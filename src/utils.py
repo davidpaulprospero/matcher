@@ -1,0 +1,593 @@
+"""
+Utility classes and functions
+"""
+
+import os
+import sys
+import json
+import hashlib
+import logging
+from pathlib import Path
+from dataclasses import dataclass, asdict, field, fields
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+import threading
+import time
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+@dataclass
+class SRTSegment:
+    """Represents a single SRT segment"""
+    index: int
+    start_time: float  # seconds
+    end_time: float    # seconds
+    text: str
+    source_file: str = ""  # Source video file path (empty for voiceover)
+    
+    # Extended attributes
+    keywords: List[str] = field(default_factory=list)
+    entities: List[str] = field(default_factory=list)
+    topic_id: Optional[int] = None
+    
+    def to_dict(self) -> dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "SRTSegment":
+        """Create from dict, handling extra/missing fields gracefully"""
+        # Get only the fields that SRTSegment expects
+        valid_fields = {f.name for f in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        
+        # Ensure required fields have defaults
+        filtered_data.setdefault('index', 0)
+        filtered_data.setdefault('start_time', 0.0)
+        filtered_data.setdefault('end_time', 0.0)
+        filtered_data.setdefault('text', '')
+        filtered_data.setdefault('source_file', '')
+        filtered_data.setdefault('keywords', [])
+        filtered_data.setdefault('entities', [])
+        filtered_data.setdefault('topic_id', None)
+        
+        return cls(**filtered_data)
+    
+    @property
+    def duration(self) -> float:
+        return self.end_time - self.start_time
+
+
+@dataclass
+class SceneInfo:
+    """Information about a video scene"""
+    video_path: str
+    scene_index: int
+    start_time: float
+    end_time: float
+    
+    # Scene description from vision model
+    description: str = ""
+    visual_keywords: List[str] = field(default_factory=list)
+    
+    # Keyframe paths
+    keyframes: List[str] = field(default_factory=list)
+    
+    # Associated transcript segment
+    transcript_segment: Optional[SRTSegment] = None
+    
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        if self.transcript_segment:
+            data['transcript_segment'] = self.transcript_segment.to_dict()
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "SceneInfo":
+        """Create from dict, handling extra/missing fields gracefully"""
+        # Handle nested transcript_segment
+        transcript_seg = None
+        if data.get('transcript_segment'):
+            transcript_seg = SRTSegment.from_dict(data['transcript_segment'])
+        
+        # Get only valid fields
+        valid_fields = {f.name for f in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        
+        # Set defaults
+        filtered_data.setdefault('video_path', '')
+        filtered_data.setdefault('scene_index', 0)
+        filtered_data.setdefault('start_time', 0.0)
+        filtered_data.setdefault('end_time', 0.0)
+        filtered_data.setdefault('description', '')
+        filtered_data.setdefault('visual_keywords', [])
+        filtered_data.setdefault('keyframes', [])
+        filtered_data['transcript_segment'] = transcript_seg
+        
+        return cls(**filtered_data)
+
+
+@dataclass
+class VideoIndex:
+    """Index entry for a video"""
+    video_path: str
+    video_hash: str
+    duration: float
+    
+    # Transcription
+    transcript_segments: List[SRTSegment] = field(default_factory=list)
+    
+    # Scenes
+    scenes: List[SceneInfo] = field(default_factory=list)
+    
+    # Embeddings (stored separately, just keep flag)
+    has_embeddings: bool = False
+    
+    # Metadata
+    indexed_at: str = ""
+    
+    def to_dict(self) -> dict:
+        return {
+            'video_path': self.video_path,
+            'video_hash': self.video_hash,
+            'duration': self.duration,
+            'transcript_segments': [s.to_dict() for s in self.transcript_segments],
+            'scenes': [s.to_dict() for s in self.scenes],
+            'has_embeddings': self.has_embeddings,
+            'indexed_at': self.indexed_at
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "VideoIndex":
+        return cls(
+            video_path=data['video_path'],
+            video_hash=data['video_hash'],
+            duration=data['duration'],
+            transcript_segments=[SRTSegment.from_dict(s) for s in data.get('transcript_segments', [])],
+            scenes=[SceneInfo.from_dict(s) for s in data.get('scenes', [])],
+            has_embeddings=data.get('has_embeddings', False),
+            indexed_at=data.get('indexed_at', '')
+        )
+
+
+@dataclass
+class Match:
+    """Represents a matched segment"""
+    voiceover_segment: SRTSegment
+    video_segment: SRTSegment
+    video_scene: Optional[SceneInfo]
+    confidence: float
+    reasoning: str
+    
+    # Match quality indicators
+    is_keyword_match: bool = False
+    is_visual_match: bool = False
+    embedding_similarity: float = 0.0
+    
+    # Reuse tracking
+    clip_reuse_count: int = 0
+    
+    def to_dict(self) -> dict:
+        return {
+            'voiceover_segment': self.voiceover_segment.to_dict(),
+            'video_segment': self.video_segment.to_dict(),
+            'video_scene': self.video_scene.to_dict() if self.video_scene else None,
+            'confidence': self.confidence,
+            'reasoning': self.reasoning,
+            'is_keyword_match': self.is_keyword_match,
+            'is_visual_match': self.is_visual_match,
+            'embedding_similarity': self.embedding_similarity,
+            'clip_reuse_count': self.clip_reuse_count
+        }
+
+
+@dataclass
+class AlternativeMatch:
+    """Alternative match option"""
+    video_segment: SRTSegment
+    video_scene: Optional[SceneInfo]
+    confidence: float
+    reasoning: str
+
+
+@dataclass
+class StrategyMatch:
+    """Match from an alternative strategy (V4-V7)"""
+    video_segment: SRTSegment
+    video_scene: Optional[SceneInfo]
+    confidence: float
+    reasoning: str
+    strategy: str  # visual_first, different_source, keyword_only, embedding_diversity
+    
+    def to_dict(self) -> dict:
+        return {
+            'video_segment': self.video_segment.to_dict(),
+            'video_scene': self.video_scene.to_dict() if self.video_scene else None,
+            'confidence': self.confidence,
+            'reasoning': self.reasoning,
+            'strategy': self.strategy
+        }
+
+
+@dataclass
+class MatchResult:
+    """Complete match result with alternatives and strategy matches"""
+    primary_match: Match
+    alternatives: List[AlternativeMatch] = field(default_factory=list)  # V2-V3
+    strategy_matches: List[StrategyMatch] = field(default_factory=list)  # V4-V7
+    has_gap: bool = False  # True if no good match found
+    gap_reason: str = ""
+
+
+@dataclass
+class Topic:
+    """A topic cluster of voiceover segments"""
+    topic_id: int
+    name: str
+    segments: List[SRTSegment]
+    keywords: List[str]
+    start_time: float
+    end_time: float
+
+
+# =============================================================================
+# PROGRESS BAR
+# =============================================================================
+
+class ProgressBar:
+    """Thread-safe progress bar with ETA"""
+    
+    def __init__(self, total: int, description: str = "", bar_length: int = 40):
+        self.total = total
+        self.current = 0
+        self.description = description
+        self.bar_length = bar_length
+        self.start_time = time.time()
+        self.lock = threading.Lock()
+        self._last_print_time = 0
+    
+    def update(self, amount: int = 1, status: str = ""):
+        """Update progress"""
+        with self.lock:
+            self.current += amount
+            self._print_bar(status)
+    
+    def set(self, value: int, status: str = ""):
+        """Set absolute progress"""
+        with self.lock:
+            self.current = value
+            self._print_bar(status)
+    
+    def _print_bar(self, status: str = ""):
+        """Print the progress bar"""
+        # Throttle updates to avoid flickering
+        current_time = time.time()
+        if current_time - self._last_print_time < 0.1 and self.current < self.total:
+            return
+        self._last_print_time = current_time
+        
+        # Calculate progress
+        progress = self.current / self.total if self.total > 0 else 0
+        filled = int(self.bar_length * progress)
+        bar = "█" * filled + "░" * (self.bar_length - filled)
+        
+        # Calculate ETA
+        elapsed = current_time - self.start_time
+        if progress > 0:
+            eta = elapsed / progress - elapsed
+            eta_str = self._format_time(eta)
+        else:
+            eta_str = "--:--"
+        
+        # Format output
+        percent = progress * 100
+        desc = f"{self.description}: " if self.description else ""
+        status_str = f" | {status}" if status else ""
+        
+        line = f"\r{desc}|{bar}| {percent:5.1f}% [{self.current}/{self.total}] ETA: {eta_str}{status_str}"
+        
+        # Print
+        sys.stdout.write(line + " " * 10)  # Extra spaces to clear previous longer lines
+        sys.stdout.flush()
+        
+        if self.current >= self.total:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+    
+    def _format_time(self, seconds: float) -> str:
+        """Format seconds as MM:SS or HH:MM:SS"""
+        if seconds < 3600:
+            return f"{int(seconds // 60):02d}:{int(seconds % 60):02d}"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = int(seconds % 60)
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    
+    def close(self):
+        """Close the progress bar"""
+        if self.current < self.total:
+            self.set(self.total)
+
+
+# =============================================================================
+# CACHING
+# =============================================================================
+
+class CacheManager:
+    """Manages caching for various data types"""
+    
+    def __init__(self, cache_dir: str):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Sub-directories
+        self.transcription_dir = self.cache_dir / "transcriptions"
+        self.embedding_dir = self.cache_dir / "embeddings"
+        self.scene_dir = self.cache_dir / "scenes"
+        self.llm_dir = self.cache_dir / "llm_responses"
+        self.index_dir = self.cache_dir / "index"
+        self.audio_dir = self.cache_dir / "audio"
+        self.keyframes_dir = self.cache_dir / "keyframes"
+        
+        for d in [self.transcription_dir, self.embedding_dir, self.scene_dir,
+                  self.llm_dir, self.index_dir, self.audio_dir, self.keyframes_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+    
+    def get_file_hash(self, file_path: str) -> str:
+        """
+        Get a fast hash based on file path, size, and modification time.
+        This is much faster than MD5 of entire file content for large videos.
+        """
+        p = Path(file_path)
+        stat = p.stat()
+        # Use absolute path, size, and mtime for uniqueness
+        hash_input = f"{p.resolve()}|{stat.st_size}|{stat.st_mtime}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
+    
+    def get_file_hash_slow(self, file_path: str) -> str:
+        """Get MD5 hash of file content (slow, but precise)"""
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    
+    def get_text_hash(self, text: str) -> str:
+        """Get hash of text content"""
+        return hashlib.md5(text.encode()).hexdigest()[:16]
+    
+    # Transcription cache
+    def get_transcription(self, video_hash: str) -> Optional[List[SRTSegment]]:
+        """Get cached transcription"""
+        cache_path = self.transcription_dir / f"{video_hash}.json"
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                data = json.load(f)
+                return [SRTSegment.from_dict(s) for s in data]
+        return None
+    
+    def save_transcription(self, video_hash: str, segments: List[SRTSegment]):
+        """Save transcription to cache"""
+        cache_path = self.transcription_dir / f"{video_hash}.json"
+        with open(cache_path, 'w') as f:
+            json.dump([s.to_dict() for s in segments], f)
+    
+    # Embedding cache
+    def get_embeddings(self, cache_key: str) -> Optional[List[List[float]]]:
+        """Get cached embeddings"""
+        cache_path = self.embedding_dir / f"{cache_key}.json"
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                return json.load(f)
+        return None
+    
+    def save_embeddings(self, cache_key: str, embeddings: List[List[float]]):
+        """Save embeddings to cache"""
+        cache_path = self.embedding_dir / f"{cache_key}.json"
+        with open(cache_path, 'w') as f:
+            json.dump(embeddings, f)
+    
+    # Scene cache
+    def get_scenes(self, video_hash: str) -> Optional[List[SceneInfo]]:
+        """Get cached scenes"""
+        cache_path = self.scene_dir / f"{video_hash}.json"
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                data = json.load(f)
+                return [SceneInfo.from_dict(s) for s in data]
+        return None
+    
+    def save_scenes(self, video_hash: str, scenes: List[SceneInfo]):
+        """Save scenes to cache"""
+        cache_path = self.scene_dir / f"{video_hash}.json"
+        with open(cache_path, 'w') as f:
+            json.dump([s.to_dict() for s in scenes], f)
+    
+    # LLM response cache
+    def get_llm_response(self, prompt_hash: str) -> Optional[dict]:
+        """Get cached LLM response"""
+        cache_path = self.llm_dir / f"{prompt_hash}.json"
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                return json.load(f)
+        return None
+    
+    def save_llm_response(self, prompt_hash: str, response: dict):
+        """Save LLM response to cache"""
+        cache_path = self.llm_dir / f"{prompt_hash}.json"
+        with open(cache_path, 'w') as f:
+            json.dump(response, f)
+    
+    # Video index cache
+    def get_video_index(self, video_hash: str) -> Optional[VideoIndex]:
+        """Get cached video index"""
+        cache_path = self.index_dir / f"{video_hash}.json"
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                data = json.load(f)
+                return VideoIndex.from_dict(data)
+        return None
+    
+    def save_video_index(self, video_index: VideoIndex):
+        """Save video index to cache"""
+        cache_path = self.index_dir / f"{video_index.video_hash}.json"
+        with open(cache_path, 'w') as f:
+            json.dump(video_index.to_dict(), f)
+    
+    def get_all_video_indices(self) -> List[VideoIndex]:
+        """Get all cached video indices"""
+        indices = []
+        for cache_path in self.index_dir.glob("*.json"):
+            with open(cache_path, 'r') as f:
+                data = json.load(f)
+                indices.append(VideoIndex.from_dict(data))
+        return indices
+    
+    # Master index (tracks which videos have been processed)
+    def get_master_index(self) -> Dict[str, str]:
+        """Get master index mapping video paths to hashes"""
+        index_path = self.cache_dir / "master_index.json"
+        if index_path.exists():
+            with open(index_path, 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def save_master_index(self, index: Dict[str, str]):
+        """Save master index"""
+        index_path = self.cache_dir / "master_index.json"
+        with open(index_path, 'w') as f:
+            json.dump(index, f)
+
+
+# =============================================================================
+# SMART REUSE TRACKER
+# =============================================================================
+
+class ReuseTracker:
+    """Tracks clip usage to prevent over-reuse"""
+    
+    def __init__(self, max_reuse: int = 2, reuse_penalty: float = 0.2):
+        self.max_reuse = max_reuse
+        self.reuse_penalty = reuse_penalty
+        self.usage_count: Dict[str, int] = {}  # clip_id -> count
+        self.lock = threading.Lock()
+    
+    def get_clip_id(self, segment: SRTSegment) -> str:
+        """Generate unique ID for a clip"""
+        return f"{segment.source_file}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+    
+    def get_usage_count(self, segment: SRTSegment) -> int:
+        """Get how many times a clip has been used"""
+        clip_id = self.get_clip_id(segment)
+        with self.lock:
+            return self.usage_count.get(clip_id, 0)
+    
+    def record_usage(self, segment: SRTSegment):
+        """Record that a clip was used"""
+        clip_id = self.get_clip_id(segment)
+        with self.lock:
+            self.usage_count[clip_id] = self.usage_count.get(clip_id, 0) + 1
+    
+    def can_use(self, segment: SRTSegment) -> bool:
+        """Check if clip can be used (hasn't exceeded max reuse)"""
+        return self.get_usage_count(segment) < self.max_reuse
+    
+    def get_penalty(self, segment: SRTSegment) -> float:
+        """Get confidence penalty based on reuse count"""
+        count = self.get_usage_count(segment)
+        return count * self.reuse_penalty
+    
+    def adjust_confidence(self, segment: SRTSegment, confidence: float) -> float:
+        """Adjust confidence based on reuse"""
+        penalty = self.get_penalty(segment)
+        return max(0.0, confidence - penalty)
+    
+    def reset(self):
+        """Reset usage tracking"""
+        with self.lock:
+            self.usage_count.clear()
+
+
+# =============================================================================
+# SRT PARSING
+# =============================================================================
+
+def parse_srt_timestamp(timestamp: str) -> float:
+    """Convert SRT timestamp to seconds"""
+    timestamp = timestamp.strip().replace(',', '.')
+    parts = timestamp.split(':')
+    hours = float(parts[0])
+    minutes = float(parts[1])
+    seconds = float(parts[2])
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def format_srt_timestamp(seconds: float) -> str:
+    """Convert seconds to SRT timestamp format"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace('.', ',')
+
+
+def parse_srt_file(srt_path: str) -> List[SRTSegment]:
+    """Parse an SRT file into segments"""
+    segments = []
+    
+    if not Path(srt_path).exists():
+        logger.error(f"SRT file not found: {srt_path}")
+        return segments
+    
+    try:
+        with open(srt_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception as e:
+        logger.error(f"Could not read SRT file: {e}")
+        return segments
+    
+    # Check if content looks like binary/audio data
+    if '\x00' in content[:1000] or 'ID3' in content[:10]:
+        logger.error(f"File appears to be binary/audio, not SRT text: {srt_path}")
+        return segments
+    
+    # Split by double newline (segment separator)
+    blocks = content.strip().split('\n\n')
+    
+    for block in blocks:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3:
+            try:
+                index = int(lines[0])
+                times = lines[1].split(' --> ')
+                if len(times) != 2:
+                    continue
+                start_time = parse_srt_timestamp(times[0])
+                end_time = parse_srt_timestamp(times[1])
+                text = ' '.join(lines[2:]).strip()
+                
+                if text:
+                    segments.append(SRTSegment(
+                        index=index,
+                        start_time=start_time,
+                        end_time=end_time,
+                        text=text,
+                        source_file=srt_path
+                    ))
+            except (ValueError, IndexError):
+                continue
+    
+    return segments
+
+
+def write_srt_file(segments: List[SRTSegment], output_path: str):
+    """Write segments to an SRT file"""
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for i, seg in enumerate(segments, 1):
+            f.write(f"{i}\n")
+            f.write(f"{format_srt_timestamp(seg.start_time)} --> {format_srt_timestamp(seg.end_time)}\n")
+            f.write(f"{seg.text}\n\n")

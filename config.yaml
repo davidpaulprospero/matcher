@@ -1,0 +1,404 @@
+# Voiceover-to-Footage Matcher v2.1 Configuration
+# ================================================
+# Enhanced with: FAISS indexing, hybrid embeddings, TF-IDF keyword weights,
+# two-stage matching, duration-aware scoring, source rotation track, and logging
+
+# Paths
+downloaded_videos_dir: "./downloaded_videos"
+otio_output_dir: "./otio_output"
+voiceover_path: "./voiceover/voiceover.srt"  # Can be .srt, .mp3, .wav, .mp4
+output_path: "./matched_timeline.otio"
+cache_dir: "./.cache"
+
+# Incremental indexing (only process new videos)
+incremental: true
+
+# Watch mode (continuous monitoring for new videos)
+watch_mode: false
+watch_interval: 30  # seconds
+
+# ================================================
+# TRANSCRIPTION (Whisper)
+# ================================================
+transcription:
+  # Provider: faster-whisper (4x faster, recommended) or openai-whisper (original)
+  provider: "faster-whisper"
+  model: "base"  # tiny, base, small, medium, large, large-v2, large-v3
+  language: "en"
+  use_gpu: true  # GPU is much faster (10-50x), requires CUDA
+  compute_type: "auto"  # auto, float16 (GPU), int8 (CPU), float32 (fallback)
+
+# ================================================
+# EMBEDDINGS
+# ================================================
+embedding:
+  provider: "gemini"  # gemini, voyage, local
+  local_model: "all-MiniLM-L6-v2"  # For local embeddings
+  gemini_model: "models/text-embedding-004"
+  voyage_model: "voyage-2"
+  
+  # NEW: Hybrid embeddings (combine text + visual scene descriptions)
+  # When enabled, embeddings are weighted average: text_weight * text_emb + visual_weight * visual_emb
+  # Falls back to text-only when vision is disabled or no scene descriptions available
+  hybrid_mode: true
+  text_weight: 0.7    # 70% weight for text transcript embedding
+  visual_weight: 0.3  # 30% weight for visual scene description embedding
+
+# ================================================
+# INDEXING (FAISS for fast similarity search)
+# ================================================
+# NEW: FAISS provides 10-50x faster candidate retrieval for large video libraries
+# Falls back to numpy brute-force if FAISS is not installed
+indexing:
+  use_faiss: true      # Set false to force numpy fallback
+  index_type: "flat"   # "flat" (exact search) or "ivf" (faster approximate for 1000+ videos)
+
+# ================================================
+# VISION (Multi-modal matching)
+# ================================================
+vision:
+  enabled: true
+  provider: "gemini"  # gemini, openai
+  frames_per_scene: 1  # Keyframes per scene (1 is enough for batching)
+  describe_scenes: true  # Generate scene descriptions
+  max_scenes_per_video: 10  # Max scenes to describe per video (cost control)
+  # With batching: 10 scenes / 5 per batch = 2 API calls per video
+  # Set to 0 to disable vision entirely
+
+# ================================================
+# VIDEO FILTER (pre-embedding relevance filter)
+# ================================================
+video_filter:
+  enabled: true
+  relevance_threshold: 0.3  # Remove videos scoring below this (0.0-1.0)
+  use_llm: true  # Use LLM to assess relevance
+  
+  # What to check
+  check_transcript: true  # Analyze video transcript
+  check_filename: true  # Check filename for hints
+  
+  # Auto-detect main topic from voiceover
+  auto_detect_topic: true
+  
+  # Manual filters (optional)
+  exclude_keywords: []  # Videos containing these words are removed
+  include_keywords: []  # If set, videos must contain at least one of these
+  
+  # Output
+  save_filter_report: true
+  filter_report_filename: "filtered_videos_report.txt"
+
+# ================================================
+# MATCHING
+# ================================================
+matching:
+  # Tiered LLM matching
+  primary_provider: "gemini"  # gemini, anthropic
+  secondary_provider: "anthropic"  # For ambiguous matches
+  
+  # Local LLM (Ollama) for finishing touches
+  local_llm_provider: "ollama"
+  local_llm_model: "llama3.2"
+  use_local_for_review: false  # Set true if Ollama is running
+  
+  # Thresholds
+  top_k_candidates: 10
+  confidence_threshold: 0.5  # Below this = flagged as gap
+  skip_llm_threshold: 0.85  # Skip LLM if embedding similarity > this
+  ambiguous_threshold: 0.6  # Use secondary LLM if confidence < this
+  
+  # NEW: Two-stage matching optimization
+  # Stage 1: Retrieve more candidates from embeddings (faster)
+  # Stage 2: Send only top candidates to LLM for reranking (saves API calls)
+  embedding_candidates: 20  # How many candidates to retrieve from embedding search
+  llm_rerank_candidates: 5  # How many candidates to send to LLM for reranking
+  
+  # Batching (disabled when smart_reuse + sequential_when_reuse)
+  batch_size: 10
+  
+  # Contextual matching (consider surrounding segments)
+  context_window: 2  # Consider N segments before/after
+  
+  # Smart reuse prevention - STRICT SETTINGS
+  smart_reuse: true
+  max_clip_reuse: 1  # 1 = no reuse allowed (each clip used only once)
+  reuse_penalty: 0.5  # 50% confidence drop if clip somehow reused
+  sequential_when_reuse: true  # Process one-by-one to track reuse accurately
+  
+  # NEW: Duration-aware scoring
+  # Penalizes clips requiring extreme speed changes to match voiceover duration
+  # Encourages natural-speed clips that need minimal adjustment in DaVinci
+  duration_scoring_enabled: true
+  ideal_speed_range: [0.85, 1.15]     # 85%-115% = no penalty (ideal)
+  soft_penalty_range: [0.7, 1.5]       # 70%-150% = small penalty
+  duration_penalty_factor: 0.1         # Confidence reduction per penalty tier
+  
+  # Caching
+  cache_llm_responses: true
+
+# ================================================
+# KEYWORDS
+# ================================================
+keywords:
+  enabled: true
+  extract_entities: true  # Extract named entities (people, places)
+  extract_topics: true
+  boost_keyword_matches: 0.1  # Confidence boost for keyword matches
+
+# ================================================
+# KEYWORD WEIGHTS (Topic-Agnostic Auto-Detection)
+# ================================================
+# NEW: Automatically extracts important terms from voiceover using TF-IDF
+# Works for any topic: disasters, cooking, tech reviews, etc.
+keyword_weights:
+  enabled: true
+  auto_detect: true           # Auto-extract top terms from voiceover
+  auto_detect_count: 20       # How many terms to auto-boost
+  boost_factor: 0.15          # Confidence boost per matching keyword
+  
+  # Optional: manually specify boost/penalty terms for this project
+  # These are in ADDITION to auto-detected terms
+  custom_boost_terms: []      # e.g., ["earthquake", "tsunami", "magnitude"]
+  custom_penalty_terms: []    # e.g., ["interview", "talking head", "podcast"]
+
+# ================================================
+# KEYWORD SUGGESTER (--suggest-keywords)
+# ================================================
+keyword_suggester:
+  # Output counts
+  num_keywords: 30  # Top keywords to include
+  num_entities: 20  # Top named entities
+  num_search_queries: 50  # Total search queries (keyword-based + LLM-generated)
+  
+  # What to extract (all enabled by default)
+  extract_names: true  # Scientists, people, characters mentioned
+  extract_places: true  # Countries, cities, geographic locations
+  extract_numbers: true  # Statistics, dates, measurements (e.g., "2.8 million people")
+  extract_events: true  # Historical events, incidents, disasters
+  extract_technical_terms: true  # Scientific/technical vocabulary
+  extract_talking_points: true  # Main themes/arguments (5-10 bullet points)
+  
+  # Types of footage to search for (used by LLM)
+  query_types:
+    - "scenic/landscape footage"
+    - "documentary footage"
+    - "news footage"
+    - "drone/aerial footage"
+    - "stock footage"
+    - "historical footage"
+    - "scientific visualization"
+  
+  # Custom keywords to always include (add your own)
+  custom_keywords: []
+  
+  # Output options
+  include_yt_dlp_commands: true
+  output_filename: "suggested_footage_keywords.txt"
+
+# ================================================
+# NEGATIVE MATCHING (what to avoid)
+# ================================================
+negative_matching:
+  enabled: true
+  rules:
+    - "Don't match talking head shots to action narration"
+    - "Don't match static images to dynamic narration"
+    - "Avoid matching unrelated b-roll to specific statements"
+    - "Don't match interview footage to documentary narration"
+
+# ================================================
+# TOPIC SEGMENTATION
+# ================================================
+topics:
+  enabled: true
+  min_topic_segments: 3  # Minimum segments to form a topic
+  similarity_threshold: 0.7  # Threshold for grouping segments
+
+# ================================================
+# SCENE DETECTION (PySceneDetect Integration)
+# ================================================
+# Detects scene boundaries in downloaded videos
+# Runs after transcription, before matching
+# Outputs: OTIO files per video + merged scene index
+scene_detection:
+  enabled: true
+  
+  # Speed preset: fast, balanced, accurate
+  # - fast: 6x downscale, skip 3 frames (quickest, less accurate)
+  # - balanced: 4x downscale, skip 2 frames (recommended)
+  # - accurate: 2x downscale, no skip (slowest, most precise)
+  preset: "fast"
+  
+  # Force CUDA GPU acceleration
+  force_cuda: true
+  
+  # Manual overrides (leave as null to use preset values)
+  # downscale: 4      # 1=full res, 2=half, 4=quarter, 6=sixth
+  # frame_skip: 2     # 0=every frame, 2=every 3rd frame
+  # threshold: 27.0   # Higher = fewer cuts detected (20-35 typical)
+  # min_scene_length: 15  # Minimum frames per scene
+  
+  # Video filter - only process videos longer than this
+  min_video_duration: 0  # seconds (0 = process all)
+  
+  # DaVinci Resolve timecode fix
+  # If your footage starts at 01:00:00:00, set this to match
+  start_timecode: "01:00:00:00"
+  
+  # Output options
+  output_otio: true         # Generate OTIO file per video (scene cuts marked)
+  output_scene_index: true  # Generate merged scene_index.json
+  
+  # Audio analysis (librosa)
+  # Detects silence (natural cut points) and speech (might conflict with voiceover)
+  audio_analysis: true
+
+# ================================================
+# OUTPUT
+# ================================================
+output:
+  include_alternatives: true  # Include alternative matches as disabled tracks
+  num_alternatives: 2  # Number of alternative matches per segment (V2, V3)
+  
+  # Strategy tracks (V4-V8) - different matching approaches for variety
+  # NEW: Added "source_rotation" for V8
+  include_strategy_tracks: true
+  strategy_tracks:
+    - "visual_first"        # V4: Prioritize scene descriptions over transcript
+    - "different_source"    # V5: Force selection from different video file
+    - "keyword_only"        # V6: Match purely on keyword/entity overlap
+    - "embedding_diversity" # V7: Find maximally different clips from V1-V3
+    - "source_rotation"     # V8: Cycle through all sources systematically (max variety)
+  
+  # Variety enforcement - ensure each track has different content
+  variety:
+    require_different_source: false  # Let each strategy decide (was too strict)
+    exclude_same_clip: true          # Never use exact same clip on multiple tracks
+    min_time_distance: 60.0          # Clips must be 60+ seconds apart within same source (1 minute)
+    min_embedding_distance: 0.2      # Strategy tracks must have distance > 0.2 from V1-V3
+  
+  markers_for_low_confidence: true
+  markers_for_gaps: true
+  markers_for_speed: true  # Mark clips with speed adjustment
+  
+  # Timeline start timecode for EDL markers
+  # Standard broadcast: 01:00:00:00
+  # Set to match your DaVinci timeline start TC for proper marker alignment
+  timeline_start_tc: "01:00:00:00"
+
+# ================================================
+# LOGGING (Documentary/Audit Trail)
+# ================================================
+# NEW: Comprehensive logging for every run
+# Outputs both human-readable .log and machine-parseable .json files
+logging:
+  enabled: true
+  log_dir: "./logs"  # Dedicated logs folder with timestamped files
+  
+  # What to log
+  log_match_decisions: true   # Every match decision (segment → clip, confidence, reasoning)
+  log_api_calls: true         # API calls count & estimated cost
+  log_performance: true       # Performance timing (transcription, embedding, matching)
+  log_config_snapshot: true   # Config used for this run
+  log_warnings_errors: true   # Warnings and errors
+  
+  # Output formats
+  output_log_file: true       # Human-readable .log file
+  output_json_file: true      # Machine-parseable .json file
+
+# ================================================
+# LLM (Keyword Extraction)
+# ================================================
+# LLM provider for keyword extraction from voiceover
+llm:
+  provider: "anthropic"  # anthropic, google
+  model: "claude-3-haiku-20240307"  # Fast and cheap for keyword extraction
+  # API key loaded from ANTHROPIC_API_KEY or GEMINI_API_KEY env var
+
+# ================================================
+# DOWNLOAD (Integrated yt-dlp Downloader)
+# ================================================
+# Automated footage downloading with 3 duration tiers
+# All settings migrated from ytdlpdownloader.py
+download:
+  enabled: true
+  
+  # Duration tiers - all 3 run for maximum variety
+  # Short clips for quick cuts, medium for transitions, long for establishing shots
+  tiers:
+    short:
+      min: 20      # seconds
+      max: 120     # seconds
+      per_keyword: 3
+    medium:
+      min: 120
+      max: 600
+      per_keyword: 3
+    long:
+      min: 600
+      max: 1500
+      per_keyword: 1
+  
+  # Download settings
+  quality: "1080p"        # 1080p, 720p, best
+  format: "mp4"
+  min_views: 0            # Minimum view count (0 = no filter)
+  max_concurrent: 3       # Parallel downloads (avoid rate limiting)
+  delay_between_keywords: 2  # Seconds between keyword batches
+  
+  # Sites to search
+  sites:
+    - "youtube"
+    # - "vimeo"
+    # - "dailymotion"
+  
+  # DaVinci Resolve transcoding
+  # Automatically transcode downloaded videos for smooth DaVinci editing
+  davinci_mode: true
+  davinci_codec: "h264"   # h264, h265, prores, dnxhd
+  davinci_prores_profile: "proxy"  # proxy, lt, standard, hq (for ProRes only)
+  delete_original: true   # Delete original after successful transcode
+  
+  # Hardware acceleration for transcoding
+  hw_accel: "auto"        # auto, nvidia, amd, intel, mac, none
+  hw_quality: "high"      # low, medium, high
+  
+  # Source tracking
+  track_sources: true     # Save metadata about downloaded videos
+  sources_file: "sources.json"  # Output file for source attribution
+
+# ================================================
+# PIPELINE (End-to-End Automation)
+# ================================================
+# Settings for the main.py end-to-end pipeline
+pipeline:
+  # Keyword extraction
+  max_keywords: 50                    # Default max keywords to extract
+  keyword_extraction_method: "llm"    # llm, tfidf
+  
+  # Pre-run confirmation
+  confirm_before_download: true       # Show summary and ask before downloading
+  
+  # Stage control (can also be set via command line)
+  skip_download: false
+  skip_transcribe: false
+  skip_match: false
+  download_only: false
+  match_only: false
+  
+  # Resume support
+  enable_checkpoints: true            # Save progress for resume after interruption
+
+# ================================================
+# TRACK STRUCTURE (v2.1)
+# ================================================
+# V1: Primary video (best overall match) - enabled
+# V2: Alternative 1 (same strategy, second best) - disabled
+# V3: Alternative 2 (same strategy, third best) - disabled
+# V4: Visual-First (prioritizes scene descriptions) - disabled
+# V5: Different-Source (forces different video file) - disabled
+# V6: Keyword-Only (matches on keywords/entities) - disabled
+# V7: Embedding-Diversity (maximally different from V1) - disabled
+# V8: Source-Rotation (cycles through all sources) - disabled
+# A1-A8: Corresponding audio tracks
+# A9: Voiceover - enabled
