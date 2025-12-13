@@ -488,12 +488,23 @@ def transcribe_voiceover_audio(
     language: str = "en",
     compute_type: str = "auto"
 ) -> str:
+    """Legacy wrapper for transcribe_voiceover_media"""
+    return transcribe_voiceover_media(audio_path, output_srt_path, model_name, language, compute_type)
+
+
+def transcribe_voiceover_media(
+    media_path: str,
+    output_srt_path: str = None,
+    model_name: str = "base",
+    language: str = "en",
+    compute_type: str = "auto"
+) -> str:
     """
-    Transcribe a voiceover audio file (MP3, WAV, M4A, etc.) to SRT format.
+    Transcribe a voiceover from audio or video file to SRT format.
     Uses faster-whisper with GPU acceleration.
     
     Args:
-        audio_path: Path to audio file (MP3, WAV, M4A, FLAC, OGG, etc.)
+        media_path: Path to media file (audio or video)
         output_srt_path: Output SRT path (default: same name with .srt extension)
         model_name: Whisper model name (tiny, base, small, medium, large)
         language: Language code (e.g., 'en', 'ja', 'es')
@@ -502,52 +513,94 @@ def transcribe_voiceover_audio(
     Returns:
         Path to generated SRT file
     """
-    audio_path = Path(audio_path)
+    media_path = Path(media_path)
     
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    if not media_path.exists():
+        raise FileNotFoundError(f"Media file not found: {media_path}")
     
-    # Supported audio formats
+    # Supported formats
     audio_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.wma', '.aac', '.opus'}
-    if audio_path.suffix.lower() not in audio_extensions:
-        raise ValueError(f"Unsupported audio format: {audio_path.suffix}")
+    video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v'}
+    
+    suffix = media_path.suffix.lower()
+    is_video = suffix in video_extensions
+    is_audio = suffix in audio_extensions
+    
+    if not is_video and not is_audio:
+        raise ValueError(f"Unsupported format: {suffix}. Supported: {audio_extensions | video_extensions}")
     
     # Determine output path
     if output_srt_path is None:
-        output_srt_path = audio_path.with_suffix('.srt')
+        output_srt_path = media_path.with_suffix('.srt')
     else:
         output_srt_path = Path(output_srt_path)
     
-    logger.info(f"Transcribing voiceover: {audio_path.name}")
+    file_type = "video" if is_video else "audio"
+    logger.info(f"Transcribing voiceover ({file_type}): {media_path.name}")
     logger.info(f"Output SRT: {output_srt_path}")
     
-    # Convert to WAV if needed (faster-whisper works best with WAV)
-    temp_wav = None
-    transcribe_path = str(audio_path)
+    # Extract/convert audio for transcription
+    temp_wav = media_path.parent / f".{media_path.stem}.temp.wav"
+    transcribe_path = str(media_path)
     
-    if audio_path.suffix.lower() != '.wav':
-        temp_wav = audio_path.with_suffix('.temp.wav')
-        logger.info(f"Converting to WAV for transcription...")
+    # Need to convert if: video file OR non-WAV audio
+    needs_conversion = is_video or suffix != '.wav'
+    
+    if needs_conversion:
+        logger.info(f"Extracting audio to WAV for transcription...")
         
-        # Use FFmpeg with CUDA decoding if available
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(audio_path),
-            "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            str(temp_wav)
-        ]
+        # Use FFmpeg with GPU-accelerated decoding for video files
+        if is_video:
+            # Try GPU decoding first
+            cmd = [
+                "ffmpeg", "-y",
+                "-hwaccel", "cuda",
+                "-i", str(media_path),
+                "-vn",  # No video
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                str(temp_wav)
+            ]
+        else:
+            # Audio file - no GPU needed
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(media_path),
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                str(temp_wav)
+            ]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if temp_wav.exists():
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            
+            if temp_wav.exists() and temp_wav.stat().st_size > 1000:
                 transcribe_path = str(temp_wav)
             else:
-                raise RuntimeError("WAV conversion failed")
+                # Fallback to CPU decoding
+                cmd_cpu = [
+                    "ffmpeg", "-y",
+                    "-i", str(media_path),
+                    "-vn",
+                    "-acodec", "pcm_s16le",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    str(temp_wav)
+                ]
+                result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=600)
+                
+                if temp_wav.exists() and temp_wav.stat().st_size > 1000:
+                    transcribe_path = str(temp_wav)
+                else:
+                    raise RuntimeError(f"Audio extraction failed: {result.stderr}")
+                    
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Audio extraction timed out (>10 minutes)")
         except Exception as e:
-            logger.error(f"Failed to convert audio: {e}")
+            logger.error(f"Failed to extract audio: {e}")
             raise
     
     # Load model with GPU
@@ -598,7 +651,7 @@ def transcribe_voiceover_audio(
         
     finally:
         # Cleanup temp WAV
-        if temp_wav and temp_wav.exists():
+        if temp_wav.exists():
             try:
                 temp_wav.unlink()
             except:

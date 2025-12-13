@@ -174,6 +174,87 @@ class VideoDownloader:
         
         return True, "\n".join(messages)
     
+    def _get_video_codec(self, video_path: str) -> tuple:
+        """
+        Get video codec info using ffprobe.
+        Returns (codec_name, container_format) or (None, None) if failed.
+        """
+        try:
+            cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            codec = result.stdout.strip().lower()
+            
+            # Get container format
+            container = Path(video_path).suffix.lower().lstrip('.')
+            
+            return codec, container
+        except Exception as e:
+            logger.debug(f"Could not get codec info: {e}")
+            return None, None
+    
+    def _needs_transcoding(self, video_path: str) -> tuple:
+        """
+        Check if video needs transcoding for DaVinci Resolve.
+        
+        Returns (needs_transcode: bool, reason: str)
+        
+        DaVinci-compatible codecs (no transcode needed):
+        - H.264/AVC in MP4/MOV container
+        - H.265/HEVC in MP4/MOV container  
+        - ProRes in MOV container
+        - DNxHD/DNxHR in MOV/MXF container
+        
+        Needs transcoding:
+        - VP9 (WebM) - common from YouTube
+        - AV1 - newer YouTube format
+        - VP8 - older WebM
+        """
+        codec, container = self._get_video_codec(video_path)
+        
+        if not codec:
+            return True, "Could not determine codec"
+        
+        # DaVinci-friendly codec+container combinations
+        compatible_combinations = {
+            # H.264 in standard containers
+            ('h264', 'mp4'), ('h264', 'mov'), ('h264', 'mkv'),
+            ('avc', 'mp4'), ('avc', 'mov'),
+            # H.265/HEVC
+            ('hevc', 'mp4'), ('hevc', 'mov'), ('hevc', 'mkv'),
+            ('h265', 'mp4'), ('h265', 'mov'),
+            # ProRes
+            ('prores', 'mov'),
+            # DNxHD/DNxHR
+            ('dnxhd', 'mov'), ('dnxhd', 'mxf'),
+            ('dnxhr', 'mov'), ('dnxhr', 'mxf'),
+        }
+        
+        # Codecs that definitely need transcoding
+        needs_transcode_codecs = {'vp9', 'vp8', 'av1', 'theora'}
+        
+        # Check if codec needs transcoding
+        if codec in needs_transcode_codecs:
+            return True, f"Codec {codec} not DaVinci-compatible"
+        
+        # Check if combination is compatible
+        if (codec, container) in compatible_combinations:
+            return False, f"Already compatible ({codec}/{container})"
+        
+        # For edge cases, check if it's a common compatible codec
+        if codec in ('h264', 'avc', 'hevc', 'h265'):
+            # H.264/H.265 in any container is usually fine
+            return False, f"Compatible codec ({codec})"
+        
+        # Unknown - safer to transcode
+        return True, f"Unknown codec combination ({codec}/{container})"
+    
     def _detect_hw_accel(self) -> str:
         """Auto-detect available hardware acceleration"""
         hw_accel = self.download_config.hw_accel
@@ -199,16 +280,27 @@ class VideoDownloader:
         return 'none'
     
     def _build_format_string(self) -> str:
-        """Build yt-dlp format selection string"""
+        """
+        Build yt-dlp format selection string.
+        In DaVinci mode, prefers h264 to avoid transcoding vp9/av1.
+        """
         quality = self.download_config.quality
         fmt = self.download_config.format
+        davinci_mode = self.download_config.davinci_mode
         
         if quality == 'best':
+            if davinci_mode:
+                # Prefer h264 (avc1) over vp9/av1 to avoid transcoding
+                # Format: best h264 mp4 > best h264 any > best mp4 > best
+                return 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best'
             return 'best'
         elif quality == 'audio':
             return 'bestaudio'
         else:
             height = quality.rstrip('p')
+            if davinci_mode:
+                # Prefer h264 at specified quality
+                return f'bestvideo[height<={height}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}][vcodec^=avc1]+bestaudio/best[height<={height}][ext=mp4]/best[height<={height}]/best'
             return f'best[height<={height}][ext={fmt}]/best[height<={height}]/best'
     
     def _build_filter_string(self, tier: str) -> str:
@@ -373,50 +465,57 @@ class VideoDownloader:
                     except:
                         pass
                 
-                # Transcode for DaVinci if enabled
+                # Transcode for DaVinci if enabled AND necessary
                 final_path = video_path
                 if self.download_config.davinci_mode:
-                    logger.info(f"    ↳ Transcoding {video_file} for DaVinci...")
-                    transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
-                        str(video_path), str(video_path)
-                    )
-                    temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
-                    transcode_cmd[-1] = str(temp_output)
+                    # Check if transcoding is actually needed
+                    needs_transcode, reason = self._needs_transcoding(str(video_path))
                     
-                    try:
-                        # Use Popen to avoid hanging on large output
-                        # stdin=DEVNULL prevents waiting for input
-                        process = subprocess.Popen(
-                            transcode_cmd,
-                            stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE,
-                            text=True
-                        )
-                        
-                        # Wait with timeout
-                        try:
-                            _, stderr = process.communicate(timeout=600)
-                            if process.returncode != 0:
-                                logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.communicate()
-                            logger.warning(f"Transcode timeout for {video_file}")
-                        
-                        if temp_output.exists() and temp_output.stat().st_size > 0:
-                            if self.download_config.delete_original:
-                                video_path.unlink()
-                            final_path = temp_output.rename(temp_output.with_stem(
-                                temp_output.stem.replace('_davinci', '')
-                            ))
-                            logger.info(f"    ↳ ✓ Transcode complete")
-                        else:
-                            logger.warning(f"    ↳ Transcode produced no output, using original")
-                            final_path = video_path
-                    except Exception as e:
-                        logger.warning(f"Transcode failed for {video_file}: {e}")
+                    if not needs_transcode:
+                        logger.info(f"    ↳ ✓ No transcode needed: {reason}")
                         final_path = video_path
+                    else:
+                        logger.info(f"    ↳ Transcoding {video_file} ({reason})...")
+                        transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
+                            str(video_path), str(video_path)
+                        )
+                        temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
+                        transcode_cmd[-1] = str(temp_output)
+                        
+                        try:
+                            # Use Popen to avoid hanging on large output
+                            # stdin=DEVNULL prevents waiting for input
+                            process = subprocess.Popen(
+                                transcode_cmd,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
+                                text=True
+                            )
+                            
+                            # Wait with timeout
+                            try:
+                                _, stderr = process.communicate(timeout=600)
+                                if process.returncode != 0:
+                                    logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.communicate()
+                                logger.warning(f"Transcode timeout for {video_file}")
+                            
+                            if temp_output.exists() and temp_output.stat().st_size > 0:
+                                if self.download_config.delete_original:
+                                    video_path.unlink()
+                                final_path = temp_output.rename(temp_output.with_stem(
+                                    temp_output.stem.replace('_davinci', '')
+                                ))
+                                logger.info(f"    ↳ ✓ Transcode complete")
+                            else:
+                                logger.warning(f"    ↳ Transcode produced no output, using original")
+                                final_path = video_path
+                        except Exception as e:
+                            logger.warning(f"Transcode failed for {video_file}: {e}")
+                            final_path = video_path
                 
                 # Create source record
                 source = DownloadedVideo(

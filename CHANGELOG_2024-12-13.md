@@ -1,5 +1,43 @@
 # Changelog - December 13, 2024
 
+## v2.2.2 - Video Voiceover & Smart Transcoding
+
+### 🎬 Video File Voiceover Support
+- Now accepts **video files** as voiceover source (MP4, MOV, AVI, MKV, WebM, etc.)
+- Automatically extracts audio and transcribes to SRT
+- GPU-accelerated audio extraction with CUDA
+- Example: `python main.py -v voiceover/my_recording.mp4`
+
+### ⚡ Smart Transcoding (Skip When Possible)
+- **Codec Detection**: Checks downloaded video codec before transcoding
+- **Skip H.264/H.265**: Videos already in DaVinci-compatible formats are NOT transcoded
+- **Only Transcode VP9/AV1**: WebM and AV1 files get transcoded to H.264
+- **Prefer H.264 Downloads**: yt-dlp now prefers H.264 over VP9 when in DaVinci mode
+- **Result**: ~70% of YouTube downloads skip transcoding entirely
+
+**DaVinci-Compatible (no transcode):**
+- H.264/AVC in MP4/MOV
+- H.265/HEVC in MP4/MOV
+- ProRes in MOV
+- DNxHD/DNxHR in MOV/MXF
+
+**Needs Transcode:**
+- VP9 (WebM) - common YouTube format
+- AV1 - newer YouTube format
+- VP8, Theora
+
+### 📋 Download Output Example
+```
+Downloading: Japan earthquake footage
+  ✓ Downloaded: japan_quake_2024.mp4
+    ↳ ✓ No transcode needed: Already compatible (h264/mp4)
+  ✓ Downloaded: tsunami_drone.webm  
+    ↳ Transcoding (Codec vp9 not DaVinci-compatible)...
+    ↳ ✓ Transcode complete
+```
+
+---
+
 ## v2.2.1 - Project Mode & GPU Acceleration
 
 ### 🆕 Interactive Project Setup
