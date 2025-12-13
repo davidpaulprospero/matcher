@@ -63,6 +63,17 @@ cd C:\Tools\voiceover-matcher
 python main.py --project "E:\Edit Job\...\JAPAN Earthquake" -v voiceover/script.srt
 ```
 
+## Supported Voiceover Formats
+
+The voiceover file can be:
+- **SRT subtitle file** (`.srt`) - Used directly
+- **Audio file** - Transcribed to SRT automatically
+  - `.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`, `.wma`, `.aac`, `.opus`
+- **Video file** - Audio extracted and transcribed
+  - `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.wmv`, `.flv`, `.m4v`
+
+If an SRT file already exists next to the audio/video, it will be used instead of transcribing.
+
 ## Command Line Options
 
 ```
@@ -72,7 +83,7 @@ Project Mode:
   --project, -p PATH     Project directory (outputs go here)
 
 Input:
-  --voiceover, -v FILE   Voiceover file (.srt, .mp3, .wav, etc.)
+  --voiceover, -v FILE   Voiceover file (.srt, audio, or video)
   --keywords, -k NUM     Number of keywords to extract (default: 50)
 
 Stage Control:
@@ -134,10 +145,24 @@ The pipeline generates:
 
 With NVIDIA GPU + CUDA:
 - **Transcription**: 10-50x faster with faster-whisper
-- **Transcoding**: NVENC hardware encoding
+- **Transcoding**: NVENC hardware encoding (when needed)
 - **Embeddings**: GPU-accelerated sentence transformers
 
 Ensure `force_cuda: true` in config.yaml.
+
+## Smart Transcoding
+
+The downloader intelligently skips transcoding when possible:
+
+| Format | Action |
+|--------|--------|
+| H.264/AVC (MP4) | ✅ Use directly - no transcode |
+| H.265/HEVC (MP4) | ✅ Use directly - no transcode |
+| ProRes (MOV) | ✅ Use directly - no transcode |
+| VP9 (WebM) | 🔄 Transcode to H.264 |
+| AV1 | 🔄 Transcode to H.264 |
+
+yt-dlp is configured to prefer H.264 downloads when in DaVinci mode, reducing transcode time by ~70%.
 
 ## Troubleshooting
 
@@ -180,7 +205,9 @@ E:\Projects\MyDocumentary\         ← Project Folder
 ### v2.2
 - Project-based folder structure
 - GPU acceleration for all FFmpeg operations
-- MP3/audio voiceover support (auto-transcription)
+- Video/audio voiceover support (auto-transcription)
+- Smart transcoding (skip H.264/H.265, only transcode VP9/AV1)
+- yt-dlp prefers H.264 to minimize transcoding
 - Entity-aware keyword extraction (names, places, dates)
 - Different sources enforced across all tracks
 - `--match-only` skips keyword extraction API calls

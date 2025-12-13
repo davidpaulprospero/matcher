@@ -10,10 +10,10 @@ A comprehensive video matching system with:
 - Source rotation strategy track
 - Comprehensive logging
 - GPU-accelerated transcription and transcoding
-- MP3/audio voiceover transcription support
+- MP3/video voiceover transcription support
 """
 
 __version__ = "2.2.0"
 
 # Convenience exports
-from .transcription import transcribe_voiceover_audio
+from .transcription import transcribe_voiceover_audio, transcribe_voiceover_media

@@ -285,7 +285,7 @@ class Pipeline:
             sys.exit(0)
     
     def stage_analyze_voiceover(self, voiceover_path: str) -> List[dict]:
-        """Stage 1: Parse and analyze voiceover (supports SRT, MP3, WAV, etc.)"""
+        """Stage 1: Parse and analyze voiceover (supports SRT, audio, and video files)"""
         self._print_stage(1, "ANALYZE VOICEOVER")
         
         voiceover_path = Path(voiceover_path)
@@ -294,31 +294,36 @@ class Pipeline:
             logger.error(f"Voiceover file not found: {voiceover_path}")
             sys.exit(1)
         
-        # Check if it's an audio file that needs transcription
+        # Supported formats
         audio_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.wma', '.aac', '.opus'}
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v'}
         
-        if voiceover_path.suffix.lower() in audio_extensions:
-            # Audio file - transcribe to SRT first
-            print(f"  Audio file detected: {voiceover_path.name}")
+        suffix = voiceover_path.suffix.lower()
+        needs_transcription = suffix in audio_extensions or suffix in video_extensions
+        
+        if needs_transcription:
+            # Audio or video file - transcribe to SRT first
+            file_type = "Video" if suffix in video_extensions else "Audio"
+            print(f"  {file_type} file detected: {voiceover_path.name}")
             print(f"  Transcribing with faster-whisper (GPU)...")
             
             try:
-                from src.transcription import transcribe_voiceover_audio
+                from src.transcription import transcribe_voiceover_media
                 
                 # Get transcription settings from config
                 model_name = getattr(self.config.transcription, 'model', 'base')
                 language = getattr(self.config.transcription, 'language', 'en')
                 compute_type = getattr(self.config.transcription, 'compute_type', 'auto')
                 
-                # Output SRT next to the audio file
+                # Output SRT next to the source file
                 srt_path = voiceover_path.with_suffix('.srt')
                 
                 # Check if SRT already exists
                 if srt_path.exists():
                     print(f"  ✓ Using existing SRT: {srt_path.name}")
                 else:
-                    srt_path = transcribe_voiceover_audio(
-                        audio_path=str(voiceover_path),
+                    srt_path = transcribe_voiceover_media(
+                        media_path=str(voiceover_path),
                         output_srt_path=str(srt_path),
                         model_name=model_name,
                         language=language,
@@ -329,11 +334,11 @@ class Pipeline:
                 voiceover_path = Path(srt_path)
                 
             except ImportError as e:
-                logger.error(f"Cannot transcribe audio - missing dependency: {e}")
+                logger.error(f"Cannot transcribe - missing dependency: {e}")
                 logger.error("Install with: pip install faster-whisper srt")
                 sys.exit(1)
             except Exception as e:
-                logger.error(f"Failed to transcribe voiceover audio: {e}")
+                logger.error(f"Failed to transcribe voiceover: {e}")
                 sys.exit(1)
         
         # Parse SRT
