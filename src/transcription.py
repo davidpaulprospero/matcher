@@ -16,7 +16,7 @@ import threading
 from .config import Config
 from .utils import (
     SRTSegment, CacheManager, ProgressBar, 
-    write_srt_file, parse_srt_file
+    write_srt_file, parse_srt_file, sanitize_path
 )
 
 logger = logging.getLogger(__name__)
@@ -250,21 +250,29 @@ def transcribe_single_video(
         try:
             segments = parse_srt_file(str(srt_path))
             # Update source_file to be the video path, not the SRT path
+            # Sanitize to remove Windows extended-length path prefix
+            clean_video_path = sanitize_path(video_path)
             for seg in segments:
-                seg.source_file = video_path
+                seg.source_file = clean_video_path
             if segments:
-                return video_path, segments
+                return clean_video_path, segments
         except Exception as e:
             logger.warning(f"Could not parse existing SRT {srt_path}: {e}")
     
     # FAST PATH 2: Check cache by file hash (fast hash based on path+size+mtime)
     video_hash = cache.get_file_hash(video_path)
     
+    # Sanitize video path for consistent storage
+    clean_video_path = sanitize_path(video_path)
+    
     # Check cache first
     cached = cache.get_transcription(video_hash)
     if cached:
         logger.debug(f"Using cached transcription for {Path(video_path).name}")
-        return video_path, cached
+        # Update source_file in cached segments to use clean path
+        for seg in cached:
+            seg.source_file = clean_video_path
+        return clean_video_path, cached
     
     # Extract audio safely
     audio_path = extract_audio_safe(video_path, cache, video_hash)
@@ -272,7 +280,7 @@ def transcribe_single_video(
         logger.warning(f"Skipping {Path(video_path).name} - could not extract valid audio")
         # Cache empty result to avoid re-trying
         cache.save_transcription(video_hash, [])
-        return video_path, []
+        return clean_video_path, []
     
     # Determine provider
     provider = getattr(config.transcription, 'provider', 'faster-whisper')
@@ -319,13 +327,13 @@ def transcribe_single_video(
         else:
             logger.warning(f"Transcription failed for {Path(video_path).name}: {e}")
         cache.save_transcription(video_hash, [])
-        return video_path, []
+        return clean_video_path, []
     except Exception as e:
         logger.warning(f"Transcription failed for {Path(video_path).name}: {e}")
         cache.save_transcription(video_hash, [])
-        return video_path, []
+        return clean_video_path, []
     
-    # Convert to segments
+    # Convert to segments - use clean path
     segments = []
     for i, seg in enumerate(result_segments, 1):
         text = seg.get('text', '').strip()
@@ -335,7 +343,7 @@ def transcribe_single_video(
                 start_time=seg['start'],
                 end_time=seg['end'],
                 text=text,
-                source_file=video_path
+                source_file=clean_video_path
             ))
     
     # Cache the result
@@ -349,7 +357,7 @@ def transcribe_single_video(
     if not segments:
         logger.warning(f"No speech detected in {Path(video_path).name}")
     
-    return video_path, segments
+    return clean_video_path, segments
 
 
 def transcribe_videos_parallel(
@@ -400,11 +408,12 @@ def transcribe_videos_parallel(
     
     # Always sequential - GPU is fast enough, and parallel CPU has issues
     for video_path in video_paths:
-        _, segments = transcribe_single_video(video_path, cache, config)
-        results[video_path] = segments
+        clean_path, segments = transcribe_single_video(video_path, cache, config)
+        # Use the sanitized path as the key
+        results[clean_path] = segments
         progress.update(1, Path(video_path).name[:40])
         if progress_callback:
-            progress_callback(video_path, segments)
+            progress_callback(clean_path, segments)
     
     progress.close()
     

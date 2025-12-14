@@ -9,12 +9,86 @@ import hashlib
 import logging
 from pathlib import Path
 from dataclasses import dataclass, asdict, field, fields
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 import threading
 import time
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PATH UTILITIES
+# =============================================================================
+
+def sanitize_path(path: Union[str, Path]) -> str:
+    r"""
+    Sanitize a file path by removing Windows extended-length path prefixes
+    and converting to forward slashes.
+    
+    This handles paths like \\?\C:\... that can cause issues with some applications.
+    
+    Args:
+        path: Path string or Path object
+        
+    Returns:
+        Clean path string with forward slashes
+    """
+    path_str = str(path)
+    
+    # Remove Windows extended-length path prefix in various forms
+    prefixes = [
+        '\\\\?\\',    # Standard form: \\?\
+        '\\\\.\\',    # Device form: \\.\
+        '//?/',       # Forward slash form
+        '//.//',      # Device forward slash
+    ]
+    
+    for prefix in prefixes:
+        if path_str.startswith(prefix):
+            path_str = path_str[len(prefix):]
+            break
+    
+    # Also check if it starts with ?\ or ?/ (edge case)
+    if path_str.startswith('?\\') or path_str.startswith('?/'):
+        path_str = path_str[2:]
+    
+    # Convert backslashes to forward slashes
+    path_str = path_str.replace('\\', '/')
+    
+    # Remove any double slashes (except preserving drive letter format)
+    while '//' in path_str:
+        path_str = path_str.replace('//', '/')
+    
+    return path_str
+
+
+def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> str:
+    """
+    Resolve a path to absolute and sanitize it.
+    
+    Args:
+        path: Path to resolve
+        base_dir: Optional base directory for relative paths
+        
+    Returns:
+        Absolute, sanitized path string
+    """
+    path = Path(path)
+    
+    if not path.is_absolute() and base_dir:
+        path = Path(base_dir) / path
+    
+    # Resolve to absolute (this may add \\?\ on Windows for long paths)
+    try:
+        path = path.resolve()
+    except OSError:
+        # If resolve fails, try to make it absolute without resolving symlinks
+        if not path.is_absolute():
+            path = Path.cwd() / path
+    
+    # Sanitize to remove any extended-length prefix
+    return sanitize_path(path)
 
 
 # =============================================================================

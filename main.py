@@ -42,6 +42,23 @@ INSTALL_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = None
 
 
+def strip_extended_path_prefix(path: Path) -> Path:
+    r"""
+    Strip Windows extended-length path prefix (\\?\) from a Path.
+    This prefix can cause issues with some applications.
+    """
+    path_str = str(path)
+    
+    # Remove Windows extended-length path prefix
+    prefixes = ['\\\\?\\', '\\\\.\\', '//?/', '//./']
+    for prefix in prefixes:
+        if path_str.startswith(prefix):
+            path_str = path_str[len(prefix):]
+            break
+    
+    return Path(path_str)
+
+
 def load_environment(project_dir: Path = None):
     """Load .env file from install dir, then optionally from project dir"""
     try:
@@ -1051,7 +1068,7 @@ Project Mode:
     
     # Determine project directory
     if args.project:
-        PROJECT_DIR = Path(args.project).resolve()
+        PROJECT_DIR = strip_extended_path_prefix(Path(args.project).resolve())
         # Strip trailing backslash/slash that Windows might add
         if str(PROJECT_DIR).endswith(('\\', '/')):
             PROJECT_DIR = PROJECT_DIR.parent / PROJECT_DIR.name
