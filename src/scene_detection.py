@@ -26,6 +26,25 @@ logger = logging.getLogger(__name__)
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpeg', '.mpg', '.3gp', '.mxf'}
 
 
+def sanitize_path_for_url(path: str) -> str:
+    """
+    Sanitize a file path for use as a URL in OTIO.
+    Removes Windows extended-length path prefix and normalizes slashes.
+    """
+    path = str(path)
+    
+    # Remove Windows extended-length path prefix
+    if path.startswith('\\\\?\\'):
+        path = path[4:]
+    elif path.startswith('//?/'):
+        path = path[4:]
+    
+    # Convert backslashes to forward slashes
+    path = path.replace('\\', '/')
+    
+    return path
+
+
 def get_file_hash(file_path: Path) -> str:
     """Get fast hash based on path + size + mtime"""
     stat = file_path.stat()
@@ -349,9 +368,10 @@ class SceneDetector:
         except:
             global_start = otio.opentime.RationalTime(0, framerate)
         
-        # Create media reference
+        # Create media reference with sanitized path
+        clean_path = sanitize_path_for_url(str(video_path.resolve()))
         media_ref = otio.schema.ExternalReference(
-            target_url=str(video_path.resolve()),
+            target_url=clean_path,
             available_range=otio.opentime.TimeRange(
                 start_time=global_start,
                 duration=otio.opentime.RationalTime(total_frames, framerate)

@@ -7,6 +7,7 @@ OTIO Timeline builder with:
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Dict
 
@@ -16,6 +17,50 @@ from .config import Config
 from .utils import SRTSegment, MatchResult, AlternativeMatch
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_path_for_url(path: str) -> str:
+    r"""
+    Sanitize a file path for use as a URL in OTIO.
+    
+    Handles:
+    - Windows extended-length paths (\\?\C:\...)
+    - Backslashes to forward slashes
+    - Proper file:// URL format
+    """
+    # Convert to string if Path object
+    path = str(path)
+    
+    # Remove Windows extended-length path prefix in various forms
+    # Check multiple patterns to be safe
+    prefixes_to_remove = [
+        '\\\\?\\',    # Standard form: \\?\
+        '\\\\.\\',    # Device form: \\.\
+        '//?/',       # Forward slash form
+        '//.//',      # Device forward slash
+        '\\?\\',      # Single backslash form (shouldn't happen but just in case)
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if path.startswith(prefix):
+            path = path[len(prefix):]
+            break
+    
+    # Also check if it starts with ?\  or ?/ after any conversions
+    if path.startswith('?\\') or path.startswith('?/'):
+        path = path[2:]
+    
+    # Convert backslashes to forward slashes
+    path = path.replace('\\', '/')
+    
+    # Remove any double slashes (except at start for UNC paths - but we don't want UNC)
+    while '//' in path:
+        path = path.replace('//', '/')
+    
+    # For absolute Windows paths (C:/...), ensure proper format
+    # Don't add file:// prefix - let OTIO/NLE handle it
+    
+    return path
 
 
 def create_clip_with_timewarp(
@@ -47,8 +92,9 @@ def create_clip_with_timewarp(
     """
     rate = frame_rate
     
-    # Create media reference
-    media_ref = otio.schema.ExternalReference(target_url=source_path)
+    # Create media reference with sanitized path
+    clean_path = sanitize_path_for_url(source_path)
+    media_ref = otio.schema.ExternalReference(target_url=clean_path)
     
     # IMPORTANT: Use round() to avoid floating-point precision drift
     # This prevents timing deviation over many clips
@@ -400,7 +446,8 @@ def create_timeline(
     
     # Add voiceover track
     if voiceover_path and matches:
-        vo_ref = otio.schema.ExternalReference(target_url=voiceover_path)
+        clean_vo_path = sanitize_path_for_url(voiceover_path)
+        vo_ref = otio.schema.ExternalReference(target_url=clean_vo_path)
         
         # Total duration should match total frames accumulated
         total_frames = timeline_frames
