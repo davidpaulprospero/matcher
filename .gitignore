@@ -60,3 +60,5 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+context.py
+llm_context.txt
