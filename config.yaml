@@ -42,8 +42,8 @@ embedding:
   # When enabled, embeddings are weighted average: text_weight * text_emb + visual_weight * visual_emb
   # Falls back to text-only when vision is disabled or no scene descriptions available
   hybrid_mode: true
-  text_weight: 0.7    # 70% weight for text transcript embedding
-  visual_weight: 0.3  # 30% weight for visual scene description embedding
+  text_weight: 0.5    # 50% weight for text transcript embedding
+  visual_weight: 0.5  # 50% weight for visual scene description embedding
 
 # ================================================
 # INDEXING (FAISS for fast similarity search)
@@ -240,7 +240,7 @@ entity_keywords:
   
   # Show in keyword review
   show_in_review: true
-  category_label: "[ENTITIES]"  # Label in review interface
+  category_label: "🏷️ ENTITIES"  # Label in review interface
 
 # ================================================
 # NEGATIVE MATCHING (what to avoid)
@@ -321,7 +321,7 @@ output:
   variety:
     require_different_source: false  # Let each strategy decide (was too strict)
     exclude_same_clip: true          # Never use exact same clip on multiple tracks
-    min_time_distance: 60.0          # Clips must be 60+ seconds apart within same source (1 minute)
+    min_time_distance: 180.0          # Clips must be 180+ seconds apart within same source (3 minute)
     min_embedding_distance: 0.2      # Strategy tracks must have distance > 0.2 from V1-V3
   
   markers_for_low_confidence: true
@@ -463,9 +463,6 @@ download:
     - "unboxing"
     - "review"
     - "vlog"
-    - "compilation"
-    - "top 10"
-    - "explained"
     - "meme"
   
   # DaVinci Resolve transcoding
@@ -499,8 +496,8 @@ face_detection:
   # Detection categories and their confidence adjustments
   # Positive = boost, Negative = penalty
   adjustments:
-    no_faces: 0.0       # Base confidence (no adjustment)
-    few_faces: 0.0      # 1-2 people visible (often OK for disaster docs)
+    no_faces: 0.1       # Base confidence (no adjustment)
+    few_faces: 0.05      # 1-2 people visible (often OK for disaster docs)
     crowd: -0.05        # Large groups (-5% for B-roll focused projects)
     close_up: -0.1      # Close-up face shots (-10% penalty)
   
