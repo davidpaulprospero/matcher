@@ -1,7 +1,8 @@
-# Voiceover-to-Footage Matcher v2.1 Configuration
+# Voiceover-to-Footage Matcher v2.3 Configuration
 # ================================================
 # Enhanced with: FAISS indexing, hybrid embeddings, TF-IDF keyword weights,
-# two-stage matching, duration-aware scoring, source rotation track, and logging
+# two-stage matching, duration-aware scoring, source rotation track, logging,
+# interactive keyword review, face detection, clip grading, cross-project cache
 
 # Paths
 downloaded_videos_dir: "./downloaded_videos"
@@ -196,6 +197,52 @@ keyword_suggester:
   output_filename: "suggested_footage_keywords.txt"
 
 # ================================================
+# ENTITY-BASED KEYWORD GENERATION (NEW)
+# ================================================
+# For each named entity (person, place, date, event), generate
+# contextually relevant search queries
+entity_keywords:
+  enabled: true
+  
+  # Always extract these entity types
+  extract_types:
+    - "PERSON"      # People names → "President Marcos typhoon response"
+    - "GPE"         # Countries/cities → "Tacloban City storm surge"
+    - "DATE"        # Dates → "December 2013 Philippines disaster"
+    - "EVENT"       # Events → "Typhoon Haiyan destruction footage"
+    - "ORG"         # Organizations → "Red Cross rescue operation"
+    - "LOC"         # Locations → "Pacific Ocean typhoon satellite"
+  
+  # How many search queries per entity
+  queries_per_entity: 2
+  
+  # Context words to append (makes searches more relevant)
+  # These are combined with the main topic
+  context_templates:
+    PERSON:
+      - "{entity} {topic} footage"
+      - "{entity} speech {topic}"
+    GPE:
+      - "{entity} {topic} aerial footage"
+      - "{entity} {topic} aftermath"
+    DATE:
+      - "{date} {topic} news footage"
+      - "{date} {topic} documentary"
+    EVENT:
+      - "{entity} footage"
+      - "{entity} documentary clips"
+    ORG:
+      - "{entity} {topic} operation"
+      - "{entity} response footage"
+    LOC:
+      - "{entity} {topic} drone footage"
+      - "{entity} scenery"
+  
+  # Show in keyword review
+  show_in_review: true
+  category_label: "[ENTITIES]"  # Label in review interface
+
+# ================================================
 # NEGATIVE MATCHING (what to avoid)
 # ================================================
 negative_matching:
@@ -352,6 +399,75 @@ download:
     # - "vimeo"
     # - "dailymotion"
   
+  # ================================================
+  # CHANNEL PREFERENCES (NEW)
+  # ================================================
+  # Boost confidence for footage from trusted channels
+  # Blacklist channels to never download from
+  preferred_channels:
+    enabled: true
+    boost_amount: 0.05  # +5% confidence for preferred channels
+    
+    # News channels (reliable footage)
+    news:
+      - "BBC"
+      - "BBC News"
+      - "Reuters"
+      - "AP Archive"
+      - "AFP"
+      - "Al Jazeera English"
+      - "DW News"
+      - "France 24"
+      - "CGTN"
+      - "Sky News"
+      - "ABC News"
+      - "CBS News"
+      - "NBC News"
+      - "CNN"
+      - "euronews"
+    
+    # Documentary channels
+    documentary:
+      - "National Geographic"
+      - "Discovery"
+      - "Smithsonian Channel"
+      - "PBS"
+      - "History"
+      - "NOVA PBS"
+      - "Real Stories"
+      - "Free Documentary"
+    
+    # Stock footage
+    stock:
+      - "Pexels"
+      - "Pixabay"
+      - "Videvo"
+      - "Coverr"
+    
+    # Custom channels (add your favorites here)
+    custom: []
+  
+  # Blacklisted channels (never download from these)
+  blacklisted_channels:
+    enabled: true
+    channels:
+      - "reaction"
+      - "podcast"
+      - "vlog"
+      # Add channels to avoid
+  
+  # Negative keywords in titles (skip videos containing these)
+  negative_title_keywords:
+    - "reaction"
+    - "podcast"
+    - "unboxing"
+    - "review"
+    - "vlog"
+    - "compilation"
+    - "top 10"
+    - "explained"
+    - "meme"
+  
   # DaVinci Resolve transcoding
   # Automatically transcode downloaded videos for smooth DaVinci editing
   davinci_mode: true
@@ -366,6 +482,97 @@ download:
   # Source tracking
   track_sources: true     # Save metadata about downloaded videos
   sources_file: "sources.json"  # Output file for source attribution
+
+# ================================================
+# FACE DETECTION (NEW)
+# ================================================
+# Filter footage based on presence of faces
+# Useful for B-roll selection vs human interest content
+face_detection:
+  enabled: true
+  prompt_per_run: true  # Ask preference at start of each run
+  
+  # Default preference (used if not prompted or for automation)
+  # Options: "no_faces", "few_faces", "any", "prefer_faces"
+  default_preference: "few_faces"
+  
+  # Detection categories and their confidence adjustments
+  # Positive = boost, Negative = penalty
+  adjustments:
+    no_faces: 0.0       # Base confidence (no adjustment)
+    few_faces: 0.0      # 1-2 people visible (often OK for disaster docs)
+    crowd: -0.05        # Large groups (-5% for B-roll focused projects)
+    close_up: -0.1      # Close-up face shots (-10% penalty)
+  
+  # Per-preference overrides
+  # When user selects "no_faces" mode:
+  no_faces_mode:
+    no_faces: 0.1       # +10% boost
+    few_faces: -0.05    # -5% penalty
+    crowd: -0.15        # -15% penalty
+    close_up: -0.25     # -25% penalty (almost exclude)
+  
+  # When user selects "prefer_faces" mode:
+  prefer_faces_mode:
+    no_faces: -0.1      # -10% penalty
+    few_faces: 0.05     # +5% boost
+    crowd: 0.05         # +5% boost
+    close_up: 0.1       # +10% boost
+
+# ================================================
+# CLIP GRADING (NEW)
+# ================================================
+# Rate clips after matching to improve future selections
+clip_grading:
+  enabled: true
+  prompt_after_match: true  # Ask to grade after matching completes
+  allow_skip: true          # Allow skipping the grading step
+  
+  # Scale: 1-5 stars
+  # 1 = Bad (wrong topic, bad quality)
+  # 2 = Poor (marginally relevant)
+  # 3 = Average (usable but not great)
+  # 4 = Good (relevant, good quality)
+  # 5 = Excellent (perfect match)
+  
+  # How grades affect confidence in future matches
+  grade_adjustments:
+    1: -0.3   # -30% confidence (almost blacklist)
+    2: -0.15  # -15% confidence
+    3: 0.0    # No change
+    4: 0.1    # +10% confidence
+    5: 0.2    # +20% confidence
+  
+  # Storage
+  grades_file: "clip_grades.json"  # Stored in project folder
+  
+  # Cross-project grades (see cross_project_cache)
+  use_global_grades: true
+
+# ================================================
+# CROSS-PROJECT CACHE (NEW)
+# ================================================
+# Share transcriptions, embeddings, and grades across projects
+# Saves time when using same footage in multiple projects
+cross_project_cache:
+  enabled: true
+  
+  # Global cache location (shared across all projects)
+  # Set to absolute path like "C:/Tools/voiceover-matcher/.global_cache"
+  global_cache_dir: null  # null = use install_dir/.global_cache
+  
+  # What to share across projects
+  share_transcriptions: true   # Video transcripts
+  share_embeddings: true       # Computed embeddings
+  share_clip_grades: true      # User ratings
+  share_scene_detection: true  # Scene boundaries
+  
+  # Priority: current project footage always ranks higher
+  current_project_boost: 0.15  # +15% for footage downloaded for this project
+  
+  # Relevance filter for cross-project footage
+  require_relevance: true      # Only suggest if contextually relevant
+  min_relevance_score: 0.4     # Minimum relevance to consider (0.0-1.0)
 
 # ================================================
 # PIPELINE (End-to-End Automation)

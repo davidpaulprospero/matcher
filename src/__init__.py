@@ -13,7 +13,7 @@ A comprehensive video matching system with:
 - MP3/video voiceover transcription support
 """
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 # Convenience exports
 from .transcription import transcribe_voiceover_audio, transcribe_voiceover_media

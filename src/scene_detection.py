@@ -246,7 +246,7 @@ class SceneDetector:
         """Load existing scene index"""
         if self.scene_index_path.exists():
             try:
-                with open(self.scene_index_path, 'r') as f:
+                with open(self.scene_index_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for video_name, scene_data in data.items():
                         self.scene_index[video_name] = VideoSceneData.from_dict(scene_data)

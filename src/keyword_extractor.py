@@ -8,7 +8,7 @@ using Claude/Gemini for intelligent expansion and refinement.
 import re
 import logging
 from typing import List, Dict, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,8 @@ class KeywordResult:
     keywords: List[str]
     segments_analyzed: int
     extraction_method: str
+    entities: List[Dict] = field(default_factory=list)  # Named entities with type info
+    topic: str = ""  # Detected main topic
 
 
 class LLMKeywordExtractor:
@@ -322,8 +324,8 @@ REFINED KEYWORDS:"""
         
         # Step 1: Extract named entities first (people, places, dates, orgs)
         logger.info("Extracting named entities with LLM...")
-        entity_keywords = self._extract_entities(text[:8000], topic)
-        logger.info(f"Entity extraction: {len(entity_keywords)} entity-based keywords")
+        entity_keywords, raw_entities = self._extract_entities(text[:8000], topic)
+        logger.info(f"Entity extraction: {len(entity_keywords)} entity-based keywords, {len(raw_entities)} entities")
         
         # Step 2: General keyword extraction
         prompt = self.KEYWORD_EXTRACTION_PROMPT.format(
@@ -367,14 +369,22 @@ REFINED KEYWORDS:"""
         return KeywordResult(
             keywords=keywords,
             segments_analyzed=num_segments,
-            extraction_method="llm_entity_aware"
+            extraction_method="llm_entity_aware",
+            entities=raw_entities,
+            topic=topic
         )
     
-    def _extract_entities(self, text: str, topic: str) -> List[str]:
-        """Extract named entities and convert to search keywords"""
+    def _extract_entities(self, text: str, topic: str) -> tuple:
+        """
+        Extract named entities and convert to search keywords.
+        
+        Returns:
+            Tuple of (keywords: List[str], raw_entities: List[Dict])
+        """
         import json
         
         prompt = self.ENTITY_EXTRACTION_PROMPT.format(text=text)
+        raw_entities = []
         
         try:
             response = self._call_llm(prompt)
@@ -395,30 +405,70 @@ REFINED KEYWORDS:"""
                 # Extract search keywords from each entity type
                 for person in entities.get('people', []):
                     kw = person.get('search_keyword', '')
+                    name = person.get('name', '')
                     if kw and len(kw) > 3:
                         keywords.append(kw)
+                    if name:
+                        raw_entities.append({
+                            'text': name,
+                            'type': 'PERSON',
+                            'search_keyword': kw,
+                            'context': person.get('context', '')
+                        })
                 
                 for place in entities.get('places', []):
                     kw = place.get('search_keyword', '')
+                    name = place.get('name', '')
                     if kw and len(kw) > 3:
                         keywords.append(kw)
+                    if name:
+                        raw_entities.append({
+                            'text': name,
+                            'type': 'GPE',  # Geo-political entity
+                            'search_keyword': kw,
+                            'context': place.get('context', '')
+                        })
                 
                 for org in entities.get('organizations', []):
                     kw = org.get('search_keyword', '')
+                    name = org.get('name', '')
                     if kw and len(kw) > 3:
                         keywords.append(kw)
+                    if name:
+                        raw_entities.append({
+                            'text': name,
+                            'type': 'ORG',
+                            'search_keyword': kw,
+                            'context': org.get('context', '')
+                        })
                 
                 for date in entities.get('dates', []):
                     kw = date.get('search_keyword', '')
+                    name = date.get('date', date.get('name', ''))
                     if kw and len(kw) > 3:
                         keywords.append(kw)
+                    if name:
+                        raw_entities.append({
+                            'text': name,
+                            'type': 'DATE',
+                            'search_keyword': kw,
+                            'context': date.get('context', '')
+                        })
                 
                 for event in entities.get('events', []):
                     kw = event.get('search_keyword', '')
+                    name = event.get('name', '')
                     if kw and len(kw) > 3:
                         keywords.append(kw)
+                    if name:
+                        raw_entities.append({
+                            'text': name,
+                            'type': 'EVENT',
+                            'search_keyword': kw,
+                            'context': event.get('context', '')
+                        })
                 
-                # Deduplicate while preserving order
+                # Deduplicate keywords while preserving order
                 seen = set()
                 unique_keywords = []
                 for kw in keywords:
@@ -427,12 +477,12 @@ REFINED KEYWORDS:"""
                         seen.add(kw_lower)
                         unique_keywords.append(kw)
                 
-                return unique_keywords
+                return unique_keywords, raw_entities
                 
         except Exception as e:
             logger.warning(f"Entity extraction failed: {e}")
         
-        return []
+        return [], []
     
     def _extract_with_tfidf(
         self,
