@@ -143,7 +143,7 @@ def load_project_config(project_dir: Path, global_config_path: Path = None):
     if project_config_path.exists():
         print(f"  ✓ Loading project config: {project_config_path}")
         try:
-            with open(project_config_path, 'r') as f:
+            with open(project_config_path, 'r', encoding='utf-8') as f:
                 project_overrides = yaml.safe_load(f)
             
             if project_overrides:
@@ -376,9 +376,10 @@ class Pipeline:
     def stage_extract_keywords(
         self,
         segments: List[dict],
-        max_keywords: int = 50
+        max_keywords: int = 50,
+        review_enabled: bool = True
     ) -> List[str]:
-        """Stage 1b: Extract search keywords from voiceover"""
+        """Stage 1b: Extract search keywords and entities from voiceover"""
         print(f"\n  Extracting keywords (max {max_keywords})...")
         
         # Initialize extractor
@@ -392,8 +393,16 @@ class Pipeline:
         )
         
         keywords = result.keywords
+        entities = getattr(result, 'entities', [])
+        topic = getattr(result, 'topic', '')
         
         print(f"  ✓ Extracted {len(keywords)} keywords ({result.extraction_method})")
+        if entities:
+            print(f"  ✓ Found {len(entities)} named entities (people, places, dates)")
+        
+        # Store entities for later use
+        self.entities = entities
+        self.topic = topic
         
         # Show sample
         if keywords:
@@ -402,6 +411,38 @@ class Pipeline:
                 print(f"    • {kw}")
             if len(keywords) > 10:
                 print(f"    ... and {len(keywords) - 10} more")
+        
+        if entities:
+            print(f"\n  Named entities:")
+            for ent in entities[:5]:
+                ent_text = ent.get('text', ent.get('name', str(ent)))
+                ent_type = ent.get('type', ent.get('label', ''))
+                print(f"    • {ent_text} ({ent_type})")
+            if len(entities) > 5:
+                print(f"    ... and {len(entities) - 5} more")
+        
+        # Interactive keyword review (if enabled)
+        if review_enabled and not getattr(self.config.pipeline, 'skip_keyword_review', False):
+            try:
+                from src.interactive import review_keywords
+                
+                # Determine project dir for saving removed keywords
+                project_dir = None
+                if hasattr(self.config, 'cache_dir'):
+                    project_dir = Path(self.config.cache_dir).parent
+                
+                print(f"\n  Launching keyword review...")
+                keywords = review_keywords(
+                    keywords=keywords,
+                    entities=entities,
+                    topic=topic,
+                    project_dir=project_dir
+                )
+                print(f"  ✓ {len(keywords)} keywords after review")
+            except ImportError:
+                pass  # Interactive module not available
+            except Exception as e:
+                logger.warning(f"Keyword review failed: {e}")
         
         self.keywords = keywords
         return keywords
@@ -926,6 +967,52 @@ class Pipeline:
         # Stage 5: Output
         self.stage_output()
         
+        # Stage 6: Clip Grading (optional)
+        if not skip_match and self.matches:
+            grading_config = getattr(self.config, 'clip_grading', None)
+            if (grading_config and 
+                getattr(grading_config, 'enabled', False) and
+                getattr(grading_config, 'prompt_after_match', True)):
+                
+                try:
+                    from src.interactive import grade_clips_after_match
+                    
+                    # Determine project dir
+                    project_dir = None
+                    if hasattr(self.config, 'cache_dir'):
+                        project_dir = Path(self.config.cache_dir).parent
+                    
+                    print("\n" + "─" * 70)
+                    print("  CLIP GRADING (Optional)")
+                    print("─" * 70)
+                    
+                    allow_skip = getattr(grading_config, 'allow_skip', True)
+                    grader = grade_clips_after_match(
+                        self.matches,
+                        project_dir=project_dir,
+                        allow_skip=allow_skip
+                    )
+                    
+                    # Merge into global cache if enabled
+                    cross_cache = getattr(self.config, 'cross_project_cache', None)
+                    if (cross_cache and 
+                        getattr(cross_cache, 'enabled', False) and
+                        getattr(cross_cache, 'share_clip_grades', True)):
+                        try:
+                            from src.interactive import GlobalCache
+                            global_cache = GlobalCache(
+                                global_cache_dir=getattr(cross_cache, 'global_cache_dir', None),
+                                install_dir=str(Path(__file__).parent)
+                            )
+                            global_cache.merge_project_grades(str(grader.grades_file))
+                        except Exception as e:
+                            logger.warning(f"Could not sync grades to global cache: {e}")
+                            
+                except ImportError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"Clip grading failed: {e}")
+        
         # Finalize logging
         if self.run_logger:
             try:
@@ -1102,20 +1189,41 @@ Project Mode:
     if args.yes:
         config.pipeline.confirm_before_download = False
     
+    # Import interactive module
+    try:
+        from src.interactive import (
+            select_voiceover_file, 
+            review_keywords, 
+            prompt_face_preference,
+            grade_clips_after_match
+        )
+        has_interactive = True
+    except ImportError:
+        has_interactive = False
+    
     # Get voiceover path
-    voiceover_path = args.voiceover or config.voiceover_path
+    voiceover_path = args.voiceover or getattr(config, 'voiceover_path', None)
     
     # In project mode, resolve voiceover path relative to project
     if args.project and voiceover_path and not Path(voiceover_path).is_absolute():
         voiceover_path = str(PROJECT_DIR / voiceover_path)
     
     if not voiceover_path or not Path(voiceover_path).exists():
-        if not args.voiceover:
-            # Prompt user
+        if has_interactive and not args.yes:
+            # Interactive file selection
+            voiceover_path = select_voiceover_file(
+                project_dir=PROJECT_DIR if args.project else None
+            )
+            
+            if not voiceover_path:
+                print("No voiceover file selected. Exiting.")
+                sys.exit(0)
+        else:
+            # Fallback to text prompt
             print("\nVoiceover file not specified.")
             if args.project:
                 print(f"  Looking in: {PROJECT_DIR / 'voiceover'}/")
-            voiceover_path = input("Enter path to voiceover SRT/audio: ").strip()
+            voiceover_path = input("Enter path to voiceover file: ").strip()
             
             # Resolve relative to project if in project mode
             if args.project and voiceover_path and not Path(voiceover_path).is_absolute():
@@ -1124,6 +1232,17 @@ Project Mode:
         if not voiceover_path or not Path(voiceover_path).exists():
             print(f"Error: Voiceover file not found: {voiceover_path}")
             sys.exit(1)
+    
+    # Face detection preference (if enabled and not --yes)
+    face_preference = getattr(config, 'face_detection', None)
+    if (face_preference and 
+        getattr(face_preference, 'enabled', False) and 
+        getattr(face_preference, 'prompt_per_run', False) and
+        has_interactive and not args.yes):
+        
+        face_pref = prompt_face_preference()
+        # Store in config for pipeline to use
+        config.face_detection.current_preference = face_pref
     
     # Get max keywords
     max_keywords = args.keywords

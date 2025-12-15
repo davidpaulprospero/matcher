@@ -243,7 +243,7 @@ class Config:
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
         """Load configuration from YAML file"""
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
         
         # Handle nested configs

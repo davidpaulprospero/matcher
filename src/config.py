@@ -323,6 +323,23 @@ class DownloadConfig:
     # Sites to search
     sites: List[str] = field(default_factory=lambda: ["youtube"])
     
+    # Channel preferences (NEW)
+    preferred_channels: Dict = field(default_factory=lambda: {
+        'enabled': True,
+        'boost_amount': 0.05,
+        'news': [],
+        'documentary': [],
+        'stock': [],
+        'custom': []
+    })
+    blacklisted_channels: Dict = field(default_factory=lambda: {
+        'enabled': True,
+        'channels': []
+    })
+    negative_title_keywords: List[str] = field(default_factory=lambda: [
+        "reaction", "podcast", "unboxing", "review", "vlog", "compilation"
+    ])
+    
     # DaVinci Resolve transcoding
     davinci_mode: bool = True
     davinci_codec: str = "h264"  # h264, h265, prores, dnxhd
@@ -336,6 +353,91 @@ class DownloadConfig:
     # Source tracking
     track_sources: bool = True
     sources_file: str = "sources.json"
+
+
+@dataclass
+class FaceDetectionConfig:
+    """Face detection filter settings"""
+    enabled: bool = True
+    prompt_per_run: bool = True
+    default_preference: str = "few_faces"  # no_faces, few_faces, any, prefer_faces
+    current_preference: str = None  # Set at runtime
+    
+    adjustments: Dict[str, float] = field(default_factory=lambda: {
+        'no_faces': 0.0,
+        'few_faces': 0.0,
+        'crowd': -0.05,
+        'close_up': -0.1
+    })
+    
+    no_faces_mode: Dict[str, float] = field(default_factory=lambda: {
+        'no_faces': 0.1,
+        'few_faces': -0.05,
+        'crowd': -0.15,
+        'close_up': -0.25
+    })
+    
+    prefer_faces_mode: Dict[str, float] = field(default_factory=lambda: {
+        'no_faces': -0.1,
+        'few_faces': 0.05,
+        'crowd': 0.05,
+        'close_up': 0.1
+    })
+
+
+@dataclass
+class ClipGradingConfig:
+    """Clip grading settings"""
+    enabled: bool = True
+    prompt_after_match: bool = True
+    allow_skip: bool = True
+    
+    grade_adjustments: Dict[int, float] = field(default_factory=lambda: {
+        1: -0.3,
+        2: -0.15,
+        3: 0.0,
+        4: 0.1,
+        5: 0.2
+    })
+    
+    grades_file: str = "clip_grades.json"
+    use_global_grades: bool = True
+
+
+@dataclass
+class CrossProjectCacheConfig:
+    """Cross-project cache settings"""
+    enabled: bool = True
+    global_cache_dir: str = None  # None = use install_dir/.global_cache
+    
+    share_transcriptions: bool = True
+    share_embeddings: bool = True
+    share_clip_grades: bool = True
+    share_scene_detection: bool = True
+    
+    current_project_boost: float = 0.15
+    require_relevance: bool = True
+    min_relevance_score: float = 0.4
+
+
+@dataclass
+class EntityKeywordsConfig:
+    """Entity-based keyword generation settings"""
+    enabled: bool = True
+    extract_types: List[str] = field(default_factory=lambda: [
+        "PERSON", "GPE", "DATE", "EVENT", "ORG", "LOC"
+    ])
+    queries_per_entity: int = 2
+    context_templates: Dict[str, List[str]] = field(default_factory=lambda: {
+        "PERSON": ["{entity} {topic} footage", "{entity} speech {topic}"],
+        "GPE": ["{entity} {topic} aerial footage", "{entity} {topic} aftermath"],
+        "DATE": ["{date} {topic} news footage", "{date} {topic} documentary"],
+        "EVENT": ["{entity} footage", "{entity} documentary clips"],
+        "ORG": ["{entity} {topic} operation", "{entity} response footage"],
+        "LOC": ["{entity} {topic} drone footage", "{entity} scenery"]
+    })
+    show_in_review: bool = True
+    category_label: str = "[ENTITIES]"
 
 
 @dataclass
@@ -394,6 +496,12 @@ class Config:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     
+    # New v2.3 configs
+    face_detection: FaceDetectionConfig = field(default_factory=FaceDetectionConfig)
+    clip_grading: ClipGradingConfig = field(default_factory=ClipGradingConfig)
+    cross_project_cache: CrossProjectCacheConfig = field(default_factory=CrossProjectCacheConfig)
+    entity_keywords: EntityKeywordsConfig = field(default_factory=EntityKeywordsConfig)
+    
     # Incremental indexing
     incremental: bool = True
     
@@ -418,7 +526,7 @@ class Config:
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
         """Load configuration from YAML file"""
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
         
         # Handle nested configs
@@ -460,6 +568,14 @@ class Config:
             data['download'] = DownloadConfig(**data['download'])
         if 'pipeline' in data:
             data['pipeline'] = PipelineConfig(**data['pipeline'])
+        if 'face_detection' in data:
+            data['face_detection'] = FaceDetectionConfig(**data['face_detection'])
+        if 'clip_grading' in data:
+            data['clip_grading'] = ClipGradingConfig(**data['clip_grading'])
+        if 'cross_project_cache' in data:
+            data['cross_project_cache'] = CrossProjectCacheConfig(**data['cross_project_cache'])
+        if 'entity_keywords' in data:
+            data['entity_keywords'] = EntityKeywordsConfig(**data['entity_keywords'])
         
         config = cls(**data)
         return config

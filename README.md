@@ -202,6 +202,15 @@ E:\Projects\MyDocumentary\         ← Project Folder
 
 ## Version History
 
+### v2.3
+- Interactive keyword review before download
+- Interactive voiceover file selection
+- Face detection preference per run
+- Clip grading after matching (1-5 stars)
+- Cross-project cache sharing
+- Preferred/blacklisted channel support
+- Enhanced entity keyword extraction
+
 ### v2.2
 - Project-based folder structure
 - GPU acceleration for all FFmpeg operations
