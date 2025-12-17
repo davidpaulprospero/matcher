@@ -445,3 +445,7 @@ def set_logger(logger: PipelineLogger):
     """Set the global pipeline logger"""
     global _pipeline_logger
     _pipeline_logger = logger
+
+
+# Alias for backward compatibility
+RunLogger = PipelineLogger

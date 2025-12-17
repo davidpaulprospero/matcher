@@ -21,10 +21,161 @@ from .utils import (
     SRTSegment, SceneInfo, Match, AlternativeMatch, StrategyMatch, MatchResult,
     CacheManager, ReuseTracker, ProgressBar
 )
-from .embeddings import find_top_k_similar, cosine_similarity
+from .embeddings_optimized import find_top_k_similar, cosine_similarity
 from .keywords import find_keyword_matches
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# ROBUST JSON PARSING
+# =============================================================================
+
+def repair_json(text: str) -> str:
+    """
+    Attempt to repair common JSON issues from LLM responses.
+    """
+    # Remove markdown code blocks
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    
+    # Remove any text before the first [ or {
+    match = re.search(r'[\[\{]', text)
+    if match:
+        text = text[match.start():]
+    
+    # Remove any text after the last ] or }
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in ']}':
+            text = text[:i + 1]
+            break
+    
+    # Fix trailing commas before ] or }
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    
+    # Fix missing commas between objects
+    text = re.sub(r'}\s*{', '},{', text)
+    
+    # Fix unescaped quotes inside strings (common in "reason" field)
+    # This is tricky - we try to fix obvious cases
+    def fix_quotes_in_value(match):
+        key = match.group(1)
+        value = match.group(2)
+        # Escape any unescaped quotes inside the value
+        # But not the surrounding quotes
+        fixed = value.replace('\\"', '<<ESCAPED>>').replace('"', '\\"').replace('<<ESCAPED>>', '\\"')
+        return f'"{key}": "{fixed}"'
+    
+    # Try to fix strings with unescaped quotes (simplified approach)
+    # Match "key": "value with "quotes" inside"
+    # This regex looks for string values that might have issues
+    
+    # Fix newlines inside strings
+    text = re.sub(r'(?<!\\)\n', ' ', text)
+    
+    return text
+
+
+def parse_llm_json(text: str, expected_count: int = None) -> Optional[List[dict]]:
+    """
+    Parse JSON from LLM response with multiple fallback strategies.
+    
+    Args:
+        text: Raw LLM response text
+        expected_count: Expected number of items (for validation)
+    
+    Returns:
+        Parsed list of dicts, or None if all parsing fails
+    """
+    if not text or not text.strip():
+        return None
+    
+    # Strategy 1: Direct parse
+    try:
+        # Find JSON array in response
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            if isinstance(result, list):
+                return result
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 2: Repair and parse
+    try:
+        repaired = repair_json(text)
+        result = json.loads(repaired)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 3: Parse individual objects
+    try:
+        # Find all JSON-like objects
+        objects = []
+        pattern = r'\{[^{}]*"voiceover"\s*:\s*\d+[^{}]*\}'
+        matches = re.finditer(pattern, text, re.DOTALL)
+        
+        for m in matches:
+            try:
+                obj_text = m.group()
+                # Clean up the object
+                obj_text = repair_json(obj_text)
+                obj = json.loads(obj_text)
+                objects.append(obj)
+            except:
+                continue
+        
+        if objects:
+            return objects
+    except:
+        pass
+    
+    # Strategy 4: Extract with regex (last resort)
+    try:
+        results = []
+        # Pattern to match voiceover, selected, confidence
+        pattern = r'"voiceover"\s*:\s*(\d+)[^}]*"selected"\s*:\s*(\d+)[^}]*"confidence"\s*:\s*([\d.]+)'
+        matches = re.finditer(pattern, text)
+        
+        for m in matches:
+            results.append({
+                'voiceover': int(m.group(1)),
+                'selected': int(m.group(2)),
+                'confidence': float(m.group(3)),
+                'reason': 'regex extracted'
+            })
+        
+        if results:
+            return results
+    except:
+        pass
+    
+    # Strategy 5: Even simpler regex
+    try:
+        results = []
+        # Look for patterns like: 1, selected: 3, confidence: 0.85
+        lines = text.split('\n')
+        for line in lines:
+            vo_match = re.search(r'voiceover["\s:]+(\d+)', line, re.IGNORECASE)
+            sel_match = re.search(r'selected["\s:]+(\d+)', line, re.IGNORECASE)
+            conf_match = re.search(r'confidence["\s:]+(\d*\.?\d+)', line, re.IGNORECASE)
+            
+            if vo_match and sel_match:
+                results.append({
+                    'voiceover': int(vo_match.group(1)),
+                    'selected': int(sel_match.group(1)),
+                    'confidence': float(conf_match.group(1)) if conf_match else 0.7,
+                    'reason': 'line extracted'
+                })
+        
+        if results:
+            return results
+    except:
+        pass
+    
+    return None
 
 
 # =============================================================================
@@ -66,11 +217,13 @@ class GeminiMatcher(LLMProvider):
         # Build batch prompt
         batch_sections = []
         for i, (vo_text, candidates) in enumerate(items):
+            # Escape quotes in text to avoid JSON issues
+            vo_text_clean = vo_text.replace('"', "'")
             candidates_text = "\n".join([
-                f"  {j+1}. [{Path(seg.source_file).name}] \"{seg.text[:80]}{'...' if len(seg.text) > 80 else ''}\""
+                f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text}\"\nCANDIDATES:\n{candidates_text}")
+            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean[:100]}\"\nCANDIDATES:\n{candidates_text}")
         
         context_str = f"\nCONTEXT: {context}" if context else ""
         
@@ -83,29 +236,40 @@ class GeminiMatcher(LLMProvider):
 
 {chr(10).join(batch_sections)}
 
-Respond with ONLY a JSON array:
-[{{"voiceover": 1, "selected": <1-5>, "confidence": <0.0-1.0>, "reason": "<brief>"}}]"""
+Respond with ONLY a valid JSON array, no other text. Use simple reasons without special characters:
+[{{"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"}}]"""
 
         try:
             response = self.model.generate_content(prompt)
             
-            json_match = re.search(r'\[.*\]', response.text, re.DOTALL)
-            if json_match:
-                results_list = json.loads(json_match.group())
-                
+            # Use robust parser
+            results_list = parse_llm_json(response.text, expected_count=len(items))
+            
+            if results_list:
                 outputs = []
                 for i, (vo_text, candidates) in enumerate(items):
                     result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
                     if result:
+                        selected_idx = result.get('selected', 1) - 1
+                        # Clamp to valid range
+                        selected_idx = max(0, min(selected_idx, len(candidates) - 1))
+                        confidence = result.get('confidence', 0.7)
+                        # Clamp confidence to valid range
+                        confidence = max(0.0, min(1.0, float(confidence)))
                         outputs.append((
-                            result['selected'] - 1,
-                            result['confidence'],
-                            result.get('reason', 'matched')
+                            selected_idx,
+                            confidence,
+                            str(result.get('reason', 'matched'))[:50]
                         ))
                     else:
+                        # Fallback for missing voiceover entry
                         outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
                 
                 return outputs
+            else:
+                logger.warning(f"Gemini: Could not parse response, using embedding fallback")
+                raise ValueError("JSON parsing failed after all strategies")
+                
         except Exception as e:
             logger.warning(f"Gemini batch error: {e}")
             raise
@@ -129,11 +293,13 @@ class ClaudeMatcher(LLMProvider):
         
         batch_sections = []
         for i, (vo_text, candidates) in enumerate(items):
+            # Escape quotes in text to avoid JSON issues
+            vo_text_clean = vo_text.replace('"', "'")[:100]
             candidates_text = "\n".join([
-                f"  {j+1}. [{Path(seg.source_file).name}] \"{seg.text[:80]}{'...' if len(seg.text) > 80 else ''}\""
+                f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text}\"\nCANDIDATES:\n{candidates_text}")
+            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}")
         
         context_str = f"\nCONTEXT: {context}" if context else ""
         
@@ -146,8 +312,8 @@ class ClaudeMatcher(LLMProvider):
 
 {chr(10).join(batch_sections)}
 
-Respond with ONLY a JSON array:
-[{{"voiceover": 1, "selected": <1-5>, "confidence": <0.0-1.0>, "reason": "<brief>"}}]"""
+Respond with ONLY a valid JSON array, no other text. Use simple reasons without special characters:
+[{{"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"}}]"""
 
         try:
             response = self.client.messages.create(
@@ -157,23 +323,34 @@ Respond with ONLY a JSON array:
             )
             
             text = response.content[0].text
-            json_match = re.search(r'\[.*\]', text, re.DOTALL)
-            if json_match:
-                results_list = json.loads(json_match.group())
-                
+            
+            # Use robust parser
+            results_list = parse_llm_json(text, expected_count=len(items))
+            
+            if results_list:
                 outputs = []
                 for i, (vo_text, candidates) in enumerate(items):
                     result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
                     if result:
+                        selected_idx = result.get('selected', 1) - 1
+                        # Clamp to valid range
+                        selected_idx = max(0, min(selected_idx, len(candidates) - 1))
+                        confidence = result.get('confidence', 0.7)
+                        # Clamp confidence to valid range
+                        confidence = max(0.0, min(1.0, float(confidence)))
                         outputs.append((
-                            result['selected'] - 1,
-                            result['confidence'],
-                            result.get('reason', 'matched')
+                            selected_idx,
+                            confidence,
+                            str(result.get('reason', 'matched'))[:50]
                         ))
                     else:
                         outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
                 
                 return outputs
+            else:
+                logger.warning(f"Claude: Could not parse response, using embedding fallback")
+                raise ValueError("JSON parsing failed after all strategies")
+                
         except Exception as e:
             logger.warning(f"Claude batch error: {e}")
             raise
@@ -200,19 +377,21 @@ class LocalLLMMatcher(LLMProvider):
         outputs = []
         
         for vo_text, candidates in items:
+            # Escape quotes to avoid JSON issues
+            vo_text_clean = vo_text.replace('"', "'")[:100]
             candidates_text = "\n".join([
-                f"{j+1}. \"{seg.text[:100]}\""
+                f"{j+1}. \"{seg.text[:80].replace(chr(34), chr(39))}\""
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
             
             prompt = f"""Match this voiceover to the best candidate:
 
-VOICEOVER: "{vo_text}"
+VOICEOVER: "{vo_text_clean}"
 
 CANDIDATES:
 {candidates_text}
 
-Respond with JSON: {{"selected": <1-5>, "confidence": <0.0-1.0>, "reason": "<brief>"}}"""
+Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85, "reason": "topic match"}}"""
 
             try:
                 response = requests.post(
@@ -227,15 +406,36 @@ Respond with JSON: {{"selected": <1-5>, "confidence": <0.0-1.0>, "reason": "<bri
                 
                 if response.status_code == 200:
                     text = response.json().get('response', '')
-                    json_match = re.search(r'\{.*\}', text, re.DOTALL)
-                    if json_match:
-                        data = json.loads(json_match.group())
+                    
+                    # Use robust parser (wrap in list for compatibility)
+                    results_list = parse_llm_json(f"[{text}]") or parse_llm_json(text)
+                    
+                    if results_list and len(results_list) > 0:
+                        data = results_list[0]
+                        selected_idx = data.get('selected', 1) - 1
+                        selected_idx = max(0, min(selected_idx, len(candidates) - 1))
+                        confidence = max(0.0, min(1.0, float(data.get('confidence', 0.5))))
                         outputs.append((
-                            data.get('selected', 1) - 1,
-                            data.get('confidence', 0.5),
-                            data.get('reason', 'local match')
+                            selected_idx,
+                            confidence,
+                            str(data.get('reason', 'local match'))[:50]
                         ))
                         continue
+                    
+                    # Fallback: try simple regex extraction
+                    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                    if json_match:
+                        try:
+                            data = json.loads(json_match.group())
+                            outputs.append((
+                                max(0, min(data.get('selected', 1) - 1, len(candidates) - 1)),
+                                max(0.0, min(1.0, float(data.get('confidence', 0.5)))),
+                                str(data.get('reason', 'local match'))[:50]
+                            ))
+                            continue
+                        except:
+                            pass
+                            
             except Exception as e:
                 logger.debug(f"Local LLM error: {e}")
             

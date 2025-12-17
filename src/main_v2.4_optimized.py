@@ -1044,9 +1044,7 @@ class Pipeline:
             
             from src.utils import CacheManager, SRTSegment
         except ImportError as e:
-            logger.error(f"Could not import modules: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning(f"Could not import modules: {e}")
             return {'videos_indexed': 0}
         
         video_dir = Path(self.config.downloaded_videos_dir)
@@ -1061,43 +1059,28 @@ class Pipeline:
         print(f"  Found {len(video_paths)} videos")
         
         # Initialize cache
-        try:
-            cache = CacheManager(self.config.cache_dir)
-            self.cache = cache
-        except Exception as e:
-            logger.error(f"Failed to initialize cache: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'videos_indexed': 0}
+        cache = CacheManager(self.config.cache_dir)
+        self.cache = cache
         
         # =====================================================================
         # OPTIMIZATION 1: Delta-aware transcription
         # Only transcribe NEW videos, load existing from cache
         # =====================================================================
         transcribe_start = time.time()
-        transcripts = {}
         
-        try:
-            if OPTIMIZED_TRANSCRIPTION:
-                print(f"  Using optimized parallel transcription ({PARALLEL_WORKERS} workers)...")
-                print(f"  Delta-aware: {'disabled' if force_reprocess else 'enabled'}")
-                transcripts = transcribe_videos_parallel(
-                    video_paths, 
-                    cache, 
-                    self.config,
-                    max_workers=PARALLEL_WORKERS,
-                    force_reprocess=force_reprocess
-                )
-            else:
-                print(f"  Transcribing with {self.config.transcription.provider}...")
-                transcripts = transcribe_videos_parallel(video_paths, cache, self.config)
-            
-            print(f"  ✓ transcribe_videos_parallel returned successfully")
-        except Exception as e:
-            logger.error(f"Transcription failed: {e}")
-            import traceback
-            traceback.print_exc()
-            # Continue with empty transcripts
+        if OPTIMIZED_TRANSCRIPTION:
+            print(f"  Using optimized parallel transcription ({PARALLEL_WORKERS} workers)...")
+            print(f"  Delta-aware: {'disabled' if force_reprocess else 'enabled'}")
+            transcripts = transcribe_videos_parallel(
+                video_paths, 
+                cache, 
+                self.config,
+                max_workers=PARALLEL_WORKERS,
+                force_reprocess=force_reprocess
+            )
+        else:
+            print(f"  Transcribing with {self.config.transcription.provider}...")
+            transcripts = transcribe_videos_parallel(video_paths, cache, self.config)
         
         transcribe_time = time.time() - transcribe_start
         print(f"  ✓ Transcribed {len(transcripts)} videos in {transcribe_time:.1f}s")
@@ -1166,13 +1149,10 @@ class Pipeline:
         # Groups into batches of 100 for API efficiency
         # =====================================================================
         embed_start = time.time()
-        embeddings = []
         
         # Extract texts for embedding
         all_texts = []
         text_metadata = []
-        
-        print(f"  Extracting text segments from {len(transcripts)} videos...")
         for video_path, segments in transcripts.items():
             for seg in segments:
                 if isinstance(seg, dict):
@@ -1186,56 +1166,36 @@ class Pipeline:
         print(f"  Computing embeddings ({self.config.embedding.provider})...")
         print(f"    {len(all_texts)} text segments")
         
-        # Handle empty text list
-        if not all_texts:
-            print(f"  ⚠ No text segments found (videos may have no speech)")
-            print(f"  Skipping embedding computation")
-            embeddings = []
+        if OPTIMIZED_EMBEDDINGS:
+            print(f"    Using batch embedding (batch size {EMBEDDING_BATCH_SIZE})")
+            embedding_provider = get_embedding_provider(self.config)
+            embeddings = compute_embeddings(
+                texts=all_texts,
+                provider=embedding_provider,
+                cache=cache,
+                cache_key="video_segments",
+                show_progress=True
+            )
         else:
-            try:
-                if OPTIMIZED_EMBEDDINGS:
-                    print(f"    Using batch embedding (batch size {EMBEDDING_BATCH_SIZE})")
-                    embedding_provider = get_embedding_provider(self.config)
-                    embeddings = compute_embeddings(
-                        texts=all_texts,
-                        provider=embedding_provider,
-                        cache=cache,
-                        cache_key="video_segments",
-                        show_progress=True
-                    )
-                else:
-                    embedding_provider = get_embedding_provider(self.config)
-                    embeddings = compute_embeddings(
-                        texts=all_texts,
-                        provider=embedding_provider,
-                        cache=cache,
-                        cache_key="video_segments"
-                    )
-                
-                embed_time = time.time() - embed_start
-                print(f"  ✓ Computed {len(embeddings)} embeddings in {embed_time:.1f}s")
-            except Exception as e:
-                logger.error(f"  Embedding computation failed: {e}")
-                import traceback
-                traceback.print_exc()
-                embeddings = []
+            embedding_provider = get_embedding_provider(self.config)
+            embeddings = compute_embeddings(
+                texts=all_texts,
+                provider=embedding_provider,
+                cache=cache,
+                cache_key="video_segments"
+            )
+        
+        embed_time = time.time() - embed_start
+        print(f"  ✓ Computed {len(embeddings)} embeddings in {embed_time:.1f}s")
         
         # Build FAISS index
-        has_embeddings = len(embeddings) > 0 if hasattr(embeddings, '__len__') else bool(embeddings)
-        if self.config.indexing.use_faiss and has_embeddings:
-            try:
-                print(f"  Building FAISS index...")
-                if OPTIMIZED_EMBEDDINGS:
-                    self.embedding_index = build_embedding_index(embeddings, self.config)
-                else:
-                    self.embedding_index = build_embedding_index(embeddings, self.config)
-                print(f"  ✓ Built index")
-            except Exception as e:
-                logger.error(f"  FAISS index build failed: {e}")
-                import traceback
-                traceback.print_exc()
-        elif not has_embeddings:
-            print(f"  ⚠ Skipping FAISS index (no embeddings)")
+        if self.config.indexing.use_faiss:
+            print(f"  Building FAISS index...")
+            if OPTIMIZED_EMBEDDINGS:
+                self.embedding_index = build_embedding_index(embeddings, self.config)
+            else:
+                self.embedding_index = build_embedding_index(embeddings, self.config)
+            print(f"  ✓ Built index")
         
         # Store for matching
         self.transcripts = transcripts
@@ -1331,12 +1291,7 @@ class Pipeline:
             print("  ⚠ No voiceover segments (run stage 1 first)")
             return {'matches': 0}
         
-        # Check embeddings (handle numpy arrays)
-        has_video_embeddings = (
-            self.embeddings is not None and 
-            (len(self.embeddings) > 0 if hasattr(self.embeddings, '__len__') else bool(self.embeddings))
-        )
-        if not has_video_embeddings:
+        if not self.embeddings:
             print("  ⚠ No video embeddings (run stage 3 first)")
             return {'matches': 0}
         
