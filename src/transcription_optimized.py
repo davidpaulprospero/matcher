@@ -782,6 +782,7 @@ def transcribe_voiceover_media(
     )
     
     # Cleanup model after single-file transcription
+    # DISABLED - causes segfault on some systems
     # _cleanup_shared_model()
     
     # Write SRT
