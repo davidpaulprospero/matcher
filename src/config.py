@@ -325,7 +325,7 @@ class DownloadConfig:
     
     # Channel preferences (NEW)
     preferred_channels: Dict = field(default_factory=lambda: {
-        'enabled': True,
+        'enabled': False,
         'boost_amount': 0.05,
         'news': [],
         'documentary': [],

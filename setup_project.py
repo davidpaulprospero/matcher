@@ -134,6 +134,8 @@ def sanitize_name(name: str) -> str:
 def create_run_bat(project_dir: Path, install_dir: Path) -> Path:
     """Create Windows batch file to run the matcher"""
     bat_content = f'''@echo off
+set IMAGEIO_FFMPEG_EXE=C:\\ffmpeg\\bin\\ffmpeg.exe
+python main.py %*
 REM Voiceover-Matcher Runner
 REM Project: {project_dir.name}
 REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
