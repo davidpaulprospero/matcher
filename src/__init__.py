@@ -1,5 +1,5 @@
 """
-Voiceover-to-Footage Matcher v2.2
+Voiceover-to-Footage Matcher v2.5
 
 A comprehensive video matching system with:
 - FAISS indexing for fast similarity search
@@ -11,9 +11,15 @@ A comprehensive video matching system with:
 - Comprehensive logging
 - GPU-accelerated transcription and transcoding
 - MP3/video voiceover transcription support
+- GPU lock fix for parallel transcription
 """
 
-__version__ = "2.3.0"
+__version__ = "2.5.0"
 
 # Convenience exports
-from .transcription import transcribe_voiceover_audio, transcribe_voiceover_media
+from .transcription import (
+    transcribe_voiceover_audio, 
+    transcribe_voiceover_media,
+    transcribe_videos_parallel,
+    DeltaAwareIndex
+)

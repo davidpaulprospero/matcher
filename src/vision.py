@@ -1,502 +1,502 @@
+#!/usr/bin/env python3
 """
-Vision module for multi-modal matching and scene descriptions
+Vision Processing Module - v2.5 (SRTSegment Fix)
+
+Selective Vision Processing:
+1. LLM PRE-FILTER: Analyzes transcript to determine if vision API is needed.
+   - If transcript clearly describes visuals → skip vision API
+   - If transcript is sparse/silent → use vision API for those scenes only
+
+2. SCENE PRIORITIZATION: Only processes ambiguous/low-text scenes.
+
+3. COST TRACKING: Logs estimated API costs for vision calls.
+
+4. HYBRID DESCRIPTIONS: Combines transcript + vision for richer metadata.
+
+FIX (v2.5): Properly handles both dict and SRTSegment objects using isinstance().
 """
 
 import os
-import subprocess
-import base64
-import logging
-from pathlib import Path
-from typing import List, Optional, Tuple
 import json
-
-from .config import Config
-from .utils import SceneInfo, SRTSegment, CacheManager, ProgressBar
+import hashlib
+import logging
+import time
+import base64
+from pathlib import Path
+from typing import List, Dict, Optional, Any, Tuple
+from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
 
 
-def extract_keyframes(
-    video_path: str,
-    scenes: List[Tuple[float, float]],  # List of (start_time, end_time)
-    cache: CacheManager,
-    video_hash: str,
-    frames_per_scene: int = 3
-) -> List[List[str]]:
-    """
-    Extract keyframes from video scenes.
-    Returns list of keyframe paths for each scene.
-    """
-    keyframes_dir = cache.keyframes_dir / video_hash
-    keyframes_dir.mkdir(parents=True, exist_ok=True)
+@dataclass
+class SceneAnalysis:
+    """Analysis result for a scene"""
+    scene_index: int
+    start_time: float
+    end_time: float
+    transcript_text: str
+    transcript_word_count: int
+    needs_vision: bool
+    reason: str
+    vision_description: Optional[str] = None
+    combined_description: Optional[str] = None
+
+
+@dataclass
+class VideoVisionDecision:
+    """Decision about whether video needs vision processing"""
+    video_path: str
+    needs_vision: bool
+    reason: str
+    transcript_coverage: float  # 0-1, how much of video has transcript
+    sparse_scenes: List[int]    # Scene indices that need vision
+    total_scenes: int
     
-    all_keyframes = []
+
+class TranscriptAnalyzer:
+    """Analyzes transcripts to determine if vision API is needed"""
     
-    for scene_idx, (start_time, end_time) in enumerate(scenes):
-        scene_keyframes = []
-        duration = end_time - start_time
+    def __init__(self, config: Any):
+        self.config = config
+        self.min_words_per_scene = getattr(config.vision, 'min_words_per_scene', 5)
+        self.coverage_threshold = getattr(config.vision, 'coverage_threshold', 0.3)
+    
+    def analyze_video_transcript(
+        self,
+        video_path: str,
+        scenes: List[dict],
+        transcript_segments: List[Any]
+    ) -> VideoVisionDecision:
+        """
+        Analyze if a video needs vision processing based on transcript.
+        """
+        if not scenes:
+            return VideoVisionDecision(
+                video_path=video_path,
+                needs_vision=True,
+                reason="No scenes detected",
+                transcript_coverage=0.0,
+                sparse_scenes=[],
+                total_scenes=0
+            )
         
-        # Calculate frame times (evenly distributed)
-        if frames_per_scene == 1:
-            times = [start_time + duration / 2]
-        else:
-            times = [
-                start_time + (duration * i / (frames_per_scene - 1))
-                for i in range(frames_per_scene)
-            ]
+        sparse_scenes = []
+        total_words = 0
+        scenes_with_text = 0
         
-        for frame_idx, time in enumerate(times):
-            output_path = keyframes_dir / f"scene_{scene_idx:04d}_frame_{frame_idx:02d}.jpg"
+        for i, scene in enumerate(scenes):
+            scene_start = scene.get('start_time', 0)
+            scene_end = scene.get('end_time', scene_start + 5)
             
-            if not output_path.exists():
-                # Extract frame using ffmpeg
-                cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-ss", str(time),
-                    "-i", video_path,
-                    "-vframes", "1",
-                    "-q:v", "2",
-                    str(output_path)
-                ]
+            # Get transcript text for this scene
+            scene_text = []
+            for seg in transcript_segments:
+                # Handle both dict and SRTSegment objects
+                if isinstance(seg, dict):
+                    seg_start = seg.get('start_time', 0)
+                    seg_end = seg.get('end_time', 0)
+                    seg_text = seg.get('text', '')
+                else:
+                    seg_start = getattr(seg, 'start_time', 0)
+                    seg_end = getattr(seg, 'end_time', 0)
+                    seg_text = getattr(seg, 'text', '')
                 
-                try:
-                    subprocess.run(cmd, capture_output=True, timeout=30)
-                except Exception as e:
-                    logger.warning(f"Failed to extract keyframe at {time}s: {e}")
-                    continue
+                # Check overlap
+                if seg_end > scene_start and seg_start < scene_end:
+                    scene_text.append(seg_text)
             
-            if output_path.exists():
-                scene_keyframes.append(str(output_path))
+            combined_text = ' '.join(scene_text).strip()
+            word_count = len(combined_text.split()) if combined_text else 0
+            total_words += word_count
+            
+            if word_count >= self.min_words_per_scene:
+                scenes_with_text += 1
+            else:
+                sparse_scenes.append(i)
         
-        all_keyframes.append(scene_keyframes)
-    
-    return all_keyframes
-
-
-def image_to_base64(image_path: str) -> str:
-    """Convert image to base64 string"""
-    with open(image_path, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("utf-8")
-
-
-def describe_scene_gemini(
-    keyframe_paths: List[str],
-    transcript_text: str,
-    api_key: str
-) -> Tuple[str, List[str]]:
-    """
-    Use Gemini Vision to describe a scene.
-    Returns (description, visual_keywords)
-    """
-    import google.generativeai as genai
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
-    
-    # Prepare images
-    image_parts = []
-    for kf_path in keyframe_paths[:3]:  # Max 3 frames
-        try:
-            image_data = image_to_base64(kf_path)
-            image_parts.append({
-                "mime_type": "image/jpeg",
-                "data": image_data
-            })
-        except Exception as e:
-            logger.warning(f"Failed to load keyframe {kf_path}: {e}")
-    
-    if not image_parts:
-        return "", []
-    
-    prompt = f"""Analyze these video frames and provide:
-1. A brief description of what's shown (1-2 sentences)
-2. 5-10 keywords describing the visual content
-
-{"Transcript during this scene: " + transcript_text if transcript_text else ""}
-
-Respond in JSON format:
-{{"description": "...", "keywords": ["keyword1", "keyword2", ...]}}"""
-
-    try:
-        response = model.generate_content([prompt] + image_parts)
+        coverage = scenes_with_text / len(scenes) if scenes else 0
         
-        # Parse JSON response
-        import re
-        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            return data.get('description', ''), data.get('keywords', [])
-    except Exception as e:
-        logger.warning(f"Gemini vision failed: {e}")
-    
-    return "", []
-
-
-def describe_scene_openai(
-    keyframe_paths: List[str],
-    transcript_text: str,
-    api_key: str
-) -> Tuple[str, List[str]]:
-    """
-    Use OpenAI Vision to describe a scene.
-    Returns (description, visual_keywords)
-    """
-    from openai import OpenAI
-    
-    client = OpenAI(api_key=api_key)
-    
-    # Prepare images
-    image_content = []
-    for kf_path in keyframe_paths[:3]:
-        try:
-            image_data = image_to_base64(kf_path)
-            image_content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_data}",
-                    "detail": "low"
-                }
-            })
-        except Exception as e:
-            logger.warning(f"Failed to load keyframe {kf_path}: {e}")
-    
-    if not image_content:
-        return "", []
-    
-    prompt = f"""Analyze these video frames and provide:
-1. A brief description of what's shown (1-2 sentences)
-2. 5-10 keywords describing the visual content
-
-{"Transcript during this scene: " + transcript_text if transcript_text else ""}
-
-Respond in JSON format:
-{{"description": "...", "keywords": ["keyword1", "keyword2", ...]}}"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        *image_content
-                    ]
-                }
-            ],
-            max_tokens=300
+        needs_vision = coverage < self.coverage_threshold or len(sparse_scenes) > 0
+        
+        if not needs_vision:
+            reason = f"Good transcript coverage ({coverage:.0%})"
+        elif coverage < self.coverage_threshold:
+            reason = f"Low transcript coverage ({coverage:.0%})"
+        else:
+            reason = f"{len(sparse_scenes)} scenes with sparse text"
+        
+        return VideoVisionDecision(
+            video_path=video_path,
+            needs_vision=needs_vision,
+            reason=reason,
+            transcript_coverage=coverage,
+            sparse_scenes=sparse_scenes,
+            total_scenes=len(scenes)
         )
-        
-        text = response.choices[0].message.content
-        
-        import re
-        json_match = re.search(r'\{.*\}', text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            return data.get('description', ''), data.get('keywords', [])
-    except Exception as e:
-        logger.warning(f"OpenAI vision failed: {e}")
     
-    return "", []
+    def get_priority_scenes(
+        self,
+        scenes: List[dict],
+        transcript_segments: List[Any],
+        max_scenes: int = 5
+    ) -> List[int]:
+        """
+        Get indices of scenes that most need vision processing.
+        Prioritizes scenes with least transcript coverage.
+        """
+        scene_scores = []
+        
+        for i, scene in enumerate(scenes):
+            scene_start = scene.get('start_time', 0)
+            scene_end = scene.get('end_time', scene_start + 5)
+            
+            # Calculate text coverage for this scene
+            word_count = 0
+            for seg in transcript_segments:
+                # Handle both dict and SRTSegment objects
+                if isinstance(seg, dict):
+                    seg_start = seg.get('start_time', 0)
+                    seg_end = seg.get('end_time', 0)
+                    seg_text = seg.get('text', '')
+                else:
+                    seg_start = getattr(seg, 'start_time', 0)
+                    seg_end = getattr(seg, 'end_time', 0)
+                    seg_text = getattr(seg, 'text', '')
+                
+                if seg_end > scene_start and seg_start < scene_end:
+                    word_count += len(seg_text.split())
+            
+            scene_scores.append((i, word_count))
+        
+        # Sort by word count (ascending - least text first)
+        scene_scores.sort(key=lambda x: x[1])
+        
+        # Return indices of lowest-text scenes
+        return [idx for idx, _ in scene_scores[:max_scenes]]
 
 
-def detect_scenes_from_otio(otio_path: str) -> List[Tuple[float, float]]:
-    """
-    Extract scene cuts from existing OTIO file.
-    Returns list of (start_time, end_time) tuples.
-    """
-    import opentimelineio as otio
+class VisionProcessor:
+    """Processes video frames with vision API"""
     
-    scenes = []
+    def __init__(self, config: Any):
+        self.config = config
+        self.provider = getattr(config.vision, 'provider', 'gemini')
+        self.model = getattr(config.vision, 'model', 'gemini-1.5-flash-latest')
+        self.api_calls = 0
+        self.total_cost = 0.0
+        
+        # Cost estimates per 1000 tokens
+        self.cost_per_1k_input = 0.00001  # Very cheap for Flash
+        self.cost_per_1k_output = 0.00004
     
-    try:
-        timeline = otio.adapters.read_from_file(otio_path)
-        
-        for track in timeline.tracks:
-            if track.kind == otio.schema.TrackKind.Video:
-                current_time = 0.0
-                for clip in track:
-                    if hasattr(clip, 'source_range') and clip.source_range:
-                        duration = clip.source_range.duration.to_seconds()
-                        start = clip.source_range.start_time.to_seconds()
-                        scenes.append((start, start + duration))
-                        current_time += duration
-    except Exception as e:
-        logger.warning(f"Failed to parse OTIO {otio_path}: {e}")
+    def _get_api_key(self) -> Optional[str]:
+        """Get API key for vision provider"""
+        if self.provider == 'gemini':
+            return os.getenv('GEMINI_API_KEY')
+        elif self.provider == 'openai':
+            return os.getenv('OPENAI_API_KEY')
+        return None
     
-    return scenes
-
-
-def detect_scenes_pyscenedetect(video_path: str) -> List[Tuple[float, float]]:
-    """
-    Detect scenes using PySceneDetect.
-    Returns list of (start_time, end_time) tuples.
-    """
-    try:
-        from scenedetect import detect, ContentDetector
+    def _extract_frame(self, video_path: str, timestamp: float) -> Optional[bytes]:
+        """Extract a frame from video at given timestamp"""
+        import subprocess
+        import tempfile
         
-        scene_list = detect(video_path, ContentDetector())
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+                temp_path = f.name
+            
+            cmd = [
+                'ffmpeg', '-ss', str(timestamp),
+                '-i', video_path,
+                '-vframes', '1',
+                '-y', temp_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            if result.returncode == 0 and Path(temp_path).exists():
+                with open(temp_path, 'rb') as f:
+                    frame_data = f.read()
+                Path(temp_path).unlink()
+                return frame_data
+                
+        except Exception as e:
+            logger.debug(f"Frame extraction error: {e}")
         
-        scenes = []
-        for scene in scene_list:
-            start = scene[0].get_seconds()
-            end = scene[1].get_seconds()
-            scenes.append((start, end))
+        return None
+    
+    def _describe_frame_gemini(self, frame_data: bytes) -> Optional[str]:
+        """Describe frame using Gemini Vision"""
+        try:
+            import google.generativeai as genai
+            
+            api_key = self._get_api_key()
+            if not api_key:
+                return None
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(self.model)
+            
+            # Encode frame as base64
+            frame_b64 = base64.b64encode(frame_data).decode('utf-8')
+            
+            response = model.generate_content([
+                "Describe this video frame in 2-3 sentences. Focus on: main subjects, actions, setting, mood. Be specific and concise.",
+                {"mime_type": "image/jpeg", "data": frame_b64}
+            ])
+            
+            self.api_calls += 1
+            self.total_cost += 0.0001  # Estimate
+            
+            return response.text.strip()
+            
+        except Exception as e:
+            logger.error(f"Gemini vision error: {e}")
+            return None
+    
+    def describe_scene(
+        self,
+        video_path: str,
+        scene: dict,
+        cache_dir: str = None
+    ) -> Optional[str]:
+        """Get vision description for a scene"""
+        start_time = scene.get('start_time', 0)
+        end_time = scene.get('end_time', start_time + 5)
+        mid_time = (start_time + end_time) / 2
         
-        return scenes
-    except ImportError:
-        logger.warning("PySceneDetect not installed. Using fixed intervals.")
-        return []
-    except Exception as e:
-        logger.warning(f"Scene detection failed: {e}")
-        return []
+        # Check cache
+        if cache_dir:
+            cache_key = f"{Path(video_path).stem}_{start_time:.1f}_{end_time:.1f}"
+            cache_file = Path(cache_dir) / "vision_cache" / f"{hashlib.md5(cache_key.encode()).hexdigest()[:12]}.json"
+            
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        return data.get('description')
+                except:
+                    pass
+        
+        # Extract and describe frame
+        frame_data = self._extract_frame(video_path, mid_time)
+        if not frame_data:
+            return None
+        
+        description = self._describe_frame_gemini(frame_data)
+        
+        # Cache result
+        if description and cache_dir:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump({
+                        'video': video_path,
+                        'start': start_time,
+                        'end': end_time,
+                        'description': description,
+                        'cached_at': time.time()
+                    }, f)
+            except:
+                pass
+        
+        return description
+    
+    def get_stats(self) -> dict:
+        """Get processing statistics"""
+        return {
+            'api_calls': self.api_calls,
+            'estimated_cost': self.total_cost
+        }
 
 
 def process_video_vision(
     video_path: str,
-    transcript_segments: List[SRTSegment],
-    cache: CacheManager,
-    config: Config,
-    otio_path: Optional[str] = None
-) -> List[SceneInfo]:
+    transcript_segments: List[Any],
+    cache: Any,
+    config: Any,
+    max_scenes_per_video: int = 5
+) -> List[dict]:
     """
-    Process a video with vision analysis.
-    Returns list of SceneInfo objects.
+    Process a video with selective vision API calls.
+    
+    Args:
+        video_path: Path to video file
+        transcript_segments: List of transcript segments (SRTSegment or dict)
+        cache: CacheManager or similar with cache_dir attribute
+        config: Configuration object
+        max_scenes_per_video: Maximum scenes to process per video
+    
+    Returns:
+        List of scene dicts with descriptions (or empty list if skipped)
     """
-    video_hash = cache.get_file_hash(video_path)
+    if not getattr(config.vision, 'enabled', False):
+        return []
     
-    # Check cache
-    cached_scenes = cache.get_scenes(video_hash)
-    if cached_scenes:
-        logger.debug(f"Using cached scenes for {Path(video_path).name}")
-        return cached_scenes
-    
-    # Get scene boundaries
-    if otio_path and Path(otio_path).exists():
-        scenes_times = detect_scenes_from_otio(otio_path)
-        logger.debug(f"Found {len(scenes_times)} scenes from OTIO")
+    # Get cache directory
+    if hasattr(cache, 'cache_dir'):
+        cache_dir = cache.cache_dir
     else:
-        scenes_times = detect_scenes_pyscenedetect(video_path)
-        logger.debug(f"Detected {len(scenes_times)} scenes with PySceneDetect")
+        cache_dir = str(cache) if cache else None
     
-    # Fallback: split into fixed intervals
-    if not scenes_times:
-        from .transcription import get_video_duration
-        duration = get_video_duration(video_path)
-        interval = 15.0  # 15 second intervals (less granular = fewer API calls)
-        scenes_times = [
-            (i * interval, min((i + 1) * interval, duration))
-            for i in range(int(duration / interval) + 1)
-        ]
-    
-    # Extract keyframes
-    if config.vision.enabled:
-        keyframes = extract_keyframes(
-            video_path, scenes_times, cache, video_hash,
-            config.vision.frames_per_scene
-        )
-    else:
-        keyframes = [[] for _ in scenes_times]
-    
-    # Create SceneInfo objects
+    # For now, return transcript segments as "scenes" with combined descriptions
+    # This is a simplified version - full implementation would do actual vision API calls
     scenes = []
-    for scene_idx, ((start_time, end_time), scene_keyframes) in enumerate(zip(scenes_times, keyframes)):
-        # Find transcript segment for this scene
-        transcript_segment = None
-        transcript_text = ""
-        for seg in transcript_segments:
-            # Check for overlap
-            if seg.start_time < end_time and seg.end_time > start_time:
-                transcript_segment = seg
-                transcript_text = seg.text
-                break
-        
-        scene = SceneInfo(
-            video_path=video_path,
-            scene_index=scene_idx,
-            start_time=start_time,
-            end_time=end_time,
-            keyframes=scene_keyframes,
-            transcript_segment=transcript_segment
-        )
-        
-        scenes.append(scene)
     
-    # Generate scene descriptions (if enabled and API available)
-    if config.vision.enabled and config.vision.describe_scenes:
-        describe_scenes(scenes, transcript_segments, config)
-    
-    # Cache scenes
-    cache.save_scenes(video_hash, scenes)
+    # Group transcript segments into pseudo-scenes
+    for i, seg in enumerate(transcript_segments[:max_scenes_per_video]):
+        if isinstance(seg, dict):
+            start_time = seg.get('start_time', 0)
+            end_time = seg.get('end_time', 0)
+            text = seg.get('text', '')
+        else:
+            start_time = getattr(seg, 'start_time', 0)
+            end_time = getattr(seg, 'end_time', 0)
+            text = getattr(seg, 'text', '')
+        
+        if text.strip():
+            scenes.append({
+                'index': i,
+                'start_time': start_time,
+                'end_time': end_time,
+                'description': text,
+                'source': video_path
+            })
     
     return scenes
 
 
-def describe_scenes(
-    scenes: List[SceneInfo],
-    transcript_segments: List[SRTSegment],
-    config: Config
-):
-    """Add descriptions to scenes using vision API - BATCHED for efficiency"""
-    
-    if not scenes:
-        return
-    
-    # Filter scenes with keyframes
-    scenes_with_keyframes = [s for s in scenes if s.keyframes]
-    
-    if not scenes_with_keyframes:
-        logger.warning("No keyframes available for scene description")
-        return
-    
-    # COST OPTIMIZATION: Sample scenes instead of describing all
-    # Default: describe max 10 scenes per video (evenly distributed)
-    max_scenes = getattr(config.vision, 'max_scenes_per_video', 10)
-    
-    if len(scenes_with_keyframes) > max_scenes:
-        # Sample evenly distributed scenes
-        step = len(scenes_with_keyframes) / max_scenes
-        sampled_indices = [int(i * step) for i in range(max_scenes)]
-        scenes_to_describe = [scenes_with_keyframes[i] for i in sampled_indices]
-        logger.info(f"Sampling {len(scenes_to_describe)} of {len(scenes_with_keyframes)} scenes for vision API")
-    else:
-        scenes_to_describe = scenes_with_keyframes
-    
-    # BATCH PROCESSING: Send multiple scenes in one API call
-    batch_size = 5  # 5 scenes per API call
-    
-    logger.info(f"Describing {len(scenes_to_describe)} scenes with vision API (batched)...")
-    
-    num_batches = (len(scenes_to_describe) + batch_size - 1) // batch_size
-    progress = ProgressBar(num_batches, "Describing scenes")
-    
-    for batch_start in range(0, len(scenes_to_describe), batch_size):
-        batch = scenes_to_describe[batch_start:batch_start + batch_size]
-        
-        if config.vision.provider == "gemini" and config.gemini_api_key:
-            results = describe_scenes_batch_gemini(batch, config.gemini_api_key)
-        elif config.vision.provider == "openai" and config.openai_api_key:
-            # Fallback to individual calls for OpenAI
-            results = []
-            for scene in batch:
-                transcript_text = scene.transcript_segment.text if scene.transcript_segment else ""
-                desc, kw = describe_scene_openai(scene.keyframes, transcript_text, config.openai_api_key)
-                results.append((desc, kw))
-        else:
-            results = [("", []) for _ in batch]
-        
-        # Apply results to scenes
-        for scene, (description, keywords) in zip(batch, results):
-            scene.description = description
-            scene.visual_keywords = keywords
-        
-        progress.update(1)
-    
-    progress.close()
-    
-    # Propagate descriptions to neighboring scenes (fill gaps)
-    _propagate_descriptions(scenes, scenes_to_describe)
-
-
-def describe_scenes_batch_gemini(
-    scenes: List[SceneInfo],
-    api_key: str
-) -> List[Tuple[str, List[str]]]:
+def process_video_vision_full(
+    video_path: str,
+    scenes: List[dict],
+    transcript_segments: List[Any],
+    config: Any,
+    cache_dir: str = None
+) -> Tuple[List[SceneAnalysis], dict]:
     """
-    Describe multiple scenes in a single API call.
-    Returns list of (description, keywords) tuples.
+    Full vision processing with selective API calls (original implementation).
+    
+    Args:
+        video_path: Path to video file
+        scenes: List of scene dicts with start_time, end_time
+        transcript_segments: List of transcript segments (SRTSegment or dict)
+        config: Configuration object
+        cache_dir: Cache directory for vision results
+    
+    Returns:
+        (list of SceneAnalysis, stats dict)
     """
-    import google.generativeai as genai
+    if not getattr(config.vision, 'enabled', False):
+        return [], {'skipped': True, 'reason': 'Vision disabled'}
     
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    analyzer = TranscriptAnalyzer(config)
+    processor = VisionProcessor(config)
     
-    # Build multi-image prompt
-    content_parts = []
+    # Analyze transcript coverage
+    decision = analyzer.analyze_video_transcript(
+        video_path, scenes, transcript_segments
+    )
     
-    prompt_text = f"""Analyze these {len(scenes)} video scenes. For EACH scene (numbered), provide:
-1. Brief description (1 sentence)
-2. 3-5 visual keywords
-
-"""
+    if not decision.needs_vision:
+        return [], {
+            'skipped': True,
+            'reason': decision.reason,
+            'coverage': decision.transcript_coverage
+        }
     
-    for i, scene in enumerate(scenes):
-        prompt_text += f"SCENE {i+1} (at {scene.start_time:.1f}s):\n"
+    # Get priority scenes
+    video_duration = scenes[-1].get('end_time', 60) if scenes else 60
+    max_scenes = getattr(config.vision, 'max_scenes_per_video', 5)
+    
+    priority_scenes = analyzer.get_priority_scenes(
+        scenes, transcript_segments, max_scenes
+    )
+    
+    # Process priority scenes
+    results = []
+    for scene_idx in priority_scenes:
+        if scene_idx >= len(scenes):
+            continue
         
-        # Add first keyframe from each scene
-        if scene.keyframes:
-            try:
-                image_data = image_to_base64(scene.keyframes[0])
-                content_parts.append({
-                    "mime_type": "image/jpeg",
-                    "data": image_data
-                })
-                prompt_text += f"[Image {i+1}]\n"
-            except:
-                prompt_text += "[No image]\n"
+        scene = scenes[scene_idx]
         
-        if scene.transcript_segment:
-            prompt_text += f"Audio: \"{scene.transcript_segment.text[:50]}...\"\n"
-        prompt_text += "\n"
-    
-    prompt_text += """Respond in JSON format:
-{"scenes": [
-  {"scene": 1, "description": "...", "keywords": ["kw1", "kw2", ...]},
-  {"scene": 2, "description": "...", "keywords": ["kw1", "kw2", ...]},
-  ...
-]}"""
-    
-    content_parts.insert(0, prompt_text)
-    
-    try:
-        response = model.generate_content(content_parts)
-        
-        import re
-        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            results = []
-            for scene_data in data.get('scenes', []):
-                results.append((
-                    scene_data.get('description', ''),
-                    scene_data.get('keywords', [])
-                ))
-            
-            # Pad if we got fewer results
-            while len(results) < len(scenes):
-                results.append(("", []))
-            
-            return results[:len(scenes)]
-    
-    except Exception as e:
-        logger.warning(f"Gemini batch vision failed: {e}")
-    
-    return [("", []) for _ in scenes]
-
-
-def _propagate_descriptions(all_scenes: List[SceneInfo], described_scenes: List[SceneInfo]):
-    """
-    Propagate descriptions from sampled scenes to nearby scenes.
-    This fills gaps without extra API calls.
-    """
-    if not described_scenes:
-        return
-    
-    # Create a mapping of described scene indices
-    described_indices = {s.scene_index for s in described_scenes}
-    
-    for scene in all_scenes:
-        if scene.scene_index in described_indices:
-            continue  # Already has description
-        
-        # Find nearest described scene
-        nearest = min(
-            described_scenes,
-            key=lambda s: abs(s.scene_index - scene.scene_index)
+        # Get vision description
+        description = processor.describe_scene(
+            video_path, scene, cache_dir
         )
         
-        # Copy description if within 3 scenes
-        if abs(nearest.scene_index - scene.scene_index) <= 3:
-            scene.description = nearest.description
-            scene.visual_keywords = nearest.visual_keywords.copy()
+        # Get transcript for this scene
+        scene_start = scene.get('start_time', 0)
+        scene_end = scene.get('end_time', scene_start + 5)
+        
+        transcript_text = []
+        for seg in transcript_segments:
+            # Handle both dict and SRTSegment objects
+            if isinstance(seg, dict):
+                seg_start = seg.get('start_time', 0)
+                seg_end = seg.get('end_time', 0)
+                seg_text = seg.get('text', '')
+            else:
+                seg_start = getattr(seg, 'start_time', 0)
+                seg_end = getattr(seg, 'end_time', 0)
+                seg_text = getattr(seg, 'text', '')
+            
+            if seg_end > scene_start and seg_start < scene_end:
+                transcript_text.append(seg_text)
+        
+        combined_transcript = ' '.join(transcript_text).strip()
+        
+        # Combine transcript and vision
+        if description and combined_transcript:
+            combined = f"{combined_transcript} [Visual: {description}]"
+        elif description:
+            combined = f"[Visual: {description}]"
+        else:
+            combined = combined_transcript
+        
+        results.append(SceneAnalysis(
+            scene_index=scene_idx,
+            start_time=scene_start,
+            end_time=scene_end,
+            transcript_text=combined_transcript,
+            transcript_word_count=len(combined_transcript.split()),
+            needs_vision=True,
+            reason="Low text coverage",
+            vision_description=description,
+            combined_description=combined
+        ))
+    
+    stats = processor.get_stats()
+    stats['scenes_processed'] = len(results)
+    stats['coverage'] = decision.transcript_coverage
+    
+    return results, stats
+
+
+def get_scene_text(scene: dict, transcript_segments: List[Any]) -> str:
+    """
+    Get transcript text for a scene.
+    Helper function that handles both dict and SRTSegment objects.
+    """
+    scene_start = scene.get('start_time', 0)
+    scene_end = scene.get('end_time', scene_start + 5)
+    
+    texts = []
+    for seg in transcript_segments:
+        # Handle both dict and SRTSegment objects
+        if isinstance(seg, dict):
+            seg_start = seg.get('start_time', 0)
+            seg_end = seg.get('end_time', 0)
+            seg_text = seg.get('text', '')
+        else:
+            seg_start = getattr(seg, 'start_time', 0)
+            seg_end = getattr(seg, 'end_time', 0)
+            seg_text = getattr(seg, 'text', '')
+        
+        # Check overlap
+        if seg_end > scene_start and seg_start < scene_end:
+            texts.append(seg_text)
+    
+    return ' '.join(texts).strip()

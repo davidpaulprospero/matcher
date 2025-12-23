@@ -72,10 +72,10 @@ class VideoDownloader:
     
     # Duration tier presets
     DURATION_TIERS = {
-        'short': {'min': 20, 'max': 120, 'per_keyword': 6},
-        'medium': {'min': 120, 'max': 600, 'per_keyword': 6},
-        'long': {'min': 600, 'max': 1500, 'per_keyword': 3},
-        'longer': {'min': 1500, 'max': 3000, 'per_keyword': 3}
+        'short': {'min': 20, 'max': 120, 'per_keyword': 8},
+        'medium': {'min': 120, 'max': 600, 'per_keyword': 8},
+        'long': {'min': 600, 'max': 1500, 'per_keyword': 5},
+        'longer': {'min': 1500, 'max': 3000, 'per_keyword': 5}
     }
     
     def __init__(self, config):

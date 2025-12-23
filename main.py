@@ -57,7 +57,7 @@ ENHANCED_STOCK_PER_KEYWORD = 2  # Videos per keyword from stock sources
 # PERFORMANCE OPTIMIZATION FLAGS (v2.4)
 # =============================================================================
 PARALLEL_WORKERS = 4            # Number of parallel transcription workers
-EMBEDDING_BATCH_SIZE = 100      # Texts per embedding API call
+EMBEDDING_BATCH_SIZE = 10      # Texts per embedding API call
 MAX_VISION_SCENES = 3           # Vision API scenes per video
 
 
@@ -197,8 +197,8 @@ def merge_config(config, overrides: dict):
 sys.path.insert(0, str(INSTALL_DIR / 'src'))
 
 from config import Config, load_config
-from downloader import VideoDownloader, DownloadCheckpoint
-from keyword_extractor import LLMKeywordExtractor
+from src.downloader import VideoDownloader, DownloadCheckpoint
+from src.keyword_extractor import LLMKeywordExtractor
 
 # Setup logging
 logging.basicConfig(
@@ -243,7 +243,7 @@ except ImportError:
 # PERFORMANCE OPTIMIZATION IMPORTS (v2.4)
 # =============================================================================
 try:
-    from src.transcription_optimized import (
+    from src.transcription import (
         transcribe_videos_parallel,
         DeltaAwareIndex,
         transcribe_voiceover_media
@@ -252,11 +252,11 @@ try:
     logger.info("✓ Using optimized parallel transcription")
 except ImportError:
     OPTIMIZED_TRANSCRIPTION = False
-    logger.debug("transcription_optimized module not available - using standard")
+    logger.debug("transcription module not available - using standard")
 
 try:
-    from src.embeddings_optimized import (
-        compute_embeddings as compute_embeddings_optimized,
+    from src.embeddings import (
+        compute_embeddings as compute_embeddings,
         get_embedding_provider as get_embedding_provider_optimized,
         build_embedding_index as build_embedding_index_optimized,
         EmbeddingCache
@@ -265,15 +265,15 @@ try:
     logger.info("✓ Using optimized batch embeddings")
 except ImportError:
     OPTIMIZED_EMBEDDINGS = False
-    logger.debug("embeddings_optimized module not available - using standard")
+    logger.debug("embeddings module not available - using standard")
 
 try:
-    from src.vision_optimized import process_video_vision as process_video_vision_optimized
+    from src.vision import process_video_vision as process_video_vision
     OPTIMIZED_VISION = True
     logger.info("✓ Using selective vision processing")
 except ImportError:
     OPTIMIZED_VISION = False
-    logger.debug("vision_optimized module not available - using standard")
+    logger.debug("vision module not available - using standard")
 
 
 class Pipeline:
@@ -769,7 +769,7 @@ class Pipeline:
             try:
                 # Use optimized transcription if available
                 if OPTIMIZED_TRANSCRIPTION:
-                    from src.transcription_optimized import transcribe_voiceover_media
+                    from src.transcription import transcribe_voiceover_media
                 else:
                     from src.transcription import transcribe_voiceover_media
                 
@@ -1028,17 +1028,17 @@ class Pipeline:
         # Import modules based on optimization availability
         try:
             if OPTIMIZED_TRANSCRIPTION:
-                from src.transcription_optimized import transcribe_videos_parallel
+                from src.transcription import transcribe_videos_parallel
             else:
                 from src.transcription import transcribe_videos_parallel
             
             if OPTIMIZED_EMBEDDINGS:
-                from src.embeddings_optimized import compute_embeddings, build_embedding_index, get_embedding_provider
+                from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
             else:
                 from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
             
             if OPTIMIZED_VISION:
-                from src.vision_optimized import process_video_vision
+                from src.vision import process_video_vision
             else:
                 from src.vision import process_video_vision
             
@@ -1318,7 +1318,7 @@ class Pipeline:
             from src.matching import match_all_segments
             
             if OPTIMIZED_EMBEDDINGS:
-                from src.embeddings_optimized import get_embedding_provider, compute_embeddings
+                from src.embeddings import get_embedding_provider, compute_embeddings
             else:
                 from src.embeddings import get_embedding_provider, compute_embeddings
             

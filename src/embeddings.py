@@ -1,263 +1,308 @@
+#!/usr/bin/env python3
 """
-Embedding providers - local and API-based
-With FAISS indexing support and hybrid embedding combination
+Embeddings Module - v2.5 (Consolidated)
+
+Features:
+=========
+1. BATCH EMBEDDING: Groups texts into batches of 100 for Gemini API calls.
+2. SMART CACHING: Embeddings cached per-video (not per-session).
+3. INCREMENTAL EMBEDDING: Only computes embeddings for new segments.
+4. RATE LIMIT HANDLING: Automatic retry with exponential backoff.
+5. NUMPY ARRAYS: Returns numpy arrays for FAISS compatibility.
+6. FAISS INTEGRATION: Proper 2D array handling for FAISS searches.
 """
 
+import os
+import json
+import hashlib
 import logging
-import math
-from typing import List, Optional, Dict, Tuple
-from abc import ABC, abstractmethod
-
-from .config import Config
-from .utils import CacheManager, ProgressBar
+import time
+from pathlib import Path
+from typing import List, Dict, Optional, Any, Tuple, Union
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# FAISS INDEX (Optional - falls back to numpy if not installed)
-# =============================================================================
-
-_FAISS_AVAILABLE = False
+# Try to import numpy early
 try:
-    import faiss
     import numpy as np
-    _FAISS_AVAILABLE = True
-    logger.debug("FAISS available for fast similarity search")
+    HAS_NUMPY = True
 except ImportError:
-    logger.debug("FAISS not installed, using numpy fallback")
+    HAS_NUMPY = False
+    np = None
+
+# Batch sizes for different providers
+BATCH_SIZES = {
+    'gemini': 100,      # Gemini supports up to 100 texts per call
+    'voyage': 128,      # Voyage supports up to 128
+    'openai': 2048,     # OpenAI supports large batches
+    'local': 32,        # Local models - limited by memory
+}
 
 
-class EmbeddingIndex:
+def _to_numpy(embeddings: Union[List, Any]) -> Any:
+    """Convert embeddings to numpy array for FAISS compatibility"""
+    if not HAS_NUMPY:
+        return embeddings
+    if isinstance(embeddings, np.ndarray):
+        return embeddings.astype('float32')
+    if isinstance(embeddings, list):
+        return np.array(embeddings, dtype='float32')
+    return embeddings
+
+
+def cosine_similarity(a: Any, b: Any) -> float:
     """
-    Fast similarity search index.
-    Uses FAISS if available, otherwise falls back to numpy brute-force.
+    Compute cosine similarity between two vectors.
+    
+    Args:
+        a: First vector (list or numpy array)
+        b: Second vector (list or numpy array)
+    
+    Returns:
+        Cosine similarity score between -1 and 1
     """
+    import numpy as np
     
-    def __init__(self, embeddings: List[List[float]], use_faiss: bool = True, index_type: str = "flat"):
-        """
-        Build an index from embeddings.
-        
-        Args:
-            embeddings: List of embedding vectors
-            use_faiss: Whether to use FAISS (if available)
-            index_type: "flat" (exact) or "ivf" (approximate, faster for large datasets)
-        """
-        self.embeddings = embeddings
-        self.dimension = len(embeddings[0]) if embeddings else 0
-        self.use_faiss = use_faiss and _FAISS_AVAILABLE and len(embeddings) > 0
-        self.index = None
-        
-        if self.use_faiss:
-            self._build_faiss_index(index_type)
-        else:
-            # Numpy fallback - precompute norms for faster cosine similarity
-            self._embeddings_array = None
-            if embeddings:
-                import numpy as np
-                self._embeddings_array = np.array(embeddings, dtype=np.float32)
-                norms = np.linalg.norm(self._embeddings_array, axis=1, keepdims=True)
-                norms[norms == 0] = 1  # Avoid division by zero
-                self._embeddings_normalized = self._embeddings_array / norms
+    # Convert to numpy
+    if isinstance(a, list):
+        a = np.array(a, dtype='float32')
+    if isinstance(b, list):
+        b = np.array(b, dtype='float32')
     
-    def _build_faiss_index(self, index_type: str):
-        """Build FAISS index"""
-        import numpy as np
-        
-        embeddings_array = np.array(self.embeddings, dtype=np.float32)
-        
-        # Normalize for cosine similarity (FAISS uses inner product)
-        faiss.normalize_L2(embeddings_array)
-        
-        if index_type == "ivf" and len(self.embeddings) > 1000:
-            # IVF index for large datasets
-            nlist = min(100, len(self.embeddings) // 10)
-            quantizer = faiss.IndexFlatIP(self.dimension)
-            self.index = faiss.IndexIVFFlat(quantizer, self.dimension, nlist, faiss.METRIC_INNER_PRODUCT)
-            self.index.train(embeddings_array)
-            self.index.add(embeddings_array)
-            self.index.nprobe = 10  # Number of clusters to search
-        else:
-            # Flat index (exact search)
-            self.index = faiss.IndexFlatIP(self.dimension)
-            self.index.add(embeddings_array)
-        
-        logger.debug(f"Built FAISS index with {len(self.embeddings)} vectors, type={index_type}")
+    # Flatten if needed
+    a = a.flatten()
+    b = b.flatten()
     
-    def search(self, query: List[float], k: int = 10) -> List[Tuple[int, float]]:
+    # Compute cosine similarity
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    
+    return float(np.dot(a, b) / (norm_a * norm_b))
+
+
+@dataclass 
+class EmbeddingCache:
+    """Persistent embedding cache with incremental updates"""
+    
+    def __init__(self, cache_dir: str):
+        self.cache_dir = Path(cache_dir) / "embeddings"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.index_path = self.cache_dir / "embedding_index.json"
+        self.index: Dict[str, dict] = {}
+        self._load_index()
+    
+    def _load_index(self):
+        """Load the embedding index"""
+        if self.index_path.exists():
+            try:
+                with open(self.index_path, 'r') as f:
+                    self.index = json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load embedding index: {e}")
+                self.index = {}
+    
+    def _save_index(self):
+        """Save the embedding index"""
+        try:
+            with open(self.index_path, 'w') as f:
+                json.dump(self.index, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not save embedding index: {e}")
+    
+    def _text_hash(self, text: str) -> str:
+        """Get hash for a text string"""
+        return hashlib.md5(text.encode()).hexdigest()[:12]
+    
+    def _batch_hash(self, texts: List[str]) -> str:
+        """Get hash for a batch of texts"""
+        combined = json.dumps(sorted(texts), sort_keys=True)
+        return hashlib.md5(combined.encode()).hexdigest()[:16]
+    
+    def get_cached_embeddings(
+        self, 
+        texts: List[str],
+        cache_key: str = "default"
+    ) -> Tuple[List[List[float]], List[str], List[int]]:
         """
-        Find top-k most similar embeddings.
+        Get cached embeddings for texts.
         
         Returns:
-            List of (index, similarity) tuples, sorted by similarity descending
+            (cached_embeddings, uncached_texts, uncached_indices)
         """
-        if not self.embeddings:
-            return []
+        cached_embeddings = []
+        uncached_texts = []
+        uncached_indices = []
         
-        if self.use_faiss:
-            return self._search_faiss(query, k)
-        else:
-            return self._search_numpy(query, k)
+        for i, text in enumerate(texts):
+            text_hash = self._text_hash(text)
+            cache_file = self.cache_dir / f"{cache_key}_{text_hash}.json"
+            
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        cached_embeddings.append((i, data['embedding']))
+                except Exception:
+                    uncached_texts.append(text)
+                    uncached_indices.append(i)
+            else:
+                uncached_texts.append(text)
+                uncached_indices.append(i)
+        
+        return cached_embeddings, uncached_texts, uncached_indices
     
-    def _search_faiss(self, query: List[float], k: int) -> List[Tuple[int, float]]:
-        """Search using FAISS"""
-        import numpy as np
+    def cache_embeddings(
+        self,
+        texts: List[str],
+        embeddings: List[List[float]],
+        indices: List[int],
+        cache_key: str = "default"
+    ):
+        """Cache embeddings for texts"""
+        for text, embedding, idx in zip(texts, embeddings, indices):
+            text_hash = self._text_hash(text)
+            cache_file = self.cache_dir / f"{cache_key}_{text_hash}.json"
+            
+            # Convert numpy to list for JSON serialization
+            if HAS_NUMPY and isinstance(embedding, np.ndarray):
+                embedding = embedding.tolist()
+            
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump({
+                        'text_preview': text[:100],
+                        'embedding': embedding,
+                        'cached_at': time.time()
+                    }, f)
+            except Exception as e:
+                logger.debug(f"Could not cache embedding: {e}")
         
-        query_array = np.array([query], dtype=np.float32)
-        faiss.normalize_L2(query_array)
-        
-        k = min(k, len(self.embeddings))
-        distances, indices = self.index.search(query_array, k)
-        
-        results = []
-        for idx, dist in zip(indices[0], distances[0]):
-            if idx >= 0:  # -1 means no result
-                results.append((int(idx), float(dist)))
-        
-        return results
+        # Update index
+        self.index[cache_key] = {
+            'count': len(texts),
+            'updated_at': time.time()
+        }
+        self._save_index()
     
-    def _search_numpy(self, query: List[float], k: int) -> List[Tuple[int, float]]:
-        """Search using numpy (fallback)"""
-        import numpy as np
+    def get_batch_cache(
+        self,
+        texts: List[str],
+        cache_key: str = "default"
+    ) -> Optional[Any]:
+        """Get cached embeddings for entire batch (faster than individual lookup)"""
+        batch_hash = self._batch_hash(texts)
+        cache_file = self.cache_dir / f"batch_{cache_key}_{batch_hash}.json"
         
-        query_array = np.array(query, dtype=np.float32)
-        query_norm = np.linalg.norm(query_array)
-        if query_norm == 0:
-            return [(i, 0.0) for i in range(min(k, len(self.embeddings)))]
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r') as f:
+                    data = json.load(f)
+                    if len(data['embeddings']) == len(texts):
+                        logger.info(f"  ✓ Loaded batch cache: {len(texts)} embeddings")
+                        # Convert to numpy for FAISS
+                        return _to_numpy(data['embeddings'])
+            except Exception:
+                pass
+        return None
+    
+    def cache_batch(
+        self,
+        texts: List[str],
+        embeddings: Any,
+        cache_key: str = "default"
+    ):
+        """Cache entire batch of embeddings"""
+        batch_hash = self._batch_hash(texts)
+        cache_file = self.cache_dir / f"batch_{cache_key}_{batch_hash}.json"
         
-        query_normalized = query_array / query_norm
+        # Convert numpy to list for JSON serialization
+        embeddings_list = embeddings
+        if HAS_NUMPY and isinstance(embeddings, np.ndarray):
+            embeddings_list = embeddings.tolist()
         
-        # Compute all cosine similarities at once
-        similarities = np.dot(self._embeddings_normalized, query_normalized)
-        
-        # Get top-k indices
-        k = min(k, len(similarities))
-        top_k_indices = np.argpartition(similarities, -k)[-k:]
-        top_k_indices = top_k_indices[np.argsort(similarities[top_k_indices])[::-1]]
-        
-        return [(int(idx), float(similarities[idx])) for idx in top_k_indices]
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump({
+                    'count': len(texts),
+                    'embeddings': embeddings_list,
+                    'cached_at': time.time()
+                }, f)
+            logger.debug(f"Cached batch: {len(texts)} embeddings")
+        except Exception as e:
+            logger.warning(f"Could not cache batch: {e}")
 
 
-# =============================================================================
-# HYBRID EMBEDDING COMBINER
-# =============================================================================
-
-def combine_hybrid_embeddings(
-    text_embedding: List[float],
-    visual_embedding: Optional[List[float]],
-    text_weight: float = 0.7,
-    visual_weight: float = 0.3
-) -> List[float]:
-    """
-    Combine text and visual embeddings using weighted average.
-    Falls back to text-only if visual is None or mismatched dimension.
-    
-    Args:
-        text_embedding: Text-based embedding
-        visual_embedding: Visual description embedding (optional)
-        text_weight: Weight for text embedding (default 0.7)
-        visual_weight: Weight for visual embedding (default 0.3)
-    
-    Returns:
-        Combined embedding (same dimension as text_embedding)
-    """
-    if visual_embedding is None or len(visual_embedding) == 0:
-        return text_embedding
-    
-    if len(text_embedding) != len(visual_embedding):
-        logger.debug(f"Dimension mismatch: text={len(text_embedding)}, visual={len(visual_embedding)}, using text only")
-        return text_embedding
-    
-    # Weighted average
-    combined = [
-        text_weight * t + visual_weight * v
-        for t, v in zip(text_embedding, visual_embedding)
-    ]
-    
-    # Normalize the combined embedding
-    norm = math.sqrt(sum(x * x for x in combined))
-    if norm > 0:
-        combined = [x / norm for x in combined]
-    
-    return combined
-
-
-def compute_hybrid_embeddings(
-    text_embeddings: List[List[float]],
-    visual_embeddings: Optional[List[Optional[List[float]]]],
-    text_weight: float = 0.7,
-    visual_weight: float = 0.3
-) -> List[List[float]]:
-    """
-    Compute hybrid embeddings for a list of texts/visuals.
-    
-    Args:
-        text_embeddings: List of text embeddings
-        visual_embeddings: List of visual embeddings (can have None entries)
-        text_weight: Weight for text component
-        visual_weight: Weight for visual component
-    
-    Returns:
-        List of hybrid embeddings
-    """
-    if visual_embeddings is None:
-        return text_embeddings
-    
-    hybrid = []
-    for i, text_emb in enumerate(text_embeddings):
-        vis_emb = visual_embeddings[i] if i < len(visual_embeddings) else None
-        hybrid.append(combine_hybrid_embeddings(text_emb, vis_emb, text_weight, visual_weight))
-    
-    return hybrid
-
-
-class EmbeddingProvider(ABC):
+class EmbeddingProvider:
     """Base class for embedding providers"""
     
-    @abstractmethod
     def embed(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts"""
-        pass
+        raise NotImplementedError
     
-    @property
-    @abstractmethod
-    def dimension(self) -> int:
-        """Return embedding dimension"""
-        pass
+    def embed_batch(
+        self, 
+        texts: List[str], 
+        batch_size: int = 100,
+        show_progress: bool = True
+    ) -> List[List[float]]:
+        """Embed texts in batches with progress reporting"""
+        all_embeddings = []
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            
+            if show_progress:
+                logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch)} texts)")
+            
+            # Retry logic with exponential backoff
+            for attempt in range(3):
+                try:
+                    embeddings = self.embed(batch)
+                    all_embeddings.extend(embeddings)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        wait = 2 ** attempt
+                        logger.warning(f"    Batch failed, retrying in {wait}s: {e}")
+                        time.sleep(wait)
+                    else:
+                        logger.error(f"    Batch failed after 3 attempts: {e}")
+                        # Fill with zeros to maintain alignment
+                        all_embeddings.extend([[0.0] * 768] * len(batch))
+        
+        return all_embeddings
 
 
 class GeminiEmbeddings(EmbeddingProvider):
-    """Google Gemini embeddings"""
+    """Google Gemini embeddings with batching"""
     
     def __init__(self, api_key: str, model: str = "models/text-embedding-004"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         self.model = model
-        self._dimension = 768
+        self.genai = genai
     
     def embed(self, texts: List[str]) -> List[List[float]]:
-        import google.generativeai as genai
+        """Embed a batch of texts (up to 100)"""
+        # Clean texts - Gemini doesn't like empty strings
+        cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         
-        embeddings = []
-        batch_size = 100
+        result = self.genai.embed_content(
+            model=self.model,
+            content=cleaned,
+            task_type="retrieval_document"
+        )
         
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
-            # Filter empty texts
-            batch = [t if t.strip() else "[empty]" for t in batch]
-            
-            result = genai.embed_content(
-                model=self.model,
-                content=batch,
-                task_type="retrieval_document"
-            )
-            embeddings.extend(result['embedding'])
-        
-        return embeddings
-    
-    @property
-    def dimension(self) -> int:
-        return self._dimension
+        # Handle both single and batch results
+        if isinstance(result['embedding'][0], list):
+            return result['embedding']
+        else:
+            return [result['embedding']]
 
 
 class VoyageEmbeddings(EmbeddingProvider):
@@ -267,192 +312,243 @@ class VoyageEmbeddings(EmbeddingProvider):
         import voyageai
         self.client = voyageai.Client(api_key=api_key)
         self.model = model
-        self._dimension = 1024
     
     def embed(self, texts: List[str]) -> List[List[float]]:
-        # Filter empty texts
-        texts = [t if t.strip() else "[empty]" for t in texts]
-        result = self.client.embed(texts, model=self.model)
+        cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+        result = self.client.embed(cleaned, model=self.model)
         return result.embeddings
-    
-    @property
-    def dimension(self) -> int:
-        return self._dimension
 
 
 class LocalEmbeddings(EmbeddingProvider):
-    """Local embeddings using sentence-transformers"""
+    """Local sentence-transformers embeddings"""
     
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         from sentence_transformers import SentenceTransformer
-        import torch
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = SentenceTransformer(model_name, device=device)
-        self._dimension = self.model.get_sentence_embedding_dimension()
-        
-        logger.info(f"Loaded local embedding model '{model_name}' on {device}")
+        self.model = SentenceTransformer(model_name)
     
     def embed(self, texts: List[str]) -> List[List[float]]:
-        # Filter empty texts
-        texts = [t if t.strip() else "[empty]" for t in texts]
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+        embeddings = self.model.encode(cleaned, show_progress_bar=False)
         return embeddings.tolist()
-    
-    @property
-    def dimension(self) -> int:
-        return self._dimension
 
 
-def get_embedding_provider(config: Config) -> EmbeddingProvider:
-    """Get the configured embedding provider"""
+def get_embedding_provider(config: Any) -> EmbeddingProvider:
+    """Get the best available embedding provider"""
+    provider_name = getattr(config.embedding, 'provider', 'gemini')
     
-    provider_type = config.embedding.provider.lower()
+    if provider_name == 'gemini':
+        api_key = os.getenv('GEMINI_API_KEY') or getattr(config, 'gemini_api_key', None)
+        if api_key:
+            try:
+                model = getattr(config.embedding, 'gemini_model', 'models/text-embedding-004')
+                return GeminiEmbeddings(api_key, model)
+            except Exception as e:
+                logger.warning(f"Could not initialize Gemini: {e}")
     
-    if provider_type == "local":
-        return LocalEmbeddings(config.embedding.local_model)
+    if provider_name == 'voyage':
+        api_key = os.getenv('VOYAGE_API_KEY') or getattr(config, 'voyage_api_key', None)
+        if api_key:
+            try:
+                model = getattr(config.embedding, 'voyage_model', 'voyage-2')
+                return VoyageEmbeddings(api_key, model)
+            except Exception as e:
+                logger.warning(f"Could not initialize Voyage: {e}")
     
-    elif provider_type == "gemini":
-        if not config.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY not set")
-        return GeminiEmbeddings(config.gemini_api_key, config.embedding.gemini_model)
-    
-    elif provider_type == "voyage":
-        if not config.voyage_api_key:
-            raise ValueError("VOYAGE_API_KEY not set")
-        return VoyageEmbeddings(config.voyage_api_key, config.embedding.voyage_model)
-    
-    else:
-        # Auto-detect available provider
-        if config.gemini_api_key:
-            logger.info("Using Gemini embeddings (auto-detected)")
-            return GeminiEmbeddings(config.gemini_api_key)
-        elif config.voyage_api_key:
-            logger.info("Using Voyage embeddings (auto-detected)")
-            return VoyageEmbeddings(config.voyage_api_key)
-        else:
-            logger.info("Using local embeddings (no API keys found)")
-            return LocalEmbeddings(config.embedding.local_model)
+    # Fallback to local
+    try:
+        model = getattr(config.embedding, 'local_model', 'all-MiniLM-L6-v2')
+        logger.info(f"Using local embeddings: {model}")
+        return LocalEmbeddings(model)
+    except Exception as e:
+        logger.error(f"Could not initialize any embedding provider: {e}")
+        raise RuntimeError("No embedding provider available")
 
 
 def compute_embeddings(
     texts: List[str],
     provider: EmbeddingProvider,
-    cache: CacheManager,
-    cache_key: str,
+    cache: Any,
+    cache_key: str = "segments",
     show_progress: bool = True
-) -> List[List[float]]:
+) -> Any:
     """
-    Compute embeddings with caching.
-    """
-    # Filter empty texts and track indices
-    valid_indices = [i for i, t in enumerate(texts) if t and t.strip()]
-    valid_texts = [texts[i] for i in valid_indices]
-    
-    if not valid_texts:
-        logger.warning("No valid texts to embed")
-        return []
-    
-    # Create cache key
-    import hashlib
-    import json
-    text_hash = hashlib.md5(json.dumps(valid_texts, sort_keys=True).encode()).hexdigest()[:16]
-    full_cache_key = f"{cache_key}_{text_hash}"
-    
-    # Check cache
-    cached = cache.get_embeddings(full_cache_key)
-    if cached:
-        logger.info(f"Loaded cached embeddings ({len(cached)} vectors)")
-        return cached
-    
-    # Compute embeddings
-    logger.info(f"Computing embeddings for {len(valid_texts)} texts...")
-    
-    if show_progress:
-        progress = ProgressBar(len(valid_texts), "Embedding")
-        
-        # Process in batches for progress updates
-        batch_size = 100
-        embeddings = []
-        
-        for i in range(0, len(valid_texts), batch_size):
-            batch = valid_texts[i:i+batch_size]
-            batch_embeddings = provider.embed(batch)
-            embeddings.extend(batch_embeddings)
-            progress.update(len(batch))
-        
-        progress.close()
-    else:
-        embeddings = provider.embed(valid_texts)
-    
-    # Cache
-    cache.save_embeddings(full_cache_key, embeddings)
-    logger.info(f"Cached embeddings to {full_cache_key}")
-    
-    return embeddings
-
-
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    """Compute cosine similarity between two vectors"""
-    import math
-    
-    dot_product = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    
-    return dot_product / (norm_a * norm_b)
-
-
-def find_top_k_similar(
-    query_embedding: List[float],
-    corpus_embeddings: List[List[float]],
-    k: int = 10,
-    index: Optional[EmbeddingIndex] = None
-) -> List[tuple]:
-    """
-    Find top-k most similar embeddings.
-    Uses FAISS index if provided, otherwise brute-force.
+    Compute embeddings with batch processing and caching.
     
     Args:
-        query_embedding: Query vector
-        corpus_embeddings: Corpus of vectors to search
-        k: Number of results to return
-        index: Optional pre-built EmbeddingIndex for faster search
+        texts: List of text strings to embed
+        provider: EmbeddingProvider instance
+        cache: CacheManager or similar with cache_dir attribute
+        cache_key: Key for caching (e.g., "video_segments", "voiceover")
+        show_progress: Whether to show progress logs
     
     Returns:
-        List of (index, similarity) tuples, sorted by similarity descending
+        Numpy array of embedding vectors (or list if numpy unavailable)
     """
-    if index is not None:
-        return index.search(query_embedding, k)
+    if not texts:
+        return _to_numpy([])
     
-    # Fallback to brute-force
-    similarities = [
-        (i, cosine_similarity(query_embedding, emb))
-        for i, emb in enumerate(corpus_embeddings)
-    ]
+    # Clean texts
+    cleaned_texts = []
+    for t in texts:
+        t = t.strip() if t else ""
+        cleaned_texts.append(t if t else "[silence]")
     
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    return similarities[:k]
+    # Get cache directory
+    cache_dir = cache.cache_dir if hasattr(cache, 'cache_dir') else str(cache)
+    embedding_cache = EmbeddingCache(cache_dir)
+    
+    # Try batch cache first (fastest) - already returns numpy
+    cached = embedding_cache.get_batch_cache(cleaned_texts, cache_key)
+    if cached is not None:
+        return cached
+    
+    # Determine batch size based on provider
+    provider_name = type(provider).__name__.lower()
+    if 'gemini' in provider_name:
+        batch_size = BATCH_SIZES['gemini']
+    elif 'voyage' in provider_name:
+        batch_size = BATCH_SIZES['voyage']
+    elif 'local' in provider_name:
+        batch_size = BATCH_SIZES['local']
+    else:
+        batch_size = 50  # Safe default
+    
+    # Compute embeddings in batches
+    if show_progress:
+        logger.info(f"  Computing embeddings: {len(cleaned_texts)} texts, batch size {batch_size}")
+    
+    start_time = time.time()
+    embeddings = provider.embed_batch(cleaned_texts, batch_size, show_progress)
+    elapsed = time.time() - start_time
+    
+    if show_progress:
+        rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
+        logger.info(f"  ✓ Computed {len(embeddings)} embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+    
+    # Cache the batch (as list for JSON)
+    embedding_cache.cache_batch(cleaned_texts, embeddings, cache_key)
+    
+    # Convert to numpy for FAISS compatibility
+    return _to_numpy(embeddings)
 
 
 def build_embedding_index(
-    embeddings: List[List[float]],
-    config: Config
-) -> EmbeddingIndex:
+    embeddings: Any,
+    config: Any
+) -> Any:
+    """Build FAISS index for fast similarity search"""
+    if not getattr(config.indexing, 'use_faiss', True):
+        return None
+    
+    try:
+        import numpy as np
+        import faiss
+        
+        # Convert to numpy array if needed
+        if isinstance(embeddings, list):
+            embeddings_np = np.array(embeddings, dtype='float32')
+        else:
+            embeddings_np = embeddings.astype('float32')
+        
+        # Normalize for cosine similarity
+        faiss.normalize_L2(embeddings_np)
+        
+        # Build index
+        dimension = embeddings_np.shape[1]
+        index_type = getattr(config.indexing, 'index_type', 'flat')
+        
+        if index_type == 'flat':
+            index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
+        elif index_type == 'ivf':
+            nlist = min(100, len(embeddings) // 10)
+            quantizer = faiss.IndexFlatIP(dimension)
+            index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
+            index.train(embeddings_np)
+        else:
+            index = faiss.IndexFlatIP(dimension)
+        
+        index.add(embeddings_np)
+        
+        logger.info(f"  ✓ Built FAISS index: {index.ntotal} vectors, dim={dimension}")
+        return index
+        
+    except ImportError:
+        logger.warning("FAISS not available, using brute-force search")
+        return None
+    except Exception as e:
+        logger.warning(f"Could not build FAISS index: {e}")
+        return None
+
+
+def find_top_k_similar(
+    query_embedding: Any,
+    embeddings: Any,
+    k: int,
+    index: Any = None
+) -> Tuple[Any, Any]:
     """
-    Build an embedding index for fast similarity search.
+    Find top-k most similar embeddings.
     
     Args:
-        embeddings: List of embedding vectors
-        config: Configuration (for FAISS settings)
+        query_embedding: Query vector (list or numpy array)
+        embeddings: All embeddings to search (list or numpy array)
+        k: Number of results to return
+        index: Optional FAISS index for fast search
     
     Returns:
-        EmbeddingIndex ready for search
+        (distances, indices) - both as numpy arrays
     """
-    use_faiss = config.indexing.use_faiss
-    index_type = config.indexing.index_type
+    import numpy as np
     
-    return EmbeddingIndex(embeddings, use_faiss=use_faiss, index_type=index_type)
+    # Convert query to numpy array if needed
+    if isinstance(query_embedding, list):
+        query_embedding = np.array(query_embedding, dtype='float32')
+    else:
+        query_embedding = np.asarray(query_embedding, dtype='float32')
+    
+    # Ensure 2D shape for FAISS (1, dim)
+    if query_embedding.ndim == 1:
+        query_embedding = query_embedding.reshape(1, -1)
+    
+    # Normalize query for cosine similarity
+    norm = np.linalg.norm(query_embedding)
+    if norm > 0:
+        query_embedding = query_embedding / norm
+    
+    # Use FAISS index if available
+    if index is not None:
+        try:
+            import faiss
+            # Make a copy for FAISS (it modifies in-place)
+            query_copy = query_embedding.copy()
+            faiss.normalize_L2(query_copy)
+            distances, indices = index.search(query_copy, k)
+            return distances[0], indices[0]
+        except Exception as e:
+            logger.warning(f"FAISS search failed, falling back to brute force: {e}")
+    
+    # Fallback to brute-force search
+    if isinstance(embeddings, list):
+        embeddings = np.array(embeddings, dtype='float32')
+    else:
+        embeddings = np.asarray(embeddings, dtype='float32')
+    
+    # Normalize embeddings
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
+    embeddings_norm = embeddings / norms
+    
+    # Compute cosine similarity
+    similarities = np.dot(embeddings_norm, query_embedding.T).flatten()
+    
+    # Get top-k indices
+    k = min(k, len(similarities))
+    if k >= len(similarities):
+        top_k_indices = np.argsort(similarities)[::-1]
+    else:
+        top_k_indices = np.argpartition(similarities, -k)[-k:]
+        top_k_indices = top_k_indices[np.argsort(similarities[top_k_indices])[::-1]]
+    
+    top_k_distances = similarities[top_k_indices]
+    
+    return top_k_distances, top_k_indices
