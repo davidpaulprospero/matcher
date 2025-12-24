@@ -72,10 +72,10 @@ class VideoDownloader:
     
     # Duration tier presets
     DURATION_TIERS = {
-        'short': {'min': 20, 'max': 120, 'per_keyword': 6},
-        'medium': {'min': 120, 'max': 600, 'per_keyword': 6},
-        'long': {'min': 600, 'max': 1500, 'per_keyword': 3},
-        'longer': {'min': 1500, 'max': 3000, 'per_keyword': 3}
+        'short': {'min': 20, 'max': 120, 'per_keyword': 8},
+        'medium': {'min': 120, 'max': 600, 'per_keyword': 8},
+        'long': {'min': 600, 'max': 1500, 'per_keyword': 5},
+        'longer': {'min': 1500, 'max': 3000, 'per_keyword': 5}
     }
     
     def __init__(self, config):
@@ -100,6 +100,54 @@ class VideoDownloader:
         
         # Load existing sources
         self._load_sources()
+        
+        # Find cookies file for YouTube authentication
+        self._cookies_path = self._find_cookies_file()
+        if self._cookies_path:
+            logger.info(f"Found cookies file: {self._cookies_path}")
+        else:
+            logger.warning("No cookies.txt found - YouTube downloads may fail!")
+            logger.warning("Export cookies from browser and save as cookies.txt in install directory")
+    
+    def _find_cookies_file(self) -> Optional[Path]:
+        """
+        Find cookies.txt file for YouTube authentication.
+        Searches in order:
+        1. Explicit path from config (download.cookies_path)
+        2. Install directory (same as config.yaml)
+        3. Project directory
+        4. Current working directory
+        """
+        search_locations = []
+        
+        # 0. Check if explicit path is set in config
+        if hasattr(self.download_config, 'cookies_path') and self.download_config.cookies_path:
+            explicit_path = Path(self.download_config.cookies_path)
+            if explicit_path.exists():
+                return explicit_path
+            else:
+                logger.warning(f"Configured cookies_path does not exist: {explicit_path}")
+        
+        # 1. Install directory (where config.yaml is)
+        if hasattr(self.config, '_config_path') and self.config._config_path:
+            install_dir = Path(self.config._config_path).parent
+            search_locations.append(install_dir / 'cookies.txt')
+        
+        # 2. Project directory
+        if hasattr(self.config, 'project_dir') and self.config.project_dir:
+            search_locations.append(Path(self.config.project_dir) / 'cookies.txt')
+        
+        # 3. Current working directory
+        search_locations.append(Path.cwd() / 'cookies.txt')
+        
+        # 4. User home directory
+        search_locations.append(Path.home() / 'cookies.txt')
+        
+        for path in search_locations:
+            if path.exists():
+                return path
+        
+        return None
     
     def _load_sources(self):
         """Load existing sources.json"""
@@ -292,17 +340,17 @@ class VideoDownloader:
         if quality == 'best':
             if davinci_mode:
                 # Prefer h264 (avc1) over vp9/av1 to avoid transcoding
-                # Format: best h264 mp4 > best h264 any > best mp4 > best
-                return 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best'
-            return 'best'
+                # Simplified format with good fallbacks
+                return 'bestvideo[vcodec^=avc1]+bestaudio/best[vcodec^=avc1]/bestvideo+bestaudio/best'
+            return 'bestvideo+bestaudio/best'
         elif quality == 'audio':
             return 'bestaudio'
         else:
             height = quality.rstrip('p')
             if davinci_mode:
-                # Prefer h264 at specified quality
-                return f'bestvideo[height<={height}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}][vcodec^=avc1]+bestaudio/best[height<={height}][ext=mp4]/best[height<={height}]/best'
-            return f'best[height<={height}][ext={fmt}]/best[height<={height}]/best'
+                # Prefer h264 at specified quality, with fallbacks
+                return f'bestvideo[height<={height}][vcodec^=avc1]+bestaudio/bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
+            return f'bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
     
     def _build_filter_string(self, tier: str) -> str:
         """Build filter string for duration"""
@@ -396,6 +444,12 @@ class VideoDownloader:
         tier_config = self.DURATION_TIERS[tier]
         max_downloads = tier_config['per_keyword']
         
+        # Search a larger pool to find videos that match duration filters
+        # This is critical: ytsearch only returns N results, so we need N >> max_downloads
+        multiplier = getattr(self.download_config, 'search_pool_multiplier', 5)
+        min_pool = getattr(self.download_config, 'min_search_pool', 30)
+        search_pool = max(max_downloads * multiplier, min_pool)
+        
         # Create keyword subdirectory
         safe_keyword = "".join(c if c.isalnum() or c in ' -_' else '_' for c in keyword)[:50]
         keyword_dir = output_dir / f"{safe_keyword}_{tier}"
@@ -407,19 +461,26 @@ class VideoDownloader:
         # Build yt-dlp command
         cmd = [
             'yt-dlp',
-            f'ytsearch{max_downloads}:{keyword}',
+            f'ytsearch{search_pool}:{keyword}',  # Search larger pool
             '-f', self._build_format_string(),
             '--match-filter', self._build_filter_string(tier),
+            '--max-downloads', str(max_downloads),  # Limit actual downloads
+            '--merge-output-format', 'mp4',  # Ensure merged output is mp4
             '--no-playlist',
             '--write-info-json',  # Need this for metadata
             '--restrict-filenames',
             '--no-overwrites',
             '-o', str(keyword_dir / '%(title)s-%(id)s.%(ext)s'),
-            '--quiet',
-            '--no-warnings',
-            '--progress'
+            '--progress',
+            '--newline',  # Better progress output
         ]
         
+        # Add cookies file if it exists (required for YouTube)
+        if self._cookies_path:
+            cmd.extend(['--cookies', str(self._cookies_path)])
+        
+        # Log the actual command for debugging
+        logger.info(f"    Search: ytsearch{search_pool}, Filter: {self._build_filter_string(tier)}, Max: {max_downloads}")
         logger.debug(f"Running: {' '.join(cmd)}")
         
         try:
@@ -439,6 +500,23 @@ class VideoDownloader:
                 process.communicate()
                 logger.warning(f"Timeout downloading '{keyword}' ({tier})")
                 return []
+            
+            # Log any errors from yt-dlp
+            if stderr:
+                # Only log meaningful errors, skip warnings
+                for line in stderr.strip().split('\n'):
+                    if line and 'WARNING' not in line:
+                        logger.debug(f"    yt-dlp stderr: {line}")
+            
+            # Log stdout (download progress)
+            if stdout:
+                for line in stdout.strip().split('\n'):
+                    if line and '[download]' in line:
+                        logger.info(f"    {line}")
+            
+            # Log return code if non-zero
+            if process.returncode != 0:
+                logger.debug(f"    yt-dlp exit code: {process.returncode}")
             
             # Find new files
             existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()

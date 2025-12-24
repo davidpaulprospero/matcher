@@ -19,6 +19,49 @@ from .utils import SRTSegment, MatchResult, AlternativeMatch
 logger = logging.getLogger(__name__)
 
 
+def _to_python_type(value):
+    """Convert numpy types to native Python types for OTIO compatibility."""
+    if value is None:
+        return None
+    
+    # Check for numpy types
+    type_name = type(value).__name__
+    module_name = type(value).__module__
+    
+    # Handle numpy scalar types
+    if module_name == 'numpy' or 'numpy' in str(type(value)):
+        # numpy float types
+        if 'float' in type_name.lower():
+            return float(value)
+        # numpy int types
+        elif 'int' in type_name.lower():
+            return int(value)
+        # numpy bool
+        elif 'bool' in type_name.lower():
+            return bool(value)
+        # numpy string types
+        elif 'str' in type_name.lower():
+            return str(value)
+        # numpy array - convert to list
+        elif hasattr(value, 'tolist'):
+            return value.tolist()
+    
+    # Handle lists recursively
+    if isinstance(value, list):
+        return [_to_python_type(v) for v in value]
+    
+    # Handle dicts recursively
+    if isinstance(value, dict):
+        return {k: _to_python_type(v) for k, v in value.items()}
+    
+    return value
+
+
+def _sanitize_metadata(metadata: dict) -> dict:
+    """Convert all metadata values to OTIO-compatible Python types."""
+    return {k: _to_python_type(v) for k, v in metadata.items()}
+
+
 def sanitize_path_for_url(path: str) -> str:
     r"""
     Sanitize a file path for use as a URL in OTIO.
@@ -127,7 +170,8 @@ def create_clip_with_timewarp(
         metadata['source_duration'] = source_duration
         metadata['suggested_speed'] = f"{time_scalar * 100:.0f}%"
     
-    # Add metadata
+    # Add metadata (convert numpy types to Python native types)
+    metadata = _sanitize_metadata(metadata)
     for key, value in metadata.items():
         clip.metadata[key] = value
     
@@ -545,12 +589,12 @@ def create_timeline_marker(
         color=color
     )
     
-    # Add metadata
-    marker.metadata['segment_num'] = segment_num
-    marker.metadata['confidence'] = confidence
-    marker.metadata['voiceover_text'] = match.voiceover_segment.text
-    marker.metadata['video_file'] = Path(match.video_segment.source_file).name
-    marker.metadata['reasoning'] = match.reasoning
+    # Add metadata (convert numpy types to Python native types)
+    marker.metadata['segment_num'] = int(segment_num) if hasattr(segment_num, 'item') else segment_num
+    marker.metadata['confidence'] = float(confidence) if hasattr(confidence, 'item') else confidence
+    marker.metadata['voiceover_text'] = str(match.voiceover_segment.text)
+    marker.metadata['video_file'] = str(Path(match.video_segment.source_file).name)
+    marker.metadata['reasoning'] = str(match.reasoning) if match.reasoning else ""
     
     return marker
 

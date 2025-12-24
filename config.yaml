@@ -1,608 +1,673 @@
-# Voiceover-to-Footage Matcher v2.3 Configuration
-# ================================================
-# Enhanced with: FAISS indexing, hybrid embeddings, TF-IDF keyword weights,
-# two-stage matching, duration-aware scoring, source rotation track, logging,
-# interactive keyword review, face detection, clip grading, cross-project cache
+# =============================================================================
+# MATCHER-ALT CONFIGURATION v3.0
+# =============================================================================
+#
+# Chain-of-thought: Centralized config for media matching pipeline
+# Reasoning: Single source of truth reduces maintenance and improves consistency
+# Decision: 2-space indentation with max 5-level nesting for LLM readability
+#
+# Usage:
+#   from src.config import load_config, get_config
+#   config = load_config("config.yaml")
+#   threshold = config.matching.min_confidence
+#
+# Performance: CSafeLoader enables <100ms config loading
+# =============================================================================
 
-# Paths
-downloaded_videos_dir: "./downloaded_videos"
-otio_output_dir: "./otio_output"
-voiceover_path: "./voiceover/voiceover.srt"  # Can be .srt, .mp3, .wav, .mp4
-output_path: "./matched_timeline.otio"
-cache_dir: "./.cache"
+# -----------------------------------------------------------------------------
+# PROJECT IDENTIFICATION
+# -----------------------------------------------------------------------------
+project:
+  name: matcher-alt
+  version: 3.0.0
+  description: AI-powered voiceover-to-footage matching pipeline
 
-# Incremental indexing (only process new videos)
-incremental: true
+project_dir: "."
 
-# Watch mode (continuous monitoring for new videos)
-watch_mode: false
-watch_interval: 30  # seconds
+# -----------------------------------------------------------------------------
+# SHARED DEFAULTS (YAML Anchors for DRY configuration)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Repeated values should use anchors to ensure consistency
+# Reasoning: Single point of change, reduces errors
+# Decision: Define common patterns here, reference with aliases below
 
-# ================================================
-# TRANSCRIPTION (Whisper)
-# ================================================
+defaults:
+  # API retry settings
+  api_retry: &api_retry
+    max_retries: 3
+    retry_delay: 2.0
+  
+  # Quality thresholds
+  quality: &quality_defaults
+    min_confidence: 0.7
+    high_confidence: 0.85
+    low_confidence: 0.5
+  
+  # Rate limiting
+  rate_limit: &rate_limit
+    request_interval: 0.5
+    max_requests_per_minute: 60
+
+# -----------------------------------------------------------------------------
+# TRANSCRIPTION (faster-whisper)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: GPU acceleration critical for performance
+# Reasoning: Parallel audio extraction (CPU) + sequential GPU transcription
+# Decision: max_workers=4 balances CPU parallelism with memory usage
+
 transcription:
-  # Provider: faster-whisper (4x faster, recommended) or openai-whisper (original)
-  provider: "faster-whisper"
-  model: "base"  # tiny, base, small, medium, large, large-v2, large-v3
-  language: "en"
-  use_gpu: true  # GPU is much faster (10-50x), requires CUDA
-  compute_type: "auto"  # auto, float16 (GPU), int8 (CPU), float32 (fallback)
-
-# ================================================
-# EMBEDDINGS
-# ================================================
-embedding:
-  provider: "gemini"  # gemini, voyage, local
-  local_model: "all-MiniLM-L6-v2"  # For local embeddings
-  gemini_model: "models/text-embedding-004"
-  voyage_model: "voyage-2"
+  provider: faster-whisper
   
-  # NEW: Hybrid embeddings (combine text + visual scene descriptions)
-  # When enabled, embeddings are weighted average: text_weight * text_emb + visual_weight * visual_emb
-  # Falls back to text-only when vision is disabled or no scene descriptions available
-  hybrid_mode: true
-  text_weight: 0.5    # 50% weight for text transcript embedding
-  visual_weight: 0.5  # 50% weight for visual scene description embedding
-
-# ================================================
-# INDEXING (FAISS for fast similarity search)
-# ================================================
-# NEW: FAISS provides 10-50x faster candidate retrieval for large video libraries
-# Falls back to numpy brute-force if FAISS is not installed
-indexing:
-  use_faiss: true      # Set false to force numpy fallback
-  index_type: "flat"   # "flat" (exact search) or "ivf" (faster approximate for 1000+ videos)
-
-# ================================================
-# VISION (Multi-modal matching)
-# ================================================
-vision:
-  enabled: true
-  provider: "gemini"  # gemini, openai
-  frames_per_scene: 1  # Keyframes per scene (1 is enough for batching)
-  describe_scenes: true  # Generate scene descriptions
-  max_scenes_per_video: 10  # Max scenes to describe per video (cost control)
-  # With batching: 10 scenes / 5 per batch = 2 API calls per video
-  # Set to 0 to disable vision entirely
-
-# ================================================
-# VIDEO FILTER (pre-embedding relevance filter)
-# ================================================
-video_filter:
-  enabled: true
-  relevance_threshold: 0.3  # Remove videos scoring below this (0.0-1.0)
-  use_llm: true  # Use LLM to assess relevance
+  # Model selection - larger = more accurate but slower
+  # Options: tiny, base, small, medium, large, large-v2, large-v3
+  model: base
+  language: en
   
-  # What to check
-  check_transcript: true  # Analyze video transcript
-  check_filename: true  # Check filename for hints
+  # GPU settings
+  # Chain-of-thought: GPU much faster but requires CUDA
+  # Reasoning: compute_type=auto lets faster-whisper choose optimal
+  use_gpu: true
+  compute_type: auto  # auto, float16, int8, float32
   
-  # Auto-detect main topic from voiceover
-  auto_detect_topic: true
-  
-  # Manual filters (optional)
-  exclude_keywords: []  # Videos containing these words are removed
-  include_keywords: []  # If set, videos must contain at least one of these
-  
-  # Output
-  save_filter_report: true
-  filter_report_filename: "filtered_videos_report.txt"
-
-# ================================================
-# MATCHING
-# ================================================
-matching:
-  # Tiered LLM matching
-  primary_provider: "gemini"  # gemini, anthropic
-  secondary_provider: "anthropic"  # For ambiguous matches
-  
-  # Local LLM (Ollama) for finishing touches
-  local_llm_provider: "ollama"
-  local_llm_model: "llama3.2"
-  use_local_for_review: false  # Set true if Ollama is running
-  
-  # Thresholds
-  top_k_candidates: 10
-  confidence_threshold: 0.5  # Below this = flagged as gap
-  skip_llm_threshold: 0.85  # Skip LLM if embedding similarity > this
-  ambiguous_threshold: 0.6  # Use secondary LLM if confidence < this
-  
-  # NEW: Two-stage matching optimization
-  # Stage 1: Retrieve more candidates from embeddings (faster)
-  # Stage 2: Send only top candidates to LLM for reranking (saves API calls)
-  embedding_candidates: 20  # How many candidates to retrieve from embedding search
-  llm_rerank_candidates: 5  # How many candidates to send to LLM for reranking
-  
-  # Batching (disabled when smart_reuse + sequential_when_reuse)
+  # Parallel processing
+  # Chain-of-thought: CPU can extract audio in parallel
+  # Reasoning: GPU transcription must be sequential (shared model)
+  max_workers: 4
   batch_size: 10
   
-  # Contextual matching (consider surrounding segments)
-  context_window: 2  # Consider N segments before/after
+  # Voice Activity Detection
+  # Chain-of-thought: VAD skips silence, improves accuracy
+  vad_filter: true
+  min_silence_duration_ms: 500
+  speech_pad_ms: 200
   
-  # Smart reuse prevention - STRICT SETTINGS
-  smart_reuse: true
-  max_clip_reuse: 1  # 1 = no reuse allowed (each clip used only once)
-  reuse_penalty: 0.5  # 50% confidence drop if clip somehow reused
-  sequential_when_reuse: true  # Process one-by-one to track reuse accurately
+  # Caching
+  cache_transcriptions: true
+  cache_dir: transcriptions
+
+# -----------------------------------------------------------------------------
+# EMBEDDINGS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vector embeddings enable semantic similarity search
+# Reasoning: Gemini best quality, local for offline/free usage
+# Decision: batch_size=100 optimal for Gemini API limits
+
+embedding:
+  provider: gemini  # gemini, voyage, local
   
-  # NEW: Duration-aware scoring
-  # Penalizes clips requiring extreme speed changes to match voiceover duration
-  # Encourages natural-speed clips that need minimal adjustment in DaVinci
-  duration_scoring_enabled: true
-  ideal_speed_range: [0.85, 1.15]     # 85%-115% = no penalty (ideal)
-  soft_penalty_range: [0.7, 1.5]       # 70%-150% = small penalty
-  duration_penalty_factor: 0.1         # Confidence reduction per penalty tier
+  # Model names per provider
+  gemini_model: models/text-embedding-004
+  voyage_model: voyage-2
+  local_model: all-MiniLM-L6-v2
+  
+  # Batch processing
+  # Chain-of-thought: Batching reduces API calls by 100x
+  batch_size: 100
+  <<: *api_retry
+  
+  # Caching
+  cache_embeddings: true
+  cache_batch_results: true
+
+# -----------------------------------------------------------------------------
+# INDEXING (FAISS)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vector index for fast similarity search
+# Reasoning: Flat index exact but O(n), IVF approximate but O(sqrt(n))
+# Decision: Use flat for <10k vectors, IVF for larger datasets
+
+indexing:
+  index_type: flat  # flat, ivf
+  use_faiss: true
+  
+  # IVF settings (only used if index_type is "ivf")
+  ivf_nlist: 100   # Number of clusters
+  ivf_nprobe: 10   # Clusters to search at query time
+  
+  # Similarity
+  normalize_embeddings: true
+  similarity_metric: cosine  # cosine, dot, euclidean
+
+# -----------------------------------------------------------------------------
+# VISION PROCESSING
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vision API expensive, use selectively
+# Reasoning: Only process scenes where transcript is sparse
+# Decision: coverage_threshold=0.3 means skip if >30% transcribed
+
+vision:
+  provider: gemini
+  model: gemini-2.0-flash
+  enabled: true
+  
+  # Selective processing
+  # Chain-of-thought: Skip vision if transcript provides enough context
+  min_words_per_scene: 5
+  coverage_threshold: 0.3
+  max_scenes_per_video: 50
+  
+  # Frame extraction
+  frame_format: jpg
+  frame_quality: 85
+  
+  # Cost management
+  max_api_calls_per_run: 100
+  estimated_cost_per_call: 0.001
+
+# -----------------------------------------------------------------------------
+# SCENE DETECTION (PySceneDetect)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Scene boundaries enable granular clip selection
+# Reasoning: Presets balance speed vs accuracy for different use cases
+# Decision: "balanced" default, "fast" for preview, "accurate" for final
+
+scene_detection:
+  enabled: true
+  preset: balanced  # fast, balanced, accurate
+  
+  # Individual settings (can override preset)
+  threshold: 27.0
+  min_scene_len: 15  # frames
+  downscale_factor: 4
+  frame_skip: 2
+  
+  # Audio analysis integration
+  audio_analysis: true
+  silence_threshold_db: -40.0
+  min_silence_duration: 0.3
+  
+  # Hardware acceleration
+  use_gpu: true
+  force_gpu: false
+
+# -----------------------------------------------------------------------------
+# AUDIO ANALYSIS (librosa)
+# -----------------------------------------------------------------------------
+audio_analysis:
+  enabled: true
+  sample_rate: 22050
+  
+  # Silence detection
+  silence_threshold_db: -40.0
+  min_silence_duration: 0.3
+  
+  # Speech detection
+  speech_threshold: 0.5
+  min_speech_duration: 0.2
+
+# -----------------------------------------------------------------------------
+# MATCHING ENGINE
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Two-stage matching optimizes cost vs quality
+# Reasoning: Embedding search cheap (FAISS), LLM expensive
+# Decision: Retrieve 20 candidates → rerank top 5 with LLM
+
+matching:
+  # Confidence thresholds (using shared defaults)
+  <<: *quality_defaults
+  
+  # Clip reuse prevention
+  # Chain-of-thought: Prevent same clip appearing multiple times
+  # Reasoning: Variety improves viewer experience
+  max_clip_reuse: 1
+  reuse_penalty: 0.5
+  
+  # Two-stage matching optimization
+  # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
+  # Reasoning: Cast wide net with embeddings, refine with LLM
+  embedding_candidates: 20  # Retrieve from FAISS
+  llm_rerank_candidates: 5  # Send to LLM
+  
+  # Duration scoring
+  # Chain-of-thought: Extreme speed changes look unnatural
+  # Reasoning: Penalize clips requiring >1.5x or <0.7x speed
+  ideal_speed_min: 0.85
+  ideal_speed_max: 1.15
+  soft_speed_min: 0.70
+  soft_speed_max: 1.50
+  duration_penalty_factor: 0.1
+  
+  # Keyword/entity boosting
+  keyword_boost: 0.05
+  entity_boost: 0.08
+  
+  # LLM providers (tiered: primary → secondary → local)
+  # Chain-of-thought: Fallback chain ensures reliability
+  # Reasoning: Gemini fast/cheap, Claude for ambiguous, Ollama offline
+  primary_provider: gemini
+  secondary_provider: anthropic
+  local_provider: ollama
+  
+  # Model names
+  gemini_model: gemini-2.0-flash
+  anthropic_model: claude-3-haiku-20240307
+  ollama_model: llama3.2
   
   # Caching
   cache_llm_responses: true
+  cache_ttl_hours: 24
 
-# ================================================
-# KEYWORDS
-# ================================================
-keywords:
-  enabled: true
-  extract_entities: true  # Extract named entities (people, places)
-  extract_topics: true
-  boost_keyword_matches: 0.1  # Confidence boost for keyword matches
+# -----------------------------------------------------------------------------
+# KEYWORD EXTRACTION
+# -----------------------------------------------------------------------------
+keyword:
+  provider: gemini  # gemini, anthropic, tfidf
+  
+  # Extraction settings
+  max_keywords: 30
+  min_keyword_length: 3
 
-# ================================================
-# KEYWORD WEIGHTS (Topic-Agnostic Auto-Detection)
-# ================================================
-# NEW: Automatically extracts important terms from voiceover using TF-IDF
-# Works for any topic: disasters, cooking, tech reviews, etc.
-keyword_weights:
-  enabled: true
-  auto_detect: true           # Auto-extract top terms from voiceover
-  auto_detect_count: 20       # How many terms to auto-boost
-  boost_factor: 0.15          # Confidence boost per matching keyword
-  
-  # Optional: manually specify boost/penalty terms for this project
-  # These are in ADDITION to auto-detected terms
-  custom_boost_terms: []      # e.g., ["earthquake", "tsunami", "magnitude"]
-  custom_penalty_terms: []    # e.g., ["interview", "talking head", "podcast"]
-
-# ================================================
-# KEYWORD SUGGESTER (--suggest-keywords)
-# ================================================
-keyword_suggester:
-  # Output counts
-  num_keywords: 30  # Top keywords to include
-  num_entities: 20  # Top named entities
-  num_search_queries: 50  # Total search queries (keyword-based + LLM-generated)
-  
-  # What to extract (all enabled by default)
-  extract_names: true  # Scientists, people, characters mentioned
-  extract_places: true  # Countries, cities, geographic locations
-  extract_numbers: true  # Statistics, dates, measurements (e.g., "2.8 million people")
-  extract_events: true  # Historical events, incidents, disasters
-  extract_technical_terms: true  # Scientific/technical vocabulary
-  extract_talking_points: true  # Main themes/arguments (5-10 bullet points)
-  
-  # Types of footage to search for (used by LLM)
-  query_types:
-    - "scenic/landscape footage"
-    - "documentary footage"
-    - "news footage"
-    - "drone/aerial footage"
-    - "stock footage"
-    - "historical footage"
-    - "scientific visualization"
-  
-  # Custom keywords to always include (add your own)
-  custom_keywords: []
-  
-  # Output options
-  include_yt_dlp_commands: true
-  output_filename: "suggested_footage_keywords.txt"
-
-# ================================================
-# ENTITY-BASED KEYWORD GENERATION (NEW)
-# ================================================
-# For each named entity (person, place, date, event), generate
-# contextually relevant search queries
-entity_keywords:
-  enabled: true
-  
-  # Always extract these entity types
-  extract_types:
-    - "PERSON"      # People names → "President Marcos typhoon response"
-    - "GPE"         # Countries/cities → "Tacloban City storm surge"
-    - "DATE"        # Dates → "December 2013 Philippines disaster"
-    - "EVENT"       # Events → "Typhoon Haiyan destruction footage"
-    - "ORG"         # Organizations → "Red Cross rescue operation"
-    - "LOC"         # Locations → "Pacific Ocean typhoon satellite"
-  
-  # How many search queries per entity
-  queries_per_entity: 2
-  
-  # Context words to append (makes searches more relevant)
-  # These are combined with the main topic
-  context_templates:
-    PERSON:
-      - "{entity} {topic} footage"
-      - "{entity} speech {topic}"
-    GPE:
-      - "{entity} {topic} aerial footage"
-      - "{entity} {topic} aftermath"
-    DATE:
-      - "{date} {topic} news footage"
-      - "{date} {topic} documentary"
-    EVENT:
-      - "{entity} footage"
-      - "{entity} documentary clips"
-    ORG:
-      - "{entity} {topic} operation"
-      - "{entity} response footage"
-    LOC:
-      - "{entity} {topic} drone footage"
-      - "{entity} scenery"
-  
-  # Show in keyword review
-  show_in_review: true
-  category_label: "🏷️ ENTITIES"  # Label in review interface
-
-# ================================================
-# NEGATIVE MATCHING (what to avoid)
-# ================================================
+# -----------------------------------------------------------------------------
+# NEGATIVE MATCHING (What NOT to match)
+# -----------------------------------------------------------------------------
 negative_matching:
   enabled: true
   rules:
     - "Don't match talking head shots to action narration"
     - "Don't match static images to dynamic narration"
     - "Avoid matching unrelated b-roll to specific statements"
-    - "Don't match interview footage to documentary narration"
 
-# ================================================
-# TOPIC SEGMENTATION
-# ================================================
-topics:
+# -----------------------------------------------------------------------------
+# ZERO-DOWNLOAD KEYWORD REMIX
+# -----------------------------------------------------------------------------
+# Enables filtering/remixing of downloaded videos based on keyword relevance
+# before transcription, without additional downloads.
+# Triggered after initial batch downloads complete.
+
+remix:
   enabled: true
-  min_topic_segments: 3  # Minimum segments to form a topic
-  similarity_threshold: 0.7  # Threshold for grouping segments
+  trigger_after_download: true
+  
+  # Scoring thresholds
+  min_relevance_score: 0.1     # Minimum score to include (0.0-1.0)
+  high_relevance_threshold: 0.5  # Score for "high relevance" label
+  
+  # Processing limits
+  max_files_to_process: 500    # Maximum videos to scan
+  max_files_to_include: 100    # Maximum videos to pass to transcription
+  
+  # Matching settings
+  fuzzy_match: true            # Allow partial keyword matches
+  case_sensitive: false
+  
+  # Interactive mode
+  interactive_curation: true   # Ask user to confirm remix
+  show_excluded: true          # Show which files were excluded
+  
+  # Logging
+  log_level: INFO
+  log_file_processing: false   # Log each file (verbose)
+  
+  # Performance
+  parallel_scoring: true
+  max_workers: 4
+  
+  # Entity extraction
+  # Chain-of-thought: Named entities get priority in searches
+  # Reasoning: "Tokyo" more specific than "city"
+  extract_entities: true
+  entity_types:
+    - PERSON
+    - GPE      # Geo-political entity (city, country)
+    - ORG
+    - DATE
+    - EVENT
+  
+  # TF-IDF fallback
+  use_tfidf_weights: true
+  tfidf_max_features: 100
+  
+  # Footage suffixes
+  # Chain-of-thought: Adding "footage" improves YouTube search relevance
+  add_footage_suffixes: true
+  footage_suffixes:
+    - 4K footage
+    - news footage
+    - drone footage
+    - aerial footage
+    - stock footage
+    - documentary footage
+  
+  batch_size: 50
 
-# ================================================
-# SCENE DETECTION (PySceneDetect Integration)
-# ================================================
-# Detects scene boundaries in downloaded videos
-# Runs after transcription, before matching
-# Outputs: OTIO files per video + merged scene index
-scene_detection:
+# -----------------------------------------------------------------------------
+# ZERO-DOWNLOAD KEYWORD REMIX
+# -----------------------------------------------------------------------------
+# Chain-of-thought: When a keyword returns 0 downloads, use LLM to generate alternatives
+# Reasoning: Specific keywords like "Wichita Kansas fentanyl 2024" may not exist on YouTube
+# Decision: Automatically broaden/rephrase failed keywords and retry
+
+zero_download_remix:
   enabled: true
-  
-  # Speed preset: fast, balanced, accurate
-  # - fast: 6x downscale, skip 3 frames (quickest, less accurate)
-  # - balanced: 4x downscale, skip 2 frames (recommended)
-  # - accurate: 2x downscale, no skip (slowest, most precise)
-  preset: "fast"
-  
-  # Force CUDA GPU acceleration
-  force_cuda: true
-  
-  # Manual overrides (leave as null to use preset values)
-  # downscale: 4      # 1=full res, 2=half, 4=quarter, 6=sixth
-  # frame_skip: 2     # 0=every frame, 2=every 3rd frame
-  # threshold: 27.0   # Higher = fewer cuts detected (20-35 typical)
-  # min_scene_length: 15  # Minimum frames per scene
-  
-  # Video filter - only process videos longer than this
-  min_video_duration: 0  # seconds (0 = process all)
-  
-  # DaVinci Resolve timecode fix
-  # If your footage starts at 01:00:00:00, set this to match
-  start_timecode: "01:00:00:00"
-  
-  # Output options
-  output_otio: true         # Generate OTIO file per video (scene cuts marked)
-  output_scene_index: true  # Generate merged scene_index.json
-  
-  # Audio analysis (librosa)
-  # Detects silence (natural cut points) and speech (might conflict with voiceover)
-  audio_analysis: true
+  max_retries: 2           # Maximum remix attempts per batch
+  use_llm: true            # Use LLM for smart remixing (Gemini/Claude)
+  use_fallback: true       # Use rule-based fallback if LLM fails
+  cache_results: true      # Cache remix results to avoid repeated API calls
+  min_keywords_to_trigger: 1  # Minimum failed keywords to trigger remix
+  max_keywords_per_batch: 20  # Maximum keywords to remix at once
 
-# ================================================
-# OUTPUT
-# ================================================
-output:
-  include_alternatives: true  # Include alternative matches as disabled tracks
-  num_alternatives: 2  # Number of alternative matches per segment (V2, V3)
-  
-  # Strategy tracks (V4-V8) - different matching approaches for variety
-  # NEW: Added "source_rotation" for V8
-  include_strategy_tracks: true
-  strategy_tracks:
-    - "visual_first"        # V4: Prioritize scene descriptions over transcript
-    - "different_source"    # V5: Force selection from different video file
-    - "keyword_only"        # V6: Match purely on keyword/entity overlap
-    - "embedding_diversity" # V7: Find maximally different clips from V1-V3
-    - "source_rotation"     # V8: Cycle through all sources systematically (max variety)
-  
-  # Variety enforcement - ensure each track has different content
-  variety:
-    require_different_source: false  # Let each strategy decide (was too strict)
-    exclude_same_clip: true          # Never use exact same clip on multiple tracks
-    min_time_distance: 180.0          # Clips must be 180+ seconds apart within same source (3 minute)
-    min_embedding_distance: 0.2      # Strategy tracks must have distance > 0.2 from V1-V3
-  
-  markers_for_low_confidence: true
-  markers_for_gaps: true
-  markers_for_speed: true  # Mark clips with speed adjustment
-  
-  # Timeline start timecode for EDL markers
-  # Standard broadcast: 01:00:00:00
-  # Set to match your DaVinci timeline start TC for proper marker alignment
-  timeline_start_tc: "01:00:00:00"
+# -----------------------------------------------------------------------------
+# LLM SETTINGS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Centralized LLM settings for keyword extraction and other tasks
+# Reasoning: Multiple components need LLM access with consistent settings
+# Decision: "google" provider uses Gemini, "anthropic" uses Claude
 
-# ================================================
-# LOGGING (Documentary/Audit Trail)
-# ================================================
-# NEW: Comprehensive logging for every run
-# Outputs both human-readable .log and machine-parseable .json files
-logging:
-  enabled: true
-  log_dir: "./logs"  # Dedicated logs folder with timestamped files
-  
-  # What to log
-  log_match_decisions: true   # Every match decision (segment → clip, confidence, reasoning)
-  log_api_calls: true         # API calls count & estimated cost
-  log_performance: true       # Performance timing (transcription, embedding, matching)
-  log_config_snapshot: true   # Config used for this run
-  log_warnings_errors: true   # Warnings and errors
-  
-  # Output formats
-  output_log_file: true       # Human-readable .log file
-  output_json_file: true      # Machine-parseable .json file
-
-# ================================================
-# LLM (Keyword Extraction)
-# ================================================
-# LLM provider for keyword extraction from voiceover
 llm:
-  provider: "anthropic"  # anthropic, google
-  model: "claude-3-haiku-20240307"  # Fast and cheap for keyword extraction
-  # API key loaded from ANTHROPIC_API_KEY or GEMINI_API_KEY env var
-
-# ================================================
-# DOWNLOAD (Integrated yt-dlp Downloader)
-# ================================================
-# Automated footage downloading with 3 duration tiers
-# All settings migrated from ytdlpdownloader.py
-download:
-  enabled: true
+  provider: google  # google, anthropic
+  model: gemini-2.0-flash
   
-  # Duration tiers - all 3 run for maximum variety
-  # Short clips for quick cuts, medium for transitions, long for establishing shots
+  # Anthropic specific (used when provider is "anthropic")
+  anthropic_model: claude-3-haiku-20240307
+  
+  # Generation settings
+  temperature: 0.7
+  max_tokens: 2000
+  
+  # API key loaded from environment:
+  #   - google: GEMINI_API_KEY
+  #   - anthropic: ANTHROPIC_API_KEY
+
+# -----------------------------------------------------------------------------
+# ENHANCED FEATURES
+# -----------------------------------------------------------------------------
+# Chain-of-thought: 90% confidence ensures quality output
+# Reasoning: Better to flag gaps than use poor matches
+# Decision: Enable keyword remix for automatic improvement
+
+enhanced:
+  enabled: true
+  min_confidence: 0.90  # 90% minimum target
+  max_retries: 3
+  
+  # Keyword remix
+  remix_enabled: true
+  remix_keyword_count: 10
+  
+  # Stock footage integration
+  enable_pexels: true
+  enable_pixabay: true
+  stock_per_keyword: 2
+  
+  # User prompts
+  confirm_before_download: true
+  prompt_enhanced_features: true
+
+# -----------------------------------------------------------------------------
+# DOWNLOADING (yt-dlp)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Duration tiers optimize for different content types
+# Reasoning: Short clips for B-roll, long for documentary segments
+# Decision: Prefer H.264 to avoid VP9/AV1 transcoding overhead
+
+downloading:
+  output_dir: downloaded_videos
+  organize_by_keyword: true
+  
+  # Quality settings
+  preferred_quality: "1080"
+  max_quality: "2160"
+  prefer_h264: true
+  
+  # DaVinci Resolve compatible codecs (no transcode needed)
+  davinci_compatible_codecs:
+    - h264
+    - hevc
+    - prores
+    - dnxhd
+    - dnxhr
+  
+  # Codecs requiring transcoding
+  transcode_codecs:
+    - vp9
+    - av1
+    - vp8
+  
+  # Transcoding settings
+  transcode_codec: h264
+  transcode_crf: 18
+  use_hw_accel: true
+  hw_accel_type: auto  # auto, cuda, amf, qsv, videotoolbox
+  
+  # Rate limiting
+  max_downloads_per_keyword: 10
+  download_delay: 1.0
+  
+  # Checkpointing
+  use_checkpoints: true
+  checkpoint_file: download_checkpoint.json
+
+# -----------------------------------------------------------------------------
+# DOWNLOAD (VideoDownloader settings)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: VideoDownloader expects config.download with specific attrs
+# Reasoning: Matches downloader.py VideoDownloader class expectations
+# Decision: Provide all attributes that VideoDownloader uses
+
+download:
+  quality: "1080p"
+  format: mp4
+  
+  # DaVinci Resolve compatibility
+  davinci_mode: true
+  davinci_codec: h264
+  davinci_prores_profile: proxy
+  
+  # Hardware acceleration
+  hw_accel: auto  # auto, cuda, amf, qsv, videotoolbox, none
+  hw_quality: high
+  
+  # Download behavior
+  min_views: 0
+  delete_original: true
+  delay_between_keywords: 1.0
+  
+  # YouTube authentication - REQUIRED!
+  # YouTube blocks yt-dlp without authentication. Export cookies from browser:
+  # 1. Install browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
+  # 2. Go to youtube.com while logged in
+  # 3. Export cookies and save as cookies.txt in install directory
+  # Leave empty to auto-detect cookies.txt in install/project directory
+  cookies_path: ""
+  
+  # Search pool settings - IMPORTANT for finding matching videos!
+  # YouTube search returns limited results, so we search more than we download
+  # to find videos that match our duration filters
+  search_pool_multiplier: 5  # Search 5x what we want to download
+  min_search_pool: 40        # Minimum search pool size
+  
+  # Duration tiers
   tiers:
     short:
-      min: 20      # seconds
-      max: 120     # seconds
+      min: 20
+      max: 120
       per_keyword: 3
     medium:
       min: 120
       max: 600
-      per_keyword: 3
+      per_keyword: 8
     long:
       min: 600
       max: 1500
+      per_keyword: 2
+    longer:
+      min: 1500
+      max: 3000
       per_keyword: 1
-  
-  # Download settings
-  quality: "1080p"        # 1080p, 720p, best
-  format: "mp4"
-  min_views: 0            # Minimum view count (0 = no filter)
-  max_concurrent: 3       # Parallel downloads (avoid rate limiting)
-  delay_between_keywords: 2  # Seconds between keyword batches
-  
-  # Sites to search
-  sites:
-    - "youtube"
-    # - "vimeo"
-    # - "dailymotion"
-  
-  # ================================================
-  # CHANNEL PREFERENCES (NEW)
-  # ================================================
-  # Boost confidence for footage from trusted channels
-  # Blacklist channels to never download from
-  preferred_channels:
-    enabled: true
-    boost_amount: 0.05  # +5% confidence for preferred channels
-    
-    # News channels (reliable footage)
-    news:
-      - "BBC"
-      - "BBC News"
-      - "Reuters"
-      - "AP Archive"
-      - "AFP"
-      - "Al Jazeera English"
-      - "DW News"
-      - "France 24"
-      - "CGTN"
-      - "Sky News"
-      - "ABC News"
-      - "CBS News"
-      - "NBC News"
-      - "CNN"
-      - "euronews"
-    
-    # Documentary channels
-    documentary:
-      - "National Geographic"
-      - "Discovery"
-      - "Smithsonian Channel"
-      - "PBS"
-      - "History"
-      - "NOVA PBS"
-      - "Real Stories"
-      - "Free Documentary"
-    
-    # Stock footage
-    stock:
-      - "Pexels"
-      - "Pixabay"
-      - "Videvo"
-      - "Coverr"
-    
-    # Custom channels (add your favorites here)
-    custom: []
-  
-  # Blacklisted channels (never download from these)
-  blacklisted_channels:
-    enabled: true
-    channels:
-      - "reaction"
-      - "podcast"
-      - "vlog"
-      # Add channels to avoid
-  
-  # Negative keywords in titles (skip videos containing these)
-  negative_title_keywords:
-    - "reaction"
-    - "podcast"
-    - "unboxing"
-    - "review"
-    - "vlog"
-    - "meme"
-  
-  # DaVinci Resolve transcoding
-  # Automatically transcode downloaded videos for smooth DaVinci editing
-  davinci_mode: true
-  davinci_codec: "h264"   # h264, h265, prores, dnxhd
-  davinci_prores_profile: "proxy"  # proxy, lt, standard, hq (for ProRes only)
-  delete_original: true   # Delete original after successful transcode
-  
-  # Hardware acceleration for transcoding
-  hw_accel: "auto"        # auto, nvidia, amd, intel, mac, none
-  hw_quality: "high"      # low, medium, high
-  
-  # Source tracking
-  track_sources: true     # Save metadata about downloaded videos
-  sources_file: "sources.json"  # Output file for source attribution
 
-# ================================================
-# FACE DETECTION (NEW)
-# ================================================
-# Filter footage based on presence of faces
-# Useful for B-roll selection vs human interest content
-face_detection:
+# -----------------------------------------------------------------------------
+# DURATION TIERS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Different video lengths serve different purposes
+# Reasoning: Short clips for quick cuts, long for extended coverage
+
+duration_tiers:
+  short:
+    min: 20
+    max: 120
+    count: 8
+  medium:
+    min: 120
+    max: 600
+    count: 8
+  long:
+    min: 600
+    max: 1500
+    count: 5
+  longer:
+    min: 1500
+    max: 3000
+    count: 5
+
+# -----------------------------------------------------------------------------
+# STOCK FOOTAGE (Pexels, Pixabay)
+# -----------------------------------------------------------------------------
+stock_footage:
   enabled: true
-  prompt_per_run: true  # Ask preference at start of each run
-  
-  # Default preference (used if not prompted or for automation)
-  # Options: "no_faces", "few_faces", "any", "prefer_faces"
-  default_preference: "few_faces"
-  
-  # Detection categories and their confidence adjustments
-  # Positive = boost, Negative = penalty
-  adjustments:
-    no_faces: 0.1       # Base confidence (no adjustment)
-    few_faces: 0.05      # 1-2 people visible (often OK for disaster docs)
-    crowd: -0.05        # Large groups (-5% for B-roll focused projects)
-    close_up: -0.1      # Close-up face shots (-10% penalty)
-  
-  # Per-preference overrides
-  # When user selects "no_faces" mode:
-  no_faces_mode:
-    no_faces: 0.1       # +10% boost
-    few_faces: -0.05    # -5% penalty
-    crowd: -0.15        # -15% penalty
-    close_up: -0.25     # -25% penalty (almost exclude)
-  
-  # When user selects "prefer_faces" mode:
-  prefer_faces_mode:
-    no_faces: -0.1      # -10% penalty
-    few_faces: 0.05     # +5% boost
-    crowd: 0.05         # +5% boost
-    close_up: 0.1       # +10% boost
+  pexels_enabled: true
+  pixabay_enabled: true
+  per_keyword: 3
+  min_duration: 5
+  max_duration: 60
+  min_height: 720
+  prefer_landscape: true
+  <<: *rate_limit
 
-# ================================================
-# CLIP GRADING (NEW)
-# ================================================
-# Rate clips after matching to improve future selections
-clip_grading:
+# -----------------------------------------------------------------------------
+# DEDUPLICATION
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Perceptual hashing detects near-duplicate videos
+# Reasoning: Saves storage, prevents redundant processing
+# Decision: threshold=10 balances precision vs recall
+
+deduplication:
   enabled: true
-  prompt_after_match: true  # Ask to grade after matching completes
-  allow_skip: true          # Allow skipping the grading step
-  
-  # Scale: 1-5 stars
-  # 1 = Bad (wrong topic, bad quality)
-  # 2 = Poor (marginally relevant)
-  # 3 = Average (usable but not great)
-  # 4 = Good (relevant, good quality)
-  # 5 = Excellent (perfect match)
-  
-  # How grades affect confidence in future matches
-  grade_adjustments:
-    1: -0.3   # -30% confidence (almost blacklist)
-    2: -0.15  # -15% confidence
-    3: 0.0    # No change
-    4: 0.1    # +10% confidence
-    5: 0.2    # +20% confidence
-  
-  # Storage
-  grades_file: "clip_grades.json"  # Stored in project folder
-  
-  # Cross-project grades (see cross_project_cache)
-  use_global_grades: true
+  hash_threshold: 10  # Hamming distance (0-64)
+  use_first_frame: true
+  auto_delete: true
+  generate_report: true
 
-# ================================================
-# CROSS-PROJECT CACHE (NEW)
-# ================================================
-# Share transcriptions, embeddings, and grades across projects
-# Saves time when using same footage in multiple projects
-cross_project_cache:
+# -----------------------------------------------------------------------------
+# OUTPUT GENERATION
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Multiple tracks give editors options
+# Reasoning: V1-V3 alternatives, V4-V8 strategies
+# Decision: Enable all by default, let editors disable unused
+
+output:
+  output_dir: output
+  
+  # File formats
+  generate_otio: true
+  generate_edl: true
+  generate_xml: true  # DaVinci Resolve XML
+  generate_report: true
+  
+  # Track structure
+  num_alternatives: 2  # V2-V3
+  include_strategy_tracks: true
+  strategy_tracks:
+    - visual_first
+    - different_source
+    - keyword_only
+    - embedding_diversity
+    - source_rotation
+  
+  # Markers
+  include_speed_markers: true
+  max_recommended_speed: 1.5
+
+# -----------------------------------------------------------------------------
+# MULTI-STYLE OUTPUT
+# -----------------------------------------------------------------------------
+multi_style:
+  enabled: false
+  styles:
+    - default
+    - strict
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Comprehensive logging aids debugging and auditing
+# Reasoning: Dual output (file + JSON) for human and machine consumption
+# Decision: Track API costs for budget management
+
+logging:
   enabled: true
+  log_dir: logs
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
   
-  # Global cache location (shared across all projects)
-  # Set to absolute path like "C:/Tools/voiceover-matcher/.global_cache"
-  global_cache_dir: null  # null = use install_dir/.global_cache
+  # Output targets
+  log_to_file: true
+  log_to_console: true
+  generate_json_log: true
   
-  # What to share across projects
-  share_transcriptions: true   # Video transcripts
-  share_embeddings: true       # Computed embeddings
-  share_clip_grades: true      # User ratings
-  share_scene_detection: true  # Scene boundaries
+  # Log content
+  log_api_calls: true
+  log_match_decisions: true
+  log_performance: true
   
-  # Priority: current project footage always ranks higher
-  current_project_boost: 0.15  # +15% for footage downloaded for this project
+  # Cost tracking
+  track_api_costs: true
   
-  # Relevance filter for cross-project footage
-  require_relevance: true      # Only suggest if contextually relevant
-  min_relevance_score: 0.4     # Minimum relevance to consider (0.0-1.0)
+  # Config debugging
+  # Chain-of-thought: Enable to debug which config values are accessed
+  log_config_access: false
+  warn_on_hardcoded: true
 
-# ================================================
-# PIPELINE (End-to-End Automation)
-# ================================================
-# Settings for the main.py end-to-end pipeline
+# -----------------------------------------------------------------------------
+# CACHE
+# -----------------------------------------------------------------------------
+cache:
+  cache_dir: .cache
+  
+  # Per-type caching
+  cache_transcriptions: true
+  cache_embeddings: true
+  cache_scenes: true
+  cache_llm_responses: true
+  cache_vision: true
+  
+  # Cross-project cache
+  cross_project_cache: false
+  cross_project_cache_dir: ""
+  
+  # Validation
+  validate_cache_on_load: true
+  use_file_hash: true
+
+# -----------------------------------------------------------------------------
+# PIPELINE AUTOMATION
+# -----------------------------------------------------------------------------
 pipeline:
-  # Keyword extraction
-  max_keywords: 50                    # Default max keywords to extract
-  keyword_extraction_method: "llm"    # llm, tfidf
-  
-  # Pre-run confirmation
-  confirm_before_download: true       # Show summary and ask before downloading
-  
-  # Stage control (can also be set via command line)
+  # Stage control (set true to skip)
   skip_download: false
-  skip_transcribe: false
-  skip_match: false
-  download_only: false
-  match_only: false
+  skip_transcription: false
+  skip_scene_detection: false
+  skip_matching: false
   
-  # Resume support
-  enable_checkpoints: true            # Save progress for resume after interruption
+  # Resume/retry
+  resume_enabled: true
+  max_retries: 3
+  
+  # Parallel processing
+  parallel_transcription: true
+  parallel_embedding: true
 
-# ================================================
-# TRACK STRUCTURE (v2.1)
-# ================================================
-# V1: Primary video (best overall match) - enabled
-# V2: Alternative 1 (same strategy, second best) - disabled
-# V3: Alternative 2 (same strategy, third best) - disabled
-# V4: Visual-First (prioritizes scene descriptions) - disabled
-# V5: Different-Source (forces different video file) - disabled
-# V6: Keyword-Only (matches on keywords/entities) - disabled
-# V7: Embedding-Diversity (maximally different from V1) - disabled
-# V8: Source-Rotation (cycles through all sources) - disabled
-# A1-A8: Corresponding audio tracks
-# A9: Voiceover - enabled
+# -----------------------------------------------------------------------------
+# API KEYS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: API keys should be in environment variables
+# Reasoning: Security - don't commit secrets to version control
+# Decision: Document required keys here, load from env vars
+#
+# Required environment variables:
+#   GEMINI_API_KEY      - Google Gemini (LLM, embeddings, vision)
+#   ANTHROPIC_API_KEY   - Anthropic Claude (secondary LLM)
+#   VOYAGE_API_KEY      - Voyage AI (alternative embeddings)
+#   PEXELS_API_KEY      - Pexels stock footage
+#   PIXABAY_API_KEY     - Pixabay stock footage
+#   UNSPLASH_API_KEY    - Unsplash images
+#
+# api_keys section is auto-populated from environment variables at runtime
