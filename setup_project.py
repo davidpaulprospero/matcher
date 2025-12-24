@@ -7,6 +7,7 @@ Creates a new project folder with interactive folder selection.
 Usage:
     python setup_project.py                    # Interactive mode
     python setup_project.py "E:\Full\Path"     # Direct path mode
+    python setup_project.py --regenerate "E:\Project\Path"  # Fix existing run.bat
 """
 
 import os
@@ -99,7 +100,7 @@ def select_folder(base_path: Path, level_name: str = "folder") -> Path:
                     if new_name:
                         new_path = base_path / new_name
                         new_path.mkdir(parents=True, exist_ok=True)
-                        print(f"  ✓ Created: {new_name}")
+                        print(f"  Created: {new_name}")
                         return new_path
                 else:
                     print("  Invalid choice, try again.")
@@ -117,7 +118,7 @@ def select_folder(base_path: Path, level_name: str = "folder") -> Path:
         if new_name:
             new_path = base_path / new_name
             new_path.mkdir(parents=True, exist_ok=True)
-            print(f"  ✓ Created: {new_name}")
+            print(f"  Created: {new_name}")
             return new_path
         return base_path
 
@@ -132,13 +133,27 @@ def sanitize_name(name: str) -> str:
 
 
 def create_run_bat(project_dir: Path, install_dir: Path) -> Path:
-    """Create Windows batch file to run the matcher"""
+    """
+    Create Windows batch file to run the matcher.
+    
+    FIXED: Removed erroneous 'python main.py %*' that ran before cd.
+    The script now correctly:
+    1. Sets environment variables
+    2. Captures the project directory
+    3. Changes to install directory FIRST
+    4. THEN runs main.py with --project argument
+    """
     bat_content = f'''@echo off
+REM ============================================================
 REM Voiceover-Matcher Runner
 REM Project: {project_dir.name}
 REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+REM ============================================================
 
-REM Central installation location
+REM Set FFmpeg path (adjust if your ffmpeg is elsewhere)
+set IMAGEIO_FFMPEG_EXE=C:\\ffmpeg\\bin\\ffmpeg.exe
+
+REM Central installation location (where main.py lives)
 set INSTALL_DIR={install_dir}
 
 REM Project directory (this folder)
@@ -146,12 +161,24 @@ set PROJECT_DIR=%~dp0
 REM Remove trailing backslash
 if "%PROJECT_DIR:~-1%"=="\\" set PROJECT_DIR=%PROJECT_DIR:~0,-1%
 
-REM Change to install directory and run with project path
+echo.
+echo   ============================================================
+echo   VOICEOVER-MATCHER
+echo   ============================================================
+echo   Project: %PROJECT_DIR%
+echo   Install: %INSTALL_DIR%
+echo.
+
+REM Change to install directory FIRST, then run main.py
 cd /d "%INSTALL_DIR%"
 python main.py --project "%PROJECT_DIR%" %*
 
 REM Keep window open if there was an error
-if %ERRORLEVEL% NEQ 0 pause
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo   [ERROR] Pipeline failed with error code %ERRORLEVEL%
+    pause
+)
 '''
     
     bat_path = project_dir / "run.bat"
@@ -162,17 +189,27 @@ if %ERRORLEVEL% NEQ 0 pause
 def create_run_sh(project_dir: Path, install_dir: Path) -> Path:
     """Create Unix shell script to run the matcher"""
     sh_content = f'''#!/bin/bash
+# ============================================================
 # Voiceover-Matcher Runner
 # Project: {project_dir.name}
 # Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+# ============================================================
 
-# Central installation location
+# Central installation location (where main.py lives)
 INSTALL_DIR="{install_dir}"
 
 # Project directory (this folder)
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Change to install directory and run with project path
+echo ""
+echo "  ============================================================"
+echo "  VOICEOVER-MATCHER"
+echo "  ============================================================"
+echo "  Project: $PROJECT_DIR"
+echo "  Install: $INSTALL_DIR"
+echo ""
+
+# Change to install directory FIRST, then run main.py
 cd "$INSTALL_DIR"
 python main.py --project "$PROJECT_DIR" "$@"
 '''
@@ -269,9 +306,9 @@ def setup_project(project_path: str, install_dir: Path = None) -> dict:
     }
     
     # Create folder structure
-    print(f"\n{'─' * 60}")
-    print(f"  📁 Creating Project: {project_dir.name}")
-    print(f"{'─' * 60}")
+    print(f"\n{'-' * 60}")
+    print(f"  Creating Project: {project_dir.name}")
+    print(f"{'-' * 60}")
     print(f"  Location: {project_dir}")
     print(f"  Install:  {install_dir}")
     print()
@@ -279,38 +316,38 @@ def setup_project(project_path: str, install_dir: Path = None) -> dict:
     folders = create_project_structure(project_dir)
     for name, path in folders.items():
         if not name.startswith('.'):
-            print(f"  ✓ {name}/")
+            print(f"  + {name}/")
         result['created'].append(str(path))
     
     # Create run scripts
     if sys.platform == 'win32':
         bat_path = create_run_bat(project_dir, install_dir)
-        print(f"  ✓ run.bat")
+        print(f"  + run.bat")
         result['run_script'] = str(bat_path)
     else:
         sh_path = create_run_sh(project_dir, install_dir)
-        print(f"  ✓ run.sh")
+        print(f"  + run.sh")
         result['run_script'] = str(sh_path)
     
     # Create project config (if doesn't exist)
     config_path = project_dir / "project_config.yaml"
     if not config_path.exists():
         create_project_config(project_dir)
-        print(f"  ✓ project_config.yaml")
+        print(f"  + project_config.yaml")
         result['config'] = str(config_path)
     else:
-        print(f"  • project_config.yaml (exists)")
+        print(f"  * project_config.yaml (exists)")
         result['config'] = str(config_path)
     
-    print(f"\n{'─' * 60}")
-    print(f"  ✅ Project Ready!")
-    print(f"{'─' * 60}")
+    print(f"\n{'-' * 60}")
+    print(f"  Project Ready!")
+    print(f"{'-' * 60}")
     print(f"\n  Next steps:")
     print(f"  1. Put your voiceover in: {project_dir.name}\\voiceover\\")
     print(f"  2. Double-click 'run.bat' to start")
     print(f"\n  Or run from command line:")
     print(f"  > cd \"{project_dir}\"")
-    print(f"  > run.bat -v voiceover\\script.srt")
+    print(f"  > run.bat --voiceover voiceover\\script.srt")
     
     return result
 
@@ -353,32 +390,32 @@ def interactive_setup():
         
         if create in ('', 'y', 'yes'):
             base_path.mkdir(parents=True, exist_ok=True)
-            print(f"  ✓ Created: {base_path}")
+            print(f"  Created: {base_path}")
         else:
             print("  Cancelled.")
             return
     
     # Step 2: Select client folder (level 1)
-    print("\n" + "─" * 60)
+    print("\n" + "-" * 60)
     print("  STEP 1: Select Client/Category")
-    print("─" * 60)
+    print("-" * 60)
     
     client_path = select_folder(base_path, "client")
     
     # Step 3: Select series/show folder (level 2) - only if we went into a subfolder
     if client_path != base_path:
-        print("\n" + "─" * 60)
+        print("\n" + "-" * 60)
         print("  STEP 2: Select Series/Show")
-        print("─" * 60)
+        print("-" * 60)
         
         series_path = select_folder(client_path, "series")
     else:
         series_path = client_path
     
     # Step 4: Project name
-    print("\n" + "─" * 60)
+    print("\n" + "-" * 60)
     print("  STEP 3: Name Your Project")
-    print("─" * 60)
+    print("-" * 60)
     
     today = datetime.now().strftime("%Y-%m-%d")
     
@@ -403,7 +440,7 @@ def interactive_setup():
     
     # Check if exists
     if project_path.exists():
-        print(f"\n  ⚠ Project already exists: {project_path}")
+        print(f"\n  Warning: Project already exists: {project_path}")
         try:
             overwrite = input("  Continue anyway? [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -435,6 +472,45 @@ def interactive_setup():
     setup_project(str(project_path))
 
 
+def regenerate_run_script(project_path: str, install_dir: str = None):
+    """
+    Regenerate the run.bat/run.sh for an existing project.
+    Useful if the script was corrupted or install location changed.
+    
+    Usage:
+        python setup_project.py --regenerate "E:\\Projects\\MyDoc"
+    """
+    project_dir = Path(project_path).resolve()
+    
+    if install_dir:
+        install_path = Path(install_dir).resolve()
+    else:
+        install_path = get_install_dir()
+    
+    if not project_dir.exists():
+        print(f"  Error: Project directory not found: {project_dir}")
+        return False
+    
+    print(f"\n  Regenerating run script for: {project_dir.name}")
+    print(f"  Install directory: {install_path}")
+    
+    if sys.platform == 'win32':
+        bat_path = create_run_bat(project_dir, install_path)
+        print(f"  + Created: {bat_path}")
+    else:
+        sh_path = create_run_sh(project_dir, install_path)
+        print(f"  + Created: {sh_path}")
+    
+    print(f"\n  Done! You can now run the project with:")
+    print(f"  > cd \"{project_dir}\"")
+    if sys.platform == 'win32':
+        print(f"  > run.bat --voiceover voiceover\\script.srt")
+    else:
+        print(f"  > ./run.sh --voiceover voiceover/script.srt")
+    
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Set up a new Voiceover-Matcher project folder',
@@ -443,6 +519,7 @@ def main():
 Examples:
   python setup_project.py                           # Interactive mode
   python setup_project.py "E:\\Projects\\MyDoc"     # Direct path
+  python setup_project.py --regenerate "E:\\Projects\\MyDoc"  # Fix run.bat
         '''
     )
     
@@ -457,9 +534,18 @@ Examples:
         help='Override central install directory'
     )
     
+    parser.add_argument(
+        '--regenerate',
+        metavar='PROJECT_PATH',
+        help='Regenerate run.bat/run.sh for an existing project'
+    )
+    
     args = parser.parse_args()
     
-    if args.project_path:
+    if args.regenerate:
+        # Regenerate run script for existing project
+        regenerate_run_script(args.regenerate, args.install_dir)
+    elif args.project_path:
         # Direct path mode
         install_dir = Path(args.install_dir) if args.install_dir else None
         setup_project(args.project_path, install_dir)

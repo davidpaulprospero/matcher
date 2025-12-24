@@ -12,7 +12,7 @@ import logging
 import json
 import re
 import hashlib
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 from abc import ABC, abstractmethod
 
@@ -21,8 +21,8 @@ from .utils import (
     SRTSegment, SceneInfo, Match, AlternativeMatch, StrategyMatch, MatchResult,
     CacheManager, ReuseTracker, ProgressBar
 )
-from .embeddings_optimized import find_top_k_similar, cosine_similarity
-from .keywords import find_keyword_matches
+from .embeddings import find_top_k_similar, cosine_similarity
+from .keyword_extractor import find_keyword_matches
 
 logger = logging.getLogger(__name__)
 
@@ -735,9 +735,12 @@ class TieredMatcher:
         scene = self._get_scene_for_segment(best_seg, scenes)
         
         # Check for keyword/visual matches
+        # Use getattr for keywords since not all segment types have it
+        vo_keywords = getattr(vo_segment, 'keywords', []) or []
+        seg_keywords = getattr(best_seg, 'keywords', []) or []
         keyword_boost, is_kw_match, is_vis_match = find_keyword_matches(
-            vo_segment.keywords,
-            best_seg.keywords,
+            vo_keywords,
+            seg_keywords,
             scene.visual_keywords if scene else None
         )
         
@@ -991,7 +994,9 @@ class StrategyMatcher:
                         return True, f"Within time window ({time_dist:.1f}s)"
         
         # Rule 4: Minimum embedding distance
-        if vc.min_embedding_distance > 0 and candidate_embedding and existing_embeddings:
+        def _has_emb(e):
+            return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
+        if vc.min_embedding_distance > 0 and _has_emb(candidate_embedding) and _has_emb(existing_embeddings):
             for existing_emb in existing_embeddings:
                 similarity = cosine_similarity(candidate_embedding, existing_emb)
                 distance = 1.0 - similarity
@@ -1014,7 +1019,8 @@ class StrategyMatcher:
         Falls back to filename/path matching if no scene data.
         """
         vo_text = vo_segment.text.lower()
-        vo_keywords = set(vo_segment.keywords) if vo_segment.keywords else set()
+        vo_kw = getattr(vo_segment, 'keywords', None)
+        vo_keywords = set(vo_kw) if vo_kw else set()
         
         # Extract key terms from voiceover for visual matching
         visual_terms = {'earthquake', 'tsunami', 'flood', 'storm', 'fire', 'volcano', 'disaster',
@@ -1144,8 +1150,10 @@ class StrategyMatcher:
         Match purely based on keyword and entity overlap, ignore embeddings.
         Falls back to text word overlap if keywords aren't populated.
         """
-        vo_keywords = set(k.lower() for k in vo_segment.keywords) if vo_segment.keywords else set()
-        vo_entities = set(e.lower() for e in vo_segment.entities) if vo_segment.entities else set()
+        vo_kw = getattr(vo_segment, 'keywords', None) or []
+        vo_ent = getattr(vo_segment, 'entities', None) or []
+        vo_keywords = set(k.lower() for k in vo_kw)
+        vo_entities = set(e.lower() for e in vo_ent)
         vo_all = vo_keywords | vo_entities
         
         # Fallback: Extract important words from voiceover text if no keywords
@@ -1169,8 +1177,10 @@ class StrategyMatcher:
             if is_excluded:
                 continue
             
-            seg_keywords = set(k.lower() for k in seg.keywords) if seg.keywords else set()
-            seg_entities = set(e.lower() for e in seg.entities) if seg.entities else set()
+            seg_kw = getattr(seg, 'keywords', None) or []
+            seg_ent = getattr(seg, 'entities', None) or []
+            seg_keywords = set(k.lower() for k in seg_kw)
+            seg_entities = set(e.lower() for e in seg_ent)
             seg_all = seg_keywords | seg_entities
             
             # Also check text for keyword presence
@@ -1214,7 +1224,9 @@ class StrategyMatcher:
         Strategy D: Embedding Diversity
         Find clips that are semantically relevant but maximally DIFFERENT from V1-V3.
         """
-        if not existing_embeddings or not candidate_embeddings:
+        def _has_emb(e):
+            return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
+        if not _has_emb(existing_embeddings) or not candidate_embeddings:
             return None
         
         # Get used sources to enforce different source
@@ -1228,7 +1240,7 @@ class StrategyMatcher:
             cand_id = self.get_clip_id(seg)
             cand_emb = candidate_embeddings.get(cand_id)
             
-            if not cand_emb:
+            if not _has_emb(cand_emb):
                 continue
             
             # Check basic exclusion (same clip)
@@ -1249,7 +1261,7 @@ class StrategyMatcher:
             avg_diversity = sum(distances) / len(distances) if distances else 0
             
             # Relevance to voiceover (must still be relevant)
-            vo_relevance = cosine_similarity(cand_emb, vo_embedding) if vo_embedding else text_sim
+            vo_relevance = cosine_similarity(cand_emb, vo_embedding) if _has_emb(vo_embedding) else text_sim
             
             # Combined score: want high relevance AND high diversity
             # Diversity weighted more heavily
@@ -1403,7 +1415,14 @@ class StrategyMatcher:
                 candidate_embeddings.get(self.get_clip_id(sm.video_segment), [])
                 for sm in strategy_matches
             ]
-            all_existing_embs = [e for e in all_existing_embs if e]  # Filter empty
+            # Filter empty - handle both lists and numpy arrays
+            def _has_content(e):
+                if e is None:
+                    return False
+                if hasattr(e, '__len__'):
+                    return len(e) > 0
+                return bool(e)
+            all_existing_embs = [e for e in all_existing_embs if _has_content(e)]
             
             match = None
             
@@ -1447,7 +1466,7 @@ def match_all_segments(
     scenes: Optional[Dict[str, List[SceneInfo]]],
     config: Config,
     cache: CacheManager,
-    embedding_index: Optional["EmbeddingIndex"] = None
+    embedding_index: Optional[Any] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -1458,7 +1477,7 @@ def match_all_segments(
     - Stage 1: Retrieve more candidates from embeddings (embedding_candidates)
     - Stage 2: Send only top candidates to LLM for reranking (llm_rerank_candidates)
     """
-    from .embeddings import EmbeddingIndex
+    # EmbeddingIndex import removed - not needed
     
     matcher = TieredMatcher(config, cache)
     strategy_matcher = StrategyMatcher(config, scenes)
@@ -1493,8 +1512,8 @@ def match_all_segments(
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Stage 1: Get more candidates from embedding search for variety
         num_embedding_candidates = max(mc.embedding_candidates, 20)
-        top_k = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
-        all_candidates = [(video_segments[idx], sim) for idx, sim in top_k]
+        distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
+        all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
         
         # Stage 2: Send only top candidates to LLM for reranking
         llm_candidates = all_candidates[:mc.llm_rerank_candidates]

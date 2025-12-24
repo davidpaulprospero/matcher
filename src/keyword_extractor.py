@@ -7,7 +7,7 @@ using Claude/Gemini for intelligent expansion and refinement.
 
 import re
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,44 @@ class LLMKeywordExtractor:
         "stock footage",
         "documentary footage"
     ]
+    
+    SEGMENT_KEYWORD_PROMPT = """Extract ONE optimal YouTube search keyword for finding B-roll footage for this voiceover segment.
+
+SEGMENT TEXT:
+"{segment_text}"
+
+DOCUMENTARY TOPIC: {topic}
+
+RULES:
+1. Return ONE keyword phrase (2-5 words) optimized for YouTube search
+2. Focus on VISUAL elements that can be filmed
+3. Include location/event names if mentioned
+4. Add context words like "footage", "video", "news" if helpful
+5. If segment is very short/generic, use the topic context
+
+Return ONLY the keyword phrase, nothing else.
+
+KEYWORD:"""
+
+    BATCH_SEGMENT_KEYWORDS_PROMPT = """Extract ONE search keyword for EACH voiceover segment to find matching B-roll footage.
+
+DOCUMENTARY TOPIC: {topic}
+
+SEGMENTS:
+{segments_text}
+
+RULES:
+1. Return ONE keyword per segment (2-5 words each)
+2. Focus on VISUAL elements - things a camera can capture
+3. Include specific names, places, events if mentioned
+4. Generic segments should relate to the overall topic
+5. Keywords should work for YouTube/stock footage search
+
+OUTPUT FORMAT:
+Return a JSON array with one keyword string per segment, in order.
+Example: ["flooding aftermath drone", "rescue workers boat", "damaged buildings aerial"]
+
+KEYWORDS:"""
     
     KEYWORD_EXTRACTION_PROMPT = """You are an expert stock footage researcher for disaster documentaries.
 
@@ -490,7 +528,7 @@ REFINED KEYWORDS:"""
         max_keywords: int
     ) -> KeywordResult:
         """Fallback: extract keywords using TF-IDF"""
-        from .keywords import KeywordWeightExtractor
+        from keyword_extractor import KeywordWeightExtractor
         
         logger.info("Falling back to TF-IDF keyword extraction")
         
@@ -529,6 +567,136 @@ REFINED KEYWORDS:"""
             segments_analyzed=len(segments),
             extraction_method="tfidf"
         )
+    
+    def extract_keyword_per_segment(
+        self,
+        segments: List[Dict],
+        topic: str = ""
+    ) -> List[str]:
+        """
+        Extract ONE keyword per segment for precise B-roll matching.
+        
+        Args:
+            segments: List of segment dicts with 'text' key
+            topic: Documentary topic for context
+        
+        Returns:
+            List of keywords (one per segment, in order)
+        """
+        import json
+        
+        if not self.llm_client:
+            logger.warning("No LLM client - using simple keyword extraction")
+            return self._simple_segment_keywords(segments, topic)
+        
+        # Prepare segments text
+        segment_texts = []
+        for i, seg in enumerate(segments):
+            text = seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+            text = text.strip()
+            if text:
+                segment_texts.append(f"{i+1}. \"{text}\"")
+            else:
+                segment_texts.append(f"{i+1}. [empty]")
+        
+        # Process in batches to avoid token limits
+        batch_size = 50
+        all_keywords = []
+        
+        for batch_start in range(0, len(segment_texts), batch_size):
+            batch_end = min(batch_start + batch_size, len(segment_texts))
+            batch = segment_texts[batch_start:batch_end]
+            
+            prompt = self.BATCH_SEGMENT_KEYWORDS_PROMPT.format(
+                topic=topic or "documentary",
+                segments_text="\n".join(batch)
+            )
+            
+            try:
+                response = self._call_llm(prompt)
+                response = response.strip()
+                
+                # Parse JSON array
+                start = response.find('[')
+                end = response.rfind(']') + 1
+                
+                if start >= 0 and end > start:
+                    json_str = response[start:end]
+                    keywords = json.loads(json_str)
+                    
+                    # Ensure we have one keyword per segment in batch
+                    while len(keywords) < (batch_end - batch_start):
+                        keywords.append(topic or "documentary footage")
+                    
+                    all_keywords.extend(keywords[:batch_end - batch_start])
+                else:
+                    # Fallback for this batch
+                    logger.warning(f"Could not parse batch {batch_start}-{batch_end}, using fallback")
+                    for i in range(batch_start, batch_end):
+                        seg_text = segments[i].get('text', '') if isinstance(segments[i], dict) else getattr(segments[i], 'text', '')
+                        all_keywords.append(self._extract_simple_keyword(seg_text, topic))
+                        
+            except Exception as e:
+                logger.warning(f"Batch keyword extraction failed: {e}")
+                # Fallback for this batch
+                for i in range(batch_start, batch_end):
+                    seg_text = segments[i].get('text', '') if isinstance(segments[i], dict) else getattr(segments[i], 'text', '')
+                    all_keywords.append(self._extract_simple_keyword(seg_text, topic))
+        
+        return all_keywords
+    
+    def _simple_segment_keywords(self, segments: List[Dict], topic: str) -> List[str]:
+        """Simple fallback: extract keywords without LLM"""
+        keywords = []
+        for seg in segments:
+            text = seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+            keywords.append(self._extract_simple_keyword(text, topic))
+        return keywords
+    
+    def _extract_simple_keyword(self, text: str, topic: str) -> str:
+        """Extract a simple keyword from segment text"""
+        if not text or len(text.strip()) < 10:
+            return topic or "documentary footage"
+        
+        # Remove common stopwords and get key terms
+        stopwords = {
+            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+            'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
+            'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as',
+            'into', 'through', 'during', 'before', 'after', 'above', 'below',
+            'between', 'under', 'again', 'further', 'then', 'once', 'here',
+            'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more',
+            'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+            'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or',
+            'because', 'until', 'while', 'although', 'though', 'this', 'that',
+            'these', 'those', 'what', 'which', 'who', 'whom', 'whose', 'it', 'its',
+            'they', 'them', 'their', 'we', 'us', 'our', 'you', 'your', 'he', 'him',
+            'his', 'she', 'her', 'i', 'me', 'my'
+        }
+        
+        # Clean and tokenize
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        
+        # Filter stopwords and get unique meaningful words
+        meaningful = []
+        seen = set()
+        for word in words:
+            if word not in stopwords and word not in seen:
+                meaningful.append(word)
+                seen.add(word)
+        
+        # Take top 3-4 words
+        if meaningful:
+            keyword = ' '.join(meaningful[:4])
+            # Capitalize proper nouns (words that were capitalized in original)
+            original_words = text.split()
+            for orig_word in original_words:
+                if orig_word[0].isupper() and orig_word.lower() in keyword.lower():
+                    keyword = keyword.replace(orig_word.lower(), orig_word)
+            return keyword
+        
+        return topic or "documentary footage"
     
     def add_footage_suffixes(
         self,
@@ -587,3 +755,73 @@ def extract_keywords_from_srt(
     # Extract keywords
     extractor = LLMKeywordExtractor(config)
     return extractor.extract_keywords(segments, max_keywords=max_keywords)
+
+
+def extract_keyword_per_segment_from_srt(
+    srt_path: str,
+    config,
+    topic: str = ""
+) -> List[str]:
+    """
+    Extract ONE keyword per SRT segment for precise B-roll matching.
+    
+    Args:
+        srt_path: Path to SRT file
+        config: Pipeline config
+        topic: Documentary topic for context (auto-detected if not provided)
+    
+    Returns:
+        List of keywords (one per segment, in order)
+    """
+    import srt
+    
+    # Parse SRT
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        subtitles = list(srt.parse(f.read()))
+    
+    # Convert to segments format
+    segments = [{'text': sub.content} for sub in subtitles]
+    
+    # Auto-detect topic from first few segments if not provided
+    if not topic:
+        first_text = ' '.join([s['text'] for s in segments[:5]])
+        # Simple topic detection: use most common nouns
+        words = re.findall(r'\b[A-Z][a-z]+\b', first_text)
+        if words:
+            from collections import Counter
+            common = Counter(words).most_common(2)
+            topic = ' '.join([w for w, _ in common])
+    
+    # Extract per-segment keywords
+    extractor = LLMKeywordExtractor(config)
+    return extractor.extract_keyword_per_segment(segments, topic=topic)
+
+def find_keyword_matches(
+    voiceover_keywords: List[str],
+    video_keywords: List[str],
+    visual_keywords: List[str] = None
+) -> Tuple[float, bool, bool]:
+    """
+    Find keyword overlap between voiceover and video.
+    Returns (boost_score, is_keyword_match, is_visual_match)
+    """
+    vo_set = set(k.lower() for k in voiceover_keywords)
+    vid_set = set(k.lower() for k in video_keywords)
+    vis_set = set(k.lower() for k in (visual_keywords or []))
+    
+    # Text keyword match
+    text_overlap = len(vo_set & vid_set)
+    is_keyword_match = text_overlap > 0
+    
+    # Visual keyword match
+    visual_overlap = len(vo_set & vis_set)
+    is_visual_match = visual_overlap > 0
+    
+    # Calculate boost score
+    boost = 0.0
+    if is_keyword_match:
+        boost += 0.05 * text_overlap  # 5% boost per matching keyword
+    if is_visual_match:
+        boost += 0.03 * visual_overlap  # 3% boost per visual match
+    
+    return min(boost, 0.2), is_keyword_match, is_visual_match  # Cap at 20% boost
