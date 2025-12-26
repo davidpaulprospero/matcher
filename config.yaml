@@ -502,6 +502,24 @@ downloading:
 # Decision: Provide all attributes that VideoDownloader uses
 
 download:
+  # ==========================================================================
+  # SHORT PATH SETTINGS - Critical for NLE compatibility
+  # ==========================================================================
+  # Windows has 260 char path limit. Long paths cause DaVinci Resolve import issues.
+  # These settings keep total path under 80 chars:
+  #   E:/v/proj_name/keyword_s/title______xYz12345678.mp4
+  #   ^--80 chars max------------------------------------------^
+  #
+  # Set root_dir to a short path near drive root for best results
+  # Example paths with these settings:
+  #   root_dir: "E:/v"  →  E:/v/myproject/winter_s/Snow_driv_abc123.mp4 (52 chars)
+  #   root_dir: ""      →  D:/Projects/myproject/videos/winter_s/Snow_driv_abc123.mp4 (65 chars)
+  
+  root_dir: ""  # Short root path. Examples: "E:/v", "D:/vid", "C:/v"
+  folder_name: "videos"  # Subfolder name when root_dir is empty
+  max_keyword_len: 6     # Keyword folder: "winter" not "winter_road_conditions"
+  max_filename_len: 8    # Filename: "Snow_dri_abc123.mp4" (8 + 11 + 4 = 23 chars)
+  
   quality: "1080p"
   format: mp4
   

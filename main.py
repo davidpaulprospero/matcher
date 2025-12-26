@@ -125,10 +125,26 @@ def make_paths_project_relative(config: Config, project_dir: Path) -> Config:
     """Update config paths to be relative to project directory"""
     project_dir = project_dir.resolve()
     config.project_dir = str(project_dir)
+    project_name = project_dir.name  # e.g., "zerokeyword__2025-12-24"
     
-    # Update downloading output dir
-    if config.downloading.output_dir and not Path(config.downloading.output_dir).is_absolute():
-        config.downloaded_videos_dir = str(project_dir / config.downloading.output_dir)
+    # Shorten project name for folder (first 15 chars)
+    short_project = project_name[:15].rstrip('_-')
+    
+    # Update downloading output dir - use new short path settings
+    download_cfg = config.download if hasattr(config, 'download') else None
+    
+    if download_cfg and download_cfg.root_dir:
+        # Use explicit root_dir (e.g., "E:/vids")
+        folder_name = getattr(download_cfg, 'folder_name', 'videos')
+        config.downloaded_videos_dir = str(Path(download_cfg.root_dir) / short_project)
+    elif config.downloading.output_dir and not Path(config.downloading.output_dir).is_absolute():
+        # Use project-relative path with short folder name
+        folder_name = 'videos'
+        if download_cfg:
+            folder_name = getattr(download_cfg, 'folder_name', 'videos')
+        config.downloaded_videos_dir = str(project_dir / folder_name)
+    else:
+        config.downloaded_videos_dir = str(project_dir / 'videos')
     
     # Update output dir
     if config.output.output_dir and not Path(config.output.output_dir).is_absolute():

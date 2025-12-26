@@ -659,9 +659,15 @@ Only output the JSON array, no other text."""
         min_pool = getattr(self.download_config, 'min_search_pool', 30)
         search_pool = max(max_downloads * multiplier, min_pool)
         
-        # Create keyword subdirectory
-        safe_keyword = "".join(c if c.isalnum() or c in ' -_' else '_' for c in keyword)[:50]
-        keyword_dir = output_dir / f"{safe_keyword}_{tier}"
+        # Get path length settings from config
+        max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
+        max_fn_len = getattr(self.download_config, 'max_filename_len', 10)
+        
+        # Create keyword subdirectory (keep folder names short for NLE compatibility)
+        safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)
+        safe_keyword = safe_keyword.replace(' ', '_')[:max_kw_len].rstrip('_')
+        tier_short = tier[0]  # s/m/l instead of short/medium/long
+        keyword_dir = output_dir / f"{safe_keyword}_{tier_short}"
         keyword_dir.mkdir(parents=True, exist_ok=True)
         
         # Get existing files
@@ -719,8 +725,8 @@ Only output the JSON array, no other text."""
                 '--write-info-json',
                 '--restrict-filenames',
                 '--no-overwrites',
-                # Truncate title to 30 chars to avoid path length issues
-                '-o', str(keyword_dir / '%(title).30s_%(id)s.%(ext)s'),
+                # Truncate title for short paths (title + _ + 11 ID + .mp4)
+                '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
                 '--progress',
                 '--newline',
                 '--quiet',  # Suppress progress output
@@ -745,6 +751,9 @@ Only output the JSON array, no other text."""
         """Download specific videos by their YouTube IDs"""
         existing_before = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
         
+        # Get filename length from config
+        max_fn_len = getattr(self.download_config, 'max_filename_len', 10)
+        
         # Build URLs from IDs
         urls = [f"https://www.youtube.com/watch?v={vid}" for vid in video_ids]
         
@@ -756,8 +765,8 @@ Only output the JSON array, no other text."""
             '--write-info-json',
             '--restrict-filenames',
             '--no-overwrites',
-            # Truncate title to 30 chars to avoid path length issues
-            '-o', str(keyword_dir / '%(title).30s_%(id)s.%(ext)s'),
+            # Truncate title for short paths
+            '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
             '--quiet',  # Suppress progress spam
             '--no-warnings',
             '--progress',
