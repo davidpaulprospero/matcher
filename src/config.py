@@ -527,6 +527,13 @@ class DownloadConfig:
     Reasoning: downloader.py accesses config.download with specific attributes
     Decision: Provide all attributes that downloader.py uses
     """
+    # Short path settings - keeps paths under Windows 260 char limit
+    # and improves NLE import performance
+    root_dir: str = ""  # Empty = use project_dir/videos. Set to e.g. "E:/v"
+    folder_name: str = "videos"  # Downloads folder name
+    max_keyword_len: int = 6  # Max chars for keyword folder names
+    max_filename_len: int = 8  # Max chars for video title in filename
+    
     # Quality settings
     quality: str = "1080p"
     format: str = "mp4"
