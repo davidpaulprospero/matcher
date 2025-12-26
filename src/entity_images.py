@@ -781,8 +781,374 @@ def download_images(
 
 
 # =============================================================================
-# ENTITY IMAGE SEARCH
+# STOCK VIDEO DOWNLOAD (Pexels/Pixabay)
 # =============================================================================
+
+# Pexels Video API
+PEXELS_VIDEOS_API = "https://api.pexels.com/videos/search"
+
+# Pixabay Video API  
+PIXABAY_VIDEOS_API = "https://pixabay.com/api/videos/"
+
+
+@dataclass
+class VideoResult:
+    """Result from video search"""
+    id: str
+    source: str  # pexels, pixabay
+    url: str  # Web page URL
+    download_url: str
+    width: int
+    height: int
+    duration: float  # seconds
+    quality: str  # hd, sd, etc
+    file_type: str  # mp4, etc
+    file_path: str = ""  # Path after download
+
+
+@dataclass
+class EntityVideoResult:
+    """Result of video search for an entity"""
+    entity_name: str
+    entity_type: str
+    context: str
+    query: str
+    videos: List[str] = field(default_factory=list)  # Downloaded file paths
+    segment_indices: List[int] = field(default_factory=list)
+
+
+class StockVideoDownloader:
+    """
+    Download stock videos from Pexels and Pixabay.
+    
+    Features:
+    - Multi-source search (Pexels, Pixabay)
+    - Quality preference (HD preferred)
+    - Duration filtering
+    """
+    
+    def __init__(
+        self,
+        output_dir: str = "./downloaded_videos",
+        pexels_key: str = None,
+        pixabay_key: str = None,
+        min_duration: float = 3.0,  # Minimum video duration in seconds
+        max_duration: float = 30.0,  # Maximum video duration
+        prefer_hd: bool = True
+    ):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # API keys
+        self.pexels_key = pexels_key or os.getenv("PEXELS_API_KEY")
+        self.pixabay_key = pixabay_key or os.getenv("PIXABAY_API_KEY")
+        
+        self.min_duration = min_duration
+        self.max_duration = max_duration
+        self.prefer_hd = prefer_hd
+        
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Voiceover-Matcher/2.3 StockVideoDownloader"
+        })
+        
+        # Rate limiting
+        self._last_request_time = 0
+        self._min_interval = 0.5
+    
+    def _rate_limit(self):
+        """Enforce rate limiting"""
+        now = time.time()
+        elapsed = now - self._last_request_time
+        if elapsed < self._min_interval:
+            time.sleep(self._min_interval - elapsed)
+        self._last_request_time = time.time()
+    
+    def search_pexels_videos(self, query: str, per_page: int = 10) -> List[VideoResult]:
+        """Search Pexels for videos"""
+        if not self.pexels_key:
+            return []
+        
+        self._rate_limit()
+        
+        headers = {"Authorization": self.pexels_key}
+        params = {
+            "query": query,
+            "per_page": per_page,
+            "orientation": "landscape"
+        }
+        
+        try:
+            response = self.session.get(PEXELS_VIDEOS_API, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            results = []
+            for video in data.get("videos", []):
+                duration = video.get("duration", 0)
+                
+                # Filter by duration
+                if duration < self.min_duration or duration > self.max_duration:
+                    continue
+                
+                # Get best quality video file
+                video_files = video.get("video_files", [])
+                if not video_files:
+                    continue
+                
+                # Sort by quality (prefer HD)
+                if self.prefer_hd:
+                    video_files.sort(key=lambda x: x.get("height", 0), reverse=True)
+                
+                best_file = video_files[0]
+                
+                results.append(VideoResult(
+                    id=str(video.get("id", "")),
+                    source="pexels",
+                    url=video.get("url", ""),
+                    download_url=best_file.get("link", ""),
+                    width=best_file.get("width", 0),
+                    height=best_file.get("height", 0),
+                    duration=duration,
+                    quality=best_file.get("quality", "unknown"),
+                    file_type=best_file.get("file_type", "mp4")
+                ))
+            
+            logger.info(f"Pexels videos '{query}': {len(results)} results")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Pexels video search error: {e}")
+            return []
+    
+    def search_pixabay_videos(self, query: str, per_page: int = 10) -> List[VideoResult]:
+        """Search Pixabay for videos"""
+        if not self.pixabay_key:
+            return []
+        
+        self._rate_limit()
+        
+        params = {
+            "key": self.pixabay_key,
+            "q": query,
+            "per_page": per_page,
+            "video_type": "film",  # film, animation, all
+            "orientation": "horizontal"
+        }
+        
+        try:
+            response = self.session.get(PIXABAY_VIDEOS_API, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            results = []
+            for video in data.get("hits", []):
+                duration = video.get("duration", 0)
+                
+                # Filter by duration
+                if duration < self.min_duration or duration > self.max_duration:
+                    continue
+                
+                # Get video URLs - Pixabay provides multiple sizes
+                videos_dict = video.get("videos", {})
+                
+                # Prefer large > medium > small
+                video_data = None
+                for size in ["large", "medium", "small"]:
+                    if size in videos_dict and videos_dict[size].get("url"):
+                        video_data = videos_dict[size]
+                        break
+                
+                if not video_data:
+                    continue
+                
+                results.append(VideoResult(
+                    id=str(video.get("id", "")),
+                    source="pixabay",
+                    url=video.get("pageURL", ""),
+                    download_url=video_data.get("url", ""),
+                    width=video_data.get("width", 0),
+                    height=video_data.get("height", 0),
+                    duration=duration,
+                    quality=video_data.get("size", "unknown"),
+                    file_type="mp4"
+                ))
+            
+            logger.info(f"Pixabay videos '{query}': {len(results)} results")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Pixabay video search error: {e}")
+            return []
+    
+    def search_all(self, query: str, per_source: int = 5) -> List[VideoResult]:
+        """Search all video sources"""
+        results = []
+        
+        # Search Pexels
+        results.extend(self.search_pexels_videos(query, per_source))
+        
+        # Search Pixabay
+        results.extend(self.search_pixabay_videos(query, per_source))
+        
+        return results
+    
+    def download_video(self, video: VideoResult) -> Optional[str]:
+        """Download a single video"""
+        if not video.download_url:
+            return None
+        
+        self._rate_limit()
+        
+        # Create filename
+        ext = "mp4"
+        filename = f"{video.source}_{video.id}.{ext}"
+        filepath = self.output_dir / filename
+        
+        if filepath.exists():
+            logger.debug(f"Video already exists: {filename}")
+            return str(filepath)
+        
+        try:
+            response = self.session.get(video.download_url, stream=True, timeout=60)
+            response.raise_for_status()
+            
+            # Download with progress
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(filepath, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+            
+            file_size_mb = filepath.stat().st_size / (1024 * 1024)
+            logger.info(f"Downloaded video: {filename} ({file_size_mb:.1f}MB, {video.duration}s)")
+            
+            return str(filepath)
+            
+        except Exception as e:
+            logger.error(f"Video download error for {video.id}: {e}")
+            if filepath.exists():
+                filepath.unlink()
+            return None
+    
+    def search_and_download(
+        self,
+        query: str,
+        max_videos: int = 3
+    ) -> List[str]:
+        """
+        Search and download videos for a query.
+        
+        Args:
+            query: Search keywords
+            max_videos: Maximum videos to download
+        
+        Returns:
+            List of downloaded file paths
+        """
+        results = self.search_all(query, per_source=max_videos * 2)
+        
+        downloaded = []
+        for video in results:
+            if len(downloaded) >= max_videos:
+                break
+            
+            path = self.download_video(video)
+            if path:
+                downloaded.append(path)
+        
+        return downloaded
+
+
+def download_entity_videos(
+    entities: List[Dict],
+    output_dir: str,
+    topic: str = "",
+    videos_per_entity: int = 3,
+    min_duration: float = 3.0,
+    max_duration: float = 30.0,
+    pexels_key: str = None,
+    pixabay_key: str = None
+) -> Dict[str, EntityVideoResult]:
+    """
+    Download stock videos for entities extracted from voiceover.
+    
+    Args:
+        entities: List of entity dicts with 'text', 'type', 'context' keys
+        output_dir: Directory to save videos
+        topic: Documentary topic for query building
+        videos_per_entity: Number of videos to download per entity
+        min_duration: Minimum video duration in seconds
+        max_duration: Maximum video duration in seconds
+    
+    Returns:
+        Dict mapping entity name to EntityVideoResult
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    results: Dict[str, EntityVideoResult] = {}
+    
+    # Initialize downloader
+    video_downloader = StockVideoDownloader(
+        output_dir=str(output_path / "stock_videos"),
+        pexels_key=pexels_key,
+        pixabay_key=pixabay_key,
+        min_duration=min_duration,
+        max_duration=max_duration
+    )
+    
+    # Check if any API keys available
+    has_keys = any([video_downloader.pexels_key, video_downloader.pixabay_key])
+    
+    if not has_keys:
+        logger.warning("No video API keys available (PEXELS_API_KEY, PIXABAY_API_KEY)")
+        return results
+    
+    # Process each entity
+    for entity in entities:
+        entity_name = entity.get('text', '')
+        entity_type = entity.get('type', '')
+        context = entity.get('context', '')
+        
+        if not entity_name:
+            continue
+        
+        # Skip if already processed
+        if entity_name in results:
+            continue
+        
+        # Build search query
+        query = build_entity_query(entity, topic)
+        
+        if not query:
+            continue
+        
+        logger.info(f"Searching stock videos for: {entity_name} ({entity_type})")
+        logger.info(f"  Query: '{query}'")
+        
+        # Download videos
+        video_paths = video_downloader.search_and_download(
+            query=query,
+            max_videos=videos_per_entity
+        )
+        
+        if video_paths:
+            results[entity_name] = EntityVideoResult(
+                entity_name=entity_name,
+                entity_type=entity_type,
+                context=context,
+                query=query,
+                videos=video_paths
+            )
+            logger.info(f"  ✓ Downloaded {len(video_paths)} videos for '{entity_name}'")
+        else:
+            logger.info(f"  ✗ No videos found for '{entity_name}'")
+    
+    return results
 
 def build_entity_query(entity: Dict, topic: str = "") -> str:
     """
@@ -1015,4 +1381,4 @@ def map_entities_to_segments(
             if entity_name.lower() in seg_text:
                 entity_segments[entity_name].append(i)
     
-    return entity_segments
+    return entity_segments  

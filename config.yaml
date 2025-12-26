@@ -362,6 +362,9 @@ image_search:
   # Images per entity (5 recommended for variety and backup options)
   images_per_entity: 5
   
+  # Videos per entity for stock footage (3 recommended)
+  videos_per_entity: 3
+  
   # Minimum file size in MB (1MB ensures quality)
   min_size_mb: 1.0
   
@@ -371,7 +374,7 @@ image_search:
   # Search sources (prioritized in order)
   use_google: true       # Google Images (requires: pip install pyimagedl)
   use_bing: true         # Bing Images (fallback)
-  use_stock_apis: true   # Pexels/Pixabay APIs (additional fallback)
+  use_stock_apis: true   # Pexels/Pixabay APIs for images AND videos
   
   # Entity types to search for
   entity_types:
@@ -382,8 +385,9 @@ image_search:
     - EVENT      # Named events
   
   # OTIO output settings
-  image_track: V9        # Track for image stills
-  default_duration: 0.0  # 0 = match segment duration
+  image_track: V9           # Track for image stills (Google Images)
+  stock_video_track: V10    # Track for stock videos (Pexels/Pixabay)
+  default_duration: 0.0     # 0 = match segment duration
 
 # -----------------------------------------------------------------------------
 # LLM SETTINGS

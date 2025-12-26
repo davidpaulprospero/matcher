@@ -928,6 +928,115 @@ Topic:"""
             print(f"  ⚠ Image search failed: {e}")
             return {}
     
+    def stage_stock_video(self) -> Dict[str, any]:
+        """
+        Stage 1.6: Download stock videos for entities.
+        Searches Pexels/Pixabay APIs for stock footage representing
+        people, places, organizations mentioned in voiceover.
+        """
+        global PROJECT_DIR
+        config = self.config
+        
+        # Check if stock video search is enabled (use same config as image_search)
+        if not config.image_search.enabled:
+            logger.debug("Image/video search disabled in config")
+            return {}
+        
+        if not config.image_search.use_stock_apis:
+            logger.debug("Stock APIs disabled in config")
+            return {}
+        
+        if not hasattr(self, 'extracted_entities') or not self.extracted_entities:
+            logger.debug("No entities available for stock video search")
+            return {}
+        
+        self._print_stage("1.6", "STOCK VIDEO SEARCH")
+        
+        try:
+            from src.entity_images import download_entity_videos, map_entities_to_segments
+            
+            # Filter entities by configured types
+            allowed_types = config.image_search.entity_types
+            entities_to_search = [
+                e for e in self.extracted_entities
+                if e.get('type', '') in allowed_types
+            ]
+            
+            if not entities_to_search:
+                print(f"  No entities of types {allowed_types} to search")
+                return {}
+            
+            # Get videos_per_entity from config (default 3)
+            videos_per_entity = getattr(config.image_search, 'videos_per_entity', 3)
+            
+            print(f"  Searching stock videos for {len(entities_to_search)} entities")
+            print(f"  Entity types: {', '.join(allowed_types)}")
+            print(f"  Videos per entity: {videos_per_entity}")
+            
+            # Get output directory - USE PROJECT_DIR if available
+            output_dir = Path(config.image_search.output_dir)
+            if not output_dir.is_absolute():
+                if PROJECT_DIR:
+                    output_dir = PROJECT_DIR / config.image_search.output_dir
+                else:
+                    output_dir = Path(config.output.output_dir).parent / config.image_search.output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"  Output directory: {output_dir}")
+            
+            # Download stock videos
+            entity_results = download_entity_videos(
+                entities=entities_to_search,
+                output_dir=str(output_dir),
+                topic=self.topic_context or "",
+                videos_per_entity=videos_per_entity,
+                min_duration=3.0,
+                max_duration=30.0,
+                pexels_key=os.getenv("PEXELS_API_KEY"),
+                pixabay_key=os.getenv("PIXABAY_API_KEY")
+            )
+            
+            # Map entities to segments for timeline placement
+            if entity_results:
+                entity_segments = map_entities_to_segments(
+                    entities_to_search,
+                    self.voiceover_segments
+                )
+                
+                # Update entity results with segment info
+                for entity_name, result in entity_results.items():
+                    result.segment_indices = entity_segments.get(entity_name, [])
+                
+                self.entity_videos = entity_results
+                
+                # Summary
+                total_videos = sum(len(r.videos) for r in entity_results.values())
+                print(f"\n  ✓ Downloaded {total_videos} stock videos for {len(entity_results)} entities")
+                
+                # Show what was found
+                for name, result in list(entity_results.items())[:5]:
+                    segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
+                    print(f"    • {name} ({result.entity_type}): {len(result.videos)} videos, {segments_str}")
+                
+                if len(entity_results) > 5:
+                    print(f"    ... and {len(entity_results) - 5} more entities")
+            else:
+                print(f"  ⚠ No stock videos downloaded")
+                self.entity_videos = {}
+            
+            return entity_results
+            
+        except ImportError as e:
+            logger.error(f"Could not import entity_images: {e}")
+            print(f"  ⚠ Stock video module not available")
+            return {}
+        except Exception as e:
+            logger.error(f"Stock video search failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"  ⚠ Stock video search failed: {e}")
+            return {}
+    
     def stage_download(self, keywords: List[str]) -> List[dict]:
         """
         Stage 2: Download footage from YouTube.
@@ -1587,7 +1696,8 @@ Topic:"""
                 config=config,
                 voiceover_path=getattr(self, 'voiceover_path', None),
                 frame_rate=getattr(config.output, 'frame_rate', 30.0),
-                entity_images=getattr(self, 'entity_images', None)  # V9 entity stills
+                entity_images=getattr(self, 'entity_images', None),  # V9 entity stills
+                entity_videos=getattr(self, 'entity_videos', None)   # V10 stock videos
             )
             
             # Output formats (config-driven)
@@ -1681,6 +1791,10 @@ Topic:"""
                 self.stage_image_search()
             elif self.config.pipeline.skip_image_search:
                 print(f"\n  ⏭ Skipping image search (config: skip_image_search=true)")
+            
+            # Stage 1.6: Stock video search (Pexels/Pixabay)
+            if self.config.image_search.enabled and self.config.image_search.use_stock_apis and not self.config.pipeline.skip_image_search:
+                self.stage_stock_video()
             
             # Stage 2: Download footage
             if not self.config.pipeline.skip_download:
@@ -2191,4 +2305,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()  
+    main()

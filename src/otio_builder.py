@@ -183,7 +183,8 @@ def create_timeline(
     config: Config,
     voiceover_path: Optional[str] = None,
     frame_rate: float = 30.0,
-    entity_images: Optional[Dict] = None
+    entity_images: Optional[Dict] = None,
+    entity_videos: Optional[Dict] = None
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
@@ -196,7 +197,8 @@ def create_timeline(
     - V5: Different-Source strategy - disabled
     - V6: Keyword-Only strategy - disabled
     - V7: Embedding-Diversity strategy - disabled
-    - V9: Entity Images (stills) - disabled
+    - V9: Entity Images (Google stills) - disabled
+    - V10: Stock Videos (Pexels/Pixabay) - disabled
     - A1-A7: Corresponding audio tracks
     - A8: Voiceover - enabled
     """
@@ -238,10 +240,15 @@ def create_timeline(
         track.enabled = False
         video_tracks.append(track)
     
-    # V9: Entity Images track
+    # V9: Entity Images track (Google Images)
     image_track = otio.schema.Track(name="V9 - Entity Images", kind=otio.schema.TrackKind.Video)
     image_track.enabled = False  # Disabled by default, user enables as needed
     image_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    
+    # V10: Stock Videos track (Pexels/Pixabay)
+    stock_video_track = otio.schema.Track(name="V10 - Stock Videos", kind=otio.schema.TrackKind.Video)
+    stock_video_track.enabled = False  # Disabled by default
+    stock_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
     
     # Create audio tracks for video audio
     audio_tracks = []
@@ -525,11 +532,23 @@ def create_timeline(
     # Add V9 Entity Images track (after other video tracks)
     timeline.tracks.append(image_track)
     
+    # Add V10 Stock Videos track
+    timeline.tracks.append(stock_video_track)
+    
     # Populate image track if entity_images provided
     if entity_images:
         _add_entity_images_to_track(
             image_track=image_track,
             entity_images=entity_images,
+            matches=matches,
+            frame_rate=rate
+        )
+    
+    # Populate stock video track if entity_videos provided
+    if entity_videos:
+        _add_entity_videos_to_track(
+            video_track=stock_video_track,
+            entity_videos=entity_videos,
             matches=matches,
             frame_rate=rate
         )
@@ -686,6 +705,182 @@ def _add_entity_images_to_track(
                 )
             )
             image_track.append(gap)
+
+
+def _add_entity_videos_to_track(
+    video_track: otio.schema.Track,
+    entity_videos: Dict,
+    matches: List[MatchResult],
+    frame_rate: float
+):
+    """
+    Add stock videos to V10 track at segment positions.
+    
+    ALL videos for an entity are placed as separate clips within
+    the segment, divided equally by duration.
+    
+    Unlike images, videos have actual duration. We use the video's
+    natural duration but may need to trim/adjust to fit the segment.
+    """
+    rate = frame_rate
+    
+    # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec)
+    segment_timing = {}
+    current_frame = 0
+    
+    for i, match_result in enumerate(matches):
+        match = match_result.primary_match
+        vo_seg = match.voiceover_segment
+        target_duration = vo_seg.end_time - vo_seg.start_time
+        duration_frames = round(target_duration * frame_rate)
+        
+        segment_timing[i] = (current_frame, duration_frames, target_duration)
+        current_frame += duration_frames
+    
+    # Process each segment
+    for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
+        match = matches[seg_idx].primary_match
+        vo_text = match.voiceover_segment.text.lower()
+        
+        # Find entities mentioned in this segment
+        segment_has_videos = False
+        
+        for entity_name, entity_result in entity_videos.items():
+            if entity_name.lower() not in vo_text:
+                continue
+            
+            if not entity_result.videos:
+                continue
+            
+            # Get all videos for this entity
+            all_videos = entity_result.videos
+            num_videos = len(all_videos)
+            
+            if num_videos == 0:
+                continue
+            
+            segment_has_videos = True
+            
+            # Divide segment duration equally among all videos
+            frames_per_video = max(1, duration_frames // num_videos)
+            remaining_frames = duration_frames - (frames_per_video * num_videos)
+            
+            # Create a clip for each video
+            for vid_idx, video_path in enumerate(all_videos):
+                # Calculate this video's display duration
+                clip_frames = frames_per_video
+                if vid_idx >= num_videos - remaining_frames:
+                    clip_frames += 1
+                
+                clip_duration_sec = clip_frames / rate
+                
+                # Get just the filename for the clip name
+                video_path_obj = Path(video_path)
+                video_filename = video_path_obj.name
+                
+                # Convert to Windows path format with backslashes for Resolve
+                video_path_resolved = str(video_path_obj.resolve())
+                if not video_path_resolved.startswith('/'):
+                    video_path_resolved = video_path_resolved.replace('/', '\\')
+                
+                # Get actual video duration using ffprobe if available
+                actual_duration_frames = _get_video_duration_frames(video_path, rate)
+                if actual_duration_frames is None:
+                    # Fallback: assume video is long enough
+                    actual_duration_frames = clip_frames * 2
+                
+                # Create external reference for video
+                # Unlike images, videos have actual duration (available_range)
+                video_ref = otio.schema.ExternalReference(
+                    target_url=video_path_resolved,
+                    available_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=otio.opentime.RationalTime(actual_duration_frames, rate)
+                    )
+                )
+                video_ref.name = video_filename
+                
+                # Create clip - use portion of video that fits segment
+                # Start from beginning, play for clip_frames duration
+                video_clip = otio.schema.Clip(
+                    name=video_filename,
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=otio.opentime.RationalTime(clip_frames, rate)
+                    )
+                )
+                
+                video_clip.media_reference = video_ref
+                
+                # Add metadata
+                video_clip.metadata['entity_name'] = entity_name
+                video_clip.metadata['entity_type'] = entity_result.entity_type
+                video_clip.metadata['query'] = entity_result.query
+                video_clip.metadata['video_path'] = video_path
+                video_clip.metadata['segment_index'] = seg_idx
+                video_clip.metadata['video_index'] = vid_idx
+                video_clip.metadata['total_videos'] = num_videos
+                video_clip.metadata['source'] = 'stock_video'
+                
+                # Add Resolve-specific metadata
+                video_clip.metadata['Resolve_OTIO'] = {}
+                
+                # Add marker for entity identification (only on first video)
+                if vid_idx == 0:
+                    marker = otio.schema.Marker(
+                        name=f"STOCK: {entity_result.entity_type} - {entity_name}",
+                        marked_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(1, rate)
+                        ),
+                        color=otio.schema.MarkerColor.CYAN
+                    )
+                    video_clip.markers.append(marker)
+                
+                video_track.append(video_clip)
+            
+            # Only process first matching entity per segment
+            break
+        
+        if not segment_has_videos:
+            # No entity matched - add gap to maintain sync
+            gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(duration_frames, rate)
+                )
+            )
+            video_track.append(gap)
+
+
+def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
+    """
+    Get video duration in frames using ffprobe.
+    
+    Returns None if ffprobe fails or is not available.
+    """
+    import subprocess
+    
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            duration_sec = float(result.stdout.strip())
+            return int(duration_sec * frame_rate)
+    except Exception:
+        pass
+    
+    return None
 
 
 def get_confidence_color(confidence: float) -> str:

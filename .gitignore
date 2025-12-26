@@ -74,3 +74,5 @@ cookies.txt
 .cache/
 downloaded_images/
 downloaded_videos/
+output/remix_report.json
+output/remix_report.json
