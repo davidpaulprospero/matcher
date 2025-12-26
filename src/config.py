@@ -367,6 +367,15 @@ class ZeroDownloadRemixConfig:
 
 
 @dataclass
+@dataclass
+class StockVideoConfig:
+    """Configuration for stock video downloads."""
+    min_duration: float = 3.0  # Minimum video duration in seconds
+    max_duration: float = 30.0  # Maximum video duration in seconds
+    prefer_hd: bool = True  # Prefer HD quality videos
+
+
+@dataclass
 class ImageSearchConfig:
     """Configuration for entity image and video search.
     
@@ -391,8 +400,8 @@ class ImageSearchConfig:
     
     # Search sources
     use_google: bool = True  # Google Images (requires pyimagedl library)
-    use_bing: bool = True  # Bing Images (fallback if Google fails)
-    use_stock_apis: bool = True  # Pexels/Pixabay for images AND videos
+    use_bing: bool = False  # Bing Images (disabled by default - alive_progress conflicts)
+    use_stock_apis: bool = True  # Pexels/Pixabay for images AND videos (recommended fallback)
     
     # Entity types to search for
     entity_types: List[str] = field(default_factory=lambda: [
@@ -403,6 +412,15 @@ class ImageSearchConfig:
     image_track: str = "V9"  # Track for image stills
     stock_video_track: str = "V10"  # Track for stock videos
     default_duration: float = 0.0  # 0 = match segment duration
+    
+    # Download timeouts and limits
+    download_timeout: int = 10  # Seconds per image download
+    max_search_time: int = 300  # Max seconds for entire search per entity (5 min)
+    max_results_to_check: int = 500  # Max search results to check per entity
+    search_until_found: bool = True  # If true, keeps searching until images_per_entity found
+    
+    # Stock video settings
+    stock_video: StockVideoConfig = field(default_factory=StockVideoConfig)
 
 
 @dataclass
@@ -970,16 +988,33 @@ class Config:
     
     @staticmethod
     def _build_dataclass(dataclass_type: Type[T], data: Dict) -> T:
-        """Build a dataclass from dict, handling missing/extra fields gracefully"""
+        """Build a dataclass from dict, handling missing/extra fields and nested dataclasses"""
         if not data:
             return dataclass_type()
         
-        valid_fields = {f.name for f in fields(dataclass_type)}
+        valid_fields = {f.name: f for f in fields(dataclass_type)}
         filtered_data = {}
         
         for key, value in data.items():
             if key in valid_fields:
-                filtered_data[key] = value
+                field_info = valid_fields[key]
+                field_type = field_info.type
+                
+                # Check if this field is a nested dataclass
+                # Handle Optional types and get the actual type
+                origin = getattr(field_type, '__origin__', None)
+                if origin is not None:
+                    # For Optional[X], Union[X, None], etc.
+                    args = getattr(field_type, '__args__', ())
+                    if args:
+                        field_type = args[0]
+                
+                # Check if the field type is a dataclass
+                if hasattr(field_type, '__dataclass_fields__') and isinstance(value, dict):
+                    # Recursively build nested dataclass
+                    filtered_data[key] = Config._build_dataclass(field_type, value)
+                else:
+                    filtered_data[key] = value
             else:
                 logger.debug(f"Ignoring unknown config field in {dataclass_type.__name__}: {key}")
         

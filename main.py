@@ -882,9 +882,14 @@ Topic:"""
                 images_per_entity=config.image_search.images_per_entity,
                 min_size_mb=config.image_search.min_size_mb,
                 use_google=config.image_search.use_google,
+                use_bing=getattr(config.image_search, 'use_bing', False),  # Disabled by default
                 use_stock_apis=config.image_search.use_stock_apis,
                 pexels_key=os.getenv("PEXELS_API_KEY"),
-                pixabay_key=os.getenv("PIXABAY_API_KEY")
+                pixabay_key=os.getenv("PIXABAY_API_KEY"),
+                download_timeout=getattr(config.image_search, 'download_timeout', 10),
+                max_search_time=getattr(config.image_search, 'max_search_time', 300),
+                max_results_to_check=getattr(config.image_search, 'max_results_to_check', 500),
+                search_until_found=getattr(config.image_search, 'search_until_found', True)
             )
             
             # Map entities to segments for timeline placement
