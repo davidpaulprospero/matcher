@@ -90,6 +90,10 @@ class RemixConfig:
     interactive_curation: bool = True  # Ask user to confirm remix
     show_excluded: bool = True  # Show which files were excluded
     
+    # Auto-accept filter (set upfront to skip mid-pipeline prompt)
+    # Options: "filtered" (use filtered), "all" (use all videos), "prompt" (ask)
+    auto_accept_filter: str = "prompt"
+    
     # Logging
     log_level: str = "INFO"
     log_file_processing: bool = True  # Log each file as it's processed
@@ -531,20 +535,36 @@ def remix_downloaded_videos(
     
     # Interactive confirmation
     if interactive and config.interactive_curation:
-        print(f"\n  Proceed with {result.included_files} videos?")
-        print(f"    [Y] Yes, use these {result.included_files} videos")
-        print(f"    [A] Use ALL videos (skip filtering)")
-        print(f"    [N] Cancel")
+        # Check if auto_accept_filter is set (from upfront config)
+        auto_accept = getattr(config, 'auto_accept_filter', 'prompt')
         
-        choice = input("  Select [Y/A/N]: ").strip().upper()
-        
-        if choice == 'A':
-            logger.info("User selected all videos, bypassing filter")
+        if auto_accept == 'filtered':
+            # Use filtered videos without prompting
+            logger.info(f"Auto-accepting filtered videos ({result.included_files})")
+            print(f"\n  ✓ Using {result.included_files} filtered videos (auto-accept)")
+            return [v.file_path for v in result.included_videos], result
+        elif auto_accept == 'all':
+            # Use all videos without prompting
+            logger.info("Auto-accepting all videos (skip filtering)")
+            print(f"\n  ✓ Using ALL {result.total_files} videos (auto-accept)")
             all_videos = result.included_videos + result.excluded_videos
             return [v.file_path for v in all_videos], result
-        elif choice != 'Y':
-            logger.info("User cancelled remix")
-            return [], result
+        else:
+            # Prompt user (auto_accept == 'prompt' or any other value)
+            print(f"\n  Proceed with {result.included_files} videos?")
+            print(f"    [Y] Yes, use these {result.included_files} videos")
+            print(f"    [A] Use ALL videos (skip filtering)")
+            print(f"    [N] Cancel")
+            
+            choice = input("  Select [Y/A/N]: ").strip().upper()
+            
+            if choice == 'A':
+                logger.info("User selected all videos, bypassing filter")
+                all_videos = result.included_videos + result.excluded_videos
+                return [v.file_path for v in all_videos], result
+            elif choice != 'Y':
+                logger.info("User cancelled remix")
+                return [], result
     
     # Return included video paths
     return [v.file_path for v in result.included_videos], result

@@ -71,3 +71,6 @@ src/CHANGELOG_v2.4_performance.md
 nul
 .global_cache/
 cookies.txt
+.cache/
+downloaded_images/
+downloaded_videos/

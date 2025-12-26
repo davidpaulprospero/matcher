@@ -361,6 +361,8 @@ class Pipeline:
         
         # Enhanced features state
         self.topic_context = ""
+        self.extracted_entities = []  # Named entities with context
+        self.entity_images = {}  # Downloaded images for entities (name -> EntityImageResult)
         self.keyword_remixer = None
         self.enhanced_enabled = config.enhanced.enabled
         self.second_style = None
@@ -470,6 +472,150 @@ class Pipeline:
             logger.error(f"Failed to parse SRT: {e}")
             sys.exit(1)
     
+    def _generate_topic_from_segments(self) -> str:
+        """Generate topic context from voiceover segments using LLM or heuristics"""
+        if not self.voiceover_segments:
+            return ""
+        
+        # Combine first few segments for context
+        text_samples = []
+        for seg in self.voiceover_segments[:5]:
+            if isinstance(seg, dict):
+                text_samples.append(seg.get('text', '')[:100])
+            elif hasattr(seg, 'text'):
+                text_samples.append(seg.text[:100])
+        
+        combined_text = " ".join(text_samples)
+        
+        if not combined_text:
+            return ""
+        
+        # Try LLM-based topic detection
+        config = self.config
+        
+        try:
+            gemini_key = getattr(config, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
+            if gemini_key:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel('gemini-2.0-flash')
+                
+                prompt = f"""Identify the main topic of this voiceover in 2-5 words.
+
+Text: {combined_text[:1500]}
+
+Respond with ONLY the topic (2-5 words), nothing else."""
+
+                response = model.generate_content(prompt)
+                topic = response.text.strip().strip('"').strip("'")
+                if topic and len(topic) < 100:
+                    return topic
+        except Exception as e:
+            logger.debug(f"LLM topic detection failed: {e}")
+        
+        # Fallback: extract key terms
+        words = combined_text.split()
+        key_words = [w for w in words if len(w) > 4 and w[0].isupper()][:3]
+        if key_words:
+            return " ".join(key_words) + " documentary"
+        
+        return "documentary content"
+    
+    def _detect_topic_from_keywords(self, keywords: List[str]) -> str:
+        """Detect main topic from extracted keywords using LLM"""
+        if not keywords:
+            return "documentary content"
+        
+        config = self.config
+        
+        # Format keywords for analysis
+        keywords_text = ", ".join(keywords[:15])  # Use top 15 keywords
+        
+        try:
+            gemini_key = getattr(config, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
+            if gemini_key:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel('gemini-2.0-flash')
+                
+                prompt = f"""Based on these video search keywords, identify the MAIN TOPIC in 3-6 words.
+
+Keywords: {keywords_text}
+
+Respond with ONLY the topic (3-6 words), nothing else. Be specific.
+Examples: "Wichita homeless opioid crisis", "Amazon rainforest deforestation", "Silicon Valley startup culture"
+
+Topic:"""
+
+                response = model.generate_content(prompt)
+                topic = response.text.strip().strip('"').strip("'").strip()
+                if topic and len(topic) < 100:
+                    logger.info(f"Detected topic from keywords: {topic}")
+                    return topic
+        except Exception as e:
+            logger.debug(f"LLM topic detection from keywords failed: {e}")
+        
+        # Fallback: analyze keywords manually
+        return self._extract_topic_from_keywords_heuristic(keywords)
+    
+    def _extract_topic_from_keywords_heuristic(self, keywords: List[str]) -> str:
+        """Extract topic from keywords using word frequency analysis"""
+        from collections import Counter
+        
+        # Split all keywords into words
+        all_words = []
+        for kw in keywords[:20]:
+            # Remove common suffixes
+            kw_clean = kw.replace(' footage', '').replace(' video', '').replace(' documentary', '')
+            words = kw_clean.split()
+            all_words.extend([w for w in words if len(w) > 3])
+        
+        # Count word frequency
+        word_counts = Counter(all_words)
+        
+        # Get top words (excluding very common ones)
+        common_words = {'the', 'and', 'for', 'with', 'from', 'that', 'this', 'USA', 'America'}
+        top_words = [word for word, count in word_counts.most_common(10) 
+                     if word not in common_words and count > 1]
+        
+        if top_words:
+            # Take top 3-4 most frequent words
+            topic_words = top_words[:4]
+            return " ".join(topic_words) + " documentary"
+        
+        # Fallback: use first keyword
+        if keywords:
+            first_kw = keywords[0].replace(' footage', '').replace(' video', '')
+            return first_kw[:50]
+        
+        return "documentary content"
+    
+    def _attach_entities_to_segments(self):
+        """
+        Attach extracted entities to their corresponding voiceover segments.
+        This enables entity markers in OTIO/EDL output for text overlays.
+        """
+        if not self.extracted_entities or not self.voiceover_segments:
+            return
+        
+        entities_attached = 0
+        
+        for seg in self.voiceover_segments:
+            if isinstance(seg, dict):
+                seg_text = seg.get('text', '').lower()
+                seg_entities = []
+                
+                for entity in self.extracted_entities:
+                    entity_text = entity.get('text', '')
+                    if entity_text and entity_text.lower() in seg_text:
+                        seg_entities.append(entity)
+                
+                if seg_entities:
+                    seg['entities'] = seg_entities
+                    entities_attached += len(seg_entities)
+        
+        logger.debug(f"Attached {entities_attached} entity references to voiceover segments")
+    
     def _get_user_confirmation(self, prompt: str, default: bool = True) -> bool:
         """Get Y/N confirmation from user"""
         suffix = "[Y/n]" if default else "[y/N]"
@@ -495,74 +641,6 @@ class Pipeline:
     # =========================================================================
     # ENHANCED FEATURES (Config-Driven)
     # =========================================================================
-    
-    def prompt_enhanced_features(self):
-        """Prompt user for enhanced feature settings (config-driven)"""
-        config = self.config
-        
-        if not config.enhanced.prompt_enhanced_features:
-            # Skip prompts if disabled in config
-            return
-        
-        if not any([
-            self.modules['keyword_remix'],
-            self.modules['pexels'],
-            self.modules['pixabay'],
-            self.modules['multi_style']
-        ]):
-            return
-        
-        print(f"\n{'─' * 70}")
-        print("  ENHANCED FEATURES")
-        print(f"{'─' * 70}")
-        
-        try:
-            # Confidence enforcement
-            if self.modules['keyword_remix'] and config.enhanced.remix_enabled:
-                min_conf = config.enhanced.min_confidence
-                enable = input(f"  Enable {min_conf:.0%} confidence enforcement? [Y/n]: ").strip().lower()
-                self.enhanced_enabled = enable != 'n'
-                
-                if self.enhanced_enabled:
-                    # Get topic context from voiceover
-                    if self.voiceover_segments:
-                        auto_topic = " ".join([s.get('text', '')[:50] for s in self.voiceover_segments[:5]])
-                        print(f"  Auto-detected topic: {auto_topic[:80]}...")
-                        custom = input("  Custom topic (Enter for auto): ").strip()
-                        self.topic_context = custom if custom else auto_topic
-                    
-                    # Initialize remixer
-                    try:
-                        from src.keyword_remix import KeywordRemixer
-                        self.keyword_remixer = KeywordRemixer(topic_context=self.topic_context)
-                        print(f"  ✓ Keyword remixer initialized")
-                    except Exception as e:
-                        print(f"  ⚠ Could not initialize remixer: {e}")
-                        self.keyword_remixer = None
-            
-            # Multi-style OTIO
-            if self.modules['multi_style'] and config.multi_style.enabled:
-                from src.multi_style import prompt_for_second_style
-                multi = input("  Generate multiple OTIO styles? [y/N]: ").strip().lower()
-                if multi == 'y':
-                    self.second_style = prompt_for_second_style()
-            
-            # Summary
-            if self.enhanced_enabled or self.second_style:
-                print(f"\n  ✓ Enhanced features configured:")
-                if self.enhanced_enabled:
-                    print(f"    • Confidence enforcement: {config.enhanced.min_confidence:.0%}")
-                    print(f"    • Max retries: {config.enhanced.max_retries}")
-                if self.modules['pexels'] and config.enhanced.enable_pexels:
-                    print(f"    • Pexels: {config.enhanced.stock_per_keyword} videos/keyword")
-                if self.modules['pixabay'] and config.enhanced.enable_pixabay:
-                    print(f"    • Pixabay: {config.enhanced.stock_per_keyword} videos/keyword")
-                if self.second_style:
-                    print(f"    • Second OTIO style: {self.second_style.name}")
-            
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Enhanced features disabled")
-            self.enhanced_enabled = False
     
     def stage_download_stock(self, keywords: List[str]) -> dict:
         """Stage 2c: Download stock footage from Pexels/Pixabay (config-driven)"""
@@ -708,8 +786,26 @@ class Pipeline:
             # Pass segments (list of dicts), get KeywordResult back
             result = extractor.extract_keywords(self.voiceover_segments, max_keywords=num_keywords)
             self.keywords = result.keywords
-            if result.topic:
-                print(f"  Detected topic: {result.topic}")
+            
+            # Store entities with context for display
+            self.extracted_entities = result.entities if result.entities else []
+            
+            # Attach entities to voiceover segments for EDL/OTIO markers
+            if self.extracted_entities:
+                self._attach_entities_to_segments()
+            
+            # Detect topic from extracted keywords (not raw text)
+            if self.keywords:
+                self.topic_context = self._detect_topic_from_keywords(self.keywords)
+                print(f"  Detected topic: {self.topic_context}")
+            elif result.topic:
+                self.topic_context = result.topic
+                print(f"  Detected topic: {self.topic_context}")
+            
+            # Show entity count
+            if self.extracted_entities:
+                print(f"  Entities found: {len(self.extracted_entities)}")
+                    
         except Exception as e:
             logger.error(f"Keyword extraction failed: {e}")
             # TF-IDF fallback
@@ -726,18 +822,111 @@ class Pipeline:
         
         print(f"  ✓ {len(self.keywords)} keywords extracted")
         
-        # Interactive review
-        if config.enhanced.confirm_before_download:
-            print(f"\n  Keywords: {', '.join(self.keywords[:20])}")
-            if len(self.keywords) > 20:
-                print(f"            ... and {len(self.keywords) - 20} more")
-            
-            if not self._get_user_confirmation("\n  Continue with these keywords?"):
-                custom = self._get_user_input("  Enter custom keywords (comma-separated)")
-                if custom:
-                    self.keywords = [k.strip() for k in custom.split(',')]
-        
         return self.keywords
+    
+    def stage_image_search(self) -> Dict[str, any]:
+        """
+        Stage 1.5: Download images for entities.
+        Searches Google/Bing/Stock APIs for images representing
+        people, places, organizations mentioned in voiceover.
+        """
+        global PROJECT_DIR
+        config = self.config
+        
+        if not config.image_search.enabled:
+            logger.debug("Image search disabled in config")
+            return {}
+        
+        if not hasattr(self, 'extracted_entities') or not self.extracted_entities:
+            logger.debug("No entities available for image search")
+            return {}
+        
+        self._print_stage("1.5", "ENTITY IMAGE SEARCH")
+        
+        try:
+            from src.entity_images import download_entity_images, map_entities_to_segments
+            
+            # Filter entities by configured types
+            allowed_types = config.image_search.entity_types
+            entities_to_search = [
+                e for e in self.extracted_entities
+                if e.get('type', '') in allowed_types
+            ]
+            
+            if not entities_to_search:
+                print(f"  No entities of types {allowed_types} to search")
+                return {}
+            
+            print(f"  Searching images for {len(entities_to_search)} entities")
+            print(f"  Entity types: {', '.join(allowed_types)}")
+            print(f"  Images per entity: {config.image_search.images_per_entity}")
+            print(f"  Minimum size: {config.image_search.min_size_mb}MB")
+            
+            # Get output directory - USE PROJECT_DIR if available
+            output_dir = Path(config.image_search.output_dir)
+            if not output_dir.is_absolute():
+                # Prefer PROJECT_DIR over install dir
+                if PROJECT_DIR:
+                    output_dir = PROJECT_DIR / config.image_search.output_dir
+                else:
+                    output_dir = Path(config.output.output_dir).parent / config.image_search.output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"  Output directory: {output_dir}")
+            
+            # Download images
+            entity_results = download_entity_images(
+                entities=entities_to_search,
+                output_dir=str(output_dir),
+                topic=self.topic_context or "",
+                images_per_entity=config.image_search.images_per_entity,
+                min_size_mb=config.image_search.min_size_mb,
+                use_google=config.image_search.use_google,
+                use_stock_apis=config.image_search.use_stock_apis,
+                pexels_key=os.getenv("PEXELS_API_KEY"),
+                pixabay_key=os.getenv("PIXABAY_API_KEY")
+            )
+            
+            # Map entities to segments for timeline placement
+            if entity_results:
+                entity_segments = map_entities_to_segments(
+                    entities_to_search,
+                    self.voiceover_segments
+                )
+                
+                # Update entity results with segment info
+                for entity_name, result in entity_results.items():
+                    result.segment_indices = entity_segments.get(entity_name, [])
+                
+                self.entity_images = entity_results
+                
+                # Summary
+                total_images = sum(len(r.images) for r in entity_results.values())
+                print(f"\n  ✓ Downloaded {total_images} images for {len(entity_results)} entities")
+                
+                # Show what was found
+                for name, result in list(entity_results.items())[:5]:
+                    segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
+                    print(f"    • {name} ({result.entity_type}): {len(result.images)} images, {segments_str}")
+                
+                if len(entity_results) > 5:
+                    print(f"    ... and {len(entity_results) - 5} more entities")
+            else:
+                print(f"  ⚠ No images downloaded")
+                self.entity_images = {}
+            
+            return entity_results
+            
+        except ImportError as e:
+            logger.error(f"Could not import imagedl: {e}")
+            print(f"  ⚠ Image search module not available")
+            return {}
+        except Exception as e:
+            logger.error(f"Image search failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"  ⚠ Image search failed: {e}")
+            return {}
     
     def stage_download(self, keywords: List[str]) -> List[dict]:
         """
@@ -767,12 +956,6 @@ class Pipeline:
             print(f"    • medium: {tiers.medium.min_seconds}-{tiers.medium.max_seconds}s ({tiers.medium.videos_per_keyword}/kw)")
             print(f"    • long:   {tiers.long.min_seconds}-{tiers.long.max_seconds}s ({tiers.long.videos_per_keyword}/kw)")
             print(f"    • longer: {tiers.longer.min_seconds}-{tiers.longer.max_seconds}s ({tiers.longer.videos_per_keyword}/kw)")
-            
-            # Confirmation
-            if config.enhanced.confirm_before_download:
-                if not self._get_user_confirmation(f"\n  Download footage for {len(keywords)} keywords?"):
-                    print("  ⏭ Download skipped by user")
-                    return []
             
             # Download using download_all() method
             output_dir = Path(config.downloaded_videos_dir)
@@ -804,6 +987,117 @@ class Pipeline:
             return []
         
         return self.downloaded_videos
+    
+    def _load_existing_videos(self):
+        """
+        Load existing videos from output directory when skipping downloads.
+        Used when skip_download=true to use previously downloaded videos.
+        
+        Search order:
+        1. pipeline.video_source_dir (if set in config - ABSOLUTE PATH)
+        2. {project_dir}/downloaded_videos/
+        3. {output_dir}/downloaded_videos/
+        4. {cwd}/downloaded_videos/
+        """
+        global PROJECT_DIR
+        config = self.config
+        
+        # Try multiple possible locations for downloaded videos
+        possible_dirs = []
+        seen_dirs = set()  # Track seen directories to avoid duplicates
+        
+        def add_dir(d):
+            """Add directory if not already seen"""
+            d = Path(d).resolve()
+            if d not in seen_dirs:
+                seen_dirs.add(d)
+                possible_dirs.append(d)
+        
+        # 0. Explicit video_source_dir from config (FIRST PRIORITY)
+        if hasattr(config.pipeline, 'video_source_dir') and config.pipeline.video_source_dir:
+            explicit_dir = Path(config.pipeline.video_source_dir)
+            add_dir(explicit_dir)
+            add_dir(explicit_dir / "downloaded_videos")
+        
+        # 1. PROJECT_DIR (from --project argument) - most likely location
+        if PROJECT_DIR:
+            add_dir(PROJECT_DIR / "downloaded_videos")
+            add_dir(PROJECT_DIR / "output" / "downloaded_videos")
+        
+        # 2. Output directory / downloaded_videos
+        output_dir = Path(config.output.output_dir)
+        if not output_dir.is_absolute() and PROJECT_DIR:
+            output_dir = PROJECT_DIR / output_dir
+        add_dir(output_dir / "downloaded_videos")
+        add_dir(output_dir.parent / "downloaded_videos")
+        
+        # 3. Current working directory (last resort)
+        add_dir(Path.cwd() / "downloaded_videos")
+        
+        # Find videos - search recursively in subfolders too
+        video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
+        videos_dir = None
+        video_files = []
+        
+        for test_dir in possible_dirs:
+            if not test_dir.exists() or not test_dir.is_dir():
+                continue
+            
+            # First check direct files
+            for f in test_dir.iterdir():
+                if f.is_file() and f.suffix.lower() in video_extensions:
+                    video_files.append(f)
+            
+            # If no direct files, search subfolders (one level deep)
+            if not video_files:
+                for subdir in test_dir.iterdir():
+                    if subdir.is_dir():
+                        for f in subdir.iterdir():
+                            if f.is_file() and f.suffix.lower() in video_extensions:
+                                video_files.append(f)
+            
+            if video_files:
+                videos_dir = test_dir
+                break
+            video_files = []  # Reset for next directory
+        
+        if video_files:
+            self.downloaded_videos = [
+                {'video_path': str(f), 'keyword': f.parent.name if f.parent != videos_dir else 'existing', 'source': 'local'}
+                for f in video_files
+            ]
+            print(f"  ✓ Loaded {len(self.downloaded_videos)} existing videos from {videos_dir}")
+            
+            # Show breakdown by subfolder
+            from collections import Counter
+            folders = Counter(Path(v['video_path']).parent.name for v in self.downloaded_videos)
+            if len(folders) > 1:
+                print(f"    Sources: {dict(folders)}")
+        else:
+            print(f"  ⚠ No video files found (.mp4, .mkv, .webm, .avi, .mov)")
+            print(f"    Searched locations:")
+            for i, d in enumerate(possible_dirs[:5], 1):
+                if d.exists():
+                    try:
+                        files = [f for f in d.iterdir() if f.is_file()]
+                        dirs = [f for f in d.iterdir() if f.is_dir()]
+                        # Check if subdirs have videos
+                        subdir_videos = 0
+                        for sd in dirs[:3]:
+                            subdir_videos += len([f for f in sd.iterdir() if f.is_file() and f.suffix.lower() in video_extensions])
+                        
+                        status = f"{len(files)} files, {len(dirs)} folders"
+                        if subdir_videos > 0:
+                            status += f" ({subdir_videos} videos in subfolders)"
+                        print(f"      {i}. [✓] {d}")
+                        print(f"          {status}")
+                    except Exception as e:
+                        print(f"      {i}. [✓] {d} (error: {e})")
+                else:
+                    print(f"      {i}. [✗] {d}")
+            print(f"    TIP: Set pipeline.video_source_dir in config.yaml to an absolute path")
+            print(f"    Example: video_source_dir: \"E:/Edit Job/project/downloaded_videos\"")
+            self.downloaded_videos = []
     
     def _stage_zero_download_remix(self, failed_keywords: List[str], output_dir: Path):
         """
@@ -943,6 +1237,7 @@ class Pipeline:
                 case_sensitive=config.remix.case_sensitive,
                 interactive_curation=config.remix.interactive_curation,
                 show_excluded=config.remix.show_excluded,
+                auto_accept_filter=config.remix.auto_accept_filter,  # Pass upfront choice
                 log_file_processing=config.remix.log_file_processing,
                 parallel_scoring=config.remix.parallel_scoring,
                 max_workers=config.remix.max_workers
@@ -976,7 +1271,7 @@ class Pipeline:
             
             # Save remix report
             if remix_result:
-                output_dir = Path(config.output_dir)
+                output_dir = Path(config.output.output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
                 report_path = output_dir / "remix_report.json"
                 save_remix_report(remix_result, report_path)
@@ -1291,7 +1586,8 @@ class Pipeline:
                 matches=self.matches,
                 config=config,
                 voiceover_path=getattr(self, 'voiceover_path', None),
-                frame_rate=getattr(config.output, 'frame_rate', 30.0)
+                frame_rate=getattr(config.output, 'frame_rate', 30.0),
+                entity_images=getattr(self, 'entity_images', None)  # V9 entity stills
             )
             
             # Output formats (config-driven)
@@ -1307,7 +1603,8 @@ class Pipeline:
                     self.matches, 
                     str(edl_path),
                     frame_rate=getattr(config.output, 'frame_rate', 30.0),
-                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00")
+                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
+                    entities=getattr(self, 'extracted_entities', [])  # Pass entities for text overlay markers
                 )
                 outputs['edl'] = str(edl_path)
                 print(f"  ✓ EDL: {edl_path}")
@@ -1363,21 +1660,41 @@ class Pipeline:
         
         self._print_banner()
         
-        # Stage 1: Analyze voiceover
+        # =====================================================================
+        # UPFRONT CONFIGURATION - All prompts happen here, then pipeline runs
+        # =====================================================================
+        
+        # Stage 1: Analyze voiceover (extracts keywords + detects topic)
         keywords = self.stage_analyze_voiceover(voiceover_path, num_keywords)
         
         if not match_only:
-            # Enhanced features prompt
-            self.prompt_enhanced_features()
+            # Get all user preferences BEFORE starting the pipeline
+            self._configure_pipeline_upfront(keywords)
+        
+        # =====================================================================
+        # PIPELINE EXECUTION - No pauses, runs end-to-end
+        # =====================================================================
+        
+        if not match_only:
+            # Stage 1.5: Entity image search (after keywords, before video download)
+            if self.config.image_search.enabled and not self.config.pipeline.skip_image_search:
+                self.stage_image_search()
+            elif self.config.pipeline.skip_image_search:
+                print(f"\n  ⏭ Skipping image search (config: skip_image_search=true)")
             
             # Stage 2: Download footage
-            self.stage_download(keywords)
-            
-            # Stage 2c: Stock footage
-            self.stage_download_stock(keywords)
-            
-            # Remix zero-download keywords (generate alternative keywords)
-            keywords = self.stage_remix_zero_downloads(keywords)
+            if not self.config.pipeline.skip_download:
+                self.stage_download(keywords)
+                
+                # Stage 2c: Stock footage
+                self.stage_download_stock(keywords)
+                
+                # Remix zero-download keywords (generate alternative keywords)
+                keywords = self.stage_remix_zero_downloads(keywords)
+            else:
+                print(f"\n  ⏭ Skipping downloads (config: skip_download=true)")
+                # Load existing videos from output directory
+                self._load_existing_videos()
             
             # Stage 2.5: Zero-download video remix (filter videos by keyword relevance)
             if self.config.remix.enabled:
@@ -1409,6 +1726,199 @@ class Pipeline:
         if self.run_logger:
             self.run_logger.finalize()
             print(f"  Log: {self.run_logger.log_file}")
+    
+    def _configure_pipeline_upfront(self, keywords: List[str]):
+        """
+        Configure all pipeline options UPFRONT before any processing starts.
+        This ensures the pipeline runs end-to-end without pauses.
+        
+        Set enhanced.non_interactive=true in config.yaml to skip all prompts.
+        """
+        config = self.config
+        
+        # Non-interactive mode - skip all prompts, use defaults
+        if config.enhanced.non_interactive:
+            print(f"\n  ─── Non-Interactive Mode ───")
+            print(f"  • Keywords: {len(keywords)}")
+            print(f"  • Topic: {self.topic_context}")
+            print(f"  • Using default settings (no prompts)")
+            
+            # Use defaults
+            self.enhanced_enabled = config.enhanced.remix_enabled
+            if self.enhanced_enabled and self.modules.get('keyword_remix'):
+                try:
+                    from src.keyword_remix import KeywordRemixer
+                    self.keyword_remixer = KeywordRemixer(topic_context=self.topic_context)
+                except:
+                    pass
+            return
+        
+        print(f"\n{'═' * 70}")
+        print(f"  PIPELINE CONFIGURATION")
+        print(f"{'═' * 70}")
+        
+        # Show detected topic
+        if self.topic_context:
+            print(f"\n  Detected topic: {self.topic_context}")
+        
+        # Show keywords summary
+        print(f"  Keywords: {len(keywords)} extracted")
+        print(f"    Top 5: {', '.join(keywords[:5])}")
+        
+        # Show entities with context
+        if hasattr(self, 'extracted_entities') and self.extracted_entities:
+            print(f"\n  ─── Named Entities ({len(self.extracted_entities)}) ───")
+            entity_types = {}
+            for entity in self.extracted_entities:
+                etype = entity.get('type', 'OTHER')
+                if etype not in entity_types:
+                    entity_types[etype] = []
+                entity_types[etype].append(entity)
+            
+            type_labels = {
+                'PERSON': '👤 People',
+                'GPE': '📍 Places', 
+                'ORG': '🏢 Organizations',
+                'DATE': '📅 Dates',
+                'EVENT': '⚡ Events'
+            }
+            
+            for etype, entities in entity_types.items():
+                label = type_labels.get(etype, f'📌 {etype}')
+                print(f"  {label}:")
+                for e in entities[:3]:  # Show max 3 per type
+                    name = e.get('text', '')
+                    context = e.get('context', '')
+                    search_kw = e.get('search_keyword', '')
+                    if context:
+                        print(f"    • {name} - {context}")
+                    else:
+                        print(f"    • {name}")
+                    if search_kw:
+                        print(f"      → Search: \"{search_kw}\"")
+                if len(entities) > 3:
+                    print(f"    ... and {len(entities) - 3} more")
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 1. KEYWORD REVIEW
+        # ─────────────────────────────────────────────────────────────────────
+        if config.enhanced.confirm_before_download:
+            print(f"\n  ─── Keyword Review ───")
+            
+            # Separate entity-based keywords from general keywords
+            entity_keywords = []
+            general_keywords = []
+            
+            if hasattr(self, 'extracted_entities') and self.extracted_entities:
+                entity_search_terms = {e.get('search_keyword', '').lower() for e in self.extracted_entities if e.get('search_keyword')}
+                for kw in keywords:
+                    if kw.lower() in entity_search_terms:
+                        entity_keywords.append(kw)
+                    else:
+                        general_keywords.append(kw)
+            else:
+                general_keywords = keywords
+            
+            if entity_keywords:
+                print(f"  Entity keywords ({len(entity_keywords)}):")
+                print(f"    {', '.join(entity_keywords[:5])}")
+                if len(entity_keywords) > 5:
+                    print(f"    ... and {len(entity_keywords) - 5} more")
+            
+            print(f"  General keywords ({len(general_keywords)}):")
+            print(f"    {', '.join(general_keywords[:8])}")
+            if len(general_keywords) > 8:
+                print(f"    ... and {len(general_keywords) - 8} more")
+            
+            if not self._get_user_confirmation("\n  Use these keywords?"):
+                custom = self._get_user_input("  Enter custom keywords (comma-separated)")
+                if custom:
+                    self.keywords = [k.strip() for k in custom.split(',')]
+                    keywords[:] = self.keywords  # Modify in place
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 2. TOPIC OVERRIDE
+        # ─────────────────────────────────────────────────────────────────────
+        print(f"\n  ─── Topic Context ───")
+        print(f"  Current: {self.topic_context or 'Not detected'}")
+        
+        custom_topic = self._get_user_input("  Custom topic (Enter to keep)")
+        if custom_topic:
+            self.topic_context = custom_topic
+            print(f"  ✓ Topic set to: {self.topic_context}")
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 3. ENHANCED FEATURES
+        # ─────────────────────────────────────────────────────────────────────
+        if config.enhanced.prompt_enhanced_features and any([
+            self.modules['keyword_remix'],
+            self.modules['pexels'],
+            self.modules['pixabay'],
+            self.modules['multi_style']
+        ]):
+            print(f"\n  ─── Enhanced Features ───")
+            
+            # Confidence enforcement
+            if self.modules['keyword_remix'] and config.enhanced.remix_enabled:
+                min_conf = config.enhanced.min_confidence
+                self.enhanced_enabled = self._get_user_confirmation(
+                    f"  Enable {min_conf:.0%} confidence enforcement?"
+                )
+                
+                if self.enhanced_enabled:
+                    # Initialize remixer with topic
+                    try:
+                        from src.keyword_remix import KeywordRemixer
+                        self.keyword_remixer = KeywordRemixer(topic_context=self.topic_context)
+                        print(f"  ✓ Keyword remixer ready")
+                    except Exception as e:
+                        logger.debug(f"Could not init remixer: {e}")
+            
+            # Multi-style OTIO
+            if self.modules['multi_style'] and config.multi_style.enabled:
+                if self._get_user_confirmation("  Generate multiple OTIO styles?", default=False):
+                    from src.multi_style import prompt_for_second_style
+                    self.second_style = prompt_for_second_style()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 4. VIDEO FILTERING
+        # ─────────────────────────────────────────────────────────────────────
+        if config.remix.enabled and config.remix.interactive_curation:
+            print(f"\n  ─── Video Filtering ───")
+            print(f"  After download, videos are scored for keyword relevance.")
+            print(f"    [F] Use FILTERED videos (recommended - higher relevance)")
+            print(f"    [A] Use ALL downloaded videos (skip filtering)")
+            
+            choice = self._get_user_input("  Select [F/A]", default="F").strip().upper()
+            
+            if choice == 'A':
+                config.remix.auto_accept_filter = "all"
+                print(f"  ✓ Will use ALL videos")
+            else:
+                config.remix.auto_accept_filter = "filtered"
+                print(f"  ✓ Will use filtered videos (min score: {config.remix.min_relevance_score})")
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 5. FINAL CONFIRMATION
+        # ─────────────────────────────────────────────────────────────────────
+        entity_count = len(self.extracted_entities) if hasattr(self, 'extracted_entities') else 0
+        
+        print(f"\n  ─── Pipeline Summary ───")
+        print(f"  • Keywords: {len(keywords)} ({entity_count} entity-based)")
+        print(f"  • Topic: {self.topic_context}")
+        print(f"  • Confidence enforcement: {'Yes' if self.enhanced_enabled else 'No'}")
+        print(f"  • Zero-download remix: {'Yes' if config.zero_download_remix.enabled else 'No'}")
+        print(f"  • Video filtering: {config.remix.auto_accept_filter.upper() if config.remix.enabled else 'Disabled'}")
+        if self.second_style:
+            print(f"  • Multi-style output: {self.second_style.name}")
+        
+        if not self._get_user_confirmation("\n  Start pipeline?"):
+            print("\n  ❌ Pipeline cancelled")
+            sys.exit(0)
+        
+        print(f"\n{'═' * 70}")
+        print(f"  STARTING PIPELINE (End-to-End)")
+        print(f"{'═' * 70}\n")
 
 
 # =============================================================================

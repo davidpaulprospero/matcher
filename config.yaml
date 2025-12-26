@@ -294,6 +294,10 @@ remix:
   interactive_curation: true   # Ask user to confirm remix
   show_excluded: true          # Show which files were excluded
   
+  # Auto-accept filter (set upfront, skip mid-pipeline prompt)
+  # Options: "filtered" (use filtered), "all" (use all videos), "prompt" (ask during pipeline)
+  auto_accept_filter: prompt
+  
   # Logging
   log_level: INFO
   log_file_processing: false   # Log each file (verbose)
@@ -347,6 +351,41 @@ zero_download_remix:
   max_keywords_per_batch: 20  # Maximum keywords to remix at once
 
 # -----------------------------------------------------------------------------
+# IMAGE SEARCH (Entity Stills)
+# -----------------------------------------------------------------------------
+# Downloads images for entities (people, places, organizations) mentioned
+# in the voiceover. Images are placed on V9 track as stills/overlays.
+
+image_search:
+  enabled: true
+  
+  # Images per entity (5 recommended for variety and backup options)
+  images_per_entity: 5
+  
+  # Minimum file size in MB (1MB ensures quality)
+  min_size_mb: 1.0
+  
+  # Output directory (relative to project)
+  output_dir: downloaded_images
+  
+  # Search sources (prioritized in order)
+  use_google: true       # Google Images (requires: pip install pyimagedl)
+  use_bing: true         # Bing Images (fallback)
+  use_stock_apis: true   # Pexels/Pixabay APIs (additional fallback)
+  
+  # Entity types to search for
+  entity_types:
+    - PERSON
+    - GPE        # Locations (cities, countries)
+    - ORG        # Organizations
+    - DATE       # Time periods
+    - EVENT      # Named events
+  
+  # OTIO output settings
+  image_track: V9        # Track for image stills
+  default_duration: 0.0  # 0 = match segment duration
+
+# -----------------------------------------------------------------------------
 # LLM SETTINGS
 # -----------------------------------------------------------------------------
 # Chain-of-thought: Centralized LLM settings for keyword extraction and other tasks
@@ -392,6 +431,7 @@ enhanced:
   # User prompts
   confirm_before_download: true
   prompt_enhanced_features: true
+  non_interactive: false  # Set to true for fully automated runs (no prompts)
 
 # -----------------------------------------------------------------------------
 # DOWNLOADING (yt-dlp)
@@ -473,23 +513,23 @@ download:
   # Search pool settings - IMPORTANT for finding matching videos!
   # YouTube search returns limited results, so we search more than we download
   # to find videos that match our duration filters
-  search_pool_multiplier: 5  # Search 5x what we want to download
-  min_search_pool: 40        # Minimum search pool size
+  search_pool_multiplier: 1  # Search 5x what we want to download
+  min_search_pool: 1        # Minimum search pool size
   
   # Duration tiers
   tiers:
     short:
       min: 20
       max: 120
-      per_keyword: 3
+      per_keyword: 1
     medium:
       min: 120
       max: 600
-      per_keyword: 8
+      per_keyword: 1
     long:
       min: 600
       max: 1500
-      per_keyword: 2
+      per_keyword: 1
     longer:
       min: 1500
       max: 3000
@@ -640,12 +680,21 @@ cache:
 # -----------------------------------------------------------------------------
 # PIPELINE AUTOMATION
 # -----------------------------------------------------------------------------
+# Skip stages to re-run pipeline with existing data.
+# Useful for: re-matching with different settings, testing output formats, etc.
+
 pipeline:
-  # Stage control (set true to skip)
-  skip_download: false
-  skip_transcription: false
-  skip_scene_detection: false
-  skip_matching: false
+  # Stage control (set true to skip that stage)
+  skip_download: true        # Skip video download - use existing videos
+  skip_image_search: false    # Skip entity image search
+  skip_transcription: false   # Skip transcription - use cached transcripts
+  skip_scene_detection: false # Skip scene detection
+  skip_matching: false        # Skip matching stage
+  
+  # Video source directory (used when skip_download=true)
+  # Set to absolute path containing your videos, e.g.:
+  # video_source_dir: "E:/Edit Job/test/project/downloaded_videos"
+  video_source_dir: ""
   
   # Resume/retry
   resume_enabled: true

@@ -106,7 +106,7 @@ class SRTSegment:
     
     # Extended attributes
     keywords: List[str] = field(default_factory=list)
-    entities: List[str] = field(default_factory=list)
+    entities: List = field(default_factory=list)  # List of entity dicts with text, type, context
     topic_id: Optional[int] = None
     
     def to_dict(self) -> dict:

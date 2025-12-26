@@ -337,6 +337,10 @@ class RemixConfig:
     interactive_curation: bool = True  # Ask user to confirm remix
     show_excluded: bool = True  # Show which files were excluded
     
+    # Auto-accept filter results (set upfront to skip mid-pipeline prompt)
+    # Options: "filtered" (use filtered), "all" (use all videos), "prompt" (ask during pipeline)
+    auto_accept_filter: str = "prompt"
+    
     # Logging
     log_level: str = "INFO"
     log_file_processing: bool = False  # Log each file (verbose)
@@ -360,6 +364,39 @@ class ZeroDownloadRemixConfig:
     cache_results: bool = True  # Cache remix results
     min_keywords_to_trigger: int = 1  # Minimum failed keywords to trigger remix
     max_keywords_per_batch: int = 20  # Maximum keywords to remix at once
+
+
+@dataclass
+class ImageSearchConfig:
+    """Configuration for entity image search.
+    
+    Downloads images representing entities (people, places, organizations)
+    mentioned in the voiceover for use as stills/overlays on V9 track.
+    """
+    enabled: bool = True
+    
+    # Images per entity (5 recommended for variety and backup options)
+    images_per_entity: int = 5
+    
+    # Minimum file size in MB (1MB default for quality)
+    min_size_mb: float = 1.0
+    
+    # Output directory (relative to project)
+    output_dir: str = "downloaded_images"
+    
+    # Search sources
+    use_google: bool = True  # Google Images (requires pyimagedl library)
+    use_bing: bool = True  # Bing Images (fallback if Google fails)
+    use_stock_apis: bool = True  # Pexels/Pixabay as additional fallback
+    
+    # Entity types to search for
+    entity_types: List[str] = field(default_factory=lambda: [
+        "PERSON", "GPE", "ORG", "DATE", "EVENT"
+    ])
+    
+    # OTIO output settings
+    image_track: str = "V9"  # Track for image stills
+    default_duration: float = 0.0  # 0 = match segment duration
 
 
 @dataclass
@@ -445,6 +482,7 @@ class EnhancedFeaturesConfig:
     # User prompts
     confirm_before_download: bool = True
     prompt_enhanced_features: bool = True
+    non_interactive: bool = False  # Skip ALL prompts, use defaults
 
 
 @dataclass
@@ -682,11 +720,16 @@ class CacheConfig:
 @dataclass
 class PipelineConfig:
     """Pipeline automation settings"""
-    # Stage control
-    skip_download: bool = False
-    skip_transcription: bool = False
-    skip_scene_detection: bool = False
-    skip_matching: bool = False
+    # Stage control - skip individual stages
+    skip_download: bool = False        # Skip video download (use existing videos)
+    skip_image_search: bool = False    # Skip entity image search
+    skip_transcription: bool = False   # Skip video transcription (use cached)
+    skip_scene_detection: bool = False # Skip scene detection
+    skip_matching: bool = False        # Skip matching stage
+    
+    # Video source directory (used when skip_download=true)
+    # Set to absolute path of folder containing videos
+    video_source_dir: str = ""
     
     # Resume/retry
     resume_enabled: bool = True
@@ -748,6 +791,7 @@ class Config:
     negative_matching: NegativeMatchingConfig = field(default_factory=NegativeMatchingConfig)
     remix: RemixConfig = field(default_factory=RemixConfig)
     zero_download_remix: ZeroDownloadRemixConfig = field(default_factory=ZeroDownloadRemixConfig)
+    image_search: ImageSearchConfig = field(default_factory=ImageSearchConfig)
     keyword: KeywordConfig = field(default_factory=KeywordConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     enhanced: EnhancedFeaturesConfig = field(default_factory=EnhancedFeaturesConfig)
@@ -890,6 +934,7 @@ class Config:
             'negative_matching': (NegativeMatchingConfig, 'negative_matching'),
             'remix': (RemixConfig, 'remix'),
             'zero_download_remix': (ZeroDownloadRemixConfig, 'zero_download_remix'),
+            'image_search': (ImageSearchConfig, 'image_search'),
             'keyword': (KeywordConfig, 'keyword'),
             'llm': (LLMConfig, 'llm'),
             'enhanced': (EnhancedFeaturesConfig, 'enhanced'),
@@ -976,7 +1021,7 @@ class Config:
         
         sections = [
             'transcription', 'embedding', 'indexing', 'vision',
-            'scene_detection', 'audio_analysis', 'matching', 'negative_matching', 'remix', 'keyword', 'llm',
+            'scene_detection', 'audio_analysis', 'matching', 'negative_matching', 'remix', 'image_search', 'keyword', 'llm',
             'enhanced', 'downloading', 'download', 'stock_footage', 'deduplication',
             'output', 'multi_style', 'logging', 'cache', 'pipeline'
         ]

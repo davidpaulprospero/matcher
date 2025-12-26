@@ -1153,7 +1153,17 @@ class StrategyMatcher:
         vo_kw = getattr(vo_segment, 'keywords', None) or []
         vo_ent = getattr(vo_segment, 'entities', None) or []
         vo_keywords = set(k.lower() for k in vo_kw)
-        vo_entities = set(e.lower() for e in vo_ent)
+        
+        # Handle entities as either strings or dicts with 'text' key
+        vo_entities = set()
+        for e in vo_ent:
+            if isinstance(e, dict):
+                text = e.get('text', '')
+                if text:
+                    vo_entities.add(text.lower())
+            elif isinstance(e, str):
+                vo_entities.add(e.lower())
+        
         vo_all = vo_keywords | vo_entities
         
         # Fallback: Extract important words from voiceover text if no keywords
@@ -1180,7 +1190,17 @@ class StrategyMatcher:
             seg_kw = getattr(seg, 'keywords', None) or []
             seg_ent = getattr(seg, 'entities', None) or []
             seg_keywords = set(k.lower() for k in seg_kw)
-            seg_entities = set(e.lower() for e in seg_ent)
+            
+            # Handle entities as either strings or dicts
+            seg_entities = set()
+            for e in seg_ent:
+                if isinstance(e, dict):
+                    text = e.get('text', '')
+                    if text:
+                        seg_entities.add(text.lower())
+                elif isinstance(e, str):
+                    seg_entities.add(e.lower())
+            
             seg_all = seg_keywords | seg_entities
             
             # Also check text for keyword presence
