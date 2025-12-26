@@ -353,7 +353,7 @@ class VideoDownloader:
             return f'bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
     
     def _build_filter_string(self, tier: str) -> str:
-        """Build filter string for duration"""
+        """Build filter string for duration and title blacklist"""
         tier_config = self.DURATION_TIERS[tier]
         filters = [
             f"duration>{tier_config['min']}",
@@ -363,7 +363,216 @@ class VideoDownloader:
         if self.download_config.min_views > 0:
             filters.append(f"view_count>{self.download_config.min_views}")
         
+        # Add title blacklist filters
+        # yt-dlp syntax: title!*=term means "title does not contain term"
+        title_blacklist = getattr(self.download_config, 'title_blacklist', [])
+        for term in title_blacklist:
+            # Escape special characters and add filter
+            safe_term = term.replace("'", "\\'")
+            filters.append(f"title!*='{safe_term}'")
+        
         return ' & '.join(filters)
+    
+    def _search_video_metadata(
+        self,
+        keyword: str,
+        tier: str,
+        max_results: int = 50
+    ) -> List[Dict]:
+        """
+        Search YouTube and get video metadata WITHOUT downloading.
+        Used for LLM title filtering.
+        
+        Returns list of dicts with: id, title, duration, channel, url
+        """
+        tier_config = self.DURATION_TIERS[tier]
+        
+        cmd = [
+            'yt-dlp',
+            f'ytsearch{max_results}:{keyword}',
+            '--dump-json',  # Get metadata only, no download
+            '--flat-playlist',  # Faster - don't extract full info
+            '--no-download',
+            '--match-filter', f"duration>{tier_config['min']} & duration<{tier_config['max']}",
+        ]
+        
+        if self._cookies_path:
+            cmd.extend(['--cookies', str(self._cookies_path)])
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            videos = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    try:
+                        data = json.loads(line)
+                        videos.append({
+                            'id': data.get('id', ''),
+                            'title': data.get('title', ''),
+                            'duration': data.get('duration', 0),
+                            'channel': data.get('channel', data.get('uploader', '')),
+                            'url': f"https://www.youtube.com/watch?v={data.get('id', '')}"
+                        })
+                    except json.JSONDecodeError:
+                        continue
+            
+            return videos
+            
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout searching metadata for '{keyword}'")
+            return []
+        except Exception as e:
+            logger.warning(f"Error searching metadata: {e}")
+            return []
+    
+    def _filter_titles_with_llm(
+        self,
+        videos: List[Dict],
+        keyword: str,
+        topic: str = ""
+    ) -> List[Dict]:
+        """
+        Filter video titles using LLM to check relevance.
+        
+        Args:
+            videos: List of video metadata dicts
+            keyword: The search keyword
+            topic: Optional topic context
+            
+        Returns:
+            List of approved videos
+        """
+        llm_config = getattr(self.download_config, 'llm_title_filter', None)
+        if not llm_config or not getattr(llm_config, 'enabled', False):
+            return videos  # Return all if LLM filter disabled
+        
+        if not videos:
+            return []
+        
+        provider = getattr(llm_config, 'provider', 'gemini')
+        model = getattr(llm_config, 'model', 'gemini-2.0-flash')
+        min_relevance = getattr(llm_config, 'min_relevance', 0.7)
+        batch_size = getattr(llm_config, 'batch_size', 20)
+        
+        approved = []
+        
+        # Process in batches
+        for i in range(0, len(videos), batch_size):
+            batch = videos[i:i + batch_size]
+            
+            # Build prompt
+            titles_list = "\n".join([f"{j+1}. {v['title']}" for j, v in enumerate(batch)])
+            
+            prompt = f"""You are filtering YouTube video titles for a video editing project.
+
+SEARCH KEYWORD: "{keyword}"
+{f'TOPIC CONTEXT: {topic}' if topic else ''}
+
+VIDEO TITLES:
+{titles_list}
+
+For each title, determine if it would provide relevant B-roll footage for the keyword/topic.
+
+REJECT videos that are:
+- Sports highlights, game recaps, match footage
+- Music videos, lyric videos, karaoke
+- Gaming content, Let's Play, walkthroughs
+- Personal vlogs unrelated to the topic
+- News commentary/opinion pieces (unless specifically needed)
+- Reaction videos
+- Compilations of memes/fails
+
+APPROVE videos that are:
+- Documentary or educational content
+- Stock footage, travel footage, city views
+- Nature, landscapes, aerial shots
+- Professional productions about the topic
+- News reports with actual footage
+- Explainer videos with relevant visuals
+
+Respond with a JSON array of objects, one per video:
+[
+  {{"index": 1, "approve": true, "reason": "Documentary about topic"}},
+  {{"index": 2, "approve": false, "reason": "Sports highlights"}}
+]
+
+Only output the JSON array, no other text."""
+
+            try:
+                if provider == 'gemini':
+                    response = self._call_gemini(prompt, model)
+                else:
+                    response = self._call_anthropic(prompt, model)
+                
+                # Parse response
+                import re
+                json_match = re.search(r'\[[\s\S]*\]', response)
+                if json_match:
+                    results = json.loads(json_match.group())
+                    for result in results:
+                        idx = result.get('index', 0) - 1
+                        if 0 <= idx < len(batch) and result.get('approve', False):
+                            video = batch[idx]
+                            video['llm_reason'] = result.get('reason', 'Approved')
+                            approved.append(video)
+                            logger.debug(f"    ✓ Approved: {video['title'][:50]}...")
+                        elif 0 <= idx < len(batch):
+                            logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({result.get('reason', 'No reason')})")
+                            
+            except Exception as e:
+                logger.warning(f"LLM title filter error: {e}")
+                # On error, approve all in batch (fail open)
+                approved.extend(batch)
+        
+        logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved")
+        return approved
+    
+    def _call_gemini(self, prompt: str, model: str) -> str:
+        """Call Gemini API for title filtering."""
+        try:
+            import google.generativeai as genai
+            
+            api_key = os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY')
+            if not api_key:
+                logger.warning("No Gemini API key found")
+                return "[]"
+            
+            genai.configure(api_key=api_key)
+            client = genai.GenerativeModel(model)
+            response = client.generate_content(prompt)
+            return response.text
+            
+        except Exception as e:
+            logger.warning(f"Gemini API error: {e}")
+            return "[]"
+    
+    def _call_anthropic(self, prompt: str, model: str) -> str:
+        """Call Anthropic API for title filtering."""
+        try:
+            import anthropic
+            
+            api_key = os.environ.get('ANTHROPIC_API_KEY')
+            if not api_key:
+                logger.warning("No Anthropic API key found")
+                return "[]"
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text
+            
+        except Exception as e:
+            logger.warning(f"Anthropic API error: {e}")
+            return "[]"
     
     def _get_ffmpeg_transcode_cmd(self, input_path: str, output_path: str) -> List[str]:
         """Build FFmpeg transcode command for DaVinci with GPU acceleration"""
@@ -438,14 +647,14 @@ class VideoDownloader:
         self,
         keyword: str,
         tier: str,
-        output_dir: Path
+        output_dir: Path,
+        topic: str = ""
     ) -> List[DownloadedVideo]:
-        """Download videos for a single keyword and tier"""
+        """Download videos for a single keyword and tier with optional LLM filtering"""
         tier_config = self.DURATION_TIERS[tier]
         max_downloads = tier_config['per_keyword']
         
         # Search a larger pool to find videos that match duration filters
-        # This is critical: ytsearch only returns N results, so we need N >> max_downloads
         multiplier = getattr(self.download_config, 'search_pool_multiplier', 5)
         min_pool = getattr(self.download_config, 'min_search_pool', 30)
         search_pool = max(max_downloads * multiplier, min_pool)
@@ -458,33 +667,118 @@ class VideoDownloader:
         # Get existing files
         existing_before = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
         
-        # Build yt-dlp command
+        # Check if LLM filtering is enabled
+        llm_config = getattr(self.download_config, 'llm_title_filter', None)
+        use_llm_filter = llm_config and getattr(llm_config, 'enabled', False)
+        
+        if use_llm_filter:
+            # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
+            logger.info(f"    Searching {search_pool} videos for LLM filtering...")
+            
+            videos = self._search_video_metadata(keyword, tier, search_pool)
+            
+            if not videos:
+                logger.warning(f"    No videos found for '{keyword}'")
+                return []
+            
+            logger.info(f"    Found {len(videos)} candidate videos")
+            
+            # Apply blacklist filter first (fast, no API cost)
+            title_blacklist = getattr(self.download_config, 'title_blacklist', [])
+            if title_blacklist:
+                before_count = len(videos)
+                videos = [v for v in videos if not any(
+                    term.lower() in v['title'].lower() for term in title_blacklist
+                )]
+                if before_count > len(videos):
+                    logger.info(f"    Blacklist filter: {len(videos)}/{before_count} passed")
+            
+            # Apply LLM filter
+            approved_videos = self._filter_titles_with_llm(videos[:search_pool], keyword, topic)
+            
+            if not approved_videos:
+                logger.warning(f"    No videos passed LLM filter for '{keyword}'")
+                return []
+            
+            # Download only approved videos (by ID)
+            video_ids = [v['id'] for v in approved_videos[:max_downloads]]
+            logger.info(f"    Downloading {len(video_ids)} approved videos...")
+            
+            return self._download_by_ids(video_ids, keyword_dir, output_dir, keyword, tier)
+        
+        else:
+            # ORIGINAL FLOW: Direct search and download with yt-dlp filters
+            cmd = [
+                'yt-dlp',
+                f'ytsearch{search_pool}:{keyword}',
+                '-f', self._build_format_string(),
+                '--match-filter', self._build_filter_string(tier),
+                '--max-downloads', str(max_downloads),
+                '--merge-output-format', 'mp4',
+                '--no-playlist',
+                '--write-info-json',
+                '--restrict-filenames',
+                '--no-overwrites',
+                # Truncate title to 30 chars to avoid path length issues
+                '-o', str(keyword_dir / '%(title).30s_%(id)s.%(ext)s'),
+                '--progress',
+                '--newline',
+                '--quiet',  # Suppress progress output
+                '--no-warnings',
+            ]
+            
+            if self._cookies_path:
+                cmd.extend(['--cookies', str(self._cookies_path)])
+            
+            logger.info(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
+            
+            return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+    
+    def _download_by_ids(
+        self,
+        video_ids: List[str],
+        keyword_dir: Path,
+        output_dir: Path,
+        keyword: str,
+        tier: str
+    ) -> List[DownloadedVideo]:
+        """Download specific videos by their YouTube IDs"""
+        existing_before = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
+        
+        # Build URLs from IDs
+        urls = [f"https://www.youtube.com/watch?v={vid}" for vid in video_ids]
+        
         cmd = [
             'yt-dlp',
-            f'ytsearch{search_pool}:{keyword}',  # Search larger pool
             '-f', self._build_format_string(),
-            '--match-filter', self._build_filter_string(tier),
-            '--max-downloads', str(max_downloads),  # Limit actual downloads
-            '--merge-output-format', 'mp4',  # Ensure merged output is mp4
+            '--merge-output-format', 'mp4',
             '--no-playlist',
-            '--write-info-json',  # Need this for metadata
+            '--write-info-json',
             '--restrict-filenames',
             '--no-overwrites',
-            '-o', str(keyword_dir / '%(title)s-%(id)s.%(ext)s'),
-            # '--progress',
-            # '--newline',  # Better progress output
-        ]
+            # Truncate title to 30 chars to avoid path length issues
+            '-o', str(keyword_dir / '%(title).30s_%(id)s.%(ext)s'),
+            '--quiet',  # Suppress progress spam
+            '--no-warnings',
+            '--progress',
+        ] + urls
         
-        # Add cookies file if it exists (required for YouTube)
         if self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
         
-        # Log the actual command for debugging
-        logger.info(f"    Search: ytsearch{search_pool}, Filter: {self._build_filter_string(tier)}, Max: {max_downloads}")
-        logger.debug(f"Running: {' '.join(cmd)}")
-        
+        return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+    
+    def _run_download_cmd(
+        self,
+        cmd: List[str],
+        keyword_dir: Path,
+        output_dir: Path,
+        keyword: str,
+        tier: str,
+        existing_before: set
+    ) -> List[DownloadedVideo]:
+        """Execute download command and process results"""
         try:
-            # Use Popen with stdin=DEVNULL to prevent hanging
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -494,29 +788,18 @@ class VideoDownloader:
             )
             
             try:
-                stdout, stderr = process.communicate(timeout=300)
+                stdout, stderr = process.communicate(timeout=600)  # 10 min timeout
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate()
                 logger.warning(f"Timeout downloading '{keyword}' ({tier})")
                 return []
             
-            # Log any errors from yt-dlp
+            # Only log actual errors
             if stderr:
-                # Only log meaningful errors, skip warnings
                 for line in stderr.strip().split('\n'):
-                    if line and 'WARNING' not in line:
-                        logger.debug(f"    yt-dlp stderr: {line}")
-            
-            # Log stdout (download progress)
-            if stdout:
-                for line in stdout.strip().split('\n'):
-                    if line and '[download]' in line:
-                        logger.info(f"    {line}")
-            
-            # Log return code if non-zero
-            if process.returncode != 0:
-                logger.debug(f"    yt-dlp exit code: {process.returncode}")
+                    if line and 'WARNING' not in line and 'ERROR' in line:
+                        logger.warning(f"    yt-dlp: {line}")
             
             # Find new files
             existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
@@ -526,12 +809,12 @@ class VideoDownloader:
             video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
             new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
             
-            logger.debug(f"  Found {len(new_videos)} new video(s) in {keyword_dir}")
+            if new_videos:
+                logger.info(f"    ✓ Downloaded {len(new_videos)} video(s)")
             
             downloaded = []
             
             for idx, video_file in enumerate(new_videos, 1):
-                logger.debug(f"  Processing video {idx}/{len(new_videos)}: {video_file}")
                 video_path = keyword_dir / video_file
                 
                 # Try to get metadata from info.json
@@ -547,14 +830,13 @@ class VideoDownloader:
                 # Transcode for DaVinci if enabled AND necessary
                 final_path = video_path
                 if self.download_config.davinci_mode:
-                    # Check if transcoding is actually needed
                     needs_transcode, reason = self._needs_transcoding(str(video_path))
                     
                     if not needs_transcode:
-                        logger.info(f"    ↳ ✓ No transcode needed: {reason}")
+                        logger.debug(f"    ↳ No transcode needed: {reason}")
                         final_path = video_path
                     else:
-                        logger.info(f"    ↳ Transcoding {video_file} ({reason})...")
+                        logger.info(f"    ↳ Transcoding {video_file[:40]}...")
                         transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
                             str(video_path), str(video_path)
                         )
@@ -626,7 +908,8 @@ class VideoDownloader:
         self,
         keyword: str,
         output_dir: Path,
-        tiers: List[str] = None
+        tiers: List[str] = None,
+        topic: str = ""
     ) -> List[DownloadedVideo]:
         """Download videos for a keyword across specified tiers"""
         if tiers is None:
@@ -643,7 +926,7 @@ class VideoDownloader:
                     continue
             
             logger.info(f"  [{tier}] Downloading...")
-            downloaded = self._download_single(keyword, tier, output_dir)
+            downloaded = self._download_single(keyword, tier, output_dir, topic)
             
             if downloaded:
                 logger.info(f"  [{tier}] ✓ {len(downloaded)} video(s)")
@@ -672,7 +955,8 @@ class VideoDownloader:
         keywords: List[str],
         output_dir: Path,
         max_concurrent: int = 3,
-        resume: bool = False
+        resume: bool = False,
+        topic: str = ""
     ) -> Tuple[List[DownloadedVideo], List[str]]:
         """
         Download videos for all keywords.
@@ -682,6 +966,7 @@ class VideoDownloader:
             output_dir: Output directory
             max_concurrent: Max concurrent downloads
             resume: Whether to resume from checkpoint
+            topic: Topic context for LLM title filtering
         
         Returns:
             Tuple of (downloaded_videos, failed_keywords)
@@ -710,6 +995,17 @@ class VideoDownloader:
         all_downloaded = []
         failed_keywords = list(self.checkpoint.failed_keywords)
         
+        # Log title blacklist if enabled
+        title_blacklist = getattr(self.download_config, 'title_blacklist', [])
+        if title_blacklist:
+            logger.info(f"  Title blacklist: {len(title_blacklist)} terms (e.g., {', '.join(title_blacklist[:5])}...)")
+        
+        # Log LLM filter status
+        llm_config = getattr(self.download_config, 'llm_title_filter', None)
+        if llm_config and getattr(llm_config, 'enabled', False):
+            provider = getattr(llm_config, 'provider', 'gemini')
+            logger.info(f"  LLM title filter: enabled ({provider})")
+        
         # Process keywords with thread pool
         # Note: We process keywords sequentially but tiers can overlap slightly
         # to avoid overwhelming the API
@@ -720,7 +1016,7 @@ class VideoDownloader:
             self.checkpoint.current_keyword = keyword
             self._save_checkpoint()
             
-            downloaded = self.download_for_keyword(keyword, output_dir)
+            downloaded = self.download_for_keyword(keyword, output_dir, topic=topic)
             
             if downloaded:
                 all_downloaded.extend(downloaded)

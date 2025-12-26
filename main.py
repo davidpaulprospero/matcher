@@ -1076,7 +1076,8 @@ Topic:"""
             downloaded_videos, failed = self.downloader.download_all(
                 keywords=keywords,
                 output_dir=output_dir,
-                resume=True
+                resume=True,
+                topic=self.topic_context or ""
             )
             self.downloaded_videos = downloaded_videos
             
@@ -1277,7 +1278,8 @@ Topic:"""
                 new_videos, new_failed = self.downloader.download_all(
                     keywords=remixed_keywords,
                     output_dir=output_dir,
-                    resume=True
+                    resume=True,
+                    topic=self.topic_context or ""
                 )
                 
                 if new_videos:
@@ -1692,7 +1694,7 @@ Topic:"""
             return outputs
         
         try:
-            from src.otio_builder import create_timeline, save_timeline, save_timeline_as_edl
+            from src.otio_builder import create_timeline, save_timeline, save_timeline_split, save_timeline_as_edl, generate_resolve_xml_with_bins
             
             # Generate timeline
             print(f"  Creating timeline...")
@@ -1707,10 +1709,63 @@ Topic:"""
             
             # Output formats (config-driven)
             if config.output.generate_otio:
-                otio_path = output_dir / "matched_timeline.otio"
-                save_timeline(timeline, str(otio_path))
-                outputs['otio'] = str(otio_path)
-                print(f"  ✓ OTIO: {otio_path}")
+                otio_base_path = output_dir / "matched_timeline"
+                
+                # Check if we should split the OTIO
+                split_otio = getattr(config.output, 'split_otio', True)
+                
+                if split_otio:
+                    # Save split OTIO files (batched by clips)
+                    clips_per_file = getattr(config.output, 'otio_clips_per_file', 10)
+                    otio_paths = save_timeline_split(
+                        timeline, 
+                        str(otio_base_path), 
+                        num_parts=3,
+                        clips_per_file=clips_per_file
+                    )
+                    outputs['otio'] = otio_paths
+                    
+                    # Categorize paths for display
+                    preview = [p for p in otio_paths if '_PREVIEW_' in p]
+                    batches = [p for p in otio_paths if '_batch' in p]
+                    audio = [p for p in otio_paths if '_A8_' in p]
+                    
+                    print(f"  ✓ OTIO files generated ({len(otio_paths)} total, {clips_per_file} clips/file):")
+                    
+                    # Show preview first (smallest, try this first)
+                    if preview:
+                        print(f"    Try first (smallest):")
+                        for p in preview:
+                            print(f"      - {Path(p).name}")
+                    
+                    # Show batch files by track
+                    if batches:
+                        # Group by track
+                        tracks = {}
+                        for p in batches:
+                            name = Path(p).name
+                            # Extract track prefix (V1, V2, etc.)
+                            parts = name.split('_')
+                            if len(parts) >= 2:
+                                track = parts[1]  # V1, V2, etc.
+                                if track not in tracks:
+                                    tracks[track] = []
+                                tracks[track].append(p)
+                        
+                        print(f"    Clip batches ({len(batches)} files):")
+                        for track, files in sorted(tracks.items()):
+                            print(f"      {track}: {len(files)} batch files")
+                    
+                    if audio:
+                        print(f"    Audio:")
+                        for p in audio:
+                            print(f"      - {Path(p).name}")
+                else:
+                    # Save single OTIO file
+                    otio_path = str(otio_base_path) + ".otio"
+                    save_timeline(timeline, otio_path)
+                    outputs['otio'] = otio_path
+                    print(f"  ✓ OTIO: {otio_path}")
             
             if config.output.generate_edl:
                 edl_path = output_dir / "matched_timeline.edl"
@@ -1723,6 +1778,23 @@ Topic:"""
                 )
                 outputs['edl'] = str(edl_path)
                 print(f"  ✓ EDL: {edl_path}")
+            
+            # Generate DaVinci Resolve XML with media bin AND timeline (FALLBACK)
+            if getattr(config.output, 'generate_xml', True):
+                xml_base_path = output_dir / "resolve_import"
+                num_parts = getattr(config.output, 'xml_parts', 2)
+                xml_paths = generate_resolve_xml_with_bins(
+                    matches=self.matches,
+                    output_path=str(xml_base_path),
+                    voiceover_path=getattr(self, 'voiceover_path', None),
+                    frame_rate=getattr(config.output, 'frame_rate', 30.0),
+                    entity_images=getattr(self, 'entity_images', None),
+                    entity_videos=getattr(self, 'entity_videos', None),
+                    config=config,
+                    num_parts=num_parts
+                )
+                outputs['xml'] = xml_paths
+                print(f"  ✓ XML (fallback - use if OTIO fails): {xml_paths[0]}")
             
             # Generate report if enabled
             if config.output.generate_report:

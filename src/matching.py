@@ -644,7 +644,22 @@ class TieredMatcher:
             # Get alternatives (prefer different sources)
             alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
             
-            return MatchResult(primary_match=match, alternatives=alternatives)
+            # Get secondary matches (different video files from V1-V3)
+            used_video_files = {best_seg.source_file}
+            alt_segments = []
+            for alt in alternatives:
+                used_video_files.add(alt.video_segment.source_file)
+                alt_segments.append(alt.video_segment)
+            
+            secondary_matches = self._get_secondary_matches(
+                valid_candidates,
+                scenes,
+                used_video_files,
+                primary_segment=best_seg,
+                alt_segments=alt_segments
+            )
+            
+            return MatchResult(primary_match=match, alternatives=alternatives, secondary_matches=secondary_matches)
         
         # Check cache - but only use if selected clip is still available
         cache_key = self._get_cache_key(vo_segment.text, valid_candidates)
@@ -677,7 +692,22 @@ class TieredMatcher:
                     cached_seg
                 )
                 
-                return MatchResult(primary_match=match, alternatives=alternatives)
+                # Get secondary matches (different video files from V1-V3)
+                used_video_files = {cached_seg.source_file}
+                alt_segments = []
+                for alt in alternatives:
+                    used_video_files.add(alt.video_segment.source_file)
+                    alt_segments.append(alt.video_segment)
+                
+                secondary_matches = self._get_secondary_matches(
+                    valid_candidates,
+                    scenes,
+                    used_video_files,
+                    primary_segment=cached_seg,
+                    alt_segments=alt_segments
+                )
+                
+                return MatchResult(primary_match=match, alternatives=alternatives, secondary_matches=secondary_matches)
             # If cached clip is over-reused, fall through to LLM matching
         
         # Build context string
@@ -756,11 +786,29 @@ class TieredMatcher:
             clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
         )
         
-        # Get alternatives (prefer different sources)
+        # Get alternatives (prefer different sources) - V2-V3
         alternatives = self._get_alternatives(
             [c for i, c in enumerate(valid_candidates[:4]) if i != selected_idx],
             scenes,
             best_seg
+        )
+        
+        # Get secondary matches (must use DIFFERENT video files from V1-V3) - V4-V6
+        # Collect all video files used by primary and alternatives
+        used_video_files = {best_seg.source_file}
+        alt_segments = []
+        for alt in alternatives:
+            used_video_files.add(alt.video_segment.source_file)
+            alt_segments.append(alt.video_segment)
+        
+        # Search through ALL candidates but exclude video files used by V1-V3
+        # Third pass allows same video file but different segment as last resort
+        secondary_matches = self._get_secondary_matches(
+            valid_candidates,  # Search ALL candidates
+            scenes,
+            used_video_files,
+            primary_segment=best_seg,
+            alt_segments=alt_segments
         )
         
         # Check for gap (no good match)
@@ -770,6 +818,7 @@ class TieredMatcher:
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,
+            secondary_matches=secondary_matches,
             has_gap=has_gap,
             gap_reason=gap_reason
         )
@@ -841,6 +890,129 @@ class TieredMatcher:
                 ))
         
         return alternatives
+    
+    def _get_secondary_matches(
+        self,
+        candidates: List[Tuple[SRTSegment, float]],
+        scenes: Optional[Dict[str, List[SceneInfo]]],
+        excluded_video_files: set,
+        primary_segment: Optional[SRTSegment] = None,
+        alt_segments: Optional[List[SRTSegment]] = None
+    ) -> List[AlternativeMatch]:
+        """
+        Get secondary matches for V4-V6.
+        
+        Three-pass approach:
+        1. First pass: Different video files from V1-V3, different from each other
+        2. Second pass: Different video files from V1-V3, allow same source within V4-V6
+        3. Third pass: Allow same video file as V1-V3 but DIFFERENT segment (last resort)
+        
+        Args:
+            candidates: List of (segment, similarity) tuples
+            scenes: Scene info dict
+            excluded_video_files: Set of video file paths to exclude (used by V1-V3)
+            primary_segment: V1 segment (to exclude same exact segment)
+            alt_segments: V2-V3 segments (to exclude same exact segments)
+        
+        Returns:
+            List of up to 3 secondary matches
+        """
+        secondary = []
+        used_sources = set()
+        num_secondary = 3  # V4, V5, V6
+        
+        # Collect exact segments used by V1-V3 (to avoid in third pass)
+        used_segments = set()
+        if primary_segment:
+            used_segments.add((primary_segment.source_file, primary_segment.start_time))
+        if alt_segments:
+            for seg in alt_segments:
+                if seg:
+                    used_segments.add((seg.source_file, seg.start_time))
+        
+        # First pass: Different video files from V1-V3, different from each other
+        for seg, sim in candidates:
+            if len(secondary) >= num_secondary:
+                break
+            
+            # Must be from a video file NOT used by V1-V3
+            if seg.source_file in excluded_video_files:
+                continue
+            
+            # Prefer different sources within secondary set too
+            if seg.source_file in used_sources:
+                continue
+            
+            scene = self._get_scene_for_segment(seg, scenes)
+            
+            position = len(secondary)
+            label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
+            
+            secondary.append(AlternativeMatch(
+                video_segment=seg,
+                video_scene=scene,
+                confidence=sim,
+                reasoning=f"{label} (source: {Path(seg.source_file).stem})"
+            ))
+            used_sources.add(seg.source_file)
+        
+        # Second pass: Different video files from V1-V3, allow same source within V4-V6
+        if len(secondary) < num_secondary:
+            for seg, sim in candidates:
+                if len(secondary) >= num_secondary:
+                    break
+                
+                # Still must be from a video file NOT used by V1-V3
+                if seg.source_file in excluded_video_files:
+                    continue
+                
+                # Check if already added (same file AND same time)
+                if any(s.video_segment.source_file == seg.source_file and 
+                       s.video_segment.start_time == seg.start_time for s in secondary):
+                    continue
+                
+                scene = self._get_scene_for_segment(seg, scenes)
+                
+                position = len(secondary)
+                label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
+                
+                secondary.append(AlternativeMatch(
+                    video_segment=seg,
+                    video_scene=scene,
+                    confidence=sim * 0.95,  # Small penalty
+                    reasoning=f"{label} (same source ok)"
+                ))
+        
+        # Third pass (LAST RESORT): Allow same video file as V1-V3 but DIFFERENT segment
+        # Only if we still don't have enough and need to fill gaps
+        if len(secondary) < num_secondary:
+            for seg, sim in candidates:
+                if len(secondary) >= num_secondary:
+                    break
+                
+                # Skip if it's the exact same segment as V1-V3
+                seg_key = (seg.source_file, seg.start_time)
+                if seg_key in used_segments:
+                    continue
+                
+                # Skip if already in secondary
+                if any(s.video_segment.source_file == seg.source_file and 
+                       s.video_segment.start_time == seg.start_time for s in secondary):
+                    continue
+                
+                scene = self._get_scene_for_segment(seg, scenes)
+                
+                position = len(secondary)
+                label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
+                
+                secondary.append(AlternativeMatch(
+                    video_segment=seg,
+                    video_scene=scene,
+                    confidence=sim * 0.85,  # Larger penalty for same video file as V1-V3
+                    reasoning=f"{label} (fallback - different segment)"
+                ))
+        
+        return secondary
     
     def _build_context(
         self,

@@ -292,7 +292,8 @@ class MatchResult:
     """Complete match result with alternatives and strategy matches"""
     primary_match: Match
     alternatives: List[AlternativeMatch] = field(default_factory=list)  # V2-V3
-    strategy_matches: List[StrategyMatch] = field(default_factory=list)  # V4-V7
+    secondary_matches: List[AlternativeMatch] = field(default_factory=list)  # V4-V6 (different video files from V1-V3)
+    strategy_matches: List[StrategyMatch] = field(default_factory=list)  # V7+
     has_gap: bool = False  # True if no good match found
     gap_reason: str = ""
 
