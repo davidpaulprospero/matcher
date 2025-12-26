@@ -513,27 +513,27 @@ download:
   # Search pool settings - IMPORTANT for finding matching videos!
   # YouTube search returns limited results, so we search more than we download
   # to find videos that match our duration filters
-  search_pool_multiplier: 1  # Search 5x what we want to download
-  min_search_pool: 1        # Minimum search pool size
+  search_pool_multiplier: 5  # Search 5x what we want to download
+  min_search_pool: 40        # Minimum search pool size
   
   # Duration tiers
   tiers:
     short:
       min: 20
       max: 120
-      per_keyword: 1
+      per_keyword: 8
     medium:
       min: 120
       max: 600
-      per_keyword: 1
+      per_keyword: 8
     long:
       min: 600
       max: 1500
-      per_keyword: 1
+      per_keyword: 5
     longer:
       min: 1500
       max: 3000
-      per_keyword: 1
+      per_keyword: 5
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
