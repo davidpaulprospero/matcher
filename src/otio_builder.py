@@ -182,7 +182,8 @@ def create_timeline(
     matches: List[MatchResult],
     config: Config,
     voiceover_path: Optional[str] = None,
-    frame_rate: float = 30.0
+    frame_rate: float = 30.0,
+    entity_images: Optional[Dict] = None
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
@@ -195,6 +196,7 @@ def create_timeline(
     - V5: Different-Source strategy - disabled
     - V6: Keyword-Only strategy - disabled
     - V7: Embedding-Diversity strategy - disabled
+    - V9: Entity Images (stills) - disabled
     - A1-A7: Corresponding audio tracks
     - A8: Voiceover - enabled
     """
@@ -235,6 +237,11 @@ def create_timeline(
         track = otio.schema.Track(name=f"V{track_num} - {display_name}", kind=otio.schema.TrackKind.Video)
         track.enabled = False
         video_tracks.append(track)
+    
+    # V9: Entity Images track
+    image_track = otio.schema.Track(name="V9 - Entity Images", kind=otio.schema.TrackKind.Video)
+    image_track.enabled = False  # Disabled by default, user enables as needed
+    image_track.metadata['Resolve_OTIO'] = {'Locked': False}
     
     # Create audio tracks for video audio
     audio_tracks = []
@@ -515,11 +522,170 @@ def create_timeline(
     
     timeline.tracks.append(voiceover_track)
     
+    # Add V9 Entity Images track (after other video tracks)
+    timeline.tracks.append(image_track)
+    
+    # Populate image track if entity_images provided
+    if entity_images:
+        _add_entity_images_to_track(
+            image_track=image_track,
+            entity_images=entity_images,
+            matches=matches,
+            frame_rate=rate
+        )
+    
     # Add timeline-level markers to the primary video track
     for marker in timeline_markers:
         video_tracks[0].markers.append(marker)
     
     return timeline
+
+
+def _add_entity_images_to_track(
+    image_track: otio.schema.Track,
+    entity_images: Dict,
+    matches: List[MatchResult],
+    frame_rate: float
+):
+    """
+    Add entity images to V9 track at segment positions.
+    
+    ALL images for an entity are placed as separate clips within
+    the segment, divided equally by duration.
+    
+    Example: 10 second segment with 5 images = 5 clips of 2 seconds each
+    
+    Format matches DaVinci Resolve's OTIO export:
+    - media_references dict with DEFAULT_MEDIA key
+    - available_range = 1 frame (still image)
+    - source_range = display duration
+    - active_media_reference_key = "DEFAULT_MEDIA"
+    """
+    rate = frame_rate
+    
+    # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec)
+    segment_timing = {}
+    current_frame = 0
+    
+    for i, match_result in enumerate(matches):
+        match = match_result.primary_match
+        vo_seg = match.voiceover_segment
+        target_duration = vo_seg.end_time - vo_seg.start_time
+        duration_frames = round(target_duration * frame_rate)
+        
+        segment_timing[i] = (current_frame, duration_frames, target_duration)
+        current_frame += duration_frames
+    
+    # Process each segment
+    for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
+        match = matches[seg_idx].primary_match
+        vo_text = match.voiceover_segment.text.lower()
+        
+        # Find entities mentioned in this segment
+        segment_has_images = False
+        
+        for entity_name, entity_result in entity_images.items():
+            if entity_name.lower() not in vo_text:
+                continue
+            
+            if not entity_result.images:
+                continue
+            
+            # Get all images for this entity
+            all_images = entity_result.images
+            num_images = len(all_images)
+            
+            if num_images == 0:
+                continue
+            
+            segment_has_images = True
+            
+            # Divide segment duration equally among all images
+            frames_per_image = max(1, duration_frames // num_images)
+            remaining_frames = duration_frames - (frames_per_image * num_images)
+            
+            # Create a clip for each image
+            for img_idx, image_path in enumerate(all_images):
+                # Calculate this image's duration (distribute remaining frames to last clips)
+                clip_frames = frames_per_image
+                if img_idx >= num_images - remaining_frames:
+                    clip_frames += 1
+                
+                # Get just the filename for the clip/reference name
+                image_path_obj = Path(image_path)
+                image_filename = image_path_obj.name
+                
+                # Convert to Windows path format with backslashes for Resolve
+                image_path_resolved = str(image_path_obj.resolve())
+                # Ensure backslashes for Windows paths
+                if not image_path_resolved.startswith('/'):
+                    image_path_resolved = image_path_resolved.replace('/', '\\')
+                
+                # Create external reference matching Resolve's format:
+                # - available_range = 1 frame (still image has 1 frame)
+                # - name = filename
+                image_ref = otio.schema.ExternalReference(
+                    target_url=image_path_resolved,
+                    available_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=otio.opentime.RationalTime(1, rate)  # 1 frame for still
+                    )
+                )
+                image_ref.name = image_filename
+                
+                # Create clip with source_range = display duration
+                image_clip = otio.schema.Clip(
+                    name=image_filename,
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=otio.opentime.RationalTime(clip_frames, rate)
+                    )
+                )
+                
+                # Set media references using the Resolve format
+                # This uses the newer OTIO format with media_references dict
+                image_clip.media_reference = image_ref
+                
+                # Add metadata
+                image_clip.metadata['entity_name'] = entity_name
+                image_clip.metadata['entity_type'] = entity_result.entity_type
+                image_clip.metadata['query'] = entity_result.query
+                image_clip.metadata['image_path'] = image_path
+                image_clip.metadata['segment_index'] = seg_idx
+                image_clip.metadata['image_index'] = img_idx
+                image_clip.metadata['total_images'] = num_images
+                image_clip.metadata['is_still_image'] = True
+                
+                # Add Resolve-specific metadata
+                image_clip.metadata['Resolve_OTIO'] = {}
+                
+                # Add marker for TEXT overlay hint (only on first image)
+                if img_idx == 0:
+                    marker = otio.schema.Marker(
+                        name=f"TEXT: {entity_result.entity_type} - {entity_name}",
+                        marked_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(1, rate)
+                        ),
+                        color=otio.schema.MarkerColor.PINK
+                    )
+                    image_clip.markers.append(marker)
+                
+                image_track.append(image_clip)
+            
+            # Only process first matching entity per segment
+            # (prevents overlapping clips from multiple entities)
+            break
+        
+        if not segment_has_images:
+            # No entity matched - add gap to maintain sync
+            gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(duration_frames, rate)
+                )
+            )
+            image_track.append(gap)
 
 
 def get_confidence_color(confidence: float) -> str:

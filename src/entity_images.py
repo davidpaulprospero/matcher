@@ -188,7 +188,7 @@ class GoogleBingImageClient:
     ) -> List[str]:
         """
         Search and download images from Google/Bing.
-        Keeps trying until finding enough images >= 1MB.
+        Keeps trying until finding enough images >= 1MB or exhausting all results.
         Cleans up search folders if no large images found.
         
         Args:
@@ -210,13 +210,24 @@ class GoogleBingImageClient:
             existing_folders = set(f.name for f in source_folder.iterdir() if f.is_dir())
         
         try:
-            # Search for LOTS of results - we need to find large images
-            search_limit = max(100, max_images * 20)  # Get many candidates
+            # Search for LOTS of results - keep trying until we find enough large images
+            search_limit = 500  # Get maximum candidates
             
             logger.info(f"Searching {self.source}: '{query}' (looking for {max_images} images >= 1MB)")
+            
+            # Try to filter for large images (format depends on source)
+            # Google: tbs=isz:l (large), isz:m (medium)
+            # Bing: imagesize:large
+            size_filter = None
+            if 'Google' in self.source:
+                size_filter = {'size': 'large'}  # Request large images
+            elif 'Bing' in self.source:
+                size_filter = {'size': 'large'}
+            
             image_infos = self.client.search(
                 keyword=query,
-                search_limits_overrides=search_limit
+                search_limits_overrides=search_limit,
+                filters=size_filter
             )
             
             if not image_infos:
@@ -228,11 +239,12 @@ class GoogleBingImageClient:
             valid_paths = []
             downloaded_count = 0
             skipped_small = 0
-            batch_size = 15  # Download in batches
-            max_batches = 10  # Try up to 10 batches (150 images)
+            batch_size = 20  # Download in larger batches
             
-            # Process in batches until we have enough large images
-            for batch_num in range(max_batches):
+            # Process ALL results until we have enough large images
+            total_batches = (len(image_infos) + batch_size - 1) // batch_size
+            
+            for batch_num in range(total_batches):
                 if len(valid_paths) >= max_images:
                     break
                 
@@ -242,7 +254,7 @@ class GoogleBingImageClient:
                 if not batch:
                     break
                 
-                logger.info(f"Batch {batch_num + 1}/{max_batches}: Downloading {len(batch)} images...")
+                logger.info(f"Batch {batch_num + 1}/{total_batches}: Downloading {len(batch)} images...")
                 
                 # Download this batch
                 try:
@@ -287,7 +299,7 @@ class GoogleBingImageClient:
                     
                     if size >= self.min_size:
                         valid_paths.append(str(file_path))
-                        logger.info(f"  ✓ KEPT: {file_path.name} ({size_mb:.2f}MB)")
+                        logger.info(f"  ✓ KEPT: {file_path.name} ({size_mb:.2f}MB) [{len(valid_paths)}/{max_images}]")
                         
                         # Save entity metadata
                         if entity_name:
@@ -313,10 +325,10 @@ class GoogleBingImageClient:
                         except:
                             pass
                 
-                # Progress update
+                # Progress update (only if still searching)
                 remaining = max_images - len(valid_paths)
-                if remaining > 0:
-                    logger.info(f"  Progress: {len(valid_paths)}/{max_images} (need {remaining} more, {skipped_small} too small so far)")
+                if remaining > 0 and batch_num < total_batches - 1:
+                    logger.info(f"  Progress: {len(valid_paths)}/{max_images} (need {remaining} more, checked {downloaded_count} images)")
             
             # Find and clean up new folders created by this search
             new_folders = []
@@ -325,11 +337,11 @@ class GoogleBingImageClient:
                 new_folder_names = current_folders - existing_folders
                 new_folders = [source_folder / name for name in new_folder_names]
             
-            # Clean up empty search folders
-            if not valid_paths:
-                logger.warning(f"✗ {self.source}: No images >= 1MB found after downloading {downloaded_count}")
+            # Summary
+            if valid_paths:
+                logger.info(f"✓ {self.source}: Found {len(valid_paths)} images >= 1MB (checked {downloaded_count} total)")
             else:
-                logger.info(f"✓ {self.source}: Found {len(valid_paths)} images >= 1MB")
+                logger.warning(f"✗ {self.source}: No images >= 1MB found after checking {downloaded_count} images")
             
             # Always clean up folders with no valid images
             self._cleanup_empty_folders(new_folders)
@@ -849,6 +861,7 @@ def download_entity_images(
     
     # Initialize clients
     google_client = None
+    bing_client = None
     stock_downloader = None
     
     if use_google:
@@ -857,13 +870,12 @@ def download_entity_images(
             source="GoogleImageClient",
             min_size_mb=min_size_mb
         )
-        if not google_client.client:
-            # Try Bing as fallback
-            google_client = GoogleBingImageClient(
-                output_dir=str(output_path),
-                source="BingImageClient",
-                min_size_mb=min_size_mb
-            )
+        # Also initialize Bing as backup
+        bing_client = GoogleBingImageClient(
+            output_dir=str(output_path),
+            source="BingImageClient",
+            min_size_mb=min_size_mb
+        )
     
     if use_stock_apis:
         stock_downloader = ImageDownloader(
@@ -873,15 +885,16 @@ def download_entity_images(
             min_size_mb=min_size_mb
         )
     
-    # Check if any source available
+    # Check which sources are available
     has_google = google_client and google_client.client
+    has_bing = bing_client and bing_client.client
     has_stock = stock_downloader and any([
         stock_downloader.pexels_key,
         stock_downloader.pixabay_key
     ])
     
-    if not has_google and not has_stock:
-        logger.warning("No image sources available. Install imagedl or set API keys.")
+    if not has_google and not has_bing and not has_stock:
+        logger.warning("No image sources available. Install pyimagedl or set API keys.")
         return results
     
     # Process each entity
@@ -910,7 +923,7 @@ def download_entity_images(
         
         downloaded_paths = []
         
-        # Try Google/Bing first (prioritized)
+        # Try Google first (prioritized)
         if has_google and len(downloaded_paths) < images_per_entity:
             paths = google_client.search_and_download(
                 query=query,
@@ -920,7 +933,19 @@ def download_entity_images(
             )
             downloaded_paths.extend(paths)
         
-        # Fallback to stock APIs if needed
+        # Try Bing if Google didn't find enough
+        if has_bing and len(downloaded_paths) < images_per_entity:
+            remaining = images_per_entity - len(downloaded_paths)
+            logger.info(f"  Trying Bing for {remaining} more images...")
+            paths = bing_client.search_and_download(
+                query=query,
+                max_images=remaining,
+                entity_name=entity_name,
+                entity_type=entity_type
+            )
+            downloaded_paths.extend(paths)
+        
+        # Fallback to stock APIs if still needed
         if has_stock and len(downloaded_paths) < images_per_entity:
             remaining = images_per_entity - len(downloaded_paths)
             paths = stock_downloader.search_and_download(
