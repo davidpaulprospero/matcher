@@ -471,8 +471,8 @@ class VideoDownloader:
             '--restrict-filenames',
             '--no-overwrites',
             '-o', str(keyword_dir / '%(title)s-%(id)s.%(ext)s'),
-            '--progress',
-            '--newline',  # Better progress output
+            # '--progress',
+            # '--newline',  # Better progress output
         ]
         
         # Add cookies file if it exists (required for YouTube)

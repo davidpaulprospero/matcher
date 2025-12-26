@@ -292,28 +292,116 @@ REFINED KEYWORDS:"""
         return '\n'.join(texts)
     
     def _detect_topic(self, text: str) -> str:
-        """Try to detect the main topic from the text"""
-        # Simple heuristic - look for common disaster keywords
-        disaster_keywords = {
-            'earthquake': 'earthquake',
-            'tsunami': 'tsunami',
-            'typhoon': 'typhoon',
-            'hurricane': 'hurricane',
+        """Detect the main topic from the text using LLM or heuristics"""
+        
+        # Try LLM-based topic detection first
+        if self.llm_client:
+            topic = self._detect_topic_llm(text[:3000])  # Limit text length
+            if topic:
+                return topic
+        
+        # Fallback to keyword-based detection
+        return self._detect_topic_heuristic(text)
+    
+    def _detect_topic_llm(self, text: str) -> str:
+        """Use LLM to detect the main topic"""
+        prompt = f"""Analyze this voiceover transcript and identify the MAIN TOPIC in 2-5 words.
+
+Transcript excerpt:
+{text[:2000]}
+
+Respond with ONLY the topic (2-5 words), nothing else. Examples:
+- "opioid crisis homelessness"
+- "climate change documentary"  
+- "wildlife conservation Africa"
+- "tech startup journey"
+- "World War 2 veterans"
+
+Topic:"""
+
+        try:
+            if hasattr(self, 'gemini_model') and self.gemini_model:
+                response = self.gemini_model.generate_content(prompt)
+                topic = response.text.strip().strip('"').strip("'")
+                if topic and len(topic) < 100:  # Sanity check
+                    logger.info(f"LLM detected topic: {topic}")
+                    return topic
+            elif hasattr(self, 'anthropic_client') and self.anthropic_client:
+                response = self.anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=50,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                topic = response.content[0].text.strip().strip('"').strip("'")
+                if topic and len(topic) < 100:
+                    logger.info(f"LLM detected topic: {topic}")
+                    return topic
+        except Exception as e:
+            logger.debug(f"LLM topic detection failed: {e}")
+        
+        return ""
+    
+    def _detect_topic_heuristic(self, text: str) -> str:
+        """Fallback heuristic-based topic detection"""
+        text_lower = text.lower()
+        
+        # Expanded topic keywords
+        topic_keywords = {
+            # Disasters
+            'earthquake': 'earthquake disaster',
+            'tsunami': 'tsunami disaster',
+            'typhoon': 'typhoon disaster',
+            'hurricane': 'hurricane disaster',
             'volcano': 'volcanic eruption',
             'eruption': 'volcanic eruption',
-            'flood': 'flooding',
-            'wildfire': 'wildfire',
-            'tornado': 'tornado',
-            'landslide': 'landslide',
-            'avalanche': 'avalanche'
+            'flood': 'flooding disaster',
+            'wildfire': 'wildfire disaster',
+            'tornado': 'tornado disaster',
+            'landslide': 'landslide disaster',
+            # Social issues
+            'homeless': 'homelessness crisis',
+            'opioid': 'opioid crisis',
+            'fentanyl': 'fentanyl crisis',
+            'addiction': 'addiction crisis',
+            'poverty': 'poverty documentary',
+            'refugee': 'refugee crisis',
+            'immigration': 'immigration documentary',
+            # Environment
+            'climate': 'climate change',
+            'pollution': 'pollution documentary',
+            'conservation': 'conservation documentary',
+            'wildlife': 'wildlife documentary',
+            'ocean': 'ocean documentary',
+            # Technology
+            'artificial intelligence': 'AI technology',
+            'startup': 'tech startup',
+            'innovation': 'technology innovation',
+            # History
+            'world war': 'World War documentary',
+            'civil war': 'civil war documentary',
+            'revolution': 'historical revolution',
+            # Health
+            'pandemic': 'pandemic documentary',
+            'covid': 'COVID-19 documentary',
+            'cancer': 'cancer documentary',
+            'mental health': 'mental health documentary'
         }
         
-        text_lower = text.lower()
-        for keyword, topic in disaster_keywords.items():
+        for keyword, topic in topic_keywords.items():
             if keyword in text_lower:
                 return topic
         
-        return "natural disaster documentary"
+        # If no specific topic found, try to extract from first sentences
+        sentences = text.split('.')[:3]
+        if sentences:
+            # Look for proper nouns or key subjects
+            first_text = ' '.join(sentences)
+            # Simple extraction: take significant words
+            words = [w for w in first_text.split() if len(w) > 4 and w[0].isupper()]
+            if words:
+                return ' '.join(words[:3]) + " documentary"
+        
+        return "documentary video content"
     
     def extract_keywords(
         self,

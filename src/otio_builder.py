@@ -702,6 +702,73 @@ def add_markers_to_clip(
             color=color
         )
         clip.markers.append(marker)
+    
+    # ENTITY MARKERS - for text overlay suggestions
+    vo_seg = match.voiceover_segment
+    entities = getattr(vo_seg, 'entities', []) or []
+    
+    if entities:
+        # Group entities by type for cleaner display
+        entity_types = {}
+        for entity in entities:
+            etype = entity.get('type', 'OTHER')
+            if etype not in entity_types:
+                entity_types[etype] = []
+            entity_types[etype].append(entity)
+        
+        frame_offset = 6  # Start after speed marker
+        
+        # Create markers for each entity type
+        for etype, ents in entity_types.items():
+            # Get icon/label for type
+            type_labels = {
+                'PERSON': '👤 NAME',
+                'GPE': '📍 LOCATION', 
+                'ORG': '🏢 ORG',
+                'DATE': '📅 DATE',
+                'EVENT': '⚡ EVENT',
+                'NUMBER': '🔢 NUMBER'
+            }
+            label = type_labels.get(etype, f'📌 {etype}')
+            
+            # Create marker for each entity
+            for entity in ents[:2]:  # Max 2 per type
+                name = entity.get('text', '')
+                context = entity.get('context', '')
+                
+                if name:
+                    marker_text = f"TEXT: {label} - {name}"
+                    if context:
+                        marker_text += f" ({context})"
+                    
+                    marker = otio.schema.Marker(
+                        name=marker_text,
+                        marked_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(frame_offset, rate),
+                            duration=marker_duration
+                        ),
+                        color=otio.schema.MarkerColor.PINK  # Pink for text overlay markers
+                    )
+                    clip.markers.append(marker)
+                    frame_offset += 1
+    
+    # Also check metadata for entity info
+    metadata_entities = clip.metadata.get('entities', [])
+    if metadata_entities and not entities:
+        for entity in metadata_entities[:3]:
+            if isinstance(entity, dict):
+                name = entity.get('text', '')
+                etype = entity.get('type', 'ENTITY')
+                if name:
+                    marker = otio.schema.Marker(
+                        name=f"TEXT: {etype} - {name}",
+                        marked_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(6, rate),
+                            duration=marker_duration
+                        ),
+                        color=otio.schema.MarkerColor.PINK
+                    )
+                    clip.markers.append(marker)
 
 
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
@@ -711,12 +778,16 @@ def save_timeline(timeline: otio.schema.Timeline, output_path: str):
 
 
 def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0, 
-                         timeline_start_tc: str = "01:00:00:00"):
+                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
     
     These markers are placed at timeline positions, not on clips.
     Import into DaVinci: File > Import > Timeline (select EDL, check "Import markers")
+    
+    Marker colors:
+    - Green/Cyan/Yellow/Orange/Red: Confidence tiers
+    - Pink: Entity markers (TEXT OVERLAY needed)
     
     Format matches exact DaVinci export:
     
@@ -741,8 +812,10 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
     
     # Track position in frames from timeline start
     timeline_frames = start_frames
+    marker_num = 1
+    entity_markers_added = 0
     
-    for i, match_result in enumerate(matches, start=1):  # Start at 001
+    for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
@@ -787,9 +860,61 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
         
         # EDL marker format for DaVinci timeline markers
         # All 4 timecodes should be the timeline position (source=record for markers)
-        lines.append(f"{i:03d}  001      V     C        {tc_start} {tc_end} {tc_start} {tc_end}  ")
+        lines.append(f"{marker_num:03d}  001      V     C        {tc_start} {tc_end} {tc_start} {tc_end}  ")
         lines.append(f" |C:{color} |M:{marker_name} |D:1")
         lines.append("")  # Empty line between markers
+        marker_num += 1
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # ENTITY MARKERS - Pink markers for text overlays
+        # ─────────────────────────────────────────────────────────────────────
+        segment_entities = getattr(vo_seg, 'entities', []) or []
+        
+        # Also check if entities passed from extracted_entities match this segment's text
+        if entities and not segment_entities:
+            # Find entities that appear in this segment's text
+            for entity in entities:
+                entity_text = entity.get('text', '')
+                if entity_text and entity_text.lower() in vo_seg.text.lower():
+                    segment_entities.append(entity)
+        
+        if segment_entities:
+            # Create offset timecode for entity markers (1 frame after main marker)
+            entity_tc = frames_to_tc(timeline_frames + 2, frame_rate)
+            entity_tc_end = frames_to_tc(timeline_frames + 3, frame_rate)
+            
+            # Group and add entity markers
+            type_icons = {
+                'PERSON': 'NAME',
+                'GPE': 'LOCATION', 
+                'ORG': 'ORG',
+                'DATE': 'DATE',
+                'EVENT': 'EVENT',
+                'NUMBER': 'NUMBER'
+            }
+            
+            for entity in segment_entities[:3]:  # Max 3 entities per segment
+                etype = entity.get('type', 'ENTITY')
+                ename = entity.get('text', '')[:25]
+                context = entity.get('context', '')[:20]
+                
+                if ename:
+                    icon = type_icons.get(etype, 'TEXT')
+                    
+                    # Format: TEXT: TYPE - Name (context)
+                    if context:
+                        entity_marker_name = f"TEXT: {icon} - {ename} ({context})"
+                    else:
+                        entity_marker_name = f"TEXT: {icon} - {ename}"
+                    
+                    # Clean for EDL
+                    entity_marker_name = entity_marker_name.replace('|', '-').replace('\n', ' ')
+                    
+                    lines.append(f"{marker_num:03d}  001      V     C        {entity_tc} {entity_tc_end} {entity_tc} {entity_tc_end}  ")
+                    lines.append(f" |C:ResolveColorPink |M:{entity_marker_name} |D:1")
+                    lines.append("")
+                    marker_num += 1
+                    entity_markers_added += 1
         
         # Move to next segment position on timeline
         timeline_frames += duration_frames
@@ -798,7 +923,7 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
     with open(edl_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
     
-    logger.info(f"Saved EDL with {len(matches)} timeline markers to {edl_path}")
+    logger.info(f"Saved EDL with {len(matches)} timeline markers + {entity_markers_added} entity markers to {edl_path}")
     logger.info(f"  Timeline starts at {timeline_start_tc}")
     return str(edl_path)
 
