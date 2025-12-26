@@ -368,15 +368,20 @@ class ZeroDownloadRemixConfig:
 
 @dataclass
 class ImageSearchConfig:
-    """Configuration for entity image search.
+    """Configuration for entity image and video search.
     
     Downloads images representing entities (people, places, organizations)
     mentioned in the voiceover for use as stills/overlays on V9 track.
+    
+    Also downloads stock videos from Pexels/Pixabay for V10 track.
     """
     enabled: bool = True
     
     # Images per entity (5 recommended for variety and backup options)
     images_per_entity: int = 5
+    
+    # Videos per entity for stock footage (3 recommended)
+    videos_per_entity: int = 3
     
     # Minimum file size in MB (1MB default for quality)
     min_size_mb: float = 1.0
@@ -387,7 +392,7 @@ class ImageSearchConfig:
     # Search sources
     use_google: bool = True  # Google Images (requires pyimagedl library)
     use_bing: bool = True  # Bing Images (fallback if Google fails)
-    use_stock_apis: bool = True  # Pexels/Pixabay as additional fallback
+    use_stock_apis: bool = True  # Pexels/Pixabay for images AND videos
     
     # Entity types to search for
     entity_types: List[str] = field(default_factory=lambda: [
@@ -396,6 +401,7 @@ class ImageSearchConfig:
     
     # OTIO output settings
     image_track: str = "V9"  # Track for image stills
+    stock_video_track: str = "V10"  # Track for stock videos
     default_duration: float = 0.0  # 0 = match segment duration
 
 
