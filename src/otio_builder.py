@@ -193,9 +193,9 @@ def create_timeline(
     - V1: Primary video (speed-adjusted) - enabled
     - V2: Alternative 1 (speed-adjusted) - disabled
     - V3: Alternative 2 (speed-adjusted) - disabled
-    - V4: Visual-First strategy - disabled
-    - V5: Different-Source strategy - disabled
-    - V6: Keyword-Only strategy - disabled
+    - V4: Secondary Primary (different video files from V1-V3) - disabled
+    - V5: Secondary Alt 1 (different video files) - disabled
+    - V6: Secondary Alt 2 (different video files) - disabled
     - V7: Embedding-Diversity strategy - disabled
     - V9: Entity Images (Google stills) - disabled
     - V10: Stock Videos (Pexels/Pixabay) - disabled
@@ -206,17 +206,21 @@ def create_timeline(
     timeline = otio.schema.Timeline(name="Matched Footage")
     rate = frame_rate
     
-    # Determine number of alternative tracks
+    # Determine number of alternative tracks (V2-V3)
     num_alternatives = config.output.num_alternatives if config.output.include_alternatives else 0
     
-    # Strategy tracks
-    strategy_names = config.output.strategy_tracks if config.output.include_strategy_tracks else []
+    # Secondary tracks (V4-V6) - always 3
+    num_secondary = 3
+    
+    # Strategy tracks (V7 only - embedding_diversity)
+    strategy_names = []
+    if config.output.include_strategy_tracks:
+        # Only include embedding_diversity for V7
+        if "embedding_diversity" in config.output.strategy_tracks:
+            strategy_names = ["embedding_diversity"]
+    
     strategy_display_names = {
-        "visual_first": "Visual-First",
-        "different_source": "Different-Source",
-        "keyword_only": "Keyword-Only",
-        "embedding_diversity": "Embedding-Diversity",
-        "source_rotation": "Source-Rotation"
+        "embedding_diversity": "Embedding-Diversity"
     }
     
     # Create video tracks
@@ -232,10 +236,18 @@ def create_timeline(
         track.enabled = False
         video_tracks.append(track)
     
-    # V4-V7: Strategy tracks
+    # V4-V6: Secondary matches (different video files from V1-V3)
+    secondary_names = ["Secondary Primary", "Secondary Alt 1", "Secondary Alt 2"]
+    for i in range(num_secondary):
+        track_num = 1 + num_alternatives + i + 1  # V4, V5, V6
+        track = otio.schema.Track(name=f"V{track_num} - {secondary_names[i]}", kind=otio.schema.TrackKind.Video)
+        track.enabled = False
+        video_tracks.append(track)
+    
+    # V7: Strategy tracks (embedding_diversity only)
     for i, strategy in enumerate(strategy_names):
         display_name = strategy_display_names.get(strategy, strategy)
-        track_num = 1 + num_alternatives + i + 1
+        track_num = 1 + num_alternatives + num_secondary + i + 1  # V7
         track = otio.schema.Track(name=f"V{track_num} - {display_name}", kind=otio.schema.TrackKind.Video)
         track.enabled = False
         video_tracks.append(track)
@@ -263,16 +275,23 @@ def create_timeline(
         track.enabled = False
         audio_tracks.append(track)
     
-    # A4-A7: Strategy audio tracks
+    # A4-A6: Secondary audio tracks
+    for i in range(num_secondary):
+        track_num = 1 + num_alternatives + i + 1  # A4, A5, A6
+        track = otio.schema.Track(name=f"A{track_num} - {secondary_names[i]} Audio", kind=otio.schema.TrackKind.Audio)
+        track.enabled = False
+        audio_tracks.append(track)
+    
+    # A7: Strategy audio tracks (embedding_diversity only)
     for i, strategy in enumerate(strategy_names):
         display_name = strategy_display_names.get(strategy, strategy)
-        track_num = 1 + num_alternatives + i + 1
+        track_num = 1 + num_alternatives + num_secondary + i + 1  # A7
         track = otio.schema.Track(name=f"A{track_num} - {display_name} Audio", kind=otio.schema.TrackKind.Audio)
         track.enabled = False
         audio_tracks.append(track)
     
     # Create voiceover track
-    voiceover_track_num = 1 + num_alternatives + len(strategy_names) + 1
+    voiceover_track_num = 1 + num_alternatives + num_secondary + len(strategy_names) + 1
     voiceover_track = otio.schema.Track(
         name=f"A{voiceover_track_num} - Voiceover",
         kind=otio.schema.TrackKind.Audio
@@ -419,8 +438,77 @@ def create_timeline(
                 )
                 audio_tracks[alt_idx + 1].append(a_gap)
         
-        # Process strategy tracks (V4-V7)
-        strategy_base_idx = 1 + num_alternatives  # Index where strategy tracks start
+        # Process secondary tracks (V4-V6) - different video files from V1-V3
+        secondary_base_idx = 1 + num_alternatives  # Index where secondary tracks start
+        
+        for sec_idx in range(num_secondary):
+            track_idx = secondary_base_idx + sec_idx
+            
+            if sec_idx < len(match_result.secondary_matches):
+                sec_match = match_result.secondary_matches[sec_idx]
+                sec_seg = sec_match.video_segment
+                sec_source_duration = sec_seg.end_time - sec_seg.start_time
+                sec_source_start = sec_seg.start_time
+                
+                sec_metadata = {
+                    'confidence': sec_match.confidence,
+                    'reasoning': sec_match.reasoning,
+                    'original_duration': sec_source_duration,
+                    'target_duration': target_duration,
+                    'is_secondary': True
+                }
+                
+                # Secondary video clip
+                sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
+                sec_v_clip = create_clip_with_timewarp(
+                    name=f"{sec_label}: {Path(sec_seg.source_file).stem}",
+                    source_path=sec_seg.source_file,
+                    source_start=sec_source_start,
+                    source_duration=sec_source_duration,
+                    target_duration=target_duration,
+                    frame_rate=frame_rate,
+                    metadata=sec_metadata
+                )
+                
+                # Color for secondary tracks
+                secondary_colors = ["PURPLE", "BLUE", "TEAL"]
+                sec_v_clip.metadata['clip_color'] = secondary_colors[sec_idx] if sec_idx < len(secondary_colors) else "GRAY"
+                
+                video_tracks[track_idx].append(sec_v_clip)
+                
+                # Secondary audio clip
+                sec_a_clip = create_clip_with_timewarp(
+                    name=f"Audio {sec_label}: {Path(sec_seg.source_file).stem}",
+                    source_path=sec_seg.source_file,
+                    source_start=sec_source_start,
+                    source_duration=sec_source_duration,
+                    target_duration=target_duration,
+                    frame_rate=frame_rate,
+                    metadata={'from_track': f'V{track_idx+1}'}
+                )
+                audio_tracks[track_idx].append(sec_a_clip)
+            else:
+                # No secondary match available - add gap
+                gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+                
+                v_gap = otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                )
+                video_tracks[track_idx].append(v_gap)
+                
+                a_gap = otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                )
+                audio_tracks[track_idx].append(a_gap)
+        
+        # Process strategy tracks (V7 - embedding_diversity only)
+        strategy_base_idx = 1 + num_alternatives + num_secondary  # Index where strategy tracks start
         
         for strat_idx, strategy in enumerate(strategy_names):
             track_idx = strategy_base_idx + strat_idx
@@ -459,9 +547,6 @@ def create_timeline(
                 
                 # Color based on strategy
                 strategy_colors = {
-                    "visual_first": "PURPLE",
-                    "different_source": "BLUE",
-                    "keyword_only": "TEAL",
                     "embedding_diversity": "PINK"
                 }
                 strat_v_clip.metadata['clip_color'] = strategy_colors.get(strategy, "GRAY")
@@ -1138,6 +1223,151 @@ def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     logger.info(f"Saved timeline to {output_path}")
 
 
+def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_parts: int = 3, clips_per_file: int = 10) -> List[str]:
+    """
+    Save timeline split into multiple OTIO files - batched by clips.
+    
+    For long videos (30+ min), even individual tracks can be too heavy.
+    This splits each track into batches of N clips each.
+    
+    Example output for V1 with 50 clips:
+    - V1_Primary_batch01_clips001-010.otio
+    - V1_Primary_batch02_clips011-020.otio
+    - V1_Primary_batch03_clips021-030.otio
+    - etc.
+    
+    Args:
+        timeline: The full OTIO timeline
+        output_path: Base output path
+        num_parts: Ignored (kept for backwards compatibility)
+        clips_per_file: Max clips per OTIO file (default 10)
+    
+    Returns:
+        List of paths to generated OTIO files
+    """
+    base_path = Path(output_path).with_suffix('')
+    generated_paths = []
+    
+    # Get all tracks
+    video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
+    audio_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Audio]
+    
+    def get_clips_from_track(track):
+        """Extract all clips (not gaps) from a track"""
+        clips = []
+        for item in track:
+            if isinstance(item, otio.schema.Clip):
+                clips.append(item)
+        return clips
+    
+    def create_track_with_clips(original_track, clips, start_idx):
+        """Create a new track with only the specified clips, with gaps for timing"""
+        new_track = otio.schema.Track(
+            name=original_track.name,
+            kind=original_track.kind
+        )
+        
+        # Calculate where these clips start in the timeline
+        current_time = otio.opentime.RationalTime(0, 30)
+        clip_idx = 0
+        
+        for item in original_track:
+            if isinstance(item, otio.schema.Clip):
+                if clip_idx >= start_idx and clip_idx < start_idx + len(clips):
+                    # Include this clip
+                    new_track.append(item.clone())
+                else:
+                    # Replace with gap of same duration
+                    gap = otio.schema.Gap(
+                        source_range=item.source_range
+                    )
+                    new_track.append(gap)
+                clip_idx += 1
+            elif isinstance(item, otio.schema.Gap):
+                # Keep gaps to maintain timing
+                new_track.append(item.clone())
+        
+        return new_track
+    
+    def save_track_batches(track, track_prefix, track_idx):
+        """Save a track split into clip batches"""
+        paths = []
+        clips = get_clips_from_track(track)
+        total_clips = len(clips)
+        
+        if total_clips == 0:
+            return paths
+        
+        num_batches = (total_clips + clips_per_file - 1) // clips_per_file
+        
+        for batch_idx in range(num_batches):
+            start_clip = batch_idx * clips_per_file
+            end_clip = min(start_clip + clips_per_file, total_clips)
+            batch_clips = clips[start_clip:end_clip]
+            
+            # Create timeline with just this batch
+            batch_timeline = otio.schema.Timeline(
+                name=f"{track.name} (clips {start_clip+1}-{end_clip})"
+            )
+            
+            # Create track with only these clips (gaps elsewhere)
+            batch_track = create_track_with_clips(track, batch_clips, start_clip)
+            batch_timeline.tracks.append(batch_track)
+            
+            # Generate filename
+            safe_name = track.name.replace(' ', '_').replace('-', '_').replace('/', '_')
+            safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '_')
+            
+            batch_path = f"{base_path}_{track_prefix}_{safe_name}_batch{batch_idx+1:02d}_clips{start_clip+1:03d}-{end_clip:03d}.otio"
+            otio.adapters.write_to_file(batch_timeline, batch_path)
+            paths.append(batch_path)
+            
+            logger.info(f"Saved {track.name} batch {batch_idx+1}/{num_batches}: clips {start_clip+1}-{end_clip}")
+        
+        return paths
+    
+    # Process each video track
+    for i, track in enumerate(video_tracks):
+        track_prefix = f"V{i+1}"
+        batch_paths = save_track_batches(track, track_prefix, i)
+        generated_paths.extend(batch_paths)
+    
+    # Process voiceover track (usually just one clip, but batch anyway)
+    for track in audio_tracks:
+        if 'voiceover' in track.name.lower() or 'a8' in track.name.lower():
+            # Voiceover is usually one clip spanning full timeline
+            vo_timeline = otio.schema.Timeline(name="Voiceover")
+            vo_timeline.tracks.append(track.clone())
+            
+            vo_path = f"{base_path}_A8_voiceover.otio"
+            otio.adapters.write_to_file(vo_timeline, vo_path)
+            generated_paths.append(vo_path)
+            logger.info(f"Saved Voiceover: {vo_path}")
+            break
+    
+    # Also save small group files for convenience
+    
+    # V1 only - first batch (smallest possible useful file)
+    v1_tracks = [t for t in video_tracks if 'v1 ' in t.name.lower() or 'primary' in t.name.lower()]
+    if v1_tracks:
+        v1_clips = get_clips_from_track(v1_tracks[0])
+        if v1_clips:
+            # Just first 5 clips
+            mini_timeline = otio.schema.Timeline(name="V1 Preview (first 5 clips)")
+            mini_track = create_track_with_clips(v1_tracks[0], v1_clips[:5], 0)
+            mini_timeline.tracks.append(mini_track)
+            
+            mini_path = f"{base_path}_PREVIEW_v1_first5.otio"
+            otio.adapters.write_to_file(mini_timeline, mini_path)
+            generated_paths.insert(0, mini_path)
+            logger.info(f"Saved V1 Preview (first 5 clips): {mini_path}")
+    
+    # Summary file with just structure (no media)
+    logger.info(f"Generated {len(generated_paths)} OTIO files total")
+    
+    return generated_paths
+
+
 def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0, 
                          timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
     """
@@ -1649,3 +1879,431 @@ def generate_match_report(matches: List[MatchResult], output_path: str, config=N
         f.write('\n'.join(report_lines))
     
     logger.info(f"Saved match report to {output_path}")
+
+
+
+
+def generate_resolve_xml_with_bins(
+    matches: List[MatchResult],
+    output_path: str,
+    voiceover_path: str = None,
+    frame_rate: float = 30.0,
+    entity_images: Dict = None,
+    entity_videos: Dict = None,
+    config = None,
+    num_parts: int = 2
+) -> List[str]:
+    """
+    Generate DaVinci Resolve compatible FCP7 XML with media bin AND timeline.
+    
+    Creates XML files that contain both:
+    1. A bin with all media files
+    2. A timeline sequence that references those clips
+    
+    This ensures media is properly linked when imported.
+    
+    Args:
+        matches: List of match results
+        output_path: Output XML path
+        voiceover_path: Path to voiceover audio
+        frame_rate: Timeline frame rate
+        entity_images: Dict of entity name -> list of image paths
+        entity_videos: Dict of entity name -> list of video paths
+        config: Config object
+        num_parts: Number of XML files to split into (default 2)
+    
+    Returns:
+        List of paths to generated XML files
+    """
+    import uuid as uuid_module
+    
+    base_path = Path(output_path).with_suffix('')
+    fps_int = int(frame_rate)
+    
+    # Collect ALL unique files
+    all_files = {}
+    file_counter = 1
+    
+    def add_file(path: str, duration_seconds: float = 0) -> dict:
+        nonlocal file_counter
+        if path not in all_files:
+            dur_frames = int(duration_seconds * frame_rate) if duration_seconds > 0 else int(60 * frame_rate)
+            all_files[path] = {
+                'file_id': f"file-{file_counter}",
+                'uuid': str(uuid_module.uuid4()),
+                'duration_frames': dur_frames
+            }
+            file_counter += 1
+        return all_files[path]
+    
+    # Collect files from all tracks
+    for match_result in matches:
+        vid_seg = match_result.primary_match.video_segment
+        dur = vid_seg.end_time if vid_seg.end_time > 0 else 60.0
+        add_file(vid_seg.source_file, dur)
+        
+        for alt in match_result.alternatives:
+            dur = alt.video_segment.end_time if alt.video_segment.end_time > 0 else 60.0
+            add_file(alt.video_segment.source_file, dur)
+        
+        for sec in getattr(match_result, 'secondary_matches', []):
+            dur = sec.video_segment.end_time if sec.video_segment.end_time > 0 else 60.0
+            add_file(sec.video_segment.source_file, dur)
+        
+        for strat in match_result.strategy_matches:
+            dur = strat.video_segment.end_time if strat.video_segment.end_time > 0 else 60.0
+            add_file(strat.video_segment.source_file, dur)
+    
+    if entity_images:
+        for entity, images in entity_images.items():
+            for img_path in images:
+                add_file(str(img_path), 5.0)
+    
+    if entity_videos:
+        for entity, videos in entity_videos.items():
+            for vid_path in videos:
+                add_file(str(vid_path), 30.0)
+    
+    if voiceover_path:
+        vo_duration = sum(
+            m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time
+            for m in matches
+        )
+        add_file(voiceover_path, vo_duration)
+    
+    def format_path_url(file_path: str) -> str:
+        path = str(Path(file_path).resolve()).replace('\\', '/')
+        if len(path) >= 2 and path[1] == ':':
+            return f"file://localhost/{path}"
+        elif path.startswith('/'):
+            return f"file://localhost{path}"
+        else:
+            return f"file://localhost/{path}"
+    
+    def escape_xml(text: str) -> str:
+        return (str(text)
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;')
+            .replace("'", '&apos;'))
+    
+    # Calculate total timeline duration
+    total_frames = 0
+    for m in matches:
+        vo_seg = m.primary_match.voiceover_segment
+        target_duration = vo_seg.end_time - vo_seg.start_time
+        total_frames += int(target_duration * frame_rate)
+    
+    # Generate complete XML with bin AND timeline
+    xml_lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE xmeml>',
+        '<xmeml version="4">',
+        '',
+        '    <!-- Project with all media and timeline -->',
+        '    <project>',
+        '        <name>Matched Footage Project</name>',
+        '        <children>',
+        '',
+        '            <!-- Media Bin -->',
+        '            <bin>',
+        '                <name>Footage</name>',
+        '                <children>',
+    ]
+    
+    # Add all files to bin with proper structure
+    for file_path, file_info in all_files.items():
+        file_name = escape_xml(Path(file_path).name)
+        path_url = format_path_url(file_path)
+        file_ext = Path(file_path).suffix.lower()
+        duration_frames = file_info['duration_frames']
+        
+        video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+        image_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+        audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+        
+        is_video = file_ext in video_exts
+        is_image = file_ext in image_exts
+        is_audio = file_ext in audio_exts
+        
+        xml_lines.extend([
+            f'                    <clip id="masterclip-{file_info["file_id"]}">',
+            f'                        <uuid>{file_info["uuid"]}</uuid>',
+            f'                        <name>{file_name}</name>',
+            '                        <rate>',
+            f'                            <timebase>{fps_int}</timebase>',
+            '                            <ntsc>FALSE</ntsc>',
+            '                        </rate>',
+            f'                        <duration>{duration_frames}</duration>',
+            '                        <media>',
+        ])
+        
+        if is_video or is_image:
+            xml_lines.extend([
+                '                            <video>',
+                '                                <track>',
+                '                                    <clipitem>',
+                f'                                        <name>{file_name}</name>',
+                f'                                        <duration>{duration_frames}</duration>',
+                '                                        <start>0</start>',
+                f'                                        <end>{duration_frames}</end>',
+                '                                        <in>0</in>',
+                f'                                        <out>{duration_frames}</out>',
+                f'                                        <file id="{file_info["file_id"]}">',
+                f'                                            <name>{file_name}</name>',
+                f'                                            <pathurl>{path_url}</pathurl>',
+                '                                            <rate>',
+                f'                                                <timebase>{fps_int}</timebase>',
+                '                                                <ntsc>FALSE</ntsc>',
+                '                                            </rate>',
+                f'                                            <duration>{duration_frames}</duration>',
+                '                                            <timecode>',
+                '                                                <rate>',
+                f'                                                    <timebase>{fps_int}</timebase>',
+                '                                                    <ntsc>FALSE</ntsc>',
+                '                                                </rate>',
+                '                                                <string>00:00:00:00</string>',
+                '                                                <frame>0</frame>',
+                '                                            </timecode>',
+                '                                        </file>',
+                '                                    </clipitem>',
+                '                                </track>',
+                '                            </video>',
+            ])
+        
+        if is_video or is_audio:
+            xml_lines.extend([
+                '                            <audio>',
+                '                                <track>',
+                '                                    <clipitem>',
+                f'                                        <name>{file_name}</name>',
+            ])
+            if not (is_video or is_image):
+                # Audio-only - need full file definition
+                xml_lines.extend([
+                    f'                                        <file id="{file_info["file_id"]}">',
+                    f'                                            <name>{file_name}</name>',
+                    f'                                            <pathurl>{path_url}</pathurl>',
+                    '                                            <rate>',
+                    f'                                                <timebase>{fps_int}</timebase>',
+                    '                                                <ntsc>FALSE</ntsc>',
+                    '                                            </rate>',
+                    f'                                            <duration>{duration_frames}</duration>',
+                    '                                        </file>',
+                ])
+            else:
+                xml_lines.append(f'                                        <file id="{file_info["file_id"]}"/>')
+            xml_lines.extend([
+                '                                    </clipitem>',
+                '                                </track>',
+                '                            </audio>',
+            ])
+        
+        xml_lines.extend([
+            '                        </media>',
+            '                    </clip>',
+        ])
+    
+    xml_lines.extend([
+        '                </children>',
+        '            </bin>',
+        '',
+        '            <!-- Timeline Sequence -->',
+        '            <sequence>',
+        '                <name>V1 - Primary Edit</name>',
+        f'                <duration>{total_frames}</duration>',
+        '                <rate>',
+        f'                    <timebase>{fps_int}</timebase>',
+        '                    <ntsc>FALSE</ntsc>',
+        '                </rate>',
+        '                <timecode>',
+        '                    <rate>',
+        f'                        <timebase>{fps_int}</timebase>',
+        '                        <ntsc>FALSE</ntsc>',
+        '                    </rate>',
+        '                    <string>01:00:00:00</string>',
+        f'                    <frame>{fps_int * 3600}</frame>',
+        '                </timecode>',
+        '                <media>',
+        '                    <video>',
+        '                        <track>',
+    ])
+    
+    # Add clips to V1 timeline track
+    timeline_pos = 0
+    for match_result in matches:
+        vo_seg = match_result.primary_match.voiceover_segment
+        vid_seg = match_result.primary_match.video_segment
+        
+        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_frames = int(target_duration * frame_rate)
+        
+        source_duration = vid_seg.end_time - vid_seg.start_time
+        source_start = vid_seg.start_time
+        source_frames = int(source_duration * frame_rate)
+        source_start_frames = int(source_start * frame_rate)
+        
+        file_info = all_files.get(vid_seg.source_file, {})
+        file_id = file_info.get('file_id', '')
+        file_name = escape_xml(Path(vid_seg.source_file).stem)
+        
+        xml_lines.extend([
+            '                            <clipitem>',
+            f'                                <name>{file_name}</name>',
+            f'                                <duration>{target_frames}</duration>',
+            f'                                <start>{timeline_pos}</start>',
+            f'                                <end>{timeline_pos + target_frames}</end>',
+            f'                                <in>{source_start_frames}</in>',
+            f'                                <out>{source_start_frames + source_frames}</out>',
+            f'                                <file id="{file_id}"/>',
+        ])
+        
+        # Add speed adjustment if needed
+        if source_frames != target_frames and target_frames > 0:
+            speed = (source_frames / target_frames) * 100
+            xml_lines.extend([
+                '                                <filter>',
+                '                                    <effect>',
+                '                                        <name>Time Remap</name>',
+                '                                        <effectid>timeremap</effectid>',
+                '                                        <parameter>',
+                '                                            <parameterid>speed</parameterid>',
+                f'                                            <value>{speed:.2f}</value>',
+                '                                        </parameter>',
+                '                                    </effect>',
+                '                                </filter>',
+            ])
+        
+        xml_lines.append('                            </clipitem>')
+        timeline_pos += target_frames
+    
+    xml_lines.extend([
+        '                        </track>',
+        '                    </video>',
+    ])
+    
+    # Add voiceover audio track
+    if voiceover_path:
+        vo_file_info = all_files.get(voiceover_path, {})
+        vo_file_id = vo_file_info.get('file_id', '')
+        
+        xml_lines.extend([
+            '                    <audio>',
+            '                        <track>',
+            '                            <clipitem>',
+            '                                <name>Voiceover</name>',
+            f'                                <duration>{total_frames}</duration>',
+            '                                <start>0</start>',
+            f'                                <end>{total_frames}</end>',
+            '                                <in>0</in>',
+            f'                                <out>{total_frames}</out>',
+            f'                                <file id="{vo_file_id}"/>',
+            '                            </clipitem>',
+            '                        </track>',
+            '                    </audio>',
+        ])
+    
+    xml_lines.extend([
+        '                </media>',
+        '            </sequence>',
+        '',
+        '        </children>',
+        '    </project>',
+        '</xmeml>',
+    ])
+    
+    # Write single XML file (project with bin + timeline)
+    xml_path = Path(f"{base_path}_project.xml")
+    with open(xml_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(xml_lines))
+    
+    logger.info(f"Saved DaVinci Resolve project XML with {len(all_files)} media files and timeline to {xml_path}")
+    
+    # Also generate media-only XMLs for manual import (split into parts)
+    generated_paths = [str(xml_path)]
+    
+    if num_parts > 1:
+        # Split media into parts for separate import
+        file_items = list(all_files.items())
+        total_files = len(file_items)
+        files_per_part = (total_files + num_parts - 1) // num_parts
+        
+        for part_idx in range(num_parts):
+            start_idx = part_idx * files_per_part
+            end_idx = min(start_idx + files_per_part, total_files)
+            
+            if start_idx >= total_files:
+                break
+            
+            files_subset = dict(file_items[start_idx:end_idx])
+            bin_name = f"Media Part {part_idx + 1}"
+            
+            part_lines = [
+                '<?xml version="1.0" encoding="UTF-8"?>',
+                '<!DOCTYPE xmeml>',
+                '<xmeml version="4">',
+                '    <bin>',
+                f'        <name>{bin_name}</name>',
+                '        <children>',
+            ]
+            
+            for file_path, file_info in files_subset.items():
+                file_name = escape_xml(Path(file_path).name)
+                path_url = format_path_url(file_path)
+                file_ext = Path(file_path).suffix.lower()
+                duration_frames = file_info['duration_frames']
+                
+                video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+                is_video = file_ext in video_exts
+                
+                part_lines.extend([
+                    f'            <clip id="masterclip-{file_info["file_id"]}">',
+                    f'                <name>{file_name}</name>',
+                    '                <rate>',
+                    f'                    <timebase>{fps_int}</timebase>',
+                    '                    <ntsc>FALSE</ntsc>',
+                    '                </rate>',
+                    '                <media>',
+                    '                    <video>',
+                    '                        <track>',
+                    '                            <clipitem>',
+                    f'                                <name>{file_name}</name>',
+                    f'                                <file id="{file_info["file_id"]}">',
+                    f'                                    <name>{file_name}</name>',
+                    f'                                    <pathurl>{path_url}</pathurl>',
+                    '                                    <rate>',
+                    f'                                        <timebase>{fps_int}</timebase>',
+                    '                                        <ntsc>FALSE</ntsc>',
+                    '                                    </rate>',
+                    f'                                    <duration>{duration_frames}</duration>',
+                    '                                    <timecode>',
+                    '                                        <rate>',
+                    f'                                            <timebase>{fps_int}</timebase>',
+                    '                                            <ntsc>FALSE</ntsc>',
+                    '                                        </rate>',
+                    '                                        <string>00:00:00:00</string>',
+                    '                                        <frame>0</frame>',
+                    '                                    </timecode>',
+                    '                                </file>',
+                    '                            </clipitem>',
+                    '                        </track>',
+                    '                    </video>',
+                    '                </media>',
+                    '            </clip>',
+                ])
+            
+            part_lines.extend([
+                '        </children>',
+                '    </bin>',
+                '</xmeml>',
+            ])
+            
+            part_path = Path(f"{base_path}_media_part{part_idx + 1}.xml")
+            with open(part_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(part_lines))
+            
+            generated_paths.append(str(part_path))
+            logger.info(f"Saved media XML part {part_idx + 1}: {part_path} ({len(files_subset)} files)")
+    
+    return generated_paths

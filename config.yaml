@@ -215,7 +215,8 @@ matching:
   # Two-stage matching optimization
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
-  embedding_candidates: 20  # Retrieve from FAISS
+  # Note: Need 50+ candidates for V1-V6 (6 unique video files)
+  embedding_candidates: 50  # Retrieve from FAISS
   llm_rerank_candidates: 5  # Send to LLM
   
   # Duration scoring
@@ -391,7 +392,7 @@ image_search:
   
   # Download timeouts and limits
   download_timeout: 10       # Seconds per image download
-  max_search_time: 60       # Max seconds for entire search per entity (5 minutes)
+  max_search_time: 300       # Max seconds for entire search per entity (5 minutes)
   max_results_to_check: 500  # Max search results to check per entity
   search_until_found: true   # If true, keeps searching until images_per_entity found (ignores max_results_to_check)
   
@@ -518,6 +519,40 @@ download:
   delete_original: true
   delay_between_keywords: 1.0
   
+  # Title blacklist - skip videos containing these terms (case-insensitive)
+  # Useful for filtering out sports highlights, music videos, etc.
+  title_blacklist:
+    - "highlights"
+    - "basketball"
+    - "football"
+    - "soccer"
+    - "nba"
+    - "nfl"
+    - "mlb"
+    - "nhl"
+    - "ufc"
+    - "boxing"
+    - "wrestling"
+    - "vs."
+    - "vs "
+    - "match"
+    - "game recap"
+    - "full game"
+    - "full match"
+    - "sports"
+    - "espn"
+    - "goals"
+    - "touchdowns"
+  
+  # LLM Title Filter - use AI to check if video titles are relevant
+  # This runs BEFORE downloading, saving bandwidth and time
+  llm_title_filter:
+    enabled: true
+    provider: gemini  # gemini (fast) or anthropic (Claude Haiku)
+    model: gemini-2.0-flash  # or claude-3-haiku-20240307
+    batch_size: 20  # Check 20 titles at once
+    min_relevance: 0.7  # 0-1, reject if below this
+  
   # YouTube authentication - REQUIRED!
   # YouTube blocks yt-dlp without authentication. Export cookies from browser:
   # 1. Install browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
@@ -530,26 +565,26 @@ download:
   # YouTube search returns limited results, so we search more than we download
   # to find videos that match our duration filters
   search_pool_multiplier: 5  # Search 5x what we want to download
-  min_search_pool: 10        # Minimum search pool size
+  min_search_pool: 40        # Minimum search pool size
   
   # Duration tiers
   tiers:
     short:
       min: 20
       max: 120
-      per_keyword: 3
+      per_keyword: 8
     medium:
       min: 120
       max: 600
-      per_keyword: 3
+      per_keyword: 8
     long:
       min: 600
       max: 1500
-      per_keyword: 1
+      per_keyword: 5
     longer:
       min: 1500
       max: 3000
-      per_keyword: 1
+      per_keyword: 5
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
@@ -615,19 +650,21 @@ output:
   
   # File formats
   generate_otio: true
+  split_otio: true  # Split OTIO into multiple files by clip batches
+  otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
   generate_edl: true
-  generate_xml: true  # DaVinci Resolve XML
+  generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
+  xml_parts: 2  # Split XML into multiple files (helps with large projects)
   generate_report: true
   
   # Track structure
+  # V1: Primary, V2-V3: Alternatives
+  # V4-V6: Secondary (different video files from V1-V3)
+  # V7: Embedding-Diversity strategy
   num_alternatives: 2  # V2-V3
   include_strategy_tracks: true
   strategy_tracks:
-    - visual_first
-    - different_source
-    - keyword_only
-    - embedding_diversity
-    - source_rotation
+    - embedding_diversity  # V7 only - V4-V6 are now secondary matches
   
   # Markers
   include_speed_markers: true

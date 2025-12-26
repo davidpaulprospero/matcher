@@ -255,7 +255,7 @@ class MatchingConfig:
     sequential_when_reuse: bool = True
     
     # Two-stage matching optimization
-    embedding_candidates: int = 20  # Retrieve from FAISS
+    embedding_candidates: int = 50  # Retrieve from FAISS (need 50+ for V1-V6)
     llm_rerank_candidates: int = 5  # Send to LLM
     top_k_candidates: int = 10  # Legacy alias
     
@@ -510,6 +510,16 @@ class EnhancedFeaturesConfig:
 
 
 @dataclass
+class LLMTitleFilterConfig:
+    """Config for LLM-based title filtering before download."""
+    enabled: bool = True
+    provider: str = "gemini"  # gemini or anthropic
+    model: str = "gemini-2.0-flash"  # or claude-3-haiku-20240307
+    batch_size: int = 20  # Check multiple titles at once
+    min_relevance: float = 0.7  # 0-1, reject if below
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
     
@@ -534,6 +544,17 @@ class DownloadConfig:
     min_views: int = 0
     delete_original: bool = True  # Delete original after transcode
     delay_between_keywords: float = 1.0
+    
+    # Title blacklist - skip videos containing these terms (case-insensitive)
+    title_blacklist: List[str] = field(default_factory=lambda: [
+        "highlights", "basketball", "football", "soccer", "nba", "nfl",
+        "mlb", "nhl", "ufc", "boxing", "wrestling", "vs.", "vs ",
+        "match", "game recap", "full game", "full match", "sports",
+        "espn", "goals", "touchdowns"
+    ])
+    
+    # LLM Title Filter - use AI to check if video titles are relevant
+    llm_title_filter: LLMTitleFilterConfig = field(default_factory=LLMTitleFilterConfig)
     
     # YouTube authentication
     # Required due to YouTube bot detection - export cookies from browser
@@ -657,8 +678,11 @@ class OutputConfig:
     
     # File formats
     generate_otio: bool = True
+    split_otio: bool = True  # Split OTIO into multiple files by clip batches
+    otio_clips_per_file: int = 10  # Max clips per OTIO file
     generate_edl: bool = True
-    generate_xml: bool = True  # DaVinci Resolve XML
+    generate_xml: bool = True  # DaVinci Resolve XML (fallback if OTIO fails)
+    xml_parts: int = 2  # Split XML into multiple files (helps with large projects)
     generate_report: bool = True
     
     # Timeline settings
@@ -666,12 +690,14 @@ class OutputConfig:
     timeline_start_tc: str = "01:00:00:00"  # Standard broadcast start
     
     # Track structure
+    # V1: Primary, V2-V3: Alternatives
+    # V4-V6: Secondary (different video files from V1-V3)
+    # V7: Embedding-Diversity strategy
     num_alternatives: int = 2  # V2-V3
     include_alternatives: bool = True
     include_strategy_tracks: bool = True
     strategy_tracks: List[str] = field(default_factory=lambda: [
-        "visual_first", "different_source", "keyword_only",
-        "embedding_diversity", "source_rotation"
+        "embedding_diversity"  # V7 only - V4-V6 are now secondary matches
     ])
     
     # Variety enforcement for strategy tracks
