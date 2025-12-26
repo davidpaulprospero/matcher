@@ -76,3 +76,5 @@ downloaded_images/
 downloaded_videos/
 output/remix_report.json
 output/remix_report.json
+output/
+imagedl_outputs/

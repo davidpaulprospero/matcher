@@ -373,8 +373,8 @@ image_search:
   
   # Search sources (prioritized in order)
   use_google: true       # Google Images (requires: pip install pyimagedl)
-  use_bing: true         # Bing Images (fallback)
-  use_stock_apis: true   # Pexels/Pixabay APIs for images AND videos
+  use_bing: false        # Bing Images (disabled - alive_progress conflicts with Google)
+  use_stock_apis: true   # Pexels/Pixabay APIs for images AND videos (recommended fallback)
   
   # Entity types to search for
   entity_types:
@@ -388,6 +388,18 @@ image_search:
   image_track: V9           # Track for image stills (Google Images)
   stock_video_track: V10    # Track for stock videos (Pexels/Pixabay)
   default_duration: 0.0     # 0 = match segment duration
+  
+  # Download timeouts and limits
+  download_timeout: 10       # Seconds per image download
+  max_search_time: 60       # Max seconds for entire search per entity (5 minutes)
+  max_results_to_check: 500  # Max search results to check per entity
+  search_until_found: true   # If true, keeps searching until images_per_entity found (ignores max_results_to_check)
+  
+  # Stock video settings
+  stock_video:
+    min_duration: 3.0        # Minimum video duration in seconds
+    max_duration: 30.0       # Maximum video duration in seconds
+    prefer_hd: true          # Prefer HD quality videos
 
 # -----------------------------------------------------------------------------
 # LLM SETTINGS
@@ -518,26 +530,26 @@ download:
   # YouTube search returns limited results, so we search more than we download
   # to find videos that match our duration filters
   search_pool_multiplier: 5  # Search 5x what we want to download
-  min_search_pool: 40        # Minimum search pool size
+  min_search_pool: 10        # Minimum search pool size
   
   # Duration tiers
   tiers:
     short:
       min: 20
       max: 120
-      per_keyword: 8
+      per_keyword: 3
     medium:
       min: 120
       max: 600
-      per_keyword: 8
+      per_keyword: 3
     long:
       min: 600
       max: 1500
-      per_keyword: 5
+      per_keyword: 1
     longer:
       min: 1500
       max: 3000
-      per_keyword: 5
+      per_keyword: 1
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
@@ -689,7 +701,7 @@ cache:
 
 pipeline:
   # Stage control (set true to skip that stage)
-  skip_download: true        # Skip video download - use existing videos
+  skip_download: false        # Skip video download - use existing videos
   skip_image_search: false    # Skip entity image search
   skip_transcription: false   # Skip transcription - use cached transcripts
   skip_scene_detection: false # Skip scene detection
