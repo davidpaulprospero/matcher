@@ -362,7 +362,7 @@ image_search:
   
   # Short path settings (like download config)
   # Set root_dir to a short path near drive root for best results
-  root_dir: ""          # Empty = use project_dir/images. Set to e.g. "E:/i"
+  root_dir: "E:/i"      # Short path for images. Empty = use project_dir/images
   folder_name: "images" # Subfolder name when root_dir is empty
   
   # Images per entity (5 recommended for variety and backup options)
@@ -520,7 +520,7 @@ download:
   #   root_dir: "E:/v"  →  E:/v/myproject/winter_s/Snow_driv_abc123.mp4 (52 chars)
   #   root_dir: ""      →  D:/Projects/myproject/videos/winter_s/Snow_driv_abc123.mp4 (65 chars)
   
-  root_dir: ""  # Short root path. Examples: "E:/v", "D:/vid", "C:/v"
+  root_dir: "E:/v"  # Short root path. Examples: "E:/v", "D:/vid", "C:/v"
   folder_name: "videos"  # Subfolder name when root_dir is empty
   max_keyword_len: 6     # Keyword folder: "winter" not "winter_road_conditions"
   max_filename_len: 8    # Filename: "Snow_dri_abc123.mp4" (8 + 11 + 4 = 23 chars)
@@ -677,7 +677,7 @@ output:
   otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
   generate_edl: true
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
-  xml_parts: 4  # Split XML into multiple files (helps with large projects)
+  xml_parts: 2  # Split XML into multiple files (helps with large projects)
   generate_report: true
   
   # Track structure
