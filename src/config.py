@@ -386,6 +386,10 @@ class ImageSearchConfig:
     """
     enabled: bool = True
     
+    # Short path settings (like download config)
+    root_dir: str = ""  # Empty = use project_dir/images. Set to e.g. "E:/i"
+    folder_name: str = "images"  # Subfolder name when root_dir is empty
+    
     # Images per entity (5 recommended for variety and backup options)
     images_per_entity: int = 5
     
@@ -395,8 +399,8 @@ class ImageSearchConfig:
     # Minimum file size in MB (1MB default for quality)
     min_size_mb: float = 1.0
     
-    # Output directory (relative to project)
-    output_dir: str = "downloaded_images"
+    # Output directory (relative to project) - DEPRECATED, use root_dir instead
+    output_dir: str = "images"
     
     # Search sources
     use_google: bool = True  # Google Images (requires pyimagedl library)

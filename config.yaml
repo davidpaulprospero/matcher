@@ -360,6 +360,11 @@ zero_download_remix:
 image_search:
   enabled: true
   
+  # Short path settings (like download config)
+  # Set root_dir to a short path near drive root for best results
+  root_dir: ""          # Empty = use project_dir/images. Set to e.g. "E:/i"
+  folder_name: "images" # Subfolder name when root_dir is empty
+  
   # Images per entity (5 recommended for variety and backup options)
   images_per_entity: 5
   
@@ -369,8 +374,8 @@ image_search:
   # Minimum file size in MB (1MB ensures quality)
   min_size_mb: 1.0
   
-  # Output directory (relative to project)
-  output_dir: downloaded_images
+  # Output directory (DEPRECATED - use root_dir instead)
+  output_dir: images
   
   # Search sources (prioritized in order)
   use_google: true       # Google Images (requires: pip install pyimagedl)
