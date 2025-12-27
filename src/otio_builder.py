@@ -1225,22 +1225,15 @@ def save_timeline(timeline: otio.schema.Timeline, output_path: str):
 
 def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_parts: int = 3, clips_per_file: int = 10) -> List[str]:
     """
-    Save timeline split into multiple OTIO files - batched by clips.
-    
-    For long videos (30+ min), even individual tracks can be too heavy.
-    This splits each track into batches of N clips each.
-    
-    Example output for V1 with 50 clips:
-    - V1_Primary_batch01_clips001-010.otio
-    - V1_Primary_batch02_clips011-020.otio
-    - V1_Primary_batch03_clips021-030.otio
-    - etc.
+    Save timeline as:
+    - Track-specific files (V1, V2, V3, etc.)
+    - Full timeline with all tracks
     
     Args:
         timeline: The full OTIO timeline
         output_path: Base output path
         num_parts: Ignored (kept for backwards compatibility)
-        clips_per_file: Max clips per OTIO file (default 10)
+        clips_per_file: Ignored (kept for backwards compatibility)
     
     Returns:
         List of paths to generated OTIO files
@@ -1252,120 +1245,48 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
     audio_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Audio]
     
-    def get_clips_from_track(track):
-        """Extract all clips (not gaps) from a track"""
-        clips = []
-        for item in track:
-            if isinstance(item, otio.schema.Clip):
-                clips.append(item)
-        return clips
+    def safe_name(name):
+        """Create filesystem-safe name"""
+        safe = name.replace(' ', '_').replace('-', '_').replace('/', '_')
+        return ''.join(c for c in safe if c.isalnum() or c == '_')[:15]
     
-    def create_track_with_clips(original_track, clips, start_idx):
-        """Create a new track with only the specified clips, with gaps for timing"""
-        new_track = otio.schema.Track(
-            name=original_track.name,
-            kind=original_track.kind
-        )
-        
-        # Calculate where these clips start in the timeline
-        current_time = otio.opentime.RationalTime(0, 30)
-        clip_idx = 0
-        
-        for item in original_track:
-            if isinstance(item, otio.schema.Clip):
-                if clip_idx >= start_idx and clip_idx < start_idx + len(clips):
-                    # Include this clip
-                    new_track.append(item.clone())
-                else:
-                    # Replace with gap of same duration
-                    gap = otio.schema.Gap(
-                        source_range=item.source_range
-                    )
-                    new_track.append(gap)
-                clip_idx += 1
-            elif isinstance(item, otio.schema.Gap):
-                # Keep gaps to maintain timing
-                new_track.append(item.clone())
-        
-        return new_track
-    
-    def save_track_batches(track, track_prefix, track_idx):
-        """Save a track split into clip batches"""
-        paths = []
-        clips = get_clips_from_track(track)
-        total_clips = len(clips)
-        
-        if total_clips == 0:
-            return paths
-        
-        num_batches = (total_clips + clips_per_file - 1) // clips_per_file
-        
-        for batch_idx in range(num_batches):
-            start_clip = batch_idx * clips_per_file
-            end_clip = min(start_clip + clips_per_file, total_clips)
-            batch_clips = clips[start_clip:end_clip]
-            
-            # Create timeline with just this batch
-            batch_timeline = otio.schema.Timeline(
-                name=f"{track.name} (clips {start_clip+1}-{end_clip})"
-            )
-            
-            # Create track with only these clips (gaps elsewhere)
-            batch_track = create_track_with_clips(track, batch_clips, start_clip)
-            batch_timeline.tracks.append(batch_track)
-            
-            # Generate filename
-            safe_name = track.name.replace(' ', '_').replace('-', '_').replace('/', '_')
-            safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '_')
-            
-            batch_path = f"{base_path}_{track_prefix}_{safe_name}_batch{batch_idx+1:02d}_clips{start_clip+1:03d}-{end_clip:03d}.otio"
-            otio.adapters.write_to_file(batch_timeline, batch_path)
-            paths.append(batch_path)
-            
-            logger.info(f"Saved {track.name} batch {batch_idx+1}/{num_batches}: clips {start_clip+1}-{end_clip}")
-        
-        return paths
-    
-    # Process each video track
+    # =========================================================================
+    # 1. TRACK-SPECIFIC FILES (one per video track)
+    # =========================================================================
     for i, track in enumerate(video_tracks):
-        track_prefix = f"V{i+1}"
-        batch_paths = save_track_batches(track, track_prefix, i)
-        generated_paths.extend(batch_paths)
+        track_timeline = otio.schema.Timeline(name=track.name)
+        track_timeline.tracks.append(track.clone())
+        
+        clip_count = sum(1 for item in track if isinstance(item, otio.schema.Clip))
+        track_path = f"{base_path}_V{i+1}_{safe_name(track.name)}.otio"
+        otio.adapters.write_to_file(track_timeline, track_path)
+        generated_paths.append(track_path)
+        logger.info(f"Saved V{i+1}: {track_path} ({clip_count} clips)")
     
-    # Process voiceover track (usually just one clip, but batch anyway)
+    # Voiceover track
     for track in audio_tracks:
         if 'voiceover' in track.name.lower() or 'a8' in track.name.lower():
-            # Voiceover is usually one clip spanning full timeline
             vo_timeline = otio.schema.Timeline(name="Voiceover")
             vo_timeline.tracks.append(track.clone())
             
             vo_path = f"{base_path}_A8_voiceover.otio"
             otio.adapters.write_to_file(vo_timeline, vo_path)
             generated_paths.append(vo_path)
-            logger.info(f"Saved Voiceover: {vo_path}")
+            logger.info(f"Saved A8 voiceover: {vo_path}")
             break
     
-    # Also save small group files for convenience
+    # =========================================================================
+    # 2. FULL TIMELINE (all tracks)
+    # =========================================================================
+    full_path = f"{base_path}_FULL.otio"
+    otio.adapters.write_to_file(timeline, full_path)
+    generated_paths.append(full_path)
+    logger.info(f"Saved FULL timeline: {full_path}")
     
-    # V1 only - first batch (smallest possible useful file)
-    v1_tracks = [t for t in video_tracks if 'v1 ' in t.name.lower() or 'primary' in t.name.lower()]
-    if v1_tracks:
-        v1_clips = get_clips_from_track(v1_tracks[0])
-        if v1_clips:
-            # Just first 5 clips
-            mini_timeline = otio.schema.Timeline(name="V1 Preview (first 5 clips)")
-            mini_track = create_track_with_clips(v1_tracks[0], v1_clips[:5], 0)
-            mini_timeline.tracks.append(mini_track)
-            
-            mini_path = f"{base_path}_PREVIEW_v1_first5.otio"
-            otio.adapters.write_to_file(mini_timeline, mini_path)
-            generated_paths.insert(0, mini_path)
-            logger.info(f"Saved V1 Preview (first 5 clips): {mini_path}")
-    
-    # Summary file with just structure (no media)
     logger.info(f"Generated {len(generated_paths)} OTIO files total")
     
     return generated_paths
+
 
 
 def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0, 

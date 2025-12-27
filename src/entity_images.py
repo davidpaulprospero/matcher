@@ -272,7 +272,9 @@ class GoogleBingImageClient:
         
         # Track folders before search to identify new ones for cleanup
         existing_folders = set()
-        source_folder = self.output_dir / self.source
+        # Use short source folder names for NLE compatibility
+        short_source = "g" if "google" in self.source.lower() else "b"  # g=Google, b=Bing
+        source_folder = self.output_dir / short_source
         if source_folder.exists():
             existing_folders = set(f.name for f in source_folder.iterdir() if f.is_dir())
         
@@ -300,10 +302,9 @@ class GoogleBingImageClient:
                 query_variations.append(f"{entity_name} photo")
                 query_variations.append(f"{entity_name} image HD")
         
-        # Create output folder for this query
-        safe_query = "".join(c if c.isalnum() else "" for c in query)[:30]
-        timestamp = time_module.strftime("%Y-%m-%d-%H-%M-%S")
-        query_folder = source_folder / f"{timestamp} {safe_query}"
+        # Create output folder for this query (keep short for NLE compatibility)
+        safe_query = "".join(c if c.isalnum() else "" for c in query)[:8]
+        query_folder = source_folder / safe_query
         query_folder.mkdir(parents=True, exist_ok=True)
         
         seen_urls = set()  # Track URLs we've already tried
@@ -753,10 +754,11 @@ class ImageDownloader:
         Returns:
             Path to downloaded file, or None if failed/too small
         """
-        # Generate filename
-        safe_photographer = re.sub(r'[^\w\-]', '_', image.photographer)[:20]
+        # Generate short filename for NLE compatibility
+        # Format: {id8}{ext} = 12 chars max
+        short_id = str(image.id)[-8:] if len(str(image.id)) > 8 else str(image.id)
         ext = Path(image.download_url.split('?')[0]).suffix or '.jpg'
-        filename = f"{image.id}_{safe_photographer}{ext}"
+        filename = f"{short_id}{ext}"
         
         output_path = self.output_dir / filename
         
@@ -1148,9 +1150,12 @@ class StockVideoDownloader:
         
         self._rate_limit()
         
-        # Create filename
+        # Create short filename for NLE compatibility
+        # Format: {source_letter}{id}.mp4 = ~12 chars
+        source_letter = video.source[0].lower()  # p=pexels, p=pixabay
+        short_id = str(video.id)[-8:] if len(str(video.id)) > 8 else str(video.id)
         ext = "mp4"
-        filename = f"{video.source}_{video.id}.{ext}"
+        filename = f"{source_letter}{short_id}.{ext}"
         filepath = self.output_dir / filename
         
         if filepath.exists():
@@ -1240,9 +1245,9 @@ def download_entity_videos(
     
     results: Dict[str, EntityVideoResult] = {}
     
-    # Initialize downloader
+    # Initialize downloader with short folder name
     video_downloader = StockVideoDownloader(
-        output_dir=str(output_path / "stock_videos"),
+        output_dir=str(output_path / "sv"),  # Short for stock_videos
         pexels_key=pexels_key,
         pixabay_key=pixabay_key,
         min_duration=min_duration,

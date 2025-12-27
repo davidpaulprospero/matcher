@@ -878,14 +878,20 @@ Topic:"""
             print(f"  Images per entity: {config.image_search.images_per_entity}")
             print(f"  Minimum size: {config.image_search.min_size_mb}MB")
             
-            # Get output directory - USE PROJECT_DIR if available
-            output_dir = Path(config.image_search.output_dir)
-            if not output_dir.is_absolute():
-                # Prefer PROJECT_DIR over install dir
-                if PROJECT_DIR:
-                    output_dir = PROJECT_DIR / config.image_search.output_dir
-                else:
-                    output_dir = Path(config.output.output_dir).parent / config.image_search.output_dir
+            # Get output directory - USE SHORT PATHS if configured
+            image_cfg = config.image_search
+            
+            if getattr(image_cfg, 'root_dir', '') and image_cfg.root_dir:
+                # Use explicit root_dir (e.g., "E:/i")
+                project_name = PROJECT_DIR.name[:15] if PROJECT_DIR else "project"
+                output_dir = Path(image_cfg.root_dir) / project_name
+            elif PROJECT_DIR:
+                # Use project-relative path
+                folder_name = getattr(image_cfg, 'folder_name', 'images')
+                output_dir = PROJECT_DIR / folder_name
+            else:
+                output_dir = Path(image_cfg.output_dir)
+            
             output_dir.mkdir(parents=True, exist_ok=True)
             
             print(f"  Output directory: {output_dir}")
@@ -994,13 +1000,20 @@ Topic:"""
             print(f"  Entity types: {', '.join(allowed_types)}")
             print(f"  Videos per entity: {videos_per_entity}")
             
-            # Get output directory - USE PROJECT_DIR if available
-            output_dir = Path(config.image_search.output_dir)
-            if not output_dir.is_absolute():
-                if PROJECT_DIR:
-                    output_dir = PROJECT_DIR / config.image_search.output_dir
-                else:
-                    output_dir = Path(config.output.output_dir).parent / config.image_search.output_dir
+            # Get output directory - USE SHORT PATHS if configured
+            image_cfg = config.image_search
+            
+            if getattr(image_cfg, 'root_dir', '') and image_cfg.root_dir:
+                # Use explicit root_dir (e.g., "E:/i")
+                project_name = PROJECT_DIR.name[:15] if PROJECT_DIR else "project"
+                output_dir = Path(image_cfg.root_dir) / project_name
+            elif PROJECT_DIR:
+                # Use project-relative path
+                folder_name = getattr(image_cfg, 'folder_name', 'images')
+                output_dir = PROJECT_DIR / folder_name
+            else:
+                output_dir = Path(image_cfg.output_dir)
+            
             output_dir.mkdir(parents=True, exist_ok=True)
             
             print(f"  Output directory: {output_dir}")
@@ -1725,56 +1738,38 @@ Topic:"""
             
             # Output formats (config-driven)
             if config.output.generate_otio:
-                otio_base_path = output_dir / "matched_timeline"
+                otio_base_path = output_dir / "timeline"
                 
                 # Check if we should split the OTIO
                 split_otio = getattr(config.output, 'split_otio', True)
                 
                 if split_otio:
-                    # Save split OTIO files (batched by clips)
-                    clips_per_file = getattr(config.output, 'otio_clips_per_file', 10)
-                    otio_paths = save_timeline_split(
-                        timeline, 
-                        str(otio_base_path), 
-                        num_parts=3,
-                        clips_per_file=clips_per_file
-                    )
+                    # Save split OTIO files (tracks + full)
+                    otio_paths = save_timeline_split(timeline, str(otio_base_path))
                     outputs['otio'] = otio_paths
                     
                     # Categorize paths for display
-                    preview = [p for p in otio_paths if '_PREVIEW_' in p]
-                    batches = [p for p in otio_paths if '_batch' in p]
+                    full = [p for p in otio_paths if '_FULL' in p]
+                    tracks = [p for p in otio_paths if '_V' in Path(p).name and '_FULL' not in p]
                     audio = [p for p in otio_paths if '_A8_' in p]
                     
-                    print(f"  ✓ OTIO files generated ({len(otio_paths)} total, {clips_per_file} clips/file):")
+                    print(f"  ✓ OTIO files generated ({len(otio_paths)} total):")
                     
-                    # Show preview first (smallest, try this first)
-                    if preview:
-                        print(f"    Try first (smallest):")
-                        for p in preview:
+                    # Show track files
+                    if tracks:
+                        print(f"    Individual tracks:")
+                        for p in tracks:
                             print(f"      - {Path(p).name}")
                     
-                    # Show batch files by track
-                    if batches:
-                        # Group by track
-                        tracks = {}
-                        for p in batches:
-                            name = Path(p).name
-                            # Extract track prefix (V1, V2, etc.)
-                            parts = name.split('_')
-                            if len(parts) >= 2:
-                                track = parts[1]  # V1, V2, etc.
-                                if track not in tracks:
-                                    tracks[track] = []
-                                tracks[track].append(p)
-                        
-                        print(f"    Clip batches ({len(batches)} files):")
-                        for track, files in sorted(tracks.items()):
-                            print(f"      {track}: {len(files)} batch files")
-                    
+                    # Show audio
                     if audio:
-                        print(f"    Audio:")
                         for p in audio:
+                            print(f"      - {Path(p).name}")
+                    
+                    # Show full timeline (last)
+                    if full:
+                        print(f"    Full timeline:")
+                        for p in full:
                             print(f"      - {Path(p).name}")
                 else:
                     # Save single OTIO file
@@ -1797,7 +1792,7 @@ Topic:"""
             
             # Generate DaVinci Resolve XML with media bin AND timeline (FALLBACK)
             if getattr(config.output, 'generate_xml', True):
-                xml_base_path = output_dir / "resolve_import"
+                xml_base_path = output_dir / "xml"
                 num_parts = getattr(config.output, 'xml_parts', 2)
                 xml_paths = generate_resolve_xml_with_bins(
                     matches=self.matches,
@@ -1810,7 +1805,7 @@ Topic:"""
                     num_parts=num_parts
                 )
                 outputs['xml'] = xml_paths
-                print(f"  ✓ XML (fallback - use if OTIO fails): {xml_paths[0]}")
+                print(f"  ✓ XML (fallback): {Path(xml_paths[0]).name}")
             
             # Generate report if enabled
             if config.output.generate_report:
