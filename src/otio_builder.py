@@ -113,7 +113,8 @@ def create_clip_with_timewarp(
     source_duration: float,
     target_duration: float,
     frame_rate: float = 30.0,
-    metadata: Optional[Dict] = None
+    metadata: Optional[Dict] = None,
+    media_duration: float = None  # Total duration of the source media file
 ) -> otio.schema.Clip:
     """
     Create a clip with duration matching the target (voiceover) duration.
@@ -129,15 +130,38 @@ def create_clip_with_timewarp(
         target_duration: Desired duration on timeline (seconds) - used for source_range
         frame_rate: Frame rate
         metadata: Optional metadata dict
+        media_duration: Total duration of the source media file (for available_range)
     
     Returns:
         OTIO Clip with duration matching target_duration
     """
     rate = frame_rate
     
-    # Create media reference with sanitized path
-    clean_path = sanitize_path_for_url(source_path)
-    media_ref = otio.schema.ExternalReference(target_url=clean_path)
+    # Create absolute Windows path with backslashes for DaVinci Resolve
+    abs_path = str(Path(source_path).resolve())
+    
+    # Get filename for ExternalReference name
+    filename = Path(source_path).name
+    
+    # Determine available_range for the media file
+    # If we don't know the media duration, estimate from source_start + source_duration
+    if media_duration is None:
+        # Estimate: assume media is at least as long as what we're using
+        estimated_duration = source_start + source_duration + 10  # Add buffer
+        media_duration = estimated_duration
+    
+    available_range = otio.opentime.TimeRange(
+        start_time=otio.opentime.RationalTime(0, rate),
+        duration=otio.opentime.RationalTime(round(media_duration * rate), rate)
+    )
+    
+    # Create media reference with proper format for DaVinci Resolve
+    # Note: name must be set as attribute, not constructor param
+    media_ref = otio.schema.ExternalReference(
+        target_url=abs_path,
+        available_range=available_range
+    )
+    media_ref.name = filename  # Set name as attribute
     
     # IMPORTANT: Use round() to avoid floating-point precision drift
     # This prevents timing deviation over many clips
@@ -228,11 +252,13 @@ def create_timeline(
     
     # V1: Primary
     track = otio.schema.Track(name="V1 - Primary", kind=otio.schema.TrackKind.Video)
+    track.metadata['Resolve_OTIO'] = {'Locked': False}
     video_tracks.append(track)
     
     # V2-V3: Alternatives
     for i in range(num_alternatives):
         track = otio.schema.Track(name=f"V{i+2} - Alternative {i+1}", kind=otio.schema.TrackKind.Video)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
     
@@ -241,6 +267,7 @@ def create_timeline(
     for i in range(num_secondary):
         track_num = 1 + num_alternatives + i + 1  # V4, V5, V6
         track = otio.schema.Track(name=f"V{track_num} - {secondary_names[i]}", kind=otio.schema.TrackKind.Video)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
     
@@ -249,6 +276,7 @@ def create_timeline(
         display_name = strategy_display_names.get(strategy, strategy)
         track_num = 1 + num_alternatives + num_secondary + i + 1  # V7
         track = otio.schema.Track(name=f"V{track_num} - {display_name}", kind=otio.schema.TrackKind.Video)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
     
@@ -267,11 +295,13 @@ def create_timeline(
     
     # A1: Primary audio
     track = otio.schema.Track(name="A1 - Video Audio", kind=otio.schema.TrackKind.Audio)
+    track.metadata['Resolve_OTIO'] = {'Locked': False}
     audio_tracks.append(track)
     
     # A2-A3: Alternative audio
     for i in range(num_alternatives):
         track = otio.schema.Track(name=f"A{i+2} - Alt {i+1} Audio", kind=otio.schema.TrackKind.Audio)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         audio_tracks.append(track)
     
@@ -279,6 +309,7 @@ def create_timeline(
     for i in range(num_secondary):
         track_num = 1 + num_alternatives + i + 1  # A4, A5, A6
         track = otio.schema.Track(name=f"A{track_num} - {secondary_names[i]} Audio", kind=otio.schema.TrackKind.Audio)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         audio_tracks.append(track)
     
@@ -287,6 +318,7 @@ def create_timeline(
         display_name = strategy_display_names.get(strategy, strategy)
         track_num = 1 + num_alternatives + num_secondary + i + 1  # A7
         track = otio.schema.Track(name=f"A{track_num} - {display_name} Audio", kind=otio.schema.TrackKind.Audio)
+        track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         audio_tracks.append(track)
     
@@ -296,6 +328,7 @@ def create_timeline(
         name=f"A{voiceover_track_num} - Voiceover",
         kind=otio.schema.TrackKind.Audio
     )
+    voiceover_track.metadata['Resolve_OTIO'] = {'Locked': False}
     
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
@@ -589,11 +622,25 @@ def create_timeline(
     
     # Add voiceover track
     if voiceover_path and matches:
-        clean_vo_path = sanitize_path_for_url(voiceover_path)
-        vo_ref = otio.schema.ExternalReference(target_url=clean_vo_path)
+        # Create absolute path for voiceover
+        abs_vo_path = str(Path(voiceover_path).resolve())
+        vo_filename = Path(voiceover_path).name
         
         # Total duration should match total frames accumulated
         total_frames = timeline_frames
+        total_duration_seconds = total_frames / rate
+        
+        # Create proper ExternalReference with available_range
+        vo_available_range = otio.opentime.TimeRange(
+            start_time=otio.opentime.RationalTime(0, rate),
+            duration=otio.opentime.RationalTime(total_frames, rate)
+        )
+        
+        vo_ref = otio.schema.ExternalReference(
+            target_url=abs_vo_path,
+            available_range=vo_available_range
+        )
+        vo_ref.name = vo_filename  # Set name as attribute
         
         vo_clip = otio.schema.Clip(
             name="Voiceover",
@@ -2176,11 +2223,17 @@ def generate_resolve_xml_with_bins(
                 duration_frames = file_info['duration_frames']
                 
                 video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+                audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
                 is_video = file_ext in video_exts
+                is_audio = file_ext in audio_exts
+                
+                # Use simple clip-N id format and include uuid for DaVinci compatibility
+                clip_num = file_info["file_id"].replace("file-", "")
                 
                 part_lines.extend([
-                    f'            <clip id="masterclip-{file_info["file_id"]}">',
-                    f'                <name>{file_name}</name>',
+                    f'            <clip id="clip-{clip_num}">',
+                    f'                <uuid>{file_info["uuid"]}</uuid>',
+                    f'                <n>{file_name}</n>',
                     '                <rate>',
                     f'                    <timebase>{fps_int}</timebase>',
                     '                    <ntsc>FALSE</ntsc>',
@@ -2188,10 +2241,10 @@ def generate_resolve_xml_with_bins(
                     '                <media>',
                     '                    <video>',
                     '                        <track>',
-                    '                            <clipitem>',
-                    f'                                <name>{file_name}</name>',
+                    f'                            <clipitem id="clipitem-{clip_num}">',
+                    f'                                <n>{file_name}</n>',
                     f'                                <file id="{file_info["file_id"]}">',
-                    f'                                    <name>{file_name}</name>',
+                    f'                                    <n>{file_name}</n>',
                     f'                                    <pathurl>{path_url}</pathurl>',
                     '                                    <rate>',
                     f'                                        <timebase>{fps_int}</timebase>',
@@ -2210,6 +2263,22 @@ def generate_resolve_xml_with_bins(
                     '                            </clipitem>',
                     '                        </track>',
                     '                    </video>',
+                ])
+                
+                # Add audio section for video and audio files
+                if is_video or is_audio:
+                    part_lines.extend([
+                        '                    <audio>',
+                        '                        <track>',
+                        f'                            <clipitem id="clipitem-{clip_num}-audio">',
+                        f'                                <n>{file_name}</n>',
+                        f'                                <file id="{file_info["file_id"]}"/>',
+                        '                            </clipitem>',
+                        '                        </track>',
+                        '                    </audio>',
+                    ])
+                
+                part_lines.extend([
                     '                </media>',
                     '            </clip>',
                 ])

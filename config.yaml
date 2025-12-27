@@ -677,7 +677,7 @@ output:
   otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
   generate_edl: true
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
-  xml_parts: 2  # Split XML into multiple files (helps with large projects)
+  xml_parts: 4  # Split XML into multiple files (helps with large projects)
   generate_report: true
   
   # Track structure
