@@ -396,6 +396,9 @@ class ImageSearchConfig:
     # Videos per entity for stock footage (3 recommended)
     videos_per_entity: int = 3
     
+    # Maximum number of entities to process (0 = no limit)
+    max_entities: int = 0
+    
     # Minimum file size in MB (1MB default for quality)
     min_size_mb: float = 1.0
     

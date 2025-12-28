@@ -1,70 +1,74 @@
 {
-  "total_files": 8,
-  "included_files": 2,
-  "excluded_files": 6,
+  "total_files": 9,
+  "included_files": 4,
+  "excluded_files": 5,
   "included_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_l\\South_Af_vKqt25WgfrI.mp4",
-      "filename": "South_Af_vKqt25WgfrI.mp4",
-      "keyword_matches": [
-        "pretoria south africa 1971 footage"
-      ],
-      "match_score": 0.5,
-      "file_size_mb": 30.814483642578125,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_s\\Elon_Mus_yhLtTl5vf1A.mp4",
-      "filename": "Elon_Mus_yhLtTl5vf1A.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_l\\Elon_Mus_oO8w6XcXJUs.mp4",
+      "filename": "Elon_Mus_oO8w6XcXJUs.mp4",
       "keyword_matches": [
         "elon musk footage"
       ],
       "match_score": 0.5,
-      "file_size_mb": 2.831080436706543,
+      "file_size_mb": 163.50464248657227,
+      "duration_estimate": null,
+      "metadata": {}
+    },
+    {
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_l\\Tesla_Fa_mr9kK0_7x08.mp4",
+      "filename": "Tesla_Fa_mr9kK0_7x08.mp4",
+      "keyword_matches": [
+        "tesla factory footage"
+      ],
+      "match_score": 0.5,
+      "file_size_mb": 240.67458248138428,
+      "duration_estimate": null,
+      "metadata": {}
+    },
+    {
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_l\\US_Tesla_952vFS_3Fp0.mp4",
+      "filename": "US_Tesla_952vFS_3Fp0.mp4",
+      "keyword_matches": [
+        "tesla factory footage"
+      ],
+      "match_score": 0.5,
+      "file_size_mb": 1382.5089645385742,
+      "duration_estimate": null,
+      "metadata": {}
+    },
+    {
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_s\\Tesla_Gi_-Ds1xV7M2gI.mp4",
+      "filename": "Tesla_Gi_-Ds1xV7M2gI.mp4",
+      "keyword_matches": [
+        "tesla factory footage"
+      ],
+      "match_score": 0.5,
+      "file_size_mb": 33.49905586242676,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
   "excluded_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Elon_M_l\\Tesla_Fa_mr9kK0_7x08.mp4",
-      "filename": "Tesla_Fa_mr9kK0_7x08.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_m\\Is_life__2KK_kzrJPS8.mp4",
+      "filename": "Is_life__2KK_kzrJPS8.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 240.67458248138428,
+      "file_size_mb": 28.06225872039795,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Elon_M_s\\Bizarre__y2Rh6HGE6S8.mp4",
-      "filename": "Bizarre__y2Rh6HGE6S8.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_s\\DGX_Spar_wX9ybkEYDc0.mp4",
+      "filename": "DGX_Spar_wX9ybkEYDc0.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 2.032212257385254,
+      "file_size_mb": 5.325817108154297,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_l\\1970s_So_e5ER_PuMOn0.mp4",
-      "filename": "1970s_So_e5ER_PuMOn0.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 207.76579761505127,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_m\\1970_s_S_6Gm7IzfqWos.mp4",
-      "filename": "1970_s_S_6Gm7IzfqWos.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 29.562726974487305,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "filename": "pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
@@ -73,19 +77,28 @@
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\stock\\pexels_4307653_N_E_HD.mp4",
-      "filename": "pexels_4307653_N_E_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\stock\\pexels_3568453_Harrison_Haines_HD.mp4",
+      "filename": "pexels_3568453_Harrison_Haines_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 11.445028305053711,
+      "file_size_mb": 9.231383323669434,
+      "duration_estimate": null,
+      "metadata": {}
+    },
+    {
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_m\\Giga_Ber_blW-Fa4a10g.mp4",
+      "filename": "Giga_Ber_blW-Fa4a10g.mp4",
+      "keyword_matches": [],
+      "match_score": 0.0,
+      "file_size_mb": 110.43008422851562,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
-  "processing_time_seconds": 0.0020008087158203125,
+  "processing_time_seconds": 0.002500295639038086,
   "keywords_used": [
     "elon musk footage",
-    "pretoria south africa 1971 footage"
+    "tesla factory footage"
   ],
   "avg_match_score": 0.5
 }

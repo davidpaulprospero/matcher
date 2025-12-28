@@ -890,6 +890,12 @@ Topic:"""
                 print(f"  No entities of types {allowed_types} to search")
                 return {}
             
+            # Apply max_entities limit if configured
+            max_entities = getattr(config.image_search, 'max_entities', 0)
+            if max_entities > 0 and len(entities_to_search) > max_entities:
+                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
+                entities_to_search = entities_to_search[:max_entities]
+            
             print(f"  Searching images for {len(entities_to_search)} entities")
             print(f"  Entity types: {', '.join(allowed_types)}")
             print(f"  Images per entity: {config.image_search.images_per_entity}")
@@ -1009,6 +1015,12 @@ Topic:"""
             if not entities_to_search:
                 print(f"  No entities of types {allowed_types} to search")
                 return {}
+            
+            # Apply max_entities limit if configured
+            max_entities = getattr(config.image_search, 'max_entities', 0)
+            if max_entities > 0 and len(entities_to_search) > max_entities:
+                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
+                entities_to_search = entities_to_search[:max_entities]
             
             # Get videos_per_entity from config (default 3)
             videos_per_entity = getattr(config.image_search, 'videos_per_entity', 3)
