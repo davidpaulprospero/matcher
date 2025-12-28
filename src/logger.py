@@ -31,6 +31,21 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import threading
+import numpy as np
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types"""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
 
 # =============================================================================
 # API COST TRACKING
@@ -673,7 +688,7 @@ class RunLogger:
         
         # Save JSON
         with open(self.json_file, 'w', encoding='utf-8') as f:
-            json.dump(self.run_log.to_dict(), f, indent=2)
+            json.dump(self.run_log.to_dict(), f, indent=2, cls=NumpyEncoder)
         
         self.file_logger.info(f"JSON log saved: {self.json_file}")
         

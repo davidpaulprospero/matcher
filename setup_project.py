@@ -149,110 +149,75 @@ REM Voiceover-Matcher Runner
 REM Project: {project_dir.name}
 REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 REM ============================================================
-REM
-REM Usage:
-REM   run                     Auto-detect: prompt if saves exist, fresh if not
-REM   run --resume            Resume interrupted run from checkpoint
-REM   run --fresh             Fresh start, ignore checkpoint
-REM   run --use-keywords      Use most recent saved keywords
-REM   run --use-keywords NAME Use specific saved keyword preset
-REM   run --list              List saved keyword presets
-REM   run --help              Show all options
-REM
-REM ============================================================
 
-REM Set FFmpeg path (adjust if your ffmpeg is elsewhere)
+REM Set FFmpeg path
 set IMAGEIO_FFMPEG_EXE=C:\\ffmpeg\\bin\\ffmpeg.exe
 
-REM Central installation location (where main.py lives)
+REM Central installation location
 set INSTALL_DIR={install_dir}
 
 REM Project directory (this folder)
 set PROJECT_DIR=%~dp0
-REM Remove trailing backslash
 if "%PROJECT_DIR:~-1%"=="\\" set PROJECT_DIR=%PROJECT_DIR:~0,-1%
 
 REM Change to install directory
 cd /d "%INSTALL_DIR%"
 
 REM ============================================================
-REM Handle explicit commands (bypass auto-detection)
+REM EXPLICIT COMMANDS (skip auto-detection)
 REM ============================================================
 
-REM --list: List saved keywords
-if "%1"=="--list" (
-    echo.
-    echo   Listing saved keyword presets...
-    echo.
+if "%~1"=="--list" (
     python main.py --project "%PROJECT_DIR%" --list-keywords
-    goto :end
+    goto :done
 )
 
-REM --help: Show help
-if "%1"=="--help" (
+if "%~1"=="--help" (
     echo.
-    echo   ============================================================
-    echo   VOICEOVER-MATCHER - Quick Commands
-    echo   ============================================================
-    echo.
-    echo   run                     Auto-detect (prompt if saves exist)
+    echo   VOICEOVER-MATCHER - Commands:
+    echo   ------------------------------------------------------------
+    echo   run                     Auto-detect [prompt if saves exist]
     echo   run --resume            Resume from checkpoint
-    echo   run --fresh             Fresh start, ignore checkpoint
-    echo   run --use-keywords      Use most recent saved keywords
-    echo   run --use-keywords NAME Use specific keyword preset
+    echo   run --fresh             Fresh start [new keywords]
+    echo   run --use-keywords      Use saved keywords
     echo   run --list              List saved keyword presets
+    echo   run --help              Show this help
     echo.
-    python main.py --help
-    goto :end
+    goto :done
 )
 
-REM --resume: Resume from checkpoint (explicit)
-if "%1"=="--resume" (
-    echo.
-    echo   ============================================================
-    echo   VOICEOVER-MATCHER
-    echo   ============================================================
-    echo   Project: %PROJECT_DIR%
+if "%~1"=="--resume" (
     echo   Mode: RESUME from checkpoint
-    echo.
     python main.py --project "%PROJECT_DIR%" --resume
     goto :check_error
 )
 
-REM --fresh: Fresh start (explicit)
-if "%1"=="--fresh" (
-    echo.
-    echo   ============================================================
-    echo   VOICEOVER-MATCHER
-    echo   ============================================================
-    echo   Project: %PROJECT_DIR%
-    echo   Mode: FRESH start (ignoring saves)
-    echo.
+if "%~1"=="--fresh" (
+    echo   Mode: FRESH start
     python main.py --project "%PROJECT_DIR%" --fresh --save-keywords
     goto :check_error
 )
 
-REM --use-keywords: Use saved keywords (explicit)
-if "%1"=="--use-keywords" (
-    echo.
-    echo   ============================================================
-    echo   VOICEOVER-MATCHER
-    echo   ============================================================
-    echo   Project: %PROJECT_DIR%
-    if "%2"=="" (
+if "%~1"=="--use-keywords" (
+    if "%~2"=="" (
         echo   Mode: Using LATEST saved keywords
-        echo.
         python main.py --project "%PROJECT_DIR%" --use-keywords
     ) else (
-        echo   Mode: Using saved keywords [%2]
-        echo.
-        python main.py --project "%PROJECT_DIR%" --use-keywords %2
+        echo   Mode: Using saved keywords [%~2]
+        python main.py --project "%PROJECT_DIR%" --use-keywords %~2
     )
     goto :check_error
 )
 
+REM If we got here with an argument, it's unknown
+if not "%~1"=="" (
+    echo   Unknown option: %~1
+    echo   Use: run --help
+    goto :done
+)
+
 REM ============================================================
-REM AUTO-DETECTION MODE (no arguments)
+REM AUTO-DETECTION (no arguments)
 REM ============================================================
 
 echo.
@@ -260,107 +225,83 @@ echo   ============================================================
 echo   VOICEOVER-MATCHER
 echo   ============================================================
 echo   Project: %PROJECT_DIR%
-echo   Install: %INSTALL_DIR%
 echo.
 
 REM Check what exists
 set HAS_CHECKPOINT=0
 set HAS_KEYWORDS=0
-
 if exist "%PROJECT_DIR%\\checkpoint.json" set HAS_CHECKPOINT=1
 if exist "%PROJECT_DIR%\\saved_keywords.json" set HAS_KEYWORDS=1
 
-REM If nothing saved, run fresh automatically
+REM If NOTHING saved, run fresh automatically (no prompt)
 if %HAS_CHECKPOINT%==0 if %HAS_KEYWORDS%==0 (
-    echo   No saves found - starting fresh run
-    echo   Mode: Normal run (auto-saving keywords)
+    echo   No saves found - starting fresh run...
     echo.
-    python main.py --project "%PROJECT_DIR%" --save-keywords %*
+    python main.py --project "%PROJECT_DIR%" --save-keywords
     goto :check_error
 )
 
-REM Something exists - show status and prompt
-echo   ─────────────────────────────────────────────────────────────
+REM Something exists - prompt user
 echo   SAVED DATA FOUND:
-if %HAS_CHECKPOINT%==1 (
-    echo     [C] Checkpoint exists (can resume interrupted run)
-)
-if %HAS_KEYWORDS%==1 (
-    echo     [K] Saved keywords exist (can reuse for same videos)
-)
-echo   ─────────────────────────────────────────────────────────────
+if %HAS_CHECKPOINT%==1 echo     - Checkpoint [resume interrupted run]
+if %HAS_KEYWORDS%==1 echo     - Saved keywords [reuse for same videos]
 echo.
 echo   Options:
-if %HAS_CHECKPOINT%==1 (
-    echo     [R] Resume from checkpoint
-)
-if %HAS_KEYWORDS%==1 (
-    echo     [K] Use saved keywords (same videos)
-)
-echo     [F] Fresh start (new keywords, new videos)
+if %HAS_CHECKPOINT%==1 echo     [R] Resume from checkpoint
+if %HAS_KEYWORDS%==1 echo     [K] Use saved keywords
+echo     [F] Fresh start [new keywords]
 echo     [Q] Quit
 echo.
 
-:prompt_loop
-set /p CHOICE="  Choice: "
+:ask
+set /p "CHOICE=  Your choice: "
+if /i "%CHOICE%"=="R" goto :do_resume
+if /i "%CHOICE%"=="K" goto :do_keywords
+if /i "%CHOICE%"=="F" goto :do_fresh
+if /i "%CHOICE%"=="Q" goto :done
+echo   Invalid choice. Enter R, K, F, or Q.
+goto :ask
 
-if /i "%CHOICE%"=="R" (
-    if %HAS_CHECKPOINT%==1 (
-        echo.
-        echo   Mode: RESUME from checkpoint
-        echo.
-        python main.py --project "%PROJECT_DIR%" --resume
-        goto :check_error
-    ) else (
-        echo   No checkpoint found. Choose another option.
-        goto :prompt_loop
-    )
+:do_resume
+if %HAS_CHECKPOINT%==0 (
+    echo   No checkpoint found!
+    goto :ask
 )
+echo   Mode: RESUME
+python main.py --project "%PROJECT_DIR%" --resume
+goto :check_error
 
-if /i "%CHOICE%"=="K" (
-    if %HAS_KEYWORDS%==1 (
-        echo.
-        echo   Mode: Using saved keywords
-        echo.
-        python main.py --project "%PROJECT_DIR%" --use-keywords
-        goto :check_error
-    ) else (
-        echo   No saved keywords found. Choose another option.
-        goto :prompt_loop
-    )
+:do_keywords
+if %HAS_KEYWORDS%==0 (
+    echo   No saved keywords found!
+    goto :ask
 )
+echo   Mode: Using saved keywords
+python main.py --project "%PROJECT_DIR%" --use-keywords
+goto :check_error
 
-if /i "%CHOICE%"=="F" (
-    echo.
-    echo   Mode: FRESH start (new keywords)
-    echo.
-    python main.py --project "%PROJECT_DIR%" --fresh --save-keywords
-    goto :check_error
-)
-
-if /i "%CHOICE%"=="Q" (
-    echo.
-    echo   Exiting.
-    goto :end
-)
-
-echo   Invalid choice. Please enter R, K, F, or Q.
-goto :prompt_loop
+:do_fresh
+echo   Mode: FRESH start
+python main.py --project "%PROJECT_DIR%" --fresh --save-keywords
+goto :check_error
 
 :check_error
-REM Keep window open if there was an error
+echo.
 if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo   [ERROR] Pipeline failed with error code %ERRORLEVEL%
-    echo.
-    echo   If interrupted, you can resume with: run --resume
-    pause
+    echo   ============================================================
+    echo   [ERROR] Pipeline failed - code %ERRORLEVEL%
+    echo   ============================================================
+    echo   Tip: run --resume to continue
 ) else (
-    echo.
+    echo   ============================================================
     echo   [SUCCESS] Pipeline completed
+    echo   ============================================================
 )
 
-:end
+:done
+echo.
+echo   Press any key to close...
+pause >nul
 '''
     
     bat_path = project_dir / "run.bat"

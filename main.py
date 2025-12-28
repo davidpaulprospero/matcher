@@ -2141,8 +2141,7 @@ Topic:"""
             try:
                 from src.keyword_remix import KeywordRemixer
                 self.keyword_remixer = KeywordRemixer(
-                    topic_context=self.topic_context,
-                    original_keywords=keywords
+                    topic_context=self.topic_context
                 )
             except Exception as e:
                 logger.warning(f"Could not reinitialize KeywordRemixer: {e}")
