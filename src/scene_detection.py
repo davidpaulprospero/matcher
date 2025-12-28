@@ -132,7 +132,9 @@ class VideoSceneData:
         )
 
 
-# Speed presets
+# Speed presets - intentionally hardcoded as these are standard templates
+# Users select preset via config.scene_detection.preset and can override
+# individual settings via config.scene_detection.threshold, etc.
 PRESETS = {
     'fast': {
         'downscale': 6,
@@ -174,16 +176,18 @@ class SceneDetector:
         # Get preset settings
         preset = PRESETS.get(self.scene_config.preset, PRESETS['balanced'])
         
-        # Allow config overrides
-        self.downscale = self.scene_config.downscale or preset['downscale']
-        self.frame_skip = self.scene_config.frame_skip or preset['frame_skip']
-        self.threshold = self.scene_config.threshold or preset['threshold']
-        self.min_scene_length = self.scene_config.min_scene_length or preset['min_scene_length']
-        self.start_timecode = self.scene_config.start_timecode
+        # Allow config overrides (use correct field names from config)
+        self.downscale = getattr(self.scene_config, 'downscale_factor', None) or preset['downscale']
+        self.frame_skip = getattr(self.scene_config, 'frame_skip', None) or preset['frame_skip']
+        self.threshold = getattr(self.scene_config, 'threshold', None) or preset['threshold']
+        self.min_scene_length = getattr(self.scene_config, 'min_scene_len', None) or preset['min_scene_length']
         
-        # Output paths
-        self.otio_output_dir = Path(config.otio_output_dir) / "scene_otio"
-        self.scene_index_path = Path(config.cache_dir) / "scene_index.json"
+        # Output paths - use config values with defaults
+        output_dir = getattr(config, 'output_dir', 'output')
+        cache_dir = getattr(config.cache, 'cache_dir', '.cache') if hasattr(config, 'cache') else '.cache'
+        
+        self.otio_output_dir = Path(output_dir) / "scene_otio"
+        self.scene_index_path = Path(cache_dir) / "scene_index.json"
         
         # Scene index (loaded or created)
         self.scene_index: Dict[str, VideoSceneData] = {}
@@ -197,15 +201,20 @@ class SceneDetector:
     
     def _setup_hw_accel(self):
         """Configure OpenCV for hardware acceleration"""
-        force_cuda = getattr(self.scene_config, 'force_cuda', False)
+        use_gpu = getattr(self.scene_config, 'use_gpu', True)
+        force_gpu = getattr(self.scene_config, 'force_gpu', False)
         
         self.hw_info = {
             'cuda_available': cv2.cuda.getCudaEnabledDeviceCount() > 0 if hasattr(cv2, 'cuda') else False,
             'opencl_available': cv2.ocl.haveOpenCL()
         }
         
+        if not use_gpu:
+            logger.info("Scene detection: GPU disabled in config")
+            return
+        
         # Force CUDA if requested and available
-        if force_cuda and self.hw_info['cuda_available']:
+        if force_gpu and self.hw_info['cuda_available']:
             logger.info("Scene detection: Forcing CUDA GPU acceleration")
             self.hw_info['using_cuda'] = True
             # Set CUDA as preferred backend
@@ -217,7 +226,7 @@ class SceneDetector:
             cv2.ocl.setUseOpenCL(True)
             self.hw_info['opencl_enabled'] = cv2.ocl.useOpenCL()
         
-        cuda_status = "CUDA (forced)" if force_cuda and self.hw_info['cuda_available'] else f"CUDA={self.hw_info.get('cuda_available')}"
+        cuda_status = "CUDA (forced)" if force_gpu and self.hw_info['cuda_available'] else f"CUDA={self.hw_info.get('cuda_available')}"
         logger.info(f"Scene detection HW: {cuda_status}, "
                    f"OpenCL={self.hw_info.get('opencl_enabled', False)}")
     
@@ -647,13 +656,14 @@ class SceneDetector:
         }
 
 
-def detect_scenes(config, video_dir: Path = None) -> SceneDetector:
+def detect_scenes(config, video_dir: Path = None, min_duration: float = 0) -> SceneDetector:
     """
     Convenience function to run scene detection.
     
     Args:
         config: Pipeline config
         video_dir: Override video directory (uses config default if None)
+        min_duration: Minimum video duration to process (seconds, default 0 = no filter)
     
     Returns:
         SceneDetector instance with populated scene index
@@ -661,9 +671,14 @@ def detect_scenes(config, video_dir: Path = None) -> SceneDetector:
     detector = SceneDetector(config)
     
     if video_dir is None:
-        video_dir = Path(config.downloaded_videos_dir)
+        # Try to get video directory from config with fallback
+        video_dir = getattr(config, 'downloaded_videos_dir', None)
+        if video_dir is None and hasattr(config, 'pipeline'):
+            video_dir = getattr(config.pipeline, 'video_source_dir', None)
+        if video_dir is None:
+            video_dir = Path('downloaded_videos')
+        video_dir = Path(video_dir)
     
-    min_duration = config.scene_detection.min_video_duration
     detector.process_all_videos(video_dir, min_duration=min_duration)
     
     return detector

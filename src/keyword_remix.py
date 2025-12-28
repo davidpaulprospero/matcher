@@ -776,7 +776,16 @@ Respond with a JSON object mapping each original keyword to its alternatives:
         
         import google.generativeai as genai
         genai.configure(api_key=self.gemini_api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # Get model from config
+        gemini_model = 'gemini-2.0-flash'
+        if self.config:
+            if hasattr(self.config, 'matching'):
+                gemini_model = getattr(self.config.matching, 'gemini_model', gemini_model)
+            elif hasattr(self.config, 'llm'):
+                gemini_model = getattr(self.config.llm, 'model', gemini_model)
+        
+        model = genai.GenerativeModel(gemini_model)
         
         prompt = self.REMIX_PROMPT.format(
             keyword=keyword,
@@ -820,10 +829,20 @@ Respond with a JSON object mapping each original keyword to its alternatives:
             topic_context=self.topic_context
         )
         
+        # Get model and max_tokens from config
+        anthropic_model = 'claude-3-haiku-20240307'
+        max_tokens = 500
+        if self.config:
+            if hasattr(self.config, 'matching'):
+                anthropic_model = getattr(self.config.matching, 'anthropic_model', anthropic_model)
+            elif hasattr(self.config, 'llm'):
+                anthropic_model = getattr(self.config.llm, 'anthropic_model', anthropic_model)
+                max_tokens = getattr(self.config.llm, 'max_tokens', max_tokens)
+        
         try:
             response = client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=500,
+                model=anthropic_model,
+                max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}]
             )
             text = response.content[0].text.strip()
@@ -1005,7 +1024,16 @@ Respond with a JSON object mapping each original keyword to its alternatives:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.gemini_api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            
+            # Get model from config
+            gemini_model = 'gemini-2.0-flash'
+            if self.config:
+                if hasattr(self.config, 'matching'):
+                    gemini_model = getattr(self.config.matching, 'gemini_model', gemini_model)
+                elif hasattr(self.config, 'llm'):
+                    gemini_model = getattr(self.config.llm, 'model', gemini_model)
+            
+            model = genai.GenerativeModel(gemini_model)
             
             keywords_list = "\n".join([f"- {kw}" for kw in keywords])
             prompt = self.BATCH_REMIX_PROMPT.format(

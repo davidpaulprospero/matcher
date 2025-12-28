@@ -111,8 +111,14 @@ class TranscriptionConfig:
     
     # VAD settings
     vad_filter: bool = True
-    min_silence_duration_ms: int = 500
-    speech_pad_ms: int = 200
+    min_silence_duration_ms: int = 200
+    speech_pad_ms: int = 10
+    
+    # Segment splitting (for voiceover optimization)
+    split_threshold_multiplier: float = 1.5  # Split if > multiplier * median
+    long_median_threshold: float = 8.0  # If median > this, use absolute threshold
+    absolute_split_threshold: float = 12.0  # Absolute threshold for very long segments
+    min_split_duration: float = 4.0  # Minimum duration to consider splitting
     
     # Caching
     cache_transcriptions: bool = True
@@ -207,6 +213,9 @@ class SceneDetectionConfig:
     downscale_factor: int = 4
     frame_skip: int = 2
     
+    # Minimum video duration to process (seconds, 0 = no minimum)
+    min_video_duration: float = 0
+    
     # Audio analysis integration
     audio_analysis: bool = True
     silence_threshold_db: float = -40.0
@@ -294,6 +303,7 @@ class MatchingConfig:
     anthropic_model: str = "claude-3-haiku-20240307"
     ollama_model: str = "llama3.2"
     local_llm_model: str = "llama3.2"  # Alias for ollama_model
+    ollama_host: str = "http://localhost:11434"  # Ollama API host
     
     # Caching
     cache_llm_responses: bool = True
@@ -584,6 +594,10 @@ class DownloadConfig:
     search_pool_multiplier: int = 5  # Search 5x what we want to download
     min_search_pool: int = 40  # Minimum search pool size
     
+    # Timeout settings
+    search_timeout: int = 60  # Seconds for search metadata subprocess
+    download_timeout: int = 600  # Seconds for download/transcode subprocess (10 min)
+    
     # Duration tiers (can be overridden)
     tiers: dict = field(default_factory=lambda: {
         'short': {'min': 20, 'max': 120, 'per_keyword': 8},
@@ -669,10 +683,11 @@ class StockFootageConfig:
 class DeduplicationConfig:
     """Video deduplication settings"""
     enabled: bool = True
-    hash_threshold: int = 10
+    hash_threshold: int = 10  # Hamming distance (0-64, lower = stricter)
     use_first_frame: bool = True
     auto_delete: bool = True
     generate_report: bool = True
+    frame_timeout: int = 30  # Seconds for FFmpeg frame extraction
 
 
 @dataclass

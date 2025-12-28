@@ -433,11 +433,13 @@ class VideoDownloader:
             cmd.extend(['--cookies', str(self._cookies_path)])
         
         try:
+            # Use config timeout or default
+            search_timeout = getattr(self.download_config, 'search_timeout', 60)
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=search_timeout
             )
             
             videos = []
@@ -595,10 +597,15 @@ Only output the JSON array, no other text."""
                 logger.warning("No Anthropic API key found")
                 return "[]"
             
+            # Get max_tokens from config if available
+            max_tokens = 2000
+            if hasattr(self.config, 'llm'):
+                max_tokens = getattr(self.config.llm, 'max_tokens', 2000)
+            
             client = anthropic.Anthropic(api_key=api_key)
             response = client.messages.create(
                 model=model,
-                max_tokens=2000,
+                max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.content[0].text
@@ -613,13 +620,19 @@ Only output the JSON array, no other text."""
         hw_accel = self._detect_hw_accel()
         quality = self.download_config.hw_quality
         
-        # Quality presets
+        # Quality presets - can be overridden by transcode_crf config
         quality_map = {
             'low': {'cq': 28, 'bitrate': '8M'},
             'medium': {'cq': 23, 'bitrate': '15M'},
             'high': {'cq': 18, 'bitrate': '25M'}
         }
         q = quality_map.get(quality, quality_map['high'])
+        
+        # Allow direct CRF override from config
+        if hasattr(self.config, 'downloading'):
+            transcode_crf = getattr(self.config.downloading, 'transcode_crf', None)
+            if transcode_crf is not None:
+                q['cq'] = transcode_crf
         
         # -nostdin prevents FFmpeg from waiting for keyboard input
         # -hide_banner reduces log noise
@@ -819,6 +832,9 @@ Only output the JSON array, no other text."""
         existing_before: set
     ) -> List[DownloadedVideo]:
         """Execute download command and process results"""
+        # Use config timeout or default (10 min)
+        download_timeout = getattr(self.download_config, 'download_timeout', 600)
+        
         try:
             process = subprocess.Popen(
                 cmd,
@@ -829,7 +845,7 @@ Only output the JSON array, no other text."""
             )
             
             try:
-                stdout, stderr = process.communicate(timeout=600)  # 10 min timeout
+                stdout, stderr = process.communicate(timeout=download_timeout)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate()
@@ -897,7 +913,7 @@ Only output the JSON array, no other text."""
                             
                             # Wait with timeout
                             try:
-                                _, stderr = process.communicate(timeout=600)
+                                _, stderr = process.communicate(timeout=download_timeout)
                                 if process.returncode != 0:
                                     logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
                             except subprocess.TimeoutExpired:

@@ -78,8 +78,15 @@ transcription:
   # Voice Activity Detection
   # Chain-of-thought: VAD skips silence, improves accuracy
   vad_filter: true
-  min_silence_duration_ms: 500
-  speech_pad_ms: 200
+  min_silence_duration_ms: 200
+  speech_pad_ms: 10
+  
+  # Segment splitting (for voiceover optimization)
+  # Splits long segments at sentence boundaries for better matching
+  split_threshold_multiplier: 1.5  # Split if > multiplier * median
+  long_median_threshold: 8.0  # If median > this, use absolute threshold
+  absolute_split_threshold: 12.0  # Absolute threshold for very long segments
+  min_split_duration: 4.0  # Minimum duration to consider splitting
   
   # Caching
   cache_transcriptions: true
@@ -171,6 +178,9 @@ scene_detection:
   downscale_factor: 4
   frame_skip: 2
   
+  # Minimum video duration to process (seconds, 0 = no minimum)
+  min_video_duration: 0
+  
   # Audio analysis integration
   audio_analysis: true
   silence_threshold_db: -40.0
@@ -243,6 +253,7 @@ matching:
   gemini_model: gemini-2.0-flash
   anthropic_model: claude-3-haiku-20240307
   ollama_model: llama3.2
+  ollama_host: http://localhost:11434
   
   # Caching
   cache_llm_responses: true
@@ -366,10 +377,10 @@ image_search:
   folder_name: "images" # Subfolder name when root_dir is empty
   
   # Images per entity (5 recommended for variety and backup options)
-  images_per_entity: 5
+  images_per_entity: 2
   
   # Videos per entity for stock footage (3 recommended)
-  videos_per_entity: 3
+  videos_per_entity: 1
   
   # Minimum file size in MB (1MB ensures quality)
   min_size_mb: 1.0
@@ -594,24 +605,28 @@ download:
   search_pool_multiplier: 5  # Search 5x what we want to download
   min_search_pool: 40        # Minimum search pool size
   
+  # Timeout settings (seconds)
+  search_timeout: 60         # Timeout for search metadata subprocess
+  download_timeout: 600      # Timeout for download/transcode subprocess (10 min)
+  
   # Duration tiers
   tiers:
     short:
       min: 20
       max: 120
-      per_keyword: 8
+      per_keyword: 5
     medium:
       min: 120
       max: 600
-      per_keyword: 8
+      per_keyword: 3
     long:
       min: 600
       max: 1500
-      per_keyword: 5
+      per_keyword: 1
     longer:
       min: 1500
       max: 3000
-      per_keyword: 5
+      per_keyword: 1
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
@@ -623,19 +638,19 @@ duration_tiers:
   short:
     min: 20
     max: 120
-    count: 8
+    count: 5
   medium:
     min: 120
     max: 600
-    count: 8
+    count: 3
   long:
     min: 600
     max: 1500
-    count: 5
+    count: 1
   longer:
     min: 1500
     max: 3000
-    count: 5
+    count: 1
 
 # -----------------------------------------------------------------------------
 # STOCK FOOTAGE (Pexels, Pixabay)
@@ -660,10 +675,11 @@ stock_footage:
 
 deduplication:
   enabled: true
-  hash_threshold: 10  # Hamming distance (0-64)
+  hash_threshold: 10  # Hamming distance (0-64, lower = stricter)
   use_first_frame: true
   auto_delete: true
   generate_report: true
+  frame_timeout: 30   # Seconds for FFmpeg frame extraction
 
 # -----------------------------------------------------------------------------
 # OUTPUT GENERATION
@@ -681,7 +697,7 @@ output:
   otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
   generate_edl: true
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
-  xml_parts: 2  # Split XML into multiple files (helps with large projects)
+  xml_parts: 4  # Split XML into multiple files (helps with large projects)
   generate_report: true
   
   # Track structure

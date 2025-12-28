@@ -479,10 +479,10 @@ class LLMProvider(ABC):
 class GeminiMatcher(LLMProvider):
     """Gemini Flash for matching"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.model = genai.GenerativeModel(model)
     
     def match_batch(
         self,
@@ -557,9 +557,10 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
 class ClaudeMatcher(LLMProvider):
     """Claude Haiku for matching (secondary/ambiguous)"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "claude-3-haiku-20240307"):
         import anthropic
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.model_name = model
     
     def match_batch(
         self,
@@ -594,7 +595,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
 
         try:
             response = self.client.messages.create(
-                model="claude-3-haiku-20240307",
+                model=self.model_name,
                 max_tokens=1500,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -754,36 +755,42 @@ class TieredMatcher:
         """Initialize LLM providers based on config"""
         mc = self.config.matching
         
+        # Get model names from config
+        gemini_model = getattr(mc, 'gemini_model', 'gemini-2.0-flash')
+        anthropic_model = getattr(mc, 'anthropic_model', 'claude-3-haiku-20240307')
+        ollama_model = getattr(mc, 'ollama_model', 'llama3.2')
+        ollama_host = getattr(mc, 'ollama_host', 'http://localhost:11434')
+        
         # Primary provider
         if mc.primary_provider == "gemini" and self.config.gemini_api_key:
-            self.primary_provider = GeminiMatcher(self.config.gemini_api_key)
-            logger.info("Primary LLM: Gemini Flash")
+            self.primary_provider = GeminiMatcher(self.config.gemini_api_key, gemini_model)
+            logger.info(f"Primary LLM: Gemini ({gemini_model})")
         elif mc.primary_provider == "anthropic" and self.config.anthropic_api_key:
-            self.primary_provider = ClaudeMatcher(self.config.anthropic_api_key)
-            logger.info("Primary LLM: Claude Haiku")
+            self.primary_provider = ClaudeMatcher(self.config.anthropic_api_key, anthropic_model)
+            logger.info(f"Primary LLM: Claude ({anthropic_model})")
         elif self.config.gemini_api_key:
-            self.primary_provider = GeminiMatcher(self.config.gemini_api_key)
-            logger.info("Primary LLM: Gemini Flash (auto)")
+            self.primary_provider = GeminiMatcher(self.config.gemini_api_key, gemini_model)
+            logger.info(f"Primary LLM: Gemini ({gemini_model}) (auto)")
         elif self.config.anthropic_api_key:
-            self.primary_provider = ClaudeMatcher(self.config.anthropic_api_key)
-            logger.info("Primary LLM: Claude Haiku (auto)")
+            self.primary_provider = ClaudeMatcher(self.config.anthropic_api_key, anthropic_model)
+            logger.info(f"Primary LLM: Claude ({anthropic_model}) (auto)")
         
         # Secondary provider (for ambiguous matches)
         if mc.secondary_provider == "anthropic" and self.config.anthropic_api_key:
-            self.secondary_provider = ClaudeMatcher(self.config.anthropic_api_key)
-            logger.info("Secondary LLM: Claude Haiku")
+            self.secondary_provider = ClaudeMatcher(self.config.anthropic_api_key, anthropic_model)
+            logger.info(f"Secondary LLM: Claude ({anthropic_model})")
         elif mc.secondary_provider == "gemini" and self.config.gemini_api_key:
-            self.secondary_provider = GeminiMatcher(self.config.gemini_api_key)
-            logger.info("Secondary LLM: Gemini Flash")
+            self.secondary_provider = GeminiMatcher(self.config.gemini_api_key, gemini_model)
+            logger.info(f"Secondary LLM: Gemini ({gemini_model})")
         
         # Local provider (for finishing touches)
         if mc.use_local_for_review:
             try:
-                self.local_provider = LocalLLMMatcher(mc.local_llm_model)
+                self.local_provider = LocalLLMMatcher(ollama_model, ollama_host)
                 # Test connection
                 import requests
-                requests.get("http://localhost:11434/api/tags", timeout=2)
-                logger.info(f"Local LLM: Ollama ({mc.local_llm_model})")
+                requests.get(f"{ollama_host}/api/tags", timeout=2)
+                logger.info(f"Local LLM: Ollama ({ollama_model})")
             except:
                 logger.info("Local LLM: Not available (Ollama not running)")
                 self.local_provider = None

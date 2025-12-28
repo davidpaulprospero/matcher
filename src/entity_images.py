@@ -545,7 +545,8 @@ class ImageDownloader:
         pexels_key: str = None,
         pixabay_key: str = None,
         unsplash_key: str = None,
-        min_size_mb: float = 1.0
+        min_size_mb: float = 1.0,
+        download_timeout: int = 60  # Timeout for HTTP requests
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -557,6 +558,9 @@ class ImageDownloader:
         
         # Size filter
         self.min_size = int(min_size_mb * 1024 * 1024)
+        
+        # Timeout for downloads
+        self.download_timeout = download_timeout
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -785,7 +789,7 @@ class ImageDownloader:
                     pass  # Continue with download anyway
             
             # Download
-            response = self.session.get(image.download_url, stream=True, timeout=60)
+            response = self.session.get(image.download_url, stream=True, timeout=self.download_timeout)
             response.raise_for_status()
             
             # Check content-length header
@@ -984,7 +988,8 @@ class StockVideoDownloader:
         pixabay_key: str = None,
         min_duration: float = 3.0,  # Minimum video duration in seconds
         max_duration: float = 30.0,  # Maximum video duration
-        prefer_hd: bool = True
+        prefer_hd: bool = True,
+        download_timeout: int = 60  # Timeout for HTTP requests
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -996,6 +1001,7 @@ class StockVideoDownloader:
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.prefer_hd = prefer_hd
+        self.download_timeout = download_timeout
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -1163,7 +1169,7 @@ class StockVideoDownloader:
             return str(filepath)
         
         try:
-            response = self.session.get(video.download_url, stream=True, timeout=60)
+            response = self.session.get(video.download_url, stream=True, timeout=self.download_timeout)
             response.raise_for_status()
             
             # Download with progress
@@ -1223,6 +1229,8 @@ def download_entity_videos(
     videos_per_entity: int = 3,
     min_duration: float = 3.0,
     max_duration: float = 30.0,
+    prefer_hd: bool = True,
+    download_timeout: int = 60,
     pexels_key: str = None,
     pixabay_key: str = None
 ) -> Dict[str, EntityVideoResult]:
@@ -1236,6 +1244,8 @@ def download_entity_videos(
         videos_per_entity: Number of videos to download per entity
         min_duration: Minimum video duration in seconds
         max_duration: Maximum video duration in seconds
+        prefer_hd: Prefer HD quality videos
+        download_timeout: Timeout for HTTP requests
     
     Returns:
         Dict mapping entity name to EntityVideoResult
@@ -1251,7 +1261,9 @@ def download_entity_videos(
         pexels_key=pexels_key,
         pixabay_key=pixabay_key,
         min_duration=min_duration,
-        max_duration=max_duration
+        max_duration=max_duration,
+        prefer_hd=prefer_hd,
+        download_timeout=download_timeout
     )
     
     # Check if any API keys available
@@ -1421,7 +1433,8 @@ def download_entity_images(
             output_dir=str(output_path),
             pexels_key=pexels_key,
             pixabay_key=pixabay_key,
-            min_size_mb=min_size_mb
+            min_size_mb=min_size_mb,
+            download_timeout=download_timeout * 6  # Longer timeout for stock API downloads
         )
     
     # Check which sources are available

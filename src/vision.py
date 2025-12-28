@@ -139,12 +139,20 @@ class TranscriptAnalyzer:
         self,
         scenes: List[dict],
         transcript_segments: List[Any],
-        max_scenes: int = 5
+        max_scenes: int = None
     ) -> List[int]:
         """
         Get indices of scenes that most need vision processing.
         Prioritizes scenes with least transcript coverage.
+        
+        Args:
+            scenes: List of scene dicts
+            transcript_segments: List of transcript segments
+            max_scenes: Maximum scenes to return (defaults to config.vision.max_scenes_per_video)
         """
+        if max_scenes is None:
+            max_scenes = getattr(self.config.vision, 'max_scenes_per_video', 50)
+        
         scene_scores = []
         
         for i, scene in enumerate(scenes):
@@ -182,13 +190,12 @@ class VisionProcessor:
     def __init__(self, config: Any):
         self.config = config
         self.provider = getattr(config.vision, 'provider', 'gemini')
-        self.model = getattr(config.vision, 'model', 'gemini-1.5-flash-latest')
+        self.model = getattr(config.vision, 'model', 'gemini-2.0-flash')
         self.api_calls = 0
         self.total_cost = 0.0
         
-        # Cost estimates per 1000 tokens
-        self.cost_per_1k_input = 0.00001  # Very cheap for Flash
-        self.cost_per_1k_output = 0.00004
+        # Cost estimate per call (from config)
+        self.cost_per_call = getattr(config.vision, 'estimated_cost_per_call', 0.001)
     
     def _get_api_key(self) -> Optional[str]:
         """Get API key for vision provider"""
@@ -248,7 +255,7 @@ class VisionProcessor:
             ])
             
             self.api_calls += 1
-            self.total_cost += 0.0001  # Estimate
+            self.total_cost += self.cost_per_call  # Use config value
             
             return response.text.strip()
             
@@ -317,7 +324,7 @@ def process_video_vision(
     transcript_segments: List[Any],
     cache: Any,
     config: Any,
-    max_scenes_per_video: int = 5
+    max_scenes_per_video: int = None
 ) -> List[dict]:
     """
     Process a video with selective vision API calls.
@@ -327,13 +334,17 @@ def process_video_vision(
         transcript_segments: List of transcript segments (SRTSegment or dict)
         cache: CacheManager or similar with cache_dir attribute
         config: Configuration object
-        max_scenes_per_video: Maximum scenes to process per video
+        max_scenes_per_video: Maximum scenes to process (defaults to config.vision.max_scenes_per_video)
     
     Returns:
         List of scene dicts with descriptions (or empty list if skipped)
     """
     if not getattr(config.vision, 'enabled', False):
         return []
+    
+    # Get max_scenes from config if not provided
+    if max_scenes_per_video is None:
+        max_scenes_per_video = getattr(config.vision, 'max_scenes_per_video', 50)
     
     # Get cache directory
     if hasattr(cache, 'cache_dir'):

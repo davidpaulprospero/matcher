@@ -67,6 +67,7 @@ class VideoDeduplicator:
     # Hash distance threshold (lower = stricter)
     # 0 = identical, <5 = same clip, <10 = very similar, <15 = somewhat similar
     DEFAULT_THRESHOLD = 10
+    DEFAULT_FRAME_TIMEOUT = 30  # Seconds for FFmpeg frame extraction
     
     def __init__(self, config=None, threshold: int = None):
         """
@@ -77,7 +78,24 @@ class VideoDeduplicator:
             threshold: Hash distance threshold (default: 10)
         """
         self.config = config
-        self.threshold = threshold or self.DEFAULT_THRESHOLD
+        
+        # Get threshold from config or use default
+        if threshold is not None:
+            self.threshold = threshold
+        elif config and hasattr(config, 'deduplication'):
+            self.threshold = getattr(config.deduplication, 'hash_threshold', self.DEFAULT_THRESHOLD)
+        else:
+            self.threshold = self.DEFAULT_THRESHOLD
+        
+        # Get frame extraction timeout from config
+        self.frame_timeout = self.DEFAULT_FRAME_TIMEOUT
+        if config and hasattr(config, 'deduplication'):
+            self.frame_timeout = getattr(config.deduplication, 'frame_timeout', self.DEFAULT_FRAME_TIMEOUT)
+        
+        # Get auto_delete setting from config
+        self.auto_delete = True
+        if config and hasattr(config, 'deduplication'):
+            self.auto_delete = getattr(config.deduplication, 'auto_delete', True)
         
         # Try to import imagehash
         try:
@@ -122,7 +140,7 @@ class VideoDeduplicator:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=self.frame_timeout
             )
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
@@ -137,7 +155,7 @@ class VideoDeduplicator:
                 '-q:v', '2',
                 str(frame_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout)
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
                 return str(frame_path)
@@ -305,7 +323,7 @@ class VideoDeduplicator:
     def deduplicate(
         self,
         video_dir: str,
-        auto_delete: bool = True,
+        auto_delete: bool = None,
         report_path: str = None
     ) -> DeduplicationReport:
         """
@@ -313,12 +331,16 @@ class VideoDeduplicator:
         
         Args:
             video_dir: Directory containing videos
-            auto_delete: Whether to automatically delete duplicates
+            auto_delete: Whether to automatically delete duplicates (default: from config)
             report_path: Path to save JSON report (optional)
         
         Returns:
             DeduplicationReport with summary
         """
+        # Use config value if not explicitly provided
+        if auto_delete is None:
+            auto_delete = self.auto_delete
+        
         video_dir = Path(video_dir)
         
         # Count total videos before

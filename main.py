@@ -501,7 +501,7 @@ class Pipeline:
             self.run_logger.file_logger.info(f"STAGE {stage}: {name}")
     
     def _parse_srt(self, srt_path: str) -> List[dict]:
-        """Parse SRT file into segments"""
+        """Parse SRT file into segments with smart splitting for long segments"""
         try:
             import srt
             with open(srt_path, 'r', encoding='utf-8') as f:
@@ -516,6 +516,9 @@ class Pipeline:
                     'text': sub.content.strip(),
                     'duration': (sub.end - sub.start).total_seconds()
                 })
+            
+            # Apply smart splitting for long segments
+            segments = self._optimize_segments(segments)
             return segments
         except ImportError:
             logger.error("srt package not installed. Install with: pip install srt")
@@ -523,6 +526,152 @@ class Pipeline:
         except Exception as e:
             logger.error(f"Failed to parse SRT: {e}")
             sys.exit(1)
+    
+    def _optimize_segments(self, segments: List[dict]) -> List[dict]:
+        """
+        Split segments that are significantly longer than the median.
+        
+        Logic:
+        - Calculate median segment duration
+        - If segment > multiplier * median, try to split at sentence boundaries
+        - Distribute time proportionally based on character count
+        """
+        import re
+        import statistics
+        
+        if len(segments) < 3:
+            return segments
+        
+        # Calculate median duration
+        durations = [s['duration'] for s in segments if s['duration'] > 0]
+        if not durations:
+            return segments
+        
+        # Get config values with defaults
+        config = self.config
+        split_multiplier = getattr(config.transcription, 'split_threshold_multiplier', 1.5)
+        long_median = getattr(config.transcription, 'long_median_threshold', 8.0)
+        absolute_threshold = getattr(config.transcription, 'absolute_split_threshold', 12.0)
+        min_split = getattr(config.transcription, 'min_split_duration', 4.0)
+        
+        median_duration = statistics.median(durations)
+        split_threshold = median_duration * split_multiplier  # Split if > multiplier * median
+        
+        # Don't split if median is already quite long
+        if median_duration > long_median:
+            split_threshold = absolute_threshold  # Only split very long segments
+        
+        # Minimum duration to consider splitting (avoid splitting short segments)
+        min_split_duration = max(min_split, median_duration)
+        
+        optimized = []
+        split_count = 0
+        
+        for seg in segments:
+            duration = seg['duration']
+            text = seg['text']
+            
+            # Check if segment should be split
+            if duration > split_threshold and duration > min_split_duration:
+                # Try to split at sentence boundaries
+                sub_segments = self._split_segment_at_sentences(seg, median_duration)
+                
+                if len(sub_segments) > 1:
+                    split_count += 1
+                    optimized.extend(sub_segments)
+                else:
+                    optimized.append(seg)
+            else:
+                optimized.append(seg)
+        
+        # Re-index segments
+        for i, seg in enumerate(optimized):
+            seg['index'] = i + 1
+        
+        if split_count > 0:
+            print(f"  ✓ Optimized: {split_count} long segments split ({len(segments)} → {len(optimized)})")
+            logger.info(f"Segment optimization: {split_count} splits, {len(segments)} → {len(optimized)} segments")
+        
+        return optimized
+    
+    def _split_segment_at_sentences(self, segment: dict, target_duration: float) -> List[dict]:
+        """
+        Split a segment at sentence boundaries, distributing time proportionally.
+        
+        Args:
+            segment: The segment to split
+            target_duration: Target duration for each sub-segment
+            
+        Returns:
+            List of sub-segments (may be just the original if can't split)
+        """
+        import re
+        
+        text = segment['text']
+        start_time = segment['start_time']
+        end_time = segment['end_time']
+        total_duration = segment['duration']
+        
+        # Split at sentence boundaries: . ! ? (but not abbreviations like "Dr." or "U.S.")
+        # Also split at semicolons and colons followed by space
+        sentence_pattern = r'(?<=[.!?])\s+(?=[A-Z])|(?<=[;:])\s+'
+        sentences = re.split(sentence_pattern, text)
+        
+        # If only one sentence, try splitting at commas for very long segments
+        if len(sentences) == 1 and total_duration > target_duration * 2:
+            # Split at major clause breaks (comma followed by conjunction or long phrase)
+            comma_pattern = r',\s+(?=and |but |or |so |yet |while |when |if |because |although )'
+            sentences = re.split(comma_pattern, text)
+            
+            # If still one piece and very long, force split at commas
+            if len(sentences) == 1 and total_duration > target_duration * 3:
+                sentences = [s.strip() for s in text.split(',') if s.strip()]
+                # Rejoin with commas (they got removed)
+                sentences = [s + (',' if i < len(sentences) - 1 else '') for i, s in enumerate(sentences)]
+        
+        # If still can't split or only one piece, return original
+        if len(sentences) <= 1:
+            return [segment]
+        
+        # Filter out empty sentences
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        if len(sentences) <= 1:
+            return [segment]
+        
+        # Calculate time distribution based on character length
+        total_chars = sum(len(s) for s in sentences)
+        if total_chars == 0:
+            return [segment]
+        
+        sub_segments = []
+        current_time = start_time
+        
+        for i, sentence in enumerate(sentences):
+            # Proportional duration based on character count
+            char_ratio = len(sentence) / total_chars
+            seg_duration = total_duration * char_ratio
+            
+            # Ensure minimum duration of 0.5 seconds
+            seg_duration = max(0.5, seg_duration)
+            
+            seg_end = current_time + seg_duration
+            
+            # Last segment should end exactly at original end time
+            if i == len(sentences) - 1:
+                seg_end = end_time
+            
+            sub_segments.append({
+                'index': segment['index'],  # Will be re-indexed later
+                'start_time': round(current_time, 3),
+                'end_time': round(seg_end, 3),
+                'text': sentence,
+                'duration': round(seg_end - current_time, 3)
+            })
+            
+            current_time = seg_end
+        
+        return sub_segments
     
     def _generate_topic_from_segments(self) -> str:
         """Generate topic context from voiceover segments using LLM or heuristics"""

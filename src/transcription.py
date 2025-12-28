@@ -187,10 +187,21 @@ def _transcribe_with_shared_model(
     model_name: str,
     compute_type: str,
     language: str = None,
-    vad_filter: bool = True
+    vad_filter: bool = True,
+    min_silence_duration_ms: int = 200,
+    speech_pad_ms: int = 10
 ) -> List[dict]:
     """
     Transcribe audio using the shared model with mutex protection.
+    
+    Args:
+        audio_path: Path to audio file
+        model_name: Whisper model name (base, small, medium, large, etc.)
+        compute_type: Compute type (auto, float16, int8)
+        language: Language code or None for auto-detect
+        vad_filter: Whether to apply Voice Activity Detection
+        min_silence_duration_ms: Minimum silence duration to split segments (from config)
+        speech_pad_ms: Padding around detected speech (from config)
     """
     print(f"\n  [TRANSCRIBE] Acquiring GPU lock...", flush=True)
     with _gpu_lock:
@@ -205,8 +216,8 @@ def _transcribe_with_shared_model(
                 language=language,
                 vad_filter=vad_filter,
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=200
+                    min_silence_duration_ms=min_silence_duration_ms,
+                    speech_pad_ms=speech_pad_ms
                 )
             )
             
@@ -455,11 +466,25 @@ def transcribe_video(
     model_name: str = "base",
     compute_type: str = "auto",
     language: str = None,
-    temp_dir: str = None
+    temp_dir: str = None,
+    vad_filter: bool = True,
+    min_silence_duration_ms: int = 200,
+    speech_pad_ms: int = 10
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file.
     Uses cache if available, otherwise transcribes with shared model.
+    
+    Args:
+        video_path: Path to video file
+        cache: TranscriptCache instance
+        model_name: Whisper model name
+        compute_type: Compute type (auto, float16, int8)
+        language: Language code or None for auto-detect
+        temp_dir: Temporary directory for audio extraction
+        vad_filter: Whether to apply Voice Activity Detection
+        min_silence_duration_ms: Minimum silence duration to split segments
+        speech_pad_ms: Padding around detected speech
     """
     video_path = str(video_path)
     video_name = Path(video_path).name
@@ -490,7 +515,10 @@ def transcribe_video(
             audio_path,
             model_name,
             compute_type,
-            language
+            language,
+            vad_filter=vad_filter,
+            min_silence_duration_ms=min_silence_duration_ms,
+            speech_pad_ms=speech_pad_ms
         )
         
         # Cache the result
@@ -555,10 +583,16 @@ def transcribe_videos_parallel(
         model_name = getattr(config.transcription, 'model', 'base')
         compute_type = getattr(config.transcription, 'compute_type', 'auto')
         language = getattr(config.transcription, 'language', None)
+        vad_filter = getattr(config.transcription, 'vad_filter', True)
+        min_silence_duration_ms = getattr(config.transcription, 'min_silence_duration_ms', 200)
+        speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
     else:
         model_name = "base"
         compute_type = "auto"
         language = None
+        vad_filter = True
+        min_silence_duration_ms = 200
+        speech_pad_ms = 10
     
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
@@ -655,7 +689,10 @@ def transcribe_videos_parallel(
                 audio_path,
                 model_name,
                 compute_type,
-                language
+                language,
+                vad_filter=vad_filter,
+                min_silence_duration_ms=min_silence_duration_ms,
+                speech_pad_ms=speech_pad_ms
             )
             print(f"    >> Returned {len(raw_segments)} segments", flush=True)
             
