@@ -1,93 +1,87 @@
 {
-  "total_files": 8,
+  "total_files": 7,
   "included_files": 3,
-  "excluded_files": 5,
+  "excluded_files": 4,
   "included_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_s\\How_Elon_sA7052cewOc.mp4",
-      "filename": "How_Elon_sA7052cewOc.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\Elon_M_m\\ELON_MUS_30McBt6IGtc.mp4",
+      "filename": "ELON_MUS_30McBt6IGtc.mp4",
       "keyword_matches": [
-        "elon musk biography footage"
+        "elon musk interview footage",
+        "elon musk blastar video game footage"
       ],
-      "match_score": 0.5,
-      "file_size_mb": 2.6175355911254883,
+      "match_score": 1.0,
+      "file_size_mb": 12.975029945373535,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_m\\SpaceX_F_sX1Y2JMK6g8.mp4",
-      "filename": "SpaceX_F_sX1Y2JMK6g8.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\Elon_M_s\\Elon_Mus_DWllANX7aJA.mp4",
+      "filename": "Elon_Mus_DWllANX7aJA.mp4",
       "keyword_matches": [
-        "spacex launch footage"
+        "elon musk interview footage",
+        "elon musk blastar video game footage"
       ],
-      "match_score": 0.5,
-      "file_size_mb": 59.30446815490723,
+      "match_score": 1.0,
+      "file_size_mb": 4.027732849121094,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_s\\SpaceX_M_RYUr-5PYA7s.mp4",
-      "filename": "SpaceX_M_RYUr-5PYA7s.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\Elon_M_s\\Elon_Mus_fEiNn1GX42k.mp4",
+      "filename": "Elon_Mus_fEiNn1GX42k.mp4",
       "keyword_matches": [
-        "spacex launch footage"
+        "elon musk interview footage",
+        "elon musk blastar video game footage"
       ],
-      "match_score": 0.5,
-      "file_size_mb": 8.541955947875977,
+      "match_score": 1.0,
+      "file_size_mb": 4.712892532348633,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
   "excluded_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_l\\Who_is_E_-apCR8R2_8A.mp4",
-      "filename": "Who_is_E_-apCR8R2_8A.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\Elon_M_l\\2012_-_S_23GzpbNUyI4.mp4",
+      "filename": "2012_-_S_23GzpbNUyI4.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 128.7164182662964,
+      "file_size_mb": 180.08596801757812,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_m\\The_Life_vpcDnBH4Ps8.mp4",
-      "filename": "The_Life_vpcDnBH4Ps8.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\Elon_M_m\\Is_life__2KK_kzrJPS8.mp4",
+      "filename": "Is_life__2KK_kzrJPS8.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 20.61891269683838,
+      "file_size_mb": 28.06225872039795,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_l\\Blastoff_b28zbsnk-48.mp4",
-      "filename": "Blastoff_b28zbsnk-48.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\stock\\pexels_10464707_cottonbro_studio_HD.mp4",
+      "filename": "pexels_10464707_cottonbro_studio_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 68.07837104797363,
+      "file_size_mb": 34.15406608581543,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
-      "filename": "pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_d67r0v_n\\test_project\\downloaded_videos\\stock\\pexels_4970459_Life_On__Super_8_HD.mp4",
+      "filename": "pexels_4970459_Life_On__Super_8_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 4.177520751953125,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\stock\\pexels_4881976_Natasha_Filippovskay_720p.mp4",
-      "filename": "pexels_4881976_Natasha_Filippovskay_720p.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 2.1189470291137695,
+      "file_size_mb": 4.482671737670898,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
-  "processing_time_seconds": 0.002000093460083008,
+  "processing_time_seconds": 0.0015003681182861328,
   "keywords_used": [
-    "elon musk biography footage",
-    "spacex launch footage"
+    "elon musk interview footage",
+    "elon musk blastar video game footage"
   ],
-  "avg_match_score": 0.5
+  "avg_match_score": 1.0
 }
