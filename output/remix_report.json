@@ -1,382 +1,70 @@
 {
-  "total_files": 78,
-  "included_files": 21,
-  "excluded_files": 57,
+  "total_files": 8,
+  "included_files": 2,
+  "excluded_files": 6,
   "included_videos": [
     {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_309811_WaveStockFootages_4K.mp4",
-      "filename": "pixabay_309811_WaveStockFootages_4K.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_l\\South_Af_vKqt25WgfrI.mp4",
+      "filename": "South_Af_vKqt25WgfrI.mp4",
       "keyword_matches": [
-        "proof is in action footage",
-        "actions speak louder recent footage",
-        "actions speak louder footage"
+        "pretoria south africa 1971 footage"
       ],
-      "match_score": 0.6,
-      "file_size_mb": 23.936172485351562,
+      "match_score": 0.5,
+      "file_size_mb": 30.814483642578125,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_18450902_Jaxon_Matthew_Willis_HD.mp4",
-      "filename": "pexels_18450902_Jaxon_Matthew_Willis_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_s\\Elon_Mus_yhLtTl5vf1A.mp4",
+      "filename": "Elon_Mus_yhLtTl5vf1A.mp4",
       "keyword_matches": [
-        "walking the walk visuals",
-        "proof is in action footage"
+        "elon musk footage"
       ],
-      "match_score": 0.4,
-      "file_size_mb": 36.04668426513672,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_3006962_Athena_Sandrini_HD.mp4",
-      "filename": "pexels_3006962_Athena_Sandrini_HD.mp4",
-      "keyword_matches": [
-        "walking the walk visuals",
-        "proof is in action footage"
-      ],
-      "match_score": 0.4,
-      "file_size_mb": 5.724435806274414,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_18068806_Google_DeepMind_HD.mp4",
-      "filename": "pexels_18068806_Google_DeepMind_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 25.49935531616211,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_18069785_Google_DeepMind_HD.mp4",
-      "filename": "pexels_18069785_Google_DeepMind_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 20.84319305419922,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_19549331_Pachon_in_Motion_HD.mp4",
-      "filename": "pexels_19549331_Pachon_in_Motion_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 31.059256553649902,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_2070037_Tom_Fisk_HD.mp4",
-      "filename": "pexels_2070037_Tom_Fisk_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 54.46563243865967,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_2324293_Engin_Akyurt_HD.mp4",
-      "filename": "pexels_2324293_Engin_Akyurt_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 31.50125217437744,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_30358456_Grind_4K_videos_HD.mp4",
-      "filename": "pexels_30358456_Grind_4K_videos_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 185.76245784759521,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_33024239_ZAIN_IMRAN_HD.mp4",
-      "filename": "pexels_33024239_ZAIN_IMRAN_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 44.039217948913574,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_35371148_Rohingya_Creative_Pr_HD.mp4",
-      "filename": "pexels_35371148_Rohingya_Creative_Pr_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 7.367192268371582,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4990233_Luis_Quintero_HD.mp4",
-      "filename": "pexels_4990233_Luis_Quintero_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 4.919605255126953,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4990236_Luis_Quintero_HD.mp4",
-      "filename": "pexels_4990236_Luis_Quintero_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 5.894811630249023,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4990235_Luis_Quintero_HD.mp4",
-      "filename": "pexels_4990235_Luis_Quintero_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 6.822939872741699,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_127269_Favorisxp_HD.mp4",
-      "filename": "pixabay_127269_Favorisxp_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 7.176053047180176,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_126725_Aashish_2808_HD.mp4",
-      "filename": "pixabay_126725_Aashish_2808_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 0.36690521240234375,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_190332_DancingSky_4K.mp4",
-      "filename": "pixabay_190332_DancingSky_4K.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 30.217979431152344,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_24497_ninosouza_HD.mp4",
-      "filename": "pixabay_24497_ninosouza_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 20.15293598175049,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_33871_GiselleA_HD.mp4",
-      "filename": "pixabay_33871_GiselleA_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 14.306795120239258,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_40054_AlexKopeykin_HD.mp4",
-      "filename": "pixabay_40054_AlexKopeykin_HD.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 31.09042453765869,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_40816_AlexKopeykin_4K.mp4",
-      "filename": "pixabay_40816_AlexKopeykin_4K.mp4",
-      "keyword_matches": [
-        "proof is in action footage"
-      ],
-      "match_score": 0.2,
-      "file_size_mb": 40.637712478637695,
+      "match_score": 0.5,
+      "file_size_mb": 2.831080436706543,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
   "excluded_videos": [
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_14480825_Kelly_HD.mp4",
-      "filename": "pexels_14480825_Kelly_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Elon_M_l\\Tesla_Fa_mr9kK0_7x08.mp4",
+      "filename": "Tesla_Fa_mr9kK0_7x08.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 20.3145694732666,
+      "file_size_mb": 240.67458248138428,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_15225658_Mohammed_Elbrassi_HD.mp4",
-      "filename": "pexels_15225658_Mohammed_Elbrassi_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Elon_M_s\\Bizarre__y2Rh6HGE6S8.mp4",
+      "filename": "Bizarre__y2Rh6HGE6S8.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 7.426111221313477,
+      "file_size_mb": 2.032212257385254,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_15789389_Farhad_Irani_HD.mp4",
-      "filename": "pexels_15789389_Farhad_Irani_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_l\\1970s_So_e5ER_PuMOn0.mp4",
+      "filename": "1970s_So_e5ER_PuMOn0.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 11.922492027282715,
+      "file_size_mb": 207.76579761505127,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_17356135_deconjpa_HD.mp4",
-      "filename": "pexels_17356135_deconjpa_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\Pretor_m\\1970_s_S_6Gm7IzfqWos.mp4",
+      "filename": "1970_s_S_6Gm7IzfqWos.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 4.5987653732299805,
+      "file_size_mb": 29.562726974487305,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_18482904_Eclipse_Chasers_HD.mp4",
-      "filename": "pexels_18482904_Eclipse_Chasers_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 32.81932353973389,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_20525236_Eclipse_Chasers_HD.mp4",
-      "filename": "pexels_20525236_Eclipse_Chasers_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 21.377535820007324,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_20601413_Eclipse_Chasers_HD.mp4",
-      "filename": "pexels_20601413_Eclipse_Chasers_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 26.045175552368164,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_20731378_Eric_Skaggs_HD.mp4",
-      "filename": "pexels_20731378_Eric_Skaggs_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 15.426939010620117,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_27440055_Huu_Huynh_HD.mp4",
-      "filename": "pexels_27440055_Huu_Huynh_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 11.295597076416016,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_27663531_Eclipse_Chasers_HD.mp4",
-      "filename": "pexels_27663531_Eclipse_Chasers_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 31.98119831085205,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_29460356_Chandresh_Uike_HD.mp4",
-      "filename": "pexels_29460356_Chandresh_Uike_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 9.715791702270508,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_3232946_Dimitar_Germanov_HD.mp4",
-      "filename": "pexels_3232946_Dimitar_Germanov_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 11.296283721923828,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_34510538_Oskar_Gross_HD.mp4",
-      "filename": "pexels_34510538_Oskar_Gross_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 23.996485710144043,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_35328818_Nicola_Narracci_HD.mp4",
-      "filename": "pexels_35328818_Nicola_Narracci_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 3.388239860534668,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_35377811_NGUY\u1ec4N_TH\u00c0NH_NH\u01a0N_HD.mp4",
-      "filename": "pexels_35377811_NGUY\u1ec4N_TH\u00c0NH_NH\u01a0N_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 8.41717529296875,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "filename": "pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
@@ -385,382 +73,19 @@
       "metadata": {}
     },
     {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_35389326_Nicola_Narracci_HD.mp4",
-      "filename": "pexels_35389326_Nicola_Narracci_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6jggei6t\\test_project\\downloaded_videos\\stock\\pexels_4307653_N_E_HD.mp4",
+      "filename": "pexels_4307653_N_E_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 7.542342185974121,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_3926340_FAHIMG_HD.mp4",
-      "filename": "pexels_3926340_FAHIMG_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 0.8034982681274414,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_3728417_Jerome_HD.mp4",
-      "filename": "pexels_3728417_Jerome_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 3.5998640060424805,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4110015_ShotPot_HD.mp4",
-      "filename": "pexels_4110015_ShotPot_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 5.082335472106934,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4110019_ShotPot_HD.mp4",
-      "filename": "pexels_4110019_ShotPot_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 13.661519050598145,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4188273_Kelly_HD.mp4",
-      "filename": "pexels_4188273_Kelly_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 34.74960899353027,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4762733_Yaroslav_Shuraev_HD.mp4",
-      "filename": "pexels_4762733_Yaroslav_Shuraev_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 13.661589622497559,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_4762735_Yaroslav_Shuraev_HD.mp4",
-      "filename": "pexels_4762735_Yaroslav_Shuraev_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 28.16987133026123,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_5538287_cottonbro_studio_HD.mp4",
-      "filename": "pexels_5538287_cottonbro_studio_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 8.82459545135498,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_7441256_Mikhail_Nilov_HD.mp4",
-      "filename": "pexels_7441256_Mikhail_Nilov_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 8.522600173950195,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_7914869_RDNE_Stock_project_HD.mp4",
-      "filename": "pexels_7914869_RDNE_Stock_project_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.456812858581543,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_8141709_Alena_Darmel_HD.mp4",
-      "filename": "pexels_8141709_Alena_Darmel_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 13.952946662902832,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_6010960_Tima_Miroshnichenko_HD.mp4",
-      "filename": "pexels_6010960_Tima_Miroshnichenko_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.83682918548584,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_8141715_Alena_Darmel_HD.mp4",
-      "filename": "pexels_8141715_Alena_Darmel_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 14.039681434631348,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_8152223_RDNE_Stock_project_HD.mp4",
-      "filename": "pexels_8152223_RDNE_Stock_project_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 5.063300132751465,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_8381404_Pavel_Danilyuk_HD.mp4",
-      "filename": "pexels_8381404_Pavel_Danilyuk_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 6.754570960998535,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_854406_Pixabay_720p.mp4",
-      "filename": "pexels_854406_Pixabay_720p.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 1.6134796142578125,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pexels_9724311_KoolShooters_HD.mp4",
-      "filename": "pexels_9724311_KoolShooters_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 7.2143449783325195,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_108415_patw64_4K.mp4",
-      "filename": "pixabay_108415_patw64_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 1.5653066635131836,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_145652_Ila700_HD.mp4",
-      "filename": "pixabay_145652_Ila700_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.419818878173828,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_161045_-MOMENTS-_HD.mp4",
-      "filename": "pixabay_161045_-MOMENTS-_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 14.8629150390625,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_15241_PhillBap_4K.mp4",
-      "filename": "pixabay_15241_PhillBap_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 80.2974681854248,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_161902_Yash_kb_HD.mp4",
-      "filename": "pixabay_161902_Yash_kb_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 3.6558332443237305,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_17285_ulleo_HD.mp4",
-      "filename": "pixabay_17285_ulleo_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 16.781893730163574,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_176527_spacetrip_HD.mp4",
-      "filename": "pixabay_176527_spacetrip_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 7.692927360534668,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_17445_Mayur_Deshmukh_HD.mp4",
-      "filename": "pixabay_17445_Mayur_Deshmukh_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 1.6003789901733398,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_184069_Radds_4K.mp4",
-      "filename": "pixabay_184069_Radds_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 78.71022129058838,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_19600_OrcaTec_4K.mp4",
-      "filename": "pixabay_19600_OrcaTec_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 17.535914421081543,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_268562_Radds_4K.mp4",
-      "filename": "pixabay_268562_Radds_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 79.03650951385498,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_2213_VariousPhotography_720p.mp4",
-      "filename": "pixabay_2213_VariousPhotography_720p.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 6.316810607910156,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_28052_serenity_seeker_HD.mp4",
-      "filename": "pixabay_28052_serenity_seeker_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 3.8952064514160156,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_30438_CryptoSkylark_HD.mp4",
-      "filename": "pixabay_30438_CryptoSkylark_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 1.903970718383789,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_304357_TonyDias7_4K.mp4",
-      "filename": "pixabay_304357_TonyDias7_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 305.00583934783936,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_2946_bellergy_720p.mp4",
-      "filename": "pixabay_2946_bellergy_720p.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 7.604213714599609,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_316188_TrapNederland_Record_HD.mp4",
-      "filename": "pixabay_316188_TrapNederland_Record_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.903017997741699,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_316191_TrapNederland_Record_HD.mp4",
-      "filename": "pixabay_316191_TrapNederland_Record_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.618513107299805,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_318885_D-GM_4K.mp4",
-      "filename": "pixabay_318885_D-GM_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 210.81024360656738,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_5129_tommyvideo_HD.mp4",
-      "filename": "pixabay_5129_tommyvideo_HD.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 4.666150093078613,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_56426_tunnelmotions_4K.mp4",
-      "filename": "pixabay_56426_tunnelmotions_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 25.706955909729004,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_57068_tunnelmotions_4K.mp4",
-      "filename": "pixabay_57068_tunnelmotions_4K.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 26.016289710998535,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "E:\\v\\test_project\\stock\\pixabay_7786_PIRO4D_720p.mp4",
-      "filename": "pixabay_7786_PIRO4D_720p.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 8.32287311553955,
+      "file_size_mb": 11.445028305053711,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
-  "processing_time_seconds": 0.011502504348754883,
+  "processing_time_seconds": 0.0020008087158203125,
   "keywords_used": [
-    "actions speak louder footage",
-    "walking the walk visuals",
-    "proof is in action footage",
-    "reliability actions visuals 2024",
-    "actions speak louder recent footage"
+    "elon musk footage",
+    "pretoria south africa 1971 footage"
   ],
-  "avg_match_score": 0.2380952380952382
+  "avg_match_score": 0.5
 }

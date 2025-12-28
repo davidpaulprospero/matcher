@@ -91,6 +91,11 @@ class VideoDownloader:
         self.sources: List[DownloadedVideo] = []
         self.sources_file = Path(config.downloaded_videos_dir) / "sources.json"
         
+        # Track downloads per tier (for max_total limits)
+        self.tier_download_counts: Dict[str, int] = {
+            'short': 0, 'medium': 0, 'long': 0, 'longer': 0
+        }
+        
         # Checkpoint
         self.checkpoint_file = Path(config.cache_dir) / "download_checkpoint.json"
         self.checkpoint: Optional[DownloadCheckpoint] = None
@@ -960,6 +965,12 @@ Only output the JSON array, no other text."""
                 logger.info(f"  [{tier}] Skipped (0/kw)")
                 continue
             
+            # Check max_total limit for this tier (e.g., only 1 LONGER video total)
+            max_total = self._get_tier_value(tier, 'max_total', 0)  # 0 = no limit
+            if max_total > 0 and self.tier_download_counts.get(tier, 0) >= max_total:
+                logger.info(f"  [{tier}] Skipped (max_total={max_total} reached)")
+                continue
+            
             # Check checkpoint - skip if already done
             if self.checkpoint:
                 video_key = f"{keyword}|{tier}"
@@ -973,6 +984,10 @@ Only output the JSON array, no other text."""
             if downloaded:
                 logger.info(f"  [{tier}] ✓ {len(downloaded)} video(s)")
                 all_downloaded.extend(downloaded)
+                
+                # Update tier download count
+                with self._lock:
+                    self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
                 
                 # Update sources
                 logger.debug(f"  [{tier}] Saving sources...")

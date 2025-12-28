@@ -47,13 +47,16 @@ def print_section(text: str):
 
 
 def download_audio(output_path: Path, cookies_path: str = None) -> bool:
-    """Download a short audio clip for voiceover"""
+    """Download a short audio clip for voiceover - prioritize content with named entities"""
     searches = [
-        'short motivational speech 30 seconds',
+        # Prioritize content likely to have named entities (people, companies, places)
+        'tech news report Tesla SpaceX 1 minute',
+        'business news earnings report 30 seconds',
+        'documentary narration history short',
+        'news anchor voiceover clip',
         'ted talk excerpt 1 minute',
         'podcast intro clip short',
         'public domain speech audio',
-        'news report audio short',
     ]
     
     for query in searches:
@@ -134,31 +137,82 @@ def create_srt_from_audio(mp3_path: Path, srt_path: Path) -> bool:
         return False
 
 
+def validate_srt_content(srt_path: Path) -> bool:
+    """Check if SRT has useful content for testing
+    
+    Returns True if SRT has:
+    - At least 2 segments
+    - At least 50 total words
+    - Content that's not just music/noise transcription
+    """
+    if not srt_path.exists():
+        return False
+    
+    try:
+        content = srt_path.read_text(encoding='utf-8')
+        
+        # Extract text lines (every 3rd line starting from line 3)
+        lines = content.strip().split('\n')
+        text_lines = []
+        for i, line in enumerate(lines):
+            # Skip sequence numbers and timestamps
+            if '-->' not in line and not line.strip().isdigit() and line.strip():
+                text_lines.append(line.strip())
+        
+        full_text = ' '.join(text_lines)
+        word_count = len(full_text.split())
+        segment_count = content.count('-->')
+        
+        # Check for music/noise indicators
+        noise_indicators = ['[music]', '[applause]', '[laughter]', '♪', '🎵']
+        is_mostly_noise = any(ind in full_text.lower() for ind in noise_indicators)
+        
+        # Validate
+        if segment_count < 2:
+            print(f"    ⚠ SRT has only {segment_count} segments (need 2+)")
+            return False
+        if word_count < 50:
+            print(f"    ⚠ SRT has only {word_count} words (need 50+)")
+            return False
+        if is_mostly_noise:
+            print(f"    ⚠ SRT appears to be mostly music/noise")
+            return False
+        
+        print(f"    ✓ SRT validated: {segment_count} segments, {word_count} words")
+        return True
+        
+    except Exception as e:
+        print(f"    ⚠ SRT validation failed: {e}")
+        return False
+
+
 def create_synthetic_srt(srt_path: Path) -> bool:
-    """Create a synthetic SRT for testing"""
+    """Create a synthetic SRT for testing - includes named entities AND obscure terms
+    
+    Named entities trigger entity image/video search.
+    Obscure terms trigger remix retry logic when downloads fail.
+    """
     texts = [
-        "Technology continues to transform our daily lives in remarkable ways.",
-        "Scientists are making breakthrough discoveries across multiple fields.",
-        "The global economy shows signs of resilience and adaptation.",
-        "Communities worldwide are finding innovative solutions to challenges.",
-        "Environmental awareness is driving sustainable development initiatives.",
-        "Education is evolving to meet the needs of a changing world.",
-        "Healthcare innovations are improving outcomes for patients everywhere.",
-        "Digital connectivity is bridging gaps between distant communities.",
-        "Creative industries are exploring new forms of artistic expression.",
-        "The future holds both challenges and unprecedented opportunities.",
+        # Segment 1: Named entities - PERSON, ORG, LOCATION
+        "Elon Musk announced major changes at Tesla headquarters in Palo Alto, California.",
+        # Segment 2: More entities - ORG, LOCATION  
+        "SpaceX continues to revolutionize space exploration with Starship launches from Texas.",
+        # Segment 3: Obscure/rare terms to trigger remix retry
+        "The rare Xenophyophore organisms exhibit bioluminescent properties in abyssal zones.",
+        # Segment 4: Mix of common and specific
+        "Climate scientists study permafrost degradation in the Arctic tundra regions.",
     ]
     
     lines = []
     for i, text in enumerate(texts):
-        start = f"00:00:{i*6:02d},000"
-        end = f"00:00:{(i+1)*6:02d},000"
+        start = f"00:00:{i*10:02d},000"
+        end = f"00:00:{(i+1)*10:02d},000"
         lines.extend([str(i + 1), f"{start} --> {end}", text, ""])
     
     with open(srt_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
     
-    print(f"    Created synthetic SRT (10 segments)")
+    print(f"    Created synthetic SRT (4 segments: entities + obscure terms)")
     return True
 
 
@@ -199,69 +253,97 @@ def run_e2e_test(keep_files: bool = False, verbose: bool = True) -> bool:
     
     print(f"  Created: {project_dir}")
     
-    # Create project config for non-interactive mode
+    # Create project config for non-interactive mode with ALL features enabled (minimal)
     project_config = project_dir / 'project_config.yaml'
-    project_config.write_text(f"""# E2E Test Config - Non-interactive mode with minimal settings
+    project_config.write_text(f"""# E2E Test Config - ALL FEATURES enabled with minimal settings
+# Goal: Test every feature at least once, but keep processing time low
+
 enhanced:
   non_interactive: true
-  face_preference: neutral
-  enable_pexels: false  # Disable stock footage for testing
-  enable_pixabay: false
-  remix_enabled: false  # Disable keyword remix
+  face_preference: none   # Test face detection (prefer clips WITHOUT faces)
+  enable_pexels: true     # Enable stock footage
+  enable_pixabay: true
+  stock_per_keyword: 1    # Only 1 stock video per keyword (cost saving)
+  remix_enabled: true     # Enable keyword remix
 
-# Disable ALL remix features
+# Entity/Image search - enabled with minimal settings
+image_search:
+  enabled: true
+  images_per_entity: 1  # Just 1 image per entity
+  videos_per_entity: 1  # Just 1 video per entity
+  max_search_time: 30   # Limit search time
+
+# Stock footage - minimal (API cost saving)
+stock_footage:
+  pexels_enabled: true
+  pixabay_enabled: true
+  per_keyword: 1  # Just 1 per keyword
+
+# Remix - enabled with minimal settings  
 remix:
+  enabled: true
   interactive_curation: false
   auto_accept_filter: filtered
-  enabled: false
+  min_relevance_score: 0.1
 
-# Disable zero-download remix (retry failed keywords)
+# Zero-download remix - enabled (will trigger on obscure keywords)
 zero_download_remix:
-  enabled: false
+  enabled: true
+  max_retries: 1
 
-# Use temp folder for cache (not shared install dir cache)
-# Both top-level and nested for compatibility
+# Scene detection - enabled
+scene_detection:
+  enabled: true
+  preset: fast
+  threshold: 30.0
+
+# Pipeline settings - don't skip anything
+pipeline:
+  skip_scene_detection: false
+  skip_image_search: false
+
+# Use temp folder for cache
 cache_dir: .cache
 cache:
   cache_dir: .cache
 
-# Use temp folder for downloads (not shared E:/v)
+# Downloads - ALL TIERS enabled, LONGER limited to 1 total
 download:
-  root_dir: null  # Null = use project folder
+  root_dir: null
   folder_name: downloaded_videos
-  max_total_videos: 10  # Cap total videos
-  # Complete tier definitions with min/max durations
+  max_total_videos: 15
+  preferred_quality: "360"  # LOWEST quality for testing
+  max_quality: "480"
   tiers:
     short:
       min: 20
       max: 120
       per_keyword: 1
-      max_results: 2
     medium:
       min: 120
       max: 600
-      per_keyword: 0
-      max_results: 0
+      per_keyword: 1
     long:
       min: 600
       max: 1500
-      per_keyword: 0
-      max_results: 0
+      per_keyword: 1
     longer:
       min: 1500
       max: 3000
-      per_keyword: 0
-      max_results: 0
+      per_keyword: 1
+      max_total: 1  # Only 1 LONGER video total across all keywords
 
-# Downloading settings
+# Downloading settings (yt-dlp)
 downloading:
   output_dir: downloaded_videos
+  preferred_quality: "360"  # LOWEST quality for testing
+  max_quality: "480"
 
-# MINIMAL settings for testing (fast run)
+# Keyword settings - minimal for fast testing
 keyword_extraction:
-  max_keywords: 5  # Only 5 keywords for testing
+  max_keywords: 2  # Only 2 keywords for fast testing
 """)
-    print(f"  Created: project_config.yaml (minimal test settings)")
+    print(f"  Created: project_config.yaml (ALL features enabled, minimal settings)")
     
     # =========================================================================
     # Prepare voiceover
@@ -271,13 +353,23 @@ keyword_extraction:
     vo_mp3 = project_dir / 'voiceover' / 'test.mp3'
     vo_srt = project_dir / 'voiceover' / 'test.srt'
     
-    # Try to download real audio
+    use_synthetic = False
+    
+    # Try to download real audio first
     if download_audio(vo_mp3, cookies_path):
         # Transcribe it
-        if not create_srt_from_audio(vo_mp3, vo_srt):
-            create_synthetic_srt(vo_srt)
+        if create_srt_from_audio(vo_mp3, vo_srt):
+            # Validate the transcription has useful content
+            if not validate_srt_content(vo_srt):
+                print(f"    → Real audio transcription not useful, using synthetic SRT")
+                use_synthetic = True
+        else:
+            use_synthetic = True
     else:
-        # Use synthetic SRT
+        use_synthetic = True
+    
+    # Fall back to synthetic SRT with entities
+    if use_synthetic:
         create_synthetic_srt(vo_srt)
     
     if not vo_srt.exists():
@@ -294,11 +386,11 @@ keyword_extraction:
         str(INSTALL_DIR / 'main.py'),
         '--project', str(project_dir),
         '--voiceover', str(vo_srt),
-        '--keywords', '5',  # Minimal keywords for testing
+        '--keywords', '2',  # Only 2 keywords for faster testing
     ]
     
-    print(f"  Command: python main.py --project <temp> --voiceover test.srt --keywords 5")
-    print(f"  Timeout: 10 minutes")
+    print(f"  Command: python main.py --project <temp> --voiceover test.srt --keywords 2")
+    print(f"  Timeout: 15 minutes (full feature test)")
     print()
     
     pipeline_start = time.time()
@@ -331,7 +423,7 @@ keyword_extraction:
                 print(line.rstrip())
                 output_lines.append(line)
             
-            process.wait(timeout=600)
+            process.wait(timeout=900)  # 15 min for full feature test
             returncode = process.returncode
             output = ''.join(output_lines)
             
@@ -343,7 +435,7 @@ keyword_extraction:
                 cwd=str(INSTALL_DIR),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=600,
+                timeout=900,  # 15 min for full feature test
                 env=env,
             )
             # Decode with UTF-8, replacing errors
@@ -446,6 +538,50 @@ keyword_extraction:
         print(f"  ✓ Videos: {video_count} downloaded")
     else:
         print(f"  ✗ Videos: None downloaded")
+    
+    # Check stock footage specifically
+    stock_dir = project_dir / 'downloaded_videos' / 'stock'
+    if stock_dir.exists():
+        stock_count = len(list(stock_dir.rglob('*.mp4')))
+        if stock_count > 0:
+            outputs_found['stock'] = stock_count
+            print(f"  ✓ Stock footage: {stock_count} videos (Pexels/Pixabay)")
+        else:
+            print(f"  ⚠ Stock footage: Directory exists but empty")
+    else:
+        print(f"  ⚠ Stock footage: Not downloaded (dir missing)")
+    
+    # Check entity images
+    entity_images_dir = project_dir / 'downloaded_videos' / 'entity_images'
+    if entity_images_dir.exists():
+        img_count = len(list(entity_images_dir.rglob('*.jpg'))) + len(list(entity_images_dir.rglob('*.png')))
+        if img_count > 0:
+            outputs_found['entity_images'] = img_count
+            print(f"  ✓ Entity images: {img_count} images")
+        else:
+            print(f"  ⚠ Entity images: Directory exists but empty")
+    else:
+        print(f"  ⚠ Entity images: Not downloaded (dir missing)")
+    
+    # Check JSON log for feature usage stats
+    if 'json' in outputs_found:
+        try:
+            data = json.loads(outputs_found['json'].read_text())
+            stages = data.get('stages', {})
+            
+            # Check if various features were used
+            features_used = []
+            if stages.get('ENTITY_IMAGES', {}).get('images', 0) > 0:
+                features_used.append('entity_images')
+            if stages.get('ENTITY_VIDEOS', {}).get('videos', 0) > 0:
+                features_used.append('entity_videos')
+            if stages.get('REMIX', {}).get('videos', 0) > 0:
+                features_used.append('remix')
+            
+            if features_used:
+                print(f"  ✓ Features used: {', '.join(features_used)}")
+        except:
+            pass
     
     # =========================================================================
     # Final result
