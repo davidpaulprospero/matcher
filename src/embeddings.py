@@ -31,7 +31,8 @@ except ImportError:
     HAS_NUMPY = False
     np = None
 
-# Batch sizes for different providers
+# Batch sizes for different providers (FALLBACK if config not provided)
+# Primary source is config.embedding.batch_size
 BATCH_SIZES = {
     'gemini': 100,      # Gemini supports up to 100 texts per call
     'voyage': 128,      # Voyage supports up to 128
@@ -246,9 +247,19 @@ class EmbeddingProvider:
         self, 
         texts: List[str], 
         batch_size: int = 100,
-        show_progress: bool = True
+        show_progress: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 2.0
     ) -> List[List[float]]:
-        """Embed texts in batches with progress reporting"""
+        """Embed texts in batches with progress reporting
+        
+        Args:
+            texts: List of texts to embed
+            batch_size: Number of texts per batch (from config)
+            show_progress: Whether to log progress
+            max_retries: Number of retry attempts (from config)
+            retry_delay: Base delay between retries in seconds (from config)
+        """
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
         
@@ -260,20 +271,22 @@ class EmbeddingProvider:
                 logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch)} texts)")
             
             # Retry logic with exponential backoff
-            for attempt in range(3):
+            for attempt in range(max_retries):
                 try:
                     embeddings = self.embed(batch)
                     all_embeddings.extend(embeddings)
                     break
                 except Exception as e:
-                    if attempt < 2:
-                        wait = 2 ** attempt
-                        logger.warning(f"    Batch failed, retrying in {wait}s: {e}")
+                    if attempt < max_retries - 1:
+                        wait = retry_delay * (2 ** attempt)
+                        logger.warning(f"    Batch failed, retrying in {wait:.1f}s: {e}")
                         time.sleep(wait)
                     else:
-                        logger.error(f"    Batch failed after 3 attempts: {e}")
+                        logger.error(f"    Batch failed after {max_retries} attempts: {e}")
                         # Fill with zeros to maintain alignment
-                        all_embeddings.extend([[0.0] * 768] * len(batch))
+                        # Use first embedding dimension or default to 768
+                        dim = len(all_embeddings[0]) if all_embeddings else 768
+                        all_embeddings.extend([[0.0] * dim] * len(batch))
         
         return all_embeddings
 
@@ -369,7 +382,8 @@ def compute_embeddings(
     provider: EmbeddingProvider,
     cache: Any,
     cache_key: str = "segments",
-    show_progress: bool = True
+    show_progress: bool = True,
+    config: Any = None
 ) -> Any:
     """
     Compute embeddings with batch processing and caching.
@@ -380,6 +394,7 @@ def compute_embeddings(
         cache: CacheManager or similar with cache_dir attribute
         cache_key: Key for caching (e.g., "video_segments", "voiceover")
         show_progress: Whether to show progress logs
+        config: Configuration object for batch_size, retries, etc.
     
     Returns:
         Numpy array of embedding vectors (or list if numpy unavailable)
@@ -402,23 +417,37 @@ def compute_embeddings(
     if cached is not None:
         return cached
     
-    # Determine batch size based on provider
-    provider_name = type(provider).__name__.lower()
-    if 'gemini' in provider_name:
-        batch_size = BATCH_SIZES['gemini']
-    elif 'voyage' in provider_name:
-        batch_size = BATCH_SIZES['voyage']
-    elif 'local' in provider_name:
-        batch_size = BATCH_SIZES['local']
+    # Get batch size from config (with provider-specific fallbacks)
+    if config and hasattr(config, 'embedding'):
+        batch_size = getattr(config.embedding, 'batch_size', 100)
+        max_retries = getattr(config.embedding, 'max_retries', 3)
+        retry_delay = getattr(config.embedding, 'retry_delay', 2.0)
     else:
-        batch_size = 50  # Safe default
+        # Fallback based on provider type
+        provider_name = type(provider).__name__.lower()
+        if 'gemini' in provider_name:
+            batch_size = BATCH_SIZES['gemini']
+        elif 'voyage' in provider_name:
+            batch_size = BATCH_SIZES['voyage']
+        elif 'local' in provider_name:
+            batch_size = BATCH_SIZES['local']
+        else:
+            batch_size = 100
+        max_retries = 3
+        retry_delay = 2.0
     
     # Compute embeddings in batches
     if show_progress:
         logger.info(f"  Computing embeddings: {len(cleaned_texts)} texts, batch size {batch_size}")
     
     start_time = time.time()
-    embeddings = provider.embed_batch(cleaned_texts, batch_size, show_progress)
+    embeddings = provider.embed_batch(
+        cleaned_texts, 
+        batch_size, 
+        show_progress,
+        max_retries=max_retries,
+        retry_delay=retry_delay
+    )
     elapsed = time.time() - start_time
     
     if show_progress:
@@ -436,7 +465,14 @@ def build_embedding_index(
     embeddings: Any,
     config: Any
 ) -> Any:
-    """Build FAISS index for fast similarity search"""
+    """Build FAISS index for fast similarity search
+    
+    Uses config.indexing settings:
+        - use_faiss: Whether to use FAISS
+        - index_type: 'flat' or 'ivf'
+        - ivf_nlist: Number of clusters for IVF
+        - ivf_nprobe: Clusters to search at query time
+    """
     if not getattr(config.indexing, 'use_faiss', True):
         return None
     
@@ -460,10 +496,17 @@ def build_embedding_index(
         if index_type == 'flat':
             index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
         elif index_type == 'ivf':
-            nlist = min(100, len(embeddings) // 10)
+            # Get IVF settings from config
+            config_nlist = getattr(config.indexing, 'ivf_nlist', 100)
+            config_nprobe = getattr(config.indexing, 'ivf_nprobe', 10)
+            
+            # nlist should not exceed data size / 10
+            nlist = min(config_nlist, max(1, len(embeddings_np) // 10))
+            
             quantizer = faiss.IndexFlatIP(dimension)
             index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
             index.train(embeddings_np)
+            index.nprobe = config_nprobe  # Set search-time clusters
         else:
             index = faiss.IndexFlatIP(dimension)
         

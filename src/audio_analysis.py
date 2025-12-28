@@ -86,11 +86,21 @@ class AudioAnalyzer:
         """
         self.config = config
         
-        # Default settings
-        self.silence_threshold_db = -40  # dB below which is considered silence
-        self.min_silence_duration = 0.3  # Minimum silence duration to detect (seconds)
-        self.speech_threshold = 0.5      # Confidence threshold for speech detection
-        self.sample_rate = 22050         # Sample rate for analysis
+        # Get settings from config or use defaults
+        if config and hasattr(config, 'audio_analysis'):
+            audio_config = config.audio_analysis
+            self.silence_threshold_db = getattr(audio_config, 'silence_threshold_db', -40.0)
+            self.min_silence_duration = getattr(audio_config, 'min_silence_duration', 0.3)
+            self.speech_threshold = getattr(audio_config, 'speech_threshold', 0.5)
+            self.sample_rate = getattr(audio_config, 'sample_rate', 22050)
+            self.min_speech_duration = getattr(audio_config, 'min_speech_duration', 0.2)
+        else:
+            # Default settings (fallback if no config)
+            self.silence_threshold_db = -40.0  # dB below which is considered silence
+            self.min_silence_duration = 0.3    # Minimum silence duration to detect (seconds)
+            self.speech_threshold = 0.5        # Confidence threshold for speech detection
+            self.sample_rate = 22050           # Sample rate for analysis
+            self.min_speech_duration = 0.2     # Minimum speech duration to detect (seconds)
         
         # Try to import librosa
         try:
@@ -318,7 +328,7 @@ class AudioAnalyzer:
             elif conf <= threshold and in_speech:
                 in_speech = False
                 duration = t - speech_start
-                if duration >= 0.2:  # Minimum 200ms speech
+                if duration >= self.min_speech_duration:  # Use config value
                     avg_conf = np.mean(speech_conf_acc)
                     speech_regions.append(SpeechRegion(
                         start_time=round(speech_start, 3),
@@ -333,7 +343,7 @@ class AudioAnalyzer:
         # Handle speech at end
         if in_speech and speech_conf_acc:
             duration = times[-1] - speech_start
-            if duration >= 0.2:
+            if duration >= self.min_speech_duration:  # Use config value
                 avg_conf = np.mean(speech_conf_acc)
                 speech_regions.append(SpeechRegion(
                     start_time=round(speech_start, 3),

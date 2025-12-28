@@ -240,11 +240,12 @@ REFINED KEYWORDS:"""
     
     def _call_llm(self, prompt: str) -> str:
         """Call LLM and return response text"""
+        max_tokens = getattr(self.config.llm, 'max_tokens', 2000)
         try:
             if self.llm_provider == 'anthropic':
                 response = self.llm_client.messages.create(
                     model=self.config.llm.model,
-                    max_tokens=2000,
+                    max_tokens=max_tokens,
                     messages=[{"role": "user", "content": prompt}]
                 )
                 return response.content[0].text
@@ -327,9 +328,11 @@ Topic:"""
                     logger.info(f"LLM detected topic: {topic}")
                     return topic
             elif hasattr(self, 'anthropic_client') and self.anthropic_client:
+                # Use model from config
+                anthropic_model = getattr(self.config.llm, 'anthropic_model', 'claude-3-haiku-20240307')
                 response = self.anthropic_client.messages.create(
-                    model="claude-3-haiku-20240307",
-                    max_tokens=50,
+                    model=anthropic_model,
+                    max_tokens=100,  # Short response for topic detection
                     messages=[{"role": "user", "content": prompt}]
                 )
                 topic = response.content[0].text.strip().strip('"').strip("'")
@@ -406,7 +409,7 @@ Topic:"""
     def extract_keywords(
         self,
         segments: List[Dict],
-        max_keywords: int = 50,
+        max_keywords: int = None,
         expand: bool = True
     ) -> KeywordResult:
         """
@@ -414,12 +417,16 @@ Topic:"""
         
         Args:
             segments: List of voiceover segments with 'text' field
-            max_keywords: Maximum number of keywords to return
+            max_keywords: Maximum number of keywords to return (uses config default if None)
             expand: Whether to expand keywords with LLM refinement
         
         Returns:
             KeywordResult with extracted keywords
         """
+        # Use config default if not specified
+        if max_keywords is None:
+            max_keywords = getattr(self.config.keyword, 'max_keywords', 30)
+        
         if not segments:
             return KeywordResult(keywords=[], segments_analyzed=0, extraction_method="none")
         
@@ -818,7 +825,7 @@ Topic:"""
 def extract_keywords_from_srt(
     srt_path: str,
     config,
-    max_keywords: int = 50
+    max_keywords: int = None
 ) -> KeywordResult:
     """
     Convenience function to extract keywords from SRT file.
@@ -826,12 +833,16 @@ def extract_keywords_from_srt(
     Args:
         srt_path: Path to SRT file
         config: Pipeline config
-        max_keywords: Maximum keywords to extract
+        max_keywords: Maximum keywords to extract (uses config default if None)
     
     Returns:
         KeywordResult with extracted keywords
     """
     import srt
+    
+    # Use config default if not specified
+    if max_keywords is None:
+        max_keywords = getattr(config.keyword, 'max_keywords', 30)
     
     # Parse SRT
     with open(srt_path, 'r', encoding='utf-8') as f:
@@ -887,11 +898,22 @@ def extract_keyword_per_segment_from_srt(
 def find_keyword_matches(
     voiceover_keywords: List[str],
     video_keywords: List[str],
-    visual_keywords: List[str] = None
+    visual_keywords: List[str] = None,
+    keyword_boost: float = 0.05,
+    visual_boost: float = 0.03,
+    max_boost: float = 0.2
 ) -> Tuple[float, bool, bool]:
     """
     Find keyword overlap between voiceover and video.
     Returns (boost_score, is_keyword_match, is_visual_match)
+    
+    Args:
+        voiceover_keywords: Keywords from voiceover
+        video_keywords: Keywords from video transcript
+        visual_keywords: Keywords from vision analysis
+        keyword_boost: Boost per matching text keyword (default from config.matching.keyword_boost)
+        visual_boost: Boost per matching visual keyword
+        max_boost: Maximum total boost cap
     """
     vo_set = set(k.lower() for k in voiceover_keywords)
     vid_set = set(k.lower() for k in video_keywords)
@@ -908,8 +930,8 @@ def find_keyword_matches(
     # Calculate boost score
     boost = 0.0
     if is_keyword_match:
-        boost += 0.05 * text_overlap  # 5% boost per matching keyword
+        boost += keyword_boost * text_overlap
     if is_visual_match:
-        boost += 0.03 * visual_overlap  # 3% boost per visual match
+        boost += visual_boost * visual_overlap
     
-    return min(boost, 0.2), is_keyword_match, is_visual_match  # Cap at 20% boost
+    return min(boost, max_boost), is_keyword_match, is_visual_match
