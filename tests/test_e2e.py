@@ -331,8 +331,7 @@ download:
     longer:
       min: 1500
       max: 3000
-      per_keyword: 1
-      max_total: 1  # Only 1 LONGER video total across all keywords
+      per_keyword: 0  # Disabled for testing - too slow
 
 # Downloading settings (yt-dlp)
 downloading:

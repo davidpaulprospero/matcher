@@ -1,74 +1,72 @@
 {
-  "total_files": 9,
-  "included_files": 4,
+  "total_files": 8,
+  "included_files": 3,
   "excluded_files": 5,
   "included_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_l\\Elon_Mus_oO8w6XcXJUs.mp4",
-      "filename": "Elon_Mus_oO8w6XcXJUs.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_s\\How_Elon_sA7052cewOc.mp4",
+      "filename": "How_Elon_sA7052cewOc.mp4",
       "keyword_matches": [
-        "elon musk footage"
+        "elon musk biography footage"
       ],
       "match_score": 0.5,
-      "file_size_mb": 163.50464248657227,
+      "file_size_mb": 2.6175355911254883,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_l\\Tesla_Fa_mr9kK0_7x08.mp4",
-      "filename": "Tesla_Fa_mr9kK0_7x08.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_m\\SpaceX_F_sX1Y2JMK6g8.mp4",
+      "filename": "SpaceX_F_sX1Y2JMK6g8.mp4",
       "keyword_matches": [
-        "tesla factory footage"
+        "spacex launch footage"
       ],
       "match_score": 0.5,
-      "file_size_mb": 240.67458248138428,
+      "file_size_mb": 59.30446815490723,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_l\\US_Tesla_952vFS_3Fp0.mp4",
-      "filename": "US_Tesla_952vFS_3Fp0.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_s\\SpaceX_M_RYUr-5PYA7s.mp4",
+      "filename": "SpaceX_M_RYUr-5PYA7s.mp4",
       "keyword_matches": [
-        "tesla factory footage"
+        "spacex launch footage"
       ],
       "match_score": 0.5,
-      "file_size_mb": 1382.5089645385742,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_s\\Tesla_Gi_-Ds1xV7M2gI.mp4",
-      "filename": "Tesla_Gi_-Ds1xV7M2gI.mp4",
-      "keyword_matches": [
-        "tesla factory footage"
-      ],
-      "match_score": 0.5,
-      "file_size_mb": 33.49905586242676,
+      "file_size_mb": 8.541955947875977,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
   "excluded_videos": [
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_m\\Is_life__2KK_kzrJPS8.mp4",
-      "filename": "Is_life__2KK_kzrJPS8.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_l\\Who_is_E_-apCR8R2_8A.mp4",
+      "filename": "Who_is_E_-apCR8R2_8A.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 28.06225872039795,
+      "file_size_mb": 128.7164182662964,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Elon_M_s\\DGX_Spar_wX9ybkEYDc0.mp4",
-      "filename": "DGX_Spar_wX9ybkEYDc0.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\Elon_M_m\\The_Life_vpcDnBH4Ps8.mp4",
+      "filename": "The_Life_vpcDnBH4Ps8.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 5.325817108154297,
+      "file_size_mb": 20.61891269683838,
       "duration_estimate": null,
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\SpaceX_l\\Blastoff_b28zbsnk-48.mp4",
+      "filename": "Blastoff_b28zbsnk-48.mp4",
+      "keyword_matches": [],
+      "match_score": 0.0,
+      "file_size_mb": 68.07837104797363,
+      "duration_estimate": null,
+      "metadata": {}
+    },
+    {
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\stock\\pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "filename": "pexels_35394036_Emrul_Kausar_Emon_HD.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
@@ -77,28 +75,19 @@
       "metadata": {}
     },
     {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\stock\\pexels_3568453_Harrison_Haines_HD.mp4",
-      "filename": "pexels_3568453_Harrison_Haines_HD.mp4",
+      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_6p7ww8w9\\test_project\\downloaded_videos\\stock\\pexels_4881976_Natasha_Filippovskay_720p.mp4",
+      "filename": "pexels_4881976_Natasha_Filippovskay_720p.mp4",
       "keyword_matches": [],
       "match_score": 0.0,
-      "file_size_mb": 9.231383323669434,
-      "duration_estimate": null,
-      "metadata": {}
-    },
-    {
-      "file_path": "C:\\Users\\daves\\AppData\\Local\\Temp\\e2e_test_as6zw13c\\test_project\\downloaded_videos\\Tesla_m\\Giga_Ber_blW-Fa4a10g.mp4",
-      "filename": "Giga_Ber_blW-Fa4a10g.mp4",
-      "keyword_matches": [],
-      "match_score": 0.0,
-      "file_size_mb": 110.43008422851562,
+      "file_size_mb": 2.1189470291137695,
       "duration_estimate": null,
       "metadata": {}
     }
   ],
-  "processing_time_seconds": 0.002500295639038086,
+  "processing_time_seconds": 0.002000093460083008,
   "keywords_used": [
-    "elon musk footage",
-    "tesla factory footage"
+    "elon musk biography footage",
+    "spacex launch footage"
   ],
   "avg_match_score": 0.5
 }
