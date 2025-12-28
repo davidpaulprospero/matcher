@@ -136,18 +136,29 @@ def create_run_bat(project_dir: Path, install_dir: Path) -> Path:
     """
     Create Windows batch file to run the matcher.
     
-    FIXED: Removed erroneous 'python main.py %*' that ran before cd.
-    The script now correctly:
-    1. Sets environment variables
-    2. Captures the project directory
-    3. Changes to install directory FIRST
-    4. THEN runs main.py with --project argument
+    Includes checkpoint & saved keywords support (v3.1):
+    - run                     Auto-detect: prompt if saves exist, fresh if not
+    - run --resume            Resume interrupted run from checkpoint
+    - run --fresh             Fresh start, ignore checkpoint
+    - run --use-keywords      Use most recent saved keywords
+    - run --list              List saved keyword presets
     """
     bat_content = f'''@echo off
 REM ============================================================
 REM Voiceover-Matcher Runner
 REM Project: {project_dir.name}
 REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+REM ============================================================
+REM
+REM Usage:
+REM   run                     Auto-detect: prompt if saves exist, fresh if not
+REM   run --resume            Resume interrupted run from checkpoint
+REM   run --fresh             Fresh start, ignore checkpoint
+REM   run --use-keywords      Use most recent saved keywords
+REM   run --use-keywords NAME Use specific saved keyword preset
+REM   run --list              List saved keyword presets
+REM   run --help              Show all options
+REM
 REM ============================================================
 
 REM Set FFmpeg path (adjust if your ffmpeg is elsewhere)
@@ -161,6 +172,89 @@ set PROJECT_DIR=%~dp0
 REM Remove trailing backslash
 if "%PROJECT_DIR:~-1%"=="\\" set PROJECT_DIR=%PROJECT_DIR:~0,-1%
 
+REM Change to install directory
+cd /d "%INSTALL_DIR%"
+
+REM ============================================================
+REM Handle explicit commands (bypass auto-detection)
+REM ============================================================
+
+REM --list: List saved keywords
+if "%1"=="--list" (
+    echo.
+    echo   Listing saved keyword presets...
+    echo.
+    python main.py --project "%PROJECT_DIR%" --list-keywords
+    goto :end
+)
+
+REM --help: Show help
+if "%1"=="--help" (
+    echo.
+    echo   ============================================================
+    echo   VOICEOVER-MATCHER - Quick Commands
+    echo   ============================================================
+    echo.
+    echo   run                     Auto-detect (prompt if saves exist)
+    echo   run --resume            Resume from checkpoint
+    echo   run --fresh             Fresh start, ignore checkpoint
+    echo   run --use-keywords      Use most recent saved keywords
+    echo   run --use-keywords NAME Use specific keyword preset
+    echo   run --list              List saved keyword presets
+    echo.
+    python main.py --help
+    goto :end
+)
+
+REM --resume: Resume from checkpoint (explicit)
+if "%1"=="--resume" (
+    echo.
+    echo   ============================================================
+    echo   VOICEOVER-MATCHER
+    echo   ============================================================
+    echo   Project: %PROJECT_DIR%
+    echo   Mode: RESUME from checkpoint
+    echo.
+    python main.py --project "%PROJECT_DIR%" --resume
+    goto :check_error
+)
+
+REM --fresh: Fresh start (explicit)
+if "%1"=="--fresh" (
+    echo.
+    echo   ============================================================
+    echo   VOICEOVER-MATCHER
+    echo   ============================================================
+    echo   Project: %PROJECT_DIR%
+    echo   Mode: FRESH start (ignoring saves)
+    echo.
+    python main.py --project "%PROJECT_DIR%" --fresh --save-keywords
+    goto :check_error
+)
+
+REM --use-keywords: Use saved keywords (explicit)
+if "%1"=="--use-keywords" (
+    echo.
+    echo   ============================================================
+    echo   VOICEOVER-MATCHER
+    echo   ============================================================
+    echo   Project: %PROJECT_DIR%
+    if "%2"=="" (
+        echo   Mode: Using LATEST saved keywords
+        echo.
+        python main.py --project "%PROJECT_DIR%" --use-keywords
+    ) else (
+        echo   Mode: Using saved keywords [%2]
+        echo.
+        python main.py --project "%PROJECT_DIR%" --use-keywords %2
+    )
+    goto :check_error
+)
+
+REM ============================================================
+REM AUTO-DETECTION MODE (no arguments)
+REM ============================================================
+
 echo.
 echo   ============================================================
 echo   VOICEOVER-MATCHER
@@ -169,16 +263,104 @@ echo   Project: %PROJECT_DIR%
 echo   Install: %INSTALL_DIR%
 echo.
 
-REM Change to install directory FIRST, then run main.py
-cd /d "%INSTALL_DIR%"
-python main.py --project "%PROJECT_DIR%" %*
+REM Check what exists
+set HAS_CHECKPOINT=0
+set HAS_KEYWORDS=0
 
+if exist "%PROJECT_DIR%\\checkpoint.json" set HAS_CHECKPOINT=1
+if exist "%PROJECT_DIR%\\saved_keywords.json" set HAS_KEYWORDS=1
+
+REM If nothing saved, run fresh automatically
+if %HAS_CHECKPOINT%==0 if %HAS_KEYWORDS%==0 (
+    echo   No saves found - starting fresh run
+    echo   Mode: Normal run (auto-saving keywords)
+    echo.
+    python main.py --project "%PROJECT_DIR%" --save-keywords %*
+    goto :check_error
+)
+
+REM Something exists - show status and prompt
+echo   ─────────────────────────────────────────────────────────────
+echo   SAVED DATA FOUND:
+if %HAS_CHECKPOINT%==1 (
+    echo     [C] Checkpoint exists (can resume interrupted run)
+)
+if %HAS_KEYWORDS%==1 (
+    echo     [K] Saved keywords exist (can reuse for same videos)
+)
+echo   ─────────────────────────────────────────────────────────────
+echo.
+echo   Options:
+if %HAS_CHECKPOINT%==1 (
+    echo     [R] Resume from checkpoint
+)
+if %HAS_KEYWORDS%==1 (
+    echo     [K] Use saved keywords (same videos)
+)
+echo     [F] Fresh start (new keywords, new videos)
+echo     [Q] Quit
+echo.
+
+:prompt_loop
+set /p CHOICE="  Choice: "
+
+if /i "%CHOICE%"=="R" (
+    if %HAS_CHECKPOINT%==1 (
+        echo.
+        echo   Mode: RESUME from checkpoint
+        echo.
+        python main.py --project "%PROJECT_DIR%" --resume
+        goto :check_error
+    ) else (
+        echo   No checkpoint found. Choose another option.
+        goto :prompt_loop
+    )
+)
+
+if /i "%CHOICE%"=="K" (
+    if %HAS_KEYWORDS%==1 (
+        echo.
+        echo   Mode: Using saved keywords
+        echo.
+        python main.py --project "%PROJECT_DIR%" --use-keywords
+        goto :check_error
+    ) else (
+        echo   No saved keywords found. Choose another option.
+        goto :prompt_loop
+    )
+)
+
+if /i "%CHOICE%"=="F" (
+    echo.
+    echo   Mode: FRESH start (new keywords)
+    echo.
+    python main.py --project "%PROJECT_DIR%" --fresh --save-keywords
+    goto :check_error
+)
+
+if /i "%CHOICE%"=="Q" (
+    echo.
+    echo   Exiting.
+    goto :end
+)
+
+echo   Invalid choice. Please enter R, K, F, or Q.
+goto :prompt_loop
+
+:check_error
 REM Keep window open if there was an error
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo   [ERROR] Pipeline failed with error code %ERRORLEVEL%
+    echo.
+    echo   If interrupted, you can resume with: run --resume
     pause
+) else (
+    echo.
+    echo   [SUCCESS] Pipeline completed
 )
+
+:end
 '''
     
     bat_path = project_dir / "run.bat"
@@ -187,12 +369,23 @@ if %ERRORLEVEL% NEQ 0 (
 
 
 def create_run_sh(project_dir: Path, install_dir: Path) -> Path:
-    """Create Unix shell script to run the matcher"""
+    """Create Unix shell script to run the matcher with checkpoint support"""
     sh_content = f'''#!/bin/bash
 # ============================================================
 # Voiceover-Matcher Runner
 # Project: {project_dir.name}
 # Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+# ============================================================
+#
+# Usage:
+#   ./run.sh                     Normal run (saves keywords automatically)
+#   ./run.sh --resume            Resume interrupted run from checkpoint
+#   ./run.sh --fresh             Fresh start, ignore checkpoint
+#   ./run.sh --use-keywords      Use most recent saved keywords
+#   ./run.sh --use-keywords NAME Use specific saved keyword preset
+#   ./run.sh --list              List saved keyword presets
+#   ./run.sh --help              Show all options
+#
 # ============================================================
 
 # Central installation location (where main.py lives)
@@ -201,17 +394,105 @@ INSTALL_DIR="{install_dir}"
 # Project directory (this folder)
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Change to install directory
+cd "$INSTALL_DIR"
+
+# ============================================================
+# Handle special commands
+# ============================================================
+
+case "$1" in
+    --list)
+        echo ""
+        echo "  Listing saved keyword presets..."
+        echo ""
+        python main.py --project "$PROJECT_DIR" --list-keywords
+        exit 0
+        ;;
+    --help)
+        echo ""
+        echo "  ============================================================"
+        echo "  VOICEOVER-MATCHER - Quick Commands"
+        echo "  ============================================================"
+        echo ""
+        echo "  ./run.sh                     Normal run (saves keywords)"
+        echo "  ./run.sh --resume            Resume from checkpoint"
+        echo "  ./run.sh --fresh             Fresh start, ignore checkpoint"
+        echo "  ./run.sh --use-keywords      Use most recent saved keywords"
+        echo "  ./run.sh --use-keywords NAME Use specific keyword preset"
+        echo "  ./run.sh --list              List saved keyword presets"
+        echo ""
+        python main.py --help
+        exit 0
+        ;;
+esac
+
+# ============================================================
+# Main run modes
+# ============================================================
+
 echo ""
 echo "  ============================================================"
 echo "  VOICEOVER-MATCHER"
 echo "  ============================================================"
 echo "  Project: $PROJECT_DIR"
 echo "  Install: $INSTALL_DIR"
+
+# Check for checkpoint
+if [ -f "$PROJECT_DIR/checkpoint.json" ]; then
+    echo "  Checkpoint: FOUND"
+else
+    echo "  Checkpoint: none"
+fi
+
+# Check for saved keywords
+if [ -f "$PROJECT_DIR/saved_keywords.json" ]; then
+    echo "  Saved keywords: FOUND"
+else
+    echo "  Saved keywords: none"
+fi
+
 echo ""
 
-# Change to install directory FIRST, then run main.py
-cd "$INSTALL_DIR"
-python main.py --project "$PROJECT_DIR" "$@"
+case "$1" in
+    --resume)
+        echo "  Mode: RESUME from checkpoint"
+        echo ""
+        python main.py --project "$PROJECT_DIR" --resume
+        ;;
+    --fresh)
+        echo "  Mode: FRESH start (ignoring checkpoint)"
+        echo ""
+        python main.py --project "$PROJECT_DIR" --fresh --save-keywords
+        ;;
+    --use-keywords)
+        if [ -z "$2" ]; then
+            echo "  Mode: Using LATEST saved keywords"
+            echo ""
+            python main.py --project "$PROJECT_DIR" --use-keywords
+        else
+            echo "  Mode: Using saved keywords [$2]"
+            echo ""
+            python main.py --project "$PROJECT_DIR" --use-keywords "$2"
+        fi
+        ;;
+    *)
+        echo "  Mode: Normal run (auto-saving keywords)"
+        echo ""
+        python main.py --project "$PROJECT_DIR" --save-keywords "$@"
+        ;;
+esac
+
+# Check exit code
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "  [ERROR] Pipeline failed"
+    echo ""
+    echo "  If interrupted, you can resume with: ./run.sh --resume"
+else
+    echo ""
+    echo "  [SUCCESS] Pipeline completed"
+fi
 '''
     
     sh_path = project_dir / "run.sh"
@@ -253,44 +534,50 @@ if "%~1"=="" (
     exit /b
 )
 
-:: Set output name
-set "input_file=%~1"
-set "output_file=%~dpn1_DAVINCI.mov"
+:: Set FFmpeg path
+set FFMPEG=C:\\ffmpeg\\bin\\ffmpeg.exe
+
+:: Check if FFmpeg exists
+if not exist "%FFMPEG%" (
+    echo   ERROR: FFmpeg not found at %FFMPEG%
+    echo   Please install FFmpeg or update the path in this script.
+    pause
+    exit /b 1
+)
+
+:: Input file
+set INPUT=%~1
+set INPUT_DIR=%~dp1
+set INPUT_NAME=%~n1
+set INPUT_EXT=%~x1
+
+:: Output file (same directory, _prores suffix)
+set OUTPUT=%INPUT_DIR%%INPUT_NAME%_prores.mov
 
 echo.
 echo   ============================================================
 echo   VIDEO CONVERTER
 echo   ============================================================
 echo.
-echo   Input:  "%~nx1"
-echo   Output: "%~n1_DAVINCI.mov"
+echo   Input:  %INPUT%
+echo   Output: %OUTPUT%
 echo.
 echo   Converting to ProRes 4444...
 echo.
 
-:: Run FFmpeg
-ffmpeg -i "%input_file%" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le -c:a pcm_s16le -q:v 4 -y "%output_file%"
+:: Convert to ProRes 4444
+"%FFMPEG%" -i "%INPUT%" -c:v prores_ks -profile:v 4 -c:a pcm_s16le -y "%OUTPUT%"
 
-if %errorlevel% equ 0 (
+if %ERRORLEVEL% EQU 0 (
     echo.
-    echo   ============================================================
-    echo   SUCCESS
-    echo   ============================================================
-    echo.
-    echo   Converted file saved as:
-    echo   %output_file%
-    echo.
+    echo   SUCCESS! Converted file saved to:
+    echo   %OUTPUT%
 ) else (
     echo.
-    echo   ============================================================
-    echo   ERROR
-    echo   ============================================================
-    echo.
-    echo   Conversion failed. Make sure FFmpeg is installed and in PATH.
-    echo   Download FFmpeg from: https://ffmpeg.org/download.html
-    echo.
+    echo   ERROR: Conversion failed.
 )
 
+echo.
 pause
 '''
     
@@ -300,33 +587,49 @@ pause
 
 
 def create_project_config(project_dir: Path) -> Path:
-    """Create project-specific config with common overrides commented out"""
-    config_content = '''# Project-Specific Configuration Overrides
-# =========================================
-# Uncomment and modify settings to override global config.yaml
-# Only include settings you want to change for THIS project.
+    """Create project-specific config that overrides central config"""
+    config_content = f'''# ============================================================
+# Project-Specific Configuration
+# Project: {project_dir.name}
+# Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+# ============================================================
+#
+# This file overrides settings from the central config.yaml
+# Only include settings you want to change for this project.
+#
+# The central config is at: {INSTALL_DIR / 'config.yaml'}
+# ============================================================
 
-# Example overrides:
+# Project identification
+project:
+  name: "{project_dir.name}"
+  
+# Uncomment and modify any settings you want to override:
 
-# voiceover_path: "./voiceover/narration.srt"
-
-# Embedding provider override
-# embedding:
-#   provider: "voyage"  # Use voyage instead of gemini for this project
-
-# Download settings override
-# download:
-#   tiers:
+# keywords:
+#   num_keywords: 20
+#   tier_config:
 #     short:
-#       per_keyword: 5  # More short clips for this project
+#       per_keyword: 1
+#     medium:
+#       per_keyword: 1
+#     long:
+#       per_keyword: 1
+#     longer:
+#       per_keyword: 0  # Disabled for speed
 
-# Matching threshold override
-# matching:
-#   confidence_threshold: 0.4  # Lower threshold for difficult matches
+# enhanced:
+#   enabled: true
+#   min_confidence: 0.70
+#   non_interactive: true  # Skip prompts, use defaults
 
-# Output settings
-# output:
-#   num_alternatives: 3  # More alternatives for this project
+# image_search:
+#   enabled: true
+#   max_entities: 2
+
+# pipeline:
+#   skip_download: false
+#   skip_image_search: false
 '''
     
     config_path = project_dir / "project_config.yaml"
@@ -335,57 +638,47 @@ def create_project_config(project_dir: Path) -> Path:
 
 
 def create_project_structure(project_dir: Path) -> dict:
-    """Create the standard project folder structure"""
+    """Create standard project folder structure"""
     folders = {
-        'voiceover': 'Place your voiceover .srt or .mp3 files here',
-        'downloaded_videos': 'Downloaded stock footage will be saved here',
-        'otio_output': 'Generated OTIO timeline files',
-        '.cache': 'Cache for transcriptions, embeddings, scene detection',
-        'logs': 'Run logs and match decision records'
+        'voiceover': project_dir / 'voiceover',
+        'output': project_dir / 'output',
+        'otio_output': project_dir / 'otio_output',
+        'logs': project_dir / 'logs',
+        'downloaded_images': project_dir / 'downloaded_images',
+        '.cache': project_dir / '.cache',
+        '.cache/transcriptions': project_dir / '.cache' / 'transcriptions',
+        '.cache/embeddings': project_dir / '.cache' / 'embeddings',
+        '.cache/scenes': project_dir / '.cache' / 'scenes',
+        '.cache/keyframes': project_dir / '.cache' / 'keyframes',
+        '.cache/audio': project_dir / '.cache' / 'audio',
+        '.cache/index': project_dir / '.cache' / 'index',
+        '.cache/llm_responses': project_dir / '.cache' / 'llm_responses',
     }
     
-    created = {}
-    for folder, description in folders.items():
-        folder_path = project_dir / folder
-        folder_path.mkdir(parents=True, exist_ok=True)
-        created[folder] = folder_path
-        
-        # Create a README in each folder (except hidden ones)
-        if not folder.startswith('.'):
-            readme_path = folder_path / "README.txt"
-            if not readme_path.exists():
-                readme_path.write_text(f"{description}\n")
+    for name, path in folders.items():
+        path.mkdir(parents=True, exist_ok=True)
     
-    return created
+    return folders
 
 
-def setup_project(project_path: str, install_dir: Path = None) -> dict:
-    """
-    Set up a new project folder.
+def setup_project(project_path: str, install_dir: Path = None):
+    """Set up a new project with all necessary files and folders"""
+    project_dir = Path(project_path).resolve()
     
-    Args:
-        project_path: Path to the project directory
-        install_dir: Central install location (auto-detected if None)
-    
-    Returns:
-        Dict with paths to created files/folders
-    """
     if install_dir is None:
         install_dir = get_install_dir()
-    
-    project_dir = Path(project_path).resolve()
     
     # Create project directory if it doesn't exist
     project_dir.mkdir(parents=True, exist_ok=True)
     
     result = {
-        'project_dir': project_dir,
-        'install_dir': install_dir,
+        'project_dir': str(project_dir),
+        'install_dir': str(install_dir),
         'created': []
     }
     
-    # Create folder structure
-    print(f"\n{'-' * 60}")
+    print()
+    print("-" * 60)
     print(f"  Creating Project: {project_dir.name}")
     print(f"{'-' * 60}")
     print(f"  Location: {project_dir}")
@@ -429,9 +722,11 @@ def setup_project(project_path: str, install_dir: Path = None) -> dict:
     print(f"\n  Next steps:")
     print(f"  1. Put your voiceover in: {project_dir.name}\\voiceover\\")
     print(f"  2. Double-click 'run.bat' to start")
-    print(f"\n  Or run from command line:")
-    print(f"  > cd \"{project_dir}\"")
-    print(f"  > run.bat --voiceover voiceover\\script.srt")
+    print(f"\n  Quick commands:")
+    print(f"    run                  Normal run (auto-saves keywords)")
+    print(f"    run --resume         Resume interrupted run")
+    print(f"    run --use-keywords   Use saved keywords")
+    print(f"    run --list           List saved keyword presets")
     
     return result
 
@@ -585,12 +880,11 @@ def regenerate_run_script(project_path: str, install_dir: str = None):
         sh_path = create_run_sh(project_dir, install_path)
         print(f"  + Created: {sh_path}")
     
-    print(f"\n  Done! You can now run the project with:")
-    print(f"  > cd \"{project_dir}\"")
-    if sys.platform == 'win32':
-        print(f"  > run.bat --voiceover voiceover\\script.srt")
-    else:
-        print(f"  > ./run.sh --voiceover voiceover/script.srt")
+    print(f"\n  Done! Quick commands:")
+    print(f"    run                  Normal run (auto-saves keywords)")
+    print(f"    run --resume         Resume interrupted run")
+    print(f"    run --use-keywords   Use saved keywords")
+    print(f"    run --list           List saved keyword presets")
     
     return True
 

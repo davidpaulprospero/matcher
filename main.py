@@ -14,6 +14,11 @@ PERFORMANCE OPTIMIZATIONS (v2.4+):
 - Batch embedding API calls (configurable batch size)
 - Selective vision processing (skip if transcript covers content)
 
+CHECKPOINT & RESUME (v3.1):
+- Automatic checkpoints after each stage
+- Resume interrupted runs with --resume
+- Saved keyword presets for reproducible runs
+
 One command to go from voiceover → matched timeline:
 1. Extract keywords from voiceover (LLM)
 2. Download footage from YouTube + Pexels + Pixabay
@@ -25,9 +30,14 @@ Usage:
     python main.py --voiceover script.srt
     python main.py --voiceover script.srt --keywords 30
     python main.py --project "E:\\Projects\\MyDoc" --voiceover voiceover.srt
-    python main.py --resume  # Resume interrupted run
-    python main.py --match-only  # Skip download, just match existing footage
-    python main.py --config custom_config.yaml  # Use custom config file
+    python main.py --resume                    # Resume interrupted run
+    python main.py --fresh                     # Force fresh start
+    python main.py --use-keywords              # Use most recent saved keywords
+    python main.py --use-keywords mypreset     # Use specific keyword preset
+    python main.py --save-keywords             # Save keywords after extraction
+    python main.py --list-keywords             # List saved keyword presets
+    python main.py --match-only                # Skip download, just match existing
+    python main.py --config custom_config.yaml # Use custom config file
 """
 
 import os
@@ -73,6 +83,10 @@ PROJECT_DIR = None
 from src.config import (
     Config, load_config, get_config, set_config, reload_config,
     ensure_dirs, get_api_key, get_config_metrics, log_hardcoded_warning
+)
+from src.checkpoint import (
+    CheckpointManager, KeywordManager, SavedKeywords,
+    format_resume_prompt, format_keyword_prompt, STAGE_ORDER
 )
 
 # Global config instance - loaded at startup
@@ -394,6 +408,7 @@ class Pipeline:
         self.topic_context = ""
         self.extracted_entities = []  # Named entities with context
         self.entity_images = {}  # Downloaded images for entities (name -> EntityImageResult)
+        self.entity_videos = {}  # Downloaded videos for entities (name -> EntityVideoResult)
         self.keyword_remixer = None
         self.enhanced_enabled = config.enhanced.enabled
         self.second_style = None
@@ -404,6 +419,10 @@ class Pipeline:
         # Performance tracking
         self.stage_timings = {}
         self.use_delta_indexing = True
+        
+        # Checkpoint manager for resume functionality
+        self.checkpoint = None  # Initialized in run() with project dir
+        self.resume_mode = False
         
         # Run logger
         self.run_logger = None
@@ -1920,12 +1939,70 @@ Topic:"""
         
         Path(output_path).write_text("\n".join(lines), encoding='utf-8')
     
-    def run(self, voiceover_path: str, num_keywords: int = None, match_only: bool = False):
+    def run(self, voiceover_path: str, num_keywords: int = None, match_only: bool = False,
+            resume: bool = False, fresh: bool = False, 
+            use_keywords: str = None, save_keywords: str = None):
         """
         Run the complete pipeline.
         All settings from config.yaml.
+        
+        Args:
+            voiceover_path: Path to voiceover file
+            num_keywords: Number of keywords to extract (None = use config)
+            match_only: Skip download, only match existing footage
+            resume: Resume from checkpoint if available
+            fresh: Force fresh start, ignore checkpoint
+            use_keywords: Use saved keywords preset (name or 'latest')
+            save_keywords: Save extracted keywords with this name ('auto' for auto-name)
         """
         start_time = time.time()
+        
+        # Initialize checkpoint and keyword managers
+        project_dir = Path(voiceover_path).parent
+        if PROJECT_DIR:
+            project_dir = PROJECT_DIR
+        
+        config_hash = getattr(self.config, '_hash', '')
+        self.checkpoint = CheckpointManager(project_dir, config_hash)
+        self.keyword_manager = KeywordManager(project_dir)
+        
+        # Handle checkpoint logic
+        if fresh and self.checkpoint.exists():
+            print("\n  🗑️ Clearing checkpoint (--fresh mode)")
+            self.checkpoint.clear()
+        elif self.checkpoint.exists():
+            self.checkpoint.load()
+            validation = self.checkpoint.validate(voiceover_path)
+            
+            if not resume and not self.config.enhanced.non_interactive:
+                # Interactive mode: ask user
+                print(format_resume_prompt(self.checkpoint))
+                while True:
+                    try:
+                        choice = input("  Choice [R/F/Q]: ").strip().upper()
+                        if choice == 'R':
+                            resume = True
+                            break
+                        elif choice == 'F':
+                            self.checkpoint.clear()
+                            break
+                        elif choice == 'Q':
+                            print("  Exiting.")
+                            return
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n  Exiting.")
+                        return
+            elif resume:
+                # --resume flag: automatically resume
+                print(f"\n  📂 Resuming from checkpoint: {self.checkpoint.data.last_completed_stage}")
+                for warning in validation.get('warnings', []):
+                    print(f"  ⚠ {warning}")
+            else:
+                # Non-interactive mode without --resume: warn and continue fresh
+                print(f"\n  ⚠ Checkpoint exists but --resume not specified. Starting fresh.")
+                self.checkpoint.clear()
+        
+        self.resume_mode = resume and self.checkpoint.data is not None
         
         self._print_banner()
         
@@ -1934,15 +2011,141 @@ Topic:"""
         # =====================================================================
         
         # Stage 1: Analyze voiceover (extracts keywords + detects topic)
-        stage_start = time.time()
-        keywords = self.stage_analyze_voiceover(voiceover_path, num_keywords)
-        stage_duration = time.time() - stage_start
-        if self.run_logger:
-            self.run_logger.log_stage_complete("ANALYZE", stage_duration, {
-                "segments": len(self.voiceover_segments),
-                "keywords": len(keywords)
+        keywords = None
+        use_saved = False
+        
+        # Check if resuming from checkpoint
+        if self.resume_mode and self.checkpoint.should_skip_stage("ANALYZE"):
+            print(f"\n  ⏭ Skipping ANALYZE (completed in previous run)")
+            # Restore state from checkpoint
+            analyze_data = self.checkpoint.get_stage_data("ANALYZE")
+            keywords = analyze_data.get('keywords', [])
+            self.keywords = keywords
+            self.voiceover_segments = analyze_data.get('segments', [])
+            self.topic_context = analyze_data.get('topic_context', '')
+            self.extracted_entities = analyze_data.get('entities', [])
+            use_saved = True
+            
+        # Check if using saved keywords from command line
+        elif use_keywords:
+            preset = None
+            if use_keywords == 'latest':
+                preset = self.keyword_manager.get_latest()
+            else:
+                preset = self.keyword_manager.get_preset(use_keywords)
+            
+            if preset:
+                print(f"\n  📂 Using saved keywords: [{preset.name}]")
+                print(f"     Created: {preset.created_at[:19] if preset.created_at else 'unknown'}")
+                print(f"     Keywords: {len(preset.keywords)}")
+                print(f"     Topic: {preset.topic_context[:50]}..." if preset.topic_context else "")
+                
+                keywords = preset.keywords
+                self.keywords = keywords
+                self.topic_context = preset.topic_context
+                self.extracted_entities = preset.entities
+                
+                # Still need to parse voiceover segments
+                self.voiceover_segments = self._parse_srt(voiceover_path)
+                print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+                use_saved = True
+            else:
+                print(f"\n  ⚠ Saved keywords '{use_keywords}' not found, extracting new keywords...")
+        
+        # Check for saved keywords (interactive mode)
+        elif not self.config.enhanced.non_interactive and self.keyword_manager.has_presets():
+            print(format_keyword_prompt(self.keyword_manager))
+            while True:
+                try:
+                    choice = input("  Choice [U/L/N]: ").strip().upper()
+                    if choice == 'U':
+                        preset = self.keyword_manager.get_latest()
+                        if preset:
+                            print(f"\n  📂 Using saved keywords: [{preset.name}]")
+                            keywords = preset.keywords
+                            self.keywords = keywords
+                            self.topic_context = preset.topic_context
+                            self.extracted_entities = preset.entities
+                            self.voiceover_segments = self._parse_srt(voiceover_path)
+                            print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+                            use_saved = True
+                        break
+                    elif choice == 'L':
+                        # List all presets with selection
+                        presets = self.keyword_manager.list_presets()
+                        print(f"\n  Saved presets:")
+                        for i, p in enumerate(presets, 1):
+                            kw_preview = ", ".join(p.keywords[:2])
+                            if len(p.keywords) > 2:
+                                kw_preview += f"... (+{len(p.keywords)-2})"
+                            print(f"    {i}. [{p.name}] {len(p.keywords)} keywords: {kw_preview}")
+                        print(f"    0. Cancel (generate new)")
+                        
+                        try:
+                            idx = int(input("\n  Select preset [1-{}]: ".format(len(presets))).strip())
+                            if 1 <= idx <= len(presets):
+                                preset = presets[idx - 1]
+                                print(f"\n  📂 Using saved keywords: [{preset.name}]")
+                                keywords = preset.keywords
+                                self.keywords = keywords
+                                self.topic_context = preset.topic_context
+                                self.extracted_entities = preset.entities
+                                self.voiceover_segments = self._parse_srt(voiceover_path)
+                                print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+                                use_saved = True
+                        except (ValueError, IndexError):
+                            pass
+                        break
+                    elif choice == 'N':
+                        break
+                except (EOFError, KeyboardInterrupt):
+                    print("\n  Generating new keywords...")
+                    break
+        
+        # Extract keywords if not using saved
+        if keywords is None:
+            stage_start = time.time()
+            keywords = self.stage_analyze_voiceover(voiceover_path, num_keywords)
+            stage_duration = time.time() - stage_start
+            if self.run_logger:
+                self.run_logger.log_stage_complete("ANALYZE", stage_duration, {
+                    "segments": len(self.voiceover_segments),
+                    "keywords": len(keywords)
+                })
+                self.run_logger.set_stats(total_segments=len(self.voiceover_segments))
+            
+            # Save checkpoint
+            self.checkpoint.set_voiceover(voiceover_path)
+            self.checkpoint.save("ANALYZE", {
+                'keywords': keywords,
+                'segments': self.voiceover_segments,
+                'segment_count': len(self.voiceover_segments),
+                'topic_context': self.topic_context,
+                'entities': self.extracted_entities
             })
-            self.run_logger.set_stats(total_segments=len(self.voiceover_segments))
+            
+            # Save keywords if requested
+            if save_keywords:
+                preset_name = None if save_keywords == 'auto' else save_keywords
+                saved_name = self.keyword_manager.save_keywords(
+                    keywords=keywords,
+                    topic_context=self.topic_context,
+                    entities=self.extracted_entities,
+                    name=preset_name,
+                    voiceover_path=voiceover_path
+                )
+                print(f"  💾 Keywords saved as: [{saved_name}]")
+        
+        # Reinitialize keyword remixer if needed
+        if use_saved and self.topic_context and self.modules.get('keyword_remix'):
+            try:
+                from src.keyword_remix import KeywordRemixer
+                self.keyword_remixer = KeywordRemixer(
+                    topic_context=self.topic_context,
+                    original_keywords=keywords
+                )
+            except Exception as e:
+                logger.warning(f"Could not reinitialize KeywordRemixer: {e}")
         
         if not match_only:
             # Get all user preferences BEFORE starting the pipeline
@@ -1955,71 +2158,101 @@ Topic:"""
         if not match_only:
             # Stage 1.5: Entity image search (after keywords, before video download)
             if self.config.image_search.enabled and not self.config.pipeline.skip_image_search:
-                stage_start = time.time()
-                self.stage_image_search()
-                stage_duration = time.time() - stage_start
-                # EntityImageResult has .images attribute (list of paths)
-                entity_images = getattr(self, 'entity_images', {})
-                if entity_images:
-                    entity_img_count = sum(
-                        len(v.images) if hasattr(v, 'images') else (len(v) if isinstance(v, list) else 0)
-                        for v in entity_images.values()
-                    )
+                if self.resume_mode and self.checkpoint.should_skip_stage("ENTITY_IMAGES"):
+                    print(f"\n  ⏭ Skipping ENTITY_IMAGES (completed in previous run)")
                 else:
-                    entity_img_count = 0
-                if self.run_logger:
-                    self.run_logger.log_stage_complete("ENTITY_IMAGES", stage_duration, {
-                        "images": entity_img_count
+                    stage_start = time.time()
+                    self.stage_image_search()
+                    stage_duration = time.time() - stage_start
+                    # EntityImageResult has .images attribute (list of paths)
+                    entity_images = getattr(self, 'entity_images', {})
+                    if entity_images:
+                        entity_img_count = sum(
+                            len(v.images) if hasattr(v, 'images') else (len(v) if isinstance(v, list) else 0)
+                            for v in entity_images.values()
+                        )
+                    else:
+                        entity_img_count = 0
+                    if self.run_logger:
+                        self.run_logger.log_stage_complete("ENTITY_IMAGES", stage_duration, {
+                            "images": entity_img_count
+                        })
+                        self.run_logger.set_stats(entity_images_downloaded=entity_img_count)
+                    
+                    # Save checkpoint
+                    self.checkpoint.save("ENTITY_IMAGES", {
+                        'image_count': entity_img_count
                     })
-                    self.run_logger.set_stats(entity_images_downloaded=entity_img_count)
             elif self.config.pipeline.skip_image_search:
                 print(f"\n  ⏭ Skipping image search (config: skip_image_search=true)")
             
             # Stage 1.6: Stock video search (Pexels/Pixabay)
             if self.config.image_search.enabled and self.config.image_search.use_stock_apis and not self.config.pipeline.skip_image_search:
-                stage_start = time.time()
-                self.stage_stock_video()
-                stage_duration = time.time() - stage_start
-                # EntityVideoResult has .videos attribute (list of paths)
-                entity_videos = getattr(self, 'entity_videos', {})
-                if entity_videos:
-                    entity_vid_count = sum(
-                        len(v.videos) if hasattr(v, 'videos') else (len(v) if isinstance(v, list) else 0)
-                        for v in entity_videos.values()
-                    )
+                if self.resume_mode and self.checkpoint.should_skip_stage("ENTITY_VIDEOS"):
+                    print(f"\n  ⏭ Skipping ENTITY_VIDEOS (completed in previous run)")
                 else:
-                    entity_vid_count = 0
-                if self.run_logger:
-                    self.run_logger.log_stage_complete("ENTITY_VIDEOS", stage_duration, {
-                        "videos": entity_vid_count
+                    stage_start = time.time()
+                    self.stage_stock_video()
+                    stage_duration = time.time() - stage_start
+                    # EntityVideoResult has .videos attribute (list of paths)
+                    entity_videos = getattr(self, 'entity_videos', {})
+                    if entity_videos:
+                        entity_vid_count = sum(
+                            len(v.videos) if hasattr(v, 'videos') else (len(v) if isinstance(v, list) else 0)
+                            for v in entity_videos.values()
+                        )
+                    else:
+                        entity_vid_count = 0
+                    if self.run_logger:
+                        self.run_logger.log_stage_complete("ENTITY_VIDEOS", stage_duration, {
+                            "videos": entity_vid_count
+                        })
+                        self.run_logger.set_stats(entity_videos_downloaded=entity_vid_count)
+                    
+                    # Save checkpoint
+                    self.checkpoint.save("ENTITY_VIDEOS", {
+                        'video_count': entity_vid_count
                     })
-                    self.run_logger.set_stats(entity_videos_downloaded=entity_vid_count)
             
             # Stage 2: Download footage
             if not self.config.pipeline.skip_download:
-                stage_start = time.time()
-                self.stage_download(keywords)
-                stage_duration = time.time() - stage_start
-                
-                # Get download stats from downloader if available
-                dl_stats = {"downloaded": len(getattr(self, 'downloaded_videos', []))}
-                if hasattr(self, 'downloader') and self.downloader:
-                    dl_stats["skipped"] = getattr(self.downloader, 'skipped_count', 0)
-                    dl_stats["failed"] = len(getattr(self, 'failed_keywords', []))
-                
-                if self.run_logger:
-                    self.run_logger.log_stage_complete("DOWNLOAD", stage_duration, dl_stats)
-                    self.run_logger.set_stats(
-                        videos_downloaded=dl_stats.get("downloaded", 0),
-                        videos_skipped=dl_stats.get("skipped", 0),
-                        videos_failed=dl_stats.get("failed", 0)
-                    )
-                
-                # Stage 2c: Stock footage
-                self.stage_download_stock(keywords)
-                
-                # Remix zero-download keywords (generate alternative keywords)
-                keywords = self.stage_remix_zero_downloads(keywords)
+                if self.resume_mode and self.checkpoint.should_skip_stage("DOWNLOAD"):
+                    print(f"\n  ⏭ Skipping DOWNLOAD (completed in previous run)")
+                    # Load existing videos
+                    self._load_existing_videos()
+                else:
+                    stage_start = time.time()
+                    self.stage_download(keywords)
+                    stage_duration = time.time() - stage_start
+                    
+                    # Get download stats from downloader if available
+                    dl_stats = {"downloaded": len(getattr(self, 'downloaded_videos', []))}
+                    if hasattr(self, 'downloader') and self.downloader:
+                        dl_stats["skipped"] = getattr(self.downloader, 'skipped_count', 0)
+                        dl_stats["failed"] = len(getattr(self, 'failed_keywords', []))
+                    
+                    if self.run_logger:
+                        self.run_logger.log_stage_complete("DOWNLOAD", stage_duration, dl_stats)
+                        self.run_logger.set_stats(
+                            videos_downloaded=dl_stats.get("downloaded", 0),
+                            videos_skipped=dl_stats.get("skipped", 0),
+                            videos_failed=dl_stats.get("failed", 0)
+                        )
+                    
+                    # Stage 2c: Stock footage
+                    self.stage_download_stock(keywords)
+                    
+                    # Remix zero-download keywords (generate alternative keywords)
+                    keywords = self.stage_remix_zero_downloads(keywords)
+                    
+                    # Save checkpoint with video paths
+                    video_paths = [str(v.get('path', v)) if isinstance(v, dict) else str(v) 
+                                   for v in self.downloaded_videos]
+                    self.checkpoint.save("DOWNLOAD", {
+                        'video_paths': video_paths,
+                        'video_count': len(video_paths),
+                        'keywords': keywords
+                    })
             else:
                 print(f"\n  ⏭ Skipping downloads (config: skip_download=true)")
                 # Load existing videos from output directory
@@ -2027,15 +2260,34 @@ Topic:"""
             
             # Stage 2.5: Zero-download video remix (filter videos by keyword relevance)
             if self.config.remix.enabled:
-                stage_start = time.time()
-                self.stage_remix(keywords)
-                stage_duration = time.time() - stage_start
-                if self.run_logger:
-                    self.run_logger.log_stage_complete("REMIX", stage_duration, {
-                        "videos": len(getattr(self, 'remixed_video_paths', []))
+                if self.resume_mode and self.checkpoint.should_skip_stage("REMIX"):
+                    print(f"\n  ⏭ Skipping REMIX (completed in previous run)")
+                    # Load remixed videos from downloaded_videos dir
+                    self._load_existing_videos()
+                else:
+                    stage_start = time.time()
+                    self.stage_remix(keywords)
+                    stage_duration = time.time() - stage_start
+                    if self.run_logger:
+                        self.run_logger.log_stage_complete("REMIX", stage_duration, {
+                            "videos": len(getattr(self, 'remixed_video_paths', []))
+                        })
+                    
+                    # Save checkpoint
+                    self.checkpoint.save("REMIX", {
+                        'remixed_paths': [str(p) for p in getattr(self, 'remixed_video_paths', [])],
+                        'video_count': len(getattr(self, 'remixed_video_paths', []))
                     })
         
-        # Stage 3: Transcribe & index
+        # Stage 3: Transcribe & index (always run - uses cache internally)
+        # Note: Transcription has its own caching, so we don't skip it entirely
+        # but it will be very fast if videos are already cached
+        if self.resume_mode and self.checkpoint.should_skip_stage("TRANSCRIBE"):
+            print(f"\n  ⏭ Skipping TRANSCRIBE (completed in previous run)")
+            # Still need to load transcripts and build index
+            self._load_existing_videos()
+            # Transcription cache will handle this
+        
         stage_start = time.time()
         self.stage_transcribe()
         stage_duration = time.time() - stage_start
@@ -2050,6 +2302,12 @@ Topic:"""
                 videos_transcribed=transcribe_stats["transcribed"],
                 embeddings_computed=transcribe_stats["embeddings"]
             )
+        
+        # Save checkpoint after transcription
+        self.checkpoint.save("TRANSCRIBE", {
+            'transcribed_count': transcribe_stats["transcribed"],
+            'embedding_count': transcribe_stats["embeddings"]
+        })
         
         # Stage 4: Match
         stage_start = time.time()
@@ -2071,6 +2329,12 @@ Topic:"""
                 avg_confidence=sum(confidences)/len(confidences) if confidences else 0
             )
         
+        # Save checkpoint after matching
+        self.checkpoint.save("MATCH", {
+            'match_count': len(self.matches) if self.matches else 0,
+            'avg_confidence': sum(confidences)/len(confidences) if confidences else 0
+        })
+        
         # Stage 5: Output
         stage_start = time.time()
         outputs = self.stage_output()
@@ -2087,6 +2351,10 @@ Topic:"""
                         self.run_logger.log_file_generated(file_type, str(fp))
                 else:
                     self.run_logger.log_file_generated(file_type, str(file_path))
+        
+        # Mark output stage complete and clear checkpoint (pipeline finished successfully)
+        self.checkpoint.save("OUTPUT", {"files": len(outputs)})
+        self.checkpoint.clear()  # Pipeline completed successfully - no need to resume
         
         # Summary
         elapsed = time.time() - start_time
@@ -2345,9 +2613,21 @@ Examples:
     python main.py --voiceover script.srt
     python main.py --voiceover script.srt --keywords 30
     python main.py --project "E:\\Projects\\MyDoc" --voiceover voiceover.srt
-    python main.py --resume
-    python main.py --match-only
-    python main.py --config custom_config.yaml
+    
+    # Checkpoint & Resume
+    python main.py --resume                    # Resume interrupted run
+    python main.py --fresh                     # Force fresh start
+    
+    # Saved Keywords (reproducible runs)
+    python main.py --save-keywords             # Save keywords after extraction
+    python main.py --save-keywords mypreset    # Save with custom name
+    python main.py --use-keywords              # Use most recent saved keywords
+    python main.py --use-keywords mypreset     # Use specific preset
+    python main.py --list-keywords             # List all saved presets
+    
+    # Other options
+    python main.py --match-only                # Skip download, match existing
+    python main.py --config custom_config.yaml # Use custom config
         """
     )
     
@@ -2388,6 +2668,36 @@ Examples:
         '--resume',
         action='store_true',
         help='Resume interrupted pipeline run'
+    )
+    
+    parser.add_argument(
+        '--fresh',
+        action='store_true',
+        help='Force fresh start, ignore any existing checkpoint'
+    )
+    
+    parser.add_argument(
+        '--use-keywords',
+        type=str,
+        nargs='?',
+        const='latest',
+        metavar='PRESET',
+        help='Use saved keywords (specify preset name, or "latest" for most recent)'
+    )
+    
+    parser.add_argument(
+        '--save-keywords',
+        type=str,
+        nargs='?',
+        const='auto',
+        metavar='NAME',
+        help='Save extracted keywords as a preset (auto-generates name if not specified)'
+    )
+    
+    parser.add_argument(
+        '--list-keywords',
+        action='store_true',
+        help='List saved keyword presets and exit'
     )
     
     parser.add_argument(
@@ -2586,6 +2896,16 @@ def main():
     # Ensure directories exist
     ensure_dirs(config)
     
+    # Handle --list-keywords
+    if getattr(args, 'list_keywords', False):
+        keyword_manager = KeywordManager(PROJECT_DIR)
+        if keyword_manager.has_presets():
+            print("\n" + keyword_manager.get_summary())
+        else:
+            print("\n  No saved keyword presets found.")
+            print(f"  Use --save-keywords to save keywords after extraction.")
+        sys.exit(0)
+    
     # Check for voiceover file
     if not args.voiceover:
         args.voiceover = find_voiceover_interactive(PROJECT_DIR)
@@ -2606,7 +2926,11 @@ def main():
     pipeline.run(
         voiceover_path=str(vo_path),
         num_keywords=args.keywords,
-        match_only=args.match_only
+        match_only=args.match_only,
+        resume=args.resume,
+        fresh=getattr(args, 'fresh', False),
+        use_keywords=getattr(args, 'use_keywords', None),
+        save_keywords=getattr(args, 'save_keywords', None)
     )
 
 
