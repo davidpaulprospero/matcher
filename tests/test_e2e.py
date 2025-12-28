@@ -271,6 +271,7 @@ image_search:
   enabled: true
   images_per_entity: 1  # Just 1 image per entity
   videos_per_entity: 1  # Just 1 video per entity
+  max_entities: 2       # Only process 2 entities for testing
   max_search_time: 30   # Limit search time
 
 # Stock footage - minimal (API cost saving)
