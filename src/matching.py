@@ -44,7 +44,7 @@ class FaceDetector:
     _cache: Dict[str, float] = {}  # video_path -> face_score (0-1)
     _mediapipe_available = None
     _opencv_available = None
-    _detector = None
+    _mp_face_detection = None
     
     @classmethod
     def get_instance(cls):
@@ -61,29 +61,41 @@ class FaceDetector:
         if FaceDetector._mediapipe_available is None:
             try:
                 import mediapipe as mp
-                FaceDetector._mediapipe_available = True
-                FaceDetector._detector = mp.solutions.face_detection.FaceDetection(
-                    model_selection=0,  # 0 = short-range (within 2m), 1 = full-range
-                    min_detection_confidence=0.5
-                )
-                logger.debug("MediaPipe face detection available")
+                # Check if solutions attribute exists (some versions don't have it)
+                if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_detection'):
+                    FaceDetector._mp_face_detection = mp.solutions.face_detection.FaceDetection(
+                        model_selection=0,  # 0 = short-range (within 2m), 1 = full-range
+                        min_detection_confidence=0.5
+                    )
+                    FaceDetector._mediapipe_available = True
+                    logger.debug("MediaPipe face detection available")
+                else:
+                    FaceDetector._mediapipe_available = False
+                    logger.debug("MediaPipe installed but solutions.face_detection not available")
             except ImportError:
                 FaceDetector._mediapipe_available = False
                 logger.debug("MediaPipe not installed, trying OpenCV fallback")
+            except Exception as e:
+                FaceDetector._mediapipe_available = False
+                logger.debug(f"MediaPipe init failed: {e}, trying OpenCV fallback")
         
         # Check OpenCV fallback
-        if FaceDetector._opencv_available is None and not FaceDetector._mediapipe_available:
+        if FaceDetector._opencv_available is None:
             try:
                 import cv2
                 cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
                 if Path(cascade_path).exists():
                     FaceDetector._opencv_available = True
-                    logger.debug("OpenCV face detection available (fallback)")
+                    logger.debug("OpenCV face detection available")
                 else:
                     FaceDetector._opencv_available = False
+                    logger.debug("OpenCV cascade file not found")
             except ImportError:
                 FaceDetector._opencv_available = False
                 logger.debug("OpenCV not installed - face detection disabled")
+            except Exception as e:
+                FaceDetector._opencv_available = False
+                logger.debug(f"OpenCV init failed: {e}")
     
     def get_face_score(self, video_path: str, cache_dir: str = None) -> float:
         """
@@ -150,7 +162,6 @@ class FaceDetector:
         """
         try:
             import cv2
-            import mediapipe as mp
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -175,7 +186,7 @@ class FaceDetector:
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
                 # Detect faces
-                results = FaceDetector._detector.process(rgb_frame)
+                results = FaceDetector._mp_face_detection.process(rgb_frame)
                 
                 if results.detections and len(results.detections) > 0:
                     frames_with_faces += 1

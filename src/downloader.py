@@ -109,6 +109,23 @@ class VideoDownloader:
             logger.warning("No cookies.txt found - YouTube downloads may fail!")
             logger.warning("Export cookies from browser and save as cookies.txt in install directory")
     
+    def _get_tier_value(self, tier: str, key: str, default: int = 0) -> int:
+        """Get tier config value, handling both dict and dataclass formats"""
+        tier_config = self.DURATION_TIERS.get(tier, {})
+        
+        if isinstance(tier_config, dict):
+            return tier_config.get(key, default)
+        else:
+            # Dataclass format - try different attribute names
+            if key == 'min':
+                return getattr(tier_config, 'min_seconds', getattr(tier_config, 'min', default))
+            elif key == 'max':
+                return getattr(tier_config, 'max_seconds', getattr(tier_config, 'max', default))
+            elif key == 'per_keyword':
+                return getattr(tier_config, 'videos_per_keyword', getattr(tier_config, 'per_keyword', default))
+            else:
+                return getattr(tier_config, key, default)
+    
     def _find_cookies_file(self) -> Optional[Path]:
         """
         Find cookies.txt file for YouTube authentication.
@@ -355,9 +372,19 @@ class VideoDownloader:
     def _build_filter_string(self, tier: str) -> str:
         """Build filter string for duration and title blacklist"""
         tier_config = self.DURATION_TIERS[tier]
+        
+        # Handle both dict and dataclass formats
+        if isinstance(tier_config, dict):
+            min_dur = tier_config.get('min', 0)
+            max_dur = tier_config.get('max', 120)
+        else:
+            # Dataclass format (DurationTierConfig)
+            min_dur = getattr(tier_config, 'min_seconds', getattr(tier_config, 'min', 0))
+            max_dur = getattr(tier_config, 'max_seconds', getattr(tier_config, 'max', 120))
+        
         filters = [
-            f"duration>{tier_config['min']}",
-            f"duration<{tier_config['max']}"
+            f"duration>{min_dur}",
+            f"duration<{max_dur}"
         ]
         
         if self.download_config.min_views > 0:
@@ -385,7 +412,8 @@ class VideoDownloader:
         
         Returns list of dicts with: id, title, duration, channel, url
         """
-        tier_config = self.DURATION_TIERS[tier]
+        min_dur = self._get_tier_value(tier, 'min', 0)
+        max_dur = self._get_tier_value(tier, 'max', 120)
         
         cmd = [
             'yt-dlp',
@@ -393,7 +421,7 @@ class VideoDownloader:
             '--dump-json',  # Get metadata only, no download
             '--flat-playlist',  # Faster - don't extract full info
             '--no-download',
-            '--match-filter', f"duration>{tier_config['min']} & duration<{tier_config['max']}",
+            '--match-filter', f"duration>{min_dur} & duration<{max_dur}",
         ]
         
         if self._cookies_path:
@@ -651,8 +679,7 @@ Only output the JSON array, no other text."""
         topic: str = ""
     ) -> List[DownloadedVideo]:
         """Download videos for a single keyword and tier with optional LLM filtering"""
-        tier_config = self.DURATION_TIERS[tier]
-        max_downloads = tier_config['per_keyword']
+        max_downloads = self._get_tier_value(tier, 'per_keyword', 5)
         
         # Search a larger pool to find videos that match duration filters
         multiplier = getattr(self.download_config, 'search_pool_multiplier', 5)
@@ -927,6 +954,12 @@ Only output the JSON array, no other text."""
         all_downloaded = []
         
         for tier in tiers:
+            # Skip tiers with per_keyword=0
+            per_kw = self._get_tier_value(tier, 'per_keyword', 5)
+            if per_kw <= 0:
+                logger.info(f"  [{tier}] Skipped (0/kw)")
+                continue
+            
             # Check checkpoint - skip if already done
             if self.checkpoint:
                 video_key = f"{keyword}|{tier}"
@@ -1061,8 +1094,8 @@ Only output the JSON array, no other text."""
             'est_storage_gb': round(total_videos * avg_size_mb / 1024, 1),
             'est_time_minutes': round(total_videos * avg_download_time / 60, 0),
             'tiers': {
-                name: f"{config['min']}s-{config['max']}s ({config['per_keyword']}/kw)"
-                for name, config in self.DURATION_TIERS.items()
+                name: f"{self._get_tier_value(name, 'min', 0)}s-{self._get_tier_value(name, 'max', 120)}s ({self._get_tier_value(name, 'per_keyword', 5)}/kw)"
+                for name in self.DURATION_TIERS.keys()
             }
         }
     
