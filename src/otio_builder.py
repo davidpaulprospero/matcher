@@ -1928,7 +1928,14 @@ def generate_resolve_xml_with_bins(
                 add_file(str(img_path), 5.0)
     
     if entity_videos:
-        for entity, videos in entity_videos.items():
+        for entity, result in entity_videos.items():
+            # Handle both EntityVideoResult objects and plain lists
+            if hasattr(result, 'videos'):
+                videos = result.videos  # EntityVideoResult dataclass
+            elif isinstance(result, list):
+                videos = result
+            else:
+                continue
             for vid_path in videos:
                 add_file(str(vid_path), 30.0)
     
