@@ -32,6 +32,19 @@ Usage:
 
 import os
 import sys
+
+# Fix Windows console encoding for Unicode characters
+if sys.platform == 'win32':
+    try:
+        # Try to set UTF-8 mode
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        # Fallback: replace stdout/stderr with UTF-8 writers
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import json
 import argparse
 import logging
@@ -150,9 +163,11 @@ def make_paths_project_relative(config: Config, project_dir: Path) -> Config:
     if config.output.output_dir and not Path(config.output.output_dir).is_absolute():
         config.otio_output_dir = str(project_dir / config.output.output_dir)
     
-    # Update cache dir
+    # Update cache dir (both nested and top-level for compatibility)
     if config.cache.cache_dir and not Path(config.cache.cache_dir).is_absolute():
         config.cache.cache_dir = str(project_dir / config.cache.cache_dir)
+    # Also sync top-level cache_dir with nested cache.cache_dir
+    config.cache_dir = config.cache.cache_dir
     
     # Update log dir
     if config.logging.log_dir and not Path(config.logging.log_dir).is_absolute():
@@ -1093,14 +1108,13 @@ Topic:"""
             # Initialize downloader with config
             self.downloader = VideoDownloader(config=config)
             
-            # Get duration tier settings from config
-            tiers = config.duration_tiers
-            
+            # Get duration tier settings from downloader (reflects merged config)
             print(f"  Duration tiers:")
-            print(f"    • short:  {tiers.short.min_seconds}-{tiers.short.max_seconds}s ({tiers.short.videos_per_keyword}/kw)")
-            print(f"    • medium: {tiers.medium.min_seconds}-{tiers.medium.max_seconds}s ({tiers.medium.videos_per_keyword}/kw)")
-            print(f"    • long:   {tiers.long.min_seconds}-{tiers.long.max_seconds}s ({tiers.long.videos_per_keyword}/kw)")
-            print(f"    • longer: {tiers.longer.min_seconds}-{tiers.longer.max_seconds}s ({tiers.longer.videos_per_keyword}/kw)")
+            for tier_name in ['short', 'medium', 'long', 'longer']:
+                min_s = self.downloader._get_tier_value(tier_name, 'min', 0)
+                max_s = self.downloader._get_tier_value(tier_name, 'max', 120)
+                per_kw = self.downloader._get_tier_value(tier_name, 'per_keyword', 5)
+                print(f"    • {tier_name}: {min_s}-{max_s}s ({per_kw}/kw)")
             
             # Download using download_all() method
             output_dir = Path(config.downloaded_videos_dir)
@@ -2031,6 +2045,7 @@ Topic:"""
         stage_duration = time.time() - stage_start
         
         match_stats = {}
+        confidences = []  # Initialize before use
         if self.matches:
             confidences = [m.primary_match.confidence for m in self.matches if m and m.primary_match]
             match_stats = {
@@ -2094,10 +2109,18 @@ Topic:"""
             print(f"  • Keywords: {len(keywords)}")
             print(f"  • Topic: {self.topic_context}")
             print(f"  • Face preference: {self.face_preference}")
+            print(f"  • Video filtering: filtered (auto)")
             print(f"  • Using default settings (no prompts)")
             
             # Use defaults
             self.enhanced_enabled = config.enhanced.remix_enabled
+            
+            # Set default video filtering to 'filtered' (skip prompt)
+            config.remix.auto_accept_filter = "filtered"
+            
+            # Disable interactive curation in remix
+            config.remix.interactive_curation = False
+            
             if self.enhanced_enabled and self.modules.get('keyword_remix'):
                 try:
                     from src.keyword_remix import KeywordRemixer
@@ -2361,6 +2384,12 @@ Examples:
         help='Validate config file and exit'
     )
     
+    parser.add_argument(
+        '--non-interactive',
+        action='store_true',
+        help='Run in non-interactive mode (skip all prompts, use defaults)'
+    )
+    
     return parser.parse_args()
 
 
@@ -2517,6 +2546,10 @@ def main():
     
     _config = config
     set_config(config)
+    
+    # Apply --non-interactive flag
+    if hasattr(args, 'non_interactive') and args.non_interactive:
+        config.enhanced.non_interactive = True
     
     # Setup logging
     logger = setup_logging(config)
