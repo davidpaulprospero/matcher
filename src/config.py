@@ -511,6 +511,10 @@ class EnhancedFeaturesConfig:
     confirm_before_download: bool = True
     prompt_enhanced_features: bool = True
     non_interactive: bool = False  # Skip ALL prompts, use defaults
+    
+    # Face preference for matching
+    # Options: "neutral" (no preference), "more" (prefer faces), "none" (avoid faces)
+    face_preference: str = "neutral"
 
 
 @dataclass

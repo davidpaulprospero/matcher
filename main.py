@@ -383,6 +383,8 @@ class Pipeline:
         self.enhanced_enabled = config.enhanced.enabled
         self.second_style = None
         self.failed_keywords = []
+        # Use config face_preference (for non-interactive mode)
+        self.face_preference = getattr(config.enhanced, 'face_preference', 'neutral')
         
         # Performance tracking
         self.stage_timings = {}
@@ -1576,7 +1578,49 @@ Topic:"""
                 self.embedding_index = build_embedding_index(self.embeddings, config=config)
                 print(f"  ✓ Built embedding index ({len(self.embeddings)} vectors)")
         
+        # Pre-detect faces if face preference is set (caches results for matching stage)
+        face_pref = getattr(self, 'face_preference', 'neutral')
+        if face_pref != 'neutral':
+            self._predetect_faces(video_files)
+        
         return self.transcripts
+    
+    def _predetect_faces(self, video_files: List[Path]):
+        """Pre-detect faces in videos and cache results for matching stage."""
+        try:
+            from src.matching import FaceDetector
+            
+            detector = FaceDetector.get_instance()
+            cache_dir = self.config.cache.cache_dir
+            
+            # Check how many need detection
+            uncached = []
+            for vf in video_files:
+                video_path = str(vf)
+                if video_path not in FaceDetector._cache:
+                    uncached.append(vf)
+            
+            if not uncached:
+                print(f"  ✓ Face detection: all {len(video_files)} videos cached")
+                return
+            
+            print(f"  Detecting faces in {len(uncached)} videos...")
+            
+            faces_found = 0
+            for i, vf in enumerate(uncached):
+                video_path = str(vf)
+                score = detector.get_face_score(video_path, cache_dir)
+                if score > 0.2:  # At least 1 frame with faces
+                    faces_found += 1
+                
+                # Progress every 10 videos
+                if (i + 1) % 10 == 0:
+                    print(f"    Processed {i + 1}/{len(uncached)}...", end='\r')
+            
+            print(f"  ✓ Face detection: {faces_found}/{len(uncached)} videos have faces")
+            
+        except Exception as e:
+            logger.warning(f"Face pre-detection failed: {e}")
     
     def stage_match(self) -> List[dict]:
         """
@@ -1677,7 +1721,8 @@ Topic:"""
                 scenes=getattr(self, 'scenes', None),
                 config=config,
                 cache=cache,
-                embedding_index=self.embedding_index
+                embedding_index=self.embedding_index,
+                face_preference=getattr(self, 'face_preference', 'neutral')
             )
             
             # Calculate confidence stats
@@ -1863,7 +1908,15 @@ Topic:"""
         # =====================================================================
         
         # Stage 1: Analyze voiceover (extracts keywords + detects topic)
+        stage_start = time.time()
         keywords = self.stage_analyze_voiceover(voiceover_path, num_keywords)
+        stage_duration = time.time() - stage_start
+        if self.run_logger:
+            self.run_logger.log_stage_complete("ANALYZE", stage_duration, {
+                "segments": len(self.voiceover_segments),
+                "keywords": len(keywords)
+            })
+            self.run_logger.set_stats(total_segments=len(self.voiceover_segments))
         
         if not match_only:
             # Get all user preferences BEFORE starting the pipeline
@@ -1876,17 +1929,65 @@ Topic:"""
         if not match_only:
             # Stage 1.5: Entity image search (after keywords, before video download)
             if self.config.image_search.enabled and not self.config.pipeline.skip_image_search:
+                stage_start = time.time()
                 self.stage_image_search()
+                stage_duration = time.time() - stage_start
+                # EntityImageResult has .images attribute (list of paths)
+                entity_images = getattr(self, 'entity_images', {})
+                if entity_images:
+                    entity_img_count = sum(
+                        len(v.images) if hasattr(v, 'images') else (len(v) if isinstance(v, list) else 0)
+                        for v in entity_images.values()
+                    )
+                else:
+                    entity_img_count = 0
+                if self.run_logger:
+                    self.run_logger.log_stage_complete("ENTITY_IMAGES", stage_duration, {
+                        "images": entity_img_count
+                    })
+                    self.run_logger.set_stats(entity_images_downloaded=entity_img_count)
             elif self.config.pipeline.skip_image_search:
                 print(f"\n  ⏭ Skipping image search (config: skip_image_search=true)")
             
             # Stage 1.6: Stock video search (Pexels/Pixabay)
             if self.config.image_search.enabled and self.config.image_search.use_stock_apis and not self.config.pipeline.skip_image_search:
+                stage_start = time.time()
                 self.stage_stock_video()
+                stage_duration = time.time() - stage_start
+                # EntityVideoResult has .videos attribute (list of paths)
+                entity_videos = getattr(self, 'entity_videos', {})
+                if entity_videos:
+                    entity_vid_count = sum(
+                        len(v.videos) if hasattr(v, 'videos') else (len(v) if isinstance(v, list) else 0)
+                        for v in entity_videos.values()
+                    )
+                else:
+                    entity_vid_count = 0
+                if self.run_logger:
+                    self.run_logger.log_stage_complete("ENTITY_VIDEOS", stage_duration, {
+                        "videos": entity_vid_count
+                    })
+                    self.run_logger.set_stats(entity_videos_downloaded=entity_vid_count)
             
             # Stage 2: Download footage
             if not self.config.pipeline.skip_download:
+                stage_start = time.time()
                 self.stage_download(keywords)
+                stage_duration = time.time() - stage_start
+                
+                # Get download stats from downloader if available
+                dl_stats = {"downloaded": len(getattr(self, 'downloaded_videos', []))}
+                if hasattr(self, 'downloader') and self.downloader:
+                    dl_stats["skipped"] = getattr(self.downloader, 'skipped_count', 0)
+                    dl_stats["failed"] = len(getattr(self, 'failed_keywords', []))
+                
+                if self.run_logger:
+                    self.run_logger.log_stage_complete("DOWNLOAD", stage_duration, dl_stats)
+                    self.run_logger.set_stats(
+                        videos_downloaded=dl_stats.get("downloaded", 0),
+                        videos_skipped=dl_stats.get("skipped", 0),
+                        videos_failed=dl_stats.get("failed", 0)
+                    )
                 
                 # Stage 2c: Stock footage
                 self.stage_download_stock(keywords)
@@ -1900,16 +2001,65 @@ Topic:"""
             
             # Stage 2.5: Zero-download video remix (filter videos by keyword relevance)
             if self.config.remix.enabled:
+                stage_start = time.time()
                 self.stage_remix(keywords)
+                stage_duration = time.time() - stage_start
+                if self.run_logger:
+                    self.run_logger.log_stage_complete("REMIX", stage_duration, {
+                        "videos": len(getattr(self, 'remixed_video_paths', []))
+                    })
         
         # Stage 3: Transcribe & index
+        stage_start = time.time()
         self.stage_transcribe()
+        stage_duration = time.time() - stage_start
+        
+        transcribe_stats = {
+            "transcribed": len(getattr(self, 'transcripts', {})),
+            "embeddings": len(getattr(self, 'embeddings', [])) if hasattr(self, 'embeddings') and self.embeddings is not None else 0
+        }
+        if self.run_logger:
+            self.run_logger.log_stage_complete("TRANSCRIBE", stage_duration, transcribe_stats)
+            self.run_logger.set_stats(
+                videos_transcribed=transcribe_stats["transcribed"],
+                embeddings_computed=transcribe_stats["embeddings"]
+            )
         
         # Stage 4: Match
+        stage_start = time.time()
         self.stage_match()
+        stage_duration = time.time() - stage_start
+        
+        match_stats = {}
+        if self.matches:
+            confidences = [m.primary_match.confidence for m in self.matches if m and m.primary_match]
+            match_stats = {
+                "matched": len(self.matches),
+                "avg_conf": f"{sum(confidences)/len(confidences)*100:.0f}%" if confidences else "0%"
+            }
+        if self.run_logger:
+            self.run_logger.log_stage_complete("MATCH", stage_duration, match_stats)
+            self.run_logger.set_stats(
+                total_matches=len(self.matches) if self.matches else 0,
+                avg_confidence=sum(confidences)/len(confidences) if confidences else 0
+            )
         
         # Stage 5: Output
+        stage_start = time.time()
         outputs = self.stage_output()
+        stage_duration = time.time() - stage_start
+        
+        if self.run_logger:
+            self.run_logger.log_stage_complete("OUTPUT", stage_duration, {
+                "files": len(outputs)
+            })
+            # Log each output file
+            for file_type, file_path in outputs.items():
+                if isinstance(file_path, list):
+                    for fp in file_path:
+                        self.run_logger.log_file_generated(file_type, str(fp))
+                else:
+                    self.run_logger.log_file_generated(file_type, str(file_path))
         
         # Summary
         elapsed = time.time() - start_time
@@ -1943,6 +2093,7 @@ Topic:"""
             print(f"\n  ─── Non-Interactive Mode ───")
             print(f"  • Keywords: {len(keywords)}")
             print(f"  • Topic: {self.topic_context}")
+            print(f"  • Face preference: {self.face_preference}")
             print(f"  • Using default settings (no prompts)")
             
             # Use defaults
@@ -2101,6 +2252,27 @@ Topic:"""
                 print(f"  ✓ Will use filtered videos (min score: {config.remix.min_relevance_score})")
         
         # ─────────────────────────────────────────────────────────────────────
+        # 4.5 FACE PREFERENCE
+        # ─────────────────────────────────────────────────────────────────────
+        print(f"\n  ─── Face Preference ───")
+        print(f"  Control whether matched clips should contain faces:")
+        print(f"    [M] MORE faces - prefer clips with people/faces")
+        print(f"    [N] NO faces - prefer clips without people (b-roll, scenery)")
+        print(f"    [X] No preference - don't filter by faces")
+        
+        face_choice = self._get_user_input("  Select [M/N/X]", default="X").strip().upper()
+        
+        if face_choice == 'M':
+            self.face_preference = "more"
+            print(f"  ✓ Will prefer clips with faces")
+        elif face_choice == 'N':
+            self.face_preference = "none"
+            print(f"  ✓ Will prefer clips without faces")
+        else:
+            self.face_preference = "neutral"
+            print(f"  ✓ No face preference")
+        
+        # ─────────────────────────────────────────────────────────────────────
         # 5. FINAL CONFIRMATION
         # ─────────────────────────────────────────────────────────────────────
         entity_count = len(self.extracted_entities) if hasattr(self, 'extracted_entities') else 0
@@ -2111,6 +2283,7 @@ Topic:"""
         print(f"  • Confidence enforcement: {'Yes' if self.enhanced_enabled else 'No'}")
         print(f"  • Zero-download remix: {'Yes' if config.zero_download_remix.enabled else 'No'}")
         print(f"  • Video filtering: {config.remix.auto_accept_filter.upper() if config.remix.enabled else 'Disabled'}")
+        print(f"  • Face preference: {self.face_preference.upper()}")
         if self.second_style:
             print(f"  • Multi-style output: {self.second_style.name}")
         

@@ -6,6 +6,7 @@ Advanced matching module with:
 - LLM response caching
 - Local LLM support
 - Smart reuse prevention
+- Face detection preference
 """
 
 import logging
@@ -25,6 +26,271 @@ from .embeddings import find_top_k_similar, cosine_similarity
 from .keyword_extractor import find_keyword_matches
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# FACE DETECTION
+# =============================================================================
+
+class FaceDetector:
+    """
+    Detect faces in video files using MediaPipe (preferred) or OpenCV (fallback).
+    Caches results per video file for performance.
+    
+    MediaPipe is faster and more accurate than OpenCV Haar cascades.
+    """
+    
+    _instance = None
+    _cache: Dict[str, float] = {}  # video_path -> face_score (0-1)
+    _mediapipe_available = None
+    _opencv_available = None
+    _detector = None
+    
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def __init__(self):
+        self._check_backends()
+    
+    def _check_backends(self):
+        """Check available face detection backends (MediaPipe preferred)"""
+        # Check MediaPipe first (preferred)
+        if FaceDetector._mediapipe_available is None:
+            try:
+                import mediapipe as mp
+                FaceDetector._mediapipe_available = True
+                FaceDetector._detector = mp.solutions.face_detection.FaceDetection(
+                    model_selection=0,  # 0 = short-range (within 2m), 1 = full-range
+                    min_detection_confidence=0.5
+                )
+                logger.debug("MediaPipe face detection available")
+            except ImportError:
+                FaceDetector._mediapipe_available = False
+                logger.debug("MediaPipe not installed, trying OpenCV fallback")
+        
+        # Check OpenCV fallback
+        if FaceDetector._opencv_available is None and not FaceDetector._mediapipe_available:
+            try:
+                import cv2
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                if Path(cascade_path).exists():
+                    FaceDetector._opencv_available = True
+                    logger.debug("OpenCV face detection available (fallback)")
+                else:
+                    FaceDetector._opencv_available = False
+            except ImportError:
+                FaceDetector._opencv_available = False
+                logger.debug("OpenCV not installed - face detection disabled")
+    
+    def get_face_score(self, video_path: str, cache_dir: str = None) -> float:
+        """
+        Get face score for a video (0 = no faces, 1 = many faces).
+        Uses cached result if available.
+        
+        Args:
+            video_path: Path to video file
+            cache_dir: Directory to store/load face cache
+            
+        Returns:
+            Face score from 0.0 (no faces) to 1.0 (many faces)
+        """
+        if not FaceDetector._mediapipe_available and not FaceDetector._opencv_available:
+            return 0.5  # Neutral if no backend available
+        
+        # Check memory cache
+        if video_path in FaceDetector._cache:
+            return FaceDetector._cache[video_path]
+        
+        # Check disk cache
+        if cache_dir:
+            cache_path = Path(cache_dir) / '.face_cache.json'
+            if cache_path.exists():
+                try:
+                    with open(cache_path, 'r') as f:
+                        disk_cache = json.load(f)
+                    if video_path in disk_cache:
+                        score = disk_cache[video_path]
+                        FaceDetector._cache[video_path] = score
+                        return score
+                except:
+                    pass
+        
+        # Compute face score
+        if FaceDetector._mediapipe_available:
+            score = self._detect_faces_mediapipe(video_path)
+        else:
+            score = self._detect_faces_opencv(video_path)
+        
+        FaceDetector._cache[video_path] = score
+        
+        # Save to disk cache
+        if cache_dir:
+            try:
+                cache_path = Path(cache_dir) / '.face_cache.json'
+                disk_cache = {}
+                if cache_path.exists():
+                    with open(cache_path, 'r') as f:
+                        disk_cache = json.load(f)
+                disk_cache[video_path] = score
+                with open(cache_path, 'w') as f:
+                    json.dump(disk_cache, f)
+            except:
+                pass
+        
+        return score
+    
+    def _detect_faces_mediapipe(self, video_path: str, sample_frames: int = 5) -> float:
+        """
+        Detect faces using MediaPipe (faster and more accurate).
+        
+        Returns score from 0.0 (no faces) to 1.0 (faces in all sampled frames).
+        """
+        try:
+            import cv2
+            import mediapipe as mp
+            
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return 0.5
+            
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames <= 0:
+                cap.release()
+                return 0.5
+            
+            # Sample frames evenly throughout video
+            frames_with_faces = 0
+            sample_positions = [int(total_frames * i / (sample_frames + 1)) for i in range(1, sample_frames + 1)]
+            
+            for pos in sample_positions:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                
+                # Convert BGR to RGB for MediaPipe
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Detect faces
+                results = FaceDetector._detector.process(rgb_frame)
+                
+                if results.detections and len(results.detections) > 0:
+                    frames_with_faces += 1
+            
+            cap.release()
+            
+            # Return ratio of frames with faces
+            return frames_with_faces / sample_frames
+            
+        except Exception as e:
+            logger.debug(f"MediaPipe face detection error for {video_path}: {e}")
+            return 0.5  # Neutral on error
+    
+    def _detect_faces_opencv(self, video_path: str, sample_frames: int = 5) -> float:
+        """
+        Detect faces using OpenCV Haar cascades (fallback).
+        
+        Returns score from 0.0 (no faces) to 1.0 (faces in all sampled frames).
+        """
+        try:
+            import cv2
+            
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return 0.5
+            
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames <= 0:
+                cap.release()
+                return 0.5
+            
+            # Load face cascade
+            cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            )
+            
+            # Sample frames evenly throughout video
+            frames_with_faces = 0
+            sample_positions = [int(total_frames * i / (sample_frames + 1)) for i in range(1, sample_frames + 1)]
+            
+            for pos in sample_positions:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                
+                # Convert to grayscale for detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                
+                # Detect faces
+                faces = cascade.detectMultiScale(
+                    gray,
+                    scaleFactor=1.1,
+                    minNeighbors=5,
+                    minSize=(30, 30)
+                )
+                
+                if len(faces) > 0:
+                    frames_with_faces += 1
+            
+            cap.release()
+            
+            # Return ratio of frames with faces
+            return frames_with_faces / sample_frames
+            
+        except Exception as e:
+            logger.debug(f"OpenCV face detection error for {video_path}: {e}")
+            return 0.5  # Neutral on error
+
+
+def apply_face_preference(
+    candidates: List[Tuple[SRTSegment, float]],
+    face_preference: str,
+    cache_dir: str = None
+) -> List[Tuple[SRTSegment, float]]:
+    """
+    Adjust candidate scores based on face preference.
+    
+    Args:
+        candidates: List of (segment, score) tuples
+        face_preference: "more", "none", or "neutral"
+        cache_dir: Cache directory for face detection results
+        
+    Returns:
+        Adjusted candidates with modified scores
+    """
+    if face_preference == "neutral":
+        return candidates
+    
+    detector = FaceDetector.get_instance()
+    
+    adjusted = []
+    for seg, score in candidates:
+        video_path = seg.source_file
+        face_score = detector.get_face_score(video_path, cache_dir)
+        
+        # Apply adjustment based on preference
+        if face_preference == "more":
+            # Boost videos with faces (face_score: 0-1)
+            # More faces = higher boost (up to +0.1)
+            adjustment = face_score * 0.1
+        elif face_preference == "none":
+            # Penalize videos with faces
+            # More faces = bigger penalty (up to -0.15)
+            adjustment = -face_score * 0.15
+        else:
+            adjustment = 0
+        
+        adjusted_score = min(1.0, max(0.0, score + adjustment))
+        adjusted.append((seg, adjusted_score))
+    
+    # Re-sort by adjusted score
+    adjusted.sort(key=lambda x: x[1], reverse=True)
+    
+    return adjusted
 
 
 # =============================================================================
@@ -608,6 +874,12 @@ class TieredMatcher:
         Returns MatchResult with primary match and alternatives.
         """
         mc = self.config.matching
+        
+        # Apply face preference if set
+        face_pref = getattr(self, 'face_preference', 'neutral')
+        if face_pref != 'neutral':
+            cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
+            candidates = apply_face_preference(candidates, face_pref, cache_dir)
         
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
@@ -1658,7 +1930,8 @@ def match_all_segments(
     scenes: Optional[Dict[str, List[SceneInfo]]],
     config: Config,
     cache: CacheManager,
-    embedding_index: Optional[Any] = None
+    embedding_index: Optional[Any] = None,
+    face_preference: str = "neutral"
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -1668,11 +1941,17 @@ def match_all_segments(
     Two-stage matching optimization:
     - Stage 1: Retrieve more candidates from embeddings (embedding_candidates)
     - Stage 2: Send only top candidates to LLM for reranking (llm_rerank_candidates)
+    
+    Args:
+        face_preference: "more" (prefer faces), "none" (avoid faces), or "neutral"
     """
     # EmbeddingIndex import removed - not needed
     
     matcher = TieredMatcher(config, cache)
     strategy_matcher = StrategyMatcher(config, scenes)
+    
+    # Store face preference for use during matching
+    matcher.face_preference = face_preference
     
     mc = config.matching
     oc = config.output
@@ -1682,6 +1961,9 @@ def match_all_segments(
     logger.info(f"  Reuse prevention: max_reuse={mc.max_clip_reuse}, penalty={mc.reuse_penalty}")
     if mc.max_clip_reuse == 1:
         logger.info(f"  Mode: Each clip can only be used ONCE")
+    
+    if face_preference != "neutral":
+        logger.info(f"  Face preference: {face_preference}")
     
     if mc.duration_scoring_enabled:
         logger.info(f"  Duration scoring: ideal={mc.ideal_speed_range}, soft={mc.soft_penalty_range}")
