@@ -454,6 +454,10 @@ enhanced:
   confirm_before_download: true
   prompt_enhanced_features: true
   non_interactive: false  # Set to true for fully automated runs (no prompts)
+  
+  # Face preference for matching
+  # Options: "neutral" (no preference), "more" (prefer faces), "none" (avoid faces)
+  face_preference: "neutral"
 
 # -----------------------------------------------------------------------------
 # DOWNLOADING (yt-dlp)

@@ -220,6 +220,85 @@ python main.py --project "$PROJECT_DIR" "$@"
     return sh_path
 
 
+def create_convert_bat(project_dir: Path) -> Path:
+    """
+    Create convert.bat for converting HEVC/CapCut videos to DaVinci-compatible ProRes.
+    
+    Drag-drop any video file onto this batch file to convert it to ProRes 4444.
+    Useful for CapCut exports that use HEVC codec which DaVinci may not handle well.
+    """
+    bat_content = '''@echo off
+REM ============================================================
+REM Video Converter for DaVinci Resolve
+REM Converts HEVC/H.265 videos to ProRes 4444 (DaVinci compatible)
+REM Usage: Drag and drop a video file onto this script
+REM ============================================================
+
+:: Check if a file was dragged onto the script
+if "%~1"=="" (
+    echo.
+    echo   ============================================================
+    echo   VIDEO CONVERTER FOR DAVINCI RESOLVE
+    echo   ============================================================
+    echo.
+    echo   Usage: Drag a video file onto this script to convert it
+    echo          to ProRes 4444 format compatible with DaVinci Resolve.
+    echo.
+    echo   This is useful for:
+    echo     - CapCut exports (HEVC/H.265)
+    echo     - iPhone recordings
+    echo     - Any video that shows artifacts in DaVinci
+    echo.
+    pause
+    exit /b
+)
+
+:: Set output name
+set "input_file=%~1"
+set "output_file=%~dpn1_DAVINCI.mov"
+
+echo.
+echo   ============================================================
+echo   VIDEO CONVERTER
+echo   ============================================================
+echo.
+echo   Input:  "%~nx1"
+echo   Output: "%~n1_DAVINCI.mov"
+echo.
+echo   Converting to ProRes 4444...
+echo.
+
+:: Run FFmpeg
+ffmpeg -i "%input_file%" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le -c:a pcm_s16le -q:v 4 -y "%output_file%"
+
+if %errorlevel% equ 0 (
+    echo.
+    echo   ============================================================
+    echo   SUCCESS
+    echo   ============================================================
+    echo.
+    echo   Converted file saved as:
+    echo   %output_file%
+    echo.
+) else (
+    echo.
+    echo   ============================================================
+    echo   ERROR
+    echo   ============================================================
+    echo.
+    echo   Conversion failed. Make sure FFmpeg is installed and in PATH.
+    echo   Download FFmpeg from: https://ffmpeg.org/download.html
+    echo.
+)
+
+pause
+'''
+    
+    bat_path = project_dir / "convert.bat"
+    bat_path.write_text(bat_content)
+    return bat_path
+
+
 def create_project_config(project_dir: Path) -> Path:
     """Create project-specific config with common overrides commented out"""
     config_content = '''# Project-Specific Configuration Overrides
@@ -324,6 +403,11 @@ def setup_project(project_path: str, install_dir: Path = None) -> dict:
         bat_path = create_run_bat(project_dir, install_dir)
         print(f"  + run.bat")
         result['run_script'] = str(bat_path)
+        
+        # Create convert.bat for HEVC->ProRes conversion
+        convert_path = create_convert_bat(project_dir)
+        print(f"  + convert.bat")
+        result['convert_script'] = str(convert_path)
     else:
         sh_path = create_run_sh(project_dir, install_dir)
         print(f"  + run.sh")

@@ -147,6 +147,29 @@ class RunLog:
     total_api_calls: int = 0
     total_api_cost_est_usd: float = 0.0
     
+    # Download stats
+    videos_downloaded: int = 0
+    videos_skipped: int = 0  # Already existed
+    videos_failed: int = 0
+    
+    # Transcription stats
+    videos_transcribed: int = 0
+    transcription_cache_hits: int = 0
+    
+    # Embedding stats
+    embeddings_computed: int = 0
+    embedding_cache_hits: int = 0
+    
+    # Entity media stats
+    entity_images_downloaded: int = 0
+    entity_videos_downloaded: int = 0
+    
+    # Stage timings (stage_name -> seconds)
+    stage_timings: Dict[str, float] = field(default_factory=dict)
+    
+    # Files generated
+    files_generated: Dict[str, str] = field(default_factory=dict)  # type -> path
+    
     # Detailed logs
     performance: List[PerformanceLog] = field(default_factory=list)
     api_calls: List[APICallLog] = field(default_factory=list)
@@ -169,7 +192,18 @@ class RunLog:
                 'avg_confidence': self.avg_confidence,
                 'total_api_calls': self.total_api_calls,
                 'total_api_cost_est_usd': self.total_api_cost_est_usd,
+                'videos_downloaded': self.videos_downloaded,
+                'videos_skipped': self.videos_skipped,
+                'videos_failed': self.videos_failed,
+                'videos_transcribed': self.videos_transcribed,
+                'transcription_cache_hits': self.transcription_cache_hits,
+                'embeddings_computed': self.embeddings_computed,
+                'embedding_cache_hits': self.embedding_cache_hits,
+                'entity_images_downloaded': self.entity_images_downloaded,
+                'entity_videos_downloaded': self.entity_videos_downloaded,
             },
+            'stage_timings': self.stage_timings,
+            'files_generated': self.files_generated,
             'performance': [asdict(p) for p in self.performance],
             'api_calls': [c.to_dict() for c in self.api_calls],
             'match_decisions': [m.to_dict() for m in self.match_decisions],
@@ -503,31 +537,247 @@ class RunLogger:
         )
         self.run_log.warnings.append(f"Config reloaded: {old_hash} → {new_hash}")
     
+    def log_stage_complete(self, stage_name: str, duration_seconds: float, stats: Dict[str, Any] = None):
+        """Log stage completion with timing and stats"""
+        with self._lock:
+            self.run_log.stage_timings[stage_name] = duration_seconds
+            
+            # Build stats string
+            stats_str = ""
+            if stats:
+                stats_parts = [f"{k}={v}" for k, v in stats.items()]
+                stats_str = f" | {' | '.join(stats_parts)}"
+            
+            self.file_logger.info(f"✓ {stage_name} [{duration_seconds:.1f}s]{stats_str}")
+    
+    def update_stats(self, **kwargs):
+        """Update run statistics"""
+        with self._lock:
+            for key, value in kwargs.items():
+                if hasattr(self.run_log, key):
+                    if isinstance(value, int) and key.endswith('_hits') or key.startswith('videos_') or key.startswith('entity_') or key.startswith('embedding'):
+                        # Increment counters
+                        current = getattr(self.run_log, key)
+                        setattr(self.run_log, key, current + value)
+                    else:
+                        setattr(self.run_log, key, value)
+    
+    def set_stats(self, **kwargs):
+        """Set run statistics directly (not increment)"""
+        with self._lock:
+            for key, value in kwargs.items():
+                if hasattr(self.run_log, key):
+                    setattr(self.run_log, key, value)
+    
+    def log_file_generated(self, file_type: str, file_path: str):
+        """Log a generated file"""
+        with self._lock:
+            self.run_log.files_generated[file_type] = file_path
+            self.run_log.output_files.append(file_path)
+    
     def finalize(self):
-        """Finalize logging and save JSON"""
+        """Finalize logging, save JSON, and generate summary files"""
         self.run_log.end_time = datetime.now().isoformat()
         
-        # Calculate summary stats
+        # Calculate summary stats from match decisions if available
         if self.run_log.match_decisions:
             confidences = [m.confidence for m in self.run_log.match_decisions]
             self.run_log.avg_confidence = sum(confidences) / len(confidences)
+            if self.run_log.total_matches == 0:
+                self.run_log.total_matches = len(self.run_log.match_decisions)
         
-        # Summary log
-        self.file_logger.info("=" * 60)
+        # Calculate total duration
+        try:
+            start = datetime.fromisoformat(self.run_log.start_time)
+            end = datetime.fromisoformat(self.run_log.end_time)
+            total_duration = (end - start).total_seconds()
+        except:
+            total_duration = sum(self.run_log.stage_timings.values())
+        
+        # Build comprehensive summary - write to both file and console
+        divider = "=" * 60
+        
+        self.file_logger.info(divider)
         self.file_logger.info("RUN SUMMARY")
-        self.file_logger.info("=" * 60)
-        self.file_logger.info(f"Total matches: {self.run_log.total_matches}")
-        self.file_logger.info(f"Avg confidence: {self.run_log.avg_confidence:.2%}")
-        self.file_logger.info(f"Total API calls: {self.run_log.total_api_calls}")
-        self.file_logger.info(f"Total API cost: ${self.run_log.total_api_cost_est_usd:.4f}")
+        self.file_logger.info(divider)
+        
+        # Also print to console
+        print(f"\n{divider}")
+        print("  RUN SUMMARY")
+        print(divider)
+        
+        # Matching stats
+        match_line = f"Matches: {self.run_log.total_matches}/{self.run_log.total_segments} | Avg: {self.run_log.avg_confidence:.1%}"
+        self.file_logger.info(f"Segments: {self.run_log.total_segments}")
+        self.file_logger.info(f"Matches: {self.run_log.total_matches}/{self.run_log.total_segments}")
+        self.file_logger.info(f"Avg confidence: {self.run_log.avg_confidence:.1%}")
+        print(f"  {match_line}")
+        
+        # Download stats
+        total_videos = self.run_log.videos_downloaded + self.run_log.videos_skipped + self.run_log.videos_failed
+        if total_videos > 0:
+            dl_line = f"Videos: {self.run_log.videos_downloaded} new, {self.run_log.videos_skipped} cached, {self.run_log.videos_failed} failed"
+            self.file_logger.info(dl_line)
+            print(f"  {dl_line}")
+        
+        # Transcription stats
+        total_transcribed = self.run_log.videos_transcribed + self.run_log.transcription_cache_hits
+        if total_transcribed > 0:
+            tx_line = f"Transcription: {self.run_log.videos_transcribed} new, {self.run_log.transcription_cache_hits} cached"
+            self.file_logger.info(tx_line)
+            print(f"  {tx_line}")
+        
+        # Embedding stats
+        total_embeddings = self.run_log.embeddings_computed + self.run_log.embedding_cache_hits
+        if total_embeddings > 0:
+            emb_line = f"Embeddings: {self.run_log.embeddings_computed} new, {self.run_log.embedding_cache_hits} cached"
+            self.file_logger.info(emb_line)
+            print(f"  {emb_line}")
+        
+        # Entity media stats
+        if self.run_log.entity_images_downloaded > 0 or self.run_log.entity_videos_downloaded > 0:
+            ent_line = f"Entity media: {self.run_log.entity_images_downloaded} images, {self.run_log.entity_videos_downloaded} videos"
+            self.file_logger.info(ent_line)
+            print(f"  {ent_line}")
+        
+        # Stage timings (file only - already shown during pipeline)
+        if self.run_log.stage_timings:
+            self.file_logger.info("Stage timings:")
+            timing_parts = []
+            for stage, duration in self.run_log.stage_timings.items():
+                self.file_logger.info(f"  {stage}: {duration:.1f}s")
+                timing_parts.append(f"{stage}={duration:.0f}s")
+            print(f"  Stages: {' | '.join(timing_parts)}")
+        
+        # API stats
+        api_line = f"API: {self.run_log.total_api_calls} calls, ${self.run_log.total_api_cost_est_usd:.4f}"
+        self.file_logger.info(f"API calls: {self.run_log.total_api_calls}")
+        self.file_logger.info(f"API cost: ${self.run_log.total_api_cost_est_usd:.4f}")
+        print(f"  {api_line}")
+        
+        # Files generated
+        if self.run_log.files_generated:
+            self.file_logger.info(f"Files generated: {len(self.run_log.files_generated)}")
+            for file_type, path in self.run_log.files_generated.items():
+                self.file_logger.info(f"  {file_type}: {Path(path).name}")
+            print(f"  Files: {len(self.run_log.files_generated)} generated")
+        
+        # Warnings/Errors
         self.file_logger.info(f"Warnings: {len(self.run_log.warnings)}")
         self.file_logger.info(f"Errors: {len(self.run_log.errors)}")
+        if self.run_log.warnings or self.run_log.errors:
+            print(f"  Warnings: {len(self.run_log.warnings)} | Errors: {len(self.run_log.errors)}")
+        
+        self.file_logger.info(f"Total time: {total_duration:.1f}s")
+        print(f"  Total: {total_duration:.1f}s")
         
         # Save JSON
         with open(self.json_file, 'w', encoding='utf-8') as f:
             json.dump(self.run_log.to_dict(), f, indent=2)
         
         self.file_logger.info(f"JSON log saved: {self.json_file}")
+        
+        # Generate LLM-friendly summary files
+        self._generate_llm_summary(total_duration)
+    
+    def _generate_llm_summary(self, total_duration: float):
+        """Generate token-friendly summary files for LLMs"""
+        log_dir = Path(self.json_file).parent
+        base_name = Path(self.json_file).stem
+        
+        # Markdown summary
+        md_path = log_dir / f"{base_name}_summary.md"
+        self._write_markdown_summary(md_path, total_duration)
+        
+        # Plaintext summary (minimal tokens)
+        txt_path = log_dir / f"{base_name}_summary.txt"
+        self._write_plaintext_summary(txt_path, total_duration)
+        
+        self.file_logger.info(f"LLM summaries: {md_path.name}, {txt_path.name}")
+    
+    def _write_markdown_summary(self, path: Path, total_duration: float):
+        """Write markdown summary"""
+        r = self.run_log
+        
+        lines = [
+            f"# Run Summary: {r.run_id}",
+            "",
+            "## Overview",
+            f"- **Start:** {r.start_time}",
+            f"- **Duration:** {total_duration:.1f}s",
+            f"- **Config:** {Path(r.config_path).name} ({r.config_hash[:8]})",
+            "",
+            "## Matching",
+            f"- Segments: {r.total_segments}",
+            f"- Matched: {r.total_matches}/{r.total_segments} ({r.total_matches/max(r.total_segments,1)*100:.0f}%)",
+            f"- Avg Confidence: {r.avg_confidence:.1%}",
+            "",
+            "## Processing",
+            f"- Videos Downloaded: {r.videos_downloaded}",
+            f"- Videos Cached: {r.videos_skipped}",
+            f"- Videos Failed: {r.videos_failed}",
+            f"- Transcribed: {r.videos_transcribed} (cached: {r.transcription_cache_hits})",
+            f"- Embeddings: {r.embeddings_computed} (cached: {r.embedding_cache_hits})",
+            "",
+            "## Entity Media",
+            f"- Images: {r.entity_images_downloaded}",
+            f"- Videos: {r.entity_videos_downloaded}",
+            "",
+            "## Stage Timings",
+        ]
+        
+        for stage, duration in r.stage_timings.items():
+            lines.append(f"- {stage}: {duration:.1f}s")
+        
+        lines.extend([
+            "",
+            "## API Usage",
+            f"- Calls: {r.total_api_calls}",
+            f"- Cost: ${r.total_api_cost_est_usd:.4f}",
+            "",
+            "## Files Generated",
+        ])
+        
+        for file_type, file_path in r.files_generated.items():
+            lines.append(f"- {file_type}: `{Path(file_path).name}`")
+        
+        if r.warnings:
+            lines.extend(["", "## Warnings"])
+            for w in r.warnings[:10]:  # Limit to 10
+                lines.append(f"- {w[:100]}")
+            if len(r.warnings) > 10:
+                lines.append(f"- ... and {len(r.warnings) - 10} more")
+        
+        if r.errors:
+            lines.extend(["", "## Errors"])
+            for e in r.errors[:10]:
+                lines.append(f"- {e[:100]}")
+            if len(r.errors) > 10:
+                lines.append(f"- ... and {len(r.errors) - 10} more")
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+    
+    def _write_plaintext_summary(self, path: Path, total_duration: float):
+        """Write minimal plaintext summary (token-efficient)"""
+        r = self.run_log
+        
+        lines = [
+            f"RUN {r.run_id}",
+            f"time={total_duration:.0f}s config={r.config_hash[:8]}",
+            f"segments={r.total_segments} matches={r.total_matches} conf={r.avg_confidence:.0%}",
+            f"videos: dl={r.videos_downloaded} cache={r.videos_skipped} fail={r.videos_failed}",
+            f"transcribe: new={r.videos_transcribed} cache={r.transcription_cache_hits}",
+            f"embed: new={r.embeddings_computed} cache={r.embedding_cache_hits}",
+            f"entity: img={r.entity_images_downloaded} vid={r.entity_videos_downloaded}",
+            f"api: calls={r.total_api_calls} cost=${r.total_api_cost_est_usd:.4f}",
+            "stages: " + " ".join(f"{k}={v:.0f}s" for k, v in r.stage_timings.items()),
+            f"files: {len(r.files_generated)}",
+            f"warn={len(r.warnings)} err={len(r.errors)}",
+        ]
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
 
 
 # =============================================================================
