@@ -2690,17 +2690,17 @@ Topic:"""
         if config.remix.enabled and config.remix.interactive_curation:
             print(f"\n  ─── Video Filtering ───")
             print(f"  After download, videos are scored for keyword relevance.")
-            print(f"    [F] Use FILTERED videos (recommended - higher relevance)")
             print(f"    [A] Use ALL downloaded videos (skip filtering)")
+            print(f"    [F] Use FILTERED videos (higher relevance, fewer options)")
             
-            choice = self._get_user_input("  Select [F/A]", default="F").strip().upper()
+            choice = self._get_user_input("  Select [A/F]", default="A").strip().upper()
             
-            if choice == 'A':
-                config.remix.auto_accept_filter = "all"
-                print(f"  ✓ Will use ALL videos")
-            else:
+            if choice == 'F':
                 config.remix.auto_accept_filter = "filtered"
                 print(f"  ✓ Will use filtered videos (min score: {config.remix.min_relevance_score})")
+            else:
+                config.remix.auto_accept_filter = "all"
+                print(f"  ✓ Will use ALL videos")
         
         # ─────────────────────────────────────────────────────────────────────
         # 4.5 FACE PREFERENCE

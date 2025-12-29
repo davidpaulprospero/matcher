@@ -7,15 +7,17 @@ Advanced matching module with:
 - Local LLM support
 - Smart reuse prevention
 - Face detection preference
+- Timeline variety enforcement
 """
 
 import logging
 import json
 import re
 import hashlib
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Set
 from pathlib import Path
 from abc import ABC, abstractmethod
+from collections import defaultdict
 
 from .config import Config
 from .utils import (
@@ -29,8 +31,84 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# FACE DETECTION
+# TIMELINE VARIETY ENFORCEMENT
 # =============================================================================
+
+class TimelineVarietyTracker:
+    """
+    Tracks source video usage per track to enforce timeline variety.
+    
+    Prevents the same source video from appearing more than max_repeats times
+    within a timeline_window (e.g., 10 minutes).
+    
+    This solves the problem of one video dominating 90% of a 30-minute timeline.
+    """
+    
+    def __init__(self, timeline_window: float = 600.0, max_repeats: int = 1):
+        """
+        Args:
+            timeline_window: Time window in seconds (default 600 = 10 minutes)
+            max_repeats: Max times same source can appear in window (default 1)
+        """
+        self.timeline_window = timeline_window
+        self.max_repeats = max_repeats
+        
+        # Track source usage per track: {track_name: [(source_file, timeline_position), ...]}
+        self.track_usage: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
+    
+    def get_excluded_sources(self, track: str, current_timeline_pos: float) -> Set[str]:
+        """
+        Get set of source files that should be excluded for this track at this position.
+        
+        Args:
+            track: Track name (e.g., "V1", "V2", etc.)
+            current_timeline_pos: Current position in timeline (seconds from start)
+        
+        Returns:
+            Set of source file paths that should be excluded
+        """
+        excluded = set()
+        window_start = current_timeline_pos - self.timeline_window
+        
+        # Count occurrences of each source within the window
+        source_counts: Dict[str, int] = defaultdict(int)
+        
+        for source_file, pos in self.track_usage[track]:
+            if pos >= window_start and pos < current_timeline_pos:
+                source_counts[source_file] += 1
+        
+        # Exclude sources that have reached max_repeats
+        for source_file, count in source_counts.items():
+            if count >= self.max_repeats:
+                excluded.add(source_file)
+        
+        return excluded
+    
+    def record_usage(self, track: str, source_file: str, timeline_pos: float):
+        """
+        Record that a source file was used on a track at a timeline position.
+        
+        Args:
+            track: Track name (e.g., "V1", "V2", etc.)
+            source_file: Path to the source video file
+            timeline_pos: Position in timeline where this clip starts (seconds)
+        """
+        self.track_usage[track].append((source_file, timeline_pos))
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get statistics about source usage per track."""
+        stats = {}
+        for track, usages in self.track_usage.items():
+            source_counts = defaultdict(int)
+            for source_file, _ in usages:
+                source_counts[Path(source_file).name] += 1
+            
+            stats[track] = {
+                "total_clips": len(usages),
+                "unique_sources": len(source_counts),
+                "top_sources": sorted(source_counts.items(), key=lambda x: -x[1])[:5]
+            }
+        return stats
 
 class FaceDetector:
     """
@@ -1960,6 +2038,10 @@ def match_all_segments(
     - Stage 1: Retrieve more candidates from embeddings (embedding_candidates)
     - Stage 2: Send only top candidates to LLM for reranking (llm_rerank_candidates)
     
+    Timeline variety enforcement:
+    - Prevents same source video from appearing multiple times within a time window
+    - Configured via config.output.variety.timeline_variety_window (default 600s = 10 min)
+    
     Args:
         face_preference: "more" (prefer faces), "none" (avoid faces), or "neutral"
     """
@@ -1973,6 +2055,7 @@ def match_all_segments(
     
     mc = config.matching
     oc = config.output
+    vc = oc.variety
     
     logger.info(f"Matching {len(voiceover_segments)} voiceover segments...")
     logger.info(f"  Two-stage matching: embedding_candidates={mc.embedding_candidates}, llm_rerank={mc.llm_rerank_candidates}")
@@ -1986,10 +2069,23 @@ def match_all_segments(
     if mc.duration_scoring_enabled:
         logger.info(f"  Duration scoring: ideal={mc.ideal_speed_range}, soft={mc.soft_penalty_range}")
     
+    # Timeline variety enforcement
+    timeline_variety_enabled = getattr(vc, 'enforce_timeline_variety', True)
+    timeline_window = getattr(vc, 'timeline_variety_window', 600.0)
+    max_repeats = getattr(vc, 'max_source_repeats_in_window', 1)
+    
+    variety_tracker = None
+    if timeline_variety_enabled:
+        variety_tracker = TimelineVarietyTracker(
+            timeline_window=timeline_window,
+            max_repeats=max_repeats
+        )
+        logger.info(f"  Timeline variety: {timeline_window/60:.0f}min window, max {max_repeats} repeat(s) per source")
+    
     if oc.include_strategy_tracks:
         logger.info(f"  Strategy tracks: {', '.join(oc.strategy_tracks)}")
-        logger.info(f"  Variety enforcement: different_source={oc.variety.require_different_source}, "
-                   f"min_time={oc.variety.min_time_distance}s, min_emb_dist={oc.variety.min_embedding_distance}")
+        logger.info(f"  Variety enforcement: different_source={vc.require_different_source}, "
+                   f"min_time={vc.min_time_distance}s, min_emb_dist={vc.min_embedding_distance}")
     
     # Build candidate embeddings lookup
     candidate_embeddings = {}
@@ -2001,11 +2097,30 @@ def match_all_segments(
     
     results = []
     
+    # Calculate timeline start (first segment start time)
+    timeline_start = voiceover_segments[0].start_time if voiceover_segments else 0.0
+    
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
+        # Calculate current timeline position (relative to start)
+        current_timeline_pos = vo_seg.start_time - timeline_start
+        
         # Stage 1: Get more candidates from embedding search for variety
         num_embedding_candidates = max(mc.embedding_candidates, 20)
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
         all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
+        
+        # Apply timeline variety filtering for V1 (primary track)
+        if variety_tracker:
+            excluded_v1 = variety_tracker.get_excluded_sources("V1", current_timeline_pos)
+            if excluded_v1:
+                # Filter out excluded sources, but keep at least some candidates
+                filtered_candidates = [(seg, dist) for seg, dist in all_candidates 
+                                       if seg.source_file not in excluded_v1]
+                if len(filtered_candidates) >= mc.llm_rerank_candidates:
+                    all_candidates = filtered_candidates
+                else:
+                    # Log that we had to relax the constraint
+                    logger.debug(f"Segment {i}: Relaxed variety constraint (only {len(filtered_candidates)} candidates after filter)")
         
         # Stage 2: Send only top candidates to LLM for reranking
         llm_candidates = all_candidates[:mc.llm_rerank_candidates]
@@ -2020,16 +2135,45 @@ def match_all_segments(
             context_before, context_after
         )
         
+        # Record V1 usage for timeline variety
+        if variety_tracker and result.primary_match:
+            variety_tracker.record_usage(
+                "V1", 
+                result.primary_match.video_segment.source_file,
+                current_timeline_pos
+            )
+        
+        # Record V2, V3 (alternatives) usage
+        if variety_tracker and result.alternatives:
+            for alt_idx, alt in enumerate(result.alternatives, start=2):
+                variety_tracker.record_usage(
+                    f"V{alt_idx}",
+                    alt.video_segment.source_file,
+                    current_timeline_pos
+                )
+        
         # Strategy matches (V4-V8) - use all embedding candidates for variety
         if oc.include_strategy_tracks:
             # Get alternative segments (V2-V3)
             alt_segments = [alt.video_segment for alt in result.alternatives]
             
+            # Apply timeline variety filtering for strategy candidates
+            strategy_candidates = all_candidates
+            if variety_tracker:
+                # For strategy tracks, exclude sources used in V1-V3 AND timeline-excluded sources
+                # Use a combined track "V_strategy" for variety tracking
+                excluded_strategy = variety_tracker.get_excluded_sources("V_strategy", current_timeline_pos)
+                if excluded_strategy:
+                    filtered_strategy = [(seg, dist) for seg, dist in all_candidates
+                                        if seg.source_file not in excluded_strategy]
+                    if len(filtered_strategy) >= 5:  # Need at least some candidates
+                        strategy_candidates = filtered_strategy
+            
             # Compute strategy matches with variety enforcement
             # Pass segment_index for source_rotation strategy
             strategy_matches = strategy_matcher.get_strategy_matches(
                 vo_segment=vo_seg,
-                all_candidates=all_candidates,  # Use all embedding candidates
+                all_candidates=strategy_candidates,  # Use filtered candidates
                 primary_match=result.primary_match.video_segment,
                 alternatives=alt_segments,
                 vo_embedding=vo_emb,
@@ -2038,6 +2182,15 @@ def match_all_segments(
             )
             
             result.strategy_matches = strategy_matches
+            
+            # Record strategy track usage
+            if variety_tracker:
+                for sm in strategy_matches:
+                    variety_tracker.record_usage(
+                        "V_strategy",
+                        sm.video_segment.source_file,
+                        current_timeline_pos
+                    )
         
         results.append(result)
         
@@ -2063,5 +2216,17 @@ def match_all_segments(
         for strategy in oc.strategy_tracks:
             count = sum(1 for r in results for sm in r.strategy_matches if sm.strategy == strategy)
             logger.info(f"  {strategy}: {count}/{len(results)} segments matched")
+    
+    # Report timeline variety stats
+    if variety_tracker:
+        stats = variety_tracker.get_stats()
+        logger.info(f"  Timeline variety enforcement:")
+        for track, track_stats in stats.items():
+            if track_stats["total_clips"] > 0:
+                unique_pct = track_stats["unique_sources"] / track_stats["total_clips"] * 100
+                logger.info(f"    {track}: {track_stats['unique_sources']} unique sources across {track_stats['total_clips']} clips ({unique_pct:.0f}% variety)")
+                if track_stats["top_sources"]:
+                    top = track_stats["top_sources"][0]
+                    logger.info(f"      Most used: {top[0]} ({top[1]} times)")
     
     return results

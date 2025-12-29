@@ -10,6 +10,7 @@ Integrates with voiceover-matcher pipeline:
 """
 
 import os
+import re
 import json
 import subprocess
 import time
@@ -60,6 +61,52 @@ class DownloadCheckpoint:
         return cls(**data)
 
 
+# Characters that cause issues in DaVinci Resolve
+# Note: Spaces are OK! Only these specific chars cause crashes.
+_UNSAFE_FILENAME_CHARS = re.compile(r'[%&$#]')
+
+def sanitize_filename_for_nle(filepath: Path) -> Path:
+    """
+    Sanitize filename to remove characters that cause issues in DaVinci Resolve.
+    
+    Based on testing: Spaces are OK, but % & $ # cause crashes.
+    
+    Args:
+        filepath: Path to file
+        
+    Returns:
+        New path (renamed if necessary), or original path if already safe
+    """
+    filename = filepath.name
+    stem = filepath.stem
+    suffix = filepath.suffix
+    
+    # Check if sanitization is needed
+    if not _UNSAFE_FILENAME_CHARS.search(stem):
+        return filepath
+    
+    # Create safe filename
+    safe_stem = _UNSAFE_FILENAME_CHARS.sub('_', stem)
+    safe_stem = re.sub(r'_+', '_', safe_stem)  # Remove multiple underscores
+    
+    new_path = filepath.parent / f"{safe_stem}{suffix}"
+    
+    # Handle collision
+    counter = 1
+    while new_path.exists() and new_path != filepath:
+        new_path = filepath.parent / f"{safe_stem}_{counter}{suffix}"
+        counter += 1
+    
+    # Rename the file
+    try:
+        filepath.rename(new_path)
+        logger.info(f"Sanitized filename: {filename} → {new_path.name}")
+        return new_path
+    except Exception as e:
+        logger.warning(f"Could not sanitize filename {filename}: {e}")
+        return filepath
+
+
 class VideoDownloader:
     """
     Advanced video downloader with:
@@ -106,13 +153,28 @@ class VideoDownloader:
         # Load existing sources
         self._load_sources()
         
-        # Find cookies file for YouTube authentication
-        self._cookies_path = self._find_cookies_file()
-        if self._cookies_path:
-            logger.info(f"Found cookies file: {self._cookies_path}")
+        # Cookie authentication for YouTube
+        # Priority: cookies_from_browser > cookies_path > auto-detect cookies.txt
+        self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
+        self._cookies_path = None
+        
+        if self._cookies_from_browser:
+            logger.info(f"Using cookies from browser: {self._cookies_from_browser}")
         else:
-            logger.warning("No cookies.txt found - YouTube downloads may fail!")
-            logger.warning("Export cookies from browser and save as cookies.txt in install directory")
+            self._cookies_path = self._find_cookies_file()
+            if self._cookies_path:
+                logger.info(f"Found cookies file: {self._cookies_path}")
+            else:
+                logger.warning("No cookies configured - YouTube downloads may fail!")
+                logger.warning("Set cookies_from_browser: firefox in config.yaml")
+                logger.warning("Or export cookies from browser and save as cookies.txt")
+    
+    def _add_cookies_to_cmd(self, cmd: list) -> None:
+        """Add cookie authentication to yt-dlp command"""
+        if self._cookies_from_browser:
+            cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
+        elif self._cookies_path:
+            cmd.extend(['--cookies', str(self._cookies_path)])
     
     def _get_tier_value(self, tier: str, key: str, default: int = 0) -> int:
         """Get tier config value, handling both dict and dataclass formats"""
@@ -429,8 +491,7 @@ class VideoDownloader:
             '--match-filter', f"duration>{min_dur} & duration<{max_dur}",
         ]
         
-        if self._cookies_path:
-            cmd.extend(['--cookies', str(self._cookies_path)])
+        self._add_cookies_to_cmd(cmd)
         
         try:
             # Use config timeout or default
@@ -778,8 +839,7 @@ Only output the JSON array, no other text."""
                 '--no-warnings',
             ]
             
-            if self._cookies_path:
-                cmd.extend(['--cookies', str(self._cookies_path)])
+            self._add_cookies_to_cmd(cmd)
             
             logger.info(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
             
@@ -817,8 +877,7 @@ Only output the JSON array, no other text."""
             '--progress',
         ] + urls
         
-        if self._cookies_path:
-            cmd.extend(['--cookies', str(self._cookies_path)])
+        self._add_cookies_to_cmd(cmd)
         
         return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
     
@@ -934,6 +993,9 @@ Only output the JSON array, no other text."""
                         except Exception as e:
                             logger.warning(f"Transcode failed for {video_file}: {e}")
                             final_path = video_path
+                
+                # Sanitize filename for NLE compatibility (removes %, &, etc.)
+                final_path = sanitize_filename_for_nle(final_path)
                 
                 # Create source record
                 source = DownloadedVideo(
