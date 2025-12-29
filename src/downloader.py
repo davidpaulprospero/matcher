@@ -832,6 +832,7 @@ Only output the JSON array, no other text."""
                 '--write-info-json',
                 '--restrict-filenames',
                 '--no-overwrites',
+                '--no-continue',  # Don't resume partial downloads (prevents hangs after crash)
                 # Truncate title for short paths (title + _ + 11 ID + .mp4)
                 '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
                 '--progress',
@@ -854,14 +855,50 @@ Only output the JSON array, no other text."""
         keyword: str,
         tier: str
     ) -> List[DownloadedVideo]:
-        """Download specific videos by their YouTube IDs"""
+        """Download specific videos by their YouTube IDs
+        
+        Automatically skips videos that already exist on disk (crash-resilient).
+        """
         existing_before = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
+        
+        # Check which video IDs are already downloaded (file-based, not checkpoint-based)
+        # This makes resumption work even without checkpoints
+        already_downloaded = []
+        missing_ids = []
+        
+        for vid_id in video_ids:
+            # Check if any file contains this video ID
+            found = False
+            for existing_file in existing_before:
+                if vid_id in existing_file and existing_file.endswith(('.mp4', '.mkv', '.webm')):
+                    found = True
+                    logger.debug(f"    Skipping {vid_id} - already exists: {existing_file}")
+                    # Create DownloadedVideo for existing file
+                    video_path = keyword_dir / existing_file
+                    already_downloaded.append(DownloadedVideo(
+                        path=str(video_path),
+                        keyword=keyword,
+                        tier=tier,
+                        duration=0,  # Will be updated if info.json exists
+                        title=existing_file,
+                        video_id=vid_id
+                    ))
+                    break
+            if not found:
+                missing_ids.append(vid_id)
+        
+        if already_downloaded:
+            logger.info(f"    ✓ {len(already_downloaded)} already downloaded, {len(missing_ids)} to fetch")
+        
+        if not missing_ids:
+            # All videos already exist
+            return already_downloaded
         
         # Get filename length from config
         max_fn_len = getattr(self.download_config, 'max_filename_len', 10)
         
         # Build URLs from IDs
-        urls = [f"https://www.youtube.com/watch?v={vid}" for vid in video_ids]
+        urls = [f"https://www.youtube.com/watch?v={vid}" for vid in missing_ids]
         
         cmd = [
             'yt-dlp',
@@ -871,6 +908,7 @@ Only output the JSON array, no other text."""
             '--write-info-json',
             '--restrict-filenames',
             '--no-overwrites',
+            '--no-continue',  # Don't resume partial downloads (prevents hangs after crash)
             # Truncate title for short paths
             '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
             '--quiet',  # Suppress progress spam
@@ -880,7 +918,10 @@ Only output the JSON array, no other text."""
         
         self._add_cookies_to_cmd(cmd)
         
-        return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+        newly_downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+        
+        # Combine already downloaded + newly downloaded
+        return already_downloaded + newly_downloaded
     
     def _run_download_cmd(
         self,
@@ -898,6 +939,22 @@ Only output the JSON array, no other text."""
             List of downloaded videos, or empty list on failure/timeout.
             Sets self._last_download_timed_out = True if timeout occurred.
         """
+        # Clean up any partial downloads from previous crashes
+        # These can cause yt-dlp to hang even with --no-continue
+        if keyword_dir.exists():
+            for part_file in keyword_dir.glob('*.part'):
+                try:
+                    part_file.unlink()
+                    logger.debug(f"Cleaned up partial download: {part_file.name}")
+                except Exception:
+                    pass
+            # Also clean up .ytdl files (download state)
+            for ytdl_file in keyword_dir.glob('*.ytdl'):
+                try:
+                    ytdl_file.unlink()
+                except Exception:
+                    pass
+        
         # Use override, config, or default (2 min for download, separate from 10 min transcode)
         download_timeout = timeout_override or getattr(self.download_config, 'download_timeout', 120)
         
@@ -1063,11 +1120,32 @@ Only output the JSON array, no other text."""
                 logger.info(f"  [{tier}] Skipped (max_total={max_total} reached)")
                 continue
             
-            # Check checkpoint - skip if already done
+            # FILE-BASED SKIP: Check if videos already exist for this keyword/tier
+            # This works even without checkpoints (crash-resilient)
+            max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
+            safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)
+            safe_keyword = safe_keyword.replace(' ', '_')[:max_kw_len].rstrip('_')
+            tier_short = tier[0]
+            keyword_dir = output_dir / f"{safe_keyword}_{tier_short}"
+            
+            if keyword_dir.exists():
+                existing_videos = [f for f in os.listdir(keyword_dir) 
+                                   if f.endswith(('.mp4', '.mkv', '.webm'))]
+                per_kw = self._get_tier_value(tier, 'per_keyword', 5)
+                if len(existing_videos) >= per_kw:
+                    logger.info(f"  [{tier}] Already have {len(existing_videos)} videos (skipping)")
+                    # Count existing toward tier total
+                    with self._lock:
+                        self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(existing_videos)
+                    continue
+                elif existing_videos:
+                    logger.info(f"  [{tier}] Found {len(existing_videos)} existing, need {per_kw - len(existing_videos)} more")
+            
+            # Checkpoint-based skip (secondary check)
             if self.checkpoint:
                 video_key = f"{keyword}|{tier}"
                 if video_key in self.checkpoint.completed_videos:
-                    logger.debug(f"Skipping {keyword} ({tier}) - already completed")
+                    logger.debug(f"Skipping {keyword} ({tier}) - checkpoint says completed")
                     continue
             
             logger.info(f"  [{tier}] Downloading...")
@@ -1159,6 +1237,16 @@ Only output the JSON array, no other text."""
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Scan existing downloads (file-based resume)
+        existing_count = 0
+        if output_dir.exists():
+            for subdir in output_dir.iterdir():
+                if subdir.is_dir():
+                    videos = [f for f in os.listdir(subdir) if f.endswith(('.mp4', '.mkv', '.webm'))]
+                    existing_count += len(videos)
+        if existing_count > 0:
+            logger.info(f"Found {existing_count} existing videos on disk (will skip)")
         
         # Load or create checkpoint
         if resume:
