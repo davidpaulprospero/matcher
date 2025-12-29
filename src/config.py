@@ -92,6 +92,24 @@ class ProjectConfig:
 
 
 @dataclass
+@dataclass
+class PauseSplitConfig:
+    """Pause-based segment splitting settings
+    
+    Splits segments at natural pauses like:
+    - List markers: "1.", "2.", "8."
+    - Location patterns: "Atlanta, Georgia,"
+    - Short phrases with punctuation
+    """
+    enabled: bool = True
+    min_gap_ms: int = 300  # Minimum gap to consider a pause
+    split_at_list_markers: bool = True  # Split after "1.", "2.", etc.
+    split_at_locations: bool = True  # Split at "City, State" patterns
+    split_at_short_phrases: bool = True  # Split at sentence boundaries
+    min_phrase_words: int = 2  # Minimum words to keep in a segment
+
+
+@dataclass
 class TranscriptionConfig:
     """Transcription settings (faster-whisper)
     
@@ -120,9 +138,16 @@ class TranscriptionConfig:
     absolute_split_threshold: float = 12.0  # Absolute threshold for very long segments
     min_split_duration: float = 4.0  # Minimum duration to consider splitting
     
+    # Pause-based splitting
+    pause_split: PauseSplitConfig = None
+    
     # Caching
     cache_transcriptions: bool = True
     cache_dir: str = "transcriptions"
+    
+    def __post_init__(self):
+        if self.pause_split is None:
+            self.pause_split = PauseSplitConfig()
 
 
 @dataclass
