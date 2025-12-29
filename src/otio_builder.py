@@ -19,6 +19,18 @@ from .utils import SRTSegment, MatchResult, AlternativeMatch
 logger = logging.getLogger(__name__)
 
 
+def _to_windows_path(path: str) -> str:
+    """
+    Convert path to Windows format with backslashes.
+    
+    DaVinci Resolve requires Windows-style paths: E:\\folder\\file.mp4
+    Forward slashes cause import issues.
+    """
+    abs_path = str(Path(path).resolve())
+    # Ensure backslashes (Windows format)
+    return abs_path.replace('/', '\\')
+
+
 def _to_python_type(value):
     """Convert numpy types to native Python types for OTIO compatibility."""
     if value is None:
@@ -162,7 +174,7 @@ def create_clip_with_timewarp(
     rate = frame_rate
     
     # Create absolute Windows path with backslashes for DaVinci Resolve
-    abs_path = str(Path(source_path).resolve())
+    abs_path = _to_windows_path(source_path)
     
     # Get filename for ExternalReference name
     filename = Path(source_path).name
@@ -205,6 +217,9 @@ def create_clip_with_timewarp(
         media_reference=media_ref,
         source_range=source_range
     )
+    
+    # Add Resolve_OTIO metadata (required for DaVinci import)
+    clip.metadata['Resolve_OTIO'] = {}
     
     # Calculate and store speed info in metadata for reference
     if metadata is None:
@@ -252,6 +267,23 @@ def create_timeline(
     """
     
     timeline = otio.schema.Timeline(name="Matched Footage")
+    
+    # Set tracks stack name to empty (DaVinci format)
+    timeline.tracks.name = ""
+    
+    # Add Resolve_OTIO metadata (required for DaVinci import)
+    timeline.metadata['Resolve_OTIO'] = {
+        'Resolve OTIO Meta Version': '1.0'
+    }
+    
+    # CRITICAL: Set global_start_time to valid RationalTime (not empty string!)
+    # DaVinci Resolve hangs indefinitely if this is "" or invalid
+    # Using 01:00:00:00 timecode start (86400 frames at 24fps, scaled to frame_rate)
+    timeline.global_start_time = otio.opentime.RationalTime(
+        int(3600 * frame_rate),  # 1 hour in frames
+        frame_rate
+    )
+    
     rate = frame_rate
     
     # Determine number of alternative tracks (V2-V3)
@@ -356,7 +388,6 @@ def create_timeline(
     
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
-    timeline_markers = []
     
     # Process each match
     for match_idx, match_result in enumerate(matches):
@@ -403,22 +434,9 @@ def create_timeline(
         # Set clip color
         v1_clip.metadata['clip_color'] = clip_color
         
-        # Add markers to primary clip
-        add_markers_to_clip(v1_clip, match_result, match, rate, target_duration)
+        # Note: Markers removed - not used in DaVinci workflow
         
         video_tracks[0].append(v1_clip)
-        
-        # Create timeline-level marker for this segment (using frame position)
-        timeline_position_seconds = timeline_frames / frame_rate
-        timeline_marker = create_timeline_marker(
-            match_idx + 1,
-            match_result,
-            match,
-            timeline_position_seconds,
-            target_duration,
-            rate
-        )
-        timeline_markers.append(timeline_marker)
         
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
@@ -646,8 +664,8 @@ def create_timeline(
     
     # Add voiceover track
     if voiceover_path and matches:
-        # Create absolute path for voiceover
-        abs_vo_path = str(Path(voiceover_path).resolve())
+        # Create absolute path for voiceover (Windows format for DaVinci)
+        abs_vo_path = _to_windows_path(voiceover_path)
         vo_filename = Path(voiceover_path).name
         
         # Total duration should match total frames accumulated
@@ -674,6 +692,7 @@ def create_timeline(
                 duration=otio.opentime.RationalTime(total_frames, rate)
             )
         )
+        vo_clip.metadata['Resolve_OTIO'] = {}  # Required for DaVinci import
         voiceover_track.append(vo_clip)
     
     # Add all tracks to timeline
@@ -683,13 +702,9 @@ def create_timeline(
     for track in audio_tracks:
         timeline.tracks.append(track)
     
-    timeline.tracks.append(voiceover_track)
-    
-    # Add V9 Entity Images track (after other video tracks)
-    timeline.tracks.append(image_track)
-    
-    # Add V10 Stock Videos track
-    timeline.tracks.append(stock_video_track)
+    # Only add voiceover track if it has content
+    if len(voiceover_track) > 0:
+        timeline.tracks.append(voiceover_track)
     
     # Populate image track if entity_images provided
     if entity_images:
@@ -700,6 +715,10 @@ def create_timeline(
             frame_rate=rate
         )
     
+    # Only add V9 Entity Images track if it has content
+    if len(image_track) > 0:
+        timeline.tracks.append(image_track)
+    
     # Populate stock video track if entity_videos provided
     if entity_videos:
         _add_entity_videos_to_track(
@@ -709,9 +728,11 @@ def create_timeline(
             frame_rate=rate
         )
     
-    # Add timeline-level markers to the primary video track
-    for marker in timeline_markers:
-        video_tracks[0].markers.append(marker)
+    # Only add V10 Stock Videos track if it has content
+    if len(stock_video_track) > 0:
+        timeline.tracks.append(stock_video_track)
+    
+    # Note: Timeline markers removed - not used in DaVinci workflow
     
     return timeline
 
@@ -791,10 +812,7 @@ def _add_entity_images_to_track(
                 image_filename = image_path_obj.name
                 
                 # Convert to Windows path format with backslashes for Resolve
-                image_path_resolved = str(image_path_obj.resolve())
-                # Ensure backslashes for Windows paths
-                if not image_path_resolved.startswith('/'):
-                    image_path_resolved = image_path_resolved.replace('/', '\\')
+                image_path_resolved = _to_windows_path(image_path)
                 
                 # Create external reference matching Resolve's format:
                 # - available_range = 1 frame (still image has 1 frame)
@@ -821,6 +839,9 @@ def _add_entity_images_to_track(
                 # This uses the newer OTIO format with media_references dict
                 image_clip.media_reference = image_ref
                 
+                # Add Resolve_OTIO metadata (required for DaVinci import)
+                image_clip.metadata['Resolve_OTIO'] = {}
+                
                 # Add metadata
                 image_clip.metadata['entity_name'] = entity_name
                 image_clip.metadata['entity_type'] = entity_result.entity_type
@@ -834,17 +855,7 @@ def _add_entity_images_to_track(
                 # Add Resolve-specific metadata
                 image_clip.metadata['Resolve_OTIO'] = {}
                 
-                # Add marker for TEXT overlay hint (only on first image)
-                if img_idx == 0:
-                    marker = otio.schema.Marker(
-                        name=f"TEXT: {entity_result.entity_type} - {entity_name}",
-                        marked_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
-                            duration=otio.opentime.RationalTime(1, rate)
-                        ),
-                        color=otio.schema.MarkerColor.PINK
-                    )
-                    image_clip.markers.append(marker)
+                # Note: Markers removed - not used in DaVinci workflow
                 
                 image_track.append(image_clip)
             
@@ -935,9 +946,7 @@ def _add_entity_videos_to_track(
                 video_filename = video_path_obj.name
                 
                 # Convert to Windows path format with backslashes for Resolve
-                video_path_resolved = str(video_path_obj.resolve())
-                if not video_path_resolved.startswith('/'):
-                    video_path_resolved = video_path_resolved.replace('/', '\\')
+                video_path_resolved = _to_windows_path(video_path)
                 
                 # Get actual video duration using ffprobe if available
                 actual_duration_frames = _get_video_duration_frames(video_path, rate)
@@ -968,6 +977,9 @@ def _add_entity_videos_to_track(
                 
                 video_clip.media_reference = video_ref
                 
+                # Add Resolve_OTIO metadata (required for DaVinci import)
+                video_clip.metadata['Resolve_OTIO'] = {}
+                
                 # Add metadata
                 video_clip.metadata['entity_name'] = entity_name
                 video_clip.metadata['entity_type'] = entity_result.entity_type
@@ -981,17 +993,7 @@ def _add_entity_videos_to_track(
                 # Add Resolve-specific metadata
                 video_clip.metadata['Resolve_OTIO'] = {}
                 
-                # Add marker for entity identification (only on first video)
-                if vid_idx == 0:
-                    marker = otio.schema.Marker(
-                        name=f"STOCK: {entity_result.entity_type} - {entity_name}",
-                        marked_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
-                            duration=otio.opentime.RationalTime(1, rate)
-                        ),
-                        color=otio.schema.MarkerColor.CYAN
-                    )
-                    video_clip.markers.append(marker)
+                # Note: Markers removed - not used in DaVinci workflow
                 
                 video_track.append(video_clip)
             
@@ -1053,241 +1055,6 @@ def get_confidence_color(confidence: float) -> str:
         return "RED"
 
 
-def create_timeline_marker(
-    segment_num: int,
-    match_result: MatchResult,
-    match,
-    position: float,
-    duration: float,
-    rate: float
-) -> otio.schema.Marker:
-    """Create a timeline-level marker for a segment"""
-    
-    confidence = match.confidence
-    
-    # Determine color
-    if confidence >= 0.8:
-        color = otio.schema.MarkerColor.GREEN
-        tier = "HIGH"
-    elif confidence >= 0.6:
-        color = otio.schema.MarkerColor.CYAN
-        tier = "GOOD"
-    elif confidence >= 0.4:
-        color = otio.schema.MarkerColor.YELLOW
-        tier = "MED"
-    elif confidence >= 0.2:
-        color = otio.schema.MarkerColor.ORANGE
-        tier = "LOW"
-    else:
-        color = otio.schema.MarkerColor.RED
-        tier = "GAP"
-    
-    # Override to RED if it's a gap
-    if match_result.has_gap:
-        color = otio.schema.MarkerColor.RED
-        tier = "GAP"
-    
-    # Build marker name - NO EMOJI for DaVinci compatibility
-    vo_text = match.voiceover_segment.text[:35] + "..." if len(match.voiceover_segment.text) > 35 else match.voiceover_segment.text
-    vo_text = vo_text.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
-    
-    marker_name = f"{tier} {confidence:.0%} - {vo_text}"
-    
-    # Use rounded frames to avoid drift
-    start_frames = round(position * rate)
-    duration_frames = round(duration * rate)
-    
-    marker = otio.schema.Marker(
-        name=marker_name,
-        marked_range=otio.opentime.TimeRange(
-            start_time=otio.opentime.RationalTime(start_frames, rate),
-            duration=otio.opentime.RationalTime(duration_frames, rate)
-        ),
-        color=color
-    )
-    
-    # Add metadata (convert numpy types to Python native types)
-    marker.metadata['segment_num'] = int(segment_num) if hasattr(segment_num, 'item') else segment_num
-    marker.metadata['confidence'] = float(confidence) if hasattr(confidence, 'item') else confidence
-    marker.metadata['voiceover_text'] = str(match.voiceover_segment.text)
-    marker.metadata['video_file'] = str(Path(match.video_segment.source_file).name)
-    marker.metadata['reasoning'] = str(match.reasoning) if match.reasoning else ""
-    
-    return marker
-
-
-def add_markers_to_clip(
-    clip: otio.schema.Clip,
-    match_result: MatchResult,
-    match,
-    rate: float,
-    duration: float
-):
-    """Add markers to indicate match quality and properties"""
-    
-    # 1 frame duration for markers
-    marker_duration = otio.opentime.RationalTime(1, rate)
-    
-    # Confidence tier marker (FIRST - most important)
-    confidence = match.confidence
-    
-    if confidence >= 0.8:
-        tier_name = f"HIGH {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.GREEN
-    elif confidence >= 0.6:
-        tier_name = f"GOOD {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.CYAN
-    elif confidence >= 0.4:
-        tier_name = f"MED {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.YELLOW
-    elif confidence >= 0.2:
-        tier_name = f"LOW {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.ORANGE
-    else:
-        tier_name = f"GAP {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.RED
-    
-    # Override to RED if it's a gap
-    if match_result.has_gap:
-        tier_name = f"NEEDS REVIEW {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.RED
-    
-    # Add confidence marker at start of clip
-    conf_marker = otio.schema.Marker(
-        name=tier_name,
-        marked_range=otio.opentime.TimeRange(
-            start_time=otio.opentime.RationalTime(0, rate),
-            duration=marker_duration
-        ),
-        color=tier_color
-    )
-    clip.markers.append(conf_marker)
-    
-    # Keyword match marker (offset slightly)
-    if match.is_keyword_match:
-        marker = otio.schema.Marker(
-            name="Keyword Match",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(2, rate),  # 2 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.GREEN
-        )
-        clip.markers.append(marker)
-    
-    # Visual match marker
-    if match.is_visual_match:
-        marker = otio.schema.Marker(
-            name="Visual Match",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(3, rate),  # 3 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.BLUE
-        )
-        clip.markers.append(marker)
-    
-    # Reused clip marker
-    if match.clip_reuse_count > 0:
-        marker = otio.schema.Marker(
-            name=f"Reused ({match.clip_reuse_count}x)",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(4, rate),  # 4 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.YELLOW
-        )
-        clip.markers.append(marker)
-    
-    # Suggested speed marker - tells user what speed to apply
-    time_scalar = clip.metadata.get('time_scalar', 1.0)
-    if time_scalar and abs(time_scalar - 1.0) > 0.05:
-        speed_pct = time_scalar * 100
-        if time_scalar > 1:
-            marker_name = f"Set {speed_pct:.0f}% speed"
-            color = otio.schema.MarkerColor.CYAN
-        else:
-            marker_name = f"Set {speed_pct:.0f}% speed"
-            color = otio.schema.MarkerColor.MAGENTA
-        
-        marker = otio.schema.Marker(
-            name=marker_name,
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(5, rate),  # 5 frames offset
-                duration=marker_duration
-            ),
-            color=color
-        )
-        clip.markers.append(marker)
-    
-    # ENTITY MARKERS - for text overlay suggestions
-    vo_seg = match.voiceover_segment
-    entities = getattr(vo_seg, 'entities', []) or []
-    
-    if entities:
-        # Group entities by type for cleaner display
-        entity_types = {}
-        for entity in entities:
-            etype = entity.get('type', 'OTHER')
-            if etype not in entity_types:
-                entity_types[etype] = []
-            entity_types[etype].append(entity)
-        
-        frame_offset = 6  # Start after speed marker
-        
-        # Create markers for each entity type
-        for etype, ents in entity_types.items():
-            # Get icon/label for type
-            type_labels = {
-                'PERSON': '👤 NAME',
-                'GPE': '📍 LOCATION', 
-                'ORG': '🏢 ORG',
-                'DATE': '📅 DATE',
-                'EVENT': '⚡ EVENT',
-                'NUMBER': '🔢 NUMBER'
-            }
-            label = type_labels.get(etype, f'📌 {etype}')
-            
-            # Create marker for each entity
-            for entity in ents[:2]:  # Max 2 per type
-                name = entity.get('text', '')
-                context = entity.get('context', '')
-                
-                if name:
-                    marker_text = f"TEXT: {label} - {name}"
-                    if context:
-                        marker_text += f" ({context})"
-                    
-                    marker = otio.schema.Marker(
-                        name=marker_text,
-                        marked_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(frame_offset, rate),
-                            duration=marker_duration
-                        ),
-                        color=otio.schema.MarkerColor.PINK  # Pink for text overlay markers
-                    )
-                    clip.markers.append(marker)
-                    frame_offset += 1
-    
-    # Also check metadata for entity info
-    metadata_entities = clip.metadata.get('entities', [])
-    if metadata_entities and not entities:
-        for entity in metadata_entities[:3]:
-            if isinstance(entity, dict):
-                name = entity.get('text', '')
-                etype = entity.get('type', 'ENTITY')
-                if name:
-                    marker = otio.schema.Marker(
-                        name=f"TEXT: {etype} - {name}",
-                        marked_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(6, rate),
-                            duration=marker_duration
-                        ),
-                        color=otio.schema.MarkerColor.PINK
-                    )
-                    clip.markers.append(marker)
-
-
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
     otio.adapters.write_to_file(timeline, output_path)
@@ -1324,8 +1091,23 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     # =========================================================================
     # 1. TRACK-SPECIFIC FILES (one per video track)
     # =========================================================================
+    # Get frame rate from original timeline if available
+    frame_rate = 30.0  # Default
+    if hasattr(timeline, 'global_start_time') and timeline.global_start_time:
+        frame_rate = timeline.global_start_time.rate
+    
     for i, track in enumerate(video_tracks):
         track_timeline = otio.schema.Timeline(name=track.name)
+        # Add Resolve_OTIO metadata (required for DaVinci import)
+        track_timeline.metadata['Resolve_OTIO'] = {
+            'Resolve OTIO Meta Version': '1.0'
+        }
+        # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
+        track_timeline.global_start_time = otio.opentime.RationalTime(
+            int(3600 * frame_rate),  # 1 hour in frames
+            frame_rate
+        )
+        
         cloned_track = track.clone()
         cloned_track.enabled = True  # Enable track in standalone file
         track_timeline.tracks.append(cloned_track)
@@ -1340,6 +1122,16 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     for track in audio_tracks:
         if 'voiceover' in track.name.lower() or 'a8' in track.name.lower():
             vo_timeline = otio.schema.Timeline(name="Voiceover")
+            # Add Resolve_OTIO metadata (required for DaVinci import)
+            vo_timeline.metadata['Resolve_OTIO'] = {
+                'Resolve OTIO Meta Version': '1.0'
+            }
+            # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
+            vo_timeline.global_start_time = otio.opentime.RationalTime(
+                int(3600 * frame_rate),  # 1 hour in frames
+                frame_rate
+            )
+            
             cloned_vo = track.clone()
             cloned_vo.enabled = True  # Enable track in standalone file
             vo_timeline.tracks.append(cloned_vo)
@@ -2014,7 +1806,11 @@ def generate_resolve_xml_with_bins(
     
     # Add all files to bin with proper structure
     for file_path, file_info in all_files.items():
-        file_name = escape_xml(Path(file_path).name)
+        # Make clip name unique by including parent folder
+        folder_name = Path(file_path).parent.name
+        base_name = Path(file_path).name
+        unique_name = escape_xml(f"{folder_name}_{base_name}")
+        
         path_url = format_path_url(file_path)
         file_ext = Path(file_path).suffix.lower()
         duration_frames = file_info['duration_frames']
@@ -2030,7 +1826,7 @@ def generate_resolve_xml_with_bins(
         xml_lines.extend([
             f'                    <clip id="masterclip-{file_info["file_id"]}">',
             f'                        <uuid>{file_info["uuid"]}</uuid>',
-            f'                        <name>{file_name}</name>',
+            f'                        <name>{unique_name}</name>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
             '                            <ntsc>FALSE</ntsc>',
@@ -2044,14 +1840,14 @@ def generate_resolve_xml_with_bins(
                 '                            <video>',
                 '                                <track>',
                 '                                    <clipitem>',
-                f'                                        <name>{file_name}</name>',
+                f'                                        <name>{unique_name}</name>',
                 f'                                        <duration>{duration_frames}</duration>',
                 '                                        <start>0</start>',
                 f'                                        <end>{duration_frames}</end>',
                 '                                        <in>0</in>',
                 f'                                        <out>{duration_frames}</out>',
                 f'                                        <file id="{file_info["file_id"]}">',
-                f'                                            <name>{file_name}</name>',
+                f'                                            <name>{unique_name}</name>',
                 f'                                            <pathurl>{path_url}</pathurl>',
                 '                                            <rate>',
                 f'                                                <timebase>{fps_int}</timebase>',
@@ -2077,13 +1873,13 @@ def generate_resolve_xml_with_bins(
                 '                            <audio>',
                 '                                <track>',
                 '                                    <clipitem>',
-                f'                                        <name>{file_name}</name>',
+                f'                                        <name>{unique_name}</name>',
             ])
             if not (is_video or is_image):
                 # Audio-only - need full file definition
                 xml_lines.extend([
                     f'                                        <file id="{file_info["file_id"]}">',
-                    f'                                            <name>{file_name}</name>',
+                    f'                                            <name>{unique_name}</name>',
                     f'                                            <pathurl>{path_url}</pathurl>',
                     '                                            <rate>',
                     f'                                                <timebase>{fps_int}</timebase>',
@@ -2146,11 +1942,15 @@ def generate_resolve_xml_with_bins(
         
         file_info = all_files.get(vid_seg.source_file, {})
         file_id = file_info.get('file_id', '')
-        file_name = escape_xml(Path(vid_seg.source_file).stem)
+        
+        # Make clip name unique by including parent folder
+        folder_name = Path(vid_seg.source_file).parent.name
+        base_name = Path(vid_seg.source_file).stem
+        unique_name = escape_xml(f"{folder_name}_{base_name}")
         
         xml_lines.extend([
             '                            <clipitem>',
-            f'                                <name>{file_name}</name>',
+            f'                                <name>{unique_name}</name>',
             f'                                <duration>{target_frames}</duration>',
             f'                                <start>{timeline_pos}</start>',
             f'                                <end>{timeline_pos + target_frames}</end>',
@@ -2223,136 +2023,203 @@ def generate_resolve_xml_with_bins(
     # Also generate media-only XMLs for manual import (split into parts)
     generated_paths = [str(xml_path)]
     
+
     if num_parts > 1:
-        # Split media into parts for separate import
-        file_items = list(all_files.items())
-        total_files = len(file_items)
-        files_per_part = (total_files + num_parts - 1) // num_parts
+        # Group files by actual filename to detect conflicts
+        # DaVinci Resolve hangs if same filename appears multiple times in one XML
+        filename_to_paths = {}
+        for file_path in all_files.keys():
+            filename = Path(file_path).name
+            if filename not in filename_to_paths:
+                filename_to_paths[filename] = []
+            filename_to_paths[filename].append(file_path)
         
-        for part_idx in range(num_parts):
-            start_idx = part_idx * files_per_part
-            end_idx = min(start_idx + files_per_part, total_files)
+        # Separate unique files from conflicting ones
+        unique_files = {}  # Files with unique filenames - safe to group
+        conflicting_files = []  # Files sharing a filename - must be in separate XMLs
+        
+        for filename, paths in filename_to_paths.items():
+            if len(paths) == 1:
+                # Unique filename - safe
+                unique_files[paths[0]] = all_files[paths[0]]
+            else:
+                # Same filename in multiple folders - conflict!
+                logger.warning(f"Filename conflict: '{filename}' appears in {len(paths)} folders")
+                for path in paths:
+                    conflicting_files.append((path, all_files[path]))
+        
+        logger.info(f"Media files: {len(unique_files)} unique, {len(conflicting_files)} with filename conflicts")
+        
+        # Split unique files into parts
+        file_items = list(unique_files.items())
+        total_files = len(file_items)
+        files_per_part = max(1, (total_files + num_parts - 1) // num_parts)
+        
+        part_idx = 0
+        
+        # Generate parts for unique files
+        for part_start in range(0, total_files, files_per_part):
+            part_end = min(part_start + files_per_part, total_files)
+            files_subset = dict(file_items[part_start:part_end])
             
-            if start_idx >= total_files:
-                break
+            if not files_subset:
+                continue
             
-            files_subset = dict(file_items[start_idx:end_idx])
-            bin_name = f"Media Part {part_idx + 1}"
-            
-            part_lines = [
-                '<?xml version="1.0" encoding="UTF-8"?>',
-                '<!DOCTYPE xmeml>',
-                '<xmeml version="4">',
-                '    <bin>',
-                f'        <name>{bin_name}</name>',
-                '        <children>',
-            ]
-            
-            for file_path, file_info in files_subset.items():
-                file_name = escape_xml(Path(file_path).name)
-                path_url = format_path_url(file_path)
-                file_ext = Path(file_path).suffix.lower()
-                duration_frames = file_info['duration_frames']
-                
-                video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
-                audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
-                is_video = file_ext in video_exts
-                is_audio = file_ext in audio_exts
-                
-                # Use simple clip-N id format and include uuid for DaVinci compatibility
-                clip_num = file_info["file_id"].replace("file-", "")
-                
-                part_lines.extend([
-                    f'            <clip id="clip-{clip_num}">',
-                    f'                <uuid>{file_info["uuid"]}</uuid>',
-                    f'                <n>{file_name}</n>',
-                    '                <rate>',
-                    f'                    <timebase>{fps_int}</timebase>',
-                    '                    <ntsc>FALSE</ntsc>',
-                    '                </rate>',
-                    '                <media>',
-                    '                    <video>',
-                    '                        <track>',
-                    f'                            <clipitem id="clipitem-{clip_num}">',
-                    f'                                <n>{file_name}</n>',
-                    f'                                <file id="{file_info["file_id"]}">',
-                    f'                                    <n>{file_name}</n>',
-                    f'                                    <pathurl>{path_url}</pathurl>',
-                    '                                    <rate>',
-                    f'                                        <timebase>{fps_int}</timebase>',
-                    '                                        <ntsc>FALSE</ntsc>',
-                    '                                    </rate>',
-                    f'                                    <duration>{duration_frames}</duration>',
-                    '                                    <timecode>',
-                    '                                        <rate>',
-                    f'                                            <timebase>{fps_int}</timebase>',
-                    '                                            <ntsc>FALSE</ntsc>',
-                    '                                        </rate>',
-                    '                                        <string>00:00:00:00</string>',
-                    '                                        <frame>0</frame>',
-                    '                                    </timecode>',
-                    '                                </file>',
-                    '                            </clipitem>',
-                    '                        </track>',
-                    '                    </video>',
-                ])
-                
-                # Add audio section for video and audio files
-                if is_video or is_audio:
-                    part_lines.extend([
-                        '                    <audio>',
-                        '                        <track>',
-                        f'                            <clipitem id="clipitem-{clip_num}-audio">',
-                        f'                                <n>{file_name}</n>',
-                        f'                                <file id="{file_info["file_id"]}"/>',
-                        '                            </clipitem>',
-                        '                        </track>',
-                        '                    </audio>',
-                    ])
-                
-                part_lines.extend([
-                    '                </media>',
-                    '            </clip>',
-                ])
-            
-            part_lines.extend([
-                '        </children>',
-                '    </bin>',
-                '',
-                '    <!-- Empty sequence required for DaVinci Resolve to import bins properly -->',
-                f'    <sequence id="media-seq-{part_idx + 1}">',
-                f'        <name>Media Part {part_idx + 1} - Import Helper</name>',
-                '        <rate>',
-                f'            <timebase>{fps_int}</timebase>',
-                '            <ntsc>FALSE</ntsc>',
-                '        </rate>',
-                '        <duration>1</duration>',
-                '        <timecode>',
-                '            <rate>',
-                f'                <timebase>{fps_int}</timebase>',
-                '                <ntsc>FALSE</ntsc>',
-                '            </rate>',
-                '            <string>01:00:00:00</string>',
-                '            <frame>108000</frame>',
-                '            <displayformat>NDF</displayformat>',
-                '        </timecode>',
-                '        <media>',
-                '            <video>',
-                '                <track/>',
-                '            </video>',
-                '            <audio>',
-                '                <track/>',
-                '            </audio>',
-                '        </media>',
-                '    </sequence>',
-                '</xmeml>',
-            ])
-            
-            part_path = Path(f"{base_path}_media_part{part_idx + 1}.xml")
-            with open(part_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(part_lines))
-            
-            generated_paths.append(str(part_path))
-            logger.info(f"Saved media XML part {part_idx + 1}: {part_path} ({len(files_subset)} files)")
+            part_idx += 1
+            _write_media_xml_part(
+                files_subset, 
+                part_idx, 
+                f"{base_path}_media_part{part_idx}.xml",
+                fps_int,
+                generated_paths,
+                logger
+            )
+        
+        # Generate separate XMLs for conflicting files (one file per XML)
+        for conflict_path, conflict_info in conflicting_files:
+            part_idx += 1
+            folder_name = Path(conflict_path).parent.name
+            # Sanitize folder name for filename
+            safe_folder = ''.join(c for c in folder_name if c.isalnum() or c in '_-')[:20]
+            _write_media_xml_part(
+                {conflict_path: conflict_info},
+                part_idx,
+                f"{base_path}_media_conflict_{part_idx}_{safe_folder}.xml",
+                fps_int,
+                generated_paths,
+                logger,
+                bin_name_override=f"Media - {folder_name}"
+            )
     
     return generated_paths
+
+
+def _write_media_xml_part(
+    files_subset: dict,
+    part_idx: int,
+    output_path: str,
+    fps_int: int,
+    generated_paths: list,
+    logger,
+    bin_name_override: str = None
+):
+    """Write a single media XML part file."""
+    bin_name = bin_name_override or f"Media Part {part_idx}"
+    
+    part_lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE xmeml>',
+        '<xmeml version="4">',
+        '    <bin>',
+        f'        <n>{bin_name}</n>',
+        '        <children>',
+    ]
+    
+    for file_path, file_info in files_subset.items():
+        # Make clip name unique by including parent folder
+        folder_name = Path(file_path).parent.name
+        base_name = Path(file_path).name
+        unique_name = escape_xml(f"{folder_name}_{base_name}")
+        
+        path_url = format_path_url(file_path)
+        file_ext = Path(file_path).suffix.lower()
+        duration_frames = file_info['duration_frames']
+        
+        video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+        audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+        is_video = file_ext in video_exts
+        is_audio = file_ext in audio_exts
+        
+        clip_num = file_info["file_id"].replace("file-", "")
+        
+        part_lines.extend([
+            f'            <clip id="clip-{clip_num}">',
+            f'                <uuid>{file_info["uuid"]}</uuid>',
+            f'                <n>{unique_name}</n>',
+            '                <rate>',
+            f'                    <timebase>{fps_int}</timebase>',
+            '                    <ntsc>FALSE</ntsc>',
+            '                </rate>',
+            '                <media>',
+            '                    <video>',
+            '                        <track>',
+            f'                            <clipitem id="clipitem-{clip_num}">',
+            f'                                <n>{unique_name}</n>',
+            f'                                <file id="{file_info["file_id"]}">',
+            f'                                    <n>{unique_name}</n>',
+            f'                                    <pathurl>{path_url}</pathurl>',
+            '                                    <rate>',
+            f'                                        <timebase>{fps_int}</timebase>',
+            '                                        <ntsc>FALSE</ntsc>',
+            '                                    </rate>',
+            f'                                    <duration>{duration_frames}</duration>',
+            '                                    <timecode>',
+            '                                        <rate>',
+            f'                                            <timebase>{fps_int}</timebase>',
+            '                                            <ntsc>FALSE</ntsc>',
+            '                                        </rate>',
+            '                                        <string>00:00:00:00</string>',
+            '                                        <frame>0</frame>',
+            '                                    </timecode>',
+            '                                </file>',
+            '                            </clipitem>',
+            '                        </track>',
+            '                    </video>',
+        ])
+        
+        # Add audio section for video and audio files
+        if is_video or is_audio:
+            part_lines.extend([
+                '                    <audio>',
+                '                        <track>',
+                f'                            <clipitem id="clipitem-{clip_num}-audio">',
+                f'                                <n>{unique_name}</n>',
+                f'                                <file id="{file_info["file_id"]}"/>',
+                '                            </clipitem>',
+                '                        </track>',
+                '                    </audio>',
+            ])
+        
+        part_lines.extend([
+            '                </media>',
+            '            </clip>',
+        ])
+    
+    part_lines.extend([
+        '        </children>',
+        '    </bin>',
+        '',
+        '    <!-- Empty sequence required for DaVinci Resolve to import bins properly -->',
+        f'    <sequence id="media-seq-{part_idx}">',
+        f'        <n>{bin_name} - Import Helper</n>',
+        '        <rate>',
+        f'            <timebase>{fps_int}</timebase>',
+        '            <ntsc>FALSE</ntsc>',
+        '        </rate>',
+        '        <duration>1</duration>',
+        '        <timecode>',
+        '            <rate>',
+        f'                <timebase>{fps_int}</timebase>',
+        '                <ntsc>FALSE</ntsc>',
+        '            </rate>',
+        '            <string>01:00:00:00</string>',
+        '            <frame>108000</frame>',
+        '            <displayformat>NDF</displayformat>',
+        '        </timecode>',
+        '        <media>',
+        '            <video>',
+        '                <track/>',
+        '            </video>',
+        '            <audio>',
+        '                <track/>',
+        '            </audio>',
+        '        </media>',
+        '    </sequence>',
+        '</xmeml>',
+    ])
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(part_lines))
+    
+    generated_paths.append(str(output_path))
+    logger.info(f"Saved media XML: {output_path} ({len(files_subset)} files)")
