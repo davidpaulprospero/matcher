@@ -612,7 +612,7 @@ download:
   
   # Timeout settings (seconds)
   search_timeout: 60         # Timeout for search metadata subprocess
-  download_timeout: 600      # Timeout for download/transcode subprocess (10 min)
+  download_timeout: 120      # Timeout per video download (2 min) - will retry with modified keyword on timeout
   
   # Duration tiers
   tiers:
