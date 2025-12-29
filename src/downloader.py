@@ -452,7 +452,8 @@ class VideoDownloader:
         
         filters = [
             f"duration>{min_dur}",
-            f"duration<{max_dur}"
+            f"duration<{max_dur}",
+            "!is_live"  # Skip live streams (they never end)
         ]
         
         if self.download_config.min_views > 0:
@@ -489,7 +490,7 @@ class VideoDownloader:
             '--dump-json',  # Get metadata only, no download
             '--flat-playlist',  # Faster - don't extract full info
             '--no-download',
-            '--match-filter', f"duration>{min_dur} & duration<{max_dur}",
+            '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
         ]
         
         self._add_cookies_to_cmd(cmd)
@@ -577,6 +578,7 @@ VIDEO TITLES:
 For each title, determine if it would provide relevant B-roll footage for the keyword/topic.
 
 REJECT videos that are:
+- Live streams, webcams, 24/7 streams, live cams
 - Sports highlights, game recaps, match footage
 - Music videos, lyric videos, karaoke
 - Gaming content, Let's Play, walkthroughs

@@ -286,7 +286,7 @@ keyword:
     enabled: true  # Enable list item detection
     download_first: true  # Download list item keywords before general keywords
     skip_if_entity_covered: true  # Skip if already in entity extraction
-    keyword_suffix: "aerial"  # Suffix for generated keywords (e.g., "Austin Texas footage")
+    keyword_suffix: "aerial"  # Suffix for generated keywords (e.g., "Austin Texas aerial")
 
 # -----------------------------------------------------------------------------
 # NEGATIVE MATCHING (What NOT to match)
@@ -577,7 +577,7 @@ download:
   delay_between_keywords: 1.0
   
   # Title blacklist - skip videos containing these terms (case-insensitive)
-  # Useful for filtering out sports highlights, music videos, etc.
+  # Useful for filtering out sports highlights, music videos, live streams, etc.
   title_blacklist:
     - "highlights"
     - "basketball"
@@ -600,6 +600,14 @@ download:
     - "espn"
     - "goals"
     - "touchdowns"
+    - "live stream"
+    - "livestream"
+    - "webcam"
+    - "live cam"
+    - "24/7"
+    - "24 7"
+    - "lofi"
+    - "lo-fi"
   
   # LLM Title Filter - use AI to check if video titles are relevant
   # This runs BEFORE downloading, saving bandwidth and time
