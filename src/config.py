@@ -466,6 +466,19 @@ class ImageSearchConfig:
 
 
 @dataclass
+class ListDetectionConfig:
+    """List-based keyword detection settings
+    
+    Detects numbered lists in voiceover (e.g., "Number 10 Austin, Texas")
+    and ensures each list item gets a guaranteed download keyword.
+    """
+    enabled: bool = True
+    download_first: bool = True  # Download list keywords before general keywords
+    skip_if_entity_covered: bool = True  # Skip if already in entity extraction
+    keyword_suffix: str = "footage"  # Suffix for generated keywords
+
+
+@dataclass
 class KeywordConfig:
     """Keyword extraction settings"""
     provider: str = "gemini"  # gemini, anthropic, tfidf
@@ -473,6 +486,9 @@ class KeywordConfig:
     # Extraction settings
     max_keywords: int = 30
     min_keyword_length: int = 3
+    
+    # List detection
+    list_detection: ListDetectionConfig = None
     
     # Entity extraction
     extract_entities: bool = True
@@ -493,6 +509,10 @@ class KeywordConfig:
     
     # Batch processing
     batch_size: int = 50
+    
+    def __post_init__(self):
+        if self.list_detection is None:
+            self.list_detection = ListDetectionConfig()
 
 
 @dataclass

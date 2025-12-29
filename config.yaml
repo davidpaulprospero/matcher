@@ -278,6 +278,15 @@ keyword:
   # Extraction settings
   max_keywords: 30
   min_keyword_length: 3
+  
+  # List-based keyword detection
+  # Detects numbered lists (e.g., "Number 10 Austin, Texas") and ensures
+  # each list item gets a guaranteed download keyword
+  list_detection:
+    enabled: true  # Enable list item detection
+    download_first: true  # Download list item keywords before general keywords
+    skip_if_entity_covered: true  # Skip if already in entity extraction
+    keyword_suffix: "aerial"  # Suffix for generated keywords (e.g., "Austin Texas footage")
 
 # -----------------------------------------------------------------------------
 # NEGATIVE MATCHING (What NOT to match)
