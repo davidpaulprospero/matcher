@@ -817,87 +817,117 @@ class Pipeline:
     
     def _detect_list_items(self, segments: List[dict]) -> List[dict]:
         """
-        Detect numbered list items from voiceover segments.
+        Detect numbered list items from voiceover segments using LLM.
         
-        Detects patterns like:
-        - "Number 10 Austin, Texas"
-        - "Number 9, Miami, Florida"
-        - "Number one, New York City"
-        - "#5 Denver, Colorado"
-        - "10. Austin, Texas"
+        Uses Gemini to analyze the transcript and identify countdown/countup lists
+        like "Top 10 cities", "Number 5: Denver", etc.
         
         Returns list of dicts with:
         - number: The list number (int)
         - text: The item text (e.g., "Austin, Texas")
-        - keyword: Generated search keyword
-        - segment_index: Which segment it was found in
+        - segment_index: Which segment it was found in (approximate)
         """
-        import re
+        import json
         
-        list_items = []
-        seen_items = set()  # Avoid duplicates
+        config = self.config
+        list_config = getattr(config.keyword, 'list_detection', None)
         
-        # Patterns to match numbered lists
-        # These patterns capture the number and the place name (typically City, State format)
-        patterns = [
-            # "Number 10 Austin" or "Number ten, Austin" - with word or digit
-            r'[Nn]umber\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)[,.\s]+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
-            # "#10 Austin" or "#10, Austin"  
-            r'#(\d+)[,.\s]+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
-            # "8. Atlanta" anywhere in text (with digit 1-20)
-            r'(?:^|[.\s])(\d{1,2})\.\s+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
-        ]
+        if not list_config or not getattr(list_config, 'enabled', False):
+            return []
         
-        # Number word to int mapping
-        word_to_num = {
-            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
-        }
+        # Combine all segment text for analysis
+        full_text = " ".join(seg.get('text', '') for seg in segments[:200])  # First 200 segments
         
-        for seg_idx, seg in enumerate(segments):
-            text = seg.get('text', '')
+        if len(full_text) < 100:
+            return []
+        
+        # Truncate if too long (keep first ~8000 chars for API limits)
+        if len(full_text) > 8000:
+            full_text = full_text[:8000] + "..."
+        
+        try:
+            import google.generativeai as genai
             
-            for pattern in patterns:
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    num_str = match.group(1).lower()
-                    item_text = match.group(2).strip().rstrip(',.')
-                    
-                    # Convert number word to int if needed
-                    if num_str in word_to_num:
-                        num = word_to_num[num_str]
-                    else:
-                        try:
-                            num = int(num_str)
-                        except ValueError:
-                            continue
-                    
-                    # Skip numbers > 20 (unlikely to be list numbers)
-                    if num > 20:
-                        continue
-                    
-                    # Clean up item text (remove trailing state abbreviations or extra words)
-                    # "Austin, Texas" -> keep as is
-                    # "Austin, Texas. We have to" -> "Austin, Texas"
-                    item_text = re.sub(r'\s+(is|was|has|had|the|a|an|we|and|but|so|now).*$', '', item_text, flags=re.IGNORECASE)
-                    item_text = item_text.strip().rstrip(',.')
-                    
-                    # Skip if too short or already seen
-                    if len(item_text) < 3 or item_text.lower() in seen_items:
-                        continue
-                    
-                    seen_items.add(item_text.lower())
-                    
+            api_key = os.getenv("GEMINI_API_KEY", "")
+            if not api_key:
+                logger.warning("No GEMINI_API_KEY for list detection")
+                return []
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            
+            prompt = f"""Analyze this transcript and identify if it contains a NUMBERED LIST or COUNTDOWN.
+
+Look for patterns like:
+- "Number 10: Austin, Texas" / "Number 9: Miami"
+- "Top 10 cities where..." then "First... Second... Third..."
+- "#5 Denver" / "#4 Seattle"
+- "10. Austin" / "9. Miami" (at start of sentences)
+
+TRANSCRIPT:
+{full_text}
+
+If this transcript contains a numbered list (like a "Top 10" countdown), extract each item.
+
+Respond with JSON only:
+{{
+  "has_list": true/false,
+  "list_type": "countdown" or "countup" or null,
+  "items": [
+    {{"number": 10, "name": "Austin, Texas"}},
+    {{"number": 9, "name": "Miami, Florida"}},
+    ...
+  ]
+}}
+
+If no numbered list is found, respond with:
+{{"has_list": false, "list_type": null, "items": []}}
+
+IMPORTANT: Only extract ACTUAL numbered list items (cities, places, things being ranked).
+Do NOT extract random numbers or percentages from the text."""
+
+            response = model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Clean up response (remove markdown code blocks if present)
+            if response_text.startswith('```'):
+                response_text = response_text.split('```')[1]
+                if response_text.startswith('json'):
+                    response_text = response_text[4:]
+            response_text = response_text.strip()
+            
+            data = json.loads(response_text)
+            
+            if not data.get('has_list') or not data.get('items'):
+                logger.debug("LLM detected no list in transcript")
+                return []
+            
+            list_items = []
+            for item in data['items']:
+                num = item.get('number', 0)
+                name = item.get('name', '')
+                
+                if num > 0 and name and len(name) >= 2:
                     list_items.append({
                         'number': num,
-                        'text': item_text,
-                        'segment_index': seg_idx
+                        'text': name,
+                        'segment_index': 0  # Approximate
                     })
-        
-        # Sort by number (descending for countdowns like "10, 9, 8...")
-        list_items.sort(key=lambda x: x['number'], reverse=True)
-        
-        return list_items
+            
+            # Sort by number (descending for countdowns)
+            list_items.sort(key=lambda x: x['number'], reverse=True)
+            
+            if list_items:
+                logger.info(f"LLM detected {len(list_items)} list items: {[i['text'] for i in list_items[:5]]}")
+            
+            return list_items
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse LLM list detection response: {e}")
+            return []
+        except Exception as e:
+            logger.warning(f"LLM list detection failed: {e}")
+            return []
     
     def _generate_list_keywords(self, list_items: List[dict], entity_texts: set, suffix: str = "footage") -> List[str]:
         """

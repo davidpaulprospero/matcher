@@ -878,12 +878,16 @@ Only output the JSON array, no other text."""
                     # Create DownloadedVideo for existing file
                     video_path = keyword_dir / existing_file
                     already_downloaded.append(DownloadedVideo(
-                        path=str(video_path),
-                        keyword=keyword,
-                        tier=tier,
-                        duration=0,  # Will be updated if info.json exists
+                        file=str(video_path),
+                        url=f"https://www.youtube.com/watch?v={vid_id}",
                         title=existing_file,
-                        video_id=vid_id
+                        channel="",
+                        upload_date="",
+                        duration=0,  # Will be updated if info.json exists
+                        duration_tier=tier,
+                        keyword=keyword,
+                        download_date="",
+                        license="Unknown"
                     ))
                     break
             if not found:
