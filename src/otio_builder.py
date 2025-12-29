@@ -31,6 +31,23 @@ def _to_windows_path(path: str) -> str:
     return abs_path.replace('/', '\\')
 
 
+def escape_xml(text: str) -> str:
+    """Escape special XML characters in text."""
+    return (str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&apos;'))
+
+
+def format_path_url(file_path: str) -> str:
+    """Format file path for DaVinci Resolve XML - use standard path with forward slashes."""
+    path = str(Path(file_path).resolve()).replace('\\', '/')
+    # Return plain path - DaVinci prefers standard paths over file:// URLs
+    return path
+
+
 def _to_python_type(value):
     """Convert numpy types to native Python types for OTIO compatibility."""
     if value is None:
@@ -176,8 +193,11 @@ def create_clip_with_timewarp(
     # Create absolute Windows path with backslashes for DaVinci Resolve
     abs_path = _to_windows_path(source_path)
     
-    # Get filename for ExternalReference name
+    # Make media reference name unique by including parent folder
+    # This prevents DaVinci Resolve from confusing clips with same filename in different folders
+    folder_name = Path(source_path).parent.name
     filename = Path(source_path).name
+    unique_media_name = f"{folder_name}_{filename}"
     
     # Determine available_range for the media file
     # If we don't know the media duration, estimate from source_start + source_duration
@@ -197,7 +217,7 @@ def create_clip_with_timewarp(
         target_url=abs_path,
         available_range=available_range
     )
-    media_ref.name = filename  # Set name as attribute
+    media_ref.name = unique_media_name  # Unique name includes folder
     
     # IMPORTANT: Use round() to avoid floating-point precision drift
     # This prevents timing deviation over many clips
@@ -421,8 +441,10 @@ def create_timeline(
         }
         
         # Create primary video clip (V1)
+        clip_folder = Path(vid_seg.source_file).parent.name
+        clip_stem = Path(vid_seg.source_file).stem
         v1_clip = create_clip_with_timewarp(
-            name=f"{Path(vid_seg.source_file).stem} [{vid_seg.start_time:.1f}s]",
+            name=f"{clip_folder}_{clip_stem} [{vid_seg.start_time:.1f}s]",
             source_path=vid_seg.source_file,
             source_start=source_start,
             source_duration=source_duration,
@@ -440,7 +462,7 @@ def create_timeline(
         
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
-            name=f"Audio: {Path(vid_seg.source_file).stem}",
+            name=f"Audio: {clip_folder}_{clip_stem}",
             source_path=vid_seg.source_file,
             source_start=source_start,
             source_duration=source_duration,
@@ -467,8 +489,10 @@ def create_timeline(
                 }
                 
                 # Alternative video clip
+                alt_folder = Path(alt_seg.source_file).parent.name
+                alt_stem = Path(alt_seg.source_file).stem
                 alt_v_clip = create_clip_with_timewarp(
-                    name=f"ALT{alt_idx+1}: {Path(alt_seg.source_file).stem}",
+                    name=f"ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
                     source_path=alt_seg.source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
@@ -484,7 +508,7 @@ def create_timeline(
                 
                 # Alternative audio clip
                 alt_a_clip = create_clip_with_timewarp(
-                    name=f"Audio ALT{alt_idx+1}: {Path(alt_seg.source_file).stem}",
+                    name=f"Audio ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
                     source_path=alt_seg.source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
@@ -535,8 +559,10 @@ def create_timeline(
                 
                 # Secondary video clip
                 sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
+                sec_folder = Path(sec_seg.source_file).parent.name
+                sec_stem = Path(sec_seg.source_file).stem
                 sec_v_clip = create_clip_with_timewarp(
-                    name=f"{sec_label}: {Path(sec_seg.source_file).stem}",
+                    name=f"{sec_label}: {sec_folder}_{sec_stem}",
                     source_path=sec_seg.source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
@@ -553,7 +579,7 @@ def create_timeline(
                 
                 # Secondary audio clip
                 sec_a_clip = create_clip_with_timewarp(
-                    name=f"Audio {sec_label}: {Path(sec_seg.source_file).stem}",
+                    name=f"Audio {sec_label}: {sec_folder}_{sec_stem}",
                     source_path=sec_seg.source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
@@ -610,8 +636,10 @@ def create_timeline(
                 }
                 
                 # Strategy video clip
+                strat_folder = Path(strat_seg.source_file).parent.name
+                strat_stem = Path(strat_seg.source_file).stem
                 strat_v_clip = create_clip_with_timewarp(
-                    name=f"{strategy.upper()}: {Path(strat_seg.source_file).stem}",
+                    name=f"{strategy.upper()}: {strat_folder}_{strat_stem}",
                     source_path=strat_seg.source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
@@ -630,7 +658,7 @@ def create_timeline(
                 
                 # Strategy audio clip
                 strat_a_clip = create_clip_with_timewarp(
-                    name=f"Audio {strategy.upper()}: {Path(strat_seg.source_file).stem}",
+                    name=f"Audio {strategy.upper()}: {strat_folder}_{strat_stem}",
                     source_path=strat_seg.source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
@@ -666,7 +694,9 @@ def create_timeline(
     if voiceover_path and matches:
         # Create absolute path for voiceover (Windows format for DaVinci)
         abs_vo_path = _to_windows_path(voiceover_path)
+        vo_folder = Path(voiceover_path).parent.name
         vo_filename = Path(voiceover_path).name
+        vo_unique_name = f"{vo_folder}_{vo_filename}"
         
         # Total duration should match total frames accumulated
         total_frames = timeline_frames
@@ -682,7 +712,7 @@ def create_timeline(
             target_url=abs_vo_path,
             available_range=vo_available_range
         )
-        vo_ref.name = vo_filename  # Set name as attribute
+        vo_ref.name = vo_unique_name  # Unique name includes folder
         
         vo_clip = otio.schema.Clip(
             name="Voiceover",
@@ -807,16 +837,18 @@ def _add_entity_images_to_track(
                 if img_idx >= num_images - remaining_frames:
                     clip_frames += 1
                 
-                # Get just the filename for the clip/reference name
+                # Get folder and filename for unique reference name
                 image_path_obj = Path(image_path)
+                image_folder = image_path_obj.parent.name
                 image_filename = image_path_obj.name
+                image_unique_name = f"{image_folder}_{image_filename}"
                 
                 # Convert to Windows path format with backslashes for Resolve
                 image_path_resolved = _to_windows_path(image_path)
                 
                 # Create external reference matching Resolve's format:
                 # - available_range = 1 frame (still image has 1 frame)
-                # - name = filename
+                # - name = unique name including folder
                 image_ref = otio.schema.ExternalReference(
                     target_url=image_path_resolved,
                     available_range=otio.opentime.TimeRange(
@@ -824,11 +856,11 @@ def _add_entity_images_to_track(
                         duration=otio.opentime.RationalTime(1, rate)  # 1 frame for still
                     )
                 )
-                image_ref.name = image_filename
+                image_ref.name = image_unique_name
                 
                 # Create clip with source_range = display duration
                 image_clip = otio.schema.Clip(
-                    name=image_filename,
+                    name=image_unique_name,
                     source_range=otio.opentime.TimeRange(
                         start_time=otio.opentime.RationalTime(0, rate),
                         duration=otio.opentime.RationalTime(clip_frames, rate)
@@ -941,9 +973,11 @@ def _add_entity_videos_to_track(
                 
                 clip_duration_sec = clip_frames / rate
                 
-                # Get just the filename for the clip name
+                # Get folder and filename for unique reference name
                 video_path_obj = Path(video_path)
+                video_folder = video_path_obj.parent.name
                 video_filename = video_path_obj.name
+                video_unique_name = f"{video_folder}_{video_filename}"
                 
                 # Convert to Windows path format with backslashes for Resolve
                 video_path_resolved = _to_windows_path(video_path)
@@ -963,12 +997,12 @@ def _add_entity_videos_to_track(
                         duration=otio.opentime.RationalTime(actual_duration_frames, rate)
                     )
                 )
-                video_ref.name = video_filename
+                video_ref.name = video_unique_name
                 
                 # Create clip - use portion of video that fits segment
                 # Start from beginning, play for clip_frames duration
                 video_clip = otio.schema.Clip(
-                    name=video_filename,
+                    name=video_unique_name,
                     source_range=otio.opentime.TimeRange(
                         start_time=otio.opentime.RationalTime(0, rate),
                         duration=otio.opentime.RationalTime(clip_frames, rate)
@@ -1765,20 +1799,6 @@ def generate_resolve_xml_with_bins(
             for m in matches
         )
         add_file(voiceover_path, vo_duration)
-    
-    def format_path_url(file_path: str) -> str:
-        """Format file path for DaVinci Resolve - use standard Windows path, not file:// URL."""
-        path = str(Path(file_path).resolve()).replace('\\', '/')
-        # Return plain path - DaVinci prefers standard paths over file:// URLs
-        return path
-    
-    def escape_xml(text: str) -> str:
-        return (str(text)
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace('"', '&quot;')
-            .replace("'", '&apos;'))
     
     # Calculate total timeline duration
     total_frames = 0
