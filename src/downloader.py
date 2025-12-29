@@ -157,6 +157,7 @@ class VideoDownloader:
         # Priority: cookies_from_browser > cookies_path > auto-detect cookies.txt
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
         self._cookies_path = None
+        self._last_download_timed_out = False  # Track timeouts for retry logic
         
         if self._cookies_from_browser:
             logger.info(f"Using cookies from browser: {self._cookies_from_browser}")
@@ -888,11 +889,20 @@ Only output the JSON array, no other text."""
         output_dir: Path,
         keyword: str,
         tier: str,
-        existing_before: set
+        existing_before: set,
+        timeout_override: int = None
     ) -> List[DownloadedVideo]:
-        """Execute download command and process results"""
-        # Use config timeout or default (10 min)
-        download_timeout = getattr(self.download_config, 'download_timeout', 600)
+        """Execute download command and process results
+        
+        Returns:
+            List of downloaded videos, or empty list on failure/timeout.
+            Sets self._last_download_timed_out = True if timeout occurred.
+        """
+        # Use override, config, or default (2 min for download, separate from 10 min transcode)
+        download_timeout = timeout_override or getattr(self.download_config, 'download_timeout', 120)
+        
+        # Track timeout for retry logic
+        self._last_download_timed_out = False
         
         try:
             process = subprocess.Popen(
@@ -908,7 +918,8 @@ Only output the JSON array, no other text."""
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate()
-                logger.warning(f"Timeout downloading '{keyword}' ({tier})")
+                logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s")
+                self._last_download_timed_out = True
                 return []
             
             # Only log actual errors
@@ -1030,7 +1041,10 @@ Only output the JSON array, no other text."""
         tiers: List[str] = None,
         topic: str = ""
     ) -> List[DownloadedVideo]:
-        """Download videos for a keyword across specified tiers"""
+        """Download videos for a keyword across specified tiers
+        
+        If download times out, will retry with modified keyword (up to 2 retries).
+        """
         if tiers is None:
             tiers = list(self.DURATION_TIERS.keys())
         
@@ -1059,6 +1073,17 @@ Only output the JSON array, no other text."""
             logger.info(f"  [{tier}] Downloading...")
             downloaded = self._download_single(keyword, tier, output_dir, topic)
             
+            # Check for timeout and retry with modified keywords
+            retry_attempt = 0
+            while not downloaded and getattr(self, '_last_download_timed_out', False) and retry_attempt < 2:
+                alt_keyword = self._get_retry_keyword(keyword, retry_attempt)
+                if alt_keyword and alt_keyword != keyword:
+                    logger.info(f"  [{tier}] Timeout - retrying with: '{alt_keyword}'")
+                    downloaded = self._download_single(alt_keyword, tier, output_dir, topic)
+                    retry_attempt += 1
+                else:
+                    break
+            
             if downloaded:
                 logger.info(f"  [{tier}] ✓ {len(downloaded)} video(s)")
                 all_downloaded.extend(downloaded)
@@ -1084,6 +1109,32 @@ Only output the JSON array, no other text."""
                 logger.debug(f"  [{tier}] Checkpoint saved")
         
         return all_downloaded
+    
+    def _get_retry_keyword(self, keyword: str, retry_count: int) -> str:
+        """Generate alternative keyword for retry after timeout
+        
+        Args:
+            keyword: Original keyword that timed out
+            retry_count: Which retry this is (0 = first retry, 1 = second retry)
+            
+        Returns:
+            Modified keyword, or original if no modification possible
+        """
+        words = keyword.split()
+        
+        if retry_count == 0:
+            # First retry: simplify by taking first 3 words + "footage"
+            if len(words) > 3:
+                return ' '.join(words[:3]) + " footage"
+            elif "footage" not in keyword.lower():
+                return keyword + " footage"
+        
+        elif retry_count == 1:
+            # Second retry: just the core concept (first 2 words)
+            if len(words) >= 2:
+                return ' '.join(words[:2])
+            
+        return keyword
     
     def download_all(
         self,

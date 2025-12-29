@@ -113,28 +113,21 @@ def encode_path_for_xml_url(path: str) -> str:
     """
     Format a file path for use in XML pathurl elements.
     
-    Note: DaVinci Resolve does NOT want URL-encoded paths.
-    Spaces are OK, but characters like % & $ # in filenames will crash it.
-    Those should be sanitized at download time, not here.
+    DaVinci Resolve expects standard Windows paths (E:/folder/file.mp4),
+    NOT file:// URL format (file://localhost/E:/...) which causes hangs.
     
     Args:
         path: File path (can be Windows or Unix style)
         
     Returns:
-        file:// URL (without URL encoding)
+        Clean file path for DaVinci Resolve (forward slashes)
     """
     # First sanitize the path (remove extended-length prefix, convert slashes)
     path = sanitize_path_for_url(path)
     
-    # Format as file:// URL (no encoding - DaVinci doesn't want it)
-    if len(path) >= 2 and path[1] == ':':
-        # Windows path like E:/folder/file.mp4
-        return f"file://localhost/{path}"
-    elif path.startswith('/'):
-        # Unix path
-        return f"file://localhost{path}"
-    else:
-        return f"file://localhost/{path}"
+    # Return plain path with forward slashes - no file:// prefix
+    # DaVinci Resolve handles this format natively
+    return path
 
 
 def create_clip_with_timewarp(
@@ -1333,7 +1326,9 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     # =========================================================================
     for i, track in enumerate(video_tracks):
         track_timeline = otio.schema.Timeline(name=track.name)
-        track_timeline.tracks.append(track.clone())
+        cloned_track = track.clone()
+        cloned_track.enabled = True  # Enable track in standalone file
+        track_timeline.tracks.append(cloned_track)
         
         clip_count = sum(1 for item in track if isinstance(item, otio.schema.Clip))
         track_path = f"{base_path}_V{i+1}_{safe_name(track.name)}.otio"
@@ -1345,7 +1340,9 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     for track in audio_tracks:
         if 'voiceover' in track.name.lower() or 'a8' in track.name.lower():
             vo_timeline = otio.schema.Timeline(name="Voiceover")
-            vo_timeline.tracks.append(track.clone())
+            cloned_vo = track.clone()
+            cloned_vo.enabled = True  # Enable track in standalone file
+            vo_timeline.tracks.append(cloned_vo)
             
             vo_path = f"{base_path}_A8_voiceover.otio"
             otio.adapters.write_to_file(vo_timeline, vo_path)
@@ -1978,17 +1975,10 @@ def generate_resolve_xml_with_bins(
         add_file(voiceover_path, vo_duration)
     
     def format_path_url(file_path: str) -> str:
-        """Format file path as proper file:// URL (no encoding - DaVinci doesn't want it)."""
+        """Format file path for DaVinci Resolve - use standard Windows path, not file:// URL."""
         path = str(Path(file_path).resolve()).replace('\\', '/')
-        
-        if len(path) >= 2 and path[1] == ':':
-            # Windows path like E:/folder/file.mp4
-            return f"file://localhost/{path}"
-        elif path.startswith('/'):
-            # Unix path
-            return f"file://localhost{path}"
-        else:
-            return f"file://localhost/{path}"
+        # Return plain path - DaVinci prefers standard paths over file:// URLs
+        return path
     
     def escape_xml(text: str) -> str:
         return (str(text)
@@ -2328,6 +2318,33 @@ def generate_resolve_xml_with_bins(
             part_lines.extend([
                 '        </children>',
                 '    </bin>',
+                '',
+                '    <!-- Empty sequence required for DaVinci Resolve to import bins properly -->',
+                f'    <sequence id="media-seq-{part_idx + 1}">',
+                f'        <name>Media Part {part_idx + 1} - Import Helper</name>',
+                '        <rate>',
+                f'            <timebase>{fps_int}</timebase>',
+                '            <ntsc>FALSE</ntsc>',
+                '        </rate>',
+                '        <duration>1</duration>',
+                '        <timecode>',
+                '            <rate>',
+                f'                <timebase>{fps_int}</timebase>',
+                '                <ntsc>FALSE</ntsc>',
+                '            </rate>',
+                '            <string>01:00:00:00</string>',
+                '            <frame>108000</frame>',
+                '            <displayformat>NDF</displayformat>',
+                '        </timecode>',
+                '        <media>',
+                '            <video>',
+                '                <track/>',
+                '            </video>',
+                '            <audio>',
+                '                <track/>',
+                '            </audio>',
+                '        </media>',
+                '    </sequence>',
                 '</xmeml>',
             ])
             

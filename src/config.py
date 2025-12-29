@@ -597,7 +597,7 @@ class DownloadConfig:
     
     # Timeout settings
     search_timeout: int = 60  # Seconds for search metadata subprocess
-    download_timeout: int = 600  # Seconds for download/transcode subprocess (10 min)
+    download_timeout: int = 120  # Seconds per video download (2 min) - retries with modified keyword on timeout
     
     # Duration tiers (can be overridden)
     tiers: dict = field(default_factory=lambda: {
