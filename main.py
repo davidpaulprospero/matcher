@@ -815,6 +815,128 @@ class Pipeline:
         
         return optimized
     
+    def _detect_list_items(self, segments: List[dict]) -> List[dict]:
+        """
+        Detect numbered list items from voiceover segments.
+        
+        Detects patterns like:
+        - "Number 10 Austin, Texas"
+        - "Number 9, Miami, Florida"
+        - "Number one, New York City"
+        - "#5 Denver, Colorado"
+        - "10. Austin, Texas"
+        
+        Returns list of dicts with:
+        - number: The list number (int)
+        - text: The item text (e.g., "Austin, Texas")
+        - keyword: Generated search keyword
+        - segment_index: Which segment it was found in
+        """
+        import re
+        
+        list_items = []
+        seen_items = set()  # Avoid duplicates
+        
+        # Patterns to match numbered lists
+        # These patterns capture the number and the place name (typically City, State format)
+        patterns = [
+            # "Number 10 Austin" or "Number ten, Austin" - with word or digit
+            r'[Nn]umber\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)[,.\s]+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
+            # "#10 Austin" or "#10, Austin"  
+            r'#(\d+)[,.\s]+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
+            # "8. Atlanta" anywhere in text (with digit 1-20)
+            r'(?:^|[.\s])(\d{1,2})\.\s+([A-Z][a-zA-Z]+(?:,?\s+[A-Z][a-zA-Z]+)?)',
+        ]
+        
+        # Number word to int mapping
+        word_to_num = {
+            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
+        }
+        
+        for seg_idx, seg in enumerate(segments):
+            text = seg.get('text', '')
+            
+            for pattern in patterns:
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    num_str = match.group(1).lower()
+                    item_text = match.group(2).strip().rstrip(',.')
+                    
+                    # Convert number word to int if needed
+                    if num_str in word_to_num:
+                        num = word_to_num[num_str]
+                    else:
+                        try:
+                            num = int(num_str)
+                        except ValueError:
+                            continue
+                    
+                    # Skip numbers > 20 (unlikely to be list numbers)
+                    if num > 20:
+                        continue
+                    
+                    # Clean up item text (remove trailing state abbreviations or extra words)
+                    # "Austin, Texas" -> keep as is
+                    # "Austin, Texas. We have to" -> "Austin, Texas"
+                    item_text = re.sub(r'\s+(is|was|has|had|the|a|an|we|and|but|so|now).*$', '', item_text, flags=re.IGNORECASE)
+                    item_text = item_text.strip().rstrip(',.')
+                    
+                    # Skip if too short or already seen
+                    if len(item_text) < 3 or item_text.lower() in seen_items:
+                        continue
+                    
+                    seen_items.add(item_text.lower())
+                    
+                    list_items.append({
+                        'number': num,
+                        'text': item_text,
+                        'segment_index': seg_idx
+                    })
+        
+        # Sort by number (descending for countdowns like "10, 9, 8...")
+        list_items.sort(key=lambda x: x['number'], reverse=True)
+        
+        return list_items
+    
+    def _generate_list_keywords(self, list_items: List[dict], entity_texts: set, suffix: str = "footage") -> List[str]:
+        """
+        Generate download keywords from detected list items.
+        
+        Args:
+            list_items: Detected list items from _detect_list_items()
+            entity_texts: Set of entity texts already covered (lowercase)
+            suffix: Suffix to add to keywords (e.g., "footage")
+            
+        Returns:
+            List of keywords, skipping items already covered by entities
+        """
+        keywords = []
+        
+        for item in list_items:
+            item_text = item['text']
+            item_lower = item_text.lower()
+            
+            # Skip if this item is already covered by entity extraction
+            # Check if any entity contains this item or vice versa
+            is_covered = False
+            for entity in entity_texts:
+                if item_lower in entity or entity in item_lower:
+                    is_covered = True
+                    logger.debug(f"List item '{item_text}' already covered by entity")
+                    break
+            
+            if is_covered:
+                continue
+            
+            # Generate keyword
+            # Clean up: "Austin, Texas" -> "Austin Texas"
+            clean_text = item_text.replace(',', ' ').replace('  ', ' ').strip()
+            keyword = f"{clean_text} {suffix}"
+            keywords.append(keyword)
+        
+        return keywords
+    
     def _generate_topic_from_segments(self) -> str:
         """Generate topic context from voiceover segments using LLM or heuristics"""
         if not self.voiceover_segments:
@@ -2503,6 +2625,45 @@ Topic:"""
                     self.checkpoint.save("ENTITY_VIDEOS", {
                         'video_count': entity_vid_count
                     })
+            
+            # Stage 1.7: List-based keyword detection
+            # Detects numbered lists and prepends guaranteed keywords
+            list_config = getattr(self.config.keyword, 'list_detection', None)
+            if list_config and getattr(list_config, 'enabled', False):
+                list_items = self._detect_list_items(self.voiceover_segments)
+                
+                if list_items:
+                    # Get entity texts to check for coverage
+                    entity_texts = set()
+                    if getattr(list_config, 'skip_if_entity_covered', True):
+                        for e in getattr(self, 'extracted_entities', []):
+                            entity_text = e.get('text', '').lower()
+                            if entity_text:
+                                entity_texts.add(entity_text)
+                    
+                    # Generate keywords from list items
+                    suffix = getattr(list_config, 'keyword_suffix', 'footage')
+                    list_keywords = self._generate_list_keywords(list_items, entity_texts, suffix)
+                    
+                    if list_keywords:
+                        print(f"\n  ─── List Items Detected ({len(list_items)}) ───")
+                        for item in list_items[:5]:
+                            print(f"    #{item['number']}: {item['text']}")
+                        if len(list_items) > 5:
+                            print(f"    ... and {len(list_items) - 5} more")
+                        
+                        print(f"  ✓ Generated {len(list_keywords)} list keywords")
+                        if list_keywords:
+                            print(f"    {', '.join(list_keywords[:3])}")
+                            if len(list_keywords) > 3:
+                                print(f"    ... and {len(list_keywords) - 3} more")
+                        
+                        # Prepend list keywords if download_first is enabled
+                        if getattr(list_config, 'download_first', True):
+                            keywords = list_keywords + [k for k in keywords if k not in list_keywords]
+                            logger.info(f"List keywords prepended: {list_keywords}")
+                        else:
+                            keywords = keywords + [k for k in list_keywords if k not in keywords]
             
             # Stage 2: Download footage
             if not self.config.pipeline.skip_download:
