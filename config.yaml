@@ -88,6 +88,16 @@ transcription:
   absolute_split_threshold: 12.0  # Absolute threshold for very long segments
   min_split_duration: 4.0  # Minimum duration to consider splitting
   
+  # Pause-based splitting (more aggressive, for natural pauses)
+  # Detects silences between SRT segments and splits at natural breaks
+  pause_split:
+    enabled: true  # Enable pause-based splitting
+    min_gap_ms: 300  # Minimum gap between SRT segments to consider a pause (ms)
+    split_at_list_markers: true  # Split after "1.", "2.", etc.
+    split_at_locations: true  # Split at "City, State" patterns
+    split_at_short_phrases: true  # Split very short phrases (< 3 words) with pauses
+    min_phrase_words: 2  # Minimum words to keep in a segment
+  
   # Caching
   cache_transcriptions: true
   cache_dir: transcriptions

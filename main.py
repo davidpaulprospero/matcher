@@ -519,6 +519,10 @@ class Pipeline:
             
             # Apply smart splitting for long segments
             segments = self._optimize_segments(segments)
+            
+            # Apply pause-based splitting for natural breaks
+            segments = self._pause_split_segments(segments)
+            
             return segments
         except ImportError:
             logger.error("srt package not installed. Install with: pip install srt")
@@ -672,6 +676,144 @@ class Pipeline:
             current_time = seg_end
         
         return sub_segments
+    
+    def _pause_split_segments(self, segments: List[dict]) -> List[dict]:
+        """
+        Split segments at natural pauses detected from timing and text patterns.
+        
+        This handles cases like:
+        - "even paradise can break. 8. Atlanta, Georgia, Atlanta was supposed to..."
+        Which should split at each natural pause point.
+        
+        Detection methods:
+        1. List markers: "1.", "2.", "8." etc.
+        2. Location patterns: "Atlanta, Georgia,"
+        3. Short phrases with punctuation
+        4. Gaps between original SRT segments
+        """
+        import re
+        
+        config = self.config
+        pause_config = getattr(config.transcription, 'pause_split', None)
+        
+        # Check if pause splitting is enabled
+        if not pause_config or not getattr(pause_config, 'enabled', False):
+            return segments
+        
+        # Get config options
+        split_list_markers = getattr(pause_config, 'split_at_list_markers', True)
+        split_locations = getattr(pause_config, 'split_at_locations', True)
+        split_short_phrases = getattr(pause_config, 'split_at_short_phrases', True)
+        min_phrase_words = getattr(pause_config, 'min_phrase_words', 2)
+        
+        optimized = []
+        split_count = 0
+        
+        for seg in segments:
+            text = seg['text']
+            start_time = seg['start_time']
+            end_time = seg['end_time']
+            duration = seg['duration']
+            
+            # Build split patterns
+            split_patterns = []
+            
+            if split_list_markers:
+                # Match list markers: "1.", "2.", "8.", "10." etc. followed by space
+                split_patterns.append(r'(?<=\d\.)\s+')
+            
+            if split_locations:
+                # Match after comma before capital letter
+                # This catches "City, State" and similar patterns
+                # e.g., "Atlanta, Georgia," -> split after each comma
+                split_patterns.append(r'(?<=,)\s+(?=[A-Z])')
+            
+            if split_short_phrases:
+                # Split after sentence-ending punctuation
+                split_patterns.append(r'(?<=[.!?])\s+(?=[A-Z0-9])')
+            
+            if not split_patterns:
+                optimized.append(seg)
+                continue
+            
+            # Combine patterns
+            combined_pattern = '|'.join(split_patterns)
+            
+            # Split the text
+            parts = re.split(combined_pattern, text)
+            parts = [p.strip() for p in parts if p.strip()]
+            
+            # Filter out parts that are too short or merge intelligently
+            # Keep: proper nouns (capitalized), sentences (end with .!?)
+            # Merge: bare numbers like "8" or very short generic words
+            valid_parts = []
+            for part in parts:
+                word_count = len(part.split())
+                
+                # Always keep if:
+                # - Has enough words
+                # - Ends with sentence punctuation
+                # - Starts with capital (proper noun/location)
+                # - Contains a comma (location pattern like "Atlanta,")
+                is_proper_noun = part and part[0].isupper()
+                has_comma = ',' in part
+                ends_with_punct = part and part[-1] in '.!?'
+                
+                if (word_count >= min_phrase_words or 
+                    ends_with_punct or 
+                    (is_proper_noun and word_count >= 1) or
+                    has_comma):
+                    valid_parts.append(part)
+                elif valid_parts:
+                    # Merge bare numbers or very short generic words with previous
+                    valid_parts[-1] = valid_parts[-1] + ' ' + part
+                else:
+                    valid_parts.append(part)
+            
+            parts = valid_parts
+            
+            if len(parts) <= 1:
+                optimized.append(seg)
+                continue
+            
+            # Calculate time distribution based on character length
+            total_chars = sum(len(p) for p in parts)
+            if total_chars == 0:
+                optimized.append(seg)
+                continue
+            
+            split_count += 1
+            current_time = start_time
+            
+            for i, part in enumerate(parts):
+                # Proportional duration
+                char_ratio = len(part) / total_chars
+                part_duration = duration * char_ratio
+                part_duration = max(0.3, part_duration)  # Minimum 0.3s
+                
+                part_end = current_time + part_duration
+                if i == len(parts) - 1:
+                    part_end = end_time
+                
+                optimized.append({
+                    'index': seg['index'],
+                    'start_time': round(current_time, 3),
+                    'end_time': round(part_end, 3),
+                    'text': part,
+                    'duration': round(part_end - current_time, 3)
+                })
+                
+                current_time = part_end
+        
+        # Re-index
+        for i, seg in enumerate(optimized):
+            seg['index'] = i + 1
+        
+        if split_count > 0:
+            print(f"  ✓ Pause-split: {split_count} segments split at natural breaks ({len(segments)} → {len(optimized)})")
+            logger.info(f"Pause-based splitting: {split_count} splits, {len(segments)} → {len(optimized)} segments")
+        
+        return optimized
     
     def _generate_topic_from_segments(self) -> str:
         """Generate topic context from voiceover segments using LLM or heuristics"""
