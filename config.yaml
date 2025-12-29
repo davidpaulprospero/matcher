@@ -308,7 +308,7 @@ remix:
   
   # Auto-accept filter (set upfront, skip mid-pipeline prompt)
   # Options: "filtered" (use filtered), "all" (use all videos), "prompt" (ask during pipeline)
-  auto_accept_filter: prompt
+  auto_accept_filter: all
   
   # Logging
   log_level: INFO
@@ -592,10 +592,15 @@ download:
     min_relevance: 0.7  # 0-1, reject if below this
   
   # YouTube authentication - REQUIRED!
-  # YouTube blocks yt-dlp without authentication. Export cookies from browser:
-  # 1. Install browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
-  # 2. Go to youtube.com while logged in
-  # 3. Export cookies and save as cookies.txt in install directory
+  # YouTube blocks yt-dlp without authentication.
+  # 
+  # Option 1 (RECOMMENDED): Extract cookies directly from browser
+  # Set to: chrome, firefox, edge, brave, opera, vivaldi, safari
+  # Note: Browser must be closed for Chrome/Edge. Firefox works while open.
+  cookies_from_browser: firefox
+  
+  # Option 2: Use exported cookies.txt file
+  # Export using browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
   # Leave empty to auto-detect cookies.txt in install/project directory
   cookies_path: ""
   
@@ -697,7 +702,7 @@ output:
   otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
   generate_edl: true
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
-  xml_parts: 4  # Split XML into multiple files (helps with large projects)
+  xml_parts: 6  # Split XML into multiple files (helps with large projects)
   generate_report: true
   
   # Track structure
@@ -708,6 +713,20 @@ output:
   include_strategy_tracks: true
   strategy_tracks:
     - embedding_diversity  # V7 only - V4-V6 are now secondary matches
+  
+  # Variety enforcement - prevents same source video from dominating timeline
+  # This solves the problem of one video being used for 90% of a 30-minute project
+  variety:
+    require_different_source: true  # Each track must use different source video
+    exclude_same_clip: true  # Never use exact same clip on multiple tracks
+    min_time_distance: 10.0  # Clips must be N seconds apart (within same source)
+    min_embedding_distance: 0.3  # Strategy tracks must have distance > this from V1-V3
+    
+    # Timeline variety - IMPORTANT for long projects
+    # Within timeline_variety_window seconds, same source can only appear max_repeats times
+    enforce_timeline_variety: true  # Enable timeline-based variety enforcement
+    timeline_variety_window: 600.0  # 10 minutes - no same source within this window
+    max_source_repeats_in_window: 1  # Max times same source can appear in window
   
   # Markers
   include_speed_markers: true

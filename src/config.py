@@ -588,6 +588,7 @@ class DownloadConfig:
     # Required due to YouTube bot detection - export cookies from browser
     # See: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp
     cookies_path: str = ""  # Path to cookies.txt (auto-detected if empty)
+    cookies_from_browser: str = ""  # Browser to extract cookies from: chrome, firefox, edge, etc.
     
     # Search pool multiplier - ytsearch returns limited results, so we need to 
     # search more than we want to download to find videos matching duration filters
@@ -697,6 +698,12 @@ class VarietyConfig:
     exclude_same_clip: bool = True  # Never use exact same clip on multiple tracks
     min_time_distance: float = 10.0  # Clips must be N seconds apart (same source)
     min_embedding_distance: float = 0.3  # V4+ must have distance > this from V1-V3
+    
+    # Timeline variety enforcement - prevents same source video from dominating
+    # Within timeline_variety_window seconds, same source can only appear max_source_repeats times
+    enforce_timeline_variety: bool = True  # Enable timeline-based variety enforcement
+    timeline_variety_window: float = 600.0  # 10 minutes - no same source within this window
+    max_source_repeats_in_window: int = 1  # Max times same source can appear in window
 
 
 @dataclass

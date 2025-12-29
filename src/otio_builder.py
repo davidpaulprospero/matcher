@@ -70,6 +70,9 @@ def sanitize_path_for_url(path: str) -> str:
     - Windows extended-length paths (\\?\C:\...)
     - Backslashes to forward slashes
     - Proper file:// URL format
+    
+    Note: Does NOT URL-encode. DaVinci Resolve doesn't want encoded paths.
+    Problematic characters (%, &, $, #) should be sanitized at download time.
     """
     # Convert to string if Path object
     path = str(path)
@@ -104,6 +107,34 @@ def sanitize_path_for_url(path: str) -> str:
     # Don't add file:// prefix - let OTIO/NLE handle it
     
     return path
+
+
+def encode_path_for_xml_url(path: str) -> str:
+    """
+    Format a file path for use in XML pathurl elements.
+    
+    Note: DaVinci Resolve does NOT want URL-encoded paths.
+    Spaces are OK, but characters like % & $ # in filenames will crash it.
+    Those should be sanitized at download time, not here.
+    
+    Args:
+        path: File path (can be Windows or Unix style)
+        
+    Returns:
+        file:// URL (without URL encoding)
+    """
+    # First sanitize the path (remove extended-length prefix, convert slashes)
+    path = sanitize_path_for_url(path)
+    
+    # Format as file:// URL (no encoding - DaVinci doesn't want it)
+    if len(path) >= 2 and path[1] == ':':
+        # Windows path like E:/folder/file.mp4
+        return f"file://localhost/{path}"
+    elif path.startswith('/'):
+        # Unix path
+        return f"file://localhost{path}"
+    else:
+        return f"file://localhost/{path}"
 
 
 def create_clip_with_timewarp(
@@ -1551,7 +1582,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
             f'            <in>{source_start_frames}</in>',
             f'            <out>{source_start_frames + source_frames}</out>',
             '            <file>',
-            f'              <pathurl>file://{vid_seg.source_file}</pathurl>',
+            f'              <pathurl>{encode_path_for_xml_url(vid_seg.source_file)}</pathurl>',
             '            </file>',
         ])
         
@@ -1626,7 +1657,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
                     f'            <in>{source_start_frames}</in>',
                     f'            <out>{source_start_frames + source_frames}</out>',
                     '            <file>',
-                    f'              <pathurl>file://{alt_seg.source_file}</pathurl>',
+                    f'              <pathurl>{encode_path_for_xml_url(alt_seg.source_file)}</pathurl>',
                     '            </file>',
                 ])
                 
@@ -1667,7 +1698,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
             '            <in>0</in>',
             f'            <out>{total_frames}</out>',
             '            <file>',
-            f'              <pathurl>file://{voiceover_path}</pathurl>',
+            f'              <pathurl>{encode_path_for_xml_url(voiceover_path)}</pathurl>',
             '            </file>',
             '          </clipitem>',
         ])
@@ -1947,10 +1978,14 @@ def generate_resolve_xml_with_bins(
         add_file(voiceover_path, vo_duration)
     
     def format_path_url(file_path: str) -> str:
+        """Format file path as proper file:// URL (no encoding - DaVinci doesn't want it)."""
         path = str(Path(file_path).resolve()).replace('\\', '/')
+        
         if len(path) >= 2 and path[1] == ':':
+            # Windows path like E:/folder/file.mp4
             return f"file://localhost/{path}"
         elif path.startswith('/'):
+            # Unix path
             return f"file://localhost{path}"
         else:
             return f"file://localhost/{path}"
