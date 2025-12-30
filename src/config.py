@@ -336,6 +336,11 @@ class MatchingConfig:
     cache_llm_responses: bool = True
     cache_ttl_hours: int = 24
 
+    # Delta matching (only match new videos)
+    delta_matching_enabled: bool = True  # Enable delta-aware matching
+    force_rematch: bool = False  # Force rematch all videos (CLI override)
+    rematch_improvement_threshold: float = 0.05  # Re-evaluate if new video > existing + this
+
 
 @dataclass
 class NegativeMatchingConfig:

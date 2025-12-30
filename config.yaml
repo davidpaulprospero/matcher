@@ -270,6 +270,13 @@ matching:
   cache_llm_responses: true
   cache_ttl_hours: 24
 
+  # Delta matching (only match new videos)
+  # Chain-of-thought: Avoid re-matching unchanged videos
+  # Reasoning: Saves time when adding new videos to existing project
+  delta_matching_enabled: true  # Enable delta-aware matching
+  force_rematch: false  # Force rematch all videos (set via CLI --force-rematch)
+  rematch_improvement_threshold: 0.05  # Re-evaluate if new video potentially 5% better
+
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
 # -----------------------------------------------------------------------------
