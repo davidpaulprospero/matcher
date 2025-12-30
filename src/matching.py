@@ -19,7 +19,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from .config import Config
+from .config import Config, get_config
 from .utils import (
     SRTSegment, SceneInfo, Match, AlternativeMatch, StrategyMatch, MatchResult,
     CacheManager, ReuseTracker, ProgressBar
