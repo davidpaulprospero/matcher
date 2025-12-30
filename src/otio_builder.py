@@ -19,7 +19,6 @@ from .utils import SRTSegment, MatchResult, AlternativeMatch
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
 def _to_windows_path(path: str) -> str:
     """
     Convert path to Windows format with backslashes.
@@ -49,8 +48,6 @@ def format_path_url(file_path: str) -> str:
     return path
 
 
-=======
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 def _to_python_type(value):
     """Convert numpy types to native Python types for OTIO compatibility."""
     if value is None:
@@ -1092,177 +1089,6 @@ def get_confidence_color(confidence: float) -> str:
         return "RED"
 
 
-<<<<<<< HEAD
-=======
-def create_timeline_marker(
-    segment_num: int,
-    match_result: MatchResult,
-    match,
-    position: float,
-    duration: float,
-    rate: float
-) -> otio.schema.Marker:
-    """Create a timeline-level marker for a segment"""
-    
-    confidence = match.confidence
-    
-    # Determine color
-    if confidence >= 0.8:
-        color = otio.schema.MarkerColor.GREEN
-        tier = "HIGH"
-    elif confidence >= 0.6:
-        color = otio.schema.MarkerColor.CYAN
-        tier = "GOOD"
-    elif confidence >= 0.4:
-        color = otio.schema.MarkerColor.YELLOW
-        tier = "MED"
-    elif confidence >= 0.2:
-        color = otio.schema.MarkerColor.ORANGE
-        tier = "LOW"
-    else:
-        color = otio.schema.MarkerColor.RED
-        tier = "GAP"
-    
-    # Override to RED if it's a gap
-    if match_result.has_gap:
-        color = otio.schema.MarkerColor.RED
-        tier = "GAP"
-    
-    # Build marker name - NO EMOJI for DaVinci compatibility
-    vo_text = match.voiceover_segment.text[:35] + "..." if len(match.voiceover_segment.text) > 35 else match.voiceover_segment.text
-    vo_text = vo_text.replace('\n', ' ').replace('\r', ' ')  # Remove newlines
-    
-    marker_name = f"{tier} {confidence:.0%} - {vo_text}"
-    
-    # Use rounded frames to avoid drift
-    start_frames = round(position * rate)
-    duration_frames = round(duration * rate)
-    
-    marker = otio.schema.Marker(
-        name=marker_name,
-        marked_range=otio.opentime.TimeRange(
-            start_time=otio.opentime.RationalTime(start_frames, rate),
-            duration=otio.opentime.RationalTime(duration_frames, rate)
-        ),
-        color=color
-    )
-    
-    # Add metadata (convert numpy types to Python native types)
-    marker.metadata['segment_num'] = int(segment_num) if hasattr(segment_num, 'item') else segment_num
-    marker.metadata['confidence'] = float(confidence) if hasattr(confidence, 'item') else confidence
-    marker.metadata['voiceover_text'] = str(match.voiceover_segment.text)
-    marker.metadata['video_file'] = str(Path(match.video_segment.source_file).name)
-    marker.metadata['reasoning'] = str(match.reasoning) if match.reasoning else ""
-    
-    return marker
-
-
-def add_markers_to_clip(
-    clip: otio.schema.Clip,
-    match_result: MatchResult,
-    match,
-    rate: float,
-    duration: float
-):
-    """Add markers to indicate match quality and properties"""
-    
-    # 1 frame duration for markers
-    marker_duration = otio.opentime.RationalTime(1, rate)
-    
-    # Confidence tier marker (FIRST - most important)
-    confidence = match.confidence
-    
-    if confidence >= 0.8:
-        tier_name = f"HIGH {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.GREEN
-    elif confidence >= 0.6:
-        tier_name = f"GOOD {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.CYAN
-    elif confidence >= 0.4:
-        tier_name = f"MED {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.YELLOW
-    elif confidence >= 0.2:
-        tier_name = f"LOW {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.ORANGE
-    else:
-        tier_name = f"GAP {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.RED
-    
-    # Override to RED if it's a gap
-    if match_result.has_gap:
-        tier_name = f"NEEDS REVIEW {confidence:.0%}"
-        tier_color = otio.schema.MarkerColor.RED
-    
-    # Add confidence marker at start of clip
-    conf_marker = otio.schema.Marker(
-        name=tier_name,
-        marked_range=otio.opentime.TimeRange(
-            start_time=otio.opentime.RationalTime(0, rate),
-            duration=marker_duration
-        ),
-        color=tier_color
-    )
-    clip.markers.append(conf_marker)
-    
-    # Keyword match marker (offset slightly)
-    if match.is_keyword_match:
-        marker = otio.schema.Marker(
-            name="Keyword Match",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(2, rate),  # 2 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.GREEN
-        )
-        clip.markers.append(marker)
-    
-    # Visual match marker
-    if match.is_visual_match:
-        marker = otio.schema.Marker(
-            name="Visual Match",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(3, rate),  # 3 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.BLUE
-        )
-        clip.markers.append(marker)
-    
-    # Reused clip marker
-    if match.clip_reuse_count > 0:
-        marker = otio.schema.Marker(
-            name=f"Reused ({match.clip_reuse_count}x)",
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(4, rate),  # 4 frames offset
-                duration=marker_duration
-            ),
-            color=otio.schema.MarkerColor.YELLOW
-        )
-        clip.markers.append(marker)
-    
-    # Suggested speed marker - tells user what speed to apply
-    time_scalar = clip.metadata.get('time_scalar', 1.0)
-    if time_scalar and abs(time_scalar - 1.0) > 0.05:
-        speed_pct = time_scalar * 100
-        if time_scalar > 1:
-            marker_name = f"Set {speed_pct:.0f}% speed"
-            color = otio.schema.MarkerColor.CYAN
-        else:
-            marker_name = f"Set {speed_pct:.0f}% speed"
-            color = otio.schema.MarkerColor.MAGENTA
-        
-        marker = otio.schema.Marker(
-            name=marker_name,
-            marked_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(5, rate),  # 5 frames offset
-                duration=marker_duration
-            ),
-            color=color
-        )
-        clip.markers.append(marker)
-
-
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
     otio.adapters.write_to_file(timeline, output_path)
@@ -1874,7 +1700,6 @@ def generate_match_report(matches: List[MatchResult], output_path: str, config=N
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(report_lines))
     
-<<<<<<< HEAD
     logger.info(f"Saved match report to {output_path}")
 
 
@@ -2418,6 +2243,3 @@ def _write_media_xml_part(
     
     generated_paths.append(str(output_path))
     logger.info(f"Saved media XML: {output_path} ({len(files_subset)} files)")
-=======
-    logger.info(f"Saved match report to {output_path}")
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d

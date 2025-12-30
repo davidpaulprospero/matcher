@@ -31,12 +31,8 @@ except ImportError:
     HAS_NUMPY = False
     np = None
 
-<<<<<<< HEAD
 # Batch sizes for different providers (FALLBACK if config not provided)
 # Primary source is config.embedding.batch_size
-=======
-# Batch sizes for different providers
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 BATCH_SIZES = {
     'gemini': 100,      # Gemini supports up to 100 texts per call
     'voyage': 128,      # Voyage supports up to 128
@@ -251,7 +247,6 @@ class EmbeddingProvider:
         self, 
         texts: List[str], 
         batch_size: int = 100,
-<<<<<<< HEAD
         show_progress: bool = True,
         max_retries: int = 3,
         retry_delay: float = 2.0
@@ -265,11 +260,6 @@ class EmbeddingProvider:
             max_retries: Number of retry attempts (from config)
             retry_delay: Base delay between retries in seconds (from config)
         """
-=======
-        show_progress: bool = True
-    ) -> List[List[float]]:
-        """Embed texts in batches with progress reporting"""
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
         
@@ -281,17 +271,12 @@ class EmbeddingProvider:
                 logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch)} texts)")
             
             # Retry logic with exponential backoff
-<<<<<<< HEAD
             for attempt in range(max_retries):
-=======
-            for attempt in range(3):
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
                 try:
                     embeddings = self.embed(batch)
                     all_embeddings.extend(embeddings)
                     break
                 except Exception as e:
-<<<<<<< HEAD
                     if attempt < max_retries - 1:
                         wait = retry_delay * (2 ** attempt)
                         logger.warning(f"    Batch failed, retrying in {wait:.1f}s: {e}")
@@ -302,16 +287,6 @@ class EmbeddingProvider:
                         # Use first embedding dimension or default to 768
                         dim = len(all_embeddings[0]) if all_embeddings else 768
                         all_embeddings.extend([[0.0] * dim] * len(batch))
-=======
-                    if attempt < 2:
-                        wait = 2 ** attempt
-                        logger.warning(f"    Batch failed, retrying in {wait}s: {e}")
-                        time.sleep(wait)
-                    else:
-                        logger.error(f"    Batch failed after 3 attempts: {e}")
-                        # Fill with zeros to maintain alignment
-                        all_embeddings.extend([[0.0] * 768] * len(batch))
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         
         return all_embeddings
 
@@ -407,12 +382,8 @@ def compute_embeddings(
     provider: EmbeddingProvider,
     cache: Any,
     cache_key: str = "segments",
-<<<<<<< HEAD
     show_progress: bool = True,
     config: Any = None
-=======
-    show_progress: bool = True
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 ) -> Any:
     """
     Compute embeddings with batch processing and caching.
@@ -423,10 +394,7 @@ def compute_embeddings(
         cache: CacheManager or similar with cache_dir attribute
         cache_key: Key for caching (e.g., "video_segments", "voiceover")
         show_progress: Whether to show progress logs
-<<<<<<< HEAD
         config: Configuration object for batch_size, retries, etc.
-=======
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     
     Returns:
         Numpy array of embedding vectors (or list if numpy unavailable)
@@ -449,7 +417,6 @@ def compute_embeddings(
     if cached is not None:
         return cached
     
-<<<<<<< HEAD
     # Get batch size from config (with provider-specific fallbacks)
     if config and hasattr(config, 'embedding'):
         batch_size = getattr(config.embedding, 'batch_size', 100)
@@ -468,25 +435,12 @@ def compute_embeddings(
             batch_size = 100
         max_retries = 3
         retry_delay = 2.0
-=======
-    # Determine batch size based on provider
-    provider_name = type(provider).__name__.lower()
-    if 'gemini' in provider_name:
-        batch_size = BATCH_SIZES['gemini']
-    elif 'voyage' in provider_name:
-        batch_size = BATCH_SIZES['voyage']
-    elif 'local' in provider_name:
-        batch_size = BATCH_SIZES['local']
-    else:
-        batch_size = 50  # Safe default
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     
     # Compute embeddings in batches
     if show_progress:
         logger.info(f"  Computing embeddings: {len(cleaned_texts)} texts, batch size {batch_size}")
     
     start_time = time.time()
-<<<<<<< HEAD
     embeddings = provider.embed_batch(
         cleaned_texts, 
         batch_size, 
@@ -494,9 +448,6 @@ def compute_embeddings(
         max_retries=max_retries,
         retry_delay=retry_delay
     )
-=======
-    embeddings = provider.embed_batch(cleaned_texts, batch_size, show_progress)
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     elapsed = time.time() - start_time
     
     if show_progress:
@@ -514,7 +465,6 @@ def build_embedding_index(
     embeddings: Any,
     config: Any
 ) -> Any:
-<<<<<<< HEAD
     """Build FAISS index for fast similarity search
     
     Uses config.indexing settings:
@@ -580,59 +530,6 @@ def find_top_k_similar(
     index: Any = None
 ) -> Tuple[Any, Any]:
     """
-=======
-    """Build FAISS index for fast similarity search"""
-    if not getattr(config.indexing, 'use_faiss', True):
-        return None
-    
-    try:
-        import numpy as np
-        import faiss
-        
-        # Convert to numpy array if needed
-        if isinstance(embeddings, list):
-            embeddings_np = np.array(embeddings, dtype='float32')
-        else:
-            embeddings_np = embeddings.astype('float32')
-        
-        # Normalize for cosine similarity
-        faiss.normalize_L2(embeddings_np)
-        
-        # Build index
-        dimension = embeddings_np.shape[1]
-        index_type = getattr(config.indexing, 'index_type', 'flat')
-        
-        if index_type == 'flat':
-            index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
-        elif index_type == 'ivf':
-            nlist = min(100, len(embeddings) // 10)
-            quantizer = faiss.IndexFlatIP(dimension)
-            index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
-            index.train(embeddings_np)
-        else:
-            index = faiss.IndexFlatIP(dimension)
-        
-        index.add(embeddings_np)
-        
-        logger.info(f"  ✓ Built FAISS index: {index.ntotal} vectors, dim={dimension}")
-        return index
-        
-    except ImportError:
-        logger.warning("FAISS not available, using brute-force search")
-        return None
-    except Exception as e:
-        logger.warning(f"Could not build FAISS index: {e}")
-        return None
-
-
-def find_top_k_similar(
-    query_embedding: Any,
-    embeddings: Any,
-    k: int,
-    index: Any = None
-) -> Tuple[Any, Any]:
-    """
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     Find top-k most similar embeddings.
     
     Args:

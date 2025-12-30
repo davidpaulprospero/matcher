@@ -14,18 +14,10 @@ import logging
 import json
 import re
 import hashlib
-<<<<<<< HEAD
 from typing import List, Optional, Tuple, Dict, Any, Set
 from pathlib import Path
 from abc import ABC, abstractmethod
 from collections import defaultdict
-=======
-from typing import List, Optional, Tuple, Dict, Any
-from pathlib import Path
-from abc import ABC, abstractmethod
-from config import get_config
-
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 
 from .config import Config
 from .utils import (
@@ -1731,7 +1723,6 @@ class StrategyMatcher:
         vo_kw = getattr(vo_segment, 'keywords', None) or []
         vo_ent = getattr(vo_segment, 'entities', None) or []
         vo_keywords = set(k.lower() for k in vo_kw)
-<<<<<<< HEAD
         
         # Handle entities as either strings or dicts with 'text' key
         vo_entities = set()
@@ -1743,9 +1734,6 @@ class StrategyMatcher:
             elif isinstance(e, str):
                 vo_entities.add(e.lower())
         
-=======
-        vo_entities = set(e.lower() for e in vo_ent)
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         vo_all = vo_keywords | vo_entities
         
         # Fallback: Extract important words from voiceover text if no keywords
@@ -1772,7 +1760,6 @@ class StrategyMatcher:
             seg_kw = getattr(seg, 'keywords', None) or []
             seg_ent = getattr(seg, 'entities', None) or []
             seg_keywords = set(k.lower() for k in seg_kw)
-<<<<<<< HEAD
             
             # Handle entities as either strings or dicts
             seg_entities = set()
@@ -1784,9 +1771,6 @@ class StrategyMatcher:
                 elif isinstance(e, str):
                     seg_entities.add(e.lower())
             
-=======
-            seg_entities = set(e.lower() for e in seg_ent)
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
             seg_all = seg_keywords | seg_entities
             
             # Also check text for keyword presence
@@ -2072,12 +2056,8 @@ def match_all_segments(
     scenes: Optional[Dict[str, List[SceneInfo]]],
     config: Config,
     cache: CacheManager,
-<<<<<<< HEAD
     embedding_index: Optional[Any] = None,
     face_preference: str = "neutral"
-=======
-    embedding_index: Optional[Any] = None
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -2173,7 +2153,6 @@ def match_all_segments(
         num_embedding_candidates = max(mc.embedding_candidates, 20)
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
         all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
-<<<<<<< HEAD
         
         # Apply timeline variety filtering for V1 (primary track)
         if variety_tracker:
@@ -2187,8 +2166,6 @@ def match_all_segments(
                 else:
                     # Log that we had to relax the constraint
                     logger.debug(f"Segment {i}: Relaxed variety constraint (only {len(filtered_candidates)} candidates after filter)")
-=======
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         
         # Stage 2: Send only top candidates to LLM for reranking
         llm_candidates = all_candidates[:mc.llm_rerank_candidates]
@@ -2285,7 +2262,6 @@ def match_all_segments(
             count = sum(1 for r in results for sm in r.strategy_matches if sm.strategy == strategy)
             logger.info(f"  {strategy}: {count}/{len(results)} segments matched")
     
-<<<<<<< HEAD
     # Report timeline variety stats
     if variety_tracker:
         stats = variety_tracker.get_stats()
@@ -2298,6 +2274,4 @@ def match_all_segments(
                     top = track_stats["top_sources"][0]
                     logger.info(f"      Most used: {top[0]} ({top[1]} times)")
     
-=======
->>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     return results
