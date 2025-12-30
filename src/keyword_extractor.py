@@ -898,14 +898,19 @@ def extract_keyword_per_segment_from_srt(
 def find_keyword_matches(
     voiceover_keywords: List[str],
     video_keywords: List[str],
+<<<<<<< HEAD
     visual_keywords: List[str] = None,
     keyword_boost: float = 0.05,
     visual_boost: float = 0.03,
     max_boost: float = 0.2
+=======
+    visual_keywords: List[str] = None
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 ) -> Tuple[float, bool, bool]:
     """
     Find keyword overlap between voiceover and video.
     Returns (boost_score, is_keyword_match, is_visual_match)
+<<<<<<< HEAD
     
     Args:
         voiceover_keywords: Keywords from voiceover
@@ -914,6 +919,8 @@ def find_keyword_matches(
         keyword_boost: Boost per matching text keyword (default from config.matching.keyword_boost)
         visual_boost: Boost per matching visual keyword
         max_boost: Maximum total boost cap
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     """
     vo_set = set(k.lower() for k in voiceover_keywords)
     vid_set = set(k.lower() for k in video_keywords)
@@ -930,8 +937,16 @@ def find_keyword_matches(
     # Calculate boost score
     boost = 0.0
     if is_keyword_match:
+<<<<<<< HEAD
         boost += keyword_boost * text_overlap
     if is_visual_match:
         boost += visual_boost * visual_overlap
     
     return min(boost, max_boost), is_keyword_match, is_visual_match
+=======
+        boost += 0.05 * text_overlap  # 5% boost per matching keyword
+    if is_visual_match:
+        boost += 0.03 * visual_overlap  # 3% boost per visual match
+    
+    return min(boost, 0.2), is_keyword_match, is_visual_match  # Cap at 20% boost
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d

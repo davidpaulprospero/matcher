@@ -64,6 +64,8 @@ context.py
 llm_context.txt
 *.md
 matcher.code-workspace
+*.md
+matcher.code-workspace
 voiceover-matcher-v2.3.zip
 *.zip
 main1.py

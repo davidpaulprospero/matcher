@@ -105,6 +105,10 @@ def get_pipeline_config() -> Config:
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+PARALLEL_WORKERS = 4            # Number of parallel transcription workers
+EMBEDDING_BATCH_SIZE = 100      # Texts per embedding API call
+MAX_VISION_SCENES = 3           # Vision API scenes per video
+
 
 def strip_extended_path_prefix(path: Path) -> Path:
     r"""
@@ -246,135 +250,88 @@ def merge_config(config: Config, overrides: dict) -> Config:
     return config
 
 
-def validate_config_at_startup(config: Config) -> bool:
-    """
-    Validate configuration at startup with clear error messages.
-    
-    Returns:
-        True if config is valid, False otherwise
-    """
-    print("\n  Validating configuration...")
-    
-    errors = config.validate()
-    
-    if errors:
-        print(f"  ⚠ Configuration warnings ({len(errors)}):")
-        for error in errors:
-            print(f"    • {error}")
-        return len([e for e in errors if 'required' in e.lower()]) == 0
-    else:
-        print("  ✓ Configuration valid")
-        return True
+# Add src to path
+sys.path.insert(0, str(INSTALL_DIR / 'src'))
 
+from config import Config, load_config
+from downloader import VideoDownloader, DownloadCheckpoint
+from keyword_extractor import LLMKeywordExtractor
 
-# =============================================================================
-# LOGGING SETUP
-# =============================================================================
-
-def setup_logging(config: Config) -> logging.Logger:
-    """Setup logging based on config"""
-    log_level = getattr(logging, config.logging.log_level.upper(), logging.INFO)
-    
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
-    )
-    
-    return logging.getLogger(__name__)
-
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # IMPORTS (After config is available)
 # =============================================================================
+try:
+    from src.keyword_remix import KeywordRemixer
+    ENHANCED_REMIX_AVAILABLE = True
+except ImportError:
+    ENHANCED_REMIX_AVAILABLE = False
+    logger.debug("keyword_remix module not available")
 
-# Core imports (always available)
-logger = logging.getLogger(__name__)
+try:
+    from src.pexels import download_pexels_footage
+    PEXELS_AVAILABLE = True
+except ImportError:
+    PEXELS_AVAILABLE = False
+    logger.debug("pexels module not available")
 
-# Lazy imports for optional modules
-def get_keyword_extractor(config: Config):
-    """Lazy import of keyword extractor"""
-    try:
-        from src.keyword_extractor import LLMKeywordExtractor
-        return LLMKeywordExtractor(config=config)
-    except ImportError as e:
-        logger.error(f"Could not import keyword_extractor: {e}")
-        return None
+try:
+    from src.pixabay import download_pixabay_footage
+    PIXABAY_AVAILABLE = True
+except ImportError:
+    PIXABAY_AVAILABLE = False
+    logger.debug("pixabay module not available")
 
-
-def get_video_downloader(config: Config):
-    """Lazy import of video downloader"""
-    try:
-        from src.downloader import VideoDownloader, DownloadCheckpoint
-        return VideoDownloader(config=config), DownloadCheckpoint
-    except ImportError as e:
-        logger.error(f"Could not import downloader: {e}")
-        return None, None
-
-
-def check_module_availability() -> Dict[str, bool]:
-    """Check which optional modules are available"""
-    modules = {}
-    
-    # Enhanced features
-    try:
-        from src.keyword_remix import KeywordRemixer
-        modules['keyword_remix'] = True
-    except ImportError:
-        modules['keyword_remix'] = False
-    
-    try:
-        from src.pexels import download_pexels_footage
-        modules['pexels'] = True
-    except ImportError:
-        modules['pexels'] = False
-    
-    try:
-        from src.pixabay import download_pixabay_footage
-        modules['pixabay'] = True
-    except ImportError:
-        modules['pixabay'] = False
-    
-    try:
-        from src.multi_style import prompt_for_second_style, STYLE_DEFAULT, OTIOStyle
-        modules['multi_style'] = True
-    except ImportError:
-        modules['multi_style'] = False
-    
-    # Performance optimizations
-    try:
-        from src.transcription import (
-            transcribe_videos_parallel,
-            DeltaAwareIndex,
-            transcribe_voiceover_media
-        )
-        modules['optimized_transcription'] = True
-    except ImportError:
-        modules['optimized_transcription'] = False
-    
-    try:
-        from src.embeddings import (
-            compute_embeddings,
-            get_embedding_provider,
-            build_embedding_index,
-            EmbeddingCache
-        )
-        modules['optimized_embeddings'] = True
-    except ImportError:
-        modules['optimized_embeddings'] = False
-    
-    try:
-        from src.vision import process_video_vision
-        modules['optimized_vision'] = True
-    except ImportError:
-        modules['optimized_vision'] = False
-    
-    return modules
-
+try:
+    from src.multi_style import prompt_for_second_style, STYLE_DEFAULT, OTIOStyle
+    MULTI_STYLE_AVAILABLE = True
+except ImportError:
+    MULTI_STYLE_AVAILABLE = False
+    logger.debug("multi_style module not available")
 
 # =============================================================================
-# PIPELINE CLASS
+# PERFORMANCE OPTIMIZATION IMPORTS (v2.4)
 # =============================================================================
+try:
+    from src.transcription_optimized import (
+        transcribe_videos_parallel,
+        DeltaAwareIndex,
+        transcribe_voiceover_media
+    )
+    OPTIMIZED_TRANSCRIPTION = True
+    logger.info("✓ Using optimized parallel transcription")
+except ImportError:
+    OPTIMIZED_TRANSCRIPTION = False
+    logger.debug("transcription_optimized module not available - using standard")
+
+try:
+    from src.embeddings_optimized import (
+        compute_embeddings as compute_embeddings_optimized,
+        get_embedding_provider as get_embedding_provider_optimized,
+        build_embedding_index as build_embedding_index_optimized,
+        EmbeddingCache
+    )
+    OPTIMIZED_EMBEDDINGS = True
+    logger.info("✓ Using optimized batch embeddings")
+except ImportError:
+    OPTIMIZED_EMBEDDINGS = False
+    logger.debug("embeddings_optimized module not available - using standard")
+
+try:
+    from src.vision_optimized import process_video_vision as process_video_vision_optimized
+    OPTIMIZED_VISION = True
+    logger.info("✓ Using selective vision processing")
+except ImportError:
+    OPTIMIZED_VISION = False
+    logger.debug("vision_optimized module not available - using standard")
+
 
 class Pipeline:
     """
@@ -1246,311 +1203,214 @@ Topic:"""
         if num_keywords is None:
             num_keywords = config.keyword.max_keywords
         
-        self._print_stage("1", "ANALYZE VOICEOVER")
+        self._print_stage("4b", "CONFIDENCE ENFORCEMENT")
+        print(f"  Minimum confidence: {ENHANCED_MIN_CONFIDENCE:.0%}")
+        print(f"  Max retries: {ENHANCED_MAX_RETRIES}")
         
-        # Determine file type and parse/transcribe
-        vo_path = Path(voiceover_path)
-        if vo_path.suffix.lower() == '.srt':
-            print(f"  Parsing SRT: {vo_path.name}")
-            self.voiceover_segments = self._parse_srt(str(vo_path))
-        else:
-            # Transcribe audio/video
-            if self.modules['optimized_transcription']:
-                from src.transcription import transcribe_voiceover_media
-                print(f"  Transcribing: {vo_path.name}")
-                
-                # Generate SRT path
-                srt_path = vo_path.with_suffix('.srt')
-                
-                # Call transcription with correct arguments
-                result_srt = transcribe_voiceover_media(
-                    str(vo_path),
-                    output_srt_path=str(srt_path),
-                    model_name=config.transcription.model,
-                    language=config.transcription.language if config.transcription.language != 'auto' else None,
-                    compute_type=config.transcription.compute_type,
-                    cache_dir=config.cache.cache_dir if config.cache.cache_transcriptions else None
-                )
-                
-                # Now parse the generated SRT file
-                print(f"  ✓ Transcription saved to: {Path(result_srt).name}")
-                self.voiceover_segments = self._parse_srt(result_srt)
-            else:
-                logger.error("Transcription module not available for non-SRT files")
-                sys.exit(1)
+        if OPTIMIZED_TRANSCRIPTION:
+            print(f"  ✓ Delta-aware indexing enabled (only new files will be processed)")
         
-        print(f"  ✓ {len(self.voiceover_segments)} segments found")
+        # Count low-confidence matches
+        def count_low_confidence():
+            low = []
+            for i, m in enumerate(self.matches):
+                if hasattr(m, 'primary_match') and m.primary_match:
+                    conf = m.primary_match.confidence
+                    if conf < ENHANCED_MIN_CONFIDENCE:
+                        low.append({
+                            'index': i,
+                            'confidence': conf,
+                            'vo_text': m.voiceover_segment.text[:80] if hasattr(m, 'voiceover_segment') else '',
+                            'matched_text': m.primary_match.video_segment.text[:80] if hasattr(m.primary_match, 'video_segment') else ''
+                        })
+            return low
         
-        # Extract keywords
-        print(f"\n  Extracting keywords (max {num_keywords})...")
+        low_conf = count_low_confidence()
+        initial_low = len(low_conf)
         
-        try:
-            from src.keyword_extractor import LLMKeywordExtractor
-            extractor = LLMKeywordExtractor(config=config)
-            # Pass segments (list of dicts), get KeywordResult back
-            result = extractor.extract_keywords(self.voiceover_segments, max_keywords=num_keywords)
-            self.keywords = result.keywords
+        if not low_conf:
+            print(f"  ✓ All {len(self.matches)} matches meet {ENHANCED_MIN_CONFIDENCE:.0%} confidence!")
+            return {'low_confidence_initial': 0, 'low_confidence_final': 0, 'retries': 0}
+        
+        print(f"  ⚠ {len(low_conf)}/{len(self.matches)} matches below {ENHANCED_MIN_CONFIDENCE:.0%}")
+        
+        # Retry loop
+        retries = 0
+        all_new_keywords = set()
+        
+        while low_conf and retries < ENHANCED_MAX_RETRIES:
+            retries += 1
+            print(f"\n  ── Retry {retries}/{ENHANCED_MAX_RETRIES} ──")
             
-            # Store entities with context for display
-            self.extracted_entities = result.entities if result.entities else []
+            # Sample low-confidence matches
+            samples = low_conf[:5]
+            new_keywords = []
             
-            # Attach entities to voiceover segments for EDL/OTIO markers
-            if self.extracted_entities:
-                self._attach_entities_to_segments()
-            
-            # Detect topic from extracted keywords (not raw text)
-            if self.keywords:
-                self.topic_context = self._detect_topic_from_keywords(self.keywords)
-                print(f"  Detected topic: {self.topic_context}")
-            elif result.topic:
-                self.topic_context = result.topic
-                print(f"  Detected topic: {self.topic_context}")
-            
-            # Show entity count
-            if self.extracted_entities:
-                print(f"  Entities found: {len(self.extracted_entities)}")
-                    
-        except Exception as e:
-            logger.error(f"Keyword extraction failed: {e}")
-            # TF-IDF fallback
-            if config.keyword.use_tfidf_weights:
-                print("  Falling back to TF-IDF extraction...")
-                voiceover_text = " ".join([s.get('text', '') for s in self.voiceover_segments])
-                from sklearn.feature_extraction.text import TfidfVectorizer
-                vectorizer = TfidfVectorizer(max_features=num_keywords, stop_words='english')
+            for sample in samples:
                 try:
-                    vectorizer.fit_transform([voiceover_text])
-                    self.keywords = list(vectorizer.get_feature_names_out())
-                except:
-                    self.keywords = []
+                    remixed = self.keyword_remixer.remix_for_low_confidence(
+                        keyword=self.topic_context.split()[0] if self.topic_context else "footage",
+                        matched_text=sample['matched_text'],
+                        voiceover_text=sample['vo_text'],
+                        confidence=sample['confidence'],
+                        attempt=retries
+                    )
+                    new_keywords.extend(remixed)
+                except Exception as e:
+                    logger.debug(f"Remix failed: {e}")
+            
+            # Remove duplicates
+            new_keywords = list(set(new_keywords) - all_new_keywords - set(keywords))
+            
+            if not new_keywords:
+                print(f"    No new keywords generated")
+                break
+            
+            print(f"    Generated {len(new_keywords)} keywords: {new_keywords[:3]}...")
+            all_new_keywords.update(new_keywords)
+            
+            # Download for new keywords
+            stock_dir = Path(self.config.downloaded_videos_dir) / "stock"
+            
+            try:
+                if PEXELS_AVAILABLE and ENHANCED_ENABLE_PEXELS:
+                    pexels_paths, _ = download_pexels_footage(
+                        new_keywords, str(stock_dir), per_keyword=2
+                    )
+                    print(f"    Pexels: +{len(pexels_paths)} videos")
+                
+                if PIXABAY_AVAILABLE and ENHANCED_ENABLE_PIXABAY:
+                    pixabay_paths, _ = download_pixabay_footage(
+                        new_keywords, str(stock_dir), per_keyword=2
+                    )
+                    print(f"    Pixabay: +{len(pixabay_paths)} videos")
+            except Exception as e:
+                print(f"    ⚠ Stock download error: {e}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # OPTIMIZATION (v2.4): Delta-aware re-indexing
+            # Only process NEWLY downloaded videos, not all videos
+            # ═══════════════════════════════════════════════════════════════
+            print(f"    Re-indexing (delta-aware - only new footage)...")
+            retry_start = time.time()
+            try:
+                # force_reprocess=False enables delta-aware indexing
+                self.stage_transcribe_index(force_reprocess=False)
+                self.stage_match()
+                retry_time = time.time() - retry_start
+                print(f"    ✓ Re-indexed in {retry_time:.1f}s")
+            except Exception as e:
+                print(f"    ⚠ Re-match error: {e}")
+                break
+            
+            # Recount
+            low_conf = count_low_confidence()
+            
+            if not low_conf:
+                print(f"\n  ✓ All matches now meet {ENHANCED_MIN_CONFIDENCE:.0%}!")
+                break
+            else:
+                print(f"    Still {len(low_conf)} below threshold")
         
-        print(f"  ✓ {len(self.keywords)} keywords extracted")
+        final_low = len(low_conf)
         
-        return self.keywords
+        if low_conf:
+            print(f"\n  ⚠ After {retries} retries: {final_low} matches still below {ENHANCED_MIN_CONFIDENCE:.0%}")
+            print(f"    Consider reviewing these segments manually")
+        
+        return {
+            'low_confidence_initial': initial_low,
+            'low_confidence_final': final_low,
+            'retries': retries,
+            'new_keywords': len(all_new_keywords),
+            'improved': initial_low - final_low
+        }
     
-    def stage_image_search(self) -> Dict[str, any]:
-        """
-        Stage 1.5: Download images for entities.
-        Searches Google/Bing/Stock APIs for images representing
-        people, places, organizations mentioned in voiceover.
-        """
-        global PROJECT_DIR
-        config = self.config
+    def stage_multi_style_otio(self) -> dict:
+        """Generate additional OTIO styles"""
+        if not self.second_style:
+            return {'skipped': True}
         
-        if not config.image_search.enabled:
-            logger.debug("Image search disabled in config")
-            return {}
+        if not hasattr(self, 'matches') or not self.matches:
+            return {'skipped': True, 'reason': 'no matches'}
         
-        if not hasattr(self, 'extracted_entities') or not self.extracted_entities:
-            logger.debug("No entities available for image search")
-            return {}
-        
-        self._print_stage("1.5", "ENTITY IMAGE SEARCH")
+        print(f"\n  Generating style 2: {self.second_style.name}...")
         
         try:
-            from src.entity_images import download_entity_images, map_entities_to_segments
-            
-            # Filter entities by configured types
-            allowed_types = config.image_search.entity_types
-            entities_to_search = [
-                e for e in self.extracted_entities
-                if e.get('type', '') in allowed_types
-            ]
-            
-            if not entities_to_search:
-                print(f"  No entities of types {allowed_types} to search")
-                return {}
-            
-            # Apply max_entities limit if configured
-            max_entities = getattr(config.image_search, 'max_entities', 0)
-            if max_entities > 0 and len(entities_to_search) > max_entities:
-                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
-                entities_to_search = entities_to_search[:max_entities]
-            
-            print(f"  Searching images for {len(entities_to_search)} entities")
-            print(f"  Entity types: {', '.join(allowed_types)}")
-            print(f"  Images per entity: {config.image_search.images_per_entity}")
-            print(f"  Minimum size: {config.image_search.min_size_mb}MB")
-            
-            # Get output directory - USE SHORT PATHS if configured
-            image_cfg = config.image_search
-            
-            if getattr(image_cfg, 'root_dir', '') and image_cfg.root_dir:
-                # Use explicit root_dir (e.g., "E:/i")
-                project_name = PROJECT_DIR.name[:15] if PROJECT_DIR else "project"
-                output_dir = Path(image_cfg.root_dir) / project_name
-            elif PROJECT_DIR:
-                # Use project-relative path
-                folder_name = getattr(image_cfg, 'folder_name', 'images')
-                output_dir = PROJECT_DIR / folder_name
-            else:
-                output_dir = Path(image_cfg.output_dir)
-            
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            print(f"  Output directory: {output_dir}")
-            
-            # Download images
-            entity_results = download_entity_images(
-                entities=entities_to_search,
-                output_dir=str(output_dir),
-                topic=self.topic_context or "",
-                images_per_entity=config.image_search.images_per_entity,
-                min_size_mb=config.image_search.min_size_mb,
-                use_google=config.image_search.use_google,
-                use_bing=getattr(config.image_search, 'use_bing', False),  # Disabled by default
-                use_stock_apis=config.image_search.use_stock_apis,
-                pexels_key=os.getenv("PEXELS_API_KEY"),
-                pixabay_key=os.getenv("PIXABAY_API_KEY"),
-                download_timeout=getattr(config.image_search, 'download_timeout', 10),
-                max_search_time=getattr(config.image_search, 'max_search_time', 300),
-                max_results_to_check=getattr(config.image_search, 'max_results_to_check', 500),
-                search_until_found=getattr(config.image_search, 'search_until_found', True)
-            )
-            
-            # Map entities to segments for timeline placement
-            if entity_results:
-                entity_segments = map_entities_to_segments(
-                    entities_to_search,
-                    self.voiceover_segments
-                )
-                
-                # Update entity results with segment info
-                for entity_name, result in entity_results.items():
-                    result.segment_indices = entity_segments.get(entity_name, [])
-                
-                self.entity_images = entity_results
-                
-                # Summary
-                total_images = sum(len(r.images) for r in entity_results.values())
-                print(f"\n  ✓ Downloaded {total_images} images for {len(entity_results)} entities")
-                
-                # Show what was found
-                for name, result in list(entity_results.items())[:5]:
-                    segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
-                    print(f"    • {name} ({result.entity_type}): {len(result.images)} images, {segments_str}")
-                
-                if len(entity_results) > 5:
-                    print(f"    ... and {len(entity_results) - 5} more entities")
-            else:
-                print(f"  ⚠ No images downloaded")
-                self.entity_images = {}
-            
-            return entity_results
-            
-        except ImportError as e:
-            logger.error(f"Could not import imagedl: {e}")
-            print(f"  ⚠ Image search module not available")
-            return {}
-        except Exception as e:
-            logger.error(f"Image search failed: {e}")
-            import traceback
-            traceback.print_exc()
-            print(f"  ⚠ Image search failed: {e}")
-            return {}
-    
-    def stage_stock_video(self) -> Dict[str, any]:
-        """
-        Stage 1.6: Download stock videos for entities.
-        Searches Pexels/Pixabay APIs for stock footage representing
-        people, places, organizations mentioned in voiceover.
-        """
-        global PROJECT_DIR
-        config = self.config
+            from src.otio_builder import create_timeline, save_timeline
+        except ImportError:
+            print(f"  ⚠ Could not import otio_builder")
+            return {'error': 'import failed'}
         
-        # Check if stock video search is enabled (use same config as image_search)
-        if not config.image_search.enabled:
-            logger.debug("Image/video search disabled in config")
-            return {}
+        output_dir = Path(self.config.otio_output_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        if not config.image_search.use_stock_apis:
-            logger.debug("Stock APIs disabled in config")
-            return {}
-        
-        if not hasattr(self, 'extracted_entities') or not self.extracted_entities:
-            logger.debug("No entities available for stock video search")
-            return {}
-        
-        self._print_stage("1.6", "STOCK VIDEO SEARCH")
+        # Store original config values
+        original_threshold = getattr(self.config.matching, 'confidence_threshold', 0.5)
+        original_alternatives = getattr(self.config.output, 'num_alternatives', 2)
         
         try:
-            from src.entity_images import download_entity_videos, map_entities_to_segments
+            # Apply style overrides
+            if hasattr(self.second_style, 'confidence_threshold'):
+                self.config.matching.confidence_threshold = self.second_style.confidence_threshold
+            if hasattr(self.second_style, 'num_alternatives'):
+                self.config.output.num_alternatives = self.second_style.num_alternatives
             
-            # Filter entities by configured types
-            allowed_types = config.image_search.entity_types
-            entities_to_search = [
-                e for e in self.extracted_entities
-                if e.get('type', '') in allowed_types
-            ]
+            # Create timeline
+            voiceover_path = getattr(self.config, 'voiceover_path', None)
+            timeline = create_timeline(self.matches, self.config, voiceover_path)
             
-            if not entities_to_search:
-                print(f"  No entities of types {allowed_types} to search")
-                return {}
+            # Save with style name
+            style_name = self.second_style.name
+            otio_path = output_dir / f"timeline_{style_name}_{timestamp}.otio"
+            save_timeline(timeline, str(otio_path))
+            print(f"  ✓ Style '{style_name}': {otio_path}")
             
-            # Apply max_entities limit if configured
-            max_entities = getattr(config.image_search, 'max_entities', 0)
-            if max_entities > 0 and len(entities_to_search) > max_entities:
-                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
-                entities_to_search = entities_to_search[:max_entities]
+            return {'file': str(otio_path), 'style': style_name}
             
-            # Get videos_per_entity from config (default 3)
-            videos_per_entity = getattr(config.image_search, 'videos_per_entity', 3)
+        finally:
+            # Restore original config
+            self.config.matching.confidence_threshold = original_threshold
+            self.config.output.num_alternatives = original_alternatives
+    
+    # =========================================================================
+    # EXISTING STAGE METHODS
+    # =========================================================================
+    
+    def stage_analyze_voiceover(self, voiceover_path: str) -> List[dict]:
+        """Stage 1: Parse and analyze voiceover (supports SRT, audio, and video files)"""
+        self._print_stage(1, "ANALYZE VOICEOVER")
+        
+        voiceover_path = Path(voiceover_path)
+        
+        if not voiceover_path.exists():
+            logger.error(f"Voiceover file not found: {voiceover_path}")
+            sys.exit(1)
+        
+        # Supported formats
+        audio_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.wma', '.aac', '.opus'}
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v'}
+        
+        suffix = voiceover_path.suffix.lower()
+        needs_transcription = suffix in audio_extensions or suffix in video_extensions
+        
+        if needs_transcription:
+            file_type = "Video" if suffix in video_extensions else "Audio"
+            print(f"  {file_type} file detected: {voiceover_path.name}")
+            print(f"  Transcribing with faster-whisper (GPU)...")
             
-            print(f"  Searching stock videos for {len(entities_to_search)} entities")
-            print(f"  Entity types: {', '.join(allowed_types)}")
-            print(f"  Videos per entity: {videos_per_entity}")
-            
-            # Get output directory - USE SHORT PATHS if configured
-            image_cfg = config.image_search
-            
-            if getattr(image_cfg, 'root_dir', '') and image_cfg.root_dir:
-                # Use explicit root_dir (e.g., "E:/i")
-                project_name = PROJECT_DIR.name[:15] if PROJECT_DIR else "project"
-                output_dir = Path(image_cfg.root_dir) / project_name
-            elif PROJECT_DIR:
-                # Use project-relative path
-                folder_name = getattr(image_cfg, 'folder_name', 'images')
-                output_dir = PROJECT_DIR / folder_name
-            else:
-                output_dir = Path(image_cfg.output_dir)
-            
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            print(f"  Output directory: {output_dir}")
-            
-            # Download stock videos
-            entity_results = download_entity_videos(
-                entities=entities_to_search,
-                output_dir=str(output_dir),
-                topic=self.topic_context or "",
-                videos_per_entity=videos_per_entity,
-                min_duration=3.0,
-                max_duration=30.0,
-                pexels_key=os.getenv("PEXELS_API_KEY"),
-                pixabay_key=os.getenv("PIXABAY_API_KEY")
-            )
-            
-            # Map entities to segments for timeline placement
-            if entity_results:
-                entity_segments = map_entities_to_segments(
-                    entities_to_search,
-                    self.voiceover_segments
-                )
+            try:
+                # Use optimized transcription if available
+                if OPTIMIZED_TRANSCRIPTION:
+                    from src.transcription_optimized import transcribe_voiceover_media
+                else:
+                    from src.transcription import transcribe_voiceover_media
                 
-                # Update entity results with segment info
-                for entity_name, result in entity_results.items():
-                    result.segment_indices = entity_segments.get(entity_name, [])
+                model_name = getattr(self.config.transcription, 'model', 'base')
+                language = getattr(self.config.transcription, 'language', 'en')
+                compute_type = getattr(self.config.transcription, 'compute_type', 'auto')
                 
-                self.entity_videos = entity_results
-                
-                # Summary
-                total_videos = sum(len(r.videos) for r in entity_results.values())
-                print(f"\n  ✓ Downloaded {total_videos} stock videos for {len(entity_results)} entities")
-                
-                # Show what was found
-                for name, result in list(entity_results.items())[:5]:
-                    segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
-                    print(f"    • {name} ({result.entity_type}): {len(result.videos)} videos, {segments_str}")
+                srt_path = voiceover_path.with_suffix('.srt')
                 
                 if len(entity_results) > 5:
                     print(f"    ... and {len(entity_results) - 5} more entities")
@@ -1656,188 +1516,187 @@ Topic:"""
                 seen_dirs.add(d)
                 possible_dirs.append(d)
         
-        # 0. Explicit video_source_dir from config (FIRST PRIORITY)
-        if hasattr(config.pipeline, 'video_source_dir') and config.pipeline.video_source_dir:
-            explicit_dir = Path(config.pipeline.video_source_dir)
-            add_dir(explicit_dir)
-            add_dir(explicit_dir / "downloaded_videos")
+        # Interactive keyword review
+        if review_enabled and not getattr(self.config.pipeline, 'skip_keyword_review', False):
+            try:
+                from src.interactive import review_keywords
+                
+                project_dir = None
+                if hasattr(self.config, 'cache_dir'):
+                    project_dir = Path(self.config.cache_dir).parent
+                
+                print(f"\n  Launching keyword review...")
+                keywords = review_keywords(
+                    keywords=keywords,
+                    entities=entities,
+                    topic=topic,
+                    project_dir=project_dir
+                )
+                print(f"  ✓ {len(keywords)} keywords after review")
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.warning(f"Keyword review failed: {e}")
         
-        # 1. PROJECT_DIR (from --project argument) - most likely location
-        if PROJECT_DIR:
-            add_dir(PROJECT_DIR / "downloaded_videos")
-            add_dir(PROJECT_DIR / "output" / "downloaded_videos")
-        
-        # 2. Output directory / downloaded_videos
-        output_dir = Path(config.output.output_dir)
-        if not output_dir.is_absolute() and PROJECT_DIR:
-            output_dir = PROJECT_DIR / output_dir
-        add_dir(output_dir / "downloaded_videos")
-        add_dir(output_dir.parent / "downloaded_videos")
-        
-        # 3. Current working directory (last resort)
-        add_dir(Path.cwd() / "downloaded_videos")
-        
-        # Find videos - search recursively in subfolders too
-        video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
-        videos_dir = None
-        video_files = []
-        
-        for test_dir in possible_dirs:
-            if not test_dir.exists() or not test_dir.is_dir():
-                continue
-            
-            # First check direct files
-            for f in test_dir.iterdir():
-                if f.is_file() and f.suffix.lower() in video_extensions:
-                    video_files.append(f)
-            
-            # If no direct files, search subfolders (one level deep)
-            if not video_files:
-                for subdir in test_dir.iterdir():
-                    if subdir.is_dir():
-                        for f in subdir.iterdir():
-                            if f.is_file() and f.suffix.lower() in video_extensions:
-                                video_files.append(f)
-            
-            if video_files:
-                videos_dir = test_dir
-                break
-            video_files = []  # Reset for next directory
-        
-        if video_files:
-            self.downloaded_videos = [
-                {'video_path': str(f), 'keyword': f.parent.name if f.parent != videos_dir else 'existing', 'source': 'local'}
-                for f in video_files
-            ]
-            print(f"  ✓ Loaded {len(self.downloaded_videos)} existing videos from {videos_dir}")
-            
-            # Show breakdown by subfolder
-            from collections import Counter
-            folders = Counter(Path(v['video_path']).parent.name for v in self.downloaded_videos)
-            if len(folders) > 1:
-                print(f"    Sources: {dict(folders)}")
-        else:
-            print(f"  ⚠ No video files found (.mp4, .mkv, .webm, .avi, .mov)")
-            print(f"    Searched locations:")
-            for i, d in enumerate(possible_dirs[:5], 1):
-                if d.exists():
-                    try:
-                        files = [f for f in d.iterdir() if f.is_file()]
-                        dirs = [f for f in d.iterdir() if f.is_dir()]
-                        # Check if subdirs have videos
-                        subdir_videos = 0
-                        for sd in dirs[:3]:
-                            subdir_videos += len([f for f in sd.iterdir() if f.is_file() and f.suffix.lower() in video_extensions])
-                        
-                        status = f"{len(files)} files, {len(dirs)} folders"
-                        if subdir_videos > 0:
-                            status += f" ({subdir_videos} videos in subfolders)"
-                        print(f"      {i}. [✓] {d}")
-                        print(f"          {status}")
-                    except Exception as e:
-                        print(f"      {i}. [✓] {d} (error: {e})")
-                else:
-                    print(f"      {i}. [✗] {d}")
-            print(f"    TIP: Set pipeline.video_source_dir in config.yaml to an absolute path")
-            print(f"    Example: video_source_dir: \"E:/Edit Job/project/downloaded_videos\"")
-            self.downloaded_videos = []
+        self.keywords = keywords
+        return keywords
     
-    def _stage_zero_download_remix(self, failed_keywords: List[str], output_dir: Path):
-        """
-        Sub-stage: Remix failed keywords and retry downloads.
+    def stage_pre_run_summary(
+        self,
+        keywords: List[str],
+        segments: List[dict]
+    ) -> bool:
+        """Show pre-run summary and get confirmation"""
+        print(f"\n{'─' * 70}")
+        print("  PRE-RUN SUMMARY")
+        print(f"{'─' * 70}\n")
         
-        Args:
-            failed_keywords: Keywords that had 0 downloads
-            output_dir: Download output directory
-        """
-        config = self.config
-        max_retries = getattr(config.zero_download_remix, 'max_retries', 2)
+        self.downloader = VideoDownloader(self.config)
         
-        print(f"\n  ─── ZERO-DOWNLOAD KEYWORD REMIX ───")
-        print(f"  Remixing {len(failed_keywords)} failed keywords...")
+        ok, msg = self.downloader.check_dependencies()
+        print(msg)
+        if not ok:
+            return False
+        
+        estimate = self.downloader.get_download_estimate(len(keywords))
+        output_dir = Path(self.config.downloaded_videos_dir)
+        inventory = self.downloader.get_inventory_report(output_dir)
+        
+        print(f"\n  Voiceover:")
+        print(f"    • {len(segments)} segments")
+        print(f"    • {sum(s['duration'] for s in segments) / 60:.1f} minutes total")
+        
+        print(f"\n  Keywords:")
+        print(f"    • {len(keywords)} search terms")
+        
+        print(f"\n  Download Plan:")
+        for tier, desc in estimate['tiers'].items():
+            print(f"    • {tier}: {desc}")
+        print(f"    • Total: ~{estimate['total_videos']} videos (YouTube)")
+        
+        # Show stock footage estimate
+        if self.enhanced_enabled:
+            stock_estimate = len(keywords[:15]) * ENHANCED_STOCK_PER_KEYWORD * 2  # Pexels + Pixabay
+            print(f"    • Stock (Pexels/Pixabay): ~{stock_estimate} additional")
+        
+        print(f"    • Est. storage: {estimate['est_storage_gb']} GB")
+        print(f"    • Est. time: {estimate['est_time_minutes']:.0f} minutes")
+        
+        if inventory['total_videos'] > 0:
+            print(f"\n  Existing Footage:")
+            print(f"    • {inventory['total_videos']} videos ({inventory['total_duration_hours']:.1f} hours)")
+        
+        print()
+        
+        if self.config.pipeline.confirm_before_download:
+            return self._get_user_confirmation("Proceed with download?", default=True)
+        return True
+    
+    def stage_download(
+        self,
+        keywords: List[str],
+        resume: bool = False
+    ) -> List[dict]:
+        """Stage 2: Download footage from YouTube"""
+        self._print_stage(2, "DOWNLOAD FOOTAGE")
+        
+        if not self.downloader:
+            self.downloader = VideoDownloader(self.config)
+        
+        output_dir = Path(self.config.downloaded_videos_dir)
+        
+        downloaded, failed = self.downloader.download_all(
+            keywords=keywords,
+            output_dir=output_dir,
+            max_concurrent=self.config.download.max_concurrent,
+            resume=resume
+        )
+        
+        print(f"\n  ✓ Downloaded {len(downloaded)} videos")
+        if failed:
+            print(f"  ⚠ {len(failed)} keywords with no results")
+            self.failed_keywords.extend(failed)
+            
+            failed_file = output_dir / "no_results_keywords.txt"
+            with open(failed_file, 'w') as f:
+                f.write(f"# Keywords with 0 results - {datetime.now().isoformat()}\n")
+                for kw in failed:
+                    f.write(f"{kw}\n")
+        
+        self.downloaded_videos = [d.to_dict() for d in downloaded]
+        return self.downloaded_videos
+    
+    def stage_deduplicate(self) -> dict:
+        """Stage 2b: Deduplicate downloaded footage"""
+        self._print_stage("2b", "DEDUPLICATE FOOTAGE")
         
         try:
-            from src.keyword_remix import KeywordRemixer, remix_zero_download_keywords
-            
-            # Get topic context if available
-            topic_context = getattr(self, 'topic_context', 'documentary video content')
-            
-            # Initialize remixer
-            remixer = KeywordRemixer(
-                config=config,
-                topic_context=topic_context,
-                cache_dir=str(config.cache.cache_dir) if hasattr(config, 'cache') else ".cache"
-            )
-            
-            # Track retries
-            still_failed = failed_keywords.copy()
-            total_recovered = 0
-            
-            for attempt in range(1, max_retries + 1):
-                if not still_failed:
-                    break
-                
-                print(f"\n  Attempt {attempt}/{max_retries}: Remixing {len(still_failed)} keywords...")
-                
-                # Remix keywords
-                batch_result = remixer.remix_keywords_batch(still_failed, attempt=attempt)
-                
-                # Collect remixed keywords
-                remixed_keywords = []
-                for r in batch_result.results:
-                    if r.success and r.remixed_keywords:
-                        print(f"    '{r.original_keyword}' → {r.remixed_keywords[:2]}")
-                        remixed_keywords.extend(r.remixed_keywords)
-                
-                if not remixed_keywords:
-                    print(f"  ⚠ No alternatives generated")
-                    break
-                
-                # Remove duplicates and already-tried keywords
-                remixed_keywords = list(set(remixed_keywords) - set(failed_keywords))
-                
-                if not remixed_keywords:
-                    print(f"  ⚠ All alternatives already tried")
-                    break
-                
-                print(f"  Downloading {len(remixed_keywords)} remixed keywords...")
-                
-                # Try downloading remixed keywords
-                new_videos, new_failed = self.downloader.download_all(
-                    keywords=remixed_keywords,
-                    output_dir=output_dir,
-                    resume=True,
-                    topic=self.topic_context or ""
-                )
-                
-                if new_videos:
-                    self.downloaded_videos.extend(new_videos)
-                    total_recovered += len(new_videos)
-                    print(f"  ✓ Recovered {len(new_videos)} videos from remixed keywords")
-                
-                # Update still_failed (only keep originals that still have no coverage)
-                # A keyword is "covered" if any of its remixes succeeded
-                successful_originals = set()
-                for r in batch_result.results:
-                    if r.success:
-                        # Check if any remixed keyword succeeded
-                        for remixed in r.remixed_keywords:
-                            if remixed not in new_failed:
-                                successful_originals.add(r.original_keyword)
-                                break
-                
-                still_failed = [k for k in still_failed if k not in successful_originals]
-            
-            # Final summary
-            if total_recovered > 0:
-                print(f"\n  ✓ Zero-download remix recovered {total_recovered} videos")
-            else:
-                print(f"\n  ⚠ Zero-download remix: No additional videos found")
-            
-            if still_failed:
-                print(f"  ⚠ Still failed ({len(still_failed)}): {', '.join(still_failed[:3])}" +
-                      (f" (+{len(still_failed)-3} more)" if len(still_failed) > 3 else ""))
+            from src.deduplication import VideoDeduplicator
+        except ImportError as e:
+            print("  ⚠ Deduplication not available")
+            return {'duplicates_deleted': 0}
         
+        video_dir = Path(self.config.downloaded_videos_dir)
+        deduplicator = VideoDeduplicator(self.config)
+        
+        if not deduplicator.is_available():
+            print("  ⚠ imagehash not installed, skipping")
+            return {'duplicates_deleted': 0}
+        
+        report_path = video_dir / "deduplication_report.json"
+        report = deduplicator.deduplicate(
+            video_dir=str(video_dir),
+            auto_delete=True,
+            report_path=str(report_path)
+        )
+        
+        print(f"\n  Scanned: {report.total_videos} videos")
+        print(f"  ✓ Unique: {report.unique_videos}")
+        
+        if report.duplicates_deleted > 0:
+            print(f"  ✓ Deleted: {report.duplicates_deleted} duplicates")
+            print(f"  ✓ Saved: {report.space_saved_mb:.1f} MB")
+        
+        return {
+            'total_videos': report.total_videos,
+            'duplicates_deleted': report.duplicates_deleted
+        }
+    
+    def stage_transcribe_index(self, force_reprocess: bool = False) -> dict:
+        """
+        Stage 3: Transcribe and index videos (OPTIMIZED v2.4)
+        
+        OPTIMIZATIONS:
+        1. Delta-aware indexing - only processes NEW videos
+        2. Parallel transcription with ThreadPoolExecutor
+        3. Batch embedding API calls (100 texts per call)
+        4. Selective vision processing (skip if transcript covers content)
+        
+        Args:
+            force_reprocess: If True, reprocess all videos (ignore cache)
+        """
+        self._print_stage(3, "TRANSCRIBE & INDEX")
+        
+        stage_start = time.time()
+        
+        # Import modules based on optimization availability
+        try:
+            if OPTIMIZED_TRANSCRIPTION:
+                from src.transcription_optimized import transcribe_videos_parallel
+            else:
+                from src.transcription import transcribe_videos_parallel
+            
+            if OPTIMIZED_EMBEDDINGS:
+                from src.embeddings_optimized import compute_embeddings, build_embedding_index, get_embedding_provider
+            else:
+                from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
+            
+            if OPTIMIZED_VISION:
+                from src.vision_optimized import process_video_vision
+            else:
+                from src.vision import process_video_vision
+            
+            from src.utils import CacheManager, SRTSegment
         except ImportError as e:
             logger.warning(f"Could not import keyword_remix: {e}")
             print(f"  ⚠ Keyword remix module not available")
@@ -2143,8 +2002,11 @@ Topic:"""
         
         try:
             from src.matching import match_all_segments
-            from src.utils import SRTSegment, CacheManager
-            from src.embeddings import compute_embeddings
+            
+            if OPTIMIZED_EMBEDDINGS:
+                from src.embeddings_optimized import get_embedding_provider, compute_embeddings
+            else:
+                from src.embeddings import get_embedding_provider, compute_embeddings
             
             print(f"  Matching settings (from config):")
             print(f"    • Min confidence: {config.matching.min_confidence}")

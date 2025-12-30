@@ -1,49 +1,83 @@
-# Voiceover-to-Footage Matcher v2.2 Dependencies
+# Voiceover-to-Footage Matcher v2.3 Dependencies
+# Updated: December 30, 2025
+# See DEPENDENCY_AUDIT.md for full audit report
 
-# Core dependencies
-opentimelineio>=0.15.0
-pyyaml>=6.0
-python-dotenv>=1.0.0  # Load .env files
-torch>=2.0
-sentence-transformers>=2.0  # For local embeddings
-srt>=3.5.0  # SRT subtitle parsing
+# =============================================================================
+# CORE DEPENDENCIES
+# =============================================================================
+opentimelineio>=0.15.0,<1.0      # Timeline manipulation
+pyyaml>=6.0,<7.0                  # YAML config parsing
+python-dotenv>=1.0.0,<2.0         # Load .env files
+srt>=3.5.0,<4.0                   # SRT subtitle parsing
+requests>=2.28,<3.0               # HTTP requests for local LLM
 
-# Transcription
-# faster-whisper is 4x faster than openai-whisper (recommended)
-faster-whisper>=0.9.0  # CTranslate2-based, 4x faster
-openai-whisper>=20230314  # Original OpenAI Whisper (fallback)
+# =============================================================================
+# MACHINE LEARNING / EMBEDDINGS
+# =============================================================================
+# NOTE: sentence-transformers 5.x requires Python >=3.10
+torch>=2.0,<3.0                   # PyTorch (latest: 2.9.0)
+sentence-transformers>=2.0,<6.0   # Local embeddings (latest: 5.2.0)
 
-# API Providers (at least one recommended)
-google-generativeai>=0.3.0  # Gemini
-anthropic>=0.5.0            # Claude
-voyageai>=0.1.0             # Voyage embeddings (optional)
-openai>=1.0                 # OpenAI (optional)
+# =============================================================================
+# TRANSCRIPTION
+# =============================================================================
+# faster-whisper is 4x faster than openai-whisper and uses less memory
+faster-whisper>=1.0.0,<2.0        # CTranslate2-based transcription
 
-# Video Processing
-ffmpeg-python>=0.2.0
+# REMOVED: openai-whisper - Large package (~2GB), not used in codebase
+# If fallback needed, uncomment: openai-whisper>=20250625
 
-# Download (yt-dlp for YouTube/Vimeo/etc)
-yt-dlp>=2023.1.0  # Video downloader
+# =============================================================================
+# AI API PROVIDERS
+# =============================================================================
+# WARNING: google-generativeai is DEPRECATED (support ended Nov 30, 2025)
+# Migration to google-genai requires code changes - see DEPENDENCY_AUDIT.md
+# TODO: Migrate 5 files to google-genai SDK, then replace this dependency
+google-generativeai>=0.8.0,<1.0   # DEPRECATED - migrate to google-genai
+# google-genai>=1.0.0,<2.0        # Replacement (uncomment after code migration)
 
-# Optional: FAISS for fast similarity search (10-50x speedup)
-# Uncomment one of these based on your system:
-# faiss-cpu>=1.7.4  # CPU-only version (most compatible)
-# faiss-gpu>=1.7.4  # GPU version (requires CUDA)
+anthropic>=0.50.0,<1.0            # Claude API (latest: 0.75.0)
 
-# Scene Detection
-scenedetect>=0.6
-opencv-python>=4.5  # For hardware-accelerated video processing
+# REMOVED: voyageai - Not imported in codebase
+# If Voyage embeddings needed, uncomment: voyageai>=0.1.0,<1.0
 
-# Audio Analysis (silence/speech detection)
-librosa>=0.10.0  # Audio feature extraction
-scipy>=1.10.0    # Required by librosa
+# REMOVED: openai - Not imported in codebase
+# If OpenAI API needed, uncomment: openai>=1.0,<2.0
 
-# Deduplication (perceptual hashing)
-imagehash>=4.3.0  # Perceptual image hashing
-Pillow>=9.0.0     # Image processing
+# =============================================================================
+# VIDEO PROCESSING
+# =============================================================================
+# NOTE: ffmpeg-python was removed - code uses subprocess calls directly
+# Ensure ffmpeg is installed on system: apt install ffmpeg / brew install ffmpeg
 
-# Parallel Processing & Caching
-joblib>=1.3.0  # Parallel execution + persistent caching
+yt-dlp>=2024.1.0                  # Video downloader (actively maintained)
+scenedetect>=0.6,<1.0             # Scene detection
+opencv-python>=4.8,<5.0           # Video frame processing
 
-# HTTP requests for local LLM
-requests>=2.28
+# =============================================================================
+# AUDIO ANALYSIS
+# =============================================================================
+librosa>=0.10.0,<0.11             # Audio feature extraction
+scipy>=1.10.0,<2.0                # Required by librosa
+
+# =============================================================================
+# IMAGE PROCESSING / DEDUPLICATION
+# =============================================================================
+imagehash>=4.3.0,<5.0             # Perceptual image hashing
+Pillow>=9.0.0,<11.0               # Image processing
+
+# =============================================================================
+# OPTIONAL: FAISS for fast similarity search (10-50x speedup)
+# =============================================================================
+# Uncomment based on your system:
+# faiss-cpu>=1.7.4,<2.0           # CPU-only version (most compatible)
+# faiss-gpu>=1.7.4,<2.0           # GPU version (requires CUDA)
+
+# =============================================================================
+# REMOVED PACKAGES (see DEPENDENCY_AUDIT.md for details)
+# =============================================================================
+# joblib - Not imported, no parallel caching implementation found
+# ffmpeg-python - Not imported, code uses subprocess directly
+# openai - Not imported in codebase
+# voyageai - Not imported in codebase
+# openai-whisper - Not imported, faster-whisper used exclusively
