@@ -1479,7 +1479,23 @@ class StrategyMatcher:
     def __init__(self, config: Config, scenes: Optional[Dict[str, List[SceneInfo]]]):
         self.config = config
         self.scenes = scenes or {}
-        self.variety_config = config.output.variety
+        
+        # Handle variety_config as either object or dict
+        vc = config.output.variety
+        if isinstance(vc, dict):
+            # Convert dict to object-like accessor
+            class VarietyWrapper:
+                def __init__(self, d):
+                    self.exclude_same_clip = d.get('exclude_same_clip', True)
+                    self.require_different_source = d.get('require_different_source', True)
+                    self.min_time_distance = d.get('min_time_distance', 10.0)
+                    self.min_embedding_distance = d.get('min_embedding_distance', 0.3)
+                    self.enforce_timeline_variety = d.get('enforce_timeline_variety', True)
+                    self.timeline_variety_window = d.get('timeline_variety_window', 600.0)
+                    self.max_source_repeats_in_window = d.get('max_source_repeats_in_window', 1)
+            self.variety_config = VarietyWrapper(vc)
+        else:
+            self.variety_config = vc
     
     def get_clip_id(self, segment: SRTSegment) -> str:
         """Generate unique clip ID"""
@@ -2070,9 +2086,15 @@ def match_all_segments(
         logger.info(f"  Duration scoring: ideal={mc.ideal_speed_range}, soft={mc.soft_penalty_range}")
     
     # Timeline variety enforcement
-    timeline_variety_enabled = getattr(vc, 'enforce_timeline_variety', True)
-    timeline_window = getattr(vc, 'timeline_variety_window', 600.0)
-    max_repeats = getattr(vc, 'max_source_repeats_in_window', 1)
+    # Handle vc as either object or dict
+    if isinstance(vc, dict):
+        timeline_variety_enabled = vc.get('enforce_timeline_variety', True)
+        timeline_window = vc.get('timeline_variety_window', 600.0)
+        max_repeats = vc.get('max_source_repeats_in_window', 1)
+    else:
+        timeline_variety_enabled = getattr(vc, 'enforce_timeline_variety', True)
+        timeline_window = getattr(vc, 'timeline_variety_window', 600.0)
+        max_repeats = getattr(vc, 'max_source_repeats_in_window', 1)
     
     variety_tracker = None
     if timeline_variety_enabled:
@@ -2084,8 +2106,17 @@ def match_all_segments(
     
     if oc.include_strategy_tracks:
         logger.info(f"  Strategy tracks: {', '.join(oc.strategy_tracks)}")
-        logger.info(f"  Variety enforcement: different_source={vc.require_different_source}, "
-                   f"min_time={vc.min_time_distance}s, min_emb_dist={vc.min_embedding_distance}")
+        # Handle vc as either object or dict
+        if isinstance(vc, dict):
+            req_diff = vc.get('require_different_source', True)
+            min_time = vc.get('min_time_distance', 10.0)
+            min_emb = vc.get('min_embedding_distance', 0.3)
+        else:
+            req_diff = getattr(vc, 'require_different_source', True)
+            min_time = getattr(vc, 'min_time_distance', 10.0)
+            min_emb = getattr(vc, 'min_embedding_distance', 0.3)
+        logger.info(f"  Variety enforcement: different_source={req_diff}, "
+                   f"min_time={min_time}s, min_emb_dist={min_emb}")
     
     # Build candidate embeddings lookup
     candidate_embeddings = {}

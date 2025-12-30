@@ -28,6 +28,7 @@ Usage:
     config = get_config()
     threshold = config.matching.min_confidence
 """
+from __future__ import annotations
 
 import os
 import sys
@@ -795,6 +796,11 @@ class OutputConfig:
     markers_for_low_confidence: bool = True
     markers_for_gaps: bool = True
     markers_for_speed: bool = True
+    
+    def __post_init__(self):
+        """Convert variety dict to VarietyConfig if needed"""
+        if isinstance(self.variety, dict):
+            self.variety = VarietyConfig(**self.variety)
 
 
 @dataclass
@@ -1104,13 +1110,30 @@ class Config:
         if not data:
             return dataclass_type()
         
+        # Get type hints to resolve string annotations (from __future__ import annotations)
+        try:
+            from typing import get_type_hints
+            type_hints = get_type_hints(dataclass_type)
+        except Exception:
+            type_hints = {}
+        
         valid_fields = {f.name: f for f in fields(dataclass_type)}
         filtered_data = {}
         
         for key, value in data.items():
             if key in valid_fields:
                 field_info = valid_fields[key]
-                field_type = field_info.type
+                
+                # Use resolved type hints if available, otherwise fall back to field.type
+                field_type = type_hints.get(key, field_info.type)
+                
+                # Handle string type annotations that couldn't be resolved
+                if isinstance(field_type, str):
+                    # Try to find the type in the module's namespace
+                    import sys
+                    module = sys.modules.get(__name__, None)
+                    if module and hasattr(module, field_type):
+                        field_type = getattr(module, field_type)
                 
                 # Check if this field is a nested dataclass
                 # Handle Optional types and get the actual type
