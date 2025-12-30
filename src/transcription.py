@@ -187,6 +187,7 @@ def _transcribe_with_shared_model(
     model_name: str,
     compute_type: str,
     language: str = None,
+<<<<<<< HEAD
     vad_filter: bool = True,
     min_silence_duration_ms: int = 200,
     speech_pad_ms: int = 10
@@ -202,6 +203,12 @@ def _transcribe_with_shared_model(
         vad_filter: Whether to apply Voice Activity Detection
         min_silence_duration_ms: Minimum silence duration to split segments (from config)
         speech_pad_ms: Padding around detected speech (from config)
+=======
+    vad_filter: bool = True
+) -> List[dict]:
+    """
+    Transcribe audio using the shared model with mutex protection.
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     """
     print(f"\n  [TRANSCRIBE] Acquiring GPU lock...", flush=True)
     with _gpu_lock:
@@ -216,8 +223,13 @@ def _transcribe_with_shared_model(
                 language=language,
                 vad_filter=vad_filter,
                 vad_parameters=dict(
+<<<<<<< HEAD
                     min_silence_duration_ms=min_silence_duration_ms,
                     speech_pad_ms=speech_pad_ms
+=======
+                    min_silence_duration_ms=500,
+                    speech_pad_ms=200
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
                 )
             )
             
@@ -434,6 +446,16 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
     if audio_path.exists():
         return str(audio_path)
     
+    video_path = Path(video_path)
+    if output_dir:
+        audio_path = Path(output_dir) / f"{video_path.stem}.wav"
+    else:
+        audio_path = video_path.with_suffix('.wav')
+    
+    # Skip if already extracted
+    if audio_path.exists():
+        return str(audio_path)
+    
     try:
         cmd = [
             'ffmpeg', '-i', str(video_path),
@@ -466,14 +488,19 @@ def transcribe_video(
     model_name: str = "base",
     compute_type: str = "auto",
     language: str = None,
+<<<<<<< HEAD
     temp_dir: str = None,
     vad_filter: bool = True,
     min_silence_duration_ms: int = 200,
     speech_pad_ms: int = 10
+=======
+    temp_dir: str = None
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file.
     Uses cache if available, otherwise transcribes with shared model.
+<<<<<<< HEAD
     
     Args:
         video_path: Path to video file
@@ -485,6 +512,8 @@ def transcribe_video(
         vad_filter: Whether to apply Voice Activity Detection
         min_silence_duration_ms: Minimum silence duration to split segments
         speech_pad_ms: Padding around detected speech
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     """
     video_path = str(video_path)
     video_name = Path(video_path).name
@@ -515,10 +544,14 @@ def transcribe_video(
             audio_path,
             model_name,
             compute_type,
+<<<<<<< HEAD
             language,
             vad_filter=vad_filter,
             min_silence_duration_ms=min_silence_duration_ms,
             speech_pad_ms=speech_pad_ms
+=======
+            language
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         )
         
         # Cache the result
@@ -583,16 +616,22 @@ def transcribe_videos_parallel(
         model_name = getattr(config.transcription, 'model', 'base')
         compute_type = getattr(config.transcription, 'compute_type', 'auto')
         language = getattr(config.transcription, 'language', None)
+<<<<<<< HEAD
         vad_filter = getattr(config.transcription, 'vad_filter', True)
         min_silence_duration_ms = getattr(config.transcription, 'min_silence_duration_ms', 200)
         speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     else:
         model_name = "base"
         compute_type = "auto"
         language = None
+<<<<<<< HEAD
         vad_filter = True
         min_silence_duration_ms = 200
         speech_pad_ms = 10
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
@@ -689,10 +728,14 @@ def transcribe_videos_parallel(
                 audio_path,
                 model_name,
                 compute_type,
+<<<<<<< HEAD
                 language,
                 vad_filter=vad_filter,
                 min_silence_duration_ms=min_silence_duration_ms,
                 speech_pad_ms=speech_pad_ms
+=======
+                language
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
             )
             print(f"    >> Returned {len(raw_segments)} segments", flush=True)
             

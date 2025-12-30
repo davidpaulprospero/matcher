@@ -14,10 +14,18 @@ import logging
 import json
 import re
 import hashlib
+<<<<<<< HEAD
 from typing import List, Optional, Tuple, Dict, Any, Set
 from pathlib import Path
 from abc import ABC, abstractmethod
 from collections import defaultdict
+=======
+from typing import List, Optional, Tuple, Dict, Any
+from pathlib import Path
+from abc import ABC, abstractmethod
+from config import get_config
+
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 
 from .config import Config
 from .utils import (
@@ -806,21 +814,35 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
 # =============================================================================
 
 class TieredMatcher:
-    """
-    Tiered matching system:
-    1. High-confidence embedding matches skip LLM
-    2. Primary LLM for normal matches
-    3. Secondary LLM for ambiguous matches
-    4. Local LLM for review/finishing touches
-    """
+    def __init__(self, config=None):
+        self.config = config or get_config()
+        mc = self.config.matching
+        
+        self.primary_model = mc.gemini_model
+        self.min_confidence = mc.min_confidence
+        self.embedding_candidates = mc.embedding_candidates
+        self.high_conf_threshold = mc.high_confidence_threshold
+        self.low_conf_threshold = mc.low_confidence_threshold
+        self.max_clip_reuse = mc.max_clip_reuse
+        self.reuse_penalty = mc.reuse_penalty
     
-    def __init__(self, config: Config, cache: CacheManager):
-        self.config = config
-        self.cache = cache
-        self.reuse_tracker = ReuseTracker(
-            max_reuse=config.matching.max_clip_reuse,
-            reuse_penalty=config.matching.reuse_penalty
-        )
+    def _should_skip_llm(self, similarity: float) -> bool:
+        """Skip LLM if embedding similarity is high enough"""
+        return similarity >= self.config.matching.high_confidence_threshold
+    
+    def _apply_duration_penalty(self, confidence: float, speed_ratio: float) -> float:
+        """Apply duration-based penalty from config"""
+        mc = self.config.matching
+        ideal_min, ideal_max = mc.ideal_speed_range
+        soft_min, soft_max = mc.soft_speed_range
+        
+        if ideal_min <= speed_ratio <= ideal_max:
+            return confidence  # No penalty
+        elif soft_min <= speed_ratio <= soft_max:
+            return confidence - mc.duration_penalty_factor
+        else:
+            return confidence - (mc.duration_penalty_factor * 2)
+
         
         # Initialize providers
         self.primary_provider = None
@@ -1709,6 +1731,7 @@ class StrategyMatcher:
         vo_kw = getattr(vo_segment, 'keywords', None) or []
         vo_ent = getattr(vo_segment, 'entities', None) or []
         vo_keywords = set(k.lower() for k in vo_kw)
+<<<<<<< HEAD
         
         # Handle entities as either strings or dicts with 'text' key
         vo_entities = set()
@@ -1720,6 +1743,9 @@ class StrategyMatcher:
             elif isinstance(e, str):
                 vo_entities.add(e.lower())
         
+=======
+        vo_entities = set(e.lower() for e in vo_ent)
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         vo_all = vo_keywords | vo_entities
         
         # Fallback: Extract important words from voiceover text if no keywords
@@ -1746,6 +1772,7 @@ class StrategyMatcher:
             seg_kw = getattr(seg, 'keywords', None) or []
             seg_ent = getattr(seg, 'entities', None) or []
             seg_keywords = set(k.lower() for k in seg_kw)
+<<<<<<< HEAD
             
             # Handle entities as either strings or dicts
             seg_entities = set()
@@ -1757,6 +1784,9 @@ class StrategyMatcher:
                 elif isinstance(e, str):
                     seg_entities.add(e.lower())
             
+=======
+            seg_entities = set(e.lower() for e in seg_ent)
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
             seg_all = seg_keywords | seg_entities
             
             # Also check text for keyword presence
@@ -2042,8 +2072,12 @@ def match_all_segments(
     scenes: Optional[Dict[str, List[SceneInfo]]],
     config: Config,
     cache: CacheManager,
+<<<<<<< HEAD
     embedding_index: Optional[Any] = None,
     face_preference: str = "neutral"
+=======
+    embedding_index: Optional[Any] = None
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -2139,6 +2173,7 @@ def match_all_segments(
         num_embedding_candidates = max(mc.embedding_candidates, 20)
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
         all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
+<<<<<<< HEAD
         
         # Apply timeline variety filtering for V1 (primary track)
         if variety_tracker:
@@ -2152,6 +2187,8 @@ def match_all_segments(
                 else:
                     # Log that we had to relax the constraint
                     logger.debug(f"Segment {i}: Relaxed variety constraint (only {len(filtered_candidates)} candidates after filter)")
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
         
         # Stage 2: Send only top candidates to LLM for reranking
         llm_candidates = all_candidates[:mc.llm_rerank_candidates]
@@ -2248,6 +2285,7 @@ def match_all_segments(
             count = sum(1 for r in results for sm in r.strategy_matches if sm.strategy == strategy)
             logger.info(f"  {strategy}: {count}/{len(results)} segments matched")
     
+<<<<<<< HEAD
     # Report timeline variety stats
     if variety_tracker:
         stats = variety_tracker.get_stats()
@@ -2260,4 +2298,6 @@ def match_all_segments(
                     top = track_stats["top_sources"][0]
                     logger.info(f"      Most used: {top[0]} ({top[1]} times)")
     
+=======
+>>>>>>> b1330c9845e731305f3f9d83439bdb03f52d956d
     return results

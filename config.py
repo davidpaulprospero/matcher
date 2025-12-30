@@ -130,6 +130,8 @@ class EmbeddingConfig:
     provider: str = "gemini"  # gemini, voyage, local
     
     # Model settings per provider
+    
+    # Model settings per provider
     gemini_model: str = "models/text-embedding-004"
     voyage_model: str = "voyage-2"
     local_model: str = "all-MiniLM-L6-v2"
@@ -233,6 +235,7 @@ class AudioAnalysisConfig:
 
 
 @dataclass
+@dataclass
 class MatchingConfig:
     """Matching engine settings
     
@@ -277,11 +280,19 @@ class MatchingConfig:
     # Caching
     cache_llm_responses: bool = True
     cache_ttl_hours: int = 24
+    cache_ttl_hours: int = 24
 
 
-@dataclass
+@dataclass 
 class KeywordConfig:
     """Keyword extraction settings"""
+    provider: str = "gemini"  # gemini, anthropic, tfidf
+    
+    # Extraction settings
+    max_keywords: int = 30
+    min_keyword_length: int = 3
+    
+    # Entity extraction
     provider: str = "gemini"  # gemini, anthropic, tfidf
     
     # Extraction settings
@@ -593,7 +604,10 @@ class Config:
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     indexing: IndexingConfig = field(default_factory=IndexingConfig)
+    indexing: IndexingConfig = field(default_factory=IndexingConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
+    scene_detection: SceneDetectionConfig = field(default_factory=SceneDetectionConfig)
+    audio_analysis: AudioAnalysisConfig = field(default_factory=AudioAnalysisConfig)
     scene_detection: SceneDetectionConfig = field(default_factory=SceneDetectionConfig)
     audio_analysis: AudioAnalysisConfig = field(default_factory=AudioAnalysisConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)

@@ -651,7 +651,7 @@ download:
     medium:
       min: 120
       max: 600
-      per_keyword: 3
+      count: 8
     long:
       min: 600
       max: 1500
