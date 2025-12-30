@@ -93,10 +93,11 @@ transcription:
   pause_split:
     enabled: true  # Enable pause-based splitting
     min_gap_ms: 300  # Minimum gap between SRT segments to consider a pause (ms)
-    split_at_list_markers: true  # Split after "1.", "2.", etc.
+    split_at_sentences: true  # Split at sentence boundaries (. ! ?) - most aggressive
+    split_at_list_markers: true  # Split before "1.", "2.", "8." etc. (countdown patterns)
     split_at_locations: true  # Split at "City, State" patterns
-    split_at_short_phrases: true  # Split very short phrases (< 3 words) with pauses
     min_phrase_words: 2  # Minimum words to keep in a segment
+    min_segment_duration: 0.5  # Minimum duration for a split segment (seconds)
   
   # Caching
   cache_transcriptions: true
@@ -286,7 +287,7 @@ keyword:
     enabled: true  # Enable list item detection
     download_first: true  # Download list item keywords before general keywords
     skip_if_entity_covered: true  # Skip if already in entity extraction
-    keyword_suffix: "aerial"  # Suffix for generated keywords (e.g., "Austin Texas aerial")
+    keyword_suffix: "footage"  # Suffix for generated keywords (e.g., "Austin Texas footage")
 
 # -----------------------------------------------------------------------------
 # NEGATIVE MATCHING (What NOT to match)

@@ -679,17 +679,14 @@ class Pipeline:
     
     def _pause_split_segments(self, segments: List[dict]) -> List[dict]:
         """
-        Split segments at natural pauses detected from timing and text patterns.
+        Split segments at natural pauses - aggressive splitting for better matching.
         
-        This handles cases like:
-        - "even paradise can break. 8. Atlanta, Georgia, Atlanta was supposed to..."
-        Which should split at each natural pause point.
+        Split patterns (in order of priority):
+        1. Sentence boundaries - every sentence becomes its own segment
+        2. List item isolation - "Number X, Town" becomes its own segment
+        3. Location patterns - "City, State," splits
         
-        Detection methods:
-        1. List markers: "1.", "2.", "8." etc.
-        2. Location patterns: "Atlanta, Georgia,"
-        3. Short phrases with punctuation
-        4. Gaps between original SRT segments
+        This creates more granular segments for better video matching.
         """
         import re
         
@@ -701,10 +698,11 @@ class Pipeline:
             return segments
         
         # Get config options
+        split_sentences = getattr(pause_config, 'split_at_sentences', True)
         split_list_markers = getattr(pause_config, 'split_at_list_markers', True)
         split_locations = getattr(pause_config, 'split_at_locations', True)
-        split_short_phrases = getattr(pause_config, 'split_at_short_phrases', True)
         min_phrase_words = getattr(pause_config, 'min_phrase_words', 2)
+        min_segment_duration = getattr(pause_config, 'min_segment_duration', 0.5)
         
         optimized = []
         split_count = 0
@@ -715,63 +713,70 @@ class Pipeline:
             end_time = seg['end_time']
             duration = seg['duration']
             
-            # Build split patterns
-            split_patterns = []
-            
-            if split_list_markers:
-                # Match list markers: "1.", "2.", "8.", "10." etc. followed by space
-                split_patterns.append(r'(?<=\d\.)\s+')
-            
-            if split_locations:
-                # Match after comma before capital letter
-                # This catches "City, State" and similar patterns
-                # e.g., "Atlanta, Georgia," -> split after each comma
-                split_patterns.append(r'(?<=,)\s+(?=[A-Z])')
-            
-            if split_short_phrases:
-                # Split after sentence-ending punctuation
-                split_patterns.append(r'(?<=[.!?])\s+(?=[A-Z0-9])')
-            
-            if not split_patterns:
+            # Skip very short segments
+            if duration < min_segment_duration or len(text) < 10:
                 optimized.append(seg)
                 continue
             
-            # Combine patterns
-            combined_pattern = '|'.join(split_patterns)
+            parts = []
+            
+            # PRIORITY 1: List item isolation
+            # Split "...text. Number 10, Pagosa Springs. More text..." into separate parts
+            if split_list_markers:
+                # Pattern: "Number X, Town" or "Number X. Town" 
+                list_pattern = re.compile(
+                    r'([Nn]umber\s+\d{1,2}[,.\s]+[A-Z][a-zA-Z\s]+?)(?=[.!?]|$)'
+                )
+                
+                # Also handle "X. Town" pattern (e.g., "8. Atlanta")
+                numbered_pattern = re.compile(
+                    r'(\d{1,2}\.\s+[A-Z][a-zA-Z\s,]+?)(?=[.!?]|$)'
+                )
+                
+                # Check if text contains list patterns
+                has_list = list_pattern.search(text) or numbered_pattern.search(text)
+                
+                if has_list:
+                    # Split before "Number X" or before "X."
+                    text = re.sub(r'(?<=[.!?])\s+(?=[Nn]umber\s+\d{1,2})', '|||SPLIT|||', text)
+                    text = re.sub(r'(?<=[.!?])\s+(?=\d{1,2}\.\s+[A-Z])', '|||SPLIT|||', text)
+            
+            # PRIORITY 2: Sentence-level splitting
+            if split_sentences:
+                # Split at sentence boundaries: . ! ? followed by space and capital letter
+                # But preserve abbreviations like "U.S." or "Dr."
+                text = re.sub(r'(?<=[.!?])\s+(?=[A-Z])', '|||SPLIT|||', text)
+            
+            # PRIORITY 3: Location patterns  
+            if split_locations:
+                # Split after "City, State," patterns - use capture group approach
+                text = re.sub(r'([A-Z][a-z]+,\s+[A-Z][a-z]+,)\s+', r'\1|||SPLIT|||', text)
             
             # Split the text
-            parts = re.split(combined_pattern, text)
+            parts = text.split('|||SPLIT|||')
             parts = [p.strip() for p in parts if p.strip()]
             
-            # Filter out parts that are too short or merge intelligently
-            # Keep: proper nouns (capitalized), sentences (end with .!?)
-            # Merge: bare numbers like "8" or very short generic words
-            valid_parts = []
-            for part in parts:
-                word_count = len(part.split())
+            # Filter out very short fragments
+            if len(parts) > 1:
+                valid_parts = []
+                for part in parts:
+                    word_count = len(part.split())
+                    
+                    # Keep if it has enough words OR is a list marker OR ends with punctuation
+                    is_list_marker = re.match(r'^[Nn]umber\s+\d{1,2}', part) or re.match(r'^\d{1,2}\.', part)
+                    ends_with_punct = part and part[-1] in '.!?'
+                    
+                    if word_count >= min_phrase_words or is_list_marker or ends_with_punct:
+                        valid_parts.append(part)
+                    elif valid_parts:
+                        # Merge tiny fragments with previous
+                        valid_parts[-1] = valid_parts[-1] + ' ' + part
+                    else:
+                        valid_parts.append(part)
                 
-                # Always keep if:
-                # - Has enough words
-                # - Ends with sentence punctuation
-                # - Starts with capital (proper noun/location)
-                # - Contains a comma (location pattern like "Atlanta,")
-                is_proper_noun = part and part[0].isupper()
-                has_comma = ',' in part
-                ends_with_punct = part and part[-1] in '.!?'
-                
-                if (word_count >= min_phrase_words or 
-                    ends_with_punct or 
-                    (is_proper_noun and word_count >= 1) or
-                    has_comma):
-                    valid_parts.append(part)
-                elif valid_parts:
-                    # Merge bare numbers or very short generic words with previous
-                    valid_parts[-1] = valid_parts[-1] + ' ' + part
-                else:
-                    valid_parts.append(part)
+                parts = valid_parts
             
-            parts = valid_parts
-            
+            # If no valid splits, keep original
             if len(parts) <= 1:
                 optimized.append(seg)
                 continue
@@ -786,14 +791,17 @@ class Pipeline:
             current_time = start_time
             
             for i, part in enumerate(parts):
-                # Proportional duration
+                # Proportional duration based on character count
                 char_ratio = len(part) / total_chars
                 part_duration = duration * char_ratio
-                part_duration = max(0.3, part_duration)  # Minimum 0.3s
+                part_duration = max(min_segment_duration, part_duration)
                 
-                part_end = current_time + part_duration
+                # Calculate end time
                 if i == len(parts) - 1:
                     part_end = end_time
+                else:
+                    part_end = current_time + part_duration
+                    part_end = min(part_end, end_time)
                 
                 optimized.append({
                     'index': seg['index'],
@@ -805,13 +813,13 @@ class Pipeline:
                 
                 current_time = part_end
         
-        # Re-index
+        # Re-index all segments
         for i, seg in enumerate(optimized):
             seg['index'] = i + 1
         
         if split_count > 0:
-            print(f"  ✓ Pause-split: {split_count} segments split at natural breaks ({len(segments)} → {len(optimized)})")
-            logger.info(f"Pause-based splitting: {split_count} splits, {len(segments)} → {len(optimized)} segments")
+            print(f"  ✓ Pause-split: {split_count} segments split ({len(segments)} → {len(optimized)})")
+            logger.info(f"Pause-based splitting: {split_count} segments split, {len(segments)} → {len(optimized)} total")
         
         return optimized
     
