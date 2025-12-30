@@ -89,6 +89,7 @@ from src.checkpoint import (
     CheckpointManager, KeywordManager, SavedKeywords,
     format_resume_prompt, format_keyword_prompt, STAGE_ORDER
 )
+from src.match_index import MatchAwareIndex
 
 # Global config instance - loaded at startup
 _config: Optional[Config] = None
@@ -1982,39 +1983,52 @@ Topic:"""
         """
         Stage 4: Match voiceover to footage.
         All matching parameters from config.
+
+        Supports delta matching: only processes new videos if enabled.
         """
         config = self.config
-        
+
         if config.pipeline.skip_matching:
             print("  ⏭ Skipping matching (config: skip_matching=true)")
             return []
-        
+
         self._print_stage("4", "MATCH FOOTAGE")
-        
+
         # Check if we have data to match
         if not self.voiceover_segments:
             print("  ⚠ No voiceover segments to match")
             return []
-        
+
         if not self.text_metadata or self.embeddings is None or len(self.embeddings) == 0:
             print("  ⚠ No video data to match against")
             return []
-        
+
         try:
             from src.matching import match_all_segments
-            
+
             if OPTIMIZED_EMBEDDINGS:
                 from src.embeddings_optimized import get_embedding_provider, compute_embeddings
             else:
                 from src.embeddings import get_embedding_provider, compute_embeddings
-            
+
+            # Get project directory for match index
+            project_dir = PROJECT_DIR or Path(getattr(self, 'voiceover_path', '.')).parent
+
+            # Initialize match index for delta matching
+            match_index = MatchAwareIndex(str(project_dir))
+
+            # Check delta matching settings
+            delta_enabled = getattr(config.matching, 'delta_matching_enabled', True)
+            force_rematch = getattr(self, 'force_rematch', False) or getattr(config.matching, 'force_rematch', False)
+
             print(f"  Matching settings (from config):")
             print(f"    • Min confidence: {config.matching.min_confidence}")
             print(f"    • High confidence threshold: {config.matching.high_confidence_threshold}")
             print(f"    • Embedding candidates: {config.matching.embedding_candidates}")
             print(f"    • LLM rerank candidates: {config.matching.llm_rerank_candidates}")
             print(f"    • Max clip reuse: {config.matching.max_clip_reuse}")
-            
+            print(f"    • Delta matching: {'enabled' if delta_enabled and not force_rematch else 'disabled'}")
+
             # Convert voiceover dict segments to SRTSegment objects
             print(f"\n  Preparing voiceover segments...")
             vo_segments = []
@@ -2032,10 +2046,11 @@ Topic:"""
                 else:
                     vo_segment = seg
                 vo_segments.append(vo_segment)
-            
-            # Convert video metadata to SRTSegment objects  
+
+            # Convert video metadata to SRTSegment objects
             print(f"  Preparing video segments...")
             video_segments = []
+            video_paths_set = set()
             for i, meta in enumerate(self.text_metadata):
                 if isinstance(meta, dict):
                     vid_segment = SRTSegment(
@@ -2045,56 +2060,158 @@ Topic:"""
                         text=meta.get('text', ''),
                         source_file=meta.get('video_path', ''),
                     )
+                    video_paths_set.add(meta.get('video_path', ''))
                 else:
                     vid_segment = meta
+                    video_paths_set.add(getattr(meta, 'source_file', ''))
                 video_segments.append(vid_segment)
-            
-            # Compute voiceover embeddings
-            print(f"  Computing voiceover embeddings...")
-            vo_texts = [seg.text for seg in vo_segments]
-            
+
+            all_video_paths = list(video_paths_set)
+
             # Get embedding provider and cache
             from src.embeddings import get_embedding_provider
             cache_dir = config.cache.cache_dir if hasattr(config.cache, 'cache_dir') else ".cache"
             provider = get_embedding_provider(config)
             cache = CacheManager(cache_dir)
-            
-            vo_embeddings = compute_embeddings(
-                texts=vo_texts,
-                provider=provider,
-                cache=cache,
-                cache_key="voiceover"
-            )
-            
-            if vo_embeddings is None or len(vo_embeddings) == 0:
-                print("  ⚠ Failed to compute voiceover embeddings")
-                return []
-            
-            # Match all segments using the high-level function
-            print(f"  Running two-stage matching...")
-            self.matches = match_all_segments(
-                voiceover_segments=vo_segments,
-                video_segments=video_segments,
-                voiceover_embeddings=vo_embeddings,
-                video_embeddings=self.embeddings,
-                scenes=getattr(self, 'scenes', None),
-                config=config,
-                cache=cache,
-                embedding_index=self.embedding_index,
-                face_preference=getattr(self, 'face_preference', 'neutral')
-            )
-            
+
+            # ================================================================
+            # DELTA MATCHING LOGIC
+            # ================================================================
+            use_cached_matches = False
+            cached_matches = None
+
+            if delta_enabled and not force_rematch:
+                # Check for voiceover changes
+                voiceover_path = getattr(self, 'voiceover_path', None)
+                if voiceover_path and match_index.is_voiceover_changed(voiceover_path):
+                    print(f"  ⚠ Voiceover changed - will rematch all videos")
+                    match_index.clear()
+                else:
+                    # Check for new/modified/deleted videos
+                    new_videos = match_index.get_new_videos(all_video_paths)
+                    modified_videos = match_index.get_modified_videos(all_video_paths)
+                    deleted_videos = match_index.get_deleted_videos(all_video_paths)
+
+                    if deleted_videos:
+                        print(f"  ⚠ {len(deleted_videos)} videos deleted - removing from index")
+                        match_index.remove_videos(deleted_videos)
+
+                    if modified_videos:
+                        print(f"  ⚠ {len(modified_videos)} videos modified - will rematch")
+                        match_index.remove_videos(modified_videos)
+                        new_videos = list(set(new_videos) | set(modified_videos))
+
+                    if not new_videos and not deleted_videos:
+                        # No changes - try to use cached matches
+                        cached_matches = match_index.get_cached_matches()
+                        if cached_matches:
+                            print(f"  ✓ No new videos - using {len(cached_matches)} cached matches")
+                            use_cached_matches = True
+                    elif new_videos:
+                        print(f"  → {len(new_videos)} new videos to match (out of {len(all_video_paths)} total)")
+
+            if force_rematch:
+                print(f"  ⚠ Force rematch enabled - clearing match cache")
+                match_index.clear()
+
+            # ================================================================
+            # MATCHING
+            # ================================================================
+
+            if use_cached_matches and cached_matches:
+                # Reconstruct match results from cache
+                from src.utils import MatchResult, Match, AlternativeMatch, StrategyMatch
+                self.matches = []
+                for m_dict in cached_matches:
+                    try:
+                        # Reconstruct MatchResult from dict
+                        primary_data = m_dict.get('primary_match', {})
+                        primary_match = Match(
+                            voiceover_segment=SRTSegment.from_dict(primary_data.get('voiceover_segment', {})),
+                            video_segment=SRTSegment.from_dict(primary_data.get('video_segment', {})),
+                            video_scene=None,
+                            confidence=primary_data.get('confidence', 0.0),
+                            reasoning=primary_data.get('reasoning', ''),
+                            is_keyword_match=primary_data.get('is_keyword_match', False),
+                            is_visual_match=primary_data.get('is_visual_match', False),
+                            embedding_similarity=primary_data.get('embedding_similarity', 0.0),
+                            clip_reuse_count=primary_data.get('clip_reuse_count', 0)
+                        )
+                        match_result = MatchResult(
+                            primary_match=primary_match,
+                            has_gap=m_dict.get('has_gap', False),
+                            gap_reason=m_dict.get('gap_reason', '')
+                        )
+                        self.matches.append(match_result)
+                    except Exception as e:
+                        logger.warning(f"Could not reconstruct cached match: {e}")
+            else:
+                # Compute voiceover embeddings
+                print(f"  Computing voiceover embeddings...")
+                vo_texts = [seg.text for seg in vo_segments]
+
+                vo_embeddings = compute_embeddings(
+                    texts=vo_texts,
+                    provider=provider,
+                    cache=cache,
+                    cache_key="voiceover"
+                )
+
+                if vo_embeddings is None or len(vo_embeddings) == 0:
+                    print("  ⚠ Failed to compute voiceover embeddings")
+                    return []
+
+                # Match all segments using the high-level function
+                print(f"  Running two-stage matching...")
+                self.matches = match_all_segments(
+                    voiceover_segments=vo_segments,
+                    video_segments=video_segments,
+                    voiceover_embeddings=vo_embeddings,
+                    video_embeddings=self.embeddings,
+                    scenes=getattr(self, 'scenes', None),
+                    config=config,
+                    cache=cache,
+                    embedding_index=self.embedding_index,
+                    face_preference=getattr(self, 'face_preference', 'neutral')
+                )
+
+                # Save matches to cache for delta matching
+                if delta_enabled:
+                    try:
+                        matches_as_dicts = []
+                        for m in self.matches:
+                            if m and hasattr(m, 'primary_match') and m.primary_match:
+                                matches_as_dicts.append({
+                                    'primary_match': m.primary_match.to_dict(),
+                                    'has_gap': getattr(m, 'has_gap', False),
+                                    'gap_reason': getattr(m, 'gap_reason', '')
+                                })
+
+                        voiceover_path = getattr(self, 'voiceover_path', None)
+                        match_index.save_matches(matches_as_dicts, voiceover_path)
+
+                        # Update voiceover hash
+                        if voiceover_path:
+                            match_index.set_voiceover_hash(voiceover_path)
+
+                        # Mark all videos as matched
+                        match_index.mark_matched_batch(all_video_paths)
+
+                        print(f"  ✓ Saved matches to cache for future delta matching")
+                    except Exception as e:
+                        logger.warning(f"Could not save match cache: {e}")
+
             # Calculate confidence stats
             confidences = [m.primary_match.confidence for m in self.matches if m and m.primary_match]
             avg_conf = sum(confidences) / len(confidences) if confidences else 0
-            
+
             print(f"\n  ✓ Matched {len(self.matches)} segments")
             print(f"  Average confidence: {avg_conf:.1%}")
-            
+
             # Check if remix needed (config-driven threshold)
             if self.enhanced_enabled and avg_conf < config.enhanced.min_confidence:
                 print(f"  ⚠ Below {config.enhanced.min_confidence:.0%} threshold - consider keyword remix")
-            
+
         except ImportError as e:
             logger.error(f"Could not import matching: {e}")
             import traceback
@@ -2105,7 +2222,7 @@ Topic:"""
             import traceback
             traceback.print_exc()
             return []
-        
+
         return self.matches
     
     def stage_output(self) -> dict:
@@ -2254,12 +2371,13 @@ Topic:"""
         Path(output_path).write_text("\n".join(lines), encoding='utf-8')
     
     def run(self, voiceover_path: str, num_keywords: int = None, match_only: bool = False,
-            resume: bool = False, fresh: bool = False, 
-            use_keywords: str = None, save_keywords: str = None):
+            resume: bool = False, fresh: bool = False,
+            use_keywords: str = None, save_keywords: str = None,
+            force_rematch: bool = False):
         """
         Run the complete pipeline.
         All settings from config.yaml.
-        
+
         Args:
             voiceover_path: Path to voiceover file
             num_keywords: Number of keywords to extract (None = use config)
@@ -2268,7 +2386,10 @@ Topic:"""
             fresh: Force fresh start, ignore checkpoint
             use_keywords: Use saved keywords preset (name or 'latest')
             save_keywords: Save extracted keywords with this name ('auto' for auto-name)
+            force_rematch: Force rematch all videos, ignoring cached matches
         """
+        # Store force_rematch for use in stage_match
+        self.force_rematch = force_rematch
         start_time = time.time()
         
         # Initialize checkpoint and keyword managers
@@ -3027,7 +3148,13 @@ Examples:
         action='store_true',
         help='Force fresh start, ignore any existing checkpoint'
     )
-    
+
+    parser.add_argument(
+        '--force-rematch',
+        action='store_true',
+        help='Force rematch all videos, ignoring cached matches (delta matching)'
+    )
+
     parser.add_argument(
         '--use-keywords',
         type=str,
@@ -3282,7 +3409,8 @@ def main():
         resume=args.resume,
         fresh=getattr(args, 'fresh', False),
         use_keywords=getattr(args, 'use_keywords', None),
-        save_keywords=getattr(args, 'save_keywords', None)
+        save_keywords=getattr(args, 'save_keywords', None),
+        force_rematch=getattr(args, 'force_rematch', False)
     )
 
 
