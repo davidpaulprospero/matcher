@@ -39,6 +39,7 @@ Usage:
     python main.py --match-only                # Skip download, just match existing
     python main.py --config custom_config.yaml # Use custom config file
 """
+from __future__ import annotations
 
 import os
 import sys
