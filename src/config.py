@@ -96,17 +96,18 @@ class ProjectConfig:
 class PauseSplitConfig:
     """Pause-based segment splitting settings
     
-    Splits segments at natural pauses like:
-    - List markers: "1.", "2.", "8."
-    - Location patterns: "Atlanta, Georgia,"
-    - Short phrases with punctuation
+    Aggressive splitting for better video matching:
+    - Sentence boundaries: Every sentence becomes its own segment
+    - List markers: "1.", "2.", "8." isolates countdown items
+    - Location patterns: "Atlanta, Georgia," splits at city/state pairs
     """
     enabled: bool = True
     min_gap_ms: int = 300  # Minimum gap to consider a pause
-    split_at_list_markers: bool = True  # Split after "1.", "2.", etc.
-    split_at_locations: bool = True  # Split at "City, State" patterns
-    split_at_short_phrases: bool = True  # Split at sentence boundaries
+    split_at_sentences: bool = True  # Split at sentence boundaries (. ! ?)
+    split_at_list_markers: bool = True  # Split before "1.", "2.", "Number 10", etc.
+    split_at_locations: bool = True  # Split at "City, State" patterns  
     min_phrase_words: int = 2  # Minimum words to keep in a segment
+    min_segment_duration: float = 0.5  # Minimum duration for split segments (seconds)
 
 
 @dataclass
