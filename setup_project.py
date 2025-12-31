@@ -300,8 +300,8 @@ if %ERRORLEVEL% NEQ 0 (
 
 :done
 echo.
-echo   Press any key to close...
-pause >nul
+REM Keep window open until user manually closes it (no "press any key")
+cmd /k
 '''
     
     bat_path = project_dir / "run.bat"
