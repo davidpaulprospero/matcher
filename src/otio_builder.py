@@ -950,18 +950,22 @@ def _add_entity_images_to_track(
                     image_path_resolved = _to_windows_path(image_path)
 
                     # Create external reference for still image
+                    # CRITICAL: available_range = 1 frame signals to Resolve this is a still image
+                    # Resolve then auto-holds (repeats) this single frame for the full source_range
+                    # DO NOT set to null - that causes "media offline" because Resolve can't
+                    # determine the media's temporal extent
                     image_ref = otio.schema.ExternalReference(
-                        target_url=image_path_resolved
+                        target_url=image_path_resolved,
+                        available_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(1, rate)  # 1 frame = still image
+                        )
                     )
                     image_ref.name = image_unique_name
-                    # Explicitly set available_range to None for still images
-                    # This produces "available_range": null in JSON
-                    # Tells Resolve the image has infinite duration (can be stretched)
-                    image_ref.available_range = None
 
                     # Create clip with source_range = display duration
-                    # source_range.start_time MUST be 0 for stills (no frames to advance)
-                    # source_range.duration = how long to display the still
+                    # source_range.start_time MUST be 0 for stills (cannot advance frames that don't exist)
+                    # source_range.duration = how long to display the still (Resolve auto-holds it)
                     image_clip = otio.schema.Clip(
                         name=image_unique_name,
                         source_range=otio.opentime.TimeRange(
