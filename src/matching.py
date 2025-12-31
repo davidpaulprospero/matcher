@@ -806,8 +806,9 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
 # =============================================================================
 
 class TieredMatcher:
-    def __init__(self, config=None):
+    def __init__(self, config=None, cache=None):
         self.config = config or get_config()
+        self.cache = cache  # Store cache for potential future use
         mc = self.config.matching
         
         self.primary_model = mc.gemini_model
