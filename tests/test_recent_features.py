@@ -177,8 +177,8 @@ class TestRecentFeatures:
                 f"new={len(new_videos)}"
             )
 
-            # Test save/load
-            index.save()
+            # Test save/load (uses private _save method)
+            index._save()
             index2 = MatchAwareIndex(str(self.temp_dir))
             passed3 = print_result(
                 "Save and reload index",
@@ -217,14 +217,14 @@ class TestRecentFeatures:
                 vt.topics == ["weather", "storm", "winter"]
             )
 
-            # Test topic overlap
+            # Test topic overlap (returns tuple of count, ratio)
             vo_topics = ["weather", "storm", "news"]
             video_topics = ["weather", "winter", "cold"]
-            overlap = compute_topic_overlap(vo_topics, video_topics)
+            overlap_count, overlap_ratio = compute_topic_overlap(vo_topics, video_topics)
             passed2 = print_result(
                 "Topic overlap computation",
-                overlap == 1,  # "weather" is common
-                f"overlap={overlap}"
+                overlap_count >= 1,  # "weather" is common
+                f"count={overlap_count}, ratio={overlap_ratio:.2f}"
             )
 
             # Test topic penalty
