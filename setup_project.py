@@ -442,10 +442,200 @@ fi
     return sh_path
 
 
+def create_analyze_bat(project_dir: Path, install_dir: Path) -> Path:
+    """
+    Create analyze.bat for post-edit timeline analysis.
+
+    Drag-drop an exported XML/OTIO timeline file to analyze which clips were kept,
+    replaced, moved, or disabled. Useful for understanding editor preferences.
+    """
+    bat_content = f'''@echo off
+REM ============================================================
+REM Post-Edit Timeline Analyzer
+REM Project: {project_dir.name}
+REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+REM ============================================================
+REM
+REM Usage: Drag and drop an exported XML or OTIO file onto this script
+REM        to analyze which clips were selected in the final edit.
+REM
+REM Output shows:
+REM   - Clips kept (V1, original recommendations)
+REM   - Clips replaced with alternatives (V2+)
+REM   - Clips replaced with external footage
+REM   - Clips moved from other segments
+REM   - Disabled segments
+REM ============================================================
+
+REM Central installation location
+set INSTALL_DIR={install_dir}
+
+REM Project directory (this folder)
+set PROJECT_DIR=%~dp0
+if "%PROJECT_DIR:~-1%"=="\\" set PROJECT_DIR=%PROJECT_DIR:~0,-1%
+
+:: Check if a file was dragged onto the script
+if "%~1"=="" (
+    echo.
+    echo   ============================================================
+    echo   POST-EDIT TIMELINE ANALYZER
+    echo   ============================================================
+    echo.
+    echo   Usage: Drag an exported XML or OTIO file onto this script
+    echo.
+    echo   This analyzes your edited timeline to understand:
+    echo     - Which clips you kept vs replaced
+    echo     - Which alternatives (V2+) you preferred
+    echo     - External clips you added
+    echo     - Clips moved between segments
+    echo     - Segments where all clips were disabled
+    echo.
+    echo   Workflow:
+    echo     1. Export timeline from DaVinci as XML or OTIO
+    echo     2. Drag the file onto this script
+    echo     3. Review the analysis summary
+    echo.
+    pause
+    exit /b
+)
+
+:: Input file
+set INPUT=%~1
+set INPUT_EXT=%~x1
+
+:: Validate extension
+if /i not "%INPUT_EXT%"==".xml" if /i not "%INPUT_EXT%"==".otio" if /i not "%INPUT_EXT%"==".fcpxml" (
+    echo.
+    echo   ERROR: Unsupported file type: %INPUT_EXT%
+    echo   Supported formats: .xml, .fcpxml, .otio
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
+echo   ============================================================
+echo   POST-EDIT TIMELINE ANALYZER
+echo   ============================================================
+echo.
+echo   Project:  %PROJECT_DIR%
+echo   Timeline: %~nx1
+echo.
+echo   Analyzing...
+echo.
+
+REM Change to install directory and run analysis
+cd /d "%INSTALL_DIR%"
+
+python -c "from src.post_edit_analysis import analyze_final_edit; analyze_final_edit(r'%INPUT%')"
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo   [ERROR] Analysis failed - check file format
+) else (
+    echo.
+    echo   [SUCCESS] Analysis complete
+)
+
+echo.
+pause
+'''
+
+    bat_path = project_dir / "analyze.bat"
+    bat_path.write_text(bat_content)
+    return bat_path
+
+
+def create_analyze_sh(project_dir: Path, install_dir: Path) -> Path:
+    """
+    Create analyze.sh for post-edit timeline analysis on Unix systems.
+
+    Usage: ./analyze.sh timeline.xml
+    """
+    sh_content = f'''#!/bin/bash
+# ============================================================
+# Post-Edit Timeline Analyzer
+# Project: {project_dir.name}
+# Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+# ============================================================
+#
+# Usage: ./analyze.sh <timeline.xml or timeline.otio>
+#
+# Analyzes which clips were selected in the final edit.
+# ============================================================
+
+# Central installation location
+INSTALL_DIR="{install_dir}"
+
+# Project directory (this folder)
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Check if a file was provided
+if [ -z "$1" ]; then
+    echo ""
+    echo "  ============================================================"
+    echo "  POST-EDIT TIMELINE ANALYZER"
+    echo "  ============================================================"
+    echo ""
+    echo "  Usage: ./analyze.sh <timeline.xml or timeline.otio>"
+    echo ""
+    echo "  This analyzes your edited timeline to understand:"
+    echo "    - Which clips you kept vs replaced"
+    echo "    - Which alternatives (V2+) you preferred"
+    echo "    - External clips you added"
+    echo "    - Clips moved between segments"
+    echo "    - Segments where all clips were disabled"
+    echo ""
+    exit 0
+fi
+
+INPUT="$1"
+EXT="${{INPUT##*.}}"
+
+# Validate extension
+if [[ ! "$EXT" =~ ^(xml|otio|fcpxml)$ ]]; then
+    echo ""
+    echo "  ERROR: Unsupported file type: .$EXT"
+    echo "  Supported formats: .xml, .fcpxml, .otio"
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "  ============================================================"
+echo "  POST-EDIT TIMELINE ANALYZER"
+echo "  ============================================================"
+echo ""
+echo "  Project:  $PROJECT_DIR"
+echo "  Timeline: $(basename "$INPUT")"
+echo ""
+echo "  Analyzing..."
+echo ""
+
+# Change to install directory and run analysis
+cd "$INSTALL_DIR"
+
+python -c "from src.post_edit_analysis import analyze_final_edit; analyze_final_edit('$INPUT')"
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "  [ERROR] Analysis failed - check file format"
+else
+    echo ""
+    echo "  [SUCCESS] Analysis complete"
+fi
+'''
+
+    sh_path = project_dir / "analyze.sh"
+    sh_path.write_text(sh_content)
+    sh_path.chmod(0o755)
+    return sh_path
+
+
 def create_convert_bat(project_dir: Path) -> Path:
     """
     Create convert.bat for converting HEVC/CapCut videos to DaVinci-compatible ProRes.
-    
+
     Drag-drop any video file onto this batch file to convert it to ProRes 4444.
     Useful for CapCut exports that use HEVC codec which DaVinci may not handle well.
     """
@@ -642,10 +832,20 @@ def setup_project(project_path: str, install_dir: Path = None):
         convert_path = create_convert_bat(project_dir)
         print(f"  + convert.bat")
         result['convert_script'] = str(convert_path)
+
+        # Create analyze.bat for post-edit timeline analysis
+        analyze_path = create_analyze_bat(project_dir, install_dir)
+        print(f"  + analyze.bat")
+        result['analyze_script'] = str(analyze_path)
     else:
         sh_path = create_run_sh(project_dir, install_dir)
         print(f"  + run.sh")
         result['run_script'] = str(sh_path)
+
+        # Create analyze.sh for post-edit timeline analysis
+        analyze_path = create_analyze_sh(project_dir, install_dir)
+        print(f"  + analyze.sh")
+        result['analyze_script'] = str(analyze_path)
     
     # Create project config (if doesn't exist)
     config_path = project_dir / "project_config.yaml"
