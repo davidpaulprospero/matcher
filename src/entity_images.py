@@ -16,7 +16,9 @@ import os
 import re
 import json
 import logging
+import random
 import requests
+import string
 import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -491,8 +493,11 @@ class GoogleBingImageClient:
             elif url.lower().endswith('.webp'):
                 ext = '.webp'
             
-            # Save file
-            filepath = output_folder / f"{index:08d}{ext}"
+            # Save file with non-sequential name to prevent image sequence detection
+            # DaVinci Resolve auto-detects sequential numbered files as image sequences
+            # Adding random suffix breaks the pattern: img_00000002_a3f2.jpg
+            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            filepath = output_folder / f"img_{index:08d}_{random_suffix}{ext}"
             
             with open(filepath, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
