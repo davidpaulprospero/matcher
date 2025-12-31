@@ -107,13 +107,12 @@ def download_voiceover(output_dir: Path, url: str = None, max_duration: int = 30
     """
     output_path = output_dir / "voiceover.mp4"
 
-    # Build yt-dlp command with low quality settings
+    # Build yt-dlp command with low quality video settings
     cmd = [
         'yt-dlp',
-        '--format', 'worstaudio[ext=m4a]/worstaudio/worst',  # Audio only for voiceover
+        '--format', 'worst[ext=mp4]/worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst',  # Lowest quality video
         '--output', str(output_path),
         '--no-playlist',
-        '--quiet',
         '--progress',
     ]
 
