@@ -201,6 +201,11 @@ scene_detection:
   use_gpu: true
   force_gpu: false
 
+  # Face detection per scene (B-roll identification)
+  # Analyzes each scene for faces to identify B-roll footage
+  detect_faces_per_scene: true  # Enable scene-level face detection
+  face_sample_frames: 3  # Frames to sample per scene
+
 # -----------------------------------------------------------------------------
 # AUDIO ANALYSIS (librosa)
 # -----------------------------------------------------------------------------
@@ -284,6 +289,14 @@ matching:
   topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
   extract_video_topics: true  # Extract topics from video transcripts using LLM
   min_topic_overlap: 1  # Minimum matching topic keywords required
+
+  # B-roll preference (scene-level face detection)
+  # Chain-of-thought: B-roll (no faces) is more useful for matching to narration
+  # Reasoning: Talking heads from news/interviews don't fit narration well
+  # Decision: When topic matches, boost scenes without faces
+  prefer_broll_when_topic_matches: true  # Enable B-roll preference when topic matches
+  broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
+  broll_boost: 0.1  # Confidence boost for matching B-roll (+10%)
 
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
