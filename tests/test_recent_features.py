@@ -11,6 +11,8 @@ Tests the following recent features:
 6. Scene-level face detection for B-roll identification
 7. B-roll preference in matching
 8. Global cache for cross-project video reuse
+9. Segment IDs in OTIO clip names for post-edit tracing
+10. Post-edit analysis tool
 
 Usage:
     python tests/test_recent_features.py
@@ -711,6 +713,195 @@ class TestRecentFeatures:
         except Exception as e:
             return print_result("Config global cache options", False, str(e))
 
+    def test_segment_ids_in_clip_names(self) -> bool:
+        """Test that OTIO builder adds segment IDs to clip names"""
+        print_section("Segment IDs in Clip Names")
+
+        if not HAS_OTIO:
+            print_result("Segment IDs", True, "SKIPPED - opentimelineio not installed")
+            return True
+
+        try:
+            from src.utils import SRTSegment, Match, MatchResult
+            from src.config import Config
+            from src.otio_builder import create_timeline
+
+            # Create minimal config
+            config = Config()
+
+            # Create 3 match results to test segment ID numbering
+            matches = []
+            for i in range(3):
+                vo_seg = SRTSegment(
+                    index=i, start_time=i * 5.0, end_time=(i + 1) * 5.0,
+                    text=f"Test segment {i}", source_file=""
+                )
+                vid_seg = SRTSegment(
+                    index=i, start_time=0.0, end_time=5.0,
+                    text=f"Video text {i}", source_file=f"/path/folder/video{i}.mp4"
+                )
+                match = Match(
+                    voiceover_segment=vo_seg,
+                    video_segment=vid_seg,
+                    video_scene=None,
+                    confidence=0.9,
+                    reasoning="Test"
+                )
+                matches.append(MatchResult(
+                    primary_match=match,
+                    alternatives=[],
+                    strategy_matches={}
+                ))
+
+            # Create timeline
+            timeline = create_timeline(
+                matches=matches,
+                config=config,
+                voiceover_path=None,
+                frame_rate=30.0,
+                entity_images=None,
+                entity_videos=None
+            )
+
+            # Find V1 track and check clip names
+            clip_names = []
+            for track in timeline.tracks:
+                if track.kind == otio.schema.TrackKind.Video and "V1" in track.name:
+                    for item in track:
+                        if hasattr(item, 'name') and item.name:
+                            clip_names.append(item.name)
+                    break
+
+            # Check that segment IDs are present
+            has_s000 = any("[S000]" in name for name in clip_names)
+            has_s001 = any("[S001]" in name for name in clip_names)
+            has_s002 = any("[S002]" in name for name in clip_names)
+
+            passed1 = print_result(
+                "Clip names contain [S000]",
+                has_s000,
+                f"found in: {[n for n in clip_names if '[S000]' in n][:1]}"
+            )
+
+            passed2 = print_result(
+                "Clip names contain [S001]",
+                has_s001
+            )
+
+            passed3 = print_result(
+                "Clip names contain [S002]",
+                has_s002
+            )
+
+            # Check metadata includes segment_index
+            has_metadata = False
+            for track in timeline.tracks:
+                if track.kind == otio.schema.TrackKind.Video and "V1" in track.name:
+                    for item in track:
+                        if hasattr(item, 'metadata') and 'segment_index' in item.metadata:
+                            has_metadata = True
+                            break
+                    break
+
+            passed4 = print_result(
+                "Clip metadata includes segment_index",
+                has_metadata
+            )
+
+            return passed1 and passed2 and passed3 and passed4
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return print_result("Segment IDs", False, str(e))
+
+    def test_post_edit_analyzer(self) -> bool:
+        """Test PostEditAnalyzer module"""
+        print_section("Post-Edit Analyzer Module")
+
+        try:
+            from src.post_edit_analysis import (
+                PostEditAnalyzer,
+                ClipSelection,
+                EditAnalysisResult,
+                analyze_final_edit
+            )
+        except ImportError as e:
+            return print_result("Post-edit analysis", True, f"SKIPPED - {e}")
+
+        try:
+            # Test ClipSelection dataclass
+            selection = ClipSelection(
+                segment_id="S001",
+                segment_index=1,
+                clip_name="[S001] folder_video [10.5s]",
+                source_file="folder_video",
+                track="V1",
+                was_alternative=False
+            )
+            passed1 = print_result(
+                "ClipSelection dataclass",
+                selection.segment_id == "S001" and selection.segment_index == 1
+            )
+
+            # Test EditAnalysisResult
+            result = EditAnalysisResult(
+                total_segments=10,
+                clips_kept=7,
+                clips_replaced_with_alt=2,
+                clips_removed=1
+            )
+            passed2 = print_result(
+                "EditAnalysisResult dataclass",
+                result.clips_kept == 7 and result.clips_replaced_with_alt == 2
+            )
+
+            # Test summary generation
+            summary = result.summary()
+            passed3 = print_result(
+                "EditAnalysisResult.summary()",
+                "Total segments" in summary and "Primary clips kept" in summary
+            )
+
+            # Test PostEditAnalyzer regex patterns
+            analyzer = PostEditAnalyzer()
+
+            # Test segment ID extraction
+            match = analyzer.SEGMENT_ID_PATTERN.search("[S001] folder_video [10.5s]")
+            passed4 = print_result(
+                "Segment ID pattern extraction",
+                match is not None and match.group(1) == "001"
+            )
+
+            # Test ALT pattern
+            alt_match = analyzer.ALT_PATTERN.search("[S005] ALT2: folder_alt [5.0s]")
+            passed5 = print_result(
+                "Alternative pattern extraction",
+                alt_match is not None and alt_match.group(1) == "2"
+            )
+
+            # Test parsing a mock clip element
+            from xml.etree.ElementTree import Element, SubElement
+
+            clip = Element('clipitem')
+            name = SubElement(clip, 'name')
+            name.text = "[S003] test_folder_video [15.5s]"
+            start = SubElement(clip, 'start')
+            start.text = "0"
+
+            parsed = analyzer._parse_clip_element(clip)
+            passed6 = print_result(
+                "Parse clip element",
+                parsed is not None and parsed.segment_index == 3 and parsed.segment_id == "S003"
+            )
+
+            return passed1 and passed2 and passed3 and passed4 and passed5 and passed6
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return print_result("Post-edit analysis", False, str(e))
+
     def run_all(self) -> bool:
         """Run all tests"""
         print_box("RECENT FEATURES TEST SUITE")
@@ -731,6 +922,8 @@ class TestRecentFeatures:
             ("Config B-roll Options", self.test_config_broll_options),
             ("Global Cache Module", self.test_global_cache_module),
             ("Config Global Cache", self.test_config_global_cache_options),
+            ("Segment IDs in Clips", self.test_segment_ids_in_clip_names),
+            ("Post-Edit Analyzer", self.test_post_edit_analyzer),
         ]
 
         passed = 0

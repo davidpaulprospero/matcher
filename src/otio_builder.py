@@ -426,8 +426,11 @@ def create_timeline(
         # Determine clip color based on confidence
         clip_color = get_confidence_color(match.confidence)
         
-        # Build metadata
+        # Build metadata - include segment_index for post-edit analysis tracing
+        segment_id = f"S{match_idx:03d}"  # S000, S001, S002, ...
         metadata = {
+            'segment_index': match_idx,
+            'segment_id': segment_id,
             'confidence': match.confidence,
             'reasoning': match.reasoning,
             'voiceover_text': vo_seg.text,
@@ -440,11 +443,11 @@ def create_timeline(
             'target_duration': target_duration
         }
         
-        # Create primary video clip (V1)
+        # Create primary video clip (V1) - prefix with segment ID for tracing
         clip_folder = Path(vid_seg.source_file).parent.name
         clip_stem = Path(vid_seg.source_file).stem
         v1_clip = create_clip_with_timewarp(
-            name=f"{clip_folder}_{clip_stem} [{vid_seg.start_time:.1f}s]",
+            name=f"[{segment_id}] {clip_folder}_{clip_stem} [{vid_seg.start_time:.1f}s]",
             source_path=vid_seg.source_file,
             source_start=source_start,
             source_duration=source_duration,
@@ -462,7 +465,7 @@ def create_timeline(
         
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
-            name=f"Audio: {clip_folder}_{clip_stem}",
+            name=f"[{segment_id}] Audio: {clip_folder}_{clip_stem}",
             source_path=vid_seg.source_file,
             source_start=source_start,
             source_duration=source_duration,
@@ -488,11 +491,11 @@ def create_timeline(
                     'target_duration': target_duration
                 }
                 
-                # Alternative video clip
+                # Alternative video clip - include segment ID for tracing
                 alt_folder = Path(alt_seg.source_file).parent.name
                 alt_stem = Path(alt_seg.source_file).stem
                 alt_v_clip = create_clip_with_timewarp(
-                    name=f"ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
+                    name=f"[{segment_id}] ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
                     source_path=alt_seg.source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
@@ -508,7 +511,7 @@ def create_timeline(
                 
                 # Alternative audio clip
                 alt_a_clip = create_clip_with_timewarp(
-                    name=f"Audio ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
+                    name=f"[{segment_id}] Audio ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
                     source_path=alt_seg.source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
@@ -550,19 +553,21 @@ def create_timeline(
                 sec_source_start = sec_seg.start_time
                 
                 sec_metadata = {
+                    'segment_index': match_idx,
+                    'segment_id': segment_id,
                     'confidence': sec_match.confidence,
                     'reasoning': sec_match.reasoning,
                     'original_duration': sec_source_duration,
                     'target_duration': target_duration,
                     'is_secondary': True
                 }
-                
-                # Secondary video clip
+
+                # Secondary video clip - include segment ID for tracing
                 sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
                 sec_folder = Path(sec_seg.source_file).parent.name
                 sec_stem = Path(sec_seg.source_file).stem
                 sec_v_clip = create_clip_with_timewarp(
-                    name=f"{sec_label}: {sec_folder}_{sec_stem}",
+                    name=f"[{segment_id}] {sec_label}: {sec_folder}_{sec_stem}",
                     source_path=sec_seg.source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
@@ -579,7 +584,7 @@ def create_timeline(
                 
                 # Secondary audio clip
                 sec_a_clip = create_clip_with_timewarp(
-                    name=f"Audio {sec_label}: {sec_folder}_{sec_stem}",
+                    name=f"[{segment_id}] Audio {sec_label}: {sec_folder}_{sec_stem}",
                     source_path=sec_seg.source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
@@ -628,18 +633,20 @@ def create_timeline(
                 strat_source_start = strat_seg.start_time
                 
                 strat_metadata = {
+                    'segment_index': match_idx,
+                    'segment_id': segment_id,
                     'confidence': strat_match.confidence,
                     'reasoning': strat_match.reasoning,
                     'strategy': strat_match.strategy,
                     'original_duration': strat_source_duration,
                     'target_duration': target_duration
                 }
-                
-                # Strategy video clip
+
+                # Strategy video clip - include segment ID for tracing
                 strat_folder = Path(strat_seg.source_file).parent.name
                 strat_stem = Path(strat_seg.source_file).stem
                 strat_v_clip = create_clip_with_timewarp(
-                    name=f"{strategy.upper()}: {strat_folder}_{strat_stem}",
+                    name=f"[{segment_id}] {strategy.upper()}: {strat_folder}_{strat_stem}",
                     source_path=strat_seg.source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
@@ -658,7 +665,7 @@ def create_timeline(
                 
                 # Strategy audio clip
                 strat_a_clip = create_clip_with_timewarp(
-                    name=f"Audio {strategy.upper()}: {strat_folder}_{strat_stem}",
+                    name=f"[{segment_id}] Audio {strategy.upper()}: {strat_folder}_{strat_stem}",
                     source_path=strat_seg.source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
@@ -1375,25 +1382,27 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
     # V1 - Primary track
     xml_lines.append('        <track>')
     timeline_pos = 0
-    
-    for match_result in matches:
+
+    for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
-        
+
         target_duration = vo_seg.end_time - vo_seg.start_time
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
-        
+
         target_frames = int(target_duration * frame_rate)
         source_frames = int(source_duration * frame_rate)
         source_start_frames = int(source_start * frame_rate)
-        
+
         # Speed factor (100 = normal, 200 = 2x fast)
         speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
-        
-        clip_name = Path(vid_seg.source_file).stem
-        
+
+        # Include segment ID in clip name for post-edit analysis tracing
+        segment_id = f"S{match_idx:03d}"
+        clip_name = f"[{segment_id}] {Path(vid_seg.source_file).stem}"
+
         xml_lines.extend([
             '          <clipitem>',
             f'            <name>{clip_name}</name>',
@@ -1451,27 +1460,30 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
     for alt_idx in range(2):
         xml_lines.append('        <track>')
         timeline_pos = 0
-        
-        for match_result in matches:
+
+        for match_idx, match_result in enumerate(matches):
             vo_seg = match_result.primary_match.voiceover_segment
             target_duration = vo_seg.end_time - vo_seg.start_time
             target_frames = int(target_duration * frame_rate)
-            
+
+            # Segment ID for tracing
+            segment_id = f"S{match_idx:03d}"
+
             if alt_idx < len(match_result.alternatives):
                 alt = match_result.alternatives[alt_idx]
                 alt_seg = alt.video_segment
-                
+
                 source_duration = alt_seg.end_time - alt_seg.start_time
                 source_start = alt_seg.start_time
                 source_frames = int(source_duration * frame_rate)
                 source_start_frames = int(source_start * frame_rate)
                 speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
-                
-                clip_name = Path(alt_seg.source_file).stem
-                
+
+                clip_name = f"[{segment_id}] ALT{alt_idx+1}: {Path(alt_seg.source_file).stem}"
+
                 xml_lines.extend([
                     '          <clipitem>',
-                    f'            <name>ALT{alt_idx+1}: {clip_name}</name>',
+                    f'            <name>{clip_name}</name>',
                     f'            <duration>{target_frames}</duration>',
                     f'            <start>{timeline_pos}</start>',
                     f'            <end>{timeline_pos + target_frames}</end>',
@@ -1946,26 +1958,27 @@ def generate_resolve_xml_with_bins(
     
     # Add clips to V1 timeline track
     timeline_pos = 0
-    for match_result in matches:
+    for match_idx, match_result in enumerate(matches):
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
-        
+
         target_duration = vo_seg.end_time - vo_seg.start_time
         target_frames = int(target_duration * frame_rate)
-        
+
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
         source_frames = int(source_duration * frame_rate)
         source_start_frames = int(source_start * frame_rate)
-        
+
         file_info = all_files.get(vid_seg.source_file, {})
         file_id = file_info.get('file_id', '')
-        
-        # Make clip name unique by including parent folder
+
+        # Make clip name unique by including segment ID and parent folder
+        segment_id = f"S{match_idx:03d}"
         folder_name = Path(vid_seg.source_file).parent.name
         base_name = Path(vid_seg.source_file).stem
-        unique_name = escape_xml(f"{folder_name}_{base_name}")
-        
+        unique_name = escape_xml(f"[{segment_id}] {folder_name}_{base_name}")
+
         xml_lines.extend([
             '                            <clipitem>',
             f'                                <name>{unique_name}</name>',
