@@ -3295,24 +3295,12 @@ Topic:"""
         # Mark output stage complete and clear checkpoint (pipeline finished successfully)
         self.checkpoint.save("OUTPUT", {"files": len(outputs)})
         self.checkpoint.clear()  # Pipeline completed successfully - no need to resume
-        
-        # Summary
-        elapsed = time.time() - start_time
-        print(f"\n{'=' * 70}")
-        print(f"  PIPELINE COMPLETE")
-        print(f"{'=' * 70}")
-        print(f"  Duration: {elapsed:.1f}s")
-        print(f"  Outputs: {len(outputs)} files generated")
-        
-        # Config metrics
-        metrics = get_config_metrics()
-        if metrics['load_count'] > 0:
-            print(f"  Config loads: {metrics['load_count']} (avg {metrics['load_time_total_ms']/metrics['load_count']:.1f}ms)")
-        
-        # Finalize logger
+
+        # Finalize logger (prints comprehensive run summary)
         if self.run_logger:
+            self.run_logger.set_stats(total_segments=len(self.srt_segments) if hasattr(self, 'srt_segments') else 0)
             self.run_logger.finalize()
-            print(f"  Log: {self.run_logger.log_file}")
+            print(f"  Log file: {self.run_logger.log_file}")
     
     def _configure_pipeline_upfront(self, keywords: List[str]):
         """

@@ -593,14 +593,14 @@ class RunLogger:
     def finalize(self):
         """Finalize logging, save JSON, and generate summary files"""
         self.run_log.end_time = datetime.now().isoformat()
-        
+
         # Calculate summary stats from match decisions if available
         if self.run_log.match_decisions:
             confidences = [m.confidence for m in self.run_log.match_decisions]
             self.run_log.avg_confidence = sum(confidences) / len(confidences)
             if self.run_log.total_matches == 0:
                 self.run_log.total_matches = len(self.run_log.match_decisions)
-        
+
         # Calculate total duration
         try:
             start = datetime.fromisoformat(self.run_log.start_time)
@@ -608,90 +608,145 @@ class RunLogger:
             total_duration = (end - start).total_seconds()
         except:
             total_duration = sum(self.run_log.stage_timings.values())
-        
-        # Build comprehensive summary - write to both file and console
-        divider = "=" * 60
-        
-        self.file_logger.info(divider)
-        self.file_logger.info("RUN SUMMARY")
-        self.file_logger.info(divider)
-        
-        # Also print to console
-        print(f"\n{divider}")
+
+        # =================================================================
+        # CONSOLE SUMMARY (clean, organized format)
+        # =================================================================
+        print("\n" + "=" * 60)
         print("  RUN SUMMARY")
-        print(divider)
-        
-        # Matching stats
-        match_line = f"Matches: {self.run_log.total_matches}/{self.run_log.total_segments} | Avg: {self.run_log.avg_confidence:.1%}"
+        print("=" * 60)
+
+        # Matching results
+        print("\n  " + "-" * 56)
+        print("  MATCHING RESULTS")
+        print("  " + "-" * 56)
+        match_pct = (self.run_log.total_matches / max(self.run_log.total_segments, 1)) * 100
+        print(f"  Segments matched:    {self.run_log.total_matches}/{self.run_log.total_segments} ({match_pct:.0f}%)")
+        print(f"  Average confidence:  {self.run_log.avg_confidence:.1%}")
+
+        # Confidence breakdown
+        if self.run_log.match_decisions:
+            high = sum(1 for m in self.run_log.match_decisions if m.confidence >= 0.80)
+            good = sum(1 for m in self.run_log.match_decisions if 0.60 <= m.confidence < 0.80)
+            medium = sum(1 for m in self.run_log.match_decisions if 0.40 <= m.confidence < 0.60)
+            low = sum(1 for m in self.run_log.match_decisions if m.confidence < 0.40)
+            print(f"  Confidence tiers:    HIGH={high} GOOD={good} MED={medium} LOW={low}")
+
+        # Processing stats
+        total_videos = self.run_log.videos_downloaded + self.run_log.videos_skipped + self.run_log.videos_failed
+        if total_videos > 0 or self.run_log.videos_transcribed > 0:
+            print("\n  " + "-" * 56)
+            print("  PROCESSING")
+            print("  " + "-" * 56)
+
+            if total_videos > 0:
+                print(f"  Videos:     {self.run_log.videos_downloaded:>4} downloaded | {self.run_log.videos_skipped:>4} cached | {self.run_log.videos_failed:>4} failed")
+
+            total_transcribed = self.run_log.videos_transcribed + self.run_log.transcription_cache_hits
+            if total_transcribed > 0:
+                print(f"  Transcribe: {self.run_log.videos_transcribed:>4} new        | {self.run_log.transcription_cache_hits:>4} cached")
+
+            total_embeddings = self.run_log.embeddings_computed + self.run_log.embedding_cache_hits
+            if total_embeddings > 0:
+                print(f"  Embeddings: {self.run_log.embeddings_computed:>4} computed   | {self.run_log.embedding_cache_hits:>4} cached")
+
+            if self.run_log.entity_images_downloaded > 0 or self.run_log.entity_videos_downloaded > 0:
+                print(f"  Entity:     {self.run_log.entity_images_downloaded:>4} images     | {self.run_log.entity_videos_downloaded:>4} videos")
+
+        # Stage timings
+        if self.run_log.stage_timings:
+            print("\n  " + "-" * 56)
+            print("  STAGE TIMINGS")
+            print("  " + "-" * 56)
+            for stage, duration in self.run_log.stage_timings.items():
+                pct = (duration / total_duration * 100) if total_duration > 0 else 0
+                bar_len = int(pct / 5)  # 20 char max bar
+                bar = "█" * bar_len + "░" * (20 - bar_len)
+                print(f"  {stage:<12} {duration:>6.1f}s  {bar} {pct:>5.1f}%")
+
+        # API usage
+        if self.run_log.total_api_calls > 0:
+            print("\n  " + "-" * 56)
+            print("  API USAGE")
+            print("  " + "-" * 56)
+            print(f"  Total calls:  {self.run_log.total_api_calls}")
+            print(f"  Est. cost:    ${self.run_log.total_api_cost_est_usd:.4f}")
+
+        # Files generated
+        if self.run_log.files_generated:
+            print("\n  " + "-" * 56)
+            print("  FILES GENERATED")
+            print("  " + "-" * 56)
+            for file_type, path in self.run_log.files_generated.items():
+                print(f"  {file_type:<12} {Path(path).name}")
+
+        # Warnings/Errors
+        if self.run_log.warnings or self.run_log.errors:
+            print("\n  " + "-" * 56)
+            print("  ISSUES")
+            print("  " + "-" * 56)
+            if self.run_log.warnings:
+                print(f"  Warnings: {len(self.run_log.warnings)}")
+                for w in self.run_log.warnings[:3]:
+                    print(f"    • {w[:60]}...")
+                if len(self.run_log.warnings) > 3:
+                    print(f"    ... and {len(self.run_log.warnings) - 3} more")
+            if self.run_log.errors:
+                print(f"  Errors: {len(self.run_log.errors)}")
+                for e in self.run_log.errors[:3]:
+                    print(f"    ✗ {e[:60]}...")
+
+        # Total time
+        print("\n  " + "-" * 56)
+        mins = int(total_duration // 60)
+        secs = total_duration % 60
+        if mins > 0:
+            print(f"  TOTAL TIME: {mins}m {secs:.1f}s")
+        else:
+            print(f"  TOTAL TIME: {total_duration:.1f}s")
+        print("=" * 60 + "\n")
+
+        # =================================================================
+        # FILE LOG (detailed)
+        # =================================================================
+        self.file_logger.info("=" * 60)
+        self.file_logger.info("RUN SUMMARY")
+        self.file_logger.info("=" * 60)
         self.file_logger.info(f"Segments: {self.run_log.total_segments}")
         self.file_logger.info(f"Matches: {self.run_log.total_matches}/{self.run_log.total_segments}")
         self.file_logger.info(f"Avg confidence: {self.run_log.avg_confidence:.1%}")
-        print(f"  {match_line}")
-        
-        # Download stats
-        total_videos = self.run_log.videos_downloaded + self.run_log.videos_skipped + self.run_log.videos_failed
+
         if total_videos > 0:
-            dl_line = f"Videos: {self.run_log.videos_downloaded} new, {self.run_log.videos_skipped} cached, {self.run_log.videos_failed} failed"
-            self.file_logger.info(dl_line)
-            print(f"  {dl_line}")
-        
-        # Transcription stats
-        total_transcribed = self.run_log.videos_transcribed + self.run_log.transcription_cache_hits
-        if total_transcribed > 0:
-            tx_line = f"Transcription: {self.run_log.videos_transcribed} new, {self.run_log.transcription_cache_hits} cached"
-            self.file_logger.info(tx_line)
-            print(f"  {tx_line}")
-        
-        # Embedding stats
-        total_embeddings = self.run_log.embeddings_computed + self.run_log.embedding_cache_hits
-        if total_embeddings > 0:
-            emb_line = f"Embeddings: {self.run_log.embeddings_computed} new, {self.run_log.embedding_cache_hits} cached"
-            self.file_logger.info(emb_line)
-            print(f"  {emb_line}")
-        
-        # Entity media stats
+            self.file_logger.info(f"Videos: {self.run_log.videos_downloaded} new, {self.run_log.videos_skipped} cached, {self.run_log.videos_failed} failed")
+
+        if self.run_log.videos_transcribed + self.run_log.transcription_cache_hits > 0:
+            self.file_logger.info(f"Transcription: {self.run_log.videos_transcribed} new, {self.run_log.transcription_cache_hits} cached")
+
+        if self.run_log.embeddings_computed + self.run_log.embedding_cache_hits > 0:
+            self.file_logger.info(f"Embeddings: {self.run_log.embeddings_computed} new, {self.run_log.embedding_cache_hits} cached")
+
         if self.run_log.entity_images_downloaded > 0 or self.run_log.entity_videos_downloaded > 0:
-            ent_line = f"Entity media: {self.run_log.entity_images_downloaded} images, {self.run_log.entity_videos_downloaded} videos"
-            self.file_logger.info(ent_line)
-            print(f"  {ent_line}")
-        
-        # Stage timings (file only - already shown during pipeline)
-        if self.run_log.stage_timings:
-            self.file_logger.info("Stage timings:")
-            timing_parts = []
-            for stage, duration in self.run_log.stage_timings.items():
-                self.file_logger.info(f"  {stage}: {duration:.1f}s")
-                timing_parts.append(f"{stage}={duration:.0f}s")
-            print(f"  Stages: {' | '.join(timing_parts)}")
-        
-        # API stats
-        api_line = f"API: {self.run_log.total_api_calls} calls, ${self.run_log.total_api_cost_est_usd:.4f}"
+            self.file_logger.info(f"Entity media: {self.run_log.entity_images_downloaded} images, {self.run_log.entity_videos_downloaded} videos")
+
+        for stage, duration in self.run_log.stage_timings.items():
+            self.file_logger.info(f"Stage {stage}: {duration:.1f}s")
+
         self.file_logger.info(f"API calls: {self.run_log.total_api_calls}")
         self.file_logger.info(f"API cost: ${self.run_log.total_api_cost_est_usd:.4f}")
-        print(f"  {api_line}")
-        
-        # Files generated
-        if self.run_log.files_generated:
-            self.file_logger.info(f"Files generated: {len(self.run_log.files_generated)}")
-            for file_type, path in self.run_log.files_generated.items():
-                self.file_logger.info(f"  {file_type}: {Path(path).name}")
-            print(f"  Files: {len(self.run_log.files_generated)} generated")
-        
-        # Warnings/Errors
+
+        for file_type, path in self.run_log.files_generated.items():
+            self.file_logger.info(f"File {file_type}: {Path(path).name}")
+
         self.file_logger.info(f"Warnings: {len(self.run_log.warnings)}")
         self.file_logger.info(f"Errors: {len(self.run_log.errors)}")
-        if self.run_log.warnings or self.run_log.errors:
-            print(f"  Warnings: {len(self.run_log.warnings)} | Errors: {len(self.run_log.errors)}")
-        
         self.file_logger.info(f"Total time: {total_duration:.1f}s")
-        print(f"  Total: {total_duration:.1f}s")
-        
+
         # Save JSON
         with open(self.json_file, 'w', encoding='utf-8') as f:
             json.dump(self.run_log.to_dict(), f, indent=2, cls=NumpyEncoder)
-        
+
         self.file_logger.info(f"JSON log saved: {self.json_file}")
-        
+
         # Generate LLM-friendly summary files
         self._generate_llm_summary(total_duration)
     
