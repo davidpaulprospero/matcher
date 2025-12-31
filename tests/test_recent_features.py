@@ -10,6 +10,7 @@ Tests the following recent features:
 5. JSON serialization fix for numpy types
 6. Scene-level face detection for B-roll identification
 7. B-roll preference in matching
+8. Global cache for cross-project video reuse
 
 Usage:
     python tests/test_recent_features.py
@@ -581,6 +582,135 @@ class TestRecentFeatures:
         except Exception as e:
             return print_result("Config B-roll options", False, str(e))
 
+    def test_global_cache_module(self) -> bool:
+        """Test GlobalCacheManager class"""
+        print_section("Global Cache Module")
+
+        try:
+            from src.global_cache import (
+                GlobalCacheManager,
+                VideoRegistryEntry,
+                DownloadInfo,
+                GlobalCacheQueryResult,
+                VideoSource
+            )
+        except ImportError as e:
+            return print_result("Global cache module", True, f"SKIPPED - {e}")
+
+        try:
+            # Create temporary global cache
+            cache_dir = self.temp_dir / "global_cache_test"
+            cache_manager = GlobalCacheManager(cache_dir=str(cache_dir))
+
+            passed1 = print_result(
+                "GlobalCacheManager initialization",
+                cache_manager is not None and cache_dir.exists()
+            )
+
+            # Test DownloadInfo dataclass
+            download_info = DownloadInfo(
+                keyword="austin texas footage",
+                youtube_id="abc123",
+                youtube_url="https://youtube.com/watch?v=abc123",
+                original_title="Austin Texas 4K"
+            )
+            passed2 = print_result(
+                "DownloadInfo dataclass",
+                download_info.keyword == "austin texas footage"
+            )
+
+            # Test VideoRegistryEntry
+            entry = VideoRegistryEntry(
+                video_hash="test123",
+                filename="test_video.mp4",
+                file_size=1000000,
+                duration=60.0,
+                topics=["austin", "texas", "city"],
+                download_info=download_info
+            )
+            passed3 = print_result(
+                "VideoRegistryEntry dataclass",
+                entry.video_hash == "test123" and len(entry.topics) == 3
+            )
+
+            # Test to_dict/from_dict roundtrip
+            entry_dict = entry.to_dict()
+            entry_restored = VideoRegistryEntry.from_dict(entry_dict)
+            passed4 = print_result(
+                "VideoRegistryEntry serialization",
+                entry_restored.video_hash == entry.video_hash
+            )
+
+            # Test GlobalCacheQueryResult
+            query_result = GlobalCacheQueryResult(
+                reuse_videos=[(entry, 0.8)],
+                redownload_keywords=["deleted keyword"],
+                uncovered_keywords=["new keyword"]
+            )
+            passed5 = print_result(
+                "GlobalCacheQueryResult",
+                len(query_result.reuse_videos) == 1 and len(query_result.redownload_keywords) == 1
+            )
+
+            # Test cache stats
+            stats = cache_manager.get_stats()
+            passed6 = print_result(
+                "GlobalCacheManager stats",
+                "total_videos" in stats and "cache_dir" in stats
+            )
+
+            return passed1 and passed2 and passed3 and passed4 and passed5 and passed6
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return print_result("Global cache module", False, str(e))
+
+    def test_config_global_cache_options(self) -> bool:
+        """Test that config has global cache options"""
+        print_section("Config Global Cache Options")
+
+        try:
+            from src.config import Config, GlobalCacheConfig
+
+            config = Config()
+            gc = config.global_cache
+
+            # Check GlobalCacheConfig fields
+            has_enabled = hasattr(gc, 'enabled')
+            has_check_before = hasattr(gc, 'check_before_download')
+            has_min_topic = hasattr(gc, 'min_topic_overlap')
+            has_share_transcripts = hasattr(gc, 'share_transcripts')
+
+            passed1 = print_result(
+                "global_cache.enabled option",
+                has_enabled,
+                f"value={getattr(gc, 'enabled', 'N/A')}"
+            )
+
+            passed2 = print_result(
+                "check_before_download option",
+                has_check_before,
+                f"value={getattr(gc, 'check_before_download', 'N/A')}"
+            )
+
+            passed3 = print_result(
+                "min_topic_overlap option",
+                has_min_topic,
+                f"value={getattr(gc, 'min_topic_overlap', 'N/A')}"
+            )
+
+            passed4 = print_result(
+                "share_transcripts option",
+                has_share_transcripts,
+                f"value={getattr(gc, 'share_transcripts', 'N/A')}"
+            )
+
+            return passed1 and passed2 and passed3 and passed4
+
+        except Exception as e:
+            return print_result("Config global cache options", False, str(e))
+
     def run_all(self) -> bool:
         """Run all tests"""
         print_box("RECENT FEATURES TEST SUITE")
@@ -599,6 +729,8 @@ class TestRecentFeatures:
             ("Face Detection Module", self.test_face_detection_module),
             ("SceneInfo Face Score", self.test_scene_info_face_score),
             ("Config B-roll Options", self.test_config_broll_options),
+            ("Global Cache Module", self.test_global_cache_module),
+            ("Config Global Cache", self.test_config_global_cache_options),
         ]
 
         passed = 0
