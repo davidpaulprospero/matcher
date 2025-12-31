@@ -775,7 +775,6 @@ def create_project_structure(project_dir: Path) -> dict:
         'output': project_dir / 'output',
         'otio_output': project_dir / 'otio_output',
         'logs': project_dir / 'logs',
-        'downloaded_images': project_dir / 'downloaded_images',
         '.cache': project_dir / '.cache',
         '.cache/transcriptions': project_dir / '.cache' / 'transcriptions',
         '.cache/embeddings': project_dir / '.cache' / 'embeddings',
