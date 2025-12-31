@@ -348,12 +348,15 @@ class PostEditAnalyzer:
         external_clips: List[ClipSelection]
     ) -> List[List[ClipSelection]]:
         """
-        Group clips into timeline positions based on their start times.
+        Group clips into timeline positions based on overlap detection.
 
-        Clips that START within a tolerance of each other are grouped together
-        (e.g., stacked clips on different tracks covering the same voiceover segment).
+        Clips that overlap significantly (>50% of the shorter clip's duration)
+        are grouped together. This handles:
+        - Stacked clips on different tracks covering the same segment
+        - Slightly offset clips that still cover the same voiceover
+        - Editor adjustments like trimming or sliding clips
 
-        Sequential clips (that follow one after another) should be in separate positions.
+        Sequential clips (no significant overlap) are in separate positions.
         Returns a list of clip lists, one per timeline position.
         """
         all_clips = segment_clips + external_clips
@@ -364,25 +367,45 @@ class PostEditAnalyzer:
         # Sort by timeline start
         sorted_clips = sorted(all_clips, key=lambda c: c.timeline_start)
 
-        # Group clips by START TIME (not overlapping end)
-        # Clips on different tracks for the same segment will have similar start times
+        # Group clips by overlap detection
         positions: List[List[ClipSelection]] = []
         current_group: List[ClipSelection] = []
-        current_start = -999.0
-        tolerance = 0.5  # 500ms tolerance for same start time
+        group_start = 0.0
+        group_end = 0.0
 
         for clip in sorted_clips:
+            clip_start = clip.timeline_start
+            clip_end = clip.timeline_end if clip.timeline_end > clip_start else clip_start + 5.0
+            clip_duration = clip_end - clip_start
+
             if not current_group:
+                # First clip starts a new group
                 current_group = [clip]
-                current_start = clip.timeline_start
-            elif abs(clip.timeline_start - current_start) <= tolerance:
-                # Same start time (within tolerance) - same position (different tracks)
-                current_group.append(clip)
+                group_start = clip_start
+                group_end = clip_end
             else:
-                # Different start time - new position
-                positions.append(current_group)
-                current_group = [clip]
-                current_start = clip.timeline_start
+                # Calculate overlap with current group
+                overlap_start = max(group_start, clip_start)
+                overlap_end = min(group_end, clip_end)
+                overlap_duration = max(0.0, overlap_end - overlap_start)
+
+                # Check if overlap is significant (>50% of shorter duration)
+                group_duration = group_end - group_start
+                min_duration = min(clip_duration, group_duration)
+                overlap_ratio = overlap_duration / min_duration if min_duration > 0 else 0
+
+                if overlap_ratio > 0.5:
+                    # Significant overlap - same position
+                    current_group.append(clip)
+                    # Extend group bounds
+                    group_start = min(group_start, clip_start)
+                    group_end = max(group_end, clip_end)
+                else:
+                    # No significant overlap - new position
+                    positions.append(current_group)
+                    current_group = [clip]
+                    group_start = clip_start
+                    group_end = clip_end
 
         if current_group:
             positions.append(current_group)
