@@ -823,6 +823,7 @@ class TestRecentFeatures:
             from src.post_edit_analysis import (
                 PostEditAnalyzer,
                 ClipSelection,
+                SegmentSelection,
                 EditAnalysisResult,
                 analyze_final_edit
             )
@@ -830,37 +831,63 @@ class TestRecentFeatures:
             return print_result("Post-edit analysis", True, f"SKIPPED - {e}")
 
         try:
-            # Test ClipSelection dataclass
+            # Test ClipSelection with track number and enabled state
             selection = ClipSelection(
                 segment_id="S001",
                 segment_index=1,
                 clip_name="[S001] folder_video [10.5s]",
                 source_file="folder_video",
-                track="V1",
-                was_alternative=False
+                track="V2",
+                track_number=2,
+                was_alternative=True,
+                alternative_index=1,
+                is_enabled=True
             )
             passed1 = print_result(
-                "ClipSelection dataclass",
-                selection.segment_id == "S001" and selection.segment_index == 1
+                "ClipSelection with track info",
+                selection.track_number == 2 and selection.is_enabled is True
             )
 
-            # Test EditAnalysisResult
-            result = EditAnalysisResult(
-                total_segments=10,
-                clips_kept=7,
-                clips_replaced_with_alt=2,
-                clips_removed=1
+            # Test SegmentSelection with layered clips
+            clip1 = ClipSelection(segment_id="S001", segment_index=1, clip_name="V1 clip",
+                                 track="V1", track_number=1, is_enabled=True)
+            clip2 = ClipSelection(segment_id="S001", segment_index=1, clip_name="V2 clip",
+                                 track="V2", track_number=2, is_enabled=True)
+            clip3 = ClipSelection(segment_id="S001", segment_index=1, clip_name="V3 disabled",
+                                 track="V3", track_number=3, is_enabled=False)
+
+            seg_sel = SegmentSelection(
+                segment_index=1,
+                segment_id="S001",
+                primary_clip=clip2,  # Highest enabled track wins
+                active_clips=[clip1, clip2],
+                disabled_clips=[clip3],
+                is_layered=True
             )
             passed2 = print_result(
-                "EditAnalysisResult dataclass",
-                result.clips_kept == 7 and result.clips_replaced_with_alt == 2
+                "SegmentSelection with priority",
+                seg_sel.primary_clip.track_number == 2 and seg_sel.is_layered
             )
 
-            # Test summary generation
-            summary = result.summary()
+            # Test EditAnalysisResult with new fields
+            result = EditAnalysisResult(
+                total_segments=10,
+                clips_kept=5,
+                clips_replaced_with_alt=3,
+                clips_all_disabled=2,
+                segments_with_layers=1,
+                track_usage={"V1": 5, "V2": 3}
+            )
             passed3 = print_result(
-                "EditAnalysisResult.summary()",
-                "Total segments" in summary and "Primary clips kept" in summary
+                "EditAnalysisResult with track usage",
+                result.clips_all_disabled == 2 and "V1" in result.track_usage
+            )
+
+            # Test summary includes new info
+            summary = result.summary()
+            passed4 = print_result(
+                "Summary includes track usage",
+                "Track usage" in summary and "All disabled" in summary
             )
 
             # Test PostEditAnalyzer regex patterns
@@ -868,19 +895,19 @@ class TestRecentFeatures:
 
             # Test segment ID extraction
             match = analyzer.SEGMENT_ID_PATTERN.search("[S001] folder_video [10.5s]")
-            passed4 = print_result(
+            passed5 = print_result(
                 "Segment ID pattern extraction",
                 match is not None and match.group(1) == "001"
             )
 
-            # Test ALT pattern
-            alt_match = analyzer.ALT_PATTERN.search("[S005] ALT2: folder_alt [5.0s]")
-            passed5 = print_result(
-                "Alternative pattern extraction",
-                alt_match is not None and alt_match.group(1) == "2"
+            # Test track number pattern
+            track_match = analyzer.TRACK_NUMBER_PATTERN.search("V3 - Alternatives")
+            passed6 = print_result(
+                "Track number pattern extraction",
+                track_match is not None and track_match.group(1) == "3"
             )
 
-            # Test parsing a mock clip element
+            # Test parsing clip with enabled element
             from xml.etree.ElementTree import Element, SubElement
 
             clip = Element('clipitem')
@@ -888,14 +915,29 @@ class TestRecentFeatures:
             name.text = "[S003] test_folder_video [15.5s]"
             start = SubElement(clip, 'start')
             start.text = "0"
+            enabled = SubElement(clip, 'enabled')
+            enabled.text = "FALSE"  # Disabled clip
 
-            parsed = analyzer._parse_clip_element(clip)
-            passed6 = print_result(
-                "Parse clip element",
-                parsed is not None and parsed.segment_index == 3 and parsed.segment_id == "S003"
+            parsed = analyzer._parse_clip_element(clip, "V2", 2)
+            passed7 = print_result(
+                "Parse clip with enabled=FALSE",
+                parsed is not None and parsed.is_enabled is False and parsed.track_number == 2
             )
 
-            return passed1 and passed2 and passed3 and passed4 and passed5 and passed6
+            # Test parsing enabled clip (default)
+            clip2 = Element('clipitem')
+            name2 = SubElement(clip2, 'name')
+            name2.text = "[S005] another_video [5.0s]"
+            start2 = SubElement(clip2, 'start')
+            start2.text = "100"
+
+            parsed2 = analyzer._parse_clip_element(clip2, "V1", 1)
+            passed8 = print_result(
+                "Parse clip defaults to enabled",
+                parsed2 is not None and parsed2.is_enabled is True
+            )
+
+            return passed1 and passed2 and passed3 and passed4 and passed5 and passed6 and passed7 and passed8
 
         except Exception as e:
             import traceback
