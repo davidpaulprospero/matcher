@@ -38,6 +38,26 @@ if sys.platform == 'win32':
 
 INSTALL_DIR = Path(__file__).parent.parent.resolve()
 
+# Load .env file from project directory
+try:
+    from dotenv import load_dotenv
+    env_path = INSTALL_DIR / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # dotenv not installed, try manual loading
+    env_path = INSTALL_DIR / '.env'
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, _, value = line.partition('=')
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and value:
+                        os.environ.setdefault(key, value)
+
 # =============================================================================
 # DISPLAY HELPERS
 # =============================================================================
@@ -538,6 +558,13 @@ def run_integration_test(
     print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Install dir: {INSTALL_DIR}")
     print(f"  Mode: {'Synthetic SRT' if skip_download else 'Real Download'}")
+
+    # Show .env status
+    env_path = INSTALL_DIR / '.env'
+    if env_path.exists():
+        print(f"  .env: Loaded from {env_path.name}")
+    else:
+        print(f"  .env: Not found (using system environment)")
 
     # Check API keys
     keys = check_api_keys()
