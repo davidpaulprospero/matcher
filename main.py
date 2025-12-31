@@ -498,10 +498,73 @@ class Pipeline:
         print(f"\n{'─' * 70}")
         print(f"  STAGE {stage}: {name}")
         print(f"{'─' * 70}")
-        
+
         if self.run_logger:
             self.run_logger.file_logger.info(f"STAGE {stage}: {name}")
-    
+
+    def _prompt_delta_matching(self):
+        """
+        Prompt user to choose delta matching mode at pipeline start.
+        Delta matching only processes new/modified videos, using cached matches for unchanged ones.
+        """
+        config = self.config
+
+        # Check if delta matching is available (match index exists with cached data)
+        project_dir = PROJECT_DIR or Path.cwd()
+        match_index_path = project_dir / ".match_index.json"
+
+        if not match_index_path.exists():
+            # No previous matches - delta matching not applicable
+            return
+
+        try:
+            import json
+            with open(match_index_path, 'r') as f:
+                index_data = json.load(f)
+
+            matched_videos = index_data.get('matched_videos', {})
+            cached_matches = index_data.get('cached_matches', [])
+
+            if not matched_videos or not cached_matches:
+                return
+
+            print(f"\n{'─' * 70}")
+            print(f"  DELTA MATCHING")
+            print(f"{'─' * 70}")
+            print(f"  Found {len(matched_videos)} previously matched videos")
+            print(f"  Cached matches: {len(cached_matches)} segments")
+            print()
+            print(f"  [D] Delta match - Only process NEW videos (faster)")
+            print(f"  [F] Full rematch - Rematch ALL videos (slower)")
+            print(f"  [Q] Quit")
+            print()
+
+            while True:
+                try:
+                    choice = input("  Choice [D/F/Q]: ").strip().upper()
+                    if choice == 'D':
+                        # Use delta matching (default behavior)
+                        self.force_rematch = False
+                        print(f"  ✓ Using delta matching - will reuse cached matches for unchanged videos")
+                        break
+                    elif choice == 'F':
+                        # Force full rematch
+                        self.force_rematch = True
+                        print(f"  ✓ Full rematch enabled - will rematch ALL videos")
+                        break
+                    elif choice == 'Q':
+                        print("  Exiting.")
+                        sys.exit(0)
+                    else:
+                        print("  Invalid choice. Please enter D, F, or Q.")
+                except (EOFError, KeyboardInterrupt):
+                    print("\n  Exiting.")
+                    sys.exit(0)
+
+        except Exception as e:
+            # If we can't read the index, just continue without prompting
+            logger.debug(f"Could not read match index for delta prompt: {e}")
+
     def _parse_srt(self, srt_path: str) -> List[dict]:
         """Parse SRT file into segments with smart splitting for long segments"""
         try:
@@ -2829,11 +2892,15 @@ Topic:"""
         self.resume_mode = resume and self.checkpoint.data is not None
         
         self._print_banner()
-        
+
         # =====================================================================
         # UPFRONT CONFIGURATION - All prompts happen here, then pipeline runs
         # =====================================================================
-        
+
+        # Delta matching prompt (if not already specified via CLI)
+        if not force_rematch and not self.config.enhanced.non_interactive:
+            self._prompt_delta_matching()
+
         # Stage 1: Analyze voiceover (extracts keywords + detects topic)
         keywords = None
         use_saved = False
