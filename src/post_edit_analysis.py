@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ClipSelection:
     """Represents a clip that was selected in the final edit."""
-    segment_id: str  # e.g., "S001"
-    segment_index: int  # e.g., 1
+    segment_id: str  # e.g., "S001" - from clip name, NOT timeline position
+    segment_index: int  # e.g., 1 - original segment this clip was made for
     clip_name: str  # Full clip name from timeline
     source_file: Optional[str] = None  # Extracted source file name
     track: str = "V1"  # Which track it came from
@@ -34,23 +34,32 @@ class ClipSelection:
     alternative_index: Optional[int] = None  # Which ALT (1, 2, etc.)
     was_secondary: bool = False  # True if secondary source was used
     is_enabled: bool = True  # False if clip is disabled in timeline
+    is_external: bool = False  # True if clip has no segment ID (external footage)
     timeline_start: float = 0.0  # Timeline position in seconds
     timeline_end: float = 0.0  # End position in seconds
     duration: float = 0.0  # Duration in seconds
+
+    # Detected position vs original segment
+    detected_position: Optional[int] = None  # Which segment position this clip is at (by timeline)
+    was_moved: bool = False  # True if clip was moved to a different segment position
 
 
 @dataclass
 class SegmentSelection:
     """
-    Represents all clips for a single segment, with priority logic applied.
+    Represents all clips for a single segment POSITION, with priority logic applied.
+
+    Note: segment_index here refers to the TIMELINE POSITION (which voiceover segment
+    this covers), not the original segment ID from clip names.
 
     In DaVinci Resolve workflow:
     - Editor disables unwanted clips rather than deleting
     - Higher tracks (V2 > V1) take visual priority
     - Multiple clips can be active for layered compositions
+    - Clips can be moved from one segment to another
     """
-    segment_index: int
-    segment_id: str
+    segment_index: int  # Timeline position (0, 1, 2...)
+    segment_id: str  # Expected segment ID for this position (S000, S001...)
 
     # Primary selection: highest enabled track
     primary_clip: Optional[ClipSelection] = None
@@ -61,9 +70,14 @@ class SegmentSelection:
     # All disabled clips (kept for reference)
     disabled_clips: List[ClipSelection] = field(default_factory=list)
 
+    # External clips (no segment ID - user added footage)
+    external_clips: List[ClipSelection] = field(default_factory=list)
+
     # Analysis flags
     is_layered: bool = False  # True if multiple active clips
     all_disabled: bool = False  # True if all clips for this segment are disabled
+    has_external: bool = False  # True if external clips were added
+    has_moved_clip: bool = False  # True if a clip from another segment was used
 
     def get_winning_track(self) -> Optional[str]:
         """Get the track name of the primary (highest) active clip."""
@@ -74,21 +88,26 @@ class SegmentSelection:
 class EditAnalysisResult:
     """Results from analyzing a final edit."""
     total_segments: int = 0
-    clips_kept: int = 0  # Primary clips kept as-is (V1, enabled)
+    clips_kept: int = 0  # Primary clips kept as-is (V1, enabled, not moved)
     clips_replaced_with_alt: int = 0  # Replaced with alternative (ALT on higher track)
     clips_replaced_with_secondary: int = 0  # Replaced with secondary source
-    clips_replaced_with_external: int = 0  # Replaced with footage not in original
-    clips_removed: int = 0  # Segments with no enabled clips
+    clips_replaced_with_external: int = 0  # Replaced with external footage (no segment ID)
+    clips_moved_from_other: int = 0  # Used a clip from another segment
+    clips_removed: int = 0  # Segments with no clips at all
     clips_all_disabled: int = 0  # Segments where all clips were disabled
 
     # Detailed selection data
     selections: List[ClipSelection] = field(default_factory=list)  # Primary selections only
     segment_selections: List[SegmentSelection] = field(default_factory=list)  # Full segment data
     missing_segments: List[int] = field(default_factory=list)  # Segment IDs not found
+    external_clips: List[ClipSelection] = field(default_factory=list)  # All external clips found
 
     # Layered composition tracking
     segments_with_layers: int = 0  # Segments with multiple active clips
     layered_segments: List[int] = field(default_factory=list)  # Which segments are layered
+
+    # Moved clips tracking
+    moved_clips: List[Tuple[int, int, ClipSelection]] = field(default_factory=list)  # (from_seg, to_seg, clip)
 
     # Track usage statistics
     track_usage: Dict[str, int] = field(default_factory=dict)  # Count per track
@@ -106,12 +125,23 @@ class EditAnalysisResult:
             f"Replaced with alternatives: {self.clips_replaced_with_alt}",
             f"Replaced with secondary: {self.clips_replaced_with_secondary}",
             f"Replaced with external: {self.clips_replaced_with_external}",
+            f"Moved from other segment: {self.clips_moved_from_other}",
             f"All disabled (removed): {self.clips_all_disabled}",
             f"Missing segments: {self.clips_removed}",
         ]
 
         if self.segments_with_layers > 0:
             lines.append(f"Layered compositions: {self.segments_with_layers} segments")
+
+        if self.moved_clips:
+            lines.append(f"Moved clips: {len(self.moved_clips)}")
+            for from_seg, to_seg, clip in self.moved_clips[:5]:
+                lines.append(f"  S{from_seg:03d} → S{to_seg:03d}: {clip.source_file or clip.clip_name[:30]}")
+            if len(self.moved_clips) > 5:
+                lines.append(f"  ... and {len(self.moved_clips) - 5} more")
+
+        if self.external_clips:
+            lines.append(f"External clips added: {len(self.external_clips)}")
 
         if self.track_usage:
             usage_str = ", ".join(f"{k}:{v}" for k, v in sorted(self.track_usage.items()))
@@ -179,8 +209,11 @@ class PostEditAnalyzer:
 
         Implements the following selection logic:
         1. Disabled clips are ignored (editor disables unwanted clips)
-        2. For each segment, the highest enabled track wins (V2 > V1)
+        2. For each segment POSITION, the highest enabled track wins (V2 > V1)
         3. Multiple active clips = layered composition (all tracked)
+        4. Clips can be moved to different positions (detected by timeline position vs segment ID)
+        5. External clips (no segment ID) are tracked separately
+        6. Only video tracks are analyzed (audio is ignored)
 
         Args:
             xml_path: Path to the exported XML file
@@ -197,88 +230,164 @@ class PostEditAnalyzer:
             logger.error(f"Failed to parse XML: {e}")
             return result
 
-        # Find all clip items in the timeline with track info
-        clips_by_segment: Dict[int, List[ClipSelection]] = {}
-
-        # Get clips with track information
+        # Get clips with track information (video tracks only)
         clip_elements = self._find_clip_elements(root)
+
+        # Parse all clips
+        all_clips: List[ClipSelection] = []
+        external_clips: List[ClipSelection] = []
 
         for clip_elem, track_name, track_number in clip_elements:
             selection = self._parse_clip_element(clip_elem, track_name, track_number)
             if selection:
-                seg_idx = selection.segment_index
-                if seg_idx not in clips_by_segment:
-                    clips_by_segment[seg_idx] = []
-                clips_by_segment[seg_idx].append(selection)
-
-        # Analyze which clips were selected using track priority
-        if clips_by_segment:
-            max_segment = max(clips_by_segment.keys())
-            result.total_segments = max_segment + 1
-
-            for seg_idx in range(result.total_segments):
-                if seg_idx not in clips_by_segment:
-                    result.missing_segments.append(seg_idx)
-                    result.clips_removed += 1
-                    continue
-
-                clips = clips_by_segment[seg_idx]
-
-                # Separate enabled and disabled clips
-                enabled_clips = [c for c in clips if c.is_enabled]
-                disabled_clips = [c for c in clips if not c.is_enabled]
-
-                # Create segment selection
-                segment_sel = SegmentSelection(
-                    segment_index=seg_idx,
-                    segment_id=f"S{seg_idx:03d}",
-                    active_clips=enabled_clips,
-                    disabled_clips=disabled_clips
-                )
-
-                # Check if all clips are disabled
-                if not enabled_clips:
-                    segment_sel.all_disabled = True
-                    result.clips_all_disabled += 1
-                    result.segment_selections.append(segment_sel)
-                    continue
-
-                # Sort enabled clips by track number (highest first)
-                enabled_clips_sorted = sorted(enabled_clips, key=lambda c: c.track_number, reverse=True)
-
-                # Primary selection = highest track number
-                primary_clip = enabled_clips_sorted[0]
-                segment_sel.primary_clip = primary_clip
-
-                # Check for layered composition (multiple active clips)
-                if len(enabled_clips) > 1:
-                    segment_sel.is_layered = True
-                    result.segments_with_layers += 1
-                    result.layered_segments.append(seg_idx)
-
-                result.segment_selections.append(segment_sel)
-                result.selections.append(primary_clip)
-
-                # Track usage statistics
-                track = primary_clip.track
-                result.track_usage[track] = result.track_usage.get(track, 0) + 1
-
-                # Categorize the selection
-                if primary_clip.was_alternative:
-                    result.clips_replaced_with_alt += 1
-                elif primary_clip.was_secondary:
-                    result.clips_replaced_with_secondary += 1
-                elif primary_clip.track_number == 1:
-                    # V1 is the primary/original recommendation
-                    result.clips_kept += 1
+                if selection.is_external:
+                    external_clips.append(selection)
                 else:
-                    # Higher track but not marked as ALT - could be external or manual
-                    result.clips_replaced_with_external += 1
+                    all_clips.append(selection)
+
+        result.external_clips = external_clips
+
+        if not all_clips:
+            logger.warning("No clips with segment IDs found")
+            return result
+
+        # Determine timeline positions by sorting clips and grouping overlapping ones
+        # Group clips by their timeline position (using start time and small tolerance)
+        clips_by_position = self._group_clips_by_timeline_position(all_clips, external_clips)
+
+        result.total_segments = len(clips_by_position)
+
+        for position_idx, clips_at_position in enumerate(clips_by_position):
+            expected_segment_id = f"S{position_idx:03d}"
+
+            # Separate by type
+            segment_clips = [c for c in clips_at_position if not c.is_external]
+            position_external = [c for c in clips_at_position if c.is_external]
+            enabled_clips = [c for c in segment_clips if c.is_enabled]
+            disabled_clips = [c for c in segment_clips if not c.is_enabled]
+
+            # Create segment selection
+            segment_sel = SegmentSelection(
+                segment_index=position_idx,
+                segment_id=expected_segment_id,
+                active_clips=enabled_clips,
+                disabled_clips=disabled_clips,
+                external_clips=position_external,
+                has_external=len(position_external) > 0
+            )
+
+            # Check if all clips are disabled
+            if not enabled_clips and not position_external:
+                segment_sel.all_disabled = True
+                result.clips_all_disabled += 1
+                result.segment_selections.append(segment_sel)
+                continue
+
+            # Consider external clips as candidates too (they're enabled by default)
+            all_enabled = enabled_clips + [c for c in position_external if c.is_enabled]
+
+            if not all_enabled:
+                segment_sel.all_disabled = True
+                result.clips_all_disabled += 1
+                result.segment_selections.append(segment_sel)
+                continue
+
+            # Sort by track number (highest first)
+            all_enabled_sorted = sorted(all_enabled, key=lambda c: c.track_number, reverse=True)
+
+            # Primary selection = highest track number
+            primary_clip = all_enabled_sorted[0]
+            segment_sel.primary_clip = primary_clip
+
+            # Detect if this clip was moved from another segment
+            if not primary_clip.is_external:
+                primary_clip.detected_position = position_idx
+                if primary_clip.segment_index != position_idx:
+                    primary_clip.was_moved = True
+                    segment_sel.has_moved_clip = True
+                    result.moved_clips.append((primary_clip.segment_index, position_idx, primary_clip))
+
+            # Check for layered composition
+            if len(all_enabled) > 1:
+                segment_sel.is_layered = True
+                result.segments_with_layers += 1
+                result.layered_segments.append(position_idx)
+
+            result.segment_selections.append(segment_sel)
+            result.selections.append(primary_clip)
+
+            # Track usage statistics
+            track = primary_clip.track
+            result.track_usage[track] = result.track_usage.get(track, 0) + 1
+
+            # Categorize the selection
+            if primary_clip.is_external:
+                result.clips_replaced_with_external += 1
+            elif primary_clip.was_moved:
+                result.clips_moved_from_other += 1
+            elif primary_clip.was_alternative:
+                result.clips_replaced_with_alt += 1
+            elif primary_clip.was_secondary:
+                result.clips_replaced_with_secondary += 1
+            elif primary_clip.track_number == 1:
+                # V1 is the primary/original recommendation, not moved
+                result.clips_kept += 1
+            else:
+                # Higher track but not marked as ALT and not moved
+                result.clips_replaced_with_alt += 1
 
         logger.info(f"Analyzed {len(clip_elements)} clips from {xml_path}")
         logger.info(f"Segments: {result.total_segments}, Kept: {result.clips_kept}, "
-                   f"Alt: {result.clips_replaced_with_alt}, Layered: {result.segments_with_layers}")
+                   f"Alt: {result.clips_replaced_with_alt}, Moved: {result.clips_moved_from_other}, "
+                   f"External: {result.clips_replaced_with_external}")
         return result
+
+    def _group_clips_by_timeline_position(
+        self,
+        segment_clips: List[ClipSelection],
+        external_clips: List[ClipSelection]
+    ) -> List[List[ClipSelection]]:
+        """
+        Group clips into timeline positions based on their start times.
+
+        Clips that START within a tolerance of each other are grouped together
+        (e.g., stacked clips on different tracks covering the same voiceover segment).
+
+        Sequential clips (that follow one after another) should be in separate positions.
+        Returns a list of clip lists, one per timeline position.
+        """
+        all_clips = segment_clips + external_clips
+
+        if not all_clips:
+            return []
+
+        # Sort by timeline start
+        sorted_clips = sorted(all_clips, key=lambda c: c.timeline_start)
+
+        # Group clips by START TIME (not overlapping end)
+        # Clips on different tracks for the same segment will have similar start times
+        positions: List[List[ClipSelection]] = []
+        current_group: List[ClipSelection] = []
+        current_start = -999.0
+        tolerance = 0.5  # 500ms tolerance for same start time
+
+        for clip in sorted_clips:
+            if not current_group:
+                current_group = [clip]
+                current_start = clip.timeline_start
+            elif abs(clip.timeline_start - current_start) <= tolerance:
+                # Same start time (within tolerance) - same position (different tracks)
+                current_group.append(clip)
+            else:
+                # Different start time - new position
+                positions.append(current_group)
+                current_group = [clip]
+                current_start = clip.timeline_start
+
+        if current_group:
+            positions.append(current_group)
+
+        return positions
 
     def _find_clip_elements(self, root: ET.Element) -> List[Tuple[ET.Element, str, int]]:
         """
@@ -365,13 +474,16 @@ class PostEditAnalyzer:
 
         # Extract segment ID from name
         match = self.SEGMENT_ID_PATTERN.search(name)
-        if not match:
-            # No segment ID - this is external footage
-            logger.debug(f"Clip without segment ID: {name}")
-            return None
+        is_external = match is None
 
-        segment_index = int(match.group(1))
-        segment_id = f"S{segment_index:03d}"
+        if is_external:
+            # No segment ID - this is external footage
+            logger.debug(f"External clip (no segment ID): {name}")
+            segment_index = -1  # Placeholder for external clips
+            segment_id = ""
+        else:
+            segment_index = int(match.group(1))
+            segment_id = f"S{segment_index:03d}"
 
         # Check if it's an alternative
         was_alt = False
@@ -464,6 +576,7 @@ class PostEditAnalyzer:
             alternative_index=alt_index,
             was_secondary=was_secondary,
             is_enabled=is_enabled,
+            is_external=is_external,
             timeline_start=timeline_start,
             timeline_end=timeline_end,
             duration=timeline_end - timeline_start if timeline_end > timeline_start else 0.0
@@ -498,7 +611,8 @@ class PostEditAnalyzer:
             logger.error(f"Failed to read OTIO file: {e}")
             return result
 
-        clips_by_segment: Dict[int, List[ClipSelection]] = {}
+        all_clips: List[ClipSelection] = []
+        external_clips: List[ClipSelection] = []
 
         # Get video tracks and their index (for track number)
         video_tracks = [t for t in timeline.tracks if t.kind == otio_lib.schema.TrackKind.Video]
@@ -523,11 +637,14 @@ class PostEditAnalyzer:
 
                 # Extract segment ID
                 match = self.SEGMENT_ID_PATTERN.search(name)
-                if not match:
-                    continue
+                is_external = match is None
 
-                segment_index = int(match.group(1))
-                segment_id = f"S{segment_index:03d}"
+                if is_external:
+                    segment_index = -1
+                    segment_id = ""
+                else:
+                    segment_index = int(match.group(1))
+                    segment_id = f"S{segment_index:03d}"
 
                 # Check if alternative
                 was_alt = False
@@ -564,70 +681,103 @@ class PostEditAnalyzer:
                     was_alternative=was_alt,
                     alternative_index=alt_index,
                     is_enabled=is_enabled,
+                    is_external=is_external,
                     timeline_start=timeline_start,
                     timeline_end=timeline_start + duration,
                     duration=duration
                 )
 
-                if segment_index not in clips_by_segment:
-                    clips_by_segment[segment_index] = []
-                clips_by_segment[segment_index].append(selection)
-
-        # Analyze results using same priority logic as analyze_xml
-        if clips_by_segment:
-            max_segment = max(clips_by_segment.keys())
-            result.total_segments = max_segment + 1
-
-            for seg_idx in range(result.total_segments):
-                if seg_idx not in clips_by_segment:
-                    result.missing_segments.append(seg_idx)
-                    result.clips_removed += 1
-                    continue
-
-                clips = clips_by_segment[seg_idx]
-
-                # Separate enabled and disabled clips
-                enabled_clips = [c for c in clips if c.is_enabled]
-                disabled_clips = [c for c in clips if not c.is_enabled]
-
-                # Create segment selection
-                segment_sel = SegmentSelection(
-                    segment_index=seg_idx,
-                    segment_id=f"S{seg_idx:03d}",
-                    active_clips=enabled_clips,
-                    disabled_clips=disabled_clips
-                )
-
-                if not enabled_clips:
-                    segment_sel.all_disabled = True
-                    result.clips_all_disabled += 1
-                    result.segment_selections.append(segment_sel)
-                    continue
-
-                # Sort by track number (highest first)
-                enabled_clips_sorted = sorted(enabled_clips, key=lambda c: c.track_number, reverse=True)
-                primary_clip = enabled_clips_sorted[0]
-                segment_sel.primary_clip = primary_clip
-
-                if len(enabled_clips) > 1:
-                    segment_sel.is_layered = True
-                    result.segments_with_layers += 1
-                    result.layered_segments.append(seg_idx)
-
-                result.segment_selections.append(segment_sel)
-                result.selections.append(primary_clip)
-
-                # Track usage
-                track = primary_clip.track
-                result.track_usage[track] = result.track_usage.get(track, 0) + 1
-
-                # Categorize
-                if primary_clip.was_alternative:
-                    result.clips_replaced_with_alt += 1
-                elif primary_clip.track_number == 1:
-                    result.clips_kept += 1
+                if is_external:
+                    external_clips.append(selection)
                 else:
-                    result.clips_replaced_with_external += 1
+                    all_clips.append(selection)
+
+        result.external_clips = external_clips
+
+        if not all_clips:
+            logger.warning("No clips with segment IDs found in OTIO")
+            return result
+
+        # Group clips by timeline position
+        clips_by_position = self._group_clips_by_timeline_position(all_clips, external_clips)
+        result.total_segments = len(clips_by_position)
+
+        for position_idx, clips_at_position in enumerate(clips_by_position):
+            expected_segment_id = f"S{position_idx:03d}"
+
+            # Separate by type
+            segment_clips = [c for c in clips_at_position if not c.is_external]
+            position_external = [c for c in clips_at_position if c.is_external]
+            enabled_clips = [c for c in segment_clips if c.is_enabled]
+            disabled_clips = [c for c in segment_clips if not c.is_enabled]
+
+            # Create segment selection
+            segment_sel = SegmentSelection(
+                segment_index=position_idx,
+                segment_id=expected_segment_id,
+                active_clips=enabled_clips,
+                disabled_clips=disabled_clips,
+                external_clips=position_external,
+                has_external=len(position_external) > 0
+            )
+
+            # Check if all clips are disabled
+            if not enabled_clips and not position_external:
+                segment_sel.all_disabled = True
+                result.clips_all_disabled += 1
+                result.segment_selections.append(segment_sel)
+                continue
+
+            # Consider external clips as candidates too
+            all_enabled = enabled_clips + [c for c in position_external if c.is_enabled]
+
+            if not all_enabled:
+                segment_sel.all_disabled = True
+                result.clips_all_disabled += 1
+                result.segment_selections.append(segment_sel)
+                continue
+
+            # Sort by track number (highest first)
+            all_enabled_sorted = sorted(all_enabled, key=lambda c: c.track_number, reverse=True)
+
+            # Primary selection = highest track number
+            primary_clip = all_enabled_sorted[0]
+            segment_sel.primary_clip = primary_clip
+
+            # Detect if this clip was moved from another segment
+            if not primary_clip.is_external:
+                primary_clip.detected_position = position_idx
+                if primary_clip.segment_index != position_idx:
+                    primary_clip.was_moved = True
+                    segment_sel.has_moved_clip = True
+                    result.moved_clips.append((primary_clip.segment_index, position_idx, primary_clip))
+
+            # Check for layered composition
+            if len(all_enabled) > 1:
+                segment_sel.is_layered = True
+                result.segments_with_layers += 1
+                result.layered_segments.append(position_idx)
+
+            result.segment_selections.append(segment_sel)
+            result.selections.append(primary_clip)
+
+            # Track usage
+            track = primary_clip.track
+            result.track_usage[track] = result.track_usage.get(track, 0) + 1
+
+            # Categorize the selection
+            if primary_clip.is_external:
+                result.clips_replaced_with_external += 1
+            elif primary_clip.was_moved:
+                result.clips_moved_from_other += 1
+            elif primary_clip.was_alternative:
+                result.clips_replaced_with_alt += 1
+            elif primary_clip.was_secondary:
+                result.clips_replaced_with_secondary += 1
+            elif primary_clip.track_number == 1:
+                result.clips_kept += 1
+            else:
+                result.clips_replaced_with_alt += 1
 
         return result
 
