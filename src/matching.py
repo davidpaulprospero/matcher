@@ -26,6 +26,7 @@ from .utils import (
 )
 from .embeddings import find_top_k_similar, cosine_similarity
 from .keyword_extractor import find_keyword_matches
+from .topic_extraction import compute_topic_penalty, VideoTopics
 
 logger = logging.getLogger(__name__)
 
@@ -806,9 +807,10 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
 # =============================================================================
 
 class TieredMatcher:
-    def __init__(self, config=None, cache=None):
+    def __init__(self, config=None, cache=None, video_topics: Dict[str, VideoTopics] = None):
         self.config = config or get_config()
         self.cache = cache  # Store cache for potential future use
+        self.video_topics = video_topics or {}  # Store video topics for chapter-based matching
         mc = self.config.matching
 
         self.primary_model = mc.gemini_model
@@ -818,6 +820,10 @@ class TieredMatcher:
         self.low_conf_threshold = mc.low_confidence_threshold
         self.max_clip_reuse = mc.max_clip_reuse
         self.reuse_penalty = mc.reuse_penalty
+
+        # Chapter-based matching settings
+        self.chapter_matching_enabled = getattr(mc, 'chapter_matching_enabled', False)
+        self.topic_mismatch_penalty = getattr(mc, 'topic_mismatch_penalty', 0.15)
 
         # Initialize reuse tracker for clip reuse prevention
         self.reuse_tracker = ReuseTracker(
@@ -847,6 +853,56 @@ class TieredMatcher:
             return confidence - mc.duration_penalty_factor
         else:
             return confidence - (mc.duration_penalty_factor * 2)
+
+    def _apply_topic_penalty(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment
+    ) -> Tuple[float, str]:
+        """
+        Apply topic-based confidence penalty for chapter matching.
+
+        Args:
+            confidence: Original confidence score
+            vo_segment: Voiceover segment (may have topics from chapter assignment)
+            video_segment: Video segment (used to look up video topics)
+
+        Returns:
+            Tuple of (adjusted_confidence, penalty_reason)
+        """
+        if not self.chapter_matching_enabled:
+            return confidence, ""
+
+        # Get voiceover chapter topics
+        vo_topics = getattr(vo_segment, 'topics', [])
+        if not vo_topics:
+            return confidence, ""
+
+        # Get video topics from the video_topics dict
+        video_path = video_segment.source_file
+        video_topic_info = self.video_topics.get(video_path)
+        if not video_topic_info:
+            return confidence, ""
+
+        video_topics = video_topic_info.topics if video_topic_info else []
+        if not video_topics:
+            return confidence, ""
+
+        # Compute penalty based on topic mismatch
+        penalty = compute_topic_penalty(
+            vo_topics=vo_topics,
+            video_topics=video_topics,
+            max_penalty=self.topic_mismatch_penalty,
+            min_overlap=1
+        )
+
+        if penalty > 0:
+            adjusted_confidence = max(0.0, confidence - penalty)
+            reason = f"topic mismatch penalty: -{penalty:.2f}"
+            return adjusted_confidence, reason
+
+        return confidence, ""
 
     def _init_providers(self):
         """Initialize LLM providers based on config"""
@@ -1014,16 +1070,27 @@ class TieredMatcher:
             # Use embedding match directly
             best_seg = valid_candidates[0][0]
             self.reuse_tracker.record_usage(best_seg)
-            
+
             # Get scene info
             scene = self._get_scene_for_segment(best_seg, scenes)
-            
+
+            # Apply topic penalty for chapter-based matching
+            adjusted_confidence = top_similarity
+            topic_penalty_reason = ""
+            adjusted_confidence, topic_penalty_reason = self._apply_topic_penalty(
+                top_similarity, vo_segment, best_seg
+            )
+
+            reasoning = f"High embedding similarity ({top_similarity:.2f})"
+            if topic_penalty_reason:
+                reasoning += f" [{topic_penalty_reason}]"
+
             match = Match(
                 voiceover_segment=vo_segment,
                 video_segment=best_seg,
                 video_scene=scene,
-                confidence=top_similarity,
-                reasoning=f"High embedding similarity ({top_similarity:.2f})",
+                confidence=adjusted_confidence,
+                reasoning=reasoning,
                 embedding_similarity=top_similarity,
                 clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
             )
@@ -1060,15 +1127,24 @@ class TieredMatcher:
             # Check if cached selection is still usable (not over-reused)
             if self.reuse_tracker.can_use(cached_seg):
                 self.reuse_tracker.record_usage(cached_seg)
-                
+
                 scene = self._get_scene_for_segment(cached_seg, scenes)
-                
+
+                # Apply topic penalty for chapter-based matching
+                adjusted_confidence, topic_penalty_reason = self._apply_topic_penalty(
+                    confidence, vo_segment, cached_seg
+                )
+
+                final_reasoning = f"(cached) {reasoning}"
+                if topic_penalty_reason:
+                    final_reasoning += f" [{topic_penalty_reason}]"
+
                 match = Match(
                     voiceover_segment=vo_segment,
                     video_segment=cached_seg,
                     video_scene=scene,
-                    confidence=confidence,
-                    reasoning=f"(cached) {reasoning}",
+                    confidence=adjusted_confidence,
+                    reasoning=final_reasoning,
                     embedding_similarity=valid_candidates[selected_idx][1],
                     clip_reuse_count=self.reuse_tracker.get_usage_count(cached_seg)
                 )
@@ -1160,13 +1236,23 @@ class TieredMatcher:
             seg_keywords,
             scene.visual_keywords if scene else None
         )
-        
+
+        # Apply topic penalty for chapter-based matching
+        base_confidence = min(1.0, confidence + keyword_boost)
+        adjusted_confidence, topic_penalty_reason = self._apply_topic_penalty(
+            base_confidence, vo_segment, best_seg
+        )
+
+        final_reasoning = reasoning
+        if topic_penalty_reason:
+            final_reasoning += f" [{topic_penalty_reason}]"
+
         match = Match(
             voiceover_segment=vo_segment,
             video_segment=best_seg,
             video_scene=scene,
-            confidence=min(1.0, confidence + keyword_boost),
-            reasoning=reasoning,
+            confidence=adjusted_confidence,
+            reasoning=final_reasoning,
             is_keyword_match=is_kw_match,
             is_visual_match=is_vis_match,
             embedding_similarity=valid_candidates[selected_idx][1],
@@ -2062,27 +2148,33 @@ def match_all_segments(
     config: Config,
     cache: CacheManager,
     embedding_index: Optional[Any] = None,
-    face_preference: str = "neutral"
+    face_preference: str = "neutral",
+    video_topics: Optional[Dict[str, VideoTopics]] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
     Processes sequentially to ensure accurate reuse tracking.
     Also computes strategy matches for V4-V8 with variety enforcement.
-    
+
     Two-stage matching optimization:
     - Stage 1: Retrieve more candidates from embeddings (embedding_candidates)
     - Stage 2: Send only top candidates to LLM for reranking (llm_rerank_candidates)
-    
+
     Timeline variety enforcement:
     - Prevents same source video from appearing multiple times within a time window
     - Configured via config.output.variety.timeline_variety_window (default 600s = 10 min)
-    
+
+    Chapter-based topic matching:
+    - If video_topics provided, applies confidence penalty for topic mismatches
+    - Helps ensure videos match the voiceover chapter/topic context
+
     Args:
         face_preference: "more" (prefer faces), "none" (avoid faces), or "neutral"
+        video_topics: Dict of video_path -> VideoTopics for chapter-based matching
     """
     # EmbeddingIndex import removed - not needed
-    
-    matcher = TieredMatcher(config, cache)
+
+    matcher = TieredMatcher(config, cache, video_topics=video_topics)
     strategy_matcher = StrategyMatcher(config, scenes)
     
     # Store face preference for use during matching

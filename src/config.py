@@ -341,6 +341,12 @@ class MatchingConfig:
     force_rematch: bool = False  # Force rematch all videos (CLI override)
     rematch_improvement_threshold: float = 0.05  # Re-evaluate if new video > existing + this
 
+    # Chapter/topic matching
+    chapter_matching_enabled: bool = True  # Enable chapter-based topic filtering
+    topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
+    extract_video_topics: bool = True  # Extract topics from video transcripts
+    min_topic_overlap: int = 1  # Minimum topic keywords that must match
+
 
 @dataclass
 class NegativeMatchingConfig:

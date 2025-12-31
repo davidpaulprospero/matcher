@@ -96,6 +96,22 @@ def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> s
 # =============================================================================
 
 @dataclass
+class Chapter:
+    """Represents a chapter/topic section in voiceover"""
+    chapter_id: int
+    start_segment_idx: int
+    end_segment_idx: int
+    title: str = ""
+    topics: List[str] = field(default_factory=list)
+
+    def contains_segment(self, segment_idx: int) -> bool:
+        return self.start_segment_idx <= segment_idx <= self.end_segment_idx
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class SRTSegment:
     """Represents a single SRT segment"""
     index: int
@@ -103,22 +119,23 @@ class SRTSegment:
     end_time: float    # seconds
     text: str
     source_file: str = ""  # Source video file path (empty for voiceover)
-    
+
     # Extended attributes
     keywords: List[str] = field(default_factory=list)
     entities: List = field(default_factory=list)  # List of entity dicts with text, type, context
     topic_id: Optional[int] = None
-    
+    topics: List[str] = field(default_factory=list)  # Topic keywords for this segment/video
+
     def to_dict(self) -> dict:
         return asdict(self)
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "SRTSegment":
         """Create from dict, handling extra/missing fields gracefully"""
         # Get only the fields that SRTSegment expects
         valid_fields = {f.name for f in fields(cls)}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
-        
+
         # Ensure required fields have defaults
         filtered_data.setdefault('index', 0)
         filtered_data.setdefault('start_time', 0.0)
@@ -128,9 +145,10 @@ class SRTSegment:
         filtered_data.setdefault('keywords', [])
         filtered_data.setdefault('entities', [])
         filtered_data.setdefault('topic_id', None)
-        
+        filtered_data.setdefault('topics', [])
+
         return cls(**filtered_data)
-    
+
     @property
     def duration(self) -> float:
         return self.end_time - self.start_time
