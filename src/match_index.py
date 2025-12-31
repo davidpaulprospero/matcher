@@ -275,27 +275,41 @@ class MatchAwareIndex:
         """
         Save match results to cache.
 
+        Saves to two locations:
+        1. cached_matches.json - for delta matching (gets overwritten)
+        2. matches_YYYYMMDD_HHMMSS.json - timestamped archive (never overwritten)
+
         Args:
             matches: List of MatchResult dicts (from MatchResult.to_dict())
             voiceover_path: Optional voiceover path for metadata
         """
+        from datetime import datetime
+
         try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             data = {
                 'version': self.VERSION,
                 'saved_at': time.time(),
+                'timestamp': timestamp,
                 'voiceover_path': str(voiceover_path) if voiceover_path else '',
                 'voiceover_hash': self.voiceover_hash,
                 'match_count': len(matches),
                 'matches': matches
             }
 
-            # Atomic write
+            # Save to main cache file (for delta matching)
             temp_path = self.matches_path.with_suffix('.tmp')
             with open(temp_path, 'w') as f:
                 json.dump(data, f)
             temp_path.replace(self.matches_path)
 
+            # Also save timestamped version (never overwritten)
+            timestamped_path = self.cache_dir / f"matches_{timestamp}.json"
+            with open(timestamped_path, 'w') as f:
+                json.dump(data, f, indent=2)
+
             logger.debug(f"Saved {len(matches)} matches to cache")
+            logger.info(f"Match results saved to: {timestamped_path.name}")
 
         except Exception as e:
             logger.error(f"Could not save matches to cache: {e}")
