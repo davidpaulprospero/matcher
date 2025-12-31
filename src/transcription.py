@@ -662,13 +662,19 @@ def transcribe_videos_parallel(
             executor.submit(extract_audio_task, vp)
             for vp in uncached_videos
         ]
-        
+
+        completed = 0
+        total_videos = len(futures)
         for future in as_completed(futures):
             try:
                 video_path, audio_path = future.result()
+                completed += 1
                 if audio_path:
                     audio_files[video_path] = audio_path
+                if show_progress and completed % 10 == 0:
+                    print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
             except Exception as e:
+                completed += 1
                 logger.error(f"  Audio extraction error: {e}")
     
     phase1_time = time.time() - phase1_start
