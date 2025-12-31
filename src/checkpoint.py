@@ -94,6 +94,52 @@ class CheckpointManager:
     def exists(self) -> bool:
         """Check if a checkpoint exists"""
         return self.checkpoint_path.exists()
+
+    def is_stale(self, max_age_hours: float = 24.0) -> bool:
+        """
+        Check if checkpoint is stale (older than max_age_hours).
+
+        A stale checkpoint should be auto-cleared to avoid resuming
+        from an outdated or corrupted state.
+
+        Args:
+            max_age_hours: Maximum age in hours before checkpoint is stale
+
+        Returns:
+            True if checkpoint is stale, False otherwise
+        """
+        if not self.data:
+            return False
+
+        try:
+            # Use updated_at if available, otherwise created_at
+            timestamp_str = self.data.updated_at or self.data.created_at
+            if not timestamp_str:
+                return True  # No timestamp = stale
+
+            checkpoint_time = datetime.fromisoformat(timestamp_str)
+            age = datetime.now() - checkpoint_time
+            age_hours = age.total_seconds() / 3600
+
+            return age_hours > max_age_hours
+        except Exception:
+            return True  # Can't parse timestamp = stale
+
+    def get_age_hours(self) -> float:
+        """Get checkpoint age in hours"""
+        if not self.data:
+            return 0.0
+
+        try:
+            timestamp_str = self.data.updated_at or self.data.created_at
+            if not timestamp_str:
+                return 0.0
+
+            checkpoint_time = datetime.fromisoformat(timestamp_str)
+            age = datetime.now() - checkpoint_time
+            return age.total_seconds() / 3600
+        except Exception:
+            return 0.0
     
     def load(self) -> Optional[CheckpointData]:
         """Load existing checkpoint"""

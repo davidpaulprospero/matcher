@@ -2870,10 +2870,17 @@ Topic:"""
             self.checkpoint.clear()
         elif self.checkpoint.exists():
             self.checkpoint.load()
-            validation = self.checkpoint.validate(voiceover_path)
-            
-            if not resume and not self.config.enhanced.non_interactive:
-                # Interactive mode: ask user
+
+            # Auto-clear stale checkpoints (default: 24 hours)
+            stale_hours = getattr(self.config.pipeline, 'checkpoint_stale_hours', 24.0)
+            if self.checkpoint.is_stale(stale_hours):
+                age_hours = self.checkpoint.get_age_hours()
+                print(f"\n  🗑️ Auto-clearing stale checkpoint ({age_hours:.1f} hours old, limit: {stale_hours}h)")
+                self.checkpoint.clear()
+                # Don't show interactive prompt - just continue fresh
+            elif not resume and not self.config.enhanced.non_interactive:
+                # Interactive mode: ask user about valid checkpoint
+                validation = self.checkpoint.validate(voiceover_path)
                 print(format_resume_prompt(self.checkpoint))
                 while True:
                     try:
@@ -2892,6 +2899,7 @@ Topic:"""
                         return
             elif resume:
                 # --resume flag: automatically resume
+                validation = self.checkpoint.validate(voiceover_path)
                 print(f"\n  📂 Resuming from checkpoint: {self.checkpoint.data.last_completed_stage}")
                 for warning in validation.get('warnings', []):
                     print(f"  ⚠ {warning}")
