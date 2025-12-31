@@ -61,7 +61,10 @@ class SceneInfo:
     start_time: float  # seconds
     end_time: float    # seconds
     duration: float    # seconds
-    
+    # Face detection for B-roll identification
+    face_score: float = 0.5  # 0.0 = no faces (B-roll), 1.0 = all faces (talking head)
+    is_broll: bool = False   # True if face_score < broll_threshold (default 0.3)
+
     def to_dict(self) -> dict:
         # Convert to native Python types for JSON serialization
         return {
@@ -70,7 +73,9 @@ class SceneInfo:
             'end_frame': int(self.end_frame),
             'start_time': float(self.start_time),
             'end_time': float(self.end_time),
-            'duration': float(self.duration)
+            'duration': float(self.duration),
+            'face_score': float(self.face_score),
+            'is_broll': bool(self.is_broll)
         }
 
 
@@ -115,7 +120,20 @@ class VideoSceneData:
     
     @classmethod
     def from_dict(cls, data: dict) -> "VideoSceneData":
-        scenes = [SceneInfo(**s) for s in data.get('scenes', [])]
+        scenes = []
+        for s in data.get('scenes', []):
+            # Handle both old format (without face_score) and new format
+            scene = SceneInfo(
+                scene_index=s['scene_index'],
+                start_frame=s['start_frame'],
+                end_frame=s['end_frame'],
+                start_time=s['start_time'],
+                end_time=s['end_time'],
+                duration=s['duration'],
+                face_score=s.get('face_score', 0.5),
+                is_broll=s.get('is_broll', False)
+            )
+            scenes.append(scene)
         return cls(
             video_path=data['video_path'],
             video_name=data['video_name'],
@@ -195,9 +213,12 @@ class SceneDetector:
         
         # Setup hardware acceleration
         self._setup_hw_accel()
-        
+
         # Initialize audio analyzer
         self._init_audio_analyzer()
+
+        # Initialize face detector for B-roll identification
+        self._init_face_detector()
     
     def _setup_hw_accel(self):
         """Configure OpenCV for hardware acceleration"""
@@ -250,7 +271,29 @@ class SceneDetector:
         except ImportError as e:
             logger.warning(f"Could not import audio_analysis module: {e}")
             self.audio_analyzer = None
-    
+
+    def _init_face_detector(self):
+        """Initialize face detector for B-roll identification"""
+        self.face_detector = None
+        self.face_detection_enabled = getattr(self.scene_config, 'detect_faces_per_scene', True)
+        self.broll_threshold = getattr(self.config.matching, 'broll_face_threshold', 0.3)
+
+        if not self.face_detection_enabled:
+            logger.info("Scene face detection disabled in config")
+            return
+
+        try:
+            from .face_detection import FaceDetector
+            self.face_detector = FaceDetector.get_instance()
+            if self.face_detector.is_available():
+                logger.info("Scene face detection enabled (for B-roll identification)")
+            else:
+                logger.warning("Face detection unavailable (MediaPipe/OpenCV not installed)")
+                self.face_detector = None
+        except ImportError as e:
+            logger.warning(f"Could not import face_detection module: {e}")
+            self.face_detector = None
+
     def _load_scene_index(self):
         """Load existing scene index"""
         if self.scene_index_path.exists():
@@ -465,7 +508,26 @@ class SceneDetector:
                     
                     speech_status = "has speech" if has_speech else "no speech"
                     logger.info(f"    → Audio: {speech_status} ({speech_ratio:.1%}), {len(audio_cut_points)} cut points")
-            
+
+            # Face detection per scene (B-roll identification)
+            if self.face_detector:
+                broll_count = 0
+                cache_dir = str(self.scene_index_path.parent)
+                for scene in scenes:
+                    face_score = self.face_detector.get_scene_face_score(
+                        str(video_path),
+                        scene.start_time,
+                        scene.end_time,
+                        scene.scene_index,
+                        sample_frames=3,
+                        cache_dir=cache_dir
+                    )
+                    scene.face_score = face_score
+                    scene.is_broll = face_score < self.broll_threshold
+                    if scene.is_broll:
+                        broll_count += 1
+                logger.info(f"    → B-roll: {broll_count}/{len(scenes)} scenes (no faces)")
+
             # Create OTIO timeline
             self.otio_output_dir.mkdir(parents=True, exist_ok=True)
             timeline = self._create_otio_timeline(video_path, scenes, framerate, total_frames)

@@ -8,6 +8,8 @@ Tests the following recent features:
 3. Chapter-based topic matching
 4. OTIO V9/V10 track inclusion
 5. JSON serialization fix for numpy types
+6. Scene-level face detection for B-roll identification
+7. B-roll preference in matching
 
 Usage:
     python tests/test_recent_features.py
@@ -439,6 +441,146 @@ class TestRecentFeatures:
         except Exception as e:
             return print_result("Config options", False, str(e))
 
+    def test_face_detection_module(self) -> bool:
+        """Test FaceDetector class and B-roll functions"""
+        print_section("Face Detection Module")
+
+        try:
+            from src.face_detection import (
+                FaceDetector,
+                apply_face_preference,
+                apply_broll_preference,
+                is_broll_scene
+            )
+        except ImportError as e:
+            return print_result("Face detection module", True, f"SKIPPED - {e}")
+
+        try:
+            # Test FaceDetector singleton
+            detector = FaceDetector.get_instance()
+            passed1 = print_result(
+                "FaceDetector singleton",
+                detector is not None,
+                f"available={detector.is_available()}"
+            )
+
+            # Test is_broll_scene helper
+            passed2 = print_result(
+                "is_broll_scene(0.1) = True",
+                is_broll_scene(0.1, threshold=0.3) is True
+            )
+
+            passed3 = print_result(
+                "is_broll_scene(0.5) = False",
+                is_broll_scene(0.5, threshold=0.3) is False
+            )
+
+            passed4 = print_result(
+                "is_broll_scene(0.9) = False",
+                is_broll_scene(0.9, threshold=0.3) is False
+            )
+
+            return passed1 and passed2 and passed3 and passed4
+
+        except Exception as e:
+            return print_result("Face detection module", False, str(e))
+
+    def test_scene_info_face_score(self) -> bool:
+        """Test SceneInfo has face_score and is_broll fields"""
+        print_section("SceneInfo Face Score Fields")
+
+        try:
+            from src.scene_detection import SceneInfo
+        except ImportError as e:
+            return print_result("SceneInfo face fields", True, f"SKIPPED - {e}")
+
+        try:
+            # Create SceneInfo with face detection fields
+            scene = SceneInfo(
+                scene_index=0,
+                start_frame=0,
+                end_frame=150,
+                start_time=0.0,
+                end_time=5.0,
+                duration=5.0,
+                face_score=0.2,  # B-roll (no faces)
+                is_broll=True
+            )
+
+            passed1 = print_result(
+                "SceneInfo has face_score field",
+                hasattr(scene, 'face_score') and scene.face_score == 0.2
+            )
+
+            passed2 = print_result(
+                "SceneInfo has is_broll field",
+                hasattr(scene, 'is_broll') and scene.is_broll is True
+            )
+
+            # Test to_dict includes face fields
+            d = scene.to_dict()
+            passed3 = print_result(
+                "to_dict includes face_score",
+                'face_score' in d and d['face_score'] == 0.2
+            )
+
+            passed4 = print_result(
+                "to_dict includes is_broll",
+                'is_broll' in d and d['is_broll'] is True
+            )
+
+            return passed1 and passed2 and passed3 and passed4
+
+        except Exception as e:
+            return print_result("SceneInfo face fields", False, str(e))
+
+    def test_config_broll_options(self) -> bool:
+        """Test that config has B-roll preference options"""
+        print_section("Config B-roll Options")
+
+        try:
+            from src.config import Config, MatchingConfig, SceneDetectionConfig
+
+            config = Config()
+            mc = config.matching
+            sc = config.scene_detection
+
+            # Check MatchingConfig B-roll fields
+            has_prefer_broll = hasattr(mc, 'prefer_broll_when_topic_matches')
+            has_threshold = hasattr(mc, 'broll_face_threshold')
+            has_boost = hasattr(mc, 'broll_boost')
+
+            passed1 = print_result(
+                "prefer_broll_when_topic_matches option",
+                has_prefer_broll,
+                f"value={getattr(mc, 'prefer_broll_when_topic_matches', 'N/A')}"
+            )
+
+            passed2 = print_result(
+                "broll_face_threshold option",
+                has_threshold,
+                f"value={getattr(mc, 'broll_face_threshold', 'N/A')}"
+            )
+
+            passed3 = print_result(
+                "broll_boost option",
+                has_boost,
+                f"value={getattr(mc, 'broll_boost', 'N/A')}"
+            )
+
+            # Check SceneDetectionConfig face fields
+            has_detect_faces = hasattr(sc, 'detect_faces_per_scene')
+            passed4 = print_result(
+                "detect_faces_per_scene option",
+                has_detect_faces,
+                f"value={getattr(sc, 'detect_faces_per_scene', 'N/A')}"
+            )
+
+            return passed1 and passed2 and passed3 and passed4
+
+        except Exception as e:
+            return print_result("Config B-roll options", False, str(e))
+
     def run_all(self) -> bool:
         """Run all tests"""
         print_box("RECENT FEATURES TEST SUITE")
@@ -454,6 +596,9 @@ class TestRecentFeatures:
             ("SRTSegment Topics", self.test_srt_segment_topics),
             ("OTIO V9/V10 Tracks", self.test_otio_tracks),
             ("Config Chapter Options", self.test_config_chapter_options),
+            ("Face Detection Module", self.test_face_detection_module),
+            ("SceneInfo Face Score", self.test_scene_info_face_score),
+            ("Config B-roll Options", self.test_config_broll_options),
         ]
 
         passed = 0

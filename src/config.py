@@ -252,6 +252,10 @@ class SceneDetectionConfig:
     use_gpu: bool = True
     force_gpu: bool = False
 
+    # Face detection per scene (B-roll identification)
+    detect_faces_per_scene: bool = True  # Enable scene-level face detection
+    face_sample_frames: int = 3  # Frames to sample per scene for face detection
+
 
 @dataclass
 class AudioAnalysisConfig:
@@ -346,6 +350,12 @@ class MatchingConfig:
     topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
     extract_video_topics: bool = True  # Extract topics from video transcripts
     min_topic_overlap: int = 1  # Minimum topic keywords that must match
+
+    # B-roll preference (scene-level face detection)
+    # When topic matches, prefer scenes without faces (B-roll) over talking heads
+    prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference
+    broll_face_threshold: float = 0.3  # face_score < this = B-roll (no faces)
+    broll_boost: float = 0.1  # Confidence boost for matching B-roll when topic matches
 
 
 @dataclass
