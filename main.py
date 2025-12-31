@@ -2004,7 +2004,105 @@ Topic:"""
             traceback.print_exc()
             print(f"  ⚠ Remix failed: {e}")
             return []
-    
+
+    def _load_transcripts_from_cache(self) -> dict:
+        """
+        Load transcripts and embeddings from cache when skipping transcription.
+        This allows the pipeline to continue with cached data.
+        """
+        config = self.config
+        self._print_stage("3", "LOAD CACHED TRANSCRIPTS")
+
+        try:
+            from src.transcription import TranscriptCache
+            from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
+            from src.utils import CacheManager
+
+            # Get video files
+            if hasattr(self, 'remixed_video_paths') and self.remixed_video_paths:
+                video_files = [Path(p) for p in self.remixed_video_paths]
+            else:
+                videos_dir = Path(config.downloaded_videos_dir)
+                video_files = list(videos_dir.rglob('*.mp4')) + list(videos_dir.rglob('*.webm'))
+
+            if not video_files:
+                print("  ⚠ No video files found")
+                return {}
+
+            print(f"  Found {len(video_files)} videos")
+
+            # Load transcripts from cache
+            cache = TranscriptCache(config.cache.cache_dir)
+            self.transcripts = {}
+            loaded = 0
+
+            for vf in video_files:
+                cached = cache.get(str(vf))
+                if cached:
+                    self.transcripts[str(vf)] = cached
+                    loaded += 1
+
+            print(f"  ✓ Loaded {loaded}/{len(video_files)} transcripts from cache")
+
+            if not self.transcripts:
+                print("  ⚠ No cached transcripts found - run without skip_transcription first")
+                return {}
+
+            # Build text metadata for matching
+            self.text_metadata = []
+            for video_path, segments in self.transcripts.items():
+                for seg in segments:
+                    if hasattr(seg, 'text'):
+                        self.text_metadata.append({
+                            'text': seg.text,
+                            'video_path': video_path,
+                            'start_time': seg.start_time,
+                            'end_time': seg.end_time
+                        })
+                    else:
+                        self.text_metadata.append({
+                            'text': seg.get('text', ''),
+                            'video_path': video_path,
+                            'start_time': seg.get('start_time', 0),
+                            'end_time': seg.get('end_time', 0)
+                        })
+
+            print(f"  ✓ Built {len(self.text_metadata)} text segments")
+
+            # Load or compute embeddings
+            provider = get_embedding_provider(config)
+            cache_mgr = CacheManager(config.cache.cache_dir)
+
+            # Try to load cached embeddings
+            cached_embeddings = cache_mgr.get_embeddings("video_segments")
+            if cached_embeddings and len(cached_embeddings) == len(self.text_metadata):
+                self.embeddings = cached_embeddings
+                print(f"  ✓ Loaded {len(self.embeddings)} embeddings from cache")
+            else:
+                # Recompute embeddings (they may have a different count)
+                print(f"  Computing embeddings...")
+                text_strings = [t['text'] for t in self.text_metadata]
+                self.embeddings = compute_embeddings(
+                    texts=text_strings,
+                    provider=provider,
+                    cache=cache_mgr,
+                    cache_key="video_segments"
+                )
+                print(f"  ✓ Computed {len(self.embeddings)} embeddings")
+
+            # Build index
+            if self.embeddings is not None and len(self.embeddings) > 0:
+                self.embedding_index = build_embedding_index(self.embeddings, config=config)
+                print(f"  ✓ Built embedding index ({len(self.embeddings)} vectors)")
+
+            return self.transcripts
+
+        except Exception as e:
+            logger.error(f"Failed to load from cache: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
     def stage_transcribe(self) -> dict:
         """
         Stage 3: Transcribe and index videos.
@@ -2014,8 +2112,8 @@ Topic:"""
         config = self.config
         
         if config.pipeline.skip_transcription:
-            print("  ⏭ Skipping transcription (config: skip_transcription=true)")
-            return {}
+            print("  ⏭ Skipping transcription - loading from cache...")
+            return self._load_transcripts_from_cache()
         
         self._print_stage("3", "TRANSCRIBE & INDEX")
         
