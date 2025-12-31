@@ -308,6 +308,7 @@ image_search:
   videos_per_entity: 0   # Skip entity videos
   max_entities: 2
   max_search_time: 30
+  min_size_mb: 0.05      # 50KB min for testing (default is 1MB)
 
 # Scene detection - fast preset
 scene_detection:
