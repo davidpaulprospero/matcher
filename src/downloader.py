@@ -608,12 +608,32 @@ Only output the JSON array, no other text."""
                     response = self._call_gemini(prompt, model)
                 else:
                     response = self._call_anthropic(prompt, model)
-                
-                # Parse response
+
+                # Parse response - extract JSON array
                 import re
                 json_match = re.search(r'\[[\s\S]*\]', response)
                 if json_match:
-                    results = json.loads(json_match.group())
+                    json_str = json_match.group()
+                    try:
+                        results = json.loads(json_str)
+                    except json.JSONDecodeError:
+                        # Try to fix truncated JSON by closing brackets
+                        json_str = json_str.rstrip()
+                        if not json_str.endswith(']'):
+                            # Find last complete object
+                            last_brace = json_str.rfind('}')
+                            if last_brace > 0:
+                                json_str = json_str[:last_brace + 1] + ']'
+                                try:
+                                    results = json.loads(json_str)
+                                    logger.debug("Fixed truncated JSON response")
+                                except json.JSONDecodeError:
+                                    raise
+                            else:
+                                raise
+                        else:
+                            raise
+
                     for result in results:
                         idx = result.get('index', 0) - 1
                         if 0 <= idx < len(batch) and result.get('approve', False):
