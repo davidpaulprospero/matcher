@@ -127,7 +127,18 @@ class SRTSegment:
     topics: List[str] = field(default_factory=list)  # Topic keywords for this segment/video
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        """Convert to JSON-serializable dict (handles numpy types)"""
+        return {
+            'index': int(self.index),
+            'start_time': float(self.start_time),
+            'end_time': float(self.end_time),
+            'text': self.text,
+            'source_file': self.source_file,
+            'keywords': list(self.keywords) if self.keywords else [],
+            'entities': list(self.entities) if self.entities else [],
+            'topic_id': int(self.topic_id) if self.topic_id is not None else None,
+            'topics': list(self.topics) if self.topics else []
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SRTSegment":
@@ -173,11 +184,18 @@ class SceneInfo:
     transcript_segment: Optional[SRTSegment] = None
     
     def to_dict(self) -> dict:
-        data = asdict(self)
-        if self.transcript_segment:
-            data['transcript_segment'] = self.transcript_segment.to_dict()
-        return data
-    
+        """Convert to JSON-serializable dict (handles numpy types)"""
+        return {
+            'video_path': self.video_path,
+            'scene_index': int(self.scene_index),
+            'start_time': float(self.start_time),
+            'end_time': float(self.end_time),
+            'description': self.description,
+            'visual_keywords': list(self.visual_keywords) if self.visual_keywords else [],
+            'keyframes': list(self.keyframes) if self.keyframes else [],
+            'transcript_segment': self.transcript_segment.to_dict() if self.transcript_segment else None
+        }
+
     @classmethod
     def from_dict(cls, data: dict) -> "SceneInfo":
         """Create from dict, handling extra/missing fields gracefully"""
@@ -254,26 +272,27 @@ class Match:
     video_scene: Optional[SceneInfo]
     confidence: float
     reasoning: str
-    
+
     # Match quality indicators
     is_keyword_match: bool = False
     is_visual_match: bool = False
     embedding_similarity: float = 0.0
-    
+
     # Reuse tracking
     clip_reuse_count: int = 0
-    
+
     def to_dict(self) -> dict:
+        """Convert to JSON-serializable dict (handles numpy types)"""
         return {
             'voiceover_segment': self.voiceover_segment.to_dict(),
             'video_segment': self.video_segment.to_dict(),
             'video_scene': self.video_scene.to_dict() if self.video_scene else None,
-            'confidence': self.confidence,
+            'confidence': float(self.confidence),  # Convert numpy float to Python float
             'reasoning': self.reasoning,
             'is_keyword_match': self.is_keyword_match,
             'is_visual_match': self.is_visual_match,
-            'embedding_similarity': self.embedding_similarity,
-            'clip_reuse_count': self.clip_reuse_count
+            'embedding_similarity': float(self.embedding_similarity),  # Convert numpy float
+            'clip_reuse_count': int(self.clip_reuse_count)
         }
 
 
