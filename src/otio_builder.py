@@ -941,6 +941,9 @@ def _add_entity_images_to_track(
                     # Get folder and filename for unique reference name
                     image_path_obj = Path(image_path)
 
+                    # Debug: Log original path from entity result
+                    logger.debug(f"Entity image path (original): {image_path}")
+
                     # Verify file exists - skip if not
                     if not image_path_obj.exists():
                         logger.warning(f"Image file not found, skipping: {image_path}")
@@ -948,6 +951,10 @@ def _add_entity_images_to_track(
 
                     image_folder = image_path_obj.parent.name
                     image_filename = image_path_obj.name
+
+                    # Debug: Log filename being used
+                    logger.debug(f"Entity image filename: {image_filename}")
+
                     # Include segment ID for post-edit analysis tracing
                     segment_id = f"[S{seg_idx:03d}]"
                     image_unique_name = f"{segment_id} {image_folder}_{image_filename}"
@@ -956,6 +963,9 @@ def _add_entity_images_to_track(
                     # Use resolve() to get absolute path, then convert to Windows format
                     abs_image_path = str(image_path_obj.resolve())
                     image_path_resolved = abs_image_path.replace('/', '\\')
+
+                    # Debug: Log final resolved path
+                    logger.debug(f"Entity image path (resolved): {image_path_resolved}")
 
                     # Create external reference for still image
                     # CRITICAL: available_range = 1 frame signals to Resolve this is a still image
