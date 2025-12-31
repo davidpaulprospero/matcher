@@ -2365,25 +2365,33 @@ Topic:"""
         """
         Stage 5: Generate output files.
         Output formats from config.
+
+        Each run creates timestamped output files to preserve history.
         """
+        from datetime import datetime
+
         config = self.config
-        
+
         self._print_stage("5", "GENERATE OUTPUT")
-        
+
         output_dir = Path(config.otio_output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # Generate timestamp for this run's outputs
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         outputs = {}
-        
+
         if not self.matches:
             print("  ⚠ No matches to export")
             return outputs
-        
+
         try:
             from src.otio_builder import create_timeline, save_timeline, save_timeline_split, save_timeline_as_edl, generate_resolve_xml_with_bins
-            
+
             # Generate timeline
             print(f"  Creating timeline...")
+            print(f"  Output timestamp: {run_timestamp}")
             timeline = create_timeline(
                 matches=self.matches,
                 config=config,
@@ -2392,10 +2400,10 @@ Topic:"""
                 entity_images=getattr(self, 'entity_images', None),  # V9 entity stills
                 entity_videos=getattr(self, 'entity_videos', None)   # V10 stock videos
             )
-            
-            # Output formats (config-driven)
+
+            # Output formats (config-driven) - all use run_timestamp
             if config.output.generate_otio:
-                otio_base_path = output_dir / "timeline"
+                otio_base_path = output_dir / f"timeline_{run_timestamp}"
                 
                 # Check if we should split the OTIO
                 split_otio = getattr(config.output, 'split_otio', True)
@@ -2436,9 +2444,9 @@ Topic:"""
                     print(f"  ✓ OTIO: {otio_path}")
             
             if config.output.generate_edl:
-                edl_path = output_dir / "matched_timeline.edl"
+                edl_path = output_dir / f"timeline_{run_timestamp}.edl"
                 save_timeline_as_edl(
-                    self.matches, 
+                    self.matches,
                     str(edl_path),
                     frame_rate=getattr(config.output, 'frame_rate', 30.0),
                     timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
@@ -2446,10 +2454,10 @@ Topic:"""
                 )
                 outputs['edl'] = str(edl_path)
                 print(f"  ✓ EDL: {edl_path}")
-            
+
             # Generate DaVinci Resolve XML with media bin AND timeline (FALLBACK)
             if getattr(config.output, 'generate_xml', True):
-                xml_base_path = output_dir / "xml"
+                xml_base_path = output_dir / f"xml_{run_timestamp}"
                 num_parts = getattr(config.output, 'xml_parts', 2)
                 xml_paths = generate_resolve_xml_with_bins(
                     matches=self.matches,
@@ -2463,10 +2471,10 @@ Topic:"""
                 )
                 outputs['xml'] = xml_paths
                 print(f"  ✓ XML (fallback): {Path(xml_paths[0]).name}")
-            
+
             # Generate report if enabled
             if config.output.generate_report:
-                report_path = output_dir / "match_report.md"
+                report_path = output_dir / f"match_report_{run_timestamp}.md"
                 self._generate_report(self.matches, str(report_path))
                 outputs['report'] = str(report_path)
                 print(f"  ✓ Report: {report_path}")
