@@ -493,11 +493,11 @@ class GoogleBingImageClient:
             elif url.lower().endswith('.webp'):
                 ext = '.webp'
             
-            # Save file with non-sequential name to prevent image sequence detection
-            # DaVinci Resolve auto-detects sequential numbered files as image sequences
-            # Adding random suffix breaks the pattern: img_00000002_a3f2.jpg
-            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-            filepath = output_folder / f"img_{index:08d}_{random_suffix}{ext}"
+            # Save file with completely non-sequential name to prevent image sequence detection
+            # DaVinci Resolve detects sequential numbered patterns even with suffixes
+            # Use UUID-based name to completely break any pattern: img_a3f2b7x9k2m4.jpg
+            random_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+            filepath = output_folder / f"img_{random_name}{ext}"
             
             with open(filepath, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
