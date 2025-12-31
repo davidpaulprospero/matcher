@@ -849,6 +849,44 @@ cache:
   use_file_hash: true
 
 # -----------------------------------------------------------------------------
+# GLOBAL CACHE (Cross-Project Video Reuse)
+# -----------------------------------------------------------------------------
+# Enables sharing of video cache (transcripts, embeddings, scenes) across
+# multiple projects. Videos from past projects can be reused if they match
+# the current project's keywords/topics.
+#
+# Key features:
+# - Pre-download check: Find relevant videos before downloading new ones
+# - Smart re-download: Re-add deleted videos to download queue
+# - Priority system: Current project videos always take precedence
+
+global_cache:
+  enabled: true
+  cache_dir: "~/.matcher_global_cache"  # ~ expands to home directory
+
+  # Pre-download optimization
+  check_before_download: true   # Query cache before downloading new videos
+  redownload_deleted: true      # Re-download if cached video file was deleted
+  prompt_reuse: true            # Ask user before reusing (false = auto-reuse)
+
+  # Relevance thresholds
+  min_keyword_similarity: 0.8   # Fuzzy match threshold for keywords (0-1)
+  min_topic_overlap: 0.3        # Minimum topic relevance to consider video (0-1)
+
+  # Limits
+  max_reuse_videos: 50          # Max videos to reuse from cache per project
+  max_redownload: 10            # Max deleted videos to re-download
+
+  # What to share globally
+  share_transcripts: true       # Share video transcripts across projects
+  share_embeddings: true        # Share embedding vectors across projects
+  share_scenes: true            # Share scene detection data across projects
+  share_face_detection: true    # Share face detection scores across projects
+
+  # Priority boost for current project videos in matching
+  current_project_boost: 0.1    # How much to boost current project videos (0-1)
+
+# -----------------------------------------------------------------------------
 # PIPELINE AUTOMATION
 # -----------------------------------------------------------------------------
 # Skip stages to re-run pipeline with existing data.

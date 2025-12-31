@@ -870,14 +870,48 @@ class CacheConfig:
     cache_scenes: bool = True
     cache_llm_responses: bool = True
     cache_vision: bool = True
-    
-    # Cross-project cache
+
+    # Cross-project cache (legacy - use GlobalCacheConfig)
     cross_project_cache: bool = False
     cross_project_cache_dir: str = ""
-    
+
     # Validation
     validate_cache_on_load: bool = True
     use_file_hash: bool = True
+
+
+@dataclass
+class GlobalCacheConfig:
+    """Global cache settings for cross-project video reuse
+
+    Enables sharing of video cache (transcripts, embeddings, scenes)
+    across multiple projects. Videos from past projects can be reused
+    if they match the current project's keywords/topics.
+    """
+    enabled: bool = True
+    cache_dir: str = "~/.matcher_global_cache"  # Expands ~ to home dir
+
+    # Pre-download optimization
+    check_before_download: bool = True  # Query cache before downloading
+    redownload_deleted: bool = True     # Re-download if cached video was deleted
+    prompt_reuse: bool = True           # Ask user before reusing (false = auto-reuse)
+
+    # Relevance thresholds
+    min_keyword_similarity: float = 0.8  # Fuzzy match threshold for keywords
+    min_topic_overlap: float = 0.3       # Topic relevance threshold
+
+    # Limits
+    max_reuse_videos: int = 50           # Max videos to reuse from cache per project
+    max_redownload: int = 10             # Max deleted videos to re-download
+
+    # What to share globally
+    share_transcripts: bool = True
+    share_embeddings: bool = True
+    share_scenes: bool = True
+    share_face_detection: bool = True
+
+    # Priority boost for current project videos in matching
+    current_project_boost: float = 0.1
 
 
 @dataclass
@@ -967,9 +1001,10 @@ class Config:
     multi_style: MultiStyleConfig = field(default_factory=MultiStyleConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    global_cache: GlobalCacheConfig = field(default_factory=GlobalCacheConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
-    
+
     # Convenience paths (resolved at load time)
     project_dir: str = "."
     downloaded_videos_dir: str = "downloaded_videos"
