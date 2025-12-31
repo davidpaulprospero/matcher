@@ -31,20 +31,28 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import threading
-import numpy as np
+
+# Optional numpy import for JSON encoding
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
 
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles numpy types"""
     def default(self, obj):
-        if isinstance(obj, (np.integer, np.int32, np.int64)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float32, np.float64)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, np.bool_):
-            return bool(obj)
+        if HAS_NUMPY:
+            if isinstance(obj, (np.integer, np.int32, np.int64)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float32, np.float64)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
         return super().default(obj)
 
 # =============================================================================
