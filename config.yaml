@@ -277,6 +277,14 @@ matching:
   force_rematch: false  # Force rematch all videos (set via CLI --force-rematch)
   rematch_improvement_threshold: 0.05  # Re-evaluate if new video potentially 5% better
 
+  # Chapter/topic matching
+  # Chain-of-thought: Match videos based on topic relevance to voiceover chapters
+  # Reasoning: Prevents matching Dallas videos to Boise narration
+  chapter_matching_enabled: true  # Enable chapter-based topic filtering
+  topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
+  extract_video_topics: true  # Extract topics from video transcripts using LLM
+  min_topic_overlap: 1  # Minimum matching topic keywords required
+
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
 # -----------------------------------------------------------------------------

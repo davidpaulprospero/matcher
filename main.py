@@ -1326,9 +1326,70 @@ Topic:"""
                     self.keywords = []
         
         print(f"  ✓ {len(self.keywords)} keywords extracted")
-        
+
+        # Detect chapters/topics in voiceover for chapter-based matching
+        if config.matching.chapter_matching_enabled:
+            self._detect_voiceover_chapters()
+
         return self.keywords
-    
+
+    def _detect_voiceover_chapters(self):
+        """Detect chapters/topic sections in voiceover for chapter-based matching."""
+        if not self.voiceover_segments:
+            return
+
+        try:
+            from src.topic_extraction import ChapterDetector
+
+            print(f"\n  Detecting chapters...")
+            detector = ChapterDetector(self.config)
+
+            # Detect chapters using LLM
+            self.chapters = detector.detect_chapters(
+                self.voiceover_segments,
+                overall_topic=self.topic_context if hasattr(self, 'topic_context') else None
+            )
+
+            if self.chapters:
+                print(f"  ✓ Found {len(self.chapters)} chapters:")
+                for ch in self.chapters:
+                    start_idx = ch.get('start_segment_idx', 0)
+                    end_idx = ch.get('end_segment_idx', 0)
+                    title = ch.get('title', 'Untitled')
+                    topics = ch.get('topics', [])
+                    topics_str = ', '.join(topics[:3]) if topics else 'no topics'
+                    print(f"    [{start_idx}-{end_idx}] {title} ({topics_str})")
+
+                # Assign chapter info to voiceover segments
+                self._assign_chapters_to_segments()
+            else:
+                print(f"  ✓ No distinct chapters detected (treating as single topic)")
+
+        except Exception as e:
+            logger.warning(f"Chapter detection failed: {e}")
+            self.chapters = []
+
+    def _assign_chapters_to_segments(self):
+        """Assign chapter_id and chapter_topics to each voiceover segment."""
+        if not self.chapters:
+            return
+
+        for ch in self.chapters:
+            start_idx = ch.get('start_segment_idx', 0)
+            end_idx = ch.get('end_segment_idx', len(self.voiceover_segments) - 1)
+            chapter_id = ch.get('chapter_id', 0)
+            topics = ch.get('topics', [])
+
+            for i in range(start_idx, min(end_idx + 1, len(self.voiceover_segments))):
+                seg = self.voiceover_segments[i]
+                if isinstance(seg, dict):
+                    seg['chapter_id'] = chapter_id
+                    seg['chapter_topics'] = topics
+                else:
+                    # Handle SRTSegment objects - store in topics field
+                    if hasattr(seg, 'topics'):
+                        seg.topics = topics
+
     def stage_image_search(self) -> Dict[str, any]:
         """
         Stage 1.5: Download images for entities.
@@ -2080,7 +2141,11 @@ Topic:"""
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
             self._predetect_faces(video_files)
-        
+
+        # Extract topics from video transcripts (for chapter-based matching)
+        if config.matching.chapter_matching_enabled and config.matching.extract_video_topics:
+            self._extract_video_topics()
+
         return self.transcripts
     
     def _predetect_faces(self, video_files: List[Path]):
@@ -2119,7 +2184,78 @@ Topic:"""
             
         except Exception as e:
             logger.warning(f"Face pre-detection failed: {e}")
-    
+
+    def _extract_video_topics(self):
+        """Extract topics from video transcripts for chapter-based matching."""
+        if not self.transcripts:
+            return
+
+        try:
+            from src.topic_extraction import TopicExtractor
+
+            print(f"\n  Extracting video topics...")
+            extractor = TopicExtractor(self.config, self.config.cache.cache_dir)
+
+            # Prepare transcripts and metadata for batch extraction
+            transcripts_dict = {}
+            metadata_dict = {}
+
+            for video_path, segments in self.transcripts.items():
+                # Combine segment texts into full transcript
+                if segments:
+                    transcript_texts = []
+                    for seg in segments:
+                        if hasattr(seg, 'text'):
+                            transcript_texts.append(seg.text)
+                        elif isinstance(seg, dict):
+                            transcript_texts.append(seg.get('text', ''))
+                    full_transcript = ' '.join(transcript_texts)
+                    transcripts_dict[video_path] = full_transcript
+
+                    # Extract source keyword from video path
+                    video_name = Path(video_path).stem
+                    # Try to extract keyword from folder structure or filename
+                    keyword = self._extract_source_keyword(video_path)
+                    metadata_dict[video_path] = {
+                        'title': video_name,
+                        'keyword': keyword
+                    }
+
+            # Batch extract topics
+            self.video_topics = extractor.extract_batch(transcripts_dict, metadata_dict)
+
+            # Count topics extracted
+            topics_count = sum(1 for vt in self.video_topics.values() if vt.topics)
+            print(f"  ✓ Extracted topics for {topics_count}/{len(self.video_topics)} videos")
+
+            # Show sample topics
+            sample_videos = list(self.video_topics.items())[:3]
+            for video_path, vt in sample_videos:
+                if vt.topics:
+                    video_name = Path(video_path).name[:30]
+                    topics_str = ', '.join(vt.topics[:3])
+                    print(f"    • {video_name}: [{topics_str}]")
+
+        except Exception as e:
+            logger.warning(f"Video topic extraction failed: {e}")
+            self.video_topics = {}
+
+    def _extract_source_keyword(self, video_path: str) -> str:
+        """Try to extract the source search keyword from video path structure."""
+        path = Path(video_path)
+        parts = path.parts
+
+        # Look for keyword folder patterns like 'downloads/keyword_name/video.mp4'
+        for i, part in enumerate(parts):
+            if part in ('downloads', 'downloaded_videos', 'videos'):
+                if i + 1 < len(parts) - 1:  # There's a subfolder after downloads
+                    keyword_folder = parts[i + 1]
+                    # Clean up folder name
+                    return keyword_folder.replace('_', ' ').replace('-', ' ')
+
+        # Fallback: use filename without extension
+        return path.stem.replace('_', ' ').replace('-', ' ')
+
     def stage_match(self) -> List[dict]:
         """
         Stage 4: Match voiceover to footage.
@@ -2179,10 +2315,14 @@ Topic:"""
                         text=seg.get('text', ''),
                         source_file=seg.get('source_file', ''),
                         keywords=seg.get('keywords', []),
-                        entities=seg.get('entities', [])
+                        entities=seg.get('entities', []),
+                        topics=seg.get('chapter_topics', [])  # Chapter topics for topic-based matching
                     )
                 else:
                     vo_segment = seg
+                    # Copy chapter topics if available
+                    if hasattr(seg, 'chapter_topics') and not getattr(seg, 'topics', None):
+                        vo_segment.topics = seg.chapter_topics
                 vo_segments.append(vo_segment)
 
             # Convert video metadata to SRTSegment objects
@@ -2299,6 +2439,12 @@ Topic:"""
 
                 # Match all segments using the high-level function
                 print(f"  Running two-stage matching...")
+
+                # Get video topics for chapter-based matching
+                video_topics = getattr(self, 'video_topics', None)
+                if video_topics and config.matching.chapter_matching_enabled:
+                    print(f"  Using chapter-based matching with {len(video_topics)} video topics")
+
                 self.matches = match_all_segments(
                     voiceover_segments=vo_segments,
                     video_segments=video_segments,
@@ -2308,7 +2454,8 @@ Topic:"""
                     config=config,
                     cache=cache,
                     embedding_index=self.embedding_index,
-                    face_preference=getattr(self, 'face_preference', 'neutral')
+                    face_preference=getattr(self, 'face_preference', 'neutral'),
+                    video_topics=video_topics
                 )
 
                 # Save matches to cache for delta matching
