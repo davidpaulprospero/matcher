@@ -20,6 +20,80 @@ from .embeddings import cosine_similarity
 logger = logging.getLogger(__name__)
 
 
+def _validate_entity_images(entity_images: Dict) -> Dict:
+    """
+    Validate and filter entity image paths.
+
+    Ensures all image paths in EntityImageResult objects are:
+    1. Valid file paths (not None, not empty)
+    2. Actually exist on disk
+    3. Have valid filenames (no brackets, sequences)
+
+    Returns a filtered copy of entity_images with only valid paths.
+    """
+    if not entity_images:
+        return {}
+
+    filtered = {}
+
+    for entity_name, entity_result in entity_images.items():
+        if not hasattr(entity_result, 'images'):
+            logger.warning(f"Entity '{entity_name}' has no 'images' attribute, skipping")
+            continue
+
+        original_images = entity_result.images
+        valid_images = []
+
+        for img_path in original_images:
+            # Skip None or empty paths
+            if not img_path:
+                logger.debug(f"Entity '{entity_name}': Skipping empty path")
+                continue
+
+            # Check for suspicious patterns (image sequences, wildcards)
+            if '[' in str(img_path) or ']' in str(img_path):
+                logger.warning(f"Entity '{entity_name}': Skipping path with brackets (image sequence?): {img_path}")
+                continue
+
+            if '*' in str(img_path) or '?' in str(img_path):
+                logger.warning(f"Entity '{entity_name}': Skipping path with wildcards: {img_path}")
+                continue
+
+            # Verify file exists
+            path_obj = Path(img_path)
+            if not path_obj.exists():
+                logger.warning(f"Entity '{entity_name}': Image file not found: {img_path}")
+                continue
+
+            if not path_obj.is_file():
+                logger.warning(f"Entity '{entity_name}': Path is not a file: {img_path}")
+                continue
+
+            # Log validated path
+            logger.debug(f"Entity '{entity_name}': Validated image: {path_obj.name}")
+            valid_images.append(img_path)
+
+        if valid_images:
+            # Create a copy with filtered images
+            # Import here to avoid circular imports
+            from .entity_images import EntityImageResult
+            filtered[entity_name] = EntityImageResult(
+                entity_name=entity_result.entity_name,
+                entity_type=entity_result.entity_type,
+                context=entity_result.context,
+                query=entity_result.query,
+                images=valid_images,
+                segment_indices=entity_result.segment_indices
+            )
+
+            if len(valid_images) != len(original_images):
+                logger.info(f"Entity '{entity_name}': Filtered {len(original_images)} -> {len(valid_images)} images")
+        else:
+            logger.warning(f"Entity '{entity_name}': No valid images after filtering")
+
+    return filtered
+
+
 def _to_windows_path(path: str) -> str:
     """
     Convert path to Windows format with backslashes.
@@ -746,12 +820,18 @@ def create_timeline(
     
     # Populate image track if entity_images provided
     if entity_images:
-        _add_entity_images_to_track(
-            image_track=image_track,
-            entity_images=entity_images,
-            matches=matches,
-            frame_rate=rate
-        )
+        # Validate and filter entity images before using
+        validated_entity_images = _validate_entity_images(entity_images)
+        if validated_entity_images:
+            logger.info(f"Entity images: {len(validated_entity_images)} entities with valid images")
+            _add_entity_images_to_track(
+                image_track=image_track,
+                entity_images=validated_entity_images,
+                matches=matches,
+                frame_rate=rate
+            )
+        else:
+            logger.warning("No valid entity images after validation")
 
     # Always add V9 Entity Images track (even if empty, for manual use)
     timeline.tracks.append(image_track)
@@ -2080,7 +2160,9 @@ def generate_resolve_xml_with_bins(
             add_file(strat.video_segment.source_file, dur)
     
     if entity_images:
-        for entity, result in entity_images.items():
+        # Validate entity images first
+        validated_entity_images = _validate_entity_images(entity_images)
+        for entity, result in validated_entity_images.items():
             # Handle both EntityImageResult objects and plain lists
             if hasattr(result, 'images'):
                 images = result.images  # EntityImageResult dataclass
