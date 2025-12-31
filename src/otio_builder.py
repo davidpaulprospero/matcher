@@ -940,14 +940,22 @@ def _add_entity_images_to_track(
 
                     # Get folder and filename for unique reference name
                     image_path_obj = Path(image_path)
+
+                    # Verify file exists - skip if not
+                    if not image_path_obj.exists():
+                        logger.warning(f"Image file not found, skipping: {image_path}")
+                        continue
+
                     image_folder = image_path_obj.parent.name
                     image_filename = image_path_obj.name
                     # Include segment ID for post-edit analysis tracing
                     segment_id = f"[S{seg_idx:03d}]"
                     image_unique_name = f"{segment_id} {image_folder}_{image_filename}"
 
-                    # Convert to Windows path format with backslashes for Resolve
-                    image_path_resolved = _to_windows_path(image_path)
+                    # Convert to absolute Windows path format with backslashes for Resolve
+                    # Use resolve() to get absolute path, then convert to Windows format
+                    abs_image_path = str(image_path_obj.resolve())
+                    image_path_resolved = abs_image_path.replace('/', '\\')
 
                     # Create external reference for still image
                     # CRITICAL: available_range = 1 frame signals to Resolve this is a still image
