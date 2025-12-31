@@ -2058,7 +2058,14 @@ def generate_resolve_xml_with_bins(
             add_file(strat.video_segment.source_file, dur)
     
     if entity_images:
-        for entity, images in entity_images.items():
+        for entity, result in entity_images.items():
+            # Handle both EntityImageResult objects and plain lists
+            if hasattr(result, 'images'):
+                images = result.images  # EntityImageResult dataclass
+            elif isinstance(result, list):
+                images = result
+            else:
+                continue
             for img_path in images:
                 add_file(str(img_path), 5.0)
     
