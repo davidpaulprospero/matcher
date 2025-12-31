@@ -949,22 +949,23 @@ def _add_entity_images_to_track(
                     # Convert to Windows path format with backslashes for Resolve
                     image_path_resolved = _to_windows_path(image_path)
 
-                    # Create external reference for still image:
-                    # - Do NOT set available_range (omit it) for null/infinite duration
-                    # - This allows the image to cover the full source_range in the Clip
-                    # - Required for DaVinci Resolve compatibility
+                    # Create external reference for still image
                     image_ref = otio.schema.ExternalReference(
                         target_url=image_path_resolved
-                        # available_range intentionally omitted = null in JSON
                     )
                     image_ref.name = image_unique_name
+                    # Explicitly set available_range to None for still images
+                    # This produces "available_range": null in JSON
+                    # Tells Resolve the image has infinite duration (can be stretched)
+                    image_ref.available_range = None
 
                     # Create clip with source_range = display duration
-                    # The image will be shown for this duration
+                    # source_range.start_time MUST be 0 for stills (no frames to advance)
+                    # source_range.duration = how long to display the still
                     image_clip = otio.schema.Clip(
                         name=image_unique_name,
                         source_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
+                            start_time=otio.opentime.RationalTime(0, rate),  # Always 0 for stills
                             duration=otio.opentime.RationalTime(clip_frames, rate)
                         )
                     )
