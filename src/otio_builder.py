@@ -9,12 +9,13 @@ OTIO Timeline builder with:
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple, Any
 
 import opentimelineio as otio
 
 from .config import Config
 from .utils import SRTSegment, MatchResult, AlternativeMatch
+from .embeddings import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -772,6 +773,82 @@ def create_timeline(
     return timeline
 
 
+def _find_best_entity_match(
+    vo_text: str,
+    entity_dict: Dict,
+    last_matched_entity: Optional[str] = None
+) -> Tuple[Optional[str], str]:
+    """
+    Find the best matching entity for a voiceover segment.
+
+    Strategy:
+    1. Exact match: Entity name appears in voiceover text
+    2. Semantic match: Use embedding similarity between voiceover and entity query
+    3. Sticky: Use last matched entity if no match found
+
+    Args:
+        vo_text: Voiceover segment text (lowercase)
+        entity_dict: Dict of entity_name -> EntityResult
+        last_matched_entity: Previous segment's matched entity name
+
+    Returns:
+        (entity_name, match_type) where match_type is 'exact', 'semantic', or 'sticky'
+    """
+    # 1. Try exact match first
+    for entity_name, entity_result in entity_dict.items():
+        if entity_name.lower() in vo_text:
+            assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+            if assets:
+                return entity_name, 'exact'
+
+    # 2. Try semantic matching using entity query similarity
+    best_entity = None
+    best_score = 0.0
+
+    try:
+        # Simple word overlap scoring as semantic proxy
+        # (Full embedding similarity would require pre-computed embeddings)
+        vo_words = set(vo_text.split())
+
+        for entity_name, entity_result in entity_dict.items():
+            assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+            if not assets:
+                continue
+
+            # Get query text for matching
+            query = getattr(entity_result, 'query', entity_name)
+            query_words = set(query.lower().split())
+
+            # Also include entity type in matching
+            entity_type = getattr(entity_result, 'entity_type', '')
+            if entity_type:
+                query_words.update(entity_type.lower().split())
+
+            # Calculate word overlap score
+            common_words = vo_words & query_words
+            if common_words:
+                # Jaccard-like similarity
+                score = len(common_words) / (len(vo_words | query_words) + 1)
+                if score > best_score:
+                    best_score = score
+                    best_entity = entity_name
+
+        # Require minimum semantic score threshold
+        if best_entity and best_score >= 0.05:
+            return best_entity, 'semantic'
+    except Exception as e:
+        logger.debug(f"Semantic matching failed: {e}")
+
+    # 3. Fall back to sticky entity
+    if last_matched_entity and last_matched_entity in entity_dict:
+        entity_result = entity_dict[last_matched_entity]
+        assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+        if assets:
+            return last_matched_entity, 'sticky'
+
+    return None, 'none'
+
+
 def _add_entity_images_to_track(
     image_track: otio.schema.Track,
     entity_images: Dict,
@@ -780,12 +857,17 @@ def _add_entity_images_to_track(
 ):
     """
     Add entity images to V9 track at segment positions.
-    
+
+    Features:
+    - Sticky entity: Last matched entity persists to fill subsequent segments
+    - Semantic matching: Uses word overlap to find relevant entities
+    - No duplicate sources: Same image won't appear twice in one segment
+
     ALL images for an entity are placed as separate clips within
     the segment, divided equally by duration.
-    
+
     Example: 10 second segment with 5 images = 5 clips of 2 seconds each
-    
+
     Format matches DaVinci Resolve's OTIO export:
     - media_references dict with DEFAULT_MEDIA key
     - available_range = 1 frame (still image)
@@ -793,124 +875,135 @@ def _add_entity_images_to_track(
     - active_media_reference_key = "DEFAULT_MEDIA"
     """
     rate = frame_rate
-    
+
     # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec)
     segment_timing = {}
     current_frame = 0
-    
+
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         target_duration = vo_seg.end_time - vo_seg.start_time
         duration_frames = round(target_duration * frame_rate)
-        
+
         segment_timing[i] = (current_frame, duration_frames, target_duration)
         current_frame += duration_frames
-    
+
+    # Track sticky entity across segments
+    last_matched_entity = None
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
         vo_text = match.voiceover_segment.text.lower()
-        
-        # Find entities mentioned in this segment
-        segment_has_images = False
-        
-        for entity_name, entity_result in entity_images.items():
-            if entity_name.lower() not in vo_text:
-                continue
-            
-            if not entity_result.images:
-                continue
-            
+
+        # Find best matching entity (exact -> semantic -> sticky)
+        entity_name, match_type = _find_best_entity_match(
+            vo_text, entity_images, last_matched_entity
+        )
+
+        if entity_name:
+            entity_result = entity_images[entity_name]
+
+            # Update sticky entity for next segments
+            last_matched_entity = entity_name
+
             # Get all images for this entity
             all_images = entity_result.images
             num_images = len(all_images)
-            
-            if num_images == 0:
+
+            if num_images > 0:
+                # Track used sources within this segment to prevent duplicates
+                used_sources = set()
+                unique_images = []
+                for img_path in all_images:
+                    # Use filename as source identifier
+                    source_id = Path(img_path).name
+                    if source_id not in used_sources:
+                        used_sources.add(source_id)
+                        unique_images.append(img_path)
+
+                # Use deduplicated images
+                all_images = unique_images
+                num_images = len(all_images)
+
+                # Divide segment duration equally among all images
+                frames_per_image = max(1, duration_frames // num_images)
+                remaining_frames = duration_frames - (frames_per_image * num_images)
+
+                # Create a clip for each image
+                for img_idx, image_path in enumerate(all_images):
+                    # Calculate this image's duration (distribute remaining frames to last clips)
+                    clip_frames = frames_per_image
+                    if img_idx >= num_images - remaining_frames:
+                        clip_frames += 1
+
+                    # Get folder and filename for unique reference name
+                    image_path_obj = Path(image_path)
+                    image_folder = image_path_obj.parent.name
+                    image_filename = image_path_obj.name
+                    # Include segment ID for post-edit analysis tracing
+                    segment_id = f"[S{seg_idx:03d}]"
+                    image_unique_name = f"{segment_id} {image_folder}_{image_filename}"
+
+                    # Convert to Windows path format with backslashes for Resolve
+                    image_path_resolved = _to_windows_path(image_path)
+
+                    # Create external reference matching Resolve's format:
+                    # - available_range = 1 frame (still image has 1 frame)
+                    # - name = unique name including folder
+                    image_ref = otio.schema.ExternalReference(
+                        target_url=image_path_resolved,
+                        available_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(1, rate)  # 1 frame for still
+                        )
+                    )
+                    image_ref.name = image_unique_name
+
+                    # Create clip with source_range = display duration
+                    image_clip = otio.schema.Clip(
+                        name=image_unique_name,
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(clip_frames, rate)
+                        )
+                    )
+
+                    # Set media references using the Resolve format
+                    # This uses the newer OTIO format with media_references dict
+                    image_clip.media_reference = image_ref
+
+                    # Add Resolve_OTIO metadata (required for DaVinci import)
+                    image_clip.metadata['Resolve_OTIO'] = {}
+
+                    # Add metadata
+                    image_clip.metadata['entity_name'] = entity_name
+                    image_clip.metadata['entity_type'] = entity_result.entity_type
+                    image_clip.metadata['query'] = entity_result.query
+                    image_clip.metadata['image_path'] = image_path
+                    image_clip.metadata['segment_index'] = seg_idx
+                    image_clip.metadata['image_index'] = img_idx
+                    image_clip.metadata['total_images'] = num_images
+                    image_clip.metadata['is_still_image'] = True
+                    image_clip.metadata['match_type'] = match_type  # Track how entity was matched
+
+                    # Add Resolve-specific metadata
+                    image_clip.metadata['Resolve_OTIO'] = {}
+
+                    image_track.append(image_clip)
+
+                # Successfully added images, continue to next segment
                 continue
-            
-            segment_has_images = True
-            
-            # Divide segment duration equally among all images
-            frames_per_image = max(1, duration_frames // num_images)
-            remaining_frames = duration_frames - (frames_per_image * num_images)
-            
-            # Create a clip for each image
-            for img_idx, image_path in enumerate(all_images):
-                # Calculate this image's duration (distribute remaining frames to last clips)
-                clip_frames = frames_per_image
-                if img_idx >= num_images - remaining_frames:
-                    clip_frames += 1
-                
-                # Get folder and filename for unique reference name
-                image_path_obj = Path(image_path)
-                image_folder = image_path_obj.parent.name
-                image_filename = image_path_obj.name
-                # Include segment ID for post-edit analysis tracing
-                segment_id = f"[S{seg_idx:03d}]"
-                image_unique_name = f"{segment_id} {image_folder}_{image_filename}"
-                
-                # Convert to Windows path format with backslashes for Resolve
-                image_path_resolved = _to_windows_path(image_path)
-                
-                # Create external reference matching Resolve's format:
-                # - available_range = 1 frame (still image has 1 frame)
-                # - name = unique name including folder
-                image_ref = otio.schema.ExternalReference(
-                    target_url=image_path_resolved,
-                    available_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=otio.opentime.RationalTime(1, rate)  # 1 frame for still
-                    )
-                )
-                image_ref.name = image_unique_name
-                
-                # Create clip with source_range = display duration
-                image_clip = otio.schema.Clip(
-                    name=image_unique_name,
-                    source_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=otio.opentime.RationalTime(clip_frames, rate)
-                    )
-                )
-                
-                # Set media references using the Resolve format
-                # This uses the newer OTIO format with media_references dict
-                image_clip.media_reference = image_ref
-                
-                # Add Resolve_OTIO metadata (required for DaVinci import)
-                image_clip.metadata['Resolve_OTIO'] = {}
-                
-                # Add metadata
-                image_clip.metadata['entity_name'] = entity_name
-                image_clip.metadata['entity_type'] = entity_result.entity_type
-                image_clip.metadata['query'] = entity_result.query
-                image_clip.metadata['image_path'] = image_path
-                image_clip.metadata['segment_index'] = seg_idx
-                image_clip.metadata['image_index'] = img_idx
-                image_clip.metadata['total_images'] = num_images
-                image_clip.metadata['is_still_image'] = True
-                
-                # Add Resolve-specific metadata
-                image_clip.metadata['Resolve_OTIO'] = {}
-                
-                # Note: Markers removed - not used in DaVinci workflow
-                
-                image_track.append(image_clip)
-            
-            # Only process first matching entity per segment
-            # (prevents overlapping clips from multiple entities)
-            break
-        
-        if not segment_has_images:
-            # No entity matched - add gap to maintain sync
-            gap = otio.schema.Gap(
-                source_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, rate),
-                    duration=otio.opentime.RationalTime(duration_frames, rate)
-                )
+
+        # No entity matched even with fallbacks - add gap to maintain sync
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(duration_frames, rate)
             )
-            image_track.append(gap)
+        )
+        image_track.append(gap)
 
 
 def _add_entity_videos_to_track(
@@ -921,137 +1014,154 @@ def _add_entity_videos_to_track(
 ):
     """
     Add stock videos to V10 track at segment positions.
-    
+
+    Features:
+    - Sticky entity: Last matched entity persists to fill subsequent segments
+    - Semantic matching: Uses word overlap to find relevant entities
+    - No duplicate sources: Same video source won't appear twice in one segment
+
     ALL videos for an entity are placed as separate clips within
     the segment, divided equally by duration.
-    
+
     Unlike images, videos have actual duration. We use the video's
     natural duration but may need to trim/adjust to fit the segment.
     """
     rate = frame_rate
-    
+
     # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec)
     segment_timing = {}
     current_frame = 0
-    
+
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         target_duration = vo_seg.end_time - vo_seg.start_time
         duration_frames = round(target_duration * frame_rate)
-        
+
         segment_timing[i] = (current_frame, duration_frames, target_duration)
         current_frame += duration_frames
-    
+
+    # Track sticky entity across segments
+    last_matched_entity = None
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
         vo_text = match.voiceover_segment.text.lower()
-        
-        # Find entities mentioned in this segment
-        segment_has_videos = False
-        
-        for entity_name, entity_result in entity_videos.items():
-            if entity_name.lower() not in vo_text:
-                continue
-            
-            if not entity_result.videos:
-                continue
-            
+
+        # Find best matching entity (exact -> semantic -> sticky)
+        entity_name, match_type = _find_best_entity_match(
+            vo_text, entity_videos, last_matched_entity
+        )
+
+        if entity_name:
+            entity_result = entity_videos[entity_name]
+
+            # Update sticky entity for next segments
+            last_matched_entity = entity_name
+
             # Get all videos for this entity
             all_videos = entity_result.videos
             num_videos = len(all_videos)
-            
-            if num_videos == 0:
+
+            if num_videos > 0:
+                # Track used sources within this segment to prevent duplicates
+                used_sources = set()
+                unique_videos = []
+                for vid_path in all_videos:
+                    # Use filename as source identifier
+                    source_id = Path(vid_path).name
+                    if source_id not in used_sources:
+                        used_sources.add(source_id)
+                        unique_videos.append(vid_path)
+
+                # Use deduplicated videos
+                all_videos = unique_videos
+                num_videos = len(all_videos)
+
+                # Divide segment duration equally among all videos
+                frames_per_video = max(1, duration_frames // num_videos)
+                remaining_frames = duration_frames - (frames_per_video * num_videos)
+
+                # Create a clip for each video
+                for vid_idx, video_path in enumerate(all_videos):
+                    # Calculate this video's display duration
+                    clip_frames = frames_per_video
+                    if vid_idx >= num_videos - remaining_frames:
+                        clip_frames += 1
+
+                    clip_duration_sec = clip_frames / rate
+
+                    # Get folder and filename for unique reference name
+                    video_path_obj = Path(video_path)
+                    video_folder = video_path_obj.parent.name
+                    video_filename = video_path_obj.name
+                    # Include segment ID for post-edit analysis tracing
+                    segment_id = f"[S{seg_idx:03d}]"
+                    video_unique_name = f"{segment_id} {video_folder}_{video_filename}"
+
+                    # Convert to Windows path format with backslashes for Resolve
+                    video_path_resolved = _to_windows_path(video_path)
+
+                    # Get actual video duration using ffprobe if available
+                    actual_duration_frames = _get_video_duration_frames(video_path, rate)
+                    if actual_duration_frames is None:
+                        # Fallback: assume video is long enough
+                        actual_duration_frames = clip_frames * 2
+
+                    # Create external reference for video
+                    # Unlike images, videos have actual duration (available_range)
+                    video_ref = otio.schema.ExternalReference(
+                        target_url=video_path_resolved,
+                        available_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(actual_duration_frames, rate)
+                        )
+                    )
+                    video_ref.name = video_unique_name
+
+                    # Create clip - use portion of video that fits segment
+                    # Start from beginning, play for clip_frames duration
+                    video_clip = otio.schema.Clip(
+                        name=video_unique_name,
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=otio.opentime.RationalTime(clip_frames, rate)
+                        )
+                    )
+
+                    video_clip.media_reference = video_ref
+
+                    # Add Resolve_OTIO metadata (required for DaVinci import)
+                    video_clip.metadata['Resolve_OTIO'] = {}
+
+                    # Add metadata
+                    video_clip.metadata['entity_name'] = entity_name
+                    video_clip.metadata['entity_type'] = entity_result.entity_type
+                    video_clip.metadata['query'] = entity_result.query
+                    video_clip.metadata['video_path'] = video_path
+                    video_clip.metadata['segment_index'] = seg_idx
+                    video_clip.metadata['video_index'] = vid_idx
+                    video_clip.metadata['total_videos'] = num_videos
+                    video_clip.metadata['source'] = 'stock_video'
+                    video_clip.metadata['match_type'] = match_type  # Track how entity was matched
+
+                    # Add Resolve-specific metadata
+                    video_clip.metadata['Resolve_OTIO'] = {}
+
+                    video_track.append(video_clip)
+
+                # Successfully added videos, continue to next segment
                 continue
-            
-            segment_has_videos = True
-            
-            # Divide segment duration equally among all videos
-            frames_per_video = max(1, duration_frames // num_videos)
-            remaining_frames = duration_frames - (frames_per_video * num_videos)
-            
-            # Create a clip for each video
-            for vid_idx, video_path in enumerate(all_videos):
-                # Calculate this video's display duration
-                clip_frames = frames_per_video
-                if vid_idx >= num_videos - remaining_frames:
-                    clip_frames += 1
-                
-                clip_duration_sec = clip_frames / rate
-                
-                # Get folder and filename for unique reference name
-                video_path_obj = Path(video_path)
-                video_folder = video_path_obj.parent.name
-                video_filename = video_path_obj.name
-                # Include segment ID for post-edit analysis tracing
-                segment_id = f"[S{seg_idx:03d}]"
-                video_unique_name = f"{segment_id} {video_folder}_{video_filename}"
-                
-                # Convert to Windows path format with backslashes for Resolve
-                video_path_resolved = _to_windows_path(video_path)
-                
-                # Get actual video duration using ffprobe if available
-                actual_duration_frames = _get_video_duration_frames(video_path, rate)
-                if actual_duration_frames is None:
-                    # Fallback: assume video is long enough
-                    actual_duration_frames = clip_frames * 2
-                
-                # Create external reference for video
-                # Unlike images, videos have actual duration (available_range)
-                video_ref = otio.schema.ExternalReference(
-                    target_url=video_path_resolved,
-                    available_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=otio.opentime.RationalTime(actual_duration_frames, rate)
-                    )
-                )
-                video_ref.name = video_unique_name
-                
-                # Create clip - use portion of video that fits segment
-                # Start from beginning, play for clip_frames duration
-                video_clip = otio.schema.Clip(
-                    name=video_unique_name,
-                    source_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=otio.opentime.RationalTime(clip_frames, rate)
-                    )
-                )
-                
-                video_clip.media_reference = video_ref
-                
-                # Add Resolve_OTIO metadata (required for DaVinci import)
-                video_clip.metadata['Resolve_OTIO'] = {}
-                
-                # Add metadata
-                video_clip.metadata['entity_name'] = entity_name
-                video_clip.metadata['entity_type'] = entity_result.entity_type
-                video_clip.metadata['query'] = entity_result.query
-                video_clip.metadata['video_path'] = video_path
-                video_clip.metadata['segment_index'] = seg_idx
-                video_clip.metadata['video_index'] = vid_idx
-                video_clip.metadata['total_videos'] = num_videos
-                video_clip.metadata['source'] = 'stock_video'
-                
-                # Add Resolve-specific metadata
-                video_clip.metadata['Resolve_OTIO'] = {}
-                
-                # Note: Markers removed - not used in DaVinci workflow
-                
-                video_track.append(video_clip)
-            
-            # Only process first matching entity per segment
-            break
-        
-        if not segment_has_videos:
-            # No entity matched - add gap to maintain sync
-            gap = otio.schema.Gap(
-                source_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, rate),
-                    duration=otio.opentime.RationalTime(duration_frames, rate)
-                )
+
+        # No entity matched even with fallbacks - add gap to maintain sync
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(duration_frames, rate)
             )
-            video_track.append(gap)
+        )
+        video_track.append(gap)
 
 
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
