@@ -397,9 +397,14 @@ class GoogleBingImageClient:
                         if filepath and filepath.exists():
                             size = filepath.stat().st_size
                             size_mb = size / (1024 * 1024)
-                            
+
                             if size >= self.min_size:
-                                valid_paths.append(str(filepath))
+                                # Validate path doesn't contain brackets (image sequence notation)
+                                path_str = str(filepath)
+                                if '[' in path_str or ']' in path_str:
+                                    logger.warning(f"  Skipping path with brackets: {path_str}")
+                                    continue
+                                valid_paths.append(path_str)
                                 logger.info(f"  ✓ KEPT: {filepath.name} ({size_mb:.2f}MB) [{len(valid_paths)}/{max_images}]")
                                 
                                 # Save entity metadata
@@ -1550,17 +1555,28 @@ def download_entity_images(
             
             downloaded_paths.extend(paths)
         
-        # Store result
+        # Store result - validate paths before storing
         if downloaded_paths:
-            results[entity_name] = EntityImageResult(
-                entity_name=entity_name,
-                entity_type=entity_type,
-                context=context,
-                query=query,
-                images=downloaded_paths
-            )
-            total_downloaded += len(downloaded_paths)
-            logger.info(f"  ✓ Downloaded {len(downloaded_paths)} images for '{entity_name}'")
+            # Filter out any paths with brackets (image sequence notation)
+            valid_paths = []
+            for p in downloaded_paths:
+                if '[' in str(p) or ']' in str(p):
+                    logger.warning(f"  Skipping invalid path with brackets: {p}")
+                elif not Path(p).exists():
+                    logger.warning(f"  Skipping non-existent path: {p}")
+                else:
+                    valid_paths.append(p)
+
+            if valid_paths:
+                results[entity_name] = EntityImageResult(
+                    entity_name=entity_name,
+                    entity_type=entity_type,
+                    context=context,
+                    query=query,
+                    images=valid_paths
+                )
+                total_downloaded += len(valid_paths)
+                logger.info(f"  ✓ Downloaded {len(valid_paths)} images for '{entity_name}'")
         else:
             logger.warning(f"  ⚠ No images found for '{entity_name}'")
         
