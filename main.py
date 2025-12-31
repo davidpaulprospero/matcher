@@ -580,8 +580,31 @@ class Pipeline:
         """Parse SRT file into segments with smart splitting for long segments"""
         try:
             import srt
-            with open(srt_path, 'r', encoding='utf-8') as f:
-                subtitles = list(srt.parse(f.read()))
+
+            # Try multiple encodings - SRT files often have different encodings
+            encodings_to_try = ['utf-8', 'utf-16', 'utf-16-le', 'utf-16-be', 'latin-1', 'cp1252']
+            content = None
+
+            for encoding in encodings_to_try:
+                try:
+                    with open(srt_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                    # Check if content looks valid (has SRT timestamp arrow)
+                    if content and '-->' in content:
+                        break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+
+            if content is None:
+                # Last resort: read as binary and detect BOM
+                with open(srt_path, 'rb') as f:
+                    raw = f.read()
+                if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+                    content = raw.decode('utf-16', errors='ignore')
+                else:
+                    content = raw.decode('utf-8', errors='ignore')
+
+            subtitles = list(srt.parse(content))
             
             segments = []
             for sub in subtitles:
