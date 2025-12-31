@@ -39,7 +39,7 @@ defaults:
   
   # Quality thresholds
   quality: &quality_defaults
-    min_confidence: 0.7
+    min_confidence: 0.6
     high_confidence: 0.85
     low_confidence: 0.5
   
@@ -236,9 +236,9 @@ matching:
   # Two-stage matching optimization
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
-  # Note: Need 50+ candidates for V1-V6 (6 unique video files)
-  embedding_candidates: 50  # Retrieve from FAISS
-  llm_rerank_candidates: 5  # Send to LLM
+  # Note: Need 75+ candidates for V1-V6 (6 unique video files)
+  embedding_candidates: 75  # Retrieve from FAISS
+  llm_rerank_candidates: 8  # Send to LLM
   
   # Duration scoring
   # Chain-of-thought: Extreme speed changes look unnatural
@@ -632,7 +632,7 @@ download:
     provider: gemini  # gemini (fast) or anthropic (Claude Haiku)
     model: gemini-2.0-flash  # or claude-3-haiku-20240307
     batch_size: 20  # Check 20 titles at once
-    min_relevance: 0.7  # 0-1, reject if below this
+    min_relevance: 0.5  # 0-1, reject if below this (lower = more permissive)
   
   # YouTube authentication - REQUIRED!
   # YouTube blocks yt-dlp without authentication.
@@ -768,8 +768,8 @@ output:
     # Timeline variety - IMPORTANT for long projects
     # Within timeline_variety_window seconds, same source can only appear max_repeats times
     enforce_timeline_variety: true  # Enable timeline-based variety enforcement
-    timeline_variety_window: 600.0  # 10 minutes - no same source within this window
-    max_source_repeats_in_window: 1  # Max times same source can appear in window
+    timeline_variety_window: 300.0  # 5 minutes - no same source within this window
+    max_source_repeats_in_window: 2  # Max times same source can appear in window
   
   # Markers
   include_speed_markers: true
