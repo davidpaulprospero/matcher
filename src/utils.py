@@ -650,17 +650,42 @@ def format_srt_timestamp(seconds: float) -> str:
 def parse_srt_file(srt_path: str) -> List[SRTSegment]:
     """Parse an SRT file into segments"""
     segments = []
-    
+
     if not Path(srt_path).exists():
         logger.error(f"SRT file not found: {srt_path}")
         return segments
-    
-    try:
-        with open(srt_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-    except Exception as e:
-        logger.error(f"Could not read SRT file: {e}")
-        return segments
+
+    # Try multiple encodings - SRT files often have different encodings
+    encodings_to_try = ['utf-8', 'utf-16', 'utf-16-le', 'utf-16-be', 'latin-1', 'cp1252']
+    content = None
+
+    for encoding in encodings_to_try:
+        try:
+            with open(srt_path, 'r', encoding=encoding) as f:
+                content = f.read()
+            # If we got here without error, check if content looks valid
+            if content and ('-->' in content or '\n' in content):
+                logger.debug(f"Successfully read SRT with encoding: {encoding}")
+                break
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+        except Exception as e:
+            logger.debug(f"Failed to read SRT with {encoding}: {e}")
+            continue
+
+    if content is None:
+        # Last resort: read as binary and decode with errors ignored
+        try:
+            with open(srt_path, 'rb') as f:
+                raw = f.read()
+            # Remove BOM if present
+            if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+                content = raw.decode('utf-16', errors='ignore')
+            else:
+                content = raw.decode('utf-8', errors='ignore')
+        except Exception as e:
+            logger.error(f"Could not read SRT file: {e}")
+            return segments
     
     # Check if content looks like binary/audio data
     if '\x00' in content[:1000] or 'ID3' in content[:10]:
