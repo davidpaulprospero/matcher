@@ -788,16 +788,16 @@ Only output the JSON array, no other text."""
         
         if use_llm_filter:
             # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
-            logger.info(f"    Searching {search_pool} videos for LLM filtering...")
-            
+            logger.debug(f"    Searching {search_pool} videos for LLM filtering...")
+
             videos = self._search_video_metadata(keyword, tier, search_pool)
-            
+
             if not videos:
-                logger.warning(f"    No videos found for '{keyword}'")
+                logger.debug(f"    No videos found for '{keyword}'")
                 return []
-            
-            logger.info(f"    Found {len(videos)} candidate videos")
-            
+
+            logger.debug(f"    Found {len(videos)} candidate videos")
+
             # Apply blacklist filter first (fast, no API cost)
             title_blacklist = getattr(self.download_config, 'title_blacklist', [])
             if title_blacklist:
@@ -806,18 +806,18 @@ Only output the JSON array, no other text."""
                     term.lower() in v['title'].lower() for term in title_blacklist
                 )]
                 if before_count > len(videos):
-                    logger.info(f"    Blacklist filter: {len(videos)}/{before_count} passed")
-            
+                    logger.debug(f"    Blacklist filter: {len(videos)}/{before_count} passed")
+
             # Apply LLM filter
             approved_videos = self._filter_titles_with_llm(videos[:search_pool], keyword, topic)
-            
+
             if not approved_videos:
-                logger.warning(f"    No videos passed LLM filter for '{keyword}'")
+                logger.debug(f"    No videos passed LLM filter for '{keyword}'")
                 return []
-            
+
             # Download only approved videos (by ID)
             video_ids = [v['id'] for v in approved_videos[:max_downloads]]
-            logger.info(f"    Downloading {len(video_ids)} approved videos...")
+            logger.debug(f"    Downloading {len(video_ids)} approved videos...")
             
             return self._download_by_ids(video_ids, keyword_dir, output_dir, keyword, tier)
         
@@ -844,8 +844,8 @@ Only output the JSON array, no other text."""
             ]
             
             self._add_cookies_to_cmd(cmd)
-            
-            logger.info(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
+
+            logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
             
             return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
     
@@ -894,7 +894,7 @@ Only output the JSON array, no other text."""
                 missing_ids.append(vid_id)
         
         if already_downloaded:
-            logger.info(f"    ✓ {len(already_downloaded)} already downloaded, {len(missing_ids)} to fetch")
+            logger.debug(f"    {len(already_downloaded)} already downloaded, {len(missing_ids)} to fetch")
         
         if not missing_ids:
             # All videos already exist
@@ -1000,7 +1000,7 @@ Only output the JSON array, no other text."""
             new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
             
             if new_videos:
-                logger.info(f"    ✓ Downloaded {len(new_videos)} video(s)")
+                logger.debug(f"    Downloaded {len(new_videos)} video(s)")
             
             downloaded = []
             
@@ -1023,10 +1023,10 @@ Only output the JSON array, no other text."""
                     needs_transcode, reason = self._needs_transcoding(str(video_path))
                     
                     if not needs_transcode:
-                        logger.debug(f"    ↳ No transcode needed: {reason}")
+                        logger.debug(f"    No transcode needed: {reason}")
                         final_path = video_path
                     else:
-                        logger.info(f"    ↳ Transcoding {video_file[:40]}...")
+                        logger.debug(f"    Transcoding {video_file[:40]}...")
                         transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
                             str(video_path), str(video_path)
                         )
@@ -1117,13 +1117,13 @@ Only output the JSON array, no other text."""
             # Skip tiers with per_keyword=0
             per_kw = self._get_tier_value(tier, 'per_keyword', 5)
             if per_kw <= 0:
-                logger.info(f"  [{tier}] Skipped (0/kw)")
+                logger.debug(f"  [{tier}] Skipped (0/kw)")
                 continue
-            
+
             # Check max_total limit for this tier (e.g., only 1 LONGER video total)
             max_total = self._get_tier_value(tier, 'max_total', 0)  # 0 = no limit
             if max_total > 0 and self.tier_download_counts.get(tier, 0) >= max_total:
-                logger.info(f"  [{tier}] Skipped (max_total={max_total} reached)")
+                logger.debug(f"  [{tier}] Skipped (max_total={max_total} reached)")
                 continue
             
             # FILE-BASED SKIP: Check if videos already exist for this keyword/tier
@@ -1135,17 +1135,17 @@ Only output the JSON array, no other text."""
             keyword_dir = output_dir / f"{safe_keyword}_{tier_short}"
             
             if keyword_dir.exists():
-                existing_videos = [f for f in os.listdir(keyword_dir) 
+                existing_videos = [f for f in os.listdir(keyword_dir)
                                    if f.endswith(('.mp4', '.mkv', '.webm'))]
                 per_kw = self._get_tier_value(tier, 'per_keyword', 5)
                 if len(existing_videos) >= per_kw:
-                    logger.info(f"  [{tier}] Already have {len(existing_videos)} videos (skipping)")
+                    logger.debug(f"  [{tier}] Already have {len(existing_videos)} videos (skipping)")
                     # Count existing toward tier total
                     with self._lock:
                         self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(existing_videos)
                     continue
                 elif existing_videos:
-                    logger.info(f"  [{tier}] Found {len(existing_videos)} existing, need {per_kw - len(existing_videos)} more")
+                    logger.debug(f"  [{tier}] Found {len(existing_videos)} existing, need {per_kw - len(existing_videos)} more")
             
             # Checkpoint-based skip (secondary check)
             if self.checkpoint:
@@ -1154,36 +1154,34 @@ Only output the JSON array, no other text."""
                     logger.debug(f"Skipping {keyword} ({tier}) - checkpoint says completed")
                     continue
             
-            logger.info(f"  [{tier}] Downloading...")
+            logger.debug(f"  [{tier}] Downloading...")
             downloaded = self._download_single(keyword, tier, output_dir, topic)
-            
+
             # Check for timeout and retry with modified keywords
             retry_attempt = 0
             while not downloaded and getattr(self, '_last_download_timed_out', False) and retry_attempt < 2:
                 alt_keyword = self._get_retry_keyword(keyword, retry_attempt)
                 if alt_keyword and alt_keyword != keyword:
-                    logger.info(f"  [{tier}] Timeout - retrying with: '{alt_keyword}'")
+                    logger.debug(f"  [{tier}] Timeout - retrying with: '{alt_keyword}'")
                     downloaded = self._download_single(alt_keyword, tier, output_dir, topic)
                     retry_attempt += 1
                 else:
                     break
-            
+
             if downloaded:
-                logger.info(f"  [{tier}] ✓ {len(downloaded)} video(s)")
+                logger.debug(f"  [{tier}] ✓ {len(downloaded)} video(s)")
                 all_downloaded.extend(downloaded)
-                
+
                 # Update tier download count
                 with self._lock:
                     self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
-                
+
                 # Update sources
-                logger.debug(f"  [{tier}] Saving sources...")
                 with self._lock:
                     self.sources.extend(downloaded)
                     self._save_sources()
-                logger.debug(f"  [{tier}] Sources saved")
             else:
-                logger.info(f"  [{tier}] ⚠ No results")
+                logger.debug(f"  [{tier}] No results")
             
             # Update checkpoint
             if self.checkpoint:
@@ -1289,28 +1287,40 @@ Only output the JSON array, no other text."""
         # Process keywords with thread pool
         # Note: We process keywords sequentially but tiers can overlap slightly
         # to avoid overwhelming the API
-        
+
+        total_videos_downloaded = 0
+        print(f"\n  Downloading videos for {len(keywords)} keywords...")
+
         for i, keyword in enumerate(keywords, 1):
-            logger.info(f"\n[{i}/{len(keywords)}] Processing: {keyword}")
-            
+            # Compact progress line (updates in place)
+            progress_pct = (i - 1) / len(keywords) * 100
+            print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
+
+            logger.info(f"[{i}/{len(keywords)}] Processing: {keyword}")
+
             self.checkpoint.current_keyword = keyword
             self._save_checkpoint()
-            
+
             downloaded = self.download_for_keyword(keyword, output_dir, topic=topic)
-            
+
             if downloaded:
                 all_downloaded.extend(downloaded)
+                total_videos_downloaded += len(downloaded)
                 self.checkpoint.completed_keywords.append(keyword)
             else:
                 failed_keywords.append(keyword)
                 self.checkpoint.failed_keywords.append(keyword)
-            
+
             self._save_checkpoint()
-            
+
             # Delay between keywords to avoid rate limiting
             if i < len(keywords):
                 time.sleep(self.download_config.delay_between_keywords)
-        
+
+        # Final progress line
+        print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
+        print(f"  ✓ Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
+
         # Clear checkpoint on success
         self._clear_checkpoint()
         
