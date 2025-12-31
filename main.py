@@ -511,7 +511,9 @@ class Pipeline:
 
         # Check if delta matching is available (match index exists with cached data)
         project_dir = PROJECT_DIR or Path.cwd()
-        match_index_path = project_dir / ".match_index.json"
+        cache_dir = project_dir / ".cache"
+        match_index_path = cache_dir / "match_index.json"
+        cached_matches_path = cache_dir / "cached_matches.json"
 
         if not match_index_path.exists():
             # No previous matches - delta matching not applicable
@@ -519,20 +521,29 @@ class Pipeline:
 
         try:
             import json
+
+            # Load match index
             with open(match_index_path, 'r') as f:
                 index_data = json.load(f)
 
             matched_videos = index_data.get('matched_videos', {})
-            cached_matches = index_data.get('cached_matches', [])
 
-            if not matched_videos or not cached_matches:
+            # Load cached matches count
+            cached_matches_count = 0
+            if cached_matches_path.exists():
+                with open(cached_matches_path, 'r') as f:
+                    cached_matches = json.load(f)
+                    cached_matches_count = len(cached_matches) if isinstance(cached_matches, list) else 0
+
+            if not matched_videos:
                 return
 
             print(f"\n{'─' * 70}")
             print(f"  DELTA MATCHING")
             print(f"{'─' * 70}")
             print(f"  Found {len(matched_videos)} previously matched videos")
-            print(f"  Cached matches: {len(cached_matches)} segments")
+            if cached_matches_count > 0:
+                print(f"  Cached matches: {cached_matches_count} segments")
             print()
             print(f"  [D] Delta match - Only process NEW videos (faster)")
             print(f"  [F] Full rematch - Rematch ALL videos (slower)")
