@@ -950,12 +950,12 @@ def _add_entity_images_to_track(
                     image_path_resolved = _to_windows_path(image_path)
 
                     # Create external reference for still image:
-                    # - available_range = None (null) for infinite duration
+                    # - Do NOT set available_range (omit it) for null/infinite duration
                     # - This allows the image to cover the full source_range in the Clip
                     # - Required for DaVinci Resolve compatibility
                     image_ref = otio.schema.ExternalReference(
-                        target_url=image_path_resolved,
-                        available_range=None  # Null = infinite duration for still images
+                        target_url=image_path_resolved
+                        # available_range intentionally omitted = null in JSON
                     )
                     image_ref.name = image_unique_name
 
