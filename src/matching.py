@@ -824,7 +824,13 @@ class TieredMatcher:
             max_reuse=mc.max_clip_reuse,
             reuse_penalty=mc.reuse_penalty
         )
-    
+
+        # Initialize providers
+        self.primary_provider = None
+        self.secondary_provider = None
+        self.local_provider = None
+        self._init_providers()
+
     def _should_skip_llm(self, similarity: float) -> bool:
         """Skip LLM if embedding similarity is high enough"""
         return similarity >= self.config.matching.high_confidence_threshold
@@ -842,14 +848,6 @@ class TieredMatcher:
         else:
             return confidence - (mc.duration_penalty_factor * 2)
 
-        
-        # Initialize providers
-        self.primary_provider = None
-        self.secondary_provider = None
-        self.local_provider = None
-        
-        self._init_providers()
-    
     def _init_providers(self):
         """Initialize LLM providers based on config"""
         mc = self.config.matching
