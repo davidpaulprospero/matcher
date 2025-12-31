@@ -810,7 +810,7 @@ class TieredMatcher:
         self.config = config or get_config()
         self.cache = cache  # Store cache for potential future use
         mc = self.config.matching
-        
+
         self.primary_model = mc.gemini_model
         self.min_confidence = mc.min_confidence
         self.embedding_candidates = mc.embedding_candidates
@@ -818,6 +818,12 @@ class TieredMatcher:
         self.low_conf_threshold = mc.low_confidence_threshold
         self.max_clip_reuse = mc.max_clip_reuse
         self.reuse_penalty = mc.reuse_penalty
+
+        # Initialize reuse tracker for clip reuse prevention
+        self.reuse_tracker = ReuseTracker(
+            max_reuse=mc.max_clip_reuse,
+            reuse_penalty=mc.reuse_penalty
+        )
     
     def _should_skip_llm(self, similarity: float) -> bool:
         """Skip LLM if embedding similarity is high enough"""
