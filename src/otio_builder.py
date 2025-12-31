@@ -744,11 +744,10 @@ def create_timeline(
             matches=matches,
             frame_rate=rate
         )
-    
-    # Only add V9 Entity Images track if it has content
-    if len(image_track) > 0:
-        timeline.tracks.append(image_track)
-    
+
+    # Always add V9 Entity Images track (even if empty, for manual use)
+    timeline.tracks.append(image_track)
+
     # Populate stock video track if entity_videos provided
     if entity_videos:
         _add_entity_videos_to_track(
@@ -757,10 +756,9 @@ def create_timeline(
             matches=matches,
             frame_rate=rate
         )
-    
-    # Only add V10 Stock Videos track if it has content
-    if len(stock_video_track) > 0:
-        timeline.tracks.append(stock_video_track)
+
+    # Always add V10 Stock Videos track (even if empty, for manual use)
+    timeline.tracks.append(stock_video_track)
     
     # Note: Timeline markers removed - not used in DaVinci workflow
     
