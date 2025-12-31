@@ -29,26 +29,69 @@ class ClipSelection:
     clip_name: str  # Full clip name from timeline
     source_file: Optional[str] = None  # Extracted source file name
     track: str = "V1"  # Which track it came from
+    track_number: int = 1  # Numeric track number (V2 = 2) for priority comparison
     was_alternative: bool = False  # True if ALT clip was used
     alternative_index: Optional[int] = None  # Which ALT (1, 2, etc.)
     was_secondary: bool = False  # True if secondary source was used
+    is_enabled: bool = True  # False if clip is disabled in timeline
     timeline_start: float = 0.0  # Timeline position in seconds
     timeline_end: float = 0.0  # End position in seconds
     duration: float = 0.0  # Duration in seconds
 
 
 @dataclass
+class SegmentSelection:
+    """
+    Represents all clips for a single segment, with priority logic applied.
+
+    In DaVinci Resolve workflow:
+    - Editor disables unwanted clips rather than deleting
+    - Higher tracks (V2 > V1) take visual priority
+    - Multiple clips can be active for layered compositions
+    """
+    segment_index: int
+    segment_id: str
+
+    # Primary selection: highest enabled track
+    primary_clip: Optional[ClipSelection] = None
+
+    # All active (enabled) clips for this segment (for layered compositions)
+    active_clips: List[ClipSelection] = field(default_factory=list)
+
+    # All disabled clips (kept for reference)
+    disabled_clips: List[ClipSelection] = field(default_factory=list)
+
+    # Analysis flags
+    is_layered: bool = False  # True if multiple active clips
+    all_disabled: bool = False  # True if all clips for this segment are disabled
+
+    def get_winning_track(self) -> Optional[str]:
+        """Get the track name of the primary (highest) active clip."""
+        return self.primary_clip.track if self.primary_clip else None
+
+
+@dataclass
 class EditAnalysisResult:
     """Results from analyzing a final edit."""
     total_segments: int = 0
-    clips_kept: int = 0  # Primary clips kept as-is
-    clips_replaced_with_alt: int = 0  # Replaced with alternative
+    clips_kept: int = 0  # Primary clips kept as-is (V1, enabled)
+    clips_replaced_with_alt: int = 0  # Replaced with alternative (ALT on higher track)
     clips_replaced_with_secondary: int = 0  # Replaced with secondary source
     clips_replaced_with_external: int = 0  # Replaced with footage not in original
-    clips_removed: int = 0  # Segments with no matching clip
+    clips_removed: int = 0  # Segments with no enabled clips
+    clips_all_disabled: int = 0  # Segments where all clips were disabled
 
-    selections: List[ClipSelection] = field(default_factory=list)
+    # Detailed selection data
+    selections: List[ClipSelection] = field(default_factory=list)  # Primary selections only
+    segment_selections: List[SegmentSelection] = field(default_factory=list)  # Full segment data
     missing_segments: List[int] = field(default_factory=list)  # Segment IDs not found
+
+    # Layered composition tracking
+    segments_with_layers: int = 0  # Segments with multiple active clips
+    layered_segments: List[int] = field(default_factory=list)  # Which segments are layered
+
+    # Track usage statistics
+    track_usage: Dict[str, int] = field(default_factory=dict)  # Count per track
 
     # Statistics
     avg_kept_confidence: float = 0.0
@@ -59,12 +102,20 @@ class EditAnalysisResult:
         lines = [
             "=== Post-Edit Analysis Summary ===",
             f"Total segments analyzed: {self.total_segments}",
-            f"Primary clips kept: {self.clips_kept} ({self.clips_kept/max(1,self.total_segments)*100:.1f}%)",
+            f"Primary clips kept (V1): {self.clips_kept} ({self.clips_kept/max(1,self.total_segments)*100:.1f}%)",
             f"Replaced with alternatives: {self.clips_replaced_with_alt}",
             f"Replaced with secondary: {self.clips_replaced_with_secondary}",
             f"Replaced with external: {self.clips_replaced_with_external}",
-            f"Removed/missing: {self.clips_removed}",
+            f"All disabled (removed): {self.clips_all_disabled}",
+            f"Missing segments: {self.clips_removed}",
         ]
+
+        if self.segments_with_layers > 0:
+            lines.append(f"Layered compositions: {self.segments_with_layers} segments")
+
+        if self.track_usage:
+            usage_str = ", ".join(f"{k}:{v}" for k, v in sorted(self.track_usage.items()))
+            lines.append(f"Track usage: {usage_str}")
 
         if self.missing_segments:
             lines.append(f"Missing segment IDs: {self.missing_segments[:10]}{'...' if len(self.missing_segments) > 10 else ''}")
@@ -80,6 +131,9 @@ class PostEditAnalyzer:
 
     # Regex to detect alternative clips: ALT1:, ALT2:, etc.
     ALT_PATTERN = re.compile(r'ALT(\d+):')
+
+    # Regex to extract track number from track name: V1, V2, A1, etc.
+    TRACK_NUMBER_PATTERN = re.compile(r'[VA](\d+)')
 
     # Regex to detect secondary clips (common labels)
     SECONDARY_PATTERNS = [
@@ -123,6 +177,11 @@ class PostEditAnalyzer:
         """
         Analyze an XML file exported from DaVinci Resolve.
 
+        Implements the following selection logic:
+        1. Disabled clips are ignored (editor disables unwanted clips)
+        2. For each segment, the highest enabled track wins (V2 > V1)
+        3. Multiple active clips = layered composition (all tracked)
+
         Args:
             xml_path: Path to the exported XML file
 
@@ -138,21 +197,21 @@ class PostEditAnalyzer:
             logger.error(f"Failed to parse XML: {e}")
             return result
 
-        # Find all clip items in the timeline
+        # Find all clip items in the timeline with track info
         clips_by_segment: Dict[int, List[ClipSelection]] = {}
 
-        # Try different XML structures (FCPXML, DaVinci, etc.)
+        # Get clips with track information
         clip_elements = self._find_clip_elements(root)
 
-        for clip_elem in clip_elements:
-            selection = self._parse_clip_element(clip_elem)
+        for clip_elem, track_name, track_number in clip_elements:
+            selection = self._parse_clip_element(clip_elem, track_name, track_number)
             if selection:
                 seg_idx = selection.segment_index
                 if seg_idx not in clips_by_segment:
                     clips_by_segment[seg_idx] = []
                 clips_by_segment[seg_idx].append(selection)
 
-        # Analyze which clips were selected
+        # Analyze which clips were selected using track priority
         if clips_by_segment:
             max_segment = max(clips_by_segment.keys())
             result.total_segments = max_segment + 1
@@ -163,50 +222,126 @@ class PostEditAnalyzer:
                     result.clips_removed += 1
                     continue
 
-                # Get the first clip for this segment (assuming single-track primary)
                 clips = clips_by_segment[seg_idx]
-                primary_clip = clips[0]  # First one found
 
+                # Separate enabled and disabled clips
+                enabled_clips = [c for c in clips if c.is_enabled]
+                disabled_clips = [c for c in clips if not c.is_enabled]
+
+                # Create segment selection
+                segment_sel = SegmentSelection(
+                    segment_index=seg_idx,
+                    segment_id=f"S{seg_idx:03d}",
+                    active_clips=enabled_clips,
+                    disabled_clips=disabled_clips
+                )
+
+                # Check if all clips are disabled
+                if not enabled_clips:
+                    segment_sel.all_disabled = True
+                    result.clips_all_disabled += 1
+                    result.segment_selections.append(segment_sel)
+                    continue
+
+                # Sort enabled clips by track number (highest first)
+                enabled_clips_sorted = sorted(enabled_clips, key=lambda c: c.track_number, reverse=True)
+
+                # Primary selection = highest track number
+                primary_clip = enabled_clips_sorted[0]
+                segment_sel.primary_clip = primary_clip
+
+                # Check for layered composition (multiple active clips)
+                if len(enabled_clips) > 1:
+                    segment_sel.is_layered = True
+                    result.segments_with_layers += 1
+                    result.layered_segments.append(seg_idx)
+
+                result.segment_selections.append(segment_sel)
                 result.selections.append(primary_clip)
 
+                # Track usage statistics
+                track = primary_clip.track
+                result.track_usage[track] = result.track_usage.get(track, 0) + 1
+
+                # Categorize the selection
                 if primary_clip.was_alternative:
                     result.clips_replaced_with_alt += 1
                 elif primary_clip.was_secondary:
                     result.clips_replaced_with_secondary += 1
-                else:
+                elif primary_clip.track_number == 1:
+                    # V1 is the primary/original recommendation
                     result.clips_kept += 1
+                else:
+                    # Higher track but not marked as ALT - could be external or manual
+                    result.clips_replaced_with_external += 1
 
         logger.info(f"Analyzed {len(clip_elements)} clips from {xml_path}")
+        logger.info(f"Segments: {result.total_segments}, Kept: {result.clips_kept}, "
+                   f"Alt: {result.clips_replaced_with_alt}, Layered: {result.segments_with_layers}")
         return result
 
-    def _find_clip_elements(self, root: ET.Element) -> List[ET.Element]:
-        """Find all clip/clipitem elements in the XML tree."""
-        clips = []
+    def _find_clip_elements(self, root: ET.Element) -> List[Tuple[ET.Element, str, int]]:
+        """
+        Find all clip/clipitem elements in the XML tree with track info.
 
-        # FCPXML format: clipitem
-        clips.extend(root.findall('.//clipitem'))
+        Returns:
+            List of tuples: (clip_element, track_name, track_number)
+        """
+        clips_with_tracks = []
 
-        # FCPXML 1.x format: clip
-        clips.extend(root.findall('.//clip'))
+        # Find video tracks and their clips
+        # FCPXML format: sequence/media/video/track
+        for track_idx, track in enumerate(root.findall('.//video/track')):
+            track_name = f"V{track_idx + 1}"
+            track_number = track_idx + 1
 
-        # DaVinci specific: asset-clip
-        clips.extend(root.findall('.//asset-clip'))
+            # Check for track name attribute
+            track_name_attr = track.get('name')
+            if track_name_attr:
+                track_name = track_name_attr
+                # Extract number from name if possible
+                num_match = self.TRACK_NUMBER_PATTERN.search(track_name_attr)
+                if num_match:
+                    track_number = int(num_match.group(1))
 
-        # Filter out non-timeline clips (e.g., bin items)
-        # Timeline clips typically have start/end or in/out
-        timeline_clips = []
-        for clip in clips:
-            # Check if it has timeline positioning info
-            if (clip.find('start') is not None or
-                clip.find('offset') is not None or
-                clip.get('offset') is not None):
-                timeline_clips.append(clip)
+            for clip in track.findall('clipitem'):
+                clips_with_tracks.append((clip, track_name, track_number))
 
-        # If no timeline clips found, return all clips (fallback)
-        return timeline_clips if timeline_clips else clips
+        # DaVinci FCPXML format: spine with clips
+        for track_idx, spine in enumerate(root.findall('.//spine')):
+            track_name = f"V{track_idx + 1}"
+            track_number = track_idx + 1
 
-    def _parse_clip_element(self, clip_elem: ET.Element) -> Optional[ClipSelection]:
-        """Parse a clip element into a ClipSelection."""
+            for clip in spine.findall('.//clip'):
+                clips_with_tracks.append((clip, track_name, track_number))
+            for clip in spine.findall('.//asset-clip'):
+                clips_with_tracks.append((clip, track_name, track_number))
+
+        # Fallback: find orphan clips and assign to V1
+        if not clips_with_tracks:
+            for clip in root.findall('.//clipitem'):
+                if clip.find('start') is not None:
+                    clips_with_tracks.append((clip, "V1", 1))
+            for clip in root.findall('.//clip'):
+                if clip.get('offset') is not None:
+                    clips_with_tracks.append((clip, "V1", 1))
+
+        return clips_with_tracks
+
+    def _parse_clip_element(
+        self,
+        clip_elem: ET.Element,
+        track_name: str = "V1",
+        track_number: int = 1
+    ) -> Optional[ClipSelection]:
+        """
+        Parse a clip element into a ClipSelection.
+
+        Args:
+            clip_elem: The XML clip element
+            track_name: Name of the track (e.g., "V1", "V2 - Alternatives")
+            track_number: Numeric track number for priority comparison
+        """
         # Get clip name from various possible locations
         name = None
 
@@ -253,6 +388,33 @@ class PostEditAnalyzer:
                 was_secondary = True
                 break
 
+        # Check if clip is enabled/disabled
+        # DaVinci/FCPXML uses <enabled> element or enabled attribute
+        is_enabled = True  # Default to enabled
+
+        # Method 1: <enabled> element (FCPXML)
+        enabled_elem = clip_elem.find('enabled')
+        if enabled_elem is not None and enabled_elem.text:
+            is_enabled = enabled_elem.text.lower() in ('true', '1', 'yes')
+
+        # Method 2: enabled attribute
+        enabled_attr = clip_elem.get('enabled')
+        if enabled_attr is not None:
+            is_enabled = enabled_attr.lower() in ('true', '1', 'yes')
+
+        # Method 3: DaVinci uses <disable> flag (inverted logic)
+        disable_elem = clip_elem.find('disable')
+        if disable_elem is not None:
+            is_enabled = False
+
+        # Method 4: Check for "disabled" in metadata
+        metadata = clip_elem.find('.//metadata')
+        if metadata is not None:
+            for meta in metadata.findall('meta'):
+                key = meta.get('key', '') or meta.find('key')
+                if key and 'disable' in str(key).lower():
+                    is_enabled = False
+
         # Extract timing info
         timeline_start = 0.0
         timeline_end = 0.0
@@ -296,9 +458,12 @@ class PostEditAnalyzer:
             segment_index=segment_index,
             clip_name=name,
             source_file=source_file,
+            track=track_name,
+            track_number=track_number,
             was_alternative=was_alt,
             alternative_index=alt_index,
             was_secondary=was_secondary,
+            is_enabled=is_enabled,
             timeline_start=timeline_start,
             timeline_end=timeline_end,
             duration=timeline_end - timeline_start if timeline_end > timeline_start else 0.0
@@ -308,6 +473,11 @@ class PostEditAnalyzer:
         """
         Analyze an OTIO file.
 
+        Implements the same selection logic as analyze_xml:
+        1. Disabled clips are ignored
+        2. Highest enabled track wins (V2 > V1)
+        3. Multiple active clips = layered composition
+
         Args:
             otio_path: Path to the OTIO file
 
@@ -315,7 +485,7 @@ class PostEditAnalyzer:
             EditAnalysisResult with analysis details
         """
         try:
-            import opentimelineio as otio
+            import opentimelineio as otio_lib
         except ImportError:
             logger.error("OpenTimelineIO not installed, cannot analyze OTIO files")
             return EditAnalysisResult()
@@ -323,20 +493,28 @@ class PostEditAnalyzer:
         result = EditAnalysisResult()
 
         try:
-            timeline = otio.adapters.read_from_file(otio_path)
+            timeline = otio_lib.adapters.read_from_file(otio_path)
         except Exception as e:
             logger.error(f"Failed to read OTIO file: {e}")
             return result
 
         clips_by_segment: Dict[int, List[ClipSelection]] = {}
 
-        # Iterate through all tracks
-        for track in timeline.tracks:
-            if track.kind != otio.schema.TrackKind.Video:
-                continue
+        # Get video tracks and their index (for track number)
+        video_tracks = [t for t in timeline.tracks if t.kind == otio_lib.schema.TrackKind.Video]
+
+        # Iterate through all video tracks with index
+        for track_idx, track in enumerate(video_tracks):
+            track_name = track.name or f"V{track_idx + 1}"
+            track_number = track_idx + 1
+
+            # Extract track number from name if possible
+            num_match = self.TRACK_NUMBER_PATTERN.search(track_name)
+            if num_match:
+                track_number = int(num_match.group(1))
 
             for item in track:
-                if not isinstance(item, otio.schema.Clip):
+                if not isinstance(item, otio_lib.schema.Clip):
                     continue
 
                 name = item.name
@@ -359,6 +537,15 @@ class PostEditAnalyzer:
                     was_alt = True
                     alt_index = int(alt_match.group(1))
 
+                # Check enabled state from metadata
+                is_enabled = True
+                if hasattr(item, 'enabled'):
+                    is_enabled = item.enabled
+                elif 'enabled' in item.metadata:
+                    is_enabled = item.metadata.get('enabled', True)
+                elif 'disabled' in item.metadata:
+                    is_enabled = not item.metadata.get('disabled', False)
+
                 # Get timing
                 timeline_start = 0.0
                 if item.range_in_parent():
@@ -372,9 +559,11 @@ class PostEditAnalyzer:
                     segment_id=segment_id,
                     segment_index=segment_index,
                     clip_name=name,
-                    track=track.name,
+                    track=track_name,
+                    track_number=track_number,
                     was_alternative=was_alt,
                     alternative_index=alt_index,
+                    is_enabled=is_enabled,
                     timeline_start=timeline_start,
                     timeline_end=timeline_start + duration,
                     duration=duration
@@ -384,7 +573,7 @@ class PostEditAnalyzer:
                     clips_by_segment[segment_index] = []
                 clips_by_segment[segment_index].append(selection)
 
-        # Analyze results
+        # Analyze results using same priority logic as analyze_xml
         if clips_by_segment:
             max_segment = max(clips_by_segment.keys())
             result.total_segments = max_segment + 1
@@ -396,13 +585,49 @@ class PostEditAnalyzer:
                     continue
 
                 clips = clips_by_segment[seg_idx]
-                primary_clip = clips[0]
+
+                # Separate enabled and disabled clips
+                enabled_clips = [c for c in clips if c.is_enabled]
+                disabled_clips = [c for c in clips if not c.is_enabled]
+
+                # Create segment selection
+                segment_sel = SegmentSelection(
+                    segment_index=seg_idx,
+                    segment_id=f"S{seg_idx:03d}",
+                    active_clips=enabled_clips,
+                    disabled_clips=disabled_clips
+                )
+
+                if not enabled_clips:
+                    segment_sel.all_disabled = True
+                    result.clips_all_disabled += 1
+                    result.segment_selections.append(segment_sel)
+                    continue
+
+                # Sort by track number (highest first)
+                enabled_clips_sorted = sorted(enabled_clips, key=lambda c: c.track_number, reverse=True)
+                primary_clip = enabled_clips_sorted[0]
+                segment_sel.primary_clip = primary_clip
+
+                if len(enabled_clips) > 1:
+                    segment_sel.is_layered = True
+                    result.segments_with_layers += 1
+                    result.layered_segments.append(seg_idx)
+
+                result.segment_selections.append(segment_sel)
                 result.selections.append(primary_clip)
 
+                # Track usage
+                track = primary_clip.track
+                result.track_usage[track] = result.track_usage.get(track, 0) + 1
+
+                # Categorize
                 if primary_clip.was_alternative:
                     result.clips_replaced_with_alt += 1
-                else:
+                elif primary_clip.track_number == 1:
                     result.clips_kept += 1
+                else:
+                    result.clips_replaced_with_external += 1
 
         return result
 
