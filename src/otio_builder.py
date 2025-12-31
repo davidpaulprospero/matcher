@@ -846,7 +846,9 @@ def _add_entity_images_to_track(
                 image_path_obj = Path(image_path)
                 image_folder = image_path_obj.parent.name
                 image_filename = image_path_obj.name
-                image_unique_name = f"{image_folder}_{image_filename}"
+                # Include segment ID for post-edit analysis tracing
+                segment_id = f"[S{seg_idx:03d}]"
+                image_unique_name = f"{segment_id} {image_folder}_{image_filename}"
                 
                 # Convert to Windows path format with backslashes for Resolve
                 image_path_resolved = _to_windows_path(image_path)
@@ -982,7 +984,9 @@ def _add_entity_videos_to_track(
                 video_path_obj = Path(video_path)
                 video_folder = video_path_obj.parent.name
                 video_filename = video_path_obj.name
-                video_unique_name = f"{video_folder}_{video_filename}"
+                # Include segment ID for post-edit analysis tracing
+                segment_id = f"[S{seg_idx:03d}]"
+                video_unique_name = f"{segment_id} {video_folder}_{video_filename}"
                 
                 # Convert to Windows path format with backslashes for Resolve
                 video_path_resolved = _to_windows_path(video_path)
