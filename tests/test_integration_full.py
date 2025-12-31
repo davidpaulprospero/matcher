@@ -110,8 +110,7 @@ def download_voiceover(output_dir: Path, url: str = None, max_duration: int = 30
     # Build yt-dlp command with low quality settings
     cmd = [
         'yt-dlp',
-        '--format', 'worst[ext=mp4]/worstvideo[ext=mp4]+worstaudio/worst',  # Lowest quality
-        '--max-filesize', '50M',  # Max 50MB
+        '--format', 'worstaudio[ext=m4a]/worstaudio/worst',  # Audio only for voiceover
         '--output', str(output_path),
         '--no-playlist',
         '--quiet',
@@ -122,58 +121,61 @@ def download_voiceover(output_dir: Path, url: str = None, max_duration: int = 30
     if not url:
         cmd.extend(['--match-filter', f'duration < {max_duration}'])
 
-    # Try specific URLs first
-    urls_to_try = [url] if url else SAMPLE_VOICEOVER_URLS
-
-    for try_url in urls_to_try:
-        if try_url:
-            print(f"    Downloading: {try_url[:50]}...", end=" ", flush=True)
-            try:
-                result = subprocess.run(
-                    cmd + [try_url],
-                    capture_output=True,
-                    timeout=180,  # 3 min timeout
-                    text=True
-                )
-
-                if output_path.exists() and output_path.stat().st_size > 100000:
-                    size_mb = output_path.stat().st_size / (1024 * 1024)
-                    print(f"✓ ({size_mb:.1f} MB)")
-                    return output_path
-                else:
-                    print("✗ (too small)")
-            except subprocess.TimeoutExpired:
-                print("✗ (timeout)")
-            except FileNotFoundError:
-                print("✗ (yt-dlp not found)")
-                return None
-            except Exception as e:
-                print(f"✗ ({e})")
-
-    # Fallback: search for short educational content
-    print("    Searching for short educational video...", end=" ", flush=True)
-    search_queries = [
-        'ytsearch1:short educational narration 2 minutes',
-        'ytsearch1:documentary introduction 1 minute',
-        'ytsearch1:science explainer short',
-    ]
-
-    for query in search_queries:
+    # Try specific URL if provided
+    if url:
+        print(f"    Downloading: {url[:60]}...", end=" ", flush=True)
         try:
             result = subprocess.run(
-                cmd + ['--match-filter', f'duration < {max_duration}', query],
+                cmd + [url],
+                capture_output=True,
+                timeout=180,  # 3 min timeout
+                text=True
+            )
+
+            if output_path.exists() and output_path.stat().st_size > 10000:  # 10KB min
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+                print(f"✓ ({size_mb:.1f} MB)")
+                return output_path
+            else:
+                # Show error details
+                if result.stderr:
+                    print(f"✗ (download failed)")
+                    print(f"      Error: {result.stderr[:200]}")
+                else:
+                    print("✗ (file too small or not created)")
+                return None  # Don't fallback search when specific URL provided
+        except subprocess.TimeoutExpired:
+            print("✗ (timeout)")
+            return None
+        except FileNotFoundError:
+            print("✗ (yt-dlp not found)")
+            return None
+        except Exception as e:
+            print(f"✗ ({e})")
+            return None
+
+    # Try default sample URLs
+    for try_url in SAMPLE_VOICEOVER_URLS:
+        print(f"    Trying: {try_url[:50]}...", end=" ", flush=True)
+        try:
+            result = subprocess.run(
+                cmd + [try_url],
                 capture_output=True,
                 timeout=120,
                 text=True
             )
 
-            if output_path.exists() and output_path.stat().st_size > 100000:
-                print("✓")
+            if output_path.exists() and output_path.stat().st_size > 10000:
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+                print(f"✓ ({size_mb:.1f} MB)")
                 return output_path
+            else:
+                print("✗")
         except:
-            pass
+            print("✗")
 
-    print("✗")
+    # Skip the slow search - just return None and use synthetic
+    print("    No sample videos available, will use synthetic SRT")
     return None
 
 
