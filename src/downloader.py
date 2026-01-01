@@ -61,6 +61,83 @@ class DownloadCheckpoint:
         return cls(**data)
 
 
+# =============================================================================
+# AUDIO-FIRST PIPELINE DATA STRUCTURES
+# =============================================================================
+
+@dataclass
+class AudioDownload:
+    """Audio-only download for fast transcription in audio-first pipeline.
+
+    Downloads only the audio track (MP3) for transcription and matching,
+    before downloading actual video segments.
+    """
+    audio_file: str       # Path to downloaded MP3
+    video_id: str         # YouTube video ID
+    video_url: str        # Full YouTube URL for later video download
+    title: str
+    channel: str
+    duration: float       # Full video duration (for clamping)
+    keyword: str
+    duration_tier: str
+    upload_date: str = ""
+    license: str = "Unknown"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class MatchedSegment:
+    """A segment from matching that needs video download.
+
+    Created during matching phase, before video segments are downloaded.
+    """
+    video_id: str
+    video_url: str
+    start_time: float     # Original timestamp in source video
+    end_time: float       # Original end timestamp
+    track: str            # "V1", "V4", etc.
+    voiceover_segment_idx: int
+    keyword: str = ""     # Source keyword (for organizing downloads)
+
+
+@dataclass
+class MergedSegment:
+    """Merged segments ready for download.
+
+    Multiple close matches are merged with buffer applied to reduce
+    download requests.
+    """
+    video_id: str
+    video_url: str
+    start_time: float     # After buffer applied
+    end_time: float       # After buffer applied
+    original_matches: List[MatchedSegment]  # Which matches this covers
+    keyword: str = ""
+
+
+@dataclass
+class DownloadedSegment:
+    """Downloaded video segment with timing info for OTIO mapping.
+
+    The file contains a portion of the original video, from original_start
+    to original_end. To find a match within this file, calculate:
+        offset = match.start_time - original_start
+    """
+    file: str             # Path to downloaded segment file
+    video_id: str
+    original_start: float # Start time in source video
+    original_end: float   # End time in source video
+    file_duration: float  # Actual file duration
+    matches: List[MatchedSegment]  # Matches contained in this segment
+    keyword: str = ""
+
+    def get_offset(self, match_time: float) -> float:
+        """Get offset within this file for a match timestamp."""
+        return match_time - self.original_start
+
+
 # Characters that cause issues in DaVinci Resolve
 # Note: Spaces are OK! Only these specific chars cause crashes.
 _UNSAFE_FILENAME_CHARS = re.compile(r'[%&$#]')
@@ -1408,3 +1485,575 @@ Only output the JSON array, no other text."""
             'keywords_covered': list(keywords_covered),
             'num_keywords_covered': len(keywords_covered)
         }
+
+    # =========================================================================
+    # AUDIO-FIRST PIPELINE METHODS
+    # =========================================================================
+
+    def download_audio_for_keyword(
+        self,
+        keyword: str,
+        output_dir: Path,
+        tier: str,
+        topic: str = ""
+    ) -> List[AudioDownload]:
+        """Download audio only (MP3) for videos matching keyword.
+
+        Phase 1 of audio-first pipeline. Downloads lightweight MP3 files
+        for transcription and matching, before video segments.
+
+        Args:
+            keyword: Search keyword
+            output_dir: Base output directory
+            tier: Duration tier ('short', 'medium', 'long', 'longer')
+            topic: Optional topic for LLM filter context
+
+        Returns:
+            List of AudioDownload records
+        """
+        audio_config = getattr(self.download_config, 'audio_first', None)
+        if not audio_config:
+            logger.error("Audio-first config not found")
+            return []
+
+        # Get tier settings
+        tier_min = self._get_tier_value(tier, 'min', 20)
+        tier_max = self._get_tier_value(tier, 'max', 120)
+        per_keyword = self._get_tier_value(tier, 'per_keyword', 5)
+
+        # Create audio output directory
+        max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
+        safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)
+        safe_keyword = safe_keyword.replace(' ', '_')[:max_kw_len].rstrip('_')
+        tier_short = tier[0]
+        audio_dir = output_dir / f"{safe_keyword}_{tier_short}_audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        # Search for videos
+        search_count = max(per_keyword * 5, 40)
+        try:
+            search_results = self._search_videos(keyword, tier, max_results=search_count)
+        except Exception as e:
+            logger.error(f"Search failed for '{keyword}': {e}")
+            return []
+
+        if not search_results:
+            logger.warning(f"No search results for '{keyword}'")
+            return []
+
+        # Filter by duration
+        filtered = [
+            v for v in search_results
+            if tier_min <= v.get('duration', 0) <= tier_max
+            and not v.get('is_live', False)  # Skip live videos
+        ]
+
+        if not filtered:
+            logger.warning(f"No videos in duration range for '{keyword}'")
+            return []
+
+        # LLM title filter if enabled
+        if getattr(self.download_config, 'llm_title_filter', None):
+            filter_config = self.download_config.llm_title_filter
+            if getattr(filter_config, 'enabled', False):
+                filtered = self._apply_llm_title_filter(filtered, keyword, topic)
+
+        # Take top N
+        to_download = filtered[:per_keyword]
+
+        # Download audio for each
+        audio_downloads = []
+        audio_quality = getattr(audio_config, 'audio_quality', 5)
+
+        for video_info in to_download:
+            video_id = video_info.get('id', '')
+            video_url = video_info.get('webpage_url', f"https://www.youtube.com/watch?v={video_id}")
+
+            # Skip if already downloaded
+            audio_file = audio_dir / f"{video_id}.mp3"
+            if audio_file.exists():
+                logger.debug(f"Audio already exists: {audio_file.name}")
+                audio_downloads.append(AudioDownload(
+                    audio_file=str(audio_file),
+                    video_id=video_id,
+                    video_url=video_url,
+                    title=video_info.get('title', ''),
+                    channel=video_info.get('channel', video_info.get('uploader', '')),
+                    duration=video_info.get('duration', 0),
+                    keyword=keyword,
+                    duration_tier=tier,
+                    upload_date=video_info.get('upload_date', ''),
+                    license=video_info.get('license', 'Unknown')
+                ))
+                continue
+
+            # Build yt-dlp command for audio only
+            cmd = [
+                'yt-dlp',
+                video_url,
+                '-x',  # Extract audio
+                '--audio-format', 'mp3',
+                '--audio-quality', str(audio_quality),
+                '-o', str(audio_dir / '%(id)s.%(ext)s'),
+                '--no-playlist',
+                '--no-warnings',
+            ]
+
+            # Add cookies if configured
+            cookies_path = getattr(self.download_config, 'cookies_path', '')
+            if cookies_path and Path(cookies_path).exists():
+                cmd.extend(['--cookies', cookies_path])
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120  # Audio should be fast
+                )
+
+                if result.returncode == 0 and audio_file.exists():
+                    audio_downloads.append(AudioDownload(
+                        audio_file=str(audio_file),
+                        video_id=video_id,
+                        video_url=video_url,
+                        title=video_info.get('title', ''),
+                        channel=video_info.get('channel', video_info.get('uploader', '')),
+                        duration=video_info.get('duration', 0),
+                        keyword=keyword,
+                        duration_tier=tier,
+                        upload_date=video_info.get('upload_date', ''),
+                        license=video_info.get('license', 'Unknown')
+                    ))
+                    logger.debug(f"Downloaded audio: {video_id}")
+                else:
+                    logger.warning(f"Audio download failed for {video_id}: {result.stderr[:200]}")
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Audio download timeout for {video_id}")
+            except Exception as e:
+                logger.warning(f"Audio download error for {video_id}: {e}")
+
+        logger.info(f"  Downloaded {len(audio_downloads)} audio files for '{keyword}' ({tier})")
+        return audio_downloads
+
+    def download_video_segments(
+        self,
+        merged_segments: List[MergedSegment],
+        output_dir: Path
+    ) -> List[DownloadedSegment]:
+        """Download video segments using --download-sections.
+
+        Phase 3 of audio-first pipeline. Downloads only the matched portions
+        of videos, not the full files.
+
+        Args:
+            merged_segments: List of merged segments with buffer applied
+            output_dir: Base output directory
+
+        Returns:
+            List of DownloadedSegment records with timing info
+        """
+        audio_config = getattr(self.download_config, 'audio_first', None)
+        fallback_full = getattr(audio_config, 'fallback_full_video', True) if audio_config else True
+
+        downloaded_segments = []
+
+        # Group by video_id for efficient downloading
+        by_video: Dict[str, List[MergedSegment]] = {}
+        for seg in merged_segments:
+            if seg.video_id not in by_video:
+                by_video[seg.video_id] = []
+            by_video[seg.video_id].append(seg)
+
+        for video_id, segments in by_video.items():
+            if not segments:
+                continue
+
+            # Use first segment for URL and keyword
+            first_seg = segments[0]
+            video_url = first_seg.video_url
+            keyword = first_seg.keyword
+
+            # Create output directory
+            max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
+            safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)
+            safe_keyword = safe_keyword.replace(' ', '_')[:max_kw_len].rstrip('_')
+            video_dir = output_dir / f"{safe_keyword}_segments"
+            video_dir.mkdir(parents=True, exist_ok=True)
+
+            # Build --download-sections arguments
+            section_args = []
+            for seg in segments:
+                # Format: *START-END (HH:MM:SS or seconds)
+                start_str = self._format_time(seg.start_time)
+                end_str = self._format_time(seg.end_time)
+                section_args.extend(['--download-sections', f'*{start_str}-{end_str}'])
+
+            # Build yt-dlp command
+            cmd = [
+                'yt-dlp',
+                video_url,
+                *section_args,
+                '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+                '--merge-output-format', 'mp4',
+                '-o', str(video_dir / f'{video_id}_%(autonumber)s.%(ext)s'),
+                '--no-playlist',
+                '--no-warnings',
+            ]
+
+            # Add cookies if configured
+            cookies_path = getattr(self.download_config, 'cookies_path', '')
+            if cookies_path and Path(cookies_path).exists():
+                cmd.extend(['--cookies', cookies_path])
+
+            # Get tier-specific timeout
+            tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
+            timeout = tier_timeouts.get('long', 600)  # Use long tier timeout for segments
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
+
+                if result.returncode != 0:
+                    logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
+                    if fallback_full:
+                        logger.info(f"Falling back to full video for {video_id}")
+                        # TODO: Implement full video fallback
+                    continue
+
+                # Rename files from autonumber to timestamp-based names
+                downloaded = rename_segments_with_timing(video_dir, video_id, segments)
+
+                for seg, file_path in zip(segments, downloaded):
+                    if file_path and Path(file_path).exists():
+                        # Get actual file duration
+                        file_duration = seg.end_time - seg.start_time  # Approximate
+
+                        downloaded_segments.append(DownloadedSegment(
+                            file=str(file_path),
+                            video_id=video_id,
+                            original_start=seg.start_time,
+                            original_end=seg.end_time,
+                            file_duration=file_duration,
+                            matches=seg.original_matches,
+                            keyword=keyword
+                        ))
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Segment download timeout for {video_id}")
+                if fallback_full:
+                    logger.info(f"Falling back to full video for {video_id}")
+            except Exception as e:
+                logger.error(f"Segment download error for {video_id}: {e}")
+
+        logger.info(f"Downloaded {len(downloaded_segments)} video segments")
+        return downloaded_segments
+
+    def _format_time(self, seconds: float) -> str:
+        """Format seconds as HH:MM:SS for yt-dlp."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+# =============================================================================
+# AUDIO-FIRST HELPER FUNCTIONS (Standalone)
+# =============================================================================
+
+def get_segment_filename(video_id: str, start_seconds: float) -> str:
+    """Generate filename with start time encoded.
+
+    Format: {video_id}_{start_seconds:04d}.mp4
+    Example: abc123_0330.mp4 = video abc123, starts at 330 seconds (5:30)
+
+    This naming allows:
+    - Easy sorting by time
+    - Extracting start time from filename
+    - Direct mapping to original timestamps
+    """
+    start_int = int(start_seconds)
+    return f"{video_id}_{start_int:04d}.mp4"
+
+
+def rename_segments_with_timing(
+    download_dir: Path,
+    video_id: str,
+    merged_segments: List[MergedSegment]
+) -> List[Optional[str]]:
+    """Rename autonumber files to timestamp-based names.
+
+    yt-dlp with --download-sections creates files like:
+        abc123_1.mp4, abc123_2.mp4, ...
+
+    This renames them to:
+        abc123_0000.mp4 (starts at 0s)
+        abc123_0330.mp4 (starts at 330s)
+
+    Args:
+        download_dir: Directory containing downloaded files
+        video_id: YouTube video ID
+        merged_segments: Segments in order they were downloaded
+
+    Returns:
+        List of renamed file paths (None if file not found)
+    """
+    renamed_files = []
+
+    for idx, segment in enumerate(merged_segments, start=1):
+        old_name = download_dir / f"{video_id}_{idx}.mp4"
+        new_name = download_dir / get_segment_filename(video_id, segment.start_time)
+
+        try:
+            if old_name.exists():
+                old_name.rename(new_name)
+                renamed_files.append(str(new_name))
+                logger.debug(f"Renamed {old_name.name} -> {new_name.name}")
+            else:
+                # Try with different extensions
+                for ext in ['.mkv', '.webm']:
+                    alt_old = old_name.with_suffix(ext)
+                    if alt_old.exists():
+                        alt_new = new_name.with_suffix(ext)
+                        alt_old.rename(alt_new)
+                        renamed_files.append(str(alt_new))
+                        break
+                else:
+                    logger.warning(f"Expected file not found: {old_name}")
+                    renamed_files.append(None)
+        except OSError as e:
+            logger.error(f"Failed to rename {old_name}: {e}")
+            renamed_files.append(None)
+
+    return renamed_files
+
+
+def merge_segments_with_buffer(
+    segments: List[Tuple[float, float]],
+    buffer_seconds: float = 30.0,
+    merge_gap_seconds: float = 15.0,
+    video_duration: float = None
+) -> List[Tuple[float, float]]:
+    """Merge overlapping segments after adding buffer.
+
+    Args:
+        segments: List of (start, end) tuples
+        buffer_seconds: Add this before/after each segment
+        merge_gap_seconds: Merge if gap is less than this
+        video_duration: Clamp end to video duration if provided
+
+    Returns:
+        List of merged (start, end) tuples
+    """
+    if not segments:
+        return []
+
+    # Step 1: Add buffer and clamp to valid range
+    buffered = []
+    for start, end in segments:
+        new_start = max(0, start - buffer_seconds)
+        new_end = end + buffer_seconds
+        if video_duration:
+            new_end = min(new_end, video_duration)
+        buffered.append((new_start, new_end))
+
+    # Step 2: Sort by start time
+    buffered.sort(key=lambda x: x[0])
+
+    # Step 3: Merge overlapping or close segments
+    merged = [buffered[0]]
+    for start, end in buffered[1:]:
+        last_start, last_end = merged[-1]
+
+        # Merge if overlapping OR gap is small
+        if start <= last_end + merge_gap_seconds:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+
+    return merged
+
+
+def collect_matched_segments(
+    match_results: List,  # List[MatchResult]
+    audio_downloads: Dict[str, AudioDownload]
+) -> Dict[str, List[MatchedSegment]]:
+    """Collect all matched segments from matching results.
+
+    Groups matches by video_id for efficient downloading.
+
+    Args:
+        match_results: Results from matching phase
+        audio_downloads: Map of video_id -> AudioDownload
+
+    Returns:
+        Dict of video_id -> List[MatchedSegment]
+    """
+    segments_by_video: Dict[str, List[MatchedSegment]] = {}
+
+    for idx, result in enumerate(match_results):
+        # Process primary match (V1)
+        if result.primary_match:
+            seg = result.primary_match.video_segment
+            video_id = _extract_video_id(seg.source_file)
+
+            if video_id and video_id in audio_downloads:
+                audio = audio_downloads[video_id]
+                matched = MatchedSegment(
+                    video_id=video_id,
+                    video_url=audio.video_url,
+                    start_time=seg.start_time,
+                    end_time=seg.end_time,
+                    track="V1",
+                    voiceover_segment_idx=idx,
+                    keyword=audio.keyword
+                )
+                if video_id not in segments_by_video:
+                    segments_by_video[video_id] = []
+                segments_by_video[video_id].append(matched)
+
+        # Process alternatives (V2-V3)
+        for alt_idx, alt in enumerate(result.alternatives or [], start=2):
+            seg = alt.video_segment
+            video_id = _extract_video_id(seg.source_file)
+
+            if video_id and video_id in audio_downloads:
+                audio = audio_downloads[video_id]
+                matched = MatchedSegment(
+                    video_id=video_id,
+                    video_url=audio.video_url,
+                    start_time=seg.start_time,
+                    end_time=seg.end_time,
+                    track=f"V{alt_idx}",
+                    voiceover_segment_idx=idx,
+                    keyword=audio.keyword
+                )
+                if video_id not in segments_by_video:
+                    segments_by_video[video_id] = []
+                segments_by_video[video_id].append(matched)
+
+        # Process secondary matches (V4-V6)
+        for sec_idx, sec in enumerate(result.secondary_matches or [], start=4):
+            seg = sec.video_segment
+            video_id = _extract_video_id(seg.source_file)
+
+            if video_id and video_id in audio_downloads:
+                audio = audio_downloads[video_id]
+                matched = MatchedSegment(
+                    video_id=video_id,
+                    video_url=audio.video_url,
+                    start_time=seg.start_time,
+                    end_time=seg.end_time,
+                    track=f"V{sec_idx}",
+                    voiceover_segment_idx=idx,
+                    keyword=audio.keyword
+                )
+                if video_id not in segments_by_video:
+                    segments_by_video[video_id] = []
+                segments_by_video[video_id].append(matched)
+
+        # Process strategy matches (V7)
+        for strat in result.strategy_matches or []:
+            seg = strat.video_segment
+            video_id = _extract_video_id(seg.source_file)
+
+            if video_id and video_id in audio_downloads:
+                audio = audio_downloads[video_id]
+                matched = MatchedSegment(
+                    video_id=video_id,
+                    video_url=audio.video_url,
+                    start_time=seg.start_time,
+                    end_time=seg.end_time,
+                    track="V7",
+                    voiceover_segment_idx=idx,
+                    keyword=audio.keyword
+                )
+                if video_id not in segments_by_video:
+                    segments_by_video[video_id] = []
+                segments_by_video[video_id].append(matched)
+
+    return segments_by_video
+
+
+def _extract_video_id(file_path: str) -> Optional[str]:
+    """Extract YouTube video ID from file path.
+
+    Assumes filename format: {video_id}.mp3 or {video_id}_0000.mp4
+    """
+    if not file_path:
+        return None
+
+    filename = Path(file_path).stem
+
+    # Handle segment format: abc123_0000
+    if '_' in filename and filename.split('_')[-1].isdigit():
+        return filename.rsplit('_', 1)[0]
+
+    # Simple format: abc123
+    return filename
+
+
+def prepare_merged_segments(
+    segments_by_video: Dict[str, List[MatchedSegment]],
+    audio_downloads: Dict[str, AudioDownload],
+    buffer_seconds: float = 30.0,
+    merge_gap_seconds: float = 15.0
+) -> List[MergedSegment]:
+    """Prepare merged segments for download.
+
+    Applies buffer, merges overlapping/close segments, and creates
+    MergedSegment records ready for download.
+
+    Args:
+        segments_by_video: Dict of video_id -> List[MatchedSegment]
+        audio_downloads: Map of video_id -> AudioDownload
+        buffer_seconds: Padding around each match
+        merge_gap_seconds: Merge if gap is smaller
+
+    Returns:
+        List of MergedSegment ready for download
+    """
+    all_merged = []
+
+    for video_id, matches in segments_by_video.items():
+        if not matches:
+            continue
+
+        # Get video duration for clamping
+        audio = audio_downloads.get(video_id)
+        video_duration = audio.duration if audio else None
+
+        # Extract time ranges
+        time_ranges = [(m.start_time, m.end_time) for m in matches]
+
+        # Merge with buffer
+        merged_ranges = merge_segments_with_buffer(
+            time_ranges,
+            buffer_seconds=buffer_seconds,
+            merge_gap_seconds=merge_gap_seconds,
+            video_duration=video_duration
+        )
+
+        # Create MergedSegment for each merged range
+        for start, end in merged_ranges:
+            # Find which original matches fall within this range
+            contained_matches = [
+                m for m in matches
+                if start <= m.start_time and m.end_time <= end
+            ]
+
+            all_merged.append(MergedSegment(
+                video_id=video_id,
+                video_url=matches[0].video_url,
+                start_time=start,
+                end_time=end,
+                original_matches=contained_matches,
+                keyword=matches[0].keyword
+            ))
+
+    return all_merged
