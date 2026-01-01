@@ -2205,21 +2205,21 @@ Topic:"""
         before transcription, without additional downloads.
         """
         config = self.config
-        
+
         # Check if remix is enabled
         if not config.remix.enabled:
             logger.debug("Remix disabled in config")
             return []
-        
+
         if not config.remix.trigger_after_download:
             logger.debug("Remix not set to trigger after download")
             return []
-        
+
         self._print_stage("2.5", "KEYWORD REMIX (Zero-Download)")
-        
+
         try:
-            from src.keyword_remix import remix_downloaded_videos, RemixConfig, save_remix_report
-            
+            from src.keyword_remix import remix_downloaded_videos, remix_audio_files, RemixConfig, save_remix_report
+
             # Create RemixConfig from config
             remix_config = RemixConfig(
                 enabled=config.remix.enabled,
@@ -2237,28 +2237,46 @@ Topic:"""
                 parallel_scoring=config.remix.parallel_scoring,
                 max_workers=config.remix.max_workers
             )
-            
+
             print(f"  Remix settings (from config):")
             print(f"    • Min relevance score: {remix_config.min_relevance_score}")
             print(f"    • Max files to include: {remix_config.max_files_to_include}")
             print(f"    • Fuzzy matching: {remix_config.fuzzy_match}")
             print(f"    • Interactive curation: {remix_config.interactive_curation}")
-            
-            # Get video directory
-            video_dir = Path(config.downloaded_videos_dir)
-            
-            if not video_dir.exists():
-                print(f"  ⚠ Video directory not found: {video_dir}")
-                return []
-            
-            # Run remix
-            included_paths, remix_result = remix_downloaded_videos(
-                video_dir=video_dir,
-                keywords=keywords,
-                config=remix_config,
-                interactive=remix_config.interactive_curation,
-                show_progress=True
-            )
+
+            # Check if audio-first mode - use audio files instead of video directory
+            if self._is_audio_first_enabled() and hasattr(self, 'audio_downloads') and self.audio_downloads:
+                audio_files = [ad.audio_file for ad in self.audio_downloads]
+                print(f"  Audio-first mode: scoring {len(audio_files)} audio files")
+
+                included_paths, remix_result = remix_audio_files(
+                    audio_files=audio_files,
+                    keywords=keywords,
+                    config=remix_config,
+                    interactive=remix_config.interactive_curation,
+                    show_progress=True
+                )
+
+                # Update audio_downloads to only include filtered files
+                if included_paths:
+                    included_set = set(included_paths)
+                    self.audio_downloads = [ad for ad in self.audio_downloads if ad.audio_file in included_set]
+                    self.audio_downloads_by_id = {a.video_id: a for a in self.audio_downloads}
+            else:
+                # Standard mode - scan video directory
+                video_dir = Path(config.downloaded_videos_dir)
+
+                if not video_dir.exists():
+                    print(f"  ⚠ Video directory not found: {video_dir}")
+                    return []
+
+                included_paths, remix_result = remix_downloaded_videos(
+                    video_dir=video_dir,
+                    keywords=keywords,
+                    config=remix_config,
+                    interactive=remix_config.interactive_curation,
+                    show_progress=True
+                )
             
             # Store result for later stages
             self.remix_result = remix_result
