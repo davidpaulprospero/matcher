@@ -1020,6 +1020,12 @@ def create_timeline(
 
     # Populate stock video track if entity_videos provided
     if entity_videos:
+        # Log what we received
+        print(f"  [V10] Stock videos received: {len(entity_videos)} entities")
+        for ename, eresult in entity_videos.items():
+            vid_count = len(getattr(eresult, 'videos', []))
+            print(f"    • {ename}: {vid_count} videos")
+
         _add_entity_videos_to_track(
             video_track=stock_video_track,
             entity_videos=entity_videos,
@@ -1347,6 +1353,10 @@ def _add_entity_videos_to_track(
     # Track sticky entity across segments
     last_matched_entity = None
 
+    # Track entity match statistics
+    video_match_stats = {'exact': 0, 'semantic': 0, 'sticky': 0, 'none': 0}
+    clips_added = 0
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
@@ -1357,6 +1367,8 @@ def _add_entity_videos_to_track(
             vo_text, entity_videos, last_matched_entity
         )
 
+        video_match_stats[match_type] += 1
+
         if entity_name:
             entity_result = entity_videos[entity_name]
 
@@ -1366,6 +1378,12 @@ def _add_entity_videos_to_track(
             # Get all videos for this entity
             all_videos = entity_result.videos
             num_videos = len(all_videos)
+
+            # Debug: Log which videos are being used for this segment
+            if seg_idx < 5:  # Only log first 5 for brevity
+                logger.debug(f"V10 Segment {seg_idx}: Entity '{entity_name}' ({match_type}), {num_videos} videos")
+                for vid in all_videos[:2]:
+                    logger.debug(f"  - {Path(vid).name}")
 
             if num_videos > 0:
                 # Track used sources within this segment to prevent duplicates
@@ -1453,6 +1471,7 @@ def _add_entity_videos_to_track(
                     video_clip.metadata['Resolve_OTIO'] = {}
 
                     video_track.append(video_clip)
+                    clips_added += 1
 
                 # Successfully added videos, continue to next segment
                 continue
@@ -1465,6 +1484,14 @@ def _add_entity_videos_to_track(
             )
         )
         video_track.append(gap)
+
+    # Log stock video matching statistics
+    total_segments = len(segment_timing)
+    matched = video_match_stats['exact'] + video_match_stats['semantic'] + video_match_stats['sticky']
+    print(f"  [V10] Stock video matching: {matched}/{total_segments} segments, {clips_added} clips added")
+    print(f"    Exact: {video_match_stats['exact']} ({100*video_match_stats['exact']/max(1,total_segments):.1f}%)")
+    print(f"    Semantic: {video_match_stats['semantic']} ({100*video_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    print(f"    Sticky: {video_match_stats['sticky']} ({100*video_match_stats['sticky']/max(1,total_segments):.1f}%)")
 
 
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
