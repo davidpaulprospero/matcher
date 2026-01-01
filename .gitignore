@@ -80,3 +80,5 @@ output/remix_report.json
 output/remix_report.json
 output/
 imagedl_outputs/
+output/remix_report.json
+__pycache__/
