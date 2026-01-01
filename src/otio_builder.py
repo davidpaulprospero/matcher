@@ -123,6 +123,50 @@ def format_path_url(file_path: str) -> str:
     return path
 
 
+def get_segment_file_offset(file_path: str) -> float:
+    """
+    Extract the start time offset from a segment filename.
+
+    Audio-first mode downloads video segments with filenames like:
+        {video_id}_{start_seconds:04d}.mp4
+
+    For these files, the start_time in the original video is embedded
+    in the filename. This function extracts it so the OTIO builder
+    can calculate the correct clip offset.
+
+    Args:
+        file_path: Path to the video/segment file
+
+    Returns:
+        The segment offset in seconds (0.0 for non-segment files)
+
+    Examples:
+        "abc123_0045.mp4" -> 45.0 (segment starts at 45s in original)
+        "abc123_0120.mp4" -> 120.0 (segment starts at 2min in original)
+        "regular_video.mp4" -> 0.0 (not a segment file)
+    """
+    filename = Path(file_path).stem  # Get filename without extension
+
+    # Pattern: video_id (11 chars) followed by _ and 4-digit start time
+    # Example: abc12345678_0045
+    match = re.match(r'^[a-zA-Z0-9_-]{11}_(\d{4})$', filename)
+    if match:
+        return float(match.group(1))
+
+    # Also try pattern with longer IDs (some video IDs vary)
+    match = re.match(r'^.+_(\d{4})$', filename)
+    if match:
+        # Verify this looks like a segment (4-digit suffix)
+        return float(match.group(1))
+
+    return 0.0
+
+
+def is_segment_file(file_path: str) -> bool:
+    """Check if a file is a downloaded segment (audio-first mode)."""
+    return get_segment_file_offset(file_path) > 0.0 or file_path.endswith('_0000.mp4')
+
+
 def _to_python_type(value):
     """Convert numpy types to native Python types for OTIO compatibility."""
     if value is None:
@@ -497,7 +541,15 @@ def create_timeline(
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
-        
+
+        # Adjust source_start for segment files (audio-first mode)
+        # Segment files only contain a portion of the original video,
+        # so we need to adjust the start time relative to the segment file
+        segment_offset = get_segment_file_offset(vid_seg.source_file)
+        if segment_offset > 0:
+            source_start = max(0, source_start - segment_offset)
+            logger.debug(f"Segment file offset: {segment_offset}s, adjusted start: {source_start}s")
+
         # Determine clip color based on confidence
         clip_color = get_confidence_color(match.confidence)
         
@@ -555,10 +607,15 @@ def create_timeline(
             if alt_idx < len(match_result.alternatives):
                 alt = match_result.alternatives[alt_idx]
                 alt_seg = alt.video_segment
-                
+
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
-                
+
+                # Adjust for segment files (audio-first mode)
+                alt_segment_offset = get_segment_file_offset(alt_seg.source_file)
+                if alt_segment_offset > 0:
+                    alt_source_start = max(0, alt_source_start - alt_segment_offset)
+
                 alt_metadata = {
                     'confidence': alt.confidence,
                     'reasoning': alt.reasoning,
@@ -626,7 +683,12 @@ def create_timeline(
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
                 sec_source_start = sec_seg.start_time
-                
+
+                # Adjust for segment files (audio-first mode)
+                sec_segment_offset = get_segment_file_offset(sec_seg.source_file)
+                if sec_segment_offset > 0:
+                    sec_source_start = max(0, sec_source_start - sec_segment_offset)
+
                 sec_metadata = {
                     'segment_index': match_idx,
                     'segment_id': segment_id,
@@ -706,7 +768,12 @@ def create_timeline(
                 strat_seg = strat_match.video_segment
                 strat_source_duration = strat_seg.end_time - strat_seg.start_time
                 strat_source_start = strat_seg.start_time
-                
+
+                # Adjust for segment files (audio-first mode)
+                strat_segment_offset = get_segment_file_offset(strat_seg.source_file)
+                if strat_segment_offset > 0:
+                    strat_source_start = max(0, strat_source_start - strat_segment_offset)
+
                 strat_metadata = {
                     'segment_index': match_idx,
                     'segment_id': segment_id,

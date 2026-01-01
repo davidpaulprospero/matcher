@@ -677,6 +677,21 @@ download:
     long: 600      # 10 min timeout for videos 10-25 min
     longer: 900    # 15 min timeout for videos 25-50 min
 
+  # Audio-First Mode - Dramatically reduces download time
+  # How it works:
+  #   1. Downloads audio only (MP3) first - ~5% of video size
+  #   2. Transcribes and matches against voiceover
+  #   3. Downloads ONLY the matched video segments with buffer
+  # Typical savings: 80-90% less download time/bandwidth
+  audio_first:
+    enabled: false          # Set to true to enable audio-first mode
+    buffer_seconds: 30.0    # Extra footage before/after each match
+    merge_gap_seconds: 15.0 # Merge segments closer than this (reduces requests)
+    audio_quality: 5        # 0 (best) to 9 (worst), 5 = ~128kbps
+    fallback_full_video: true      # If segment download fails, download full video
+    delete_audio_after_video: false # Keep audio files after video download
+    checkpoint_phases: true  # Save checkpoint after each phase
+
   # Duration tiers
   tiers:
     short:
