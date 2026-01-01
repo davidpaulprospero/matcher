@@ -299,33 +299,144 @@ class KeywordRemixProcessor:
             metadata=metadata
         )
     
-    def scan_directory(self, video_dir: Path) -> List[Path]:
+    def scan_directory(self, video_dir: Path, include_audio: bool = False) -> List[Path]:
         """
-        Scan directory for video files.
-        
+        Scan directory for video/audio files.
+
         Args:
             video_dir: Directory to scan
-            
+            include_audio: Whether to include audio files (for audio-first mode)
+
         Returns:
-            List of video file paths
+            List of video/audio file paths
         """
         video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v'}
+        audio_extensions = {'.mp3', '.m4a', '.opus', '.ogg', '.wav', '.flac'}
+
+        allowed_extensions = video_extensions
+        if include_audio:
+            allowed_extensions = video_extensions | audio_extensions
+
         video_files = []
-        
+
         for root, dirs, files in os.walk(video_dir):
             for file in files:
-                if Path(file).suffix.lower() in video_extensions:
+                if Path(file).suffix.lower() in allowed_extensions:
                     video_files.append(Path(root) / file)
-        
+
         self.metrics['files_scanned'] = len(video_files)
-        
+
         logger.info(json.dumps({
             'event': 'directory_scan_complete',
             'directory': str(video_dir),
-            'video_files_found': len(video_files)
+            'video_files_found': len(video_files),
+            'include_audio': include_audio
         }))
-        
+
         return video_files[:self.config.max_files_to_process]
+
+    def process_file_list(
+        self,
+        file_paths: List[Path],
+        show_progress: bool = True
+    ) -> RemixResult:
+        """
+        Process a list of files and score against keywords.
+
+        Args:
+            file_paths: List of file paths to score
+            show_progress: Whether to show progress output
+
+        Returns:
+            RemixResult with scoring results
+        """
+        self.metrics['start_time'] = time.time()
+        self.metrics['files_scanned'] = len(file_paths)
+
+        logger.info(json.dumps({
+            'event': 'remix_processing_start',
+            'file_count': len(file_paths),
+            'keywords': self.keywords[:10],
+            'keywords_total': len(self.keywords)
+        }))
+
+        if not file_paths:
+            return RemixResult(
+                total_files=0,
+                included_files=0,
+                excluded_files=0,
+                included_videos=[],
+                excluded_videos=[],
+                processing_time_seconds=0,
+                keywords_used=self.keywords,
+                avg_match_score=0.0
+            )
+
+        if show_progress:
+            print(f"  Scoring {len(file_paths)} files against {len(self.keywords)} keywords...")
+
+        # Score all files
+        scored_videos: List[VideoScore] = []
+
+        if self.config.parallel_scoring and len(file_paths) > 10:
+            with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+                futures = {executor.submit(self.score_video, Path(fp)): fp for fp in file_paths}
+
+                for i, future in enumerate(as_completed(futures)):
+                    try:
+                        score = future.result()
+                        scored_videos.append(score)
+                        self.metrics['files_scored'] += 1
+
+                        if show_progress and (i + 1) % 20 == 0:
+                            print(f"    Scored {i + 1}/{len(file_paths)} files...")
+                    except Exception as e:
+                        self.metrics['scoring_errors'] += 1
+                        logger.error(f"Scoring error: {e}")
+        else:
+            for i, fp in enumerate(file_paths):
+                try:
+                    score = self.score_video(Path(fp))
+                    scored_videos.append(score)
+                    self.metrics['files_scored'] += 1
+
+                    if show_progress and (i + 1) % 20 == 0:
+                        print(f"    Scored {i + 1}/{len(file_paths)} files...")
+                except Exception as e:
+                    self.metrics['scoring_errors'] += 1
+                    logger.error(f"Scoring error for {fp}: {e}")
+
+        # Sort by score (highest first)
+        scored_videos.sort(key=lambda x: x.match_score, reverse=True)
+
+        # Apply filtering
+        included = []
+        excluded = []
+
+        for video in scored_videos:
+            if video.match_score >= self.config.min_relevance_score:
+                if len(included) < self.config.max_files_to_include:
+                    included.append(video)
+                else:
+                    excluded.append(video)
+            else:
+                excluded.append(video)
+
+        # Calculate metrics
+        self.metrics['end_time'] = time.time()
+        processing_time = self.metrics['end_time'] - self.metrics['start_time']
+        avg_score = sum(v.match_score for v in included) / len(included) if included else 0.0
+
+        return RemixResult(
+            total_files=len(file_paths),
+            included_files=len(included),
+            excluded_files=len(excluded),
+            included_videos=included,
+            excluded_videos=excluded,
+            processing_time_seconds=processing_time,
+            keywords_used=self.keywords,
+            avg_match_score=avg_score
+        )
     
     def process_videos(
         self,
@@ -567,6 +678,98 @@ def remix_downloaded_videos(
                 return [], result
     
     # Return included video paths
+    return [v.file_path for v in result.included_videos], result
+
+
+def remix_audio_files(
+    audio_files: List[str],
+    keywords: List[str],
+    config: Optional[RemixConfig] = None,
+    interactive: bool = True,
+    show_progress: bool = True
+) -> Tuple[List[str], RemixResult]:
+    """
+    Remix audio files for audio-first mode.
+
+    Args:
+        audio_files: List of audio file paths to score
+        keywords: Keywords to match against
+        config: RemixConfig (uses defaults if None)
+        interactive: Whether to prompt user for confirmation
+        show_progress: Whether to show progress output
+
+    Returns:
+        Tuple of (list of included audio paths, RemixResult)
+    """
+    if config is None:
+        config = RemixConfig()
+
+    if not config.enabled:
+        logger.info("Remix disabled in config, returning all audio files")
+        return audio_files, None
+
+    if not audio_files:
+        logger.warning("No audio files provided for remix")
+        return [], None
+
+    # Initialize processor
+    processor = KeywordRemixProcessor(config, keywords)
+
+    # Process audio files directly
+    result = processor.process_file_list([Path(f) for f in audio_files], show_progress)
+
+    if show_progress:
+        print(f"\n  Remix Results (Audio-First Mode):")
+        print(f"    • Total audio files scored: {result.total_files}")
+        print(f"    • Included (score ≥{config.min_relevance_score}): {result.included_files}")
+        print(f"    • Excluded: {result.excluded_files}")
+        print(f"    • Average relevance score: {result.avg_match_score:.1%}")
+        print(f"    • Processing time: {result.processing_time_seconds:.1f}s")
+
+        if result.included_videos:
+            print(f"\n  Top 5 matches:")
+            for i, video in enumerate(result.included_videos[:5]):
+                relevance = "HIGH" if video.match_score >= config.high_relevance_threshold else "MED"
+                print(f"    {i+1}. [{relevance}] {video.filename[:50]}... (score: {video.match_score:.1%})")
+                if video.keyword_matches:
+                    print(f"       Keywords: {', '.join(video.keyword_matches[:3])}")
+
+        if config.show_excluded and result.excluded_videos:
+            print(f"\n  Excluded ({len(result.excluded_videos)} files with score <{config.min_relevance_score}):")
+            for video in result.excluded_videos[:3]:
+                print(f"    • {video.filename[:50]}... (score: {video.match_score:.1%})")
+            if len(result.excluded_videos) > 3:
+                print(f"    ... and {len(result.excluded_videos) - 3} more")
+
+    # Interactive confirmation
+    if interactive and config.interactive_curation:
+        auto_accept = getattr(config, 'auto_accept_filter', 'prompt')
+
+        if auto_accept == 'filtered':
+            logger.info(f"Auto-accepting filtered audio files ({result.included_files})")
+            print(f"\n  ✓ Using {result.included_files} filtered audio files (auto-accept)")
+            return [v.file_path for v in result.included_videos], result
+        elif auto_accept == 'all':
+            logger.info("Auto-accepting all audio files (skip filtering)")
+            print(f"\n  ✓ Using ALL {result.total_files} audio files (auto-accept)")
+            all_files = result.included_videos + result.excluded_videos
+            return [v.file_path for v in all_files], result
+        else:
+            print(f"\n  Proceed with {result.included_files} audio files?")
+            print(f"    [Y] Yes, use these {result.included_files} files")
+            print(f"    [A] Use ALL files (skip filtering)")
+            print(f"    [N] Cancel")
+
+            choice = input("  Select [Y/A/N]: ").strip().upper()
+
+            if choice == 'A':
+                logger.info("User selected all audio files, bypassing filter")
+                all_files = result.included_videos + result.excluded_videos
+                return [v.file_path for v in all_files], result
+            elif choice != 'Y':
+                logger.info("User cancelled remix")
+                return [], result
+
     return [v.file_path for v in result.included_videos], result
 
 
