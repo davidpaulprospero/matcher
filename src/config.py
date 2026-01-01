@@ -352,7 +352,7 @@ class MatchingConfig:
 
     # B-roll boost (silent videos are valuable)
     # Boosts confidence for: 1) silent/B-roll videos, 2) scenes without faces when topic matches
-    broll_boost: float = 0.1  # Confidence boost for B-roll videos (0.0-0.2)
+    broll_boost: float = 0.2  # Confidence boost for B-roll videos (0.0-0.3)
 
     # B-roll preference (scene-level face detection)
     # When topic matches, prefer scenes without faces (B-roll) over talking heads
