@@ -159,7 +159,7 @@ class FaceDetector:
             video_path: Path to video file
             start_time: Scene start time in seconds
             end_time: Scene end time in seconds
-            scene_index: Scene index for caching
+            scene_index: Scene index for caching (used with time range for unique key)
             sample_frames: Number of frames to sample within the scene
             cache_dir: Directory for cache
 
@@ -169,15 +169,19 @@ class FaceDetector:
         if not self.is_available():
             return 0.5  # Neutral if no backend
 
-        # Check scene cache
-        cache_key = f"{video_path}:{scene_index}"
+        # Use time-based cache key for segment-level detection
+        # Format: video_path:start_time-end_time (times rounded to 0.1s)
+        time_key = f"{start_time:.1f}-{end_time:.1f}"
+        cache_key = f"{video_path}:{time_key}"
+
+        # Check memory cache (use time_key as dict key)
         if video_path in FaceDetector._scene_cache:
-            if scene_index in FaceDetector._scene_cache[video_path]:
-                return FaceDetector._scene_cache[video_path][scene_index]
+            if time_key in FaceDetector._scene_cache[video_path]:
+                return FaceDetector._scene_cache[video_path][time_key]
 
         # Check disk cache for scene faces
         if cache_dir:
-            cache_path = Path(cache_dir) / '.scene_face_cache.json'
+            cache_path = Path(cache_dir) / '.segment_face_cache.json'
             if cache_path.exists():
                 try:
                     with open(cache_path, 'r') as f:
@@ -186,12 +190,12 @@ class FaceDetector:
                         score = disk_cache[cache_key]
                         if video_path not in FaceDetector._scene_cache:
                             FaceDetector._scene_cache[video_path] = {}
-                        FaceDetector._scene_cache[video_path][scene_index] = score
+                        FaceDetector._scene_cache[video_path][time_key] = score
                         return score
                 except:
                     pass
 
-        # Compute face score for scene
+        # Compute face score for scene/segment
         if FaceDetector._mediapipe_available:
             score = self._detect_faces_in_range_mediapipe(
                 video_path, start_time, end_time, sample_frames
@@ -204,12 +208,12 @@ class FaceDetector:
         # Update memory cache
         if video_path not in FaceDetector._scene_cache:
             FaceDetector._scene_cache[video_path] = {}
-        FaceDetector._scene_cache[video_path][scene_index] = score
+        FaceDetector._scene_cache[video_path][time_key] = score
 
         # Save to disk cache
         if cache_dir:
             try:
-                cache_path = Path(cache_dir) / '.scene_face_cache.json'
+                cache_path = Path(cache_dir) / '.segment_face_cache.json'
                 disk_cache = {}
                 if cache_path.exists():
                     with open(cache_path, 'r') as f:
@@ -448,7 +452,11 @@ def apply_face_preference(
     cache_dir: str = None
 ) -> List[Tuple]:
     """
-    Adjust candidate scores based on face preference.
+    Adjust candidate scores based on face preference using SEGMENT-LEVEL detection.
+
+    Uses the specific time range of each video segment to detect faces,
+    not the entire video. This allows matching clips without faces even
+    from videos that contain faces in other parts.
 
     Args:
         candidates: List of (segment, score) tuples
@@ -463,18 +471,43 @@ def apply_face_preference(
 
     detector = FaceDetector.get_instance()
 
+    if not detector.is_available():
+        logger.debug("Face detection not available, skipping preference adjustment")
+        return candidates
+
     adjusted = []
     for seg, score in candidates:
         video_path = seg.source_file
-        face_score = detector.get_face_score(video_path, cache_dir)
+
+        # Use segment-level face detection (specific time range)
+        start_time = getattr(seg, 'start_time', 0.0)
+        end_time = getattr(seg, 'end_time', 0.0)
+        segment_index = getattr(seg, 'index', 0)
+
+        if end_time > start_time:
+            # Detect faces only within this segment's time range
+            face_score = detector.get_scene_face_score(
+                video_path=video_path,
+                start_time=start_time,
+                end_time=end_time,
+                scene_index=segment_index,
+                sample_frames=3,  # Sample 3 frames within segment
+                cache_dir=cache_dir
+            )
+            logger.debug(
+                f"Segment face score: {video_path}[{start_time:.1f}-{end_time:.1f}] = {face_score:.2f}"
+            )
+        else:
+            # Fallback to video-level if no time range
+            face_score = detector.get_face_score(video_path, cache_dir)
 
         # Apply adjustment based on preference
         if face_preference == "more":
-            # Boost videos with faces (face_score: 0-1)
+            # Boost segments with faces (face_score: 0-1)
             # More faces = higher boost (up to +0.1)
             adjustment = face_score * 0.1
         elif face_preference == "none":
-            # Penalize videos with faces
+            # Penalize segments with faces
             # More faces = bigger penalty (up to -0.15)
             adjustment = -face_score * 0.15
         else:
