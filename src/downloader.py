@@ -1992,6 +1992,9 @@ def rename_segments_with_timing(
             if found_file:
                 # Preserve original extension
                 final_name = new_name.with_suffix(found_file.suffix)
+                # Delete existing file if present (from previous run)
+                if final_name.exists():
+                    final_name.unlink()
                 found_file.rename(final_name)
                 renamed_files.append(str(final_name))
                 logger.debug(f"Renamed {found_file.name} -> {final_name.name}")
@@ -2002,6 +2005,9 @@ def rename_segments_with_timing(
                 if idx <= len(matches):
                     found_file = matches[idx - 1]
                     final_name = new_name.with_suffix(found_file.suffix)
+                    # Delete existing file if present
+                    if final_name.exists():
+                        final_name.unlink()
                     found_file.rename(final_name)
                     renamed_files.append(str(final_name))
                     logger.debug(f"Renamed (glob) {found_file.name} -> {final_name.name}")
