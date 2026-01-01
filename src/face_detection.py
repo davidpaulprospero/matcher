@@ -475,7 +475,12 @@ def apply_face_preference(
         logger.debug("Face detection not available, skipping preference adjustment")
         return candidates
 
+    logger.debug(f"Applying segment-level face preference '{face_preference}' to {len(candidates)} candidates")
+
     adjusted = []
+    segments_with_faces = 0
+    segments_without_faces = 0
+
     for seg, score in candidates:
         video_path = seg.source_file
 
@@ -501,6 +506,12 @@ def apply_face_preference(
             # Fallback to video-level if no time range
             face_score = detector.get_face_score(video_path, cache_dir)
 
+        # Track face statistics
+        if face_score > 0.3:
+            segments_with_faces += 1
+        else:
+            segments_without_faces += 1
+
         # Apply adjustment based on preference
         if face_preference == "more":
             # Boost segments with faces (face_score: 0-1)
@@ -518,6 +529,11 @@ def apply_face_preference(
 
     # Re-sort by adjusted score
     adjusted.sort(key=lambda x: x[1], reverse=True)
+
+    logger.debug(
+        f"Face preference applied: {segments_without_faces} B-roll (no faces), "
+        f"{segments_with_faces} with faces"
+    )
 
     return adjusted
 

@@ -2888,6 +2888,9 @@ Topic:"""
             return
 
         print(f"\n  📹 Found {len(silent_videos)} silent/B-roll videos")
+        logger.info(f"Silent video handling: Found {len(silent_videos)} videos with <{min_words} words")
+        for sv in silent_videos:
+            logger.debug(f"  Silent video: {Path(sv).name}")
 
         # Track which videos we successfully described
         described = 0
@@ -2964,6 +2967,7 @@ Be specific and descriptive for semantic matching purposes."""
                         # Simple fallback - use keyword as description
                         description = f"Video footage of {keyword}. Visual content showing {clean_name}."
                         source = 'keyword'
+                        logger.debug(f"Keyword fallback for {Path(video_path).name}: {description}")
 
                 except Exception as e:
                     logger.debug(f"LLM fallback failed for {video_path}: {e}")
@@ -3001,9 +3005,11 @@ Be specific and descriptive for semantic matching purposes."""
                 described += 1
 
                 print(f"    ✓ {Path(video_path).name}: {source} description ({len(description)} chars)")
+                logger.info(f"B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
 
         if described > 0:
             print(f"  ✓ Generated descriptions for {described}/{len(silent_videos)} silent videos")
+            logger.info(f"Silent video summary: {described}/{len(silent_videos)} videos described for matching")
 
     def _extract_source_keyword(self, video_path: str) -> str:
         """Try to extract the source search keyword from video path structure."""
