@@ -233,6 +233,12 @@ Before committing changes:
 - **DownloadedVideo:** Fixed field names (file, duration_tier)
 - **Config loading:** Enhanced `_build_dataclass` for string annotations
 
+### 2025-12-31: CLAUDE.md expansion
+- **Expanded documentation:** Added Common Bugs & Fixes, Key Features, Testing Checklist
+- **Future annotations warning:** Documented `__post_init__` requirement for nested dataclasses
+- **Regex gotcha:** Added lookbehind limitation and workaround
+- **Project overrides:** Documented `project_config.yaml` feature
+
 ### 2026-01-01: Tier-specific download timeouts
 - **Problem:** 120s timeout too short for medium/long videos
 - **Solution:** Added `download_timeouts` dict with per-tier values
