@@ -125,7 +125,7 @@ Also add to title_blacklist: `live stream`, `livestream`, `webcam`, `24/7`
 ### Track Layout
 | Track | Purpose | Default State |
 |-------|---------|---------------|
-| V1 | Primary video (speed-adjusted) | Enabled |
+| V1 | Primary video | Enabled |
 | V2 | Alternative 1 | Disabled |
 | V3 | Alternative 2 | Disabled |
 | V4 | Secondary Primary (different source from V1-V3) | Disabled |
