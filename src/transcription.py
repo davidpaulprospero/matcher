@@ -245,7 +245,8 @@ def _transcribe_with_shared_model(
     language: str = None,
     vad_filter: bool = True,
     min_silence_duration_ms: int = 200,
-    speech_pad_ms: int = 10
+    speech_pad_ms: int = 10,
+    word_timestamps: bool = False
 ) -> List[dict]:
     """
     Transcribe audio using the shared model with mutex protection.
@@ -258,12 +259,13 @@ def _transcribe_with_shared_model(
         vad_filter: Whether to apply Voice Activity Detection
         min_silence_duration_ms: Minimum silence duration to split segments (from config)
         speech_pad_ms: Padding around detected speech (from config)
+        word_timestamps: Whether to include word-level timestamps
     """
     print(f"\n  [TRANSCRIBE] Acquiring GPU lock...", flush=True)
     with _gpu_lock:
         print(f"  [TRANSCRIBE] Lock acquired, getting model...", flush=True)
         model = _get_shared_model(model_name, compute_type)
-        
+
         audio_name = Path(audio_path).name[:40]
         print(f"  [TRANSCRIBE] Starting transcription of {audio_name}...", flush=True)
         try:
@@ -274,21 +276,29 @@ def _transcribe_with_shared_model(
                 vad_parameters=dict(
                     min_silence_duration_ms=min_silence_duration_ms,
                     speech_pad_ms=speech_pad_ms
-                )
+                ),
+                word_timestamps=word_timestamps
             )
-            
+
             print(f"  [TRANSCRIBE] Transcription done, processing segments...", flush=True)
             result = []
             for seg in segments:
-                result.append({
+                seg_data = {
                     "start": seg.start,
                     "end": seg.end,
                     "text": seg.text.strip()
-                })
-            
+                }
+                # Include word-level timestamps if available
+                if word_timestamps and hasattr(seg, 'words') and seg.words:
+                    seg_data["words"] = [
+                        {"word": w.word, "start": w.start, "end": w.end}
+                        for w in seg.words
+                    ]
+                result.append(seg_data)
+
             print(f"  [TRANSCRIBE] Done: {len(result)} segments", flush=True)
             return result
-            
+
         except Exception as e:
             print(f"  [TRANSCRIBE] Error: {e}", flush=True)
             logger.error(f"Transcription error: {e}")
@@ -852,11 +862,12 @@ def transcribe_voiceover_media(
     model_name: str = "base",
     language: str = None,
     compute_type: str = "auto",
-    cache_dir: str = None
+    cache_dir: str = None,
+    word_timestamps: bool = True
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
-    
+
     Args:
         media_path: Path to audio or video file
         output_srt_path: Path for output SRT file (default: same as media with .srt extension)
@@ -864,9 +875,10 @@ def transcribe_voiceover_media(
         language: Language code or None for auto-detect
         compute_type: Compute type (auto, float16, int8)
         cache_dir: Optional cache directory for extracted audio
-    
+        word_timestamps: Whether to generate word-level timestamps (default True)
+
     Returns:
-        Path to the generated SRT file
+        Path to the generated SRT file (also generates .words.json if word_timestamps=True)
     """
     media_path = Path(media_path)
     
@@ -889,28 +901,29 @@ def transcribe_voiceover_media(
             temp_dir.mkdir(parents=True, exist_ok=True)
         else:
             temp_dir = media_path.parent
-        
+
         audio_path = extract_audio(str(media_path), str(temp_dir))
-        
+
         if not audio_path:
             logger.error(f"Could not extract audio from {media_path}")
             raise RuntimeError(f"Could not extract audio from {media_path}")
-        
-        # Transcribe the extracted audio
+
+        # Transcribe the extracted audio with word timestamps
         segments = _transcribe_with_shared_model(
             audio_path,
             model_name,
             compute_type,
             language,
-            vad_filter=False  # Don't filter voiceover
+            vad_filter=False,  # Don't filter voiceover
+            word_timestamps=word_timestamps
         )
-        
+
         # Clean up extracted audio
         try:
             Path(audio_path).unlink()
         except:
             pass
-    
+
     elif media_path.suffix.lower() in audio_extensions:
         # It's already an audio file
         segments = _transcribe_with_shared_model(
@@ -918,17 +931,28 @@ def transcribe_voiceover_media(
             model_name,
             compute_type,
             language,
-            vad_filter=False
+            vad_filter=False,
+            word_timestamps=word_timestamps
         )
     else:
         raise ValueError(f"Unsupported media format: {media_path.suffix}")
-    
+
     if not segments:
         raise RuntimeError(f"No segments generated from transcription of {media_path}")
-    
+
     # Write SRT file
     _write_srt(segments, str(srt_path))
-    
+
+    # Save word-level timestamps to JSON for pause-split accuracy
+    if word_timestamps:
+        words_path = srt_path.with_suffix('.words.json')
+        try:
+            with open(words_path, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2)
+            logger.info(f"Saved word timestamps to {words_path}")
+        except Exception as e:
+            logger.warning(f"Could not save word timestamps: {e}")
+
     return str(srt_path)
 
 
