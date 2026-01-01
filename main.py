@@ -1816,22 +1816,23 @@ Topic:"""
         print(f"    Buffer: {getattr(audio_config, 'buffer_seconds', 30)}s")
         print(f"    Merge gap: {getattr(audio_config, 'merge_gap_seconds', 15)}s")
 
-        try:
-            from src.downloader import VideoDownloader
+        from src.downloader import VideoDownloader
 
-            # Initialize downloader
-            self.downloader = VideoDownloader(config=config)
+        # Initialize downloader
+        self.downloader = VideoDownloader(config=config)
 
-            output_dir = Path(config.downloaded_videos_dir)
-            all_audio_downloads = []
+        output_dir = Path(config.downloaded_videos_dir)
+        all_audio_downloads = []
 
-            # Download audio for each keyword and tier
-            tiers = list(self.downloader.DURATION_TIERS.keys())
-            total_keywords = len(keywords)
+        # Download audio for each keyword and tier
+        tiers = list(self.downloader.DURATION_TIERS.keys())
+        total_keywords = len(keywords)
+        failed_keywords = []
 
-            for idx, keyword in enumerate(keywords, 1):
-                print(f"\n  [{idx}/{total_keywords}] {keyword}")
+        for idx, keyword in enumerate(keywords, 1):
+            print(f"\n  [{idx}/{total_keywords}] {keyword}")
 
+            try:
                 for tier in tiers:
                     per_kw = self.downloader._get_tier_value(tier, 'per_keyword', 5)
                     if per_kw <= 0:
@@ -1844,19 +1845,21 @@ Topic:"""
                         topic=self.topic_context or ""
                     )
                     all_audio_downloads.extend(audio_downloads)
+            except Exception as e:
+                logger.error(f"Audio download failed for keyword '{keyword}': {e}")
+                import traceback
+                traceback.print_exc()
+                failed_keywords.append(keyword)
+                # Continue with next keyword - don't lose partial downloads
 
-            # Store for later use
-            self.audio_downloads = all_audio_downloads
-            self.audio_downloads_by_id = {a.video_id: a for a in all_audio_downloads}
+        # Store for later use - even if some keywords failed
+        self.audio_downloads = all_audio_downloads
+        self.audio_downloads_by_id = {a.video_id: a for a in all_audio_downloads}
 
-            print(f"\n  ✓ Downloaded {len(all_audio_downloads)} audio files")
-            return all_audio_downloads
-
-        except Exception as e:
-            logger.error(f"Audio download failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+        if failed_keywords:
+            print(f"\n  ⚠ {len(failed_keywords)} keywords failed: {failed_keywords}")
+        print(f"\n  ✓ Downloaded {len(all_audio_downloads)} audio files")
+        return all_audio_downloads
 
     def stage_download_video_segments(self) -> List:
         """
