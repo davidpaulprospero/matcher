@@ -323,7 +323,10 @@ class TranscriptSegment:
     end_time: float
     text: str
     source_file: str = ""
-    
+    # B-roll/silent video attributes
+    is_broll: bool = False  # True if this is a silent/B-roll video segment
+    description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+
     def to_dict(self) -> dict:
         return asdict(self)
 

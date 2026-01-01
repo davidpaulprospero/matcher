@@ -2637,7 +2637,12 @@ Topic:"""
                     logger.warning(f"Failed to transcribe {vf}: {e}")
         
         print(f"  ✓ Transcribed {len(self.transcripts)} videos")
-        
+
+        # Handle silent videos (B-roll) - generate descriptions for matching
+        silent_video_config = getattr(config, 'silent_video', None)
+        if silent_video_config and getattr(silent_video_config, 'enabled', True):
+            self._handle_silent_videos(video_files)
+
         # Embeddings (config-driven batching)
         if self.modules['optimized_embeddings'] and config.pipeline.parallel_embedding:
             from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
@@ -2843,6 +2848,162 @@ Topic:"""
         except Exception as e:
             logger.warning(f"Video topic extraction failed: {e}")
             self.video_topics = {}
+
+    def _handle_silent_videos(self, video_files: List[Path]):
+        """
+        Handle videos with no speech (B-roll) by generating descriptions.
+
+        Silent videos are valuable B-roll footage. This method:
+        1. Detects videos with no/sparse transcripts
+        2. Generates descriptions using Vision API or LLM from title/keyword
+        3. Creates synthetic segments for embedding and matching
+
+        B-roll videos get a confidence boost during matching since they're
+        versatile visual content without talking heads.
+        """
+        config = self.config
+        silent_config = getattr(config, 'silent_video', None)
+
+        # Default settings if no config
+        min_words = getattr(silent_config, 'min_words_threshold', 10) if silent_config else 10
+        use_vision = getattr(silent_config, 'use_vision_api', True) if silent_config else True
+        use_llm = getattr(silent_config, 'use_llm_fallback', True) if silent_config else True
+
+        # Find silent videos
+        silent_videos = []
+        for vf in video_files:
+            video_path = str(vf)
+            segments = self.transcripts.get(video_path, [])
+
+            # Count words in transcript
+            total_words = 0
+            for seg in segments:
+                text = seg.text if hasattr(seg, 'text') else seg.get('text', '')
+                total_words += len(text.split())
+
+            if total_words < min_words:
+                silent_videos.append(video_path)
+
+        if not silent_videos:
+            return
+
+        print(f"\n  📹 Found {len(silent_videos)} silent/B-roll videos")
+
+        # Track which videos we successfully described
+        described = 0
+
+        for video_path in silent_videos:
+            description = None
+            source = None
+
+            # Try Vision API first (if enabled and available)
+            if use_vision and description is None:
+                try:
+                    from src.vision import VisionProcessor
+
+                    processor = VisionProcessor(config)
+                    if processor.is_available():
+                        # Get video duration for sampling
+                        import subprocess
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                             '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
+
+                        # Sample 3 frames and describe
+                        descriptions = []
+                        sample_times = [duration * 0.25, duration * 0.5, duration * 0.75]
+                        for t in sample_times:
+                            scene = {'start_time': max(0, t - 1), 'end_time': t + 1}
+                            desc = processor.describe_scene(
+                                video_path, scene,
+                                cache_dir=config.cache.cache_dir
+                            )
+                            if desc:
+                                descriptions.append(desc)
+
+                        if descriptions:
+                            description = ' '.join(descriptions)
+                            source = 'vision'
+                            logger.debug(f"Vision API described {Path(video_path).name}: {description[:100]}...")
+                except Exception as e:
+                    logger.debug(f"Vision API failed for {video_path}: {e}")
+
+            # Fallback to LLM from title/keyword
+            if use_llm and description is None:
+                try:
+                    keyword = self._extract_source_keyword(video_path)
+                    video_name = Path(video_path).stem
+
+                    # Clean up video name for description
+                    clean_name = video_name.replace('_', ' ').replace('-', ' ')
+                    # Remove video IDs (11-char YouTube IDs)
+                    import re
+                    clean_name = re.sub(r'\b[a-zA-Z0-9_-]{11}\b', '', clean_name).strip()
+
+                    # Generate description from keyword + filename
+                    if self.config.gemini_api_key:
+                        import google.generativeai as genai
+                        genai.configure(api_key=self.config.gemini_api_key)
+                        model = genai.GenerativeModel('gemini-2.0-flash')
+
+                        prompt = f"""Generate a short visual description (2-3 sentences) for a stock video based on:
+- Search keyword: {keyword}
+- Filename: {clean_name}
+
+Describe what visual content this video likely contains. Focus on subjects, actions, and setting.
+Be specific and descriptive for semantic matching purposes."""
+
+                        response = model.generate_content(prompt)
+                        description = response.text.strip()
+                        source = 'llm'
+                        logger.debug(f"LLM described {Path(video_path).name}: {description[:100]}...")
+                    else:
+                        # Simple fallback - use keyword as description
+                        description = f"Video footage of {keyword}. Visual content showing {clean_name}."
+                        source = 'keyword'
+
+                except Exception as e:
+                    logger.debug(f"LLM fallback failed for {video_path}: {e}")
+
+            # Create synthetic segments if we have a description
+            if description:
+                # Get video duration
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                         '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
+                except:
+                    duration = 30.0
+
+                # Create synthetic transcript segment
+                from src.transcription import TranscriptSegment
+
+                synthetic_segment = TranscriptSegment(
+                    text=description,
+                    start_time=0.0,
+                    end_time=duration,
+                    source_file=video_path
+                )
+
+                # Mark as B-roll for potential boost
+                synthetic_segment.is_broll = True
+                synthetic_segment.description_source = source
+
+                # Add/replace in transcripts
+                self.transcripts[video_path] = [synthetic_segment]
+                described += 1
+
+                print(f"    ✓ {Path(video_path).name}: {source} description ({len(description)} chars)")
+
+        if described > 0:
+            print(f"  ✓ Generated descriptions for {described}/{len(silent_videos)} silent videos")
 
     def _extract_source_keyword(self, video_path: str) -> str:
         """Try to extract the source search keyword from video path structure."""
