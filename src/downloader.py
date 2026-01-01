@@ -1966,28 +1966,49 @@ def rename_segments_with_timing(
     renamed_files = []
 
     for idx, segment in enumerate(merged_segments, start=1):
-        old_name = download_dir / f"{video_id}_{idx}.mp4"
         new_name = download_dir / get_segment_filename(video_id, segment.start_time)
 
+        # Try different autonumber formats and extensions
+        # yt-dlp %(autonumber)s produces 5-digit padded by default: 00001, 00002
+        possible_names = [
+            f"{video_id}_{idx:05d}",  # 00001, 00002 (yt-dlp default)
+            f"{video_id}_{idx}",       # 1, 2 (unpadded)
+            f"{video_id}_{idx:02d}",   # 01, 02 (2-digit)
+        ]
+        extensions = ['.mp4', '.mkv', '.webm']
+
+        found_file = None
+        for name_base in possible_names:
+            for ext in extensions:
+                candidate = download_dir / f"{name_base}{ext}"
+                if candidate.exists():
+                    found_file = candidate
+                    break
+            if found_file:
+                break
+
         try:
-            if old_name.exists():
-                old_name.rename(new_name)
-                renamed_files.append(str(new_name))
-                logger.debug(f"Renamed {old_name.name} -> {new_name.name}")
+            if found_file:
+                # Preserve original extension
+                final_name = new_name.with_suffix(found_file.suffix)
+                found_file.rename(final_name)
+                renamed_files.append(str(final_name))
+                logger.debug(f"Renamed {found_file.name} -> {final_name.name}")
             else:
-                # Try with different extensions
-                for ext in ['.mkv', '.webm']:
-                    alt_old = old_name.with_suffix(ext)
-                    if alt_old.exists():
-                        alt_new = new_name.with_suffix(ext)
-                        alt_old.rename(alt_new)
-                        renamed_files.append(str(alt_new))
-                        break
+                # Try glob as fallback
+                pattern = f"{video_id}_*"
+                matches = sorted(download_dir.glob(pattern))
+                if idx <= len(matches):
+                    found_file = matches[idx - 1]
+                    final_name = new_name.with_suffix(found_file.suffix)
+                    found_file.rename(final_name)
+                    renamed_files.append(str(final_name))
+                    logger.debug(f"Renamed (glob) {found_file.name} -> {final_name.name}")
                 else:
-                    logger.warning(f"Expected file not found: {old_name}")
+                    logger.warning(f"Expected file not found: {video_id}_{idx}.mp4")
                     renamed_files.append(None)
         except OSError as e:
-            logger.error(f"Failed to rename {old_name}: {e}")
+            logger.error(f"Failed to rename segment {idx} for {video_id}: {e}")
             renamed_files.append(None)
 
     return renamed_files
