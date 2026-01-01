@@ -981,8 +981,16 @@ Only output the JSON array, no other text."""
                 except Exception:
                     pass
         
-        # Use override, config, or default (2 min for download, separate from 10 min transcode)
-        download_timeout = timeout_override or getattr(self.download_config, 'download_timeout', 120)
+        # Use override, tier-specific timeout, config default, or fallback (2 min)
+        # Tier-specific timeouts: longer videos need more download time
+        if timeout_override:
+            download_timeout = timeout_override
+        else:
+            tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
+            if tier and tier in tier_timeouts:
+                download_timeout = tier_timeouts[tier]
+            else:
+                download_timeout = getattr(self.download_config, 'download_timeout', 120)
         
         # Track timeout for retry logic
         self._last_download_timed_out = False
