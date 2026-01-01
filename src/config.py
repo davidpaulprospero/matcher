@@ -93,7 +93,6 @@ class ProjectConfig:
 
 
 @dataclass
-@dataclass
 class PauseSplitConfig:
     """Pause-based segment splitting settings
     
@@ -424,7 +423,6 @@ class ZeroDownloadRemixConfig:
     max_keywords_per_batch: int = 20  # Maximum keywords to remix at once
 
 
-@dataclass
 @dataclass
 class StockVideoConfig:
     """Configuration for stock video downloads."""
