@@ -1594,7 +1594,7 @@ Only output the JSON array, no other text."""
                 '-x',  # Extract audio
                 '--audio-format', 'mp3',
                 '--audio-quality', str(audio_quality),
-                '-o', str(audio_dir / '%(id)s.%(ext)s'),
+                '-o', str(audio_dir / '%(id)s.mp3'),  # Force .mp3 extension
                 '--no-playlist',
                 '--no-warnings',
             ]
@@ -1625,7 +1625,9 @@ Only output the JSON array, no other text."""
                     ))
                     logger.debug(f"Downloaded audio: {video_id}")
                 else:
-                    logger.warning(f"Audio download failed for {video_id}: {result.stderr[:200]}")
+                    # Show last 500 chars of stderr (actual error, not ffmpeg header)
+                    err_msg = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
+                    logger.warning(f"Audio download failed for {video_id} (rc={result.returncode}): {err_msg}")
 
             except subprocess.TimeoutExpired:
                 logger.warning(f"Audio download timeout for {video_id}")
