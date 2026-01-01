@@ -665,7 +665,16 @@ class DownloadConfig:
     
     # Timeout settings
     search_timeout: int = 60  # Seconds for search metadata subprocess
-    download_timeout: int = 120  # Seconds per video download (2 min) - retries with modified keyword on timeout
+    download_timeout: int = 120  # Default seconds per video download (used for 'short' tier)
+
+    # Tier-specific download timeouts (longer videos need more time)
+    # Keys: 'short', 'medium', 'long', 'longer'
+    download_timeouts: Dict[str, int] = field(default_factory=lambda: {
+        'short': 120,    # 2 min timeout for videos <2 min
+        'medium': 300,   # 5 min timeout for videos 2-10 min
+        'long': 600,     # 10 min timeout for videos 10-25 min
+        'longer': 900,   # 15 min timeout for videos 25-50 min
+    })
     
     # Duration tiers (can be overridden)
     tiers: dict = field(default_factory=lambda: {
