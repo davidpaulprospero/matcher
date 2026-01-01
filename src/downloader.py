@@ -1532,7 +1532,7 @@ Only output the JSON array, no other text."""
         # Search for videos
         search_count = max(per_keyword * 5, 40)
         try:
-            search_results = self._search_videos(keyword, tier, max_results=search_count)
+            search_results = self._search_video_metadata(keyword, tier, max_results=search_count)
         except Exception as e:
             logger.error(f"Search failed for '{keyword}': {e}")
             return []
