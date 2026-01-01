@@ -413,20 +413,25 @@ class VideoDownloader:
     def _needs_transcoding(self, video_path: str) -> tuple:
         """
         Check if video needs transcoding for DaVinci Resolve.
-        
+
         Returns (needs_transcode: bool, reason: str)
-        
+
         DaVinci-compatible codecs (no transcode needed):
         - H.264/AVC in MP4/MOV container
-        - H.265/HEVC in MP4/MOV container  
+        - H.265/HEVC in MP4/MOV container
         - ProRes in MOV container
         - DNxHD/DNxHR in MOV/MXF container
-        
+
         Needs transcoding:
         - VP9 (WebM) - common from YouTube
         - AV1 - newer YouTube format
         - VP8 - older WebM
         """
+        # Skip audio-only files (audio-first pipeline downloads mp3/m4a)
+        audio_extensions = {'.mp3', '.m4a', '.opus', '.ogg', '.wav', '.flac', '.aac'}
+        if Path(video_path).suffix.lower() in audio_extensions:
+            return False, "Audio file (no transcode)"
+
         codec, container = self._get_video_codec(video_path)
         
         if not codec:
