@@ -758,6 +758,19 @@ stock_footage:
   <<: *rate_limit
 
 # -----------------------------------------------------------------------------
+# SILENT VIDEO HANDLING (B-ROLL)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Silent videos (no speech) are valuable B-roll footage
+# Reasoning: They're versatile visual content without talking heads
+# Decision: Generate descriptions using Vision API or LLM for matching
+silent_video:
+  enabled: true  # Enable silent video handling
+  min_words_threshold: 10  # Videos with fewer words are considered silent
+  use_vision_api: true  # Use Gemini Vision to describe video frames
+  use_llm_fallback: true  # Fall back to LLM description from title/keyword
+  cache_descriptions: true  # Cache generated descriptions
+
+# -----------------------------------------------------------------------------
 # DEDUPLICATION
 # -----------------------------------------------------------------------------
 # Chain-of-thought: Perceptual hashing detects near-duplicate videos
