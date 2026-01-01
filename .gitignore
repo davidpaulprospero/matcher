@@ -63,8 +63,7 @@ Thumbs.db
 context.py
 llm_context.txt
 *.md
-matcher.code-workspace
-*.md
+!CLAUDE.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
 *.zip
