@@ -1614,6 +1614,11 @@ Only output the JSON array, no other text."""
                 '--no-warnings',
             ]
 
+            # Add ffmpeg location if configured (required for audio conversion)
+            ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
+            if ffmpeg_loc:
+                cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+
             # Add cookies (browser or file)
             cmd.extend(self._get_cookies_args())
 
