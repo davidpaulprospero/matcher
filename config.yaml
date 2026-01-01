@@ -726,18 +726,22 @@ duration_tiers:
     min: 20
     max: 120
     count: 5
+    max_total: 0        # 0 = no limit
   medium:
     min: 120
     max: 600
     count: 3
+    max_total: 0
   long:
     min: 600
     max: 1500
     count: 1
+    max_total: 0
   longer:
     min: 1500
     max: 3000
     count: 1
+    max_total: 1        # Only 1 longer video per project (saves ~5 min download time)
 
 # -----------------------------------------------------------------------------
 # STOCK FOOTAGE (Pexels, Pixabay)

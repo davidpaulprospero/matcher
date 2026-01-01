@@ -784,15 +784,16 @@ class DurationTierConfig:
     min_seconds: int = 0
     max_seconds: int = 120
     videos_per_keyword: int = 5
+    max_total: int = 0  # 0 = no limit, >0 = project-level cap
 
 
 @dataclass
 class DurationTiersConfig:
     """Duration tiers for downloading"""
-    short: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(20, 120, 8))
-    medium: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(120, 600, 8))
-    long: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(600, 1500, 5))
-    longer: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(1500, 3000, 5))
+    short: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(20, 120, 8, 0))
+    medium: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(120, 600, 8, 0))
+    long: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(600, 1500, 5, 0))
+    longer: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(1500, 3000, 1, 1))  # 1 per project
 
 
 @dataclass
@@ -1280,17 +1281,18 @@ class Config:
     def _build_duration_tiers(data: Dict) -> DurationTiersConfig:
         """Build duration tiers from nested config"""
         tiers = DurationTiersConfig()
-        
+
         for tier_name in ['short', 'medium', 'long', 'longer']:
             if tier_name in data:
                 tier_data = data[tier_name]
                 tier_config = DurationTierConfig(
                     min_seconds=tier_data.get('min', 0),
                     max_seconds=tier_data.get('max', 120),
-                    videos_per_keyword=tier_data.get('count', 5)
+                    videos_per_keyword=tier_data.get('count', 5),
+                    max_total=tier_data.get('max_total', 0)
                 )
                 setattr(tiers, tier_name, tier_config)
-        
+
         return tiers
     
     def to_yaml(self, output_path: str = None) -> str:
