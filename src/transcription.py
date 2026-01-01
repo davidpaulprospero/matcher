@@ -260,20 +260,50 @@ class TranscriptCache:
     cache_dir: Path
     alt_cache_dir: Path = None
     _source_map: Dict[str, Path] = None  # Maps source_file -> cache_file
-    
+    _video_id_map: Dict[str, Path] = None  # Maps video_id -> cache_file (for segment matching)
+
+    @staticmethod
+    def _extract_video_id(filename: str) -> Optional[str]:
+        """
+        Extract YouTube video ID from filename.
+        Handles: video_id.mp4, video_id.mp3, video_id_0045.mp4 (segments)
+        YouTube IDs are 11 characters: [A-Za-z0-9_-]
+        """
+        import re
+        stem = Path(filename).stem
+
+        # Pattern 1: Segment file like "abc12345678_0045" -> extract "abc12345678"
+        segment_match = re.match(r'^([A-Za-z0-9_-]{11})_\d+$', stem)
+        if segment_match:
+            return segment_match.group(1)
+
+        # Pattern 2: Regular file with 11-char ID at start
+        # Handle names like "abc12345678" or "abc12345678_extra_info"
+        if len(stem) >= 11:
+            potential_id = stem[:11]
+            if re.match(r'^[A-Za-z0-9_-]{11}$', potential_id):
+                return potential_id
+
+        # Pattern 3: Exact 11-char stem
+        if len(stem) == 11 and re.match(r'^[A-Za-z0-9_-]+$', stem):
+            return stem
+
+        return None
+
     def __init__(self, cache_dir: str):
         base_dir = Path(cache_dir)
-        
+
         # Check both possible folder names
         self.cache_dir = base_dir / "transcriptions"
         self.alt_cache_dir = base_dir / "transcripts"
-        
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._source_map = {}
-        
+        self._video_id_map = {}  # Maps video ID -> cache file
+
         print(f"  [DEBUG] Primary cache: {self.cache_dir}", flush=True)
         print(f"  [DEBUG] Alt cache: {self.alt_cache_dir}", flush=True)
-        
+
         # Build reverse lookup by reading source_file from each cache file
         self._build_source_map()
     
@@ -309,15 +339,20 @@ class TranscriptCache:
                         # Normalize path for matching
                         source_file = str(Path(source_file).resolve()) if source_file else ''
                         self._source_map[source_file] = cache_file
-                        
+
                         # Also add just the filename as key for partial matching
                         filename = Path(source_file).name
                         self._source_map[filename] = cache_file
-                        
+
+                        # Extract video ID for segment matching (audio-first mode support)
+                        video_id = self._extract_video_id(filename)
+                        if video_id and video_id not in self._video_id_map:
+                            self._video_id_map[video_id] = cache_file
+
                 except Exception as e:
                     continue
-            
-        print(f"  [DEBUG] Built source map with {len(self._source_map)} entries", flush=True)
+
+        print(f"  [DEBUG] Built source map with {len(self._source_map)} entries, {len(self._video_id_map)} video IDs", flush=True)
         if self._source_map:
             sample_keys = list(self._source_map.keys())[:2]
             for k in sample_keys:
@@ -334,7 +369,7 @@ class TranscriptCache:
         """Get cached transcript for a video"""
         video_path_resolved = str(Path(video_path).resolve())
         video_name = Path(video_path).name
-        
+
         # Try source map lookup first (most reliable)
         cache_file = None
         if video_path_resolved in self._source_map:
@@ -343,7 +378,13 @@ class TranscriptCache:
             cache_file = self._source_map[video_name]
         elif video_path in self._source_map:
             cache_file = self._source_map[video_path]
-        
+
+        # Fallback to video ID lookup (for segment files matching audio transcripts)
+        if not cache_file:
+            video_id = self._extract_video_id(video_name)
+            if video_id and video_id in self._video_id_map:
+                cache_file = self._video_id_map[video_id]
+
         # Fallback to hash-based lookup
         if not cache_file:
             video_hash = self._get_video_hash(video_path)
