@@ -1696,14 +1696,25 @@ Only output the JSON array, no other text."""
                 by_video[seg.video_id] = []
             by_video[seg.video_id].append(seg)
 
+        total_videos = len(by_video)
+        current_video = 0
+
         for video_id, segments in by_video.items():
             if not segments:
                 continue
+
+            current_video += 1
 
             # Use first segment for URL and keyword
             first_seg = segments[0]
             video_url = first_seg.video_url
             keyword = first_seg.keyword
+
+            # Calculate total duration for this video's segments
+            total_seg_duration = sum(seg.end_time - seg.start_time for seg in segments)
+
+            # Progress output
+            print(f"  [{current_video}/{total_videos}] {video_id} ({len(segments)} segments, {total_seg_duration:.0f}s)")
 
             # Create output directory
             max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
@@ -1754,14 +1765,17 @@ Only output the JSON array, no other text."""
                 )
 
                 if result.returncode != 0:
+                    print(f"      ✗ Failed: {result.stderr[-200:] if result.stderr else 'Unknown error'}")
                     logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
                 else:
                     segment_success = True
                     # Rename files from autonumber to timestamp-based names
                     downloaded = rename_segments_with_timing(video_dir, video_id, segments)
 
+                    success_count = 0
                     for seg, file_path in zip(segments, downloaded):
                         if file_path and Path(file_path).exists():
+                            success_count += 1
                             # Get actual file duration
                             file_duration = seg.end_time - seg.start_time  # Approximate
 
@@ -1775,13 +1789,18 @@ Only output the JSON array, no other text."""
                                 keyword=keyword
                             ))
 
+                    print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
+
             except subprocess.TimeoutExpired:
+                print(f"      ✗ Timeout after {timeout}s")
                 logger.warning(f"Segment download timeout for {video_id}")
             except Exception as e:
+                print(f"      ✗ Error: {e}")
                 logger.error(f"Segment download error for {video_id}: {e}")
 
             # Fallback to full video if segment download failed
             if not segment_success and fallback_full:
+                print(f"      → Falling back to full video download...")
                 fallback_segments = self._download_full_video_fallback(
                     video_id=video_id,
                     video_url=video_url,
