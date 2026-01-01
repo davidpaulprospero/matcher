@@ -1016,7 +1016,14 @@ class TieredMatcher:
         # Check for gap (no good match)
         has_gap = confidence < self.config.matching.confidence_threshold
         gap_reason = f"Low confidence ({confidence:.2f})" if has_gap else ""
-        
+
+        # Verbose logging for match decision
+        logger.debug(f"Match decision for segment: '{vo_segment.text[:50]}...'")
+        logger.debug(f"  Video: {Path(selected_seg.source_file).name} @ {selected_seg.start_time:.1f}s")
+        logger.debug(f"  Confidence: {confidence:.2f}, LLM: {llm_name}")
+        logger.debug(f"  Reason: {reasoning[:100]}...")
+        logger.debug(f"  Alternatives: {len(alternatives)}, Has gap: {has_gap}")
+
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,
