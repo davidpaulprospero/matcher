@@ -1731,6 +1731,11 @@ Only output the JSON array, no other text."""
                 '--no-warnings',
             ]
 
+            # Add ffmpeg location if configured (required for segment downloads)
+            ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
+            if ffmpeg_loc:
+                cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+
             # Add cookies (browser or file)
             cmd.extend(self._get_cookies_args())
 
@@ -1851,6 +1856,12 @@ Only output the JSON array, no other text."""
             '--no-playlist',
             '--no-warnings',
         ]
+
+        # Add ffmpeg location if configured
+        ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
+        if ffmpeg_loc:
+            cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+
         cmd.extend(self._get_cookies_args())
 
         try:
