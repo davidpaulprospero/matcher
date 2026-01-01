@@ -684,7 +684,7 @@ download:
   #   3. Downloads ONLY the matched video segments with buffer
   # Typical savings: 80-90% less download time/bandwidth
   audio_first:
-    enabled: false          # Set to true to enable audio-first mode
+    enabled: true           # Audio-first mode enabled by default
     buffer_seconds: 30.0    # Extra footage before/after each match
     merge_gap_seconds: 15.0 # Merge segments closer than this (reduces requests)
     audio_quality: 5        # 0 (best) to 9 (worst), 5 = ~128kbps
