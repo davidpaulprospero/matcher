@@ -2528,11 +2528,14 @@ Topic:"""
             if self.embeddings is not None and len(self.embeddings) > 0:
                 self.embedding_index = build_embedding_index(self.embeddings, config=config)
                 print(f"  ✓ Built embedding index ({len(self.embeddings)} vectors)")
-        
+
         # Pre-detect faces if face preference is set (caches results for matching stage)
+        # Skip for audio-first mode - face detection runs after video segments are downloaded
         face_pref = getattr(self, 'face_preference', 'neutral')
-        if face_pref != 'neutral':
+        if face_pref != 'neutral' and not self._is_audio_first_enabled():
             self._predetect_faces(video_files)
+        elif face_pref != 'neutral' and self._is_audio_first_enabled():
+            print(f"  ⏭ Face detection deferred (audio-first mode - will run after video download)")
 
         # Extract topics from video transcripts (for chapter-based matching)
         if config.matching.chapter_matching_enabled and config.matching.extract_video_topics:
@@ -3551,6 +3554,13 @@ Topic:"""
                     'segment_count': len(self.downloaded_segments),
                     'segment_files': [seg.file for seg in self.downloaded_segments]
                 })
+
+                # Run face detection on downloaded video segments (deferred from Stage 3)
+                face_pref = getattr(self, 'face_preference', 'neutral')
+                if face_pref != 'neutral' and self.downloaded_segments:
+                    segment_files = [Path(seg.file) for seg in self.downloaded_segments]
+                    print(f"\n  ─── Face Detection (on video segments) ───")
+                    self._predetect_faces(segment_files)
 
         # Stage 5: Output
         stage_start = time.time()
