@@ -1690,9 +1690,128 @@ class StrategyMatcher:
                 reasoning=f"Diverse match (diversity={best_diversity:.2f})",
                 strategy="embedding_diversity"
             )
-        
+
         return None
-    
+
+    def get_secondary_matches_diversity(
+        self,
+        vo_segment: SRTSegment,
+        all_candidates: List[Tuple[SRTSegment, float]],
+        primary_match: SRTSegment,
+        alternatives: List[SRTSegment],
+        vo_embedding: List[float],
+        candidate_embeddings: Dict[str, List[float]]
+    ) -> List[AlternativeMatch]:
+        """
+        Get secondary matches (V4-V6) using diversity scoring.
+
+        STRICT enforcement: Each track MUST use a different source video.
+        Uses same diversity algorithm as V7 (embedding_diversity).
+
+        Args:
+            vo_segment: The voiceover segment
+            all_candidates: All candidate clips with similarity scores
+            primary_match: V1 match segment
+            alternatives: V2-V3 match segments
+            vo_embedding: Voiceover embedding
+            candidate_embeddings: Dict of clip_id -> embedding
+
+        Returns:
+            List of up to 3 AlternativeMatch objects for V4, V5, V6
+        """
+        def _has_emb(e):
+            return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
+
+        if not candidate_embeddings:
+            return []
+
+        # Collect V1-V3 source files and embeddings
+        v1_v3_sources = {primary_match.source_file}
+        v1_v3_embeddings = []
+
+        # Get V1 embedding
+        v1_id = self.get_clip_id(primary_match)
+        if v1_id in candidate_embeddings:
+            v1_v3_embeddings.append(candidate_embeddings[v1_id])
+
+        # Get V2-V3 embeddings
+        for alt_seg in alternatives:
+            if alt_seg:
+                v1_v3_sources.add(alt_seg.source_file)
+                alt_id = self.get_clip_id(alt_seg)
+                if alt_id in candidate_embeddings:
+                    v1_v3_embeddings.append(candidate_embeddings[alt_id])
+
+        secondary_matches = []
+        used_sources = set(v1_v3_sources)  # Start with V1-V3 sources excluded
+        existing_embeddings = list(v1_v3_embeddings)
+
+        labels = ["Secondary Primary", "Secondary Alt 1", "Secondary Alt 2"]
+
+        for track_idx in range(3):  # V4, V5, V6
+            best_candidate = None
+            best_score = -1
+            best_diversity = 0
+            best_emb = None
+
+            for seg, text_sim in all_candidates:
+                # STRICT: Must be from a different source than V1-V3 AND previous secondary tracks
+                if seg.source_file in used_sources:
+                    continue
+
+                cand_id = self.get_clip_id(seg)
+                cand_emb = candidate_embeddings.get(cand_id)
+
+                if not _has_emb(cand_emb):
+                    continue
+
+                # Skip if same exact clip already used
+                if any(self.get_clip_id(sm.video_segment) == cand_id for sm in secondary_matches):
+                    continue
+
+                # Calculate diversity: average distance from ALL existing matches (V1-V3 + previous V4-V6)
+                if existing_embeddings:
+                    distances = []
+                    for existing_emb in existing_embeddings:
+                        if _has_emb(existing_emb):
+                            sim = cosine_similarity(cand_emb, existing_emb)
+                            distances.append(1.0 - sim)
+                    avg_diversity = sum(distances) / len(distances) if distances else 0
+                else:
+                    avg_diversity = 0.5  # Default if no embeddings
+
+                # Relevance to voiceover
+                vo_relevance = cosine_similarity(cand_emb, vo_embedding) if _has_emb(vo_embedding) else text_sim
+
+                # Combined score: 40% relevance + 60% diversity (same as V7)
+                combined_score = vo_relevance * 0.4 + avg_diversity * 0.6
+
+                # Must meet minimum relevance threshold
+                if vo_relevance < 0.3:
+                    continue
+
+                if combined_score > best_score:
+                    best_score = combined_score
+                    best_candidate = seg
+                    best_diversity = avg_diversity
+                    best_emb = cand_emb
+
+            if best_candidate:
+                scene = self._get_scene_for_segment(best_candidate)
+                secondary_matches.append(AlternativeMatch(
+                    video_segment=best_candidate,
+                    video_scene=scene,
+                    confidence=best_score,
+                    reasoning=f"{labels[track_idx]} (diversity={best_diversity:.2f}, source: {Path(best_candidate.source_file).stem})"
+                ))
+
+                # Add to exclusion for next track
+                used_sources.add(best_candidate.source_file)
+                if _has_emb(best_emb):
+                    existing_embeddings.append(best_emb)
+
+        return secondary_matches
+
     def _get_scene_for_segment(self, segment: SRTSegment) -> Optional[SceneInfo]:
         """Find the scene containing this segment"""
         video_scenes = self.scenes.get(segment.source_file, [])
@@ -2053,13 +2172,34 @@ def match_all_segments(
             )
             
             result.strategy_matches = strategy_matches
-            
+
             # Record strategy track usage
             if variety_tracker:
                 for sm in strategy_matches:
                     variety_tracker.record_usage(
                         "V_strategy",
                         sm.video_segment.source_file,
+                        current_timeline_pos
+                    )
+
+            # Compute secondary matches (V4-V6) using diversity scoring
+            # This overrides the secondary_matches from match_segment with strict source enforcement
+            secondary_matches = strategy_matcher.get_secondary_matches_diversity(
+                vo_segment=vo_seg,
+                all_candidates=strategy_candidates,
+                primary_match=result.primary_match.video_segment,
+                alternatives=alt_segments,
+                vo_embedding=vo_emb,
+                candidate_embeddings=candidate_embeddings
+            )
+            result.secondary_matches = secondary_matches
+
+            # Record V4-V6 usage for timeline variety
+            if variety_tracker and secondary_matches:
+                for sec_idx, sec_match in enumerate(secondary_matches, start=4):
+                    variety_tracker.record_usage(
+                        f"V{sec_idx}",
+                        sec_match.video_segment.source_file,
                         current_timeline_pos
                     )
         
