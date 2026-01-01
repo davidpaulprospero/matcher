@@ -289,47 +289,47 @@ def create_clip_with_timewarp(
     media_duration: float = None  # Total duration of the source media file
 ) -> otio.schema.Clip:
     """
-    Create a clip with duration matching the target (voiceover) duration.
-    
-    The clip's source_range is set to target_duration so it aligns perfectly
-    on the timeline. Speed adjustment can be done manually in the NLE.
-    
+    Create a clip with speed adjustment to match target (voiceover) duration.
+
+    Uses LinearTimeWarp to stretch/compress source footage to fit target duration.
+    This ensures clips align with voiceover without manual speed adjustment in NLE.
+
     Args:
         name: Clip name
         source_path: Path to source video/audio
         source_start: Start time in source (seconds)
-        source_duration: Original duration in source (seconds) - stored in metadata
-        target_duration: Desired duration on timeline (seconds) - used for source_range
+        source_duration: Original duration in source (seconds)
+        target_duration: Desired duration on timeline (seconds)
         frame_rate: Frame rate
         metadata: Optional metadata dict
         media_duration: Total duration of the source media file (for available_range)
-    
+
     Returns:
-        OTIO Clip with duration matching target_duration
+        OTIO Clip with LinearTimeWarp applied to match target_duration
     """
     rate = frame_rate
-    
+
     # Create absolute Windows path with backslashes for DaVinci Resolve
     abs_path = _to_windows_path(source_path)
-    
+
     # Make media reference name unique by including parent folder
     # This prevents DaVinci Resolve from confusing clips with same filename in different folders
     folder_name = Path(source_path).parent.name
     filename = Path(source_path).name
     unique_media_name = f"{folder_name}_{filename}"
-    
+
     # Determine available_range for the media file
     # If we don't know the media duration, estimate from source_start + source_duration
     if media_duration is None:
         # Estimate: assume media is at least as long as what we're using
         estimated_duration = source_start + source_duration + 10  # Add buffer
         media_duration = estimated_duration
-    
+
     available_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(0, rate),
         duration=otio.opentime.RationalTime(round(media_duration * rate), rate)
     )
-    
+
     # Create media reference with proper format for DaVinci Resolve
     # Note: name must be set as attribute, not constructor param
     media_ref = otio.schema.ExternalReference(
@@ -337,33 +337,51 @@ def create_clip_with_timewarp(
         available_range=available_range
     )
     media_ref.name = unique_media_name  # Unique name includes folder
-    
+
     # IMPORTANT: Use round() to avoid floating-point precision drift
     # This prevents timing deviation over many clips
     start_frames = round(source_start * rate)
-    duration_frames = round(target_duration * rate)
-    
-    # Source range uses TARGET duration so clips align with voiceover
-    # The clip will be trimmed to fit - user can adjust speed manually
+
+    # Source range uses SOURCE duration - the actual footage we're using
+    # LinearTimeWarp will stretch/compress this to target_duration on timeline
+    source_duration_frames = round(source_duration * rate)
+
+    # Ensure we have at least 1 frame
+    if source_duration_frames < 1:
+        source_duration_frames = 1
+
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),
-        duration=otio.opentime.RationalTime(duration_frames, rate)
+        duration=otio.opentime.RationalTime(source_duration_frames, rate)
     )
-    
+
     # Create clip
     clip = otio.schema.Clip(
         name=name,
         media_reference=media_ref,
         source_range=source_range
     )
-    
+
+    # Apply LinearTimeWarp to match target duration
+    # time_scalar = source_duration / target_duration
+    # - time_scalar < 1: slow down (stretch footage to fill longer duration)
+    # - time_scalar > 1: speed up (compress footage to fit shorter duration)
+    # - time_scalar = 1: no change (source and target match)
+    if target_duration > 0 and source_duration > 0:
+        time_scalar = source_duration / target_duration
+
+        # Only apply time warp if there's a meaningful speed change (>1% difference)
+        if abs(time_scalar - 1.0) > 0.01:
+            time_warp = otio.schema.LinearTimeWarp(time_scalar=time_scalar)
+            clip.effects.append(time_warp)
+
     # Add Resolve_OTIO metadata (required for DaVinci import)
     clip.metadata['Resolve_OTIO'] = {}
-    
+
     # Calculate and store speed info in metadata for reference
     if metadata is None:
         metadata = {}
-    
+
     if target_duration > 0 and source_duration > 0:
         time_scalar = source_duration / target_duration
         metadata['time_scalar'] = time_scalar
@@ -371,12 +389,12 @@ def create_clip_with_timewarp(
         metadata['target_duration'] = target_duration
         metadata['source_duration'] = source_duration
         metadata['suggested_speed'] = f"{time_scalar * 100:.0f}%"
-    
+
     # Add metadata (convert numpy types to Python native types)
     metadata = _sanitize_metadata(metadata)
     for key, value in metadata.items():
         clip.metadata[key] = value
-    
+
     return clip
 
 
