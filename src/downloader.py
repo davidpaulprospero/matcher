@@ -1599,10 +1599,8 @@ Only output the JSON array, no other text."""
                 '--no-warnings',
             ]
 
-            # Add cookies if configured
-            cookies_path = getattr(self.download_config, 'cookies_path', '')
-            if cookies_path and Path(cookies_path).exists():
-                cmd.extend(['--cookies', cookies_path])
+            # Add cookies (browser or file)
+            cmd.extend(self._get_cookies_args())
 
             try:
                 result = subprocess.run(
@@ -1702,15 +1700,14 @@ Only output the JSON array, no other text."""
                 '--no-warnings',
             ]
 
-            # Add cookies if configured
-            cookies_path = getattr(self.download_config, 'cookies_path', '')
-            if cookies_path and Path(cookies_path).exists():
-                cmd.extend(['--cookies', cookies_path])
+            # Add cookies (browser or file)
+            cmd.extend(self._get_cookies_args())
 
             # Get tier-specific timeout
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
             timeout = tier_timeouts.get('long', 600)  # Use long tier timeout for segments
 
+            segment_success = False
             try:
                 result = subprocess.run(
                     cmd,
@@ -1721,35 +1718,42 @@ Only output the JSON array, no other text."""
 
                 if result.returncode != 0:
                     logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
-                    if fallback_full:
-                        logger.info(f"Falling back to full video for {video_id}")
-                        # TODO: Implement full video fallback
-                    continue
+                else:
+                    segment_success = True
+                    # Rename files from autonumber to timestamp-based names
+                    downloaded = rename_segments_with_timing(video_dir, video_id, segments)
 
-                # Rename files from autonumber to timestamp-based names
-                downloaded = rename_segments_with_timing(video_dir, video_id, segments)
+                    for seg, file_path in zip(segments, downloaded):
+                        if file_path and Path(file_path).exists():
+                            # Get actual file duration
+                            file_duration = seg.end_time - seg.start_time  # Approximate
 
-                for seg, file_path in zip(segments, downloaded):
-                    if file_path and Path(file_path).exists():
-                        # Get actual file duration
-                        file_duration = seg.end_time - seg.start_time  # Approximate
-
-                        downloaded_segments.append(DownloadedSegment(
-                            file=str(file_path),
-                            video_id=video_id,
-                            original_start=seg.start_time,
-                            original_end=seg.end_time,
-                            file_duration=file_duration,
-                            matches=seg.original_matches,
-                            keyword=keyword
-                        ))
+                            downloaded_segments.append(DownloadedSegment(
+                                file=str(file_path),
+                                video_id=video_id,
+                                original_start=seg.start_time,
+                                original_end=seg.end_time,
+                                file_duration=file_duration,
+                                matches=seg.original_matches,
+                                keyword=keyword
+                            ))
 
             except subprocess.TimeoutExpired:
                 logger.warning(f"Segment download timeout for {video_id}")
-                if fallback_full:
-                    logger.info(f"Falling back to full video for {video_id}")
             except Exception as e:
                 logger.error(f"Segment download error for {video_id}: {e}")
+
+            # Fallback to full video if segment download failed
+            if not segment_success and fallback_full:
+                fallback_segments = self._download_full_video_fallback(
+                    video_id=video_id,
+                    video_url=video_url,
+                    video_dir=video_dir,
+                    segments=segments,
+                    keyword=keyword,
+                    timeout=timeout
+                )
+                downloaded_segments.extend(fallback_segments)
 
         logger.info(f"Downloaded {len(downloaded_segments)} video segments")
         return downloaded_segments
@@ -1760,6 +1764,120 @@ Only output the JSON array, no other text."""
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def _get_cookies_args(self) -> List[str]:
+        """Get yt-dlp cookie arguments (browser or file).
+
+        Prefers cookies_from_browser, falls back to cookies_path.
+        Returns list of arguments to extend yt-dlp command.
+        """
+        # Prefer browser cookies
+        cookies_browser = getattr(self.download_config, 'cookies_from_browser', '')
+        if cookies_browser:
+            logger.debug(f"Using cookies from browser: {cookies_browser}")
+            return ['--cookies-from-browser', cookies_browser]
+
+        # Fall back to cookies file
+        cookies_path = getattr(self.download_config, 'cookies_path', '')
+        if cookies_path and Path(cookies_path).exists():
+            logger.debug(f"Using cookies file: {cookies_path}")
+            return ['--cookies', cookies_path]
+
+        return []
+
+    def _download_full_video_fallback(
+        self,
+        video_id: str,
+        video_url: str,
+        video_dir: Path,
+        segments: List[MergedSegment],
+        keyword: str,
+        timeout: int = 600
+    ) -> List[DownloadedSegment]:
+        """Download full video as fallback when segment download fails.
+
+        Args:
+            video_id: YouTube video ID
+            video_url: Full YouTube URL
+            video_dir: Output directory
+            segments: Original segments (for match info)
+            keyword: Source keyword
+            timeout: Download timeout in seconds
+
+        Returns:
+            List with single DownloadedSegment covering full video
+        """
+        logger.info(f"  Downloading full video fallback: {video_id}")
+
+        output_file = video_dir / f"{video_id}_0000.mp4"
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+            '--merge-output-format', 'mp4',
+            '-o', str(output_file),
+            '--no-playlist',
+            '--no-warnings',
+        ]
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+            if result.returncode == 0 and output_file.exists():
+                # Get video duration using ffprobe if available
+                video_duration = self._get_video_duration(output_file)
+                if video_duration is None:
+                    # Estimate from segments
+                    video_duration = max(seg.end_time for seg in segments) + 60
+
+                # Collect all original matches from all segments
+                all_matches = []
+                for seg in segments:
+                    all_matches.extend(seg.original_matches)
+
+                logger.info(f"  ✓ Full video fallback success: {video_id}")
+                return [DownloadedSegment(
+                    file=str(output_file),
+                    video_id=video_id,
+                    original_start=0,
+                    original_end=video_duration,
+                    file_duration=video_duration,
+                    matches=all_matches,
+                    keyword=keyword
+                )]
+            else:
+                logger.error(f"Full video fallback failed for {video_id}: {result.stderr[:200]}")
+                return []
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Full video fallback timeout for {video_id}")
+            return []
+        except Exception as e:
+            logger.error(f"Full video fallback error for {video_id}: {e}")
+            return []
+
+    def _get_video_duration(self, video_path: Path) -> Optional[float]:
+        """Get video duration using ffprobe."""
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                return float(result.stdout.strip())
+        except Exception:
+            pass
+        return None
 
 
 # =============================================================================
@@ -1853,9 +1971,36 @@ def merge_segments_with_buffer(
     if not segments:
         return []
 
+    # Step 0: Validate and filter segments
+    validated = []
+    for start, end in segments:
+        # Type check
+        try:
+            start = float(start)
+            end = float(end)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid segment timestamps ({start}, {end}), skipping")
+            continue
+
+        # Fix negative start times
+        if start < 0:
+            logger.debug(f"Negative start time {start}, clamping to 0")
+            start = 0
+
+        # Skip invalid segments where end <= start
+        if end <= start:
+            logger.warning(f"Invalid segment [{start}, {end}] (end <= start), skipping")
+            continue
+
+        validated.append((start, end))
+
+    if not validated:
+        logger.warning("No valid segments after validation")
+        return []
+
     # Step 1: Add buffer and clamp to valid range
     buffered = []
-    for start, end in segments:
+    for start, end in validated:
         new_start = max(0, start - buffer_seconds)
         new_end = end + buffer_seconds
         if video_duration:
