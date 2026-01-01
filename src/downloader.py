@@ -1569,12 +1569,18 @@ Only output the JSON array, no other text."""
             video_id = video_info.get('id', '')
             video_url = video_info.get('webpage_url', f"https://www.youtube.com/watch?v={video_id}")
 
-            # Skip if already downloaded
-            audio_file = audio_dir / f"{video_id}.mp3"
-            if audio_file.exists():
-                logger.debug(f"Audio already exists: {audio_file.name}")
+            # Skip if already downloaded (check multiple audio formats)
+            existing_file = None
+            for ext in ['.mp3', '.m4a', '.mp4', '.opus', '.webm', '.ogg', '.wav']:
+                candidate = audio_dir / f"{video_id}{ext}"
+                if candidate.exists():
+                    existing_file = candidate
+                    break
+
+            if existing_file:
+                logger.debug(f"Audio already exists: {existing_file.name}")
                 audio_downloads.append(AudioDownload(
-                    audio_file=str(audio_file),
+                    audio_file=str(existing_file),
                     video_id=video_id,
                     video_url=video_url,
                     title=video_info.get('title', ''),
@@ -1588,13 +1594,14 @@ Only output the JSON array, no other text."""
                 continue
 
             # Build yt-dlp command for audio only
+            # Use %(ext)s and let yt-dlp determine the final extension
             cmd = [
                 'yt-dlp',
                 video_url,
                 '-x',  # Extract audio
                 '--audio-format', 'mp3',
                 '--audio-quality', str(audio_quality),
-                '-o', str(audio_dir / '%(id)s.mp3'),  # Force .mp3 extension
+                '-o', str(audio_dir / '%(id)s.%(ext)s'),
                 '--no-playlist',
                 '--no-warnings',
             ]
@@ -1610,9 +1617,19 @@ Only output the JSON array, no other text."""
                     timeout=120  # Audio should be fast
                 )
 
-                if result.returncode == 0 and audio_file.exists():
+                # Find the actual downloaded file (could be .mp3, .m4a, .opus, etc.)
+                actual_file = None
+                if result.returncode == 0:
+                    # Look for any audio file matching this video_id
+                    for ext in ['.mp3', '.m4a', '.mp4', '.opus', '.webm', '.ogg', '.wav']:
+                        candidate = audio_dir / f"{video_id}{ext}"
+                        if candidate.exists():
+                            actual_file = candidate
+                            break
+
+                if actual_file:
                     audio_downloads.append(AudioDownload(
-                        audio_file=str(audio_file),
+                        audio_file=str(actual_file),
                         video_id=video_id,
                         video_url=video_url,
                         title=video_info.get('title', ''),
@@ -1623,7 +1640,7 @@ Only output the JSON array, no other text."""
                         upload_date=video_info.get('upload_date', ''),
                         license=video_info.get('license', 'Unknown')
                     ))
-                    logger.debug(f"Downloaded audio: {video_id}")
+                    logger.debug(f"Downloaded audio: {actual_file.name}")
                 else:
                     # Show last 500 chars of stderr (actual error, not ffmpeg header)
                     err_msg = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
