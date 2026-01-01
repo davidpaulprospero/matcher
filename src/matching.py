@@ -673,6 +673,46 @@ class TieredMatcher:
 
         return boosted, reason
 
+    def _apply_current_project_boost(
+        self,
+        confidence: float,
+        video_segment: SRTSegment
+    ) -> Tuple[float, str]:
+        """
+        Apply confidence boost for videos from the current project.
+
+        Videos downloaded for the current project are prioritized over
+        videos from the global cache (past projects).
+
+        Args:
+            confidence: Original confidence score
+            video_segment: Video segment being considered
+
+        Returns:
+            Tuple of (boosted_confidence, boost_reason)
+        """
+        # Check if this is from global cache
+        source = getattr(video_segment, 'source', None)
+
+        # If no source attribute, assume it's from current project
+        if source is None or source != 'global_cache':
+            return confidence, ""
+
+        # Videos from global cache get a penalty (current project gets relative boost)
+        gc_config = getattr(self.config, 'global_cache', None)
+        current_project_boost = getattr(gc_config, 'current_project_boost', 0.1) if gc_config else 0.1
+
+        if current_project_boost <= 0:
+            return confidence, ""
+
+        # Apply penalty to global cache videos (equivalent to boosting current project)
+        penalized = max(0.0, confidence - current_project_boost)
+        reason = f"global cache: -{current_project_boost:.2f}"
+
+        logger.debug(f"Global cache penalty applied: {confidence:.2f} -> {penalized:.2f}")
+
+        return penalized, reason
+
     def _init_providers(self):
         """Initialize LLM providers based on config"""
         mc = self.config.matching
@@ -855,11 +895,18 @@ class TieredMatcher:
                 adjusted_confidence, best_seg
             )
 
+            # Apply current project boost (prioritize current project over global cache)
+            adjusted_confidence, project_reason = self._apply_current_project_boost(
+                adjusted_confidence, best_seg
+            )
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
             if broll_reason:
                 reasoning += f" [{broll_reason}]"
+            if project_reason:
+                reasoning += f" [{project_reason}]"
 
             match = Match(
                 voiceover_segment=vo_segment,
@@ -870,7 +917,7 @@ class TieredMatcher:
                 embedding_similarity=top_similarity,
                 clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
             )
-            
+
             # Get alternatives (prefer different sources)
             alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
             
@@ -916,11 +963,18 @@ class TieredMatcher:
                     adjusted_confidence, cached_seg
                 )
 
+                # Apply current project boost (prioritize current project over global cache)
+                adjusted_confidence, project_reason = self._apply_current_project_boost(
+                    adjusted_confidence, cached_seg
+                )
+
                 final_reasoning = f"(cached) {reasoning}"
                 if topic_penalty_reason:
                     final_reasoning += f" [{topic_penalty_reason}]"
                 if broll_reason:
                     final_reasoning += f" [{broll_reason}]"
+                if project_reason:
+                    final_reasoning += f" [{project_reason}]"
 
                 match = Match(
                     voiceover_segment=vo_segment,
@@ -1031,11 +1085,18 @@ class TieredMatcher:
             adjusted_confidence, best_seg
         )
 
+        # Apply current project boost (prioritize current project over global cache)
+        adjusted_confidence, project_reason = self._apply_current_project_boost(
+            adjusted_confidence, best_seg
+        )
+
         final_reasoning = reasoning
         if topic_penalty_reason:
             final_reasoning += f" [{topic_penalty_reason}]"
         if broll_reason:
             final_reasoning += f" [{broll_reason}]"
+        if project_reason:
+            final_reasoning += f" [{project_reason}]"
 
         match = Match(
             voiceover_segment=vo_segment,

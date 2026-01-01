@@ -505,11 +505,16 @@ class Pipeline:
         # Performance tracking
         self.stage_timings = {}
         self.use_delta_indexing = True
-        
+
         # Checkpoint manager for resume functionality
         self.checkpoint = None  # Initialized in run() with project dir
         self.resume_mode = False
-        
+
+        # Global cache for cross-project video reuse
+        self.global_cache = None
+        self.global_cache_videos = []  # Videos reused from global cache
+        self._init_global_cache()
+
         # Run logger
         self.run_logger = None
         self._init_logger()
@@ -524,7 +529,29 @@ class Pipeline:
                 print(f"  ✓ Logging enabled: {self.run_logger.log_file}")
             except Exception as e:
                 print(f"  ⚠ Could not initialize logger: {e}")
-    
+
+    def _init_global_cache(self):
+        """Initialize global cache for cross-project video reuse"""
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config or not getattr(gc_config, 'enabled', False):
+            logger.debug("Global cache disabled")
+            return
+
+        try:
+            from src.global_cache import GlobalCacheManager
+
+            cache_dir = getattr(gc_config, 'cache_dir', '~/.matcher_global_cache')
+            # Expand ~ to home directory
+            cache_dir = str(Path(cache_dir).expanduser())
+
+            self.global_cache = GlobalCacheManager(cache_dir=cache_dir, config=self.config)
+            stats = self.global_cache.get_stats()
+            logger.info(f"Global cache initialized: {stats['total_videos']} videos, "
+                       f"{stats['total_topics']} topics, {stats['total_keywords']} keywords")
+        except Exception as e:
+            logger.warning(f"Could not initialize global cache: {e}")
+            self.global_cache = None
+
     def _print_banner(self):
         """Print startup banner with config-driven values"""
         config = self.config
@@ -1875,6 +1902,100 @@ Topic:"""
             print(f"  ⚠ Stock video search failed: {e}")
             return {}
     
+    def _check_global_cache_for_videos(self, keywords: List[str]) -> Tuple[List[str], List[dict]]:
+        """
+        Check global cache for relevant videos before downloading.
+
+        Returns:
+            Tuple of (keywords_to_download, reusable_videos)
+            - keywords_to_download: Keywords that need new downloads
+            - reusable_videos: Videos from global cache that can be reused
+        """
+        if not self.global_cache:
+            return keywords, []
+
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config or not getattr(gc_config, 'check_before_download', True):
+            return keywords, []
+
+        print(f"\n  🔍 Checking global cache for existing videos...")
+
+        # Get topics from voiceover for relevance filtering
+        vo_topics = []
+        if hasattr(self, 'voiceover_segments') and self.voiceover_segments:
+            # Extract topics from voiceover text
+            vo_text = ' '.join([
+                s.text if hasattr(s, 'text') else s.get('text', '')
+                for s in self.voiceover_segments[:10]  # First 10 segments
+            ])
+            vo_topics = [kw.lower() for kw in keywords[:5]]  # Use first 5 keywords as topics
+            if self.topic_context:
+                vo_topics.append(self.topic_context.lower())
+
+        # Query global cache
+        min_relevance = getattr(gc_config, 'min_topic_overlap', 0.3)
+        max_reuse = getattr(gc_config, 'max_reuse_videos', 50)
+
+        result = self.global_cache.find_videos_for_keywords(
+            keywords=keywords,
+            topics=vo_topics,
+            min_relevance=min_relevance,
+            max_results=max_reuse
+        )
+
+        logger.info(f"Global cache query: {result.total_cached_matches} matches, "
+                   f"{result.files_exist_count} exist, {result.files_deleted_count} deleted")
+
+        reusable_videos = []
+        covered_keywords = set()
+
+        # Process reusable videos
+        for entry, relevance in result.reuse_videos:
+            if entry.file_exists and entry.current_path:
+                video_info = {
+                    'path': entry.current_path,
+                    'source': 'global_cache',
+                    'relevance': relevance,
+                    'topics': entry.topics,
+                    'keywords': entry.keywords,
+                    'has_transcript': entry.has_transcript,
+                    'video_hash': entry.video_hash
+                }
+                reusable_videos.append(video_info)
+
+                # Track which keywords are covered
+                if entry.download_info and entry.download_info.keyword:
+                    covered_keywords.add(entry.download_info.keyword.lower())
+                for kw in entry.keywords:
+                    covered_keywords.add(kw.lower())
+
+        # Determine which keywords still need downloads
+        keywords_to_download = []
+        for kw in keywords:
+            if kw.lower() not in covered_keywords:
+                keywords_to_download.append(kw)
+
+        if reusable_videos:
+            print(f"  ✓ Found {len(reusable_videos)} reusable videos from global cache")
+            for v in reusable_videos[:3]:
+                print(f"    • {Path(v['path']).name} (relevance: {v['relevance']:.2f})")
+            if len(reusable_videos) > 3:
+                print(f"    ... and {len(reusable_videos) - 3} more")
+
+            self.global_cache_videos = reusable_videos
+            logger.info(f"Reusing {len(reusable_videos)} videos from global cache")
+
+        if result.redownload_keywords:
+            print(f"  📥 {len(result.redownload_keywords)} cached videos were deleted, adding to download queue")
+            keywords_to_download.extend(result.redownload_keywords)
+
+        if result.uncovered_keywords:
+            logger.debug(f"Uncovered keywords: {result.uncovered_keywords}")
+
+        print(f"  → {len(keywords_to_download)} keywords need new downloads")
+
+        return keywords_to_download, reusable_videos
+
     def stage_download(self, keywords: List[str]) -> List[dict]:
         """
         Stage 2: Download footage from YouTube.
@@ -1882,16 +2003,19 @@ Topic:"""
         Includes zero-download keyword remix for failed keywords.
         """
         config = self.config
-        
+
         if config.pipeline.skip_download:
             print("  ⏭ Skipping download (config: skip_download=true)")
             return []
-        
+
         self._print_stage("2", "DOWNLOAD FOOTAGE")
-        
+
+        # Check global cache first
+        keywords_to_download, reusable_videos = self._check_global_cache_for_videos(keywords)
+
         try:
             from src.downloader import VideoDownloader, DownloadCheckpoint
-            
+
             # Initialize downloader with config
             self.downloader = VideoDownloader(config=config)
             
@@ -1903,24 +2027,47 @@ Topic:"""
                 per_kw = self.downloader._get_tier_value(tier_name, 'per_keyword', 5)
                 print(f"    • {tier_name}: {min_s}-{max_s}s ({per_kw}/kw)")
             
-            # Download using download_all() method
+            # Download using download_all() method (only for keywords not covered by cache)
             output_dir = Path(config.downloaded_videos_dir)
-            downloaded_videos, failed = self.downloader.download_all(
-                keywords=keywords,
-                output_dir=output_dir,
-                resume=True,
-                topic=self.topic_context or ""
-            )
+
+            if keywords_to_download:
+                downloaded_videos, failed = self.downloader.download_all(
+                    keywords=keywords_to_download,
+                    output_dir=output_dir,
+                    resume=True,
+                    topic=self.topic_context or ""
+                )
+            else:
+                downloaded_videos = []
+                failed = []
+                print(f"  ⏭ All keywords covered by global cache, skipping download")
+
+            # Combine newly downloaded videos with reusable videos from global cache
+            # Current project videos come first (higher priority)
             self.downloaded_videos = downloaded_videos
-            
+
+            # Add global cache videos (marked with source='global_cache')
+            if reusable_videos:
+                for gv in reusable_videos:
+                    # Convert to format expected by rest of pipeline
+                    self.downloaded_videos.append({
+                        'path': gv['path'],
+                        'file': gv['path'],
+                        'source': 'global_cache',
+                        'relevance': gv.get('relevance', 0.5),
+                        'video_hash': gv.get('video_hash', '')
+                    })
+
             # Store failed keywords for potential remix
             self.failed_keywords = failed
-            
+
             if failed:
-                print(f"  ⚠ Failed keywords: {', '.join(failed[:5])}" + 
+                print(f"  ⚠ Failed keywords: {', '.join(failed[:5])}" +
                       (f" (+{len(failed)-5} more)" if len(failed) > 5 else ""))
-            
-            print(f"\n  ✓ Downloaded {len(self.downloaded_videos)} videos")
+
+            print(f"\n  ✓ Downloaded {len(downloaded_videos)} new videos")
+            if reusable_videos:
+                print(f"  ✓ Reusing {len(reusable_videos)} videos from global cache")
             
             # Zero-download keyword remix
             if failed and hasattr(config, 'zero_download_remix') and config.zero_download_remix.enabled:
@@ -2709,8 +2856,123 @@ Topic:"""
         if config.matching.chapter_matching_enabled and config.matching.extract_video_topics:
             self._extract_video_topics()
 
+        # Share transcripts to global cache (for cross-project reuse)
+        self._share_to_global_cache(video_files)
+
         return self.transcripts
-    
+
+    def _share_to_global_cache(self, video_files: List[Path]):
+        """
+        Share processed video data to global cache for cross-project reuse.
+
+        Registers videos and copies transcripts, topics, and face scores
+        to the global cache so future projects can reuse this data.
+        """
+        if not self.global_cache:
+            return
+
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config:
+            return
+
+        share_transcripts = getattr(gc_config, 'share_transcripts', True)
+        share_face = getattr(gc_config, 'share_face_detection', True)
+
+        if not share_transcripts and not share_face:
+            return
+
+        print(f"\n  📤 Sharing to global cache...")
+        registered = 0
+
+        for vf in video_files:
+            video_path = str(vf)
+
+            # Skip videos from global cache (already registered)
+            video_info = None
+            for dv in getattr(self, 'downloaded_videos', []):
+                if isinstance(dv, dict):
+                    if dv.get('path') == video_path or dv.get('file') == video_path:
+                        video_info = dv
+                        break
+
+            if video_info and video_info.get('source') == 'global_cache':
+                continue
+
+            try:
+                # Get transcript for this video
+                segments = self.transcripts.get(video_path, [])
+                transcript_text = ' '.join([
+                    s.text if hasattr(s, 'text') else s.get('text', '')
+                    for s in segments[:5]  # First 5 segments as preview
+                ])
+
+                # Get topics if extracted
+                topics = []
+                if hasattr(self, 'video_topics') and video_path in self.video_topics:
+                    vt = self.video_topics[video_path]
+                    topics = vt.topics if hasattr(vt, 'topics') else []
+
+                # Extract keyword from path
+                keyword = self._extract_source_keyword(video_path)
+
+                # Get face score if available
+                face_score = 0.5
+                if share_face:
+                    try:
+                        from src.face_detection import FaceDetector
+                        detector = FaceDetector.get_instance()
+                        if detector.is_available() and video_path in detector._cache:
+                            face_score = detector._cache[video_path]
+                    except:
+                        pass
+
+                # Get video duration
+                duration = 0.0
+                if segments:
+                    last_seg = segments[-1]
+                    duration = last_seg.end_time if hasattr(last_seg, 'end_time') else last_seg.get('end_time', 0)
+
+                # Register in global cache
+                entry = self.global_cache.register_video(
+                    video_path=video_path,
+                    download_keyword=keyword,
+                    topics=topics,
+                    project_id=str(PROJECT_DIR) if PROJECT_DIR else "",
+                    duration=duration
+                )
+
+                if entry:
+                    # Mark as processed
+                    self.global_cache.mark_video_processed(
+                        video_hash=entry.video_hash,
+                        has_transcript=bool(segments),
+                        has_embeddings=hasattr(self, 'embeddings') and self.embeddings is not None,
+                        face_score=face_score
+                    )
+
+                    # Copy transcript to global cache
+                    if share_transcripts and segments:
+                        transcript_data = {
+                            'segments': [
+                                s.to_dict() if hasattr(s, 'to_dict') else s
+                                for s in segments
+                            ],
+                            'video_path': video_path,
+                            'topics': topics
+                        }
+                        self.global_cache.copy_transcript_to_global(
+                            entry.video_hash, transcript_data
+                        )
+
+                    registered += 1
+
+            except Exception as e:
+                logger.debug(f"Failed to register {vf.name} in global cache: {e}")
+
+        if registered > 0:
+            print(f"  ✓ Registered {registered} videos in global cache")
+            logger.info(f"Global cache: registered {registered} videos")
+
     def _predetect_faces(self, video_files: List[Path]):
         """Pre-detect faces in videos and cache results for matching stage."""
         try:
