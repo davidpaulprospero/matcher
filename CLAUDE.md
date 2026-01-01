@@ -117,6 +117,54 @@ Also add to title_blacklist: `live stream`, `livestream`, `webcam`, `24/7`
 **Cause:** Variable-width patterns in lookbehind
 **Fix:** Use capture groups with replacement instead
 
+## OTIO Timeline Structure
+
+**Location:** `src/otio_builder.py`
+**IMPORTANT:** When editing track assignments or adding new tracks, always update this section!
+
+### Track Layout
+| Track | Purpose | Default State |
+|-------|---------|---------------|
+| V1 | Primary video (speed-adjusted) | Enabled |
+| V2 | Alternative 1 | Disabled |
+| V3 | Alternative 2 | Disabled |
+| V4 | Secondary Primary (different source from V1-V3) | Disabled |
+| V5 | Secondary Alt 1 | Disabled |
+| V6 | Secondary Alt 2 | Disabled |
+| V7 | Embedding-Diversity strategy | Disabled |
+| V8 | (Reserved) | - |
+| V9 | Entity Images (Google stills) | Disabled |
+| V10 | Stock Videos (Pexels/Pixabay) | Disabled |
+| A1-A7 | Corresponding audio tracks | Matches video |
+
+### Key Functions
+- `build_otio_timeline()` - Main entry point, creates timeline with all tracks
+- `_create_clip()` - Creates individual clips with speed adjustment
+- `_validate_entity_images()` - Filters invalid image paths before OTIO
+- `_to_windows_path()` - Converts paths for DaVinci Resolve compatibility
+
+### Config Options
+```yaml
+output:
+  generate_otio: true
+  split_otio: true           # Split into multiple files
+  otio_clips_per_file: 10    # Clips per OTIO file
+  num_alternatives: 2        # V2-V3 count
+  include_strategy_tracks: true
+  strategy_tracks:
+    - "embedding_diversity"  # V7
+```
+
+### Path Handling
+DaVinci Resolve requires Windows-style backslash paths:
+```python
+# WRONG: forward slashes fail in DaVinci
+path = "E:/videos/clip.mp4"
+
+# CORRECT: use _to_windows_path()
+path = _to_windows_path("E:/videos/clip.mp4")  # Returns "E:\\videos\\clip.mp4"
+```
+
 ## Key Features
 
 ### Pause-Split Segments
