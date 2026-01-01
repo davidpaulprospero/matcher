@@ -296,6 +296,14 @@ def _transcribe_with_shared_model(
                     ]
                 result.append(seg_data)
 
+            # Verbose logging for transcription result
+            total_duration = sum(s.get('end', 0) - s.get('start', 0) for s in result)
+            logger.debug(f"Transcription complete: {audio_name}")
+            logger.debug(f"  Segments: {len(result)}, Total duration: {total_duration:.1f}s")
+            if result:
+                logger.debug(f"  First segment: '{result[0].get('text', '')[:50]}...'")
+                logger.debug(f"  Word timestamps: {'yes' if result[0].get('words') else 'no'}")
+
             print(f"  [TRANSCRIBE] Done: {len(result)} segments", flush=True)
             return result
 

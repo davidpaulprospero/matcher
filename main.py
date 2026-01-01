@@ -272,17 +272,101 @@ def validate_config_at_startup(config: Config) -> bool:
 # LOGGING SETUP
 # =============================================================================
 
-def setup_logging(config: Config) -> logging.Logger:
-    """Setup logging based on config"""
+def setup_logging(config: Config, output_dir: Path = None, run_timestamp: str = None) -> logging.Logger:
+    """
+    Setup logging with dual log files per run.
+
+    Creates two log files:
+    1. run_{timestamp}.log - Normal logging (INFO level, matches console)
+    2. run_{timestamp}_verbose.log - Verbose logging (DEBUG level, everything)
+
+    Args:
+        config: Configuration object
+        output_dir: Directory to save log files (default: project output dir)
+        run_timestamp: Timestamp string for filenames (default: auto-generated)
+
+    Returns:
+        Logger instance
+    """
+    from datetime import datetime
+
+    # Get log level from config
     log_level = getattr(logging, config.logging.log_level.upper(), logging.INFO)
-    
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+
+    # Generate timestamp if not provided
+    if run_timestamp is None:
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Determine output directory
+    if output_dir is None:
+        output_dir = Path(config.output.output_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create logs subdirectory
+    logs_dir = output_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Log file paths
+    normal_log_path = logs_dir / f"run_{run_timestamp}.log"
+    verbose_log_path = logs_dir / f"run_{run_timestamp}_verbose.log"
+
+    # Get root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+
+    # Clear any existing handlers
+    root_logger.handlers.clear()
+
+    # Console handler (matches config level)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_format = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%H:%M:%S'
     )
-    
-    return logging.getLogger(__name__)
+    console_handler.setFormatter(console_format)
+    root_logger.addHandler(console_handler)
+
+    # Normal log file handler (INFO level)
+    try:
+        normal_handler = logging.FileHandler(normal_log_path, encoding='utf-8')
+        normal_handler.setLevel(logging.INFO)
+        normal_format = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        normal_handler.setFormatter(normal_format)
+        root_logger.addHandler(normal_handler)
+    except Exception as e:
+        print(f"  Warning: Could not create normal log file: {e}")
+
+    # Verbose log file handler (DEBUG level - everything)
+    try:
+        verbose_handler = logging.FileHandler(verbose_log_path, encoding='utf-8')
+        verbose_handler.setLevel(logging.DEBUG)
+        verbose_format = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        verbose_handler.setFormatter(verbose_format)
+        root_logger.addHandler(verbose_handler)
+    except Exception as e:
+        print(f"  Warning: Could not create verbose log file: {e}")
+
+    # Log startup info
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized")
+    logger.debug(f"Normal log: {normal_log_path}")
+    logger.debug(f"Verbose log: {verbose_log_path}")
+
+    # Store paths for reference
+    logger.log_paths = {
+        'normal': str(normal_log_path),
+        'verbose': str(verbose_log_path)
+    }
+
+    return logger
 
 
 # =============================================================================
@@ -4228,8 +4312,20 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
     
-    # Setup logging
-    logger = setup_logging(config)
+    # Setup logging with dual log files (normal + verbose)
+    # Determine output directory from config or project path
+    if hasattr(args, 'project') and args.project:
+        log_output_dir = Path(args.project)
+    else:
+        log_output_dir = Path(config.output.output_dir)
+
+    logger = setup_logging(config, output_dir=log_output_dir)
+
+    # Print log file locations
+    if hasattr(logger, 'log_paths'):
+        print(f"\n  📝 Log files:")
+        print(f"    Normal:  {Path(logger.log_paths['normal']).name}")
+        print(f"    Verbose: {Path(logger.log_paths['verbose']).name}")
     
     # Validate config
     if args.validate_config:
