@@ -45,18 +45,48 @@ _progress_lock = threading.Lock()
 _progress_data = {"completed": 0, "total": 0, "current": ""}
 
 
+def _extract_video_id(filename: str) -> Optional[str]:
+    """
+    Extract YouTube video ID from filename.
+    Handles: video_id.mp4, video_id.mp3, video_id_0045.mp4 (segments)
+    YouTube IDs are 11 characters: [A-Za-z0-9_-]
+    """
+    import re
+    stem = Path(filename).stem
+
+    # Pattern 1: Segment file like "abc12345678_0045" -> extract "abc12345678"
+    segment_match = re.match(r'^([A-Za-z0-9_-]{11})_\d+$', stem)
+    if segment_match:
+        return segment_match.group(1)
+
+    # Pattern 2: Regular file with 11-char ID at start
+    # Handle names like "abc12345678" or "abc12345678_extra_info"
+    if len(stem) >= 11:
+        potential_id = stem[:11]
+        if re.match(r'^[A-Za-z0-9_-]{11}$', potential_id):
+            return potential_id
+
+    # Pattern 3: Exact 11-char stem
+    if len(stem) == 11 and re.match(r'^[A-Za-z0-9_-]+$', stem):
+        return stem
+
+    return None
+
+
 class DeltaAwareIndex:
     """
     Tracks which videos have been indexed to enable delta-aware processing.
     Only processes NEW videos on subsequent runs.
+    Supports video ID matching for audio-first mode (segments match audio transcripts).
     """
-    
+
     def __init__(self, cache_dir: str):
         self.cache_dir = Path(cache_dir)
         self.index_path = self.cache_dir / "delta_index.json"
         self.indexed_videos = set()
+        self.indexed_video_ids = set()  # Track video IDs for segment matching
         self._load()
-    
+
     def _load(self):
         """Load the index of previously processed videos"""
         if self.index_path.exists():
@@ -64,10 +94,19 @@ class DeltaAwareIndex:
                 with open(self.index_path, 'r') as f:
                     data = json.load(f)
                     self.indexed_videos = set(data.get('indexed', []))
+                    self.indexed_video_ids = set(data.get('indexed_ids', []))
+
+                    # Rebuild video IDs from paths if not stored (migration)
+                    if not self.indexed_video_ids:
+                        for vp in self.indexed_videos:
+                            vid_id = _extract_video_id(vp)
+                            if vid_id:
+                                self.indexed_video_ids.add(vid_id)
             except Exception as e:
                 logger.debug(f"Could not load delta index: {e}")
                 self.indexed_videos = set()
-    
+                self.indexed_video_ids = set()
+
     def _save(self):
         """Save the index"""
         try:
@@ -75,33 +114,50 @@ class DeltaAwareIndex:
             with open(self.index_path, 'w') as f:
                 json.dump({
                     'indexed': list(self.indexed_videos),
+                    'indexed_ids': list(self.indexed_video_ids),
                     'updated_at': time.time()
                 }, f)
         except Exception as e:
             logger.debug(f"Could not save delta index: {e}")
-    
+
     def is_indexed(self, video_path: str) -> bool:
-        """Check if a video has been indexed"""
-        return str(video_path) in self.indexed_videos
-    
+        """Check if a video has been indexed (by path or video ID)"""
+        # Check exact path match
+        if str(video_path) in self.indexed_videos:
+            return True
+
+        # Check video ID match (for segment files matching audio)
+        vid_id = _extract_video_id(video_path)
+        if vid_id and vid_id in self.indexed_video_ids:
+            return True
+
+        return False
+
     def mark_indexed(self, video_path: str):
         """Mark a video as indexed"""
         self.indexed_videos.add(str(video_path))
+        vid_id = _extract_video_id(video_path)
+        if vid_id:
+            self.indexed_video_ids.add(vid_id)
         self._save()
-    
+
     def mark_indexed_batch(self, video_paths: List[str]):
         """Mark multiple videos as indexed"""
         for vp in video_paths:
             self.indexed_videos.add(str(vp))
+            vid_id = _extract_video_id(vp)
+            if vid_id:
+                self.indexed_video_ids.add(vid_id)
         self._save()
-    
+
     def get_new_videos(self, video_paths: List[str]) -> List[str]:
         """Get list of videos that haven't been indexed yet"""
         return [vp for vp in video_paths if not self.is_indexed(vp)]
-    
+
     def clear(self):
         """Clear the index (force full reprocess)"""
         self.indexed_videos = set()
+        self.indexed_video_ids = set()
         self._save()
 
 
@@ -262,34 +318,6 @@ class TranscriptCache:
     _source_map: Dict[str, Path] = None  # Maps source_file -> cache_file
     _video_id_map: Dict[str, Path] = None  # Maps video_id -> cache_file (for segment matching)
 
-    @staticmethod
-    def _extract_video_id(filename: str) -> Optional[str]:
-        """
-        Extract YouTube video ID from filename.
-        Handles: video_id.mp4, video_id.mp3, video_id_0045.mp4 (segments)
-        YouTube IDs are 11 characters: [A-Za-z0-9_-]
-        """
-        import re
-        stem = Path(filename).stem
-
-        # Pattern 1: Segment file like "abc12345678_0045" -> extract "abc12345678"
-        segment_match = re.match(r'^([A-Za-z0-9_-]{11})_\d+$', stem)
-        if segment_match:
-            return segment_match.group(1)
-
-        # Pattern 2: Regular file with 11-char ID at start
-        # Handle names like "abc12345678" or "abc12345678_extra_info"
-        if len(stem) >= 11:
-            potential_id = stem[:11]
-            if re.match(r'^[A-Za-z0-9_-]{11}$', potential_id):
-                return potential_id
-
-        # Pattern 3: Exact 11-char stem
-        if len(stem) == 11 and re.match(r'^[A-Za-z0-9_-]+$', stem):
-            return stem
-
-        return None
-
     def __init__(self, cache_dir: str):
         base_dir = Path(cache_dir)
 
@@ -345,7 +373,7 @@ class TranscriptCache:
                         self._source_map[filename] = cache_file
 
                         # Extract video ID for segment matching (audio-first mode support)
-                        video_id = self._extract_video_id(filename)
+                        video_id = _extract_video_id(filename)
                         if video_id and video_id not in self._video_id_map:
                             self._video_id_map[video_id] = cache_file
 
@@ -381,7 +409,7 @@ class TranscriptCache:
 
         # Fallback to video ID lookup (for segment files matching audio transcripts)
         if not cache_file:
-            video_id = self._extract_video_id(video_name)
+            video_id = _extract_video_id(video_name)
             if video_id and video_id in self._video_id_map:
                 cache_file = self._video_id_map[video_id]
 
