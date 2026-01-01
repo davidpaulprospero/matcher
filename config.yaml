@@ -692,6 +692,10 @@ download:
     delete_audio_after_video: false # Keep audio files after video download
     checkpoint_phases: true  # Save checkpoint after each phase
 
+  # FFmpeg location (required for segment downloads if not in PATH)
+  # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
+  ffmpeg_location: "C:/ffmpeg/bin"
+
   # Duration tiers
   tiers:
     short:

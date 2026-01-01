@@ -725,6 +725,10 @@ class DownloadConfig:
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
 
+    # FFmpeg location (for segment downloads, set if not in PATH)
+    # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
+    ffmpeg_location: str = ""
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.llm_title_filter, dict):
