@@ -1938,6 +1938,47 @@ Topic:"""
         audio_config = getattr(self.config.download, 'audio_first', None)
         return audio_config and getattr(audio_config, 'enabled', False)
 
+    def _rebuild_audio_downloads_from_disk(self):
+        """Rebuild audio_downloads from audio files on disk when resuming."""
+        from src.downloader import AudioDownload
+
+        config = self.config
+        output_dir = Path(config.downloaded_videos_dir)
+
+        if not output_dir.exists():
+            logger.warning(f"Audio directory not found: {output_dir}")
+            return
+
+        # Find all audio directories (ending with _audio)
+        audio_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.endswith('_audio')]
+
+        audio_downloads = []
+        audio_extensions = {'.mp3', '.m4a', '.opus', '.ogg', '.wav', '.flac'}
+
+        for audio_dir in audio_dirs:
+            # Extract keyword from dir name (e.g., "Manitoba_s_audio" -> "Manitoba")
+            keyword = audio_dir.name.rsplit('_', 2)[0] if '_' in audio_dir.name else audio_dir.name
+
+            for audio_file in audio_dir.iterdir():
+                if audio_file.suffix.lower() in audio_extensions:
+                    video_id = audio_file.stem
+                    audio_downloads.append(AudioDownload(
+                        audio_file=str(audio_file),
+                        video_id=video_id,
+                        video_url=f"https://www.youtube.com/watch?v={video_id}",
+                        title="",  # Unknown when rebuilding
+                        channel="",
+                        duration=0,  # Unknown when rebuilding
+                        keyword=keyword,
+                        duration_tier="short",  # Default
+                        upload_date="",
+                        license="Unknown"
+                    ))
+
+        self.audio_downloads = audio_downloads
+        self.audio_downloads_by_id = {a.video_id: a for a in audio_downloads}
+        print(f"  Rebuilt {len(audio_downloads)} audio downloads from disk")
+
     def _load_existing_videos(self):
         """
         Load existing videos from output directory when skipping downloads.
@@ -3344,6 +3385,9 @@ Topic:"""
                     print(f"\n  ⏭ Skipping DOWNLOAD (completed in previous run)")
                     # Load existing videos
                     self._load_existing_videos()
+                    # For audio-first mode, rebuild audio_downloads from disk
+                    if self._is_audio_first_enabled():
+                        self._rebuild_audio_downloads_from_disk()
                 else:
                     stage_start = time.time()
 
