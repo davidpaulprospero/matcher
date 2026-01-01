@@ -994,9 +994,17 @@ def create_timeline(
     
     # Populate image track if entity_images provided
     if entity_images:
+        # Log what we received
+        print(f"  [V9] Entity images received: {len(entity_images)} entities")
+        for ename, eresult in entity_images.items():
+            img_count = len(getattr(eresult, 'images', []))
+            print(f"    • {ename}: {img_count} images")
+
         # Validate and filter entity images before using
         validated_entity_images = _validate_entity_images(entity_images)
         if validated_entity_images:
+            total_images = sum(len(e.images) for e in validated_entity_images.values())
+            print(f"  [V9] After validation: {len(validated_entity_images)} entities, {total_images} images")
             logger.info(f"Entity images: {len(validated_entity_images)} entities with valid images")
             _add_entity_images_to_track(
                 image_track=image_track,
@@ -1146,6 +1154,9 @@ def _add_entity_images_to_track(
     # Track sticky entity across segments
     last_matched_entity = None
 
+    # Track entity match statistics
+    entity_match_stats = {'exact': 0, 'semantic': 0, 'sticky': 0, 'none': 0}
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
@@ -1156,6 +1167,8 @@ def _add_entity_images_to_track(
             vo_text, entity_images, last_matched_entity
         )
 
+        entity_match_stats[match_type] += 1
+
         if entity_name:
             entity_result = entity_images[entity_name]
 
@@ -1165,6 +1178,12 @@ def _add_entity_images_to_track(
             # Get all images for this entity
             all_images = entity_result.images
             num_images = len(all_images)
+
+            # Debug: Log which images are being used for this segment
+            if seg_idx < 5:  # Only log first 5 for brevity
+                logger.debug(f"Segment {seg_idx}: Entity '{entity_name}' ({match_type}), {num_images} images")
+                for img in all_images[:2]:
+                    logger.debug(f"  - {Path(img).name}")
 
             if num_images > 0:
                 # Track used sources within this segment to prevent duplicates
@@ -1280,6 +1299,14 @@ def _add_entity_images_to_track(
             )
         )
         image_track.append(gap)
+
+    # Log entity matching statistics
+    total_segments = len(segment_timing)
+    matched = entity_match_stats['exact'] + entity_match_stats['semantic'] + entity_match_stats['sticky']
+    print(f"  [V9] Entity matching: {matched}/{total_segments} segments")
+    print(f"    Exact: {entity_match_stats['exact']} ({100*entity_match_stats['exact']/max(1,total_segments):.1f}%)")
+    print(f"    Semantic: {entity_match_stats['semantic']} ({100*entity_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    print(f"    Sticky: {entity_match_stats['sticky']} ({100*entity_match_stats['sticky']/max(1,total_segments):.1f}%)")
 
 
 def _add_entity_videos_to_track(
