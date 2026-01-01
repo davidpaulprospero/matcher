@@ -2937,7 +2937,8 @@ Topic:"""
                 voiceover_path=getattr(self, 'voiceover_path', None),
                 frame_rate=getattr(config.output, 'frame_rate', 30.0),
                 entity_images=getattr(self, 'entity_images', None),  # V9 entity stills
-                entity_videos=getattr(self, 'entity_videos', None)   # V10 stock videos
+                entity_videos=getattr(self, 'entity_videos', None),  # V10 stock videos
+                downloaded_segments=getattr(self, 'downloaded_segments', None)  # Audio-first video segments
             )
 
             # Output formats (config-driven) - all use run_timestamp

@@ -386,11 +386,12 @@ def create_timeline(
     voiceover_path: Optional[str] = None,
     frame_rate: float = 30.0,
     entity_images: Optional[Dict] = None,
-    entity_videos: Optional[Dict] = None
+    entity_videos: Optional[Dict] = None,
+    downloaded_segments: Optional[List] = None
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
-    
+
     Track structure:
     - V1: Primary video (speed-adjusted) - enabled
     - V2: Alternative 1 (speed-adjusted) - disabled
@@ -403,8 +404,71 @@ def create_timeline(
     - V10: Stock Videos (Pexels/Pixabay) - disabled
     - A1-A7: Corresponding audio tracks
     - A8: Voiceover - enabled
+
+    Args:
+        downloaded_segments: Optional list of DownloadedSegment from audio-first mode.
+            When provided, video segment files are used instead of audio files.
     """
-    
+
+    # Build lookup for audio-first mode: video_id -> segment info
+    # This maps audio file video IDs to their downloaded video segment files
+    segment_lookup = {}
+    if downloaded_segments:
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            if video_id not in segment_lookup:
+                segment_lookup[video_id] = []
+            segment_lookup[video_id].append({
+                'file': seg.file,
+                'start': seg.original_start,
+                'end': seg.original_end
+            })
+
+    def resolve_video_segment(source_file: str, source_start: float) -> Tuple[str, float]:
+        """
+        Resolve audio file path to video segment path for audio-first mode.
+
+        Args:
+            source_file: Original source file (may be audio .mp3)
+            source_start: Start time in the original source
+
+        Returns:
+            Tuple of (resolved_path, adjusted_start_time)
+            - If video segment found: (segment_file, time_relative_to_segment)
+            - Otherwise: (original_source_file, original_source_start)
+        """
+        if not segment_lookup:
+            return source_file, source_start
+
+        # Extract video_id from the source file path
+        # Audio files are like: /path/to/video_id.mp3 or /path/to/folder/video_id.mp3
+        stem = Path(source_file).stem
+        video_id = stem
+
+        # Check if we have segment(s) for this video
+        if video_id not in segment_lookup:
+            return source_file, source_start
+
+        # Find the segment that contains this time
+        segments = segment_lookup[video_id]
+        for seg_info in segments:
+            # Check if source_start falls within this segment's range
+            if seg_info['start'] <= source_start <= seg_info['end']:
+                # Calculate the offset within the segment file
+                adjusted_start = source_start - seg_info['start']
+                return seg_info['file'], adjusted_start
+
+        # If no segment contains this exact time, use the first segment
+        # and let the clip reference the original time (fallback)
+        if segments:
+            seg_info = segments[0]
+            # Check if it's reasonably close
+            if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
+                adjusted_start = max(0, source_start - seg_info['start'])
+                return seg_info['file'], adjusted_start
+
+        return source_file, source_start
+
     timeline = otio.schema.Timeline(name="Matched Footage")
     
     # Set tracks stack name to empty (DaVinci format)
@@ -542,13 +606,20 @@ def create_timeline(
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
 
-        # Adjust source_start for segment files (audio-first mode)
-        # Segment files only contain a portion of the original video,
-        # so we need to adjust the start time relative to the segment file
-        segment_offset = get_segment_file_offset(vid_seg.source_file)
-        if segment_offset > 0:
-            source_start = max(0, source_start - segment_offset)
-            logger.debug(f"Segment file offset: {segment_offset}s, adjusted start: {source_start}s")
+        # Resolve audio file to video segment (audio-first mode)
+        # This maps .mp3 audio files to downloaded .mp4 video segments
+        resolved_source, adjusted_start = resolve_video_segment(vid_seg.source_file, source_start)
+
+        # Also check for segment file offset from filename (legacy support)
+        segment_offset = get_segment_file_offset(resolved_source)
+        if segment_offset > 0 and resolved_source == vid_seg.source_file:
+            # Only apply filename-based offset if we didn't already resolve
+            adjusted_start = max(0, source_start - segment_offset)
+            logger.debug(f"Segment file offset: {segment_offset}s, adjusted start: {adjusted_start}s")
+
+        # Use the resolved source file and adjusted start time
+        source_file_for_clip = resolved_source
+        source_start = adjusted_start
 
         # Determine clip color based on confidence
         clip_color = get_confidence_color(match.confidence)
@@ -571,29 +642,29 @@ def create_timeline(
         }
         
         # Create primary video clip (V1) - prefix with segment ID for tracing
-        clip_folder = Path(vid_seg.source_file).parent.name
-        clip_stem = Path(vid_seg.source_file).stem
+        clip_folder = Path(source_file_for_clip).parent.name
+        clip_stem = Path(source_file_for_clip).stem
         v1_clip = create_clip_with_timewarp(
             name=f"[{segment_id}] {clip_folder}_{clip_stem} [{vid_seg.start_time:.1f}s]",
-            source_path=vid_seg.source_file,
+            source_path=source_file_for_clip,
             source_start=source_start,
             source_duration=source_duration,
             target_duration=target_duration,
             frame_rate=frame_rate,
             metadata=metadata
         )
-        
+
         # Set clip color
         v1_clip.metadata['clip_color'] = clip_color
-        
+
         # Note: Markers removed - not used in DaVinci workflow
-        
+
         video_tracks[0].append(v1_clip)
-        
+
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
             name=f"[{segment_id}] Audio: {clip_folder}_{clip_stem}",
-            source_path=vid_seg.source_file,
+            source_path=source_file_for_clip,
             source_start=source_start,
             source_duration=source_duration,
             target_duration=target_duration,
@@ -611,10 +682,16 @@ def create_timeline(
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
 
-                # Adjust for segment files (audio-first mode)
-                alt_segment_offset = get_segment_file_offset(alt_seg.source_file)
-                if alt_segment_offset > 0:
-                    alt_source_start = max(0, alt_source_start - alt_segment_offset)
+                # Resolve audio file to video segment (audio-first mode)
+                alt_resolved_source, alt_adjusted_start = resolve_video_segment(alt_seg.source_file, alt_source_start)
+
+                # Legacy segment file offset support
+                alt_segment_offset = get_segment_file_offset(alt_resolved_source)
+                if alt_segment_offset > 0 and alt_resolved_source == alt_seg.source_file:
+                    alt_adjusted_start = max(0, alt_source_start - alt_segment_offset)
+
+                alt_source_file = alt_resolved_source
+                alt_source_start = alt_adjusted_start
 
                 alt_metadata = {
                     'confidence': alt.confidence,
@@ -622,29 +699,29 @@ def create_timeline(
                     'original_duration': alt_source_duration,
                     'target_duration': target_duration
                 }
-                
+
                 # Alternative video clip - include segment ID for tracing
-                alt_folder = Path(alt_seg.source_file).parent.name
-                alt_stem = Path(alt_seg.source_file).stem
+                alt_folder = Path(alt_source_file).parent.name
+                alt_stem = Path(alt_source_file).stem
                 alt_v_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
-                    source_path=alt_seg.source_file,
+                    source_path=alt_source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
                     metadata=alt_metadata
                 )
-                
+
                 # Set clip color for alternatives too
                 alt_v_clip.metadata['clip_color'] = get_confidence_color(alt.confidence)
-                
+
                 video_tracks[alt_idx + 1].append(alt_v_clip)
-                
+
                 # Alternative audio clip
                 alt_a_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] Audio ALT{alt_idx+1}: {alt_folder}_{alt_stem}",
-                    source_path=alt_seg.source_file,
+                    source_path=alt_source_file,
                     source_start=alt_source_start,
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
@@ -674,20 +751,26 @@ def create_timeline(
         
         # Process secondary tracks (V4-V6) - different video files from V1-V3
         secondary_base_idx = 1 + num_alternatives  # Index where secondary tracks start
-        
+
         for sec_idx in range(num_secondary):
             track_idx = secondary_base_idx + sec_idx
-            
+
             if sec_idx < len(match_result.secondary_matches):
                 sec_match = match_result.secondary_matches[sec_idx]
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
                 sec_source_start = sec_seg.start_time
 
-                # Adjust for segment files (audio-first mode)
-                sec_segment_offset = get_segment_file_offset(sec_seg.source_file)
-                if sec_segment_offset > 0:
-                    sec_source_start = max(0, sec_source_start - sec_segment_offset)
+                # Resolve audio file to video segment (audio-first mode)
+                sec_resolved_source, sec_adjusted_start = resolve_video_segment(sec_seg.source_file, sec_source_start)
+
+                # Legacy segment file offset support
+                sec_segment_offset = get_segment_file_offset(sec_resolved_source)
+                if sec_segment_offset > 0 and sec_resolved_source == sec_seg.source_file:
+                    sec_adjusted_start = max(0, sec_source_start - sec_segment_offset)
+
+                sec_source_file = sec_resolved_source
+                sec_source_start = sec_adjusted_start
 
                 sec_metadata = {
                     'segment_index': match_idx,
@@ -701,28 +784,28 @@ def create_timeline(
 
                 # Secondary video clip - include segment ID for tracing
                 sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
-                sec_folder = Path(sec_seg.source_file).parent.name
-                sec_stem = Path(sec_seg.source_file).stem
+                sec_folder = Path(sec_source_file).parent.name
+                sec_stem = Path(sec_source_file).stem
                 sec_v_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] {sec_label}: {sec_folder}_{sec_stem}",
-                    source_path=sec_seg.source_file,
+                    source_path=sec_source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
                     metadata=sec_metadata
                 )
-                
+
                 # Color for secondary tracks
                 secondary_colors = ["PURPLE", "BLUE", "TEAL"]
                 sec_v_clip.metadata['clip_color'] = secondary_colors[sec_idx] if sec_idx < len(secondary_colors) else "GRAY"
-                
+
                 video_tracks[track_idx].append(sec_v_clip)
-                
+
                 # Secondary audio clip
                 sec_a_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] Audio {sec_label}: {sec_folder}_{sec_stem}",
-                    source_path=sec_seg.source_file,
+                    source_path=sec_source_file,
                     source_start=sec_source_start,
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
@@ -752,10 +835,10 @@ def create_timeline(
         
         # Process strategy tracks (V7 - embedding_diversity only)
         strategy_base_idx = 1 + num_alternatives + num_secondary  # Index where strategy tracks start
-        
+
         for strat_idx, strategy in enumerate(strategy_names):
             track_idx = strategy_base_idx + strat_idx
-            
+
             # Find strategy match for this strategy
             strat_match = None
             if match_result.strategy_matches:
@@ -763,16 +846,22 @@ def create_timeline(
                     if sm.strategy == strategy:
                         strat_match = sm
                         break
-            
+
             if strat_match:
                 strat_seg = strat_match.video_segment
                 strat_source_duration = strat_seg.end_time - strat_seg.start_time
                 strat_source_start = strat_seg.start_time
 
-                # Adjust for segment files (audio-first mode)
-                strat_segment_offset = get_segment_file_offset(strat_seg.source_file)
-                if strat_segment_offset > 0:
-                    strat_source_start = max(0, strat_source_start - strat_segment_offset)
+                # Resolve audio file to video segment (audio-first mode)
+                strat_resolved_source, strat_adjusted_start = resolve_video_segment(strat_seg.source_file, strat_source_start)
+
+                # Legacy segment file offset support
+                strat_segment_offset = get_segment_file_offset(strat_resolved_source)
+                if strat_segment_offset > 0 and strat_resolved_source == strat_seg.source_file:
+                    strat_adjusted_start = max(0, strat_source_start - strat_segment_offset)
+
+                strat_source_file = strat_resolved_source
+                strat_source_start = strat_adjusted_start
 
                 strat_metadata = {
                     'segment_index': match_idx,
@@ -785,30 +874,30 @@ def create_timeline(
                 }
 
                 # Strategy video clip - include segment ID for tracing
-                strat_folder = Path(strat_seg.source_file).parent.name
-                strat_stem = Path(strat_seg.source_file).stem
+                strat_folder = Path(strat_source_file).parent.name
+                strat_stem = Path(strat_source_file).stem
                 strat_v_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] {strategy.upper()}: {strat_folder}_{strat_stem}",
-                    source_path=strat_seg.source_file,
+                    source_path=strat_source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
                     metadata=strat_metadata
                 )
-                
+
                 # Color based on strategy
                 strategy_colors = {
                     "embedding_diversity": "PINK"
                 }
                 strat_v_clip.metadata['clip_color'] = strategy_colors.get(strategy, "GRAY")
-                
+
                 video_tracks[track_idx].append(strat_v_clip)
-                
+
                 # Strategy audio clip
                 strat_a_clip = create_clip_with_timewarp(
                     name=f"[{segment_id}] Audio {strategy.upper()}: {strat_folder}_{strat_stem}",
-                    source_path=strat_seg.source_file,
+                    source_path=strat_source_file,
                     source_start=strat_source_start,
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
