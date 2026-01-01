@@ -609,6 +609,44 @@ class LLMTitleFilterConfig:
 
 
 @dataclass
+class AudioFirstConfig:
+    """Audio-first download pipeline configuration.
+
+    When enabled, downloads audio (MP3) first for fast transcription/matching,
+    then downloads only the matched video segments. This dramatically reduces
+    download time and storage usage.
+
+    Enable per-project in project_config.yaml:
+        download:
+          audio_first:
+            enabled: true
+    """
+    # Enable/disable audio-first mode
+    enabled: bool = False  # Disabled by default, enable per-project
+
+    # Buffer around matched segments (seconds)
+    # Adds padding before/after each match for editing flexibility
+    buffer_seconds: float = 30.0
+
+    # Merge segments if gap is smaller than this (seconds)
+    # Reduces number of download requests
+    merge_gap_seconds: float = 15.0
+
+    # Audio quality for transcription (0=best, 9=worst)
+    # 5 is ~128kbps, good enough for speech recognition
+    audio_quality: int = 5
+
+    # If segment download fails, download full video as fallback
+    fallback_full_video: bool = True
+
+    # Keep audio files after video download (useful for re-matching)
+    delete_audio_after_video: bool = False
+
+    # Checkpoint between phases for resume capability
+    checkpoint_phases: bool = True
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
     
@@ -683,6 +721,16 @@ class DownloadConfig:
         'long': {'min': 600, 'max': 1500, 'per_keyword': 5},
         'longer': {'min': 1500, 'max': 3000, 'per_keyword': 5}
     })
+
+    # Audio-first download pipeline (enable per-project for faster downloads)
+    audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
+
+    def __post_init__(self):
+        """Convert nested dicts to proper dataclass instances."""
+        if isinstance(self.llm_title_filter, dict):
+            self.llm_title_filter = LLMTitleFilterConfig(**self.llm_title_filter)
+        if isinstance(self.audio_first, dict):
+            self.audio_first = AudioFirstConfig(**self.audio_first)
 
 
 @dataclass
