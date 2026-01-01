@@ -1789,7 +1789,155 @@ Topic:"""
             return []
         
         return self.downloaded_videos
-    
+
+    # =========================================================================
+    # AUDIO-FIRST PIPELINE STAGES
+    # =========================================================================
+
+    def stage_download_audio(self, keywords: List[str]) -> List:
+        """
+        Stage 2A (Audio-First): Download audio only for transcription.
+
+        Downloads lightweight MP3 files for fast transcription and matching,
+        before deciding which video segments to download.
+        """
+        from src.downloader import AudioDownload
+
+        config = self.config
+        audio_config = getattr(config.download, 'audio_first', None)
+
+        if not audio_config or not getattr(audio_config, 'enabled', False):
+            logger.warning("Audio-first mode not enabled")
+            return []
+
+        self._print_stage("2A", "DOWNLOAD AUDIO (Audio-First Mode)")
+
+        print(f"  📢 Audio-first mode: Downloading audio for transcription")
+        print(f"    Buffer: {getattr(audio_config, 'buffer_seconds', 30)}s")
+        print(f"    Merge gap: {getattr(audio_config, 'merge_gap_seconds', 15)}s")
+
+        try:
+            from src.downloader import VideoDownloader
+
+            # Initialize downloader
+            self.downloader = VideoDownloader(config=config)
+
+            output_dir = Path(config.downloaded_videos_dir)
+            all_audio_downloads = []
+
+            # Download audio for each keyword and tier
+            tiers = list(self.downloader.DURATION_TIERS.keys())
+            total_keywords = len(keywords)
+
+            for idx, keyword in enumerate(keywords, 1):
+                print(f"\n  [{idx}/{total_keywords}] {keyword}")
+
+                for tier in tiers:
+                    per_kw = self.downloader._get_tier_value(tier, 'per_keyword', 5)
+                    if per_kw <= 0:
+                        continue
+
+                    audio_downloads = self.downloader.download_audio_for_keyword(
+                        keyword=keyword,
+                        output_dir=output_dir,
+                        tier=tier,
+                        topic=self.topic_context or ""
+                    )
+                    all_audio_downloads.extend(audio_downloads)
+
+            # Store for later use
+            self.audio_downloads = all_audio_downloads
+            self.audio_downloads_by_id = {a.video_id: a for a in all_audio_downloads}
+
+            print(f"\n  ✓ Downloaded {len(all_audio_downloads)} audio files")
+            return all_audio_downloads
+
+        except Exception as e:
+            logger.error(f"Audio download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def stage_download_video_segments(self) -> List:
+        """
+        Stage 2B (Audio-First): Download only matched video segments.
+
+        Called after matching to download only the portions of videos
+        that are actually used in the timeline.
+        """
+        from src.downloader import (
+            collect_matched_segments,
+            prepare_merged_segments,
+            DownloadedSegment
+        )
+
+        config = self.config
+        audio_config = getattr(config.download, 'audio_first', None)
+
+        if not hasattr(self, 'matches') or not self.matches:
+            logger.error("No match results - run matching first")
+            return []
+
+        if not hasattr(self, 'audio_downloads_by_id'):
+            logger.error("No audio downloads - run audio download first")
+            return []
+
+        self._print_stage("2B", "DOWNLOAD VIDEO SEGMENTS")
+
+        buffer_seconds = getattr(audio_config, 'buffer_seconds', 30.0)
+        merge_gap = getattr(audio_config, 'merge_gap_seconds', 15.0)
+
+        print(f"  🎬 Downloading matched video segments")
+        print(f"    Buffer: {buffer_seconds}s, Merge gap: {merge_gap}s")
+
+        try:
+            # Collect matched segments from results
+            segments_by_video = collect_matched_segments(
+                self.matches,
+                self.audio_downloads_by_id
+            )
+
+            total_matches = sum(len(segs) for segs in segments_by_video.values())
+            print(f"    Matched segments: {total_matches} across {len(segments_by_video)} videos")
+
+            # Merge segments with buffer
+            merged_segments = prepare_merged_segments(
+                segments_by_video,
+                self.audio_downloads_by_id,
+                buffer_seconds=buffer_seconds,
+                merge_gap_seconds=merge_gap
+            )
+
+            print(f"    After merge: {len(merged_segments)} segments to download")
+
+            # Download video segments
+            output_dir = Path(config.downloaded_videos_dir)
+            downloaded_segments = self.downloader.download_video_segments(
+                merged_segments,
+                output_dir
+            )
+
+            # Store for OTIO building
+            self.downloaded_segments = downloaded_segments
+            self.downloaded_segments_by_id = {}
+            for seg in downloaded_segments:
+                key = f"{seg.video_id}_{int(seg.original_start)}"
+                self.downloaded_segments_by_id[key] = seg
+
+            print(f"\n  ✓ Downloaded {len(downloaded_segments)} video segments")
+            return downloaded_segments
+
+        except Exception as e:
+            logger.error(f"Video segment download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def _is_audio_first_enabled(self) -> bool:
+        """Check if audio-first mode is enabled."""
+        audio_config = getattr(self.config.download, 'audio_first', None)
+        return audio_config and getattr(audio_config, 'enabled', False)
+
     def _load_existing_videos(self):
         """
         Load existing videos from output directory when skipping downloads.
@@ -2214,15 +2362,20 @@ Topic:"""
         
         self._print_stage("3", "TRANSCRIBE & INDEX")
         
+        # Check if audio-first mode - use audio files
+        if self._is_audio_first_enabled() and hasattr(self, 'audio_downloads') and self.audio_downloads:
+            # Use audio files from audio-first download
+            video_files = [Path(ad.audio_file) for ad in self.audio_downloads]
+            print(f"  Using {len(video_files)} audio files from audio-first mode")
         # Check if we have remixed video paths from stage_remix
-        if hasattr(self, 'remixed_video_paths') and self.remixed_video_paths:
+        elif hasattr(self, 'remixed_video_paths') and self.remixed_video_paths:
             # Use filtered videos from remix stage
             video_files = [Path(p) for p in self.remixed_video_paths]
             print(f"  Using {len(video_files)} videos from remix stage")
         else:
             # Fall back to scanning directory
             videos_dir = Path(config.downloaded_videos_dir)
-            video_files = list(videos_dir.rglob('*.mp4')) + list(videos_dir.rglob('*.webm'))
+            video_files = list(videos_dir.rglob('*.mp4')) + list(videos_dir.rglob('*.webm')) + list(videos_dir.rglob('*.mp3'))
         
         if not video_files:
             print("  ⚠ No video files found")
@@ -3185,7 +3338,7 @@ Topic:"""
                         else:
                             keywords = keywords + [k for k in list_keywords if k not in keywords]
             
-            # Stage 2: Download footage
+            # Stage 2: Download footage (or audio-only for audio-first mode)
             if not self.config.pipeline.skip_download:
                 if self.resume_mode and self.checkpoint.should_skip_stage("DOWNLOAD"):
                     print(f"\n  ⏭ Skipping DOWNLOAD (completed in previous run)")
@@ -3193,15 +3346,23 @@ Topic:"""
                     self._load_existing_videos()
                 else:
                     stage_start = time.time()
-                    self.stage_download(keywords)
+
+                    # Check if audio-first mode is enabled
+                    if self._is_audio_first_enabled():
+                        print(f"\n  ─── Audio-First Mode ───")
+                        print(f"  • Downloading audio only (MP3) for faster processing")
+                        print(f"  • Video segments will be downloaded after matching")
+                        self.audio_downloads = self.stage_download_audio(keywords)
+                        dl_stats = {"downloaded": len(self.audio_downloads), "mode": "audio-first"}
+                    else:
+                        self.stage_download(keywords)
+                        dl_stats = {"downloaded": len(getattr(self, 'downloaded_videos', []))}
+                        if hasattr(self, 'downloader') and self.downloader:
+                            dl_stats["skipped"] = getattr(self.downloader, 'skipped_count', 0)
+                            dl_stats["failed"] = len(getattr(self, 'failed_keywords', []))
+
                     stage_duration = time.time() - stage_start
-                    
-                    # Get download stats from downloader if available
-                    dl_stats = {"downloaded": len(getattr(self, 'downloaded_videos', []))}
-                    if hasattr(self, 'downloader') and self.downloader:
-                        dl_stats["skipped"] = getattr(self.downloader, 'skipped_count', 0)
-                        dl_stats["failed"] = len(getattr(self, 'failed_keywords', []))
-                    
+
                     if self.run_logger:
                         self.run_logger.log_stage_complete("DOWNLOAD", stage_duration, dl_stats)
                         self.run_logger.set_stats(
@@ -3209,21 +3370,31 @@ Topic:"""
                             videos_skipped=dl_stats.get("skipped", 0),
                             videos_failed=dl_stats.get("failed", 0)
                         )
-                    
-                    # Stage 2c: Stock footage
-                    self.stage_download_stock(keywords)
-                    
-                    # Remix zero-download keywords (generate alternative keywords)
-                    keywords = self.stage_remix_zero_downloads(keywords)
-                    
-                    # Save checkpoint with video paths
-                    video_paths = [str(v.get('path', v)) if isinstance(v, dict) else str(v) 
-                                   for v in self.downloaded_videos]
-                    self.checkpoint.save("DOWNLOAD", {
-                        'video_paths': video_paths,
-                        'video_count': len(video_paths),
-                        'keywords': keywords
-                    })
+
+                    # Stage 2c: Stock footage (skip in audio-first mode)
+                    if not self._is_audio_first_enabled():
+                        self.stage_download_stock(keywords)
+
+                        # Remix zero-download keywords (generate alternative keywords)
+                        keywords = self.stage_remix_zero_downloads(keywords)
+
+                    # Save checkpoint with video/audio paths
+                    if self._is_audio_first_enabled():
+                        audio_paths = [ad.audio_file for ad in getattr(self, 'audio_downloads', [])]
+                        self.checkpoint.save("DOWNLOAD", {
+                            'audio_paths': audio_paths,
+                            'audio_count': len(audio_paths),
+                            'keywords': keywords,
+                            'mode': 'audio-first'
+                        })
+                    else:
+                        video_paths = [str(v.get('path', v)) if isinstance(v, dict) else str(v)
+                                       for v in self.downloaded_videos]
+                        self.checkpoint.save("DOWNLOAD", {
+                            'video_paths': video_paths,
+                            'video_count': len(video_paths),
+                            'keywords': keywords
+                        })
             else:
                 print(f"\n  ⏭ Skipping downloads (config: skip_download=true)")
                 # Load existing videos from output directory
@@ -3305,7 +3476,34 @@ Topic:"""
             'match_count': len(self.matches) if self.matches else 0,
             'avg_confidence': sum(confidences)/len(confidences) if confidences else 0
         })
-        
+
+        # Stage 4.5: Download video segments (audio-first mode only)
+        if self._is_audio_first_enabled() and self.matches:
+            if self.resume_mode and self.checkpoint.should_skip_stage("VIDEO_SEGMENTS"):
+                print(f"\n  ⏭ Skipping VIDEO_SEGMENTS (completed in previous run)")
+            else:
+                stage_start = time.time()
+                print(f"\n  ─── Downloading Video Segments ───")
+                print(f"  • Matched {len(self.matches)} voiceover segments")
+                print(f"  • Downloading only required video portions")
+
+                self.downloaded_segments = self.stage_download_video_segments()
+                stage_duration = time.time() - stage_start
+
+                segment_stats = {
+                    "segments": len(self.downloaded_segments),
+                    "total_matches": sum(len(seg.matches) for seg in self.downloaded_segments)
+                }
+
+                if self.run_logger:
+                    self.run_logger.log_stage_complete("VIDEO_SEGMENTS", stage_duration, segment_stats)
+
+                # Save checkpoint
+                self.checkpoint.save("VIDEO_SEGMENTS", {
+                    'segment_count': len(self.downloaded_segments),
+                    'segment_files': [seg.file for seg in self.downloaded_segments]
+                })
+
         # Stage 5: Output
         stage_start = time.time()
         outputs = self.stage_output()

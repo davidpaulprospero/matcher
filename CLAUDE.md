@@ -201,6 +201,46 @@ Location: `src/downloader.py`
 - Auto-cleanup of `.part` and `.ytdl` files
 - `--no-continue` flag to prevent resume hangs
 
+### Audio-First Mode (Download Optimization)
+Location: `src/downloader.py`, `main.py`
+Dramatically reduces download time by only downloading matched video segments.
+
+**How it works:**
+1. **Audio download:** Downloads audio-only (MP3, ~5% of video size)
+2. **Transcribe & match:** Runs matching on audio transcripts
+3. **Segment download:** Downloads only matched video portions with buffer
+
+**Config:**
+```yaml
+download:
+  audio_first:
+    enabled: true           # Enable audio-first mode
+    buffer_seconds: 30.0    # Extra footage before/after each match
+    merge_gap_seconds: 15.0 # Merge segments closer than this
+    audio_quality: 5        # 0 (best) to 9 (worst), 5 = ~128kbps
+    fallback_full_video: true      # Download full video if segment fails
+    delete_audio_after_video: false # Keep audio files
+```
+
+**Data structures** (`src/downloader.py`):
+- `AudioDownload` - Downloaded audio file metadata
+- `MatchedSegment` - Matched segment from a specific video
+- `MergedSegment` - Merged segments with buffer applied
+- `DownloadedSegment` - Downloaded video segment file
+
+**Segment naming:** `{video_id}_{start_seconds:04d}.mp4`
+- Example: `abc12345678_0045.mp4` (segment starting at 45s)
+- OTIO builder uses `get_segment_file_offset()` to calculate clip offsets
+
+**yt-dlp commands:**
+```bash
+# Audio download
+yt-dlp -f "bestaudio" --extract-audio --audio-format mp3 --audio-quality 5
+
+# Video segment download
+yt-dlp --download-sections "*45-90" -o "%(id)s_%(autonumber)s.%(ext)s"
+```
+
 ### Variety Config
 Location: `src/matching.py` → `StrategyMatcher`
 Must handle as both dict and object:
@@ -301,3 +341,23 @@ Before committing changes:
 - **Strict enforcement:** V4, V5, V6 each MUST use different source videos
 - **No fallbacks:** Empty track if no different source available
 - **Files changed:** `src/matching.py`
+
+### 2026-01-01: Audio-First Download Mode
+- **Problem:** Downloading full videos wastes bandwidth (only ~5% of footage used)
+- **Solution:** Audio-first pipeline - download audio, transcribe, match, then download only needed video segments
+- **Workflow:**
+  1. Stage 2A: Download audio-only (MP3, ~5% of video size)
+  2. Stage 3: Transcribe audio files
+  3. Stage 4: Match voiceover to video transcripts
+  4. Stage 4.5: Download only matched video segments with buffer
+- **Key features:**
+  - 30s buffer before/after each match
+  - Segments within 15s merged to reduce download requests
+  - Segment files named with start time: `{video_id}_{start:04d}.mp4`
+  - OTIO builder auto-adjusts clip offsets for segment files
+- **Files changed:**
+  - `src/config.py` - Added `AudioFirstConfig` dataclass
+  - `src/downloader.py` - Added `AudioDownload`, `MatchedSegment`, `MergedSegment`, `DownloadedSegment` dataclasses and download methods
+  - `main.py` - Added `stage_download_audio()`, `stage_download_video_segments()`, pipeline integration
+  - `src/otio_builder.py` - Added `get_segment_file_offset()`, segment offset adjustments
+  - `config.yaml` - Added `audio_first` config section
