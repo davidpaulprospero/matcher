@@ -1556,7 +1556,7 @@ Only output the JSON array, no other text."""
         if getattr(self.download_config, 'llm_title_filter', None):
             filter_config = self.download_config.llm_title_filter
             if getattr(filter_config, 'enabled', False):
-                filtered = self._apply_llm_title_filter(filtered, keyword, topic)
+                filtered = self._filter_titles_with_llm(filtered, keyword, topic)
 
         # Take top N
         to_download = filtered[:per_keyword]
