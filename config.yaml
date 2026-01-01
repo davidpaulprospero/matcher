@@ -296,7 +296,7 @@ matching:
   # Decision: When topic matches, boost scenes without faces
   prefer_broll_when_topic_matches: true  # Enable B-roll preference when topic matches
   broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
-  broll_boost: 0.1  # Confidence boost for matching B-roll (+10%)
+  broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
 
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
