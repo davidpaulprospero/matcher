@@ -696,25 +696,6 @@ download:
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"
 
-  # Duration tiers
-  tiers:
-    short:
-      min: 20
-      max: 120
-      per_keyword: 5
-    medium:
-      min: 120
-      max: 600
-      count: 8
-    long:
-      min: 600
-      max: 1500
-      per_keyword: 1
-    longer:
-      min: 1500
-      max: 3000
-      per_keyword: 1
-
 # -----------------------------------------------------------------------------
 # DURATION TIERS
 # -----------------------------------------------------------------------------
