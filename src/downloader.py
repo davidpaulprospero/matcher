@@ -1620,12 +1620,15 @@ Only output the JSON array, no other text."""
                 # Find the actual downloaded file (could be .mp3, .m4a, .opus, etc.)
                 actual_file = None
                 if result.returncode == 0:
-                    # Look for any audio file matching this video_id
-                    for ext in ['.mp3', '.m4a', '.mp4', '.opus', '.webm', '.ogg', '.wav']:
-                        candidate = audio_dir / f"{video_id}{ext}"
-                        if candidate.exists():
-                            actual_file = candidate
-                            break
+                    # Use glob to find any file matching this video_id
+                    matches = list(audio_dir.glob(f"{video_id}.*"))
+                    if matches:
+                        actual_file = matches[0]
+                        logger.debug(f"Found audio file: {actual_file.name}")
+                    else:
+                        # Debug: list what files ARE in the directory
+                        all_files = list(audio_dir.iterdir())
+                        logger.debug(f"No file found for {video_id}. Dir contains: {[f.name for f in all_files[:10]]}")
 
                 if actual_file:
                     audio_downloads.append(AudioDownload(
@@ -1644,7 +1647,9 @@ Only output the JSON array, no other text."""
                 else:
                     # Show last 500 chars of stderr (actual error, not ffmpeg header)
                     err_msg = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
-                    logger.warning(f"Audio download failed for {video_id} (rc={result.returncode}): {err_msg}")
+                    # Also list files in dir for debugging
+                    dir_files = [f.name for f in audio_dir.iterdir()] if audio_dir.exists() else []
+                    logger.warning(f"Audio download failed for {video_id} (rc={result.returncode}). Files in dir: {dir_files[:5]}")
 
             except subprocess.TimeoutExpired:
                 logger.warning(f"Audio download timeout for {video_id}")
