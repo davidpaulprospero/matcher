@@ -257,19 +257,21 @@ class VideoDownloader:
     def _get_tier_value(self, tier: str, key: str, default: int = 0) -> int:
         """Get tier config value, handling both dict and dataclass formats"""
         tier_config = self.DURATION_TIERS.get(tier, {})
-        
+
         if isinstance(tier_config, dict):
-            return tier_config.get(key, default)
+            value = tier_config.get(key, default)
+            return value if value is not None else default
         else:
             # Dataclass format - try different attribute names
             if key == 'min':
-                return getattr(tier_config, 'min_seconds', getattr(tier_config, 'min', default))
+                value = getattr(tier_config, 'min_seconds', getattr(tier_config, 'min', default))
             elif key == 'max':
-                return getattr(tier_config, 'max_seconds', getattr(tier_config, 'max', default))
+                value = getattr(tier_config, 'max_seconds', getattr(tier_config, 'max', default))
             elif key == 'per_keyword':
-                return getattr(tier_config, 'videos_per_keyword', getattr(tier_config, 'per_keyword', default))
+                value = getattr(tier_config, 'videos_per_keyword', getattr(tier_config, 'per_keyword', default))
             else:
-                return getattr(tier_config, key, default)
+                value = getattr(tier_config, key, default)
+            return value if value is not None else default
     
     def _find_cookies_file(self) -> Optional[Path]:
         """
