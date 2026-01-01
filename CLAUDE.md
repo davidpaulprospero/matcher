@@ -128,9 +128,9 @@ Also add to title_blacklist: `live stream`, `livestream`, `webcam`, `24/7`
 | V1 | Primary video | Enabled |
 | V2 | Alternative 1 | Disabled |
 | V3 | Alternative 2 | Disabled |
-| V4 | Secondary Primary (different source from V1-V3) | Disabled |
-| V5 | Secondary Alt 1 | Disabled |
-| V6 | Secondary Alt 2 | Disabled |
+| V4 | Secondary Primary (diversity-scored, strict different source) | Disabled |
+| V5 | Secondary Alt 1 (diversity-scored, strict different source) | Disabled |
+| V6 | Secondary Alt 2 (diversity-scored, strict different source) | Disabled |
 | V7 | Embedding-Diversity strategy | Disabled |
 | V8 | (Reserved) | - |
 | V9 | Entity Images (Google stills) | Disabled |
@@ -142,6 +142,7 @@ Also add to title_blacklist: `live stream`, `livestream`, `webcam`, `24/7`
 - `_create_clip()` - Creates individual clips with speed adjustment
 - `_validate_entity_images()` - Filters invalid image paths before OTIO
 - `_to_windows_path()` - Converts paths for DaVinci Resolve compatibility
+- `get_secondary_matches_diversity()` - V4-V6 matching with strict source enforcement
 
 ### Config Options
 ```yaml
@@ -292,3 +293,11 @@ Before committing changes:
 - **Solution:** Added `download_timeouts` dict with per-tier values
 - **Files changed:** `src/config.py`, `src/downloader.py`, `config.yaml`
 - **Timeouts:** short=120s, medium=300s, long=600s, longer=900s
+
+### 2026-01-01: V4-V6 diversity scoring with strict source enforcement
+- **Problem:** V4-V6 could share sources, fallback logic reduced variety
+- **Solution:** New `get_secondary_matches_diversity()` method in StrategyMatcher
+- **Algorithm:** Same as V7 (40% relevance + 60% diversity), min 0.3 relevance
+- **Strict enforcement:** V4, V5, V6 each MUST use different source videos
+- **No fallbacks:** Empty track if no different source available
+- **Files changed:** `src/matching.py`
