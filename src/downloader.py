@@ -1548,10 +1548,11 @@ Only output the JSON array, no other text."""
             logger.warning(f"No search results for '{keyword}'")
             return []
 
-        # Filter by duration
+        # Filter by duration (handle None duration values)
         filtered = [
             v for v in search_results
-            if tier_min <= v.get('duration', 0) <= tier_max
+            if (v.get('duration') or 0) >= tier_min
+            and (v.get('duration') or 0) <= tier_max
             and not v.get('is_live', False)  # Skip live videos
         ]
 
