@@ -668,8 +668,15 @@ download:
   
   # Timeout settings (seconds)
   search_timeout: 60         # Timeout for search metadata subprocess
-  download_timeout: 120      # Timeout per video download (2 min) - will retry with modified keyword on timeout
-  
+  download_timeout: 120      # Default timeout per video download (used for 'short' tier)
+
+  # Tier-specific download timeouts (longer videos need more time)
+  download_timeouts:
+    short: 120     # 2 min timeout for videos <2 min
+    medium: 300    # 5 min timeout for videos 2-10 min
+    long: 600      # 10 min timeout for videos 10-25 min
+    longer: 900    # 15 min timeout for videos 25-50 min
+
   # Duration tiers
   tiers:
     short:
