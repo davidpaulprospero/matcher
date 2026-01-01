@@ -2576,9 +2576,55 @@ Topic:"""
                     print(f"    Processed {i + 1}/{len(uncached)}...", end='\r')
             
             print(f"  ✓ Face detection: {faces_found}/{len(uncached)} videos have faces")
-            
+
         except Exception as e:
             logger.warning(f"Face pre-detection failed: {e}")
+
+    def _map_segment_face_scores_to_audio(self):
+        """
+        Map face scores from video segments to original audio file paths.
+
+        In audio-first mode, face detection runs on video segments (e.g., video_id_0035.mp4)
+        but matching uses audio file paths (e.g., video_id.mp3). This method copies the
+        face scores so they can be looked up by audio file path during second-pass matching.
+        """
+        if not hasattr(self, 'downloaded_segments') or not self.downloaded_segments:
+            return
+
+        if not hasattr(self, 'audio_downloads_by_id') or not self.audio_downloads_by_id:
+            return
+
+        try:
+            from src.face_detection import FaceDetector
+
+            detector = FaceDetector.get_instance()
+            cache_dir = self.config.cache.cache_dir
+            mapped_count = 0
+
+            # For each downloaded segment, find the corresponding audio file
+            for seg in self.downloaded_segments:
+                video_id = seg.video_id
+                segment_path = seg.file
+
+                # Get face score for the video segment
+                if segment_path in FaceDetector._cache:
+                    face_score = FaceDetector._cache[segment_path]
+
+                    # Find corresponding audio file
+                    if video_id in self.audio_downloads_by_id:
+                        audio_download = self.audio_downloads_by_id[video_id]
+                        audio_path = audio_download.audio_file
+
+                        # Map the face score to audio file path
+                        if audio_path not in FaceDetector._cache:
+                            FaceDetector._cache[audio_path] = face_score
+                            mapped_count += 1
+
+            if mapped_count > 0:
+                logger.debug(f"Mapped {mapped_count} face scores from segments to audio files")
+
+        except Exception as e:
+            logger.warning(f"Failed to map segment face scores: {e}")
 
     def _extract_video_topics(self):
         """Extract topics from video transcripts for chapter-based matching."""
@@ -3561,6 +3607,15 @@ Topic:"""
                     segment_files = [Path(seg.file) for seg in self.downloaded_segments]
                     print(f"\n  ─── Face Detection (on video segments) ───")
                     self._predetect_faces(segment_files)
+
+                    # Map face scores from video segments to audio files
+                    # This allows second-pass matching to use face scores
+                    self._map_segment_face_scores_to_audio()
+
+                    # Second-pass matching with face preference
+                    print(f"\n  ─── Second-Pass Matching (with face preference: {face_pref}) ───")
+                    self.matches = self.stage_match()
+                    print(f"  ✓ Re-matched {len(self.matches)} segments with face preference")
 
         # Stage 5: Output
         stage_start = time.time()
