@@ -3522,7 +3522,7 @@ Topic:"""
         print(f"    [N] NO faces - prefer clips without people (b-roll, scenery)")
         print(f"    [X] No preference - don't filter by faces")
         
-        face_choice = self._get_user_input("  Select [M/N/X]", default="X").strip().upper()
+        face_choice = self._get_user_input("  Select [M/N/X]", default="N").strip().upper()
         
         if face_choice == 'M':
             self.face_preference = "more"
