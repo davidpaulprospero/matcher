@@ -3184,8 +3184,9 @@ Topic:"""
         # Track which videos we successfully described
         described = 0
         cached_count = 0
+        total_silent = len(silent_videos)
 
-        for video_path in silent_videos:
+        for idx, video_path in enumerate(silent_videos, 1):
             description = None
             source = None
             duration = 30.0
@@ -3200,7 +3201,7 @@ Topic:"""
                 duration = cached.get('duration', 30.0)
                 cached_count += 1
                 from_cache = True
-                logger.debug(f"Using cached B-roll description for {Path(video_path).name}")
+                logger.debug(f"({idx}/{total_silent}) Using cached B-roll description for {Path(video_path).name}")
 
             # Try Vision API first (if enabled and available)
             if use_vision and description is None:
@@ -3233,9 +3234,9 @@ Topic:"""
                         if descriptions:
                             description = ' '.join(descriptions)
                             source = 'vision'
-                            logger.debug(f"Vision API described {Path(video_path).name}: {description[:100]}...")
+                            logger.debug(f"({idx}/{total_silent}) Vision API described {Path(video_path).name}: {description[:100]}...")
                 except Exception as e:
-                    logger.debug(f"Vision API failed for {video_path}: {e}")
+                    logger.debug(f"({idx}/{total_silent}) Vision API failed for {Path(video_path).name}: {e}")
 
             # Fallback to LLM from title/keyword
             if use_llm and description is None:
@@ -3265,15 +3266,15 @@ Be specific and descriptive for semantic matching purposes."""
                         response = model.generate_content(prompt)
                         description = response.text.strip()
                         source = 'llm'
-                        logger.debug(f"LLM described {Path(video_path).name}: {description[:100]}...")
+                        logger.debug(f"({idx}/{total_silent}) LLM described {Path(video_path).name}: {description[:100]}...")
                     else:
                         # Simple fallback - use keyword as description
                         description = f"Video footage of {keyword}. Visual content showing {clean_name}."
                         source = 'keyword'
-                        logger.debug(f"Keyword fallback for {Path(video_path).name}: {description}")
+                        logger.debug(f"({idx}/{total_silent}) Keyword fallback for {Path(video_path).name}: {description}")
 
                 except Exception as e:
-                    logger.debug(f"LLM fallback failed for {video_path}: {e}")
+                    logger.debug(f"({idx}/{total_silent}) LLM fallback failed for {Path(video_path).name}: {e}")
 
             # Create synthetic segments if we have a description
             if description:
@@ -3320,8 +3321,8 @@ Be specific and descriptive for semantic matching purposes."""
 
                 # Only print for newly generated descriptions (not cached)
                 if not from_cache:
-                    print(f"    ✓ {Path(video_path).name}: {source} description ({len(description)} chars)")
-                    logger.info(f"B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
+                    print(f"    ({idx}/{total_silent}) ✓ {Path(video_path).name}: {source} ({len(description)} chars)")
+                    logger.info(f"({idx}/{total_silent}) B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
 
         # Save cache after processing
         save_broll_cache()
