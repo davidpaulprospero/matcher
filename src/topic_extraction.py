@@ -227,8 +227,9 @@ No explanation, just the JSON array."""
         """
         results = {}
         video_metadata = video_metadata or {}
+        total = len(transcripts)
 
-        for video_path, transcript in transcripts.items():
+        for idx, (video_path, transcript) in enumerate(transcripts.items(), 1):
             meta = video_metadata.get(video_path, {})
             title = meta.get('title', '')
             keyword = meta.get('keyword', '')
@@ -240,6 +241,9 @@ No explanation, just the JSON array."""
                 source_keyword=keyword
             )
             results[video_path] = result
+
+            if idx % 50 == 0 or idx == total:
+                logger.info(f"({idx}/{total}) Topic extraction progress")
 
         return results
 

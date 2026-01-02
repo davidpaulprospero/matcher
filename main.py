@@ -3064,7 +3064,6 @@ Topic:"""
         try:
             from src.topic_extraction import TopicExtractor
 
-            print(f"\n  Extracting video topics...")
             extractor = TopicExtractor(self.config, self.config.cache.cache_dir)
 
             # Prepare transcripts and metadata for batch extraction
@@ -3093,6 +3092,8 @@ Topic:"""
                     }
 
             # Batch extract topics
+            print(f"\n  Extracting video topics ({len(transcripts_dict)} videos)...")
+            logger.info(f"Extracting topics from {len(transcripts_dict)} videos")
             self.video_topics = extractor.extract_batch(transcripts_dict, metadata_dict)
 
             # Count topics extracted
