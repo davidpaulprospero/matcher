@@ -1590,33 +1590,34 @@ Topic:"""
     # MAIN PIPELINE STAGES (Config-Driven)
     # =========================================================================
     
-    def stage_analyze_voiceover(self, voiceover_path: str, num_keywords: int = None) -> List[str]:
+    def _load_voiceover_segments(self, voiceover_path: str, quiet: bool = False) -> List[dict]:
         """
-        Stage 1: Analyze voiceover and extract keywords.
-        All parameters from config unless overridden.
+        Load voiceover segments from SRT or transcribe audio/video file.
+
+        Args:
+            voiceover_path: Path to voiceover file (.srt, .mp3, .wav, etc.)
+            quiet: If True, suppress print statements
+
+        Returns:
+            List of segment dictionaries
         """
         config = self.config
-        
-        # Use config default if not specified
-        if num_keywords is None:
-            num_keywords = config.keyword.max_keywords
-        
-        self._print_stage("1", "ANALYZE VOICEOVER")
-        
-        # Determine file type and parse/transcribe
         vo_path = Path(voiceover_path)
+
         if vo_path.suffix.lower() == '.srt':
-            print(f"  Parsing SRT: {vo_path.name}")
-            self.voiceover_segments = self._parse_srt(str(vo_path))
+            if not quiet:
+                print(f"  Parsing SRT: {vo_path.name}")
+            return self._parse_srt(str(vo_path))
         else:
             # Transcribe audio/video
             if self.modules['optimized_transcription']:
                 from src.transcription import transcribe_voiceover_media
-                print(f"  Transcribing: {vo_path.name}")
-                
+                if not quiet:
+                    print(f"  Transcribing: {vo_path.name}")
+
                 # Generate SRT path
                 srt_path = vo_path.with_suffix('.srt')
-                
+
                 # Call transcription with correct arguments
                 result_srt = transcribe_voiceover_media(
                     str(vo_path),
@@ -1626,14 +1627,30 @@ Topic:"""
                     compute_type=config.transcription.compute_type,
                     cache_dir=config.cache.cache_dir if config.cache.cache_transcriptions else None
                 )
-                
-                # Now parse the generated SRT file
-                print(f"  ✓ Transcription saved to: {Path(result_srt).name}")
-                self.voiceover_segments = self._parse_srt(result_srt)
+
+                if not quiet:
+                    print(f"  ✓ Transcription saved to: {Path(result_srt).name}")
+                return self._parse_srt(result_srt)
             else:
                 logger.error("Transcription module not available for non-SRT files")
                 sys.exit(1)
-        
+
+    def stage_analyze_voiceover(self, voiceover_path: str, num_keywords: int = None) -> List[str]:
+        """
+        Stage 1: Analyze voiceover and extract keywords.
+        All parameters from config unless overridden.
+        """
+        config = self.config
+
+        # Use config default if not specified
+        if num_keywords is None:
+            num_keywords = config.keyword.max_keywords
+
+        self._print_stage("1", "ANALYZE VOICEOVER")
+
+        # Load voiceover segments (handles both SRT and audio files)
+        self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
+
         print(f"  ✓ {len(self.voiceover_segments)} segments found")
         
         # Extract keywords
@@ -3973,7 +3990,7 @@ Be specific and descriptive for semantic matching purposes."""
                 self.extracted_entities = preset.entities
                 
                 # Still need to parse voiceover segments
-                self.voiceover_segments = self._parse_srt(voiceover_path)
+                self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                 print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
                 use_saved = True
             else:
@@ -3993,7 +4010,7 @@ Be specific and descriptive for semantic matching purposes."""
                             self.keywords = keywords
                             self.topic_context = preset.topic_context
                             self.extracted_entities = preset.entities
-                            self.voiceover_segments = self._parse_srt(voiceover_path)
+                            self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                             print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
                             use_saved = True
                         break
@@ -4017,7 +4034,7 @@ Be specific and descriptive for semantic matching purposes."""
                                 self.keywords = keywords
                                 self.topic_context = preset.topic_context
                                 self.extracted_entities = preset.entities
-                                self.voiceover_segments = self._parse_srt(voiceover_path)
+                                self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                                 print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
                                 use_saved = True
                         except (ValueError, IndexError):
