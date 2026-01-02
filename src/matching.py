@@ -557,7 +557,9 @@ class TieredMatcher:
         # Initialize reuse tracker for clip reuse prevention
         self.reuse_tracker = ReuseTracker(
             max_reuse=mc.max_clip_reuse,
-            reuse_penalty=mc.reuse_penalty
+            reuse_penalty=mc.reuse_penalty,
+            max_source_file_reuse=getattr(mc, 'max_source_file_reuse', 0),
+            source_file_penalty=getattr(mc, 'source_file_penalty', 0.05)
         )
 
         # Initialize providers

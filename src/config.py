@@ -292,6 +292,10 @@ class MatchingConfig:
     reuse_penalty: float = 0.5
     smart_reuse: bool = True
     sequential_when_reuse: bool = True
+
+    # Source file reuse prevention (limits how many times any segment from same video can be used)
+    max_source_file_reuse: int = 15  # 0 = unlimited, 15 = max 15 clips from same video
+    source_file_penalty: float = 0.05  # Penalty per use after reaching half the max
     
     # Two-stage matching optimization
     embedding_candidates: int = 50  # Retrieve from FAISS (need 50+ for V1-V6)

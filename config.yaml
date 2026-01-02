@@ -237,7 +237,13 @@ matching:
   # Reasoning: Variety improves viewer experience
   max_clip_reuse: 1
   reuse_penalty: 0.5
-  
+
+  # Source file reuse prevention
+  # Chain-of-thought: Prevent over-reliance on single video file
+  # Reasoning: One video shouldn't dominate the timeline
+  max_source_file_reuse: 15  # 0 = unlimited, 15 = max 15 clips from same video
+  source_file_penalty: 0.05  # Penalty per use after reaching half the max
+
   # Two-stage matching optimization
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
