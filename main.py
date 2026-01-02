@@ -3621,11 +3621,15 @@ Be specific and descriptive for semantic matching purposes."""
 
         self._print_stage("5", "GENERATE OUTPUT")
 
-        output_dir = Path(config.otio_output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         # Generate timestamp for this run's outputs
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Create timestamped subdirectory for this run's outputs
+        base_output_dir = Path(config.otio_output_dir)
+        output_dir = base_output_dir / run_timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"  Output directory: {output_dir}")
 
         outputs = {}
 
@@ -3638,7 +3642,6 @@ Be specific and descriptive for semantic matching purposes."""
 
             # Generate timeline
             print(f"  Creating timeline...")
-            print(f"  Output timestamp: {run_timestamp}")
             timeline = create_timeline(
                 matches=self.matches,
                 config=config,
@@ -3649,9 +3652,9 @@ Be specific and descriptive for semantic matching purposes."""
                 downloaded_segments=getattr(self, 'downloaded_segments', None)  # Audio-first video segments
             )
 
-            # Output formats (config-driven) - all use run_timestamp
+            # Output formats (config-driven)
             if config.output.generate_otio:
-                otio_base_path = output_dir / f"timeline_{run_timestamp}"
+                otio_base_path = output_dir / "timeline"
                 
                 # Check if we should split the OTIO
                 split_otio = getattr(config.output, 'split_otio', True)
@@ -3692,7 +3695,7 @@ Be specific and descriptive for semantic matching purposes."""
                     print(f"  ✓ OTIO: {otio_path}")
             
             if config.output.generate_edl:
-                edl_path = output_dir / f"timeline_{run_timestamp}.edl"
+                edl_path = output_dir / "timeline.edl"
                 save_timeline_as_edl(
                     self.matches,
                     str(edl_path),
@@ -3705,7 +3708,7 @@ Be specific and descriptive for semantic matching purposes."""
 
             # Generate DaVinci Resolve XML with media bin AND timeline (FALLBACK)
             if getattr(config.output, 'generate_xml', True):
-                xml_base_path = output_dir / f"xml_{run_timestamp}"
+                xml_base_path = output_dir / "timeline"
                 num_parts = getattr(config.output, 'xml_parts', 2)
                 xml_paths = generate_resolve_xml_with_bins(
                     matches=self.matches,
@@ -3722,7 +3725,7 @@ Be specific and descriptive for semantic matching purposes."""
 
             # Generate report if enabled
             if config.output.generate_report:
-                report_path = output_dir / f"match_report_{run_timestamp}.md"
+                report_path = output_dir / "match_report.md"
                 self._generate_report(self.matches, str(report_path))
                 outputs['report'] = str(report_path)
                 print(f"  ✓ Report: {report_path}")
