@@ -508,32 +508,22 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
     """Extract audio from video file"""
     import subprocess
     import hashlib
-    
+
     video_path = Path(video_path)
-    
+
     # Use hash of full path to avoid collisions with similar filenames
     path_hash = hashlib.md5(str(video_path).encode()).hexdigest()[:8]
     audio_filename = f"{video_path.stem[:80]}_{path_hash}.wav"
-    
+
     if output_dir:
         audio_path = Path(output_dir) / audio_filename
     else:
         audio_path = video_path.parent / audio_filename
-    
+
     # Skip if already extracted
     if audio_path.exists():
         return str(audio_path)
-    
-    video_path = Path(video_path)
-    if output_dir:
-        audio_path = Path(output_dir) / f"{video_path.stem}.wav"
-    else:
-        audio_path = video_path.with_suffix('.wav')
-    
-    # Skip if already extracted
-    if audio_path.exists():
-        return str(audio_path)
-    
+
     try:
         cmd = [
             'ffmpeg', '-i', str(video_path),
