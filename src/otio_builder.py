@@ -608,16 +608,50 @@ def create_timeline(
         kind=otio.schema.TrackKind.Audio
     )
     voiceover_track.metadata['Resolve_OTIO'] = {'Locked': False}
-    
+
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
-    
+
+    # Get the first segment's start time as timeline reference (usually 0, but might not be)
+    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+
     # Process each match
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
-        
+
+        # Check for gap before this segment (silence in voiceover)
+        # Expected position = where this segment should start relative to first segment
+        expected_start_frames = round((vo_seg.start_time - first_segment_start) * frame_rate)
+
+        if expected_start_frames > timeline_frames:
+            # There's a gap - insert silence/gap clips on all tracks
+            gap_frames = expected_start_frames - timeline_frames
+            gap_duration = otio.opentime.RationalTime(gap_frames, rate)
+
+            logger.debug(f"Segment {match_idx}: Inserting {gap_frames/rate:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
+
+            # Add gap to all video tracks
+            for track in video_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+
+            # Add gap to all audio tracks
+            for track in audio_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+
+            timeline_frames = expected_start_frames
+
         # Target duration = voiceover segment duration
         target_duration = vo_seg.end_time - vo_seg.start_time
         duration_frames = round(target_duration * frame_rate)
@@ -955,28 +989,36 @@ def create_timeline(
         vo_folder = Path(voiceover_path).parent.name
         vo_filename = Path(voiceover_path).name
         vo_unique_name = f"{vo_folder}_{vo_filename}"
-        
-        # Total duration should match total frames accumulated
+
+        # Calculate voiceover timing to match video tracks exactly
+        # The voiceover should start at first_segment_start in the source file
+        # and have the same duration as the accumulated timeline
+        vo_start_frames = round(first_segment_start * rate)
         total_frames = timeline_frames
         total_duration_seconds = total_frames / rate
-        
+
+        # Estimate total media duration (start offset + timeline duration + buffer)
+        estimated_media_duration = first_segment_start + total_duration_seconds + 10
+
         # Create proper ExternalReference with available_range
         vo_available_range = otio.opentime.TimeRange(
             start_time=otio.opentime.RationalTime(0, rate),
-            duration=otio.opentime.RationalTime(total_frames, rate)
+            duration=otio.opentime.RationalTime(round(estimated_media_duration * rate), rate)
         )
-        
+
         vo_ref = otio.schema.ExternalReference(
             target_url=abs_vo_path,
             available_range=vo_available_range
         )
         vo_ref.name = vo_unique_name  # Unique name includes folder
-        
+
+        # Voiceover clip starts at first_segment_start in the source
+        # This ensures the voiceover audio aligns with the video clips
         vo_clip = otio.schema.Clip(
             name="Voiceover",
             media_reference=vo_ref,
             source_range=otio.opentime.TimeRange(
-                start_time=otio.opentime.RationalTime(0, rate),
+                start_time=otio.opentime.RationalTime(vo_start_frames, rate),
                 duration=otio.opentime.RationalTime(total_frames, rate)
             )
         )
