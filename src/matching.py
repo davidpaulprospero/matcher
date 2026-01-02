@@ -917,12 +917,16 @@ class TieredMatcher:
                 current_project_candidates = apply_face_preference(current_project_candidates, face_pref, cache_dir)
 
             # Apply cached face scores to global cache candidates
+            # NEVER run face detection on global cache - only use cached scores
             if global_cache_candidates:
                 adjusted_cache = []
+                with_cached_score = 0
+                without_cached_score = 0
                 for seg, score in global_cache_candidates:
-                    # Use cached face_score if available
+                    # Use cached face_score if available (from global cache registry)
                     cached_face_score = getattr(seg, 'face_score', None)
                     if cached_face_score is not None:
+                        with_cached_score += 1
                         # Apply same adjustment as apply_face_preference
                         if face_pref == "more":
                             # Boost segments with faces
@@ -935,9 +939,12 @@ class TieredMatcher:
                         else:
                             adjusted_cache.append((seg, score))
                     else:
-                        # No cached score, keep original
+                        # No cached score - keep original (don't run detection to avoid hang)
+                        without_cached_score += 1
                         adjusted_cache.append((seg, score))
                 global_cache_candidates = adjusted_cache
+                if without_cached_score > 0:
+                    logger.debug(f"  {with_cached_score} cached have face scores, {without_cached_score} don't (skipped)")
 
             # Merge back and re-sort by score
             candidates = current_project_candidates + global_cache_candidates
