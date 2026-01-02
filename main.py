@@ -2061,7 +2061,8 @@ Topic:"""
                     'topics': entry.topics,
                     'keywords': entry.keywords,
                     'has_transcript': entry.has_transcript,
-                    'video_hash': entry.video_hash
+                    'video_hash': entry.video_hash,
+                    'face_score': entry.face_score  # Cached face score from global cache
                 }
                 reusable_videos.append(video_info)
 
@@ -2157,7 +2158,8 @@ Topic:"""
                         'file': gv['path'],
                         'source': 'global_cache',
                         'relevance': gv.get('relevance', 0.5),
-                        'video_hash': gv.get('video_hash', '')
+                        'video_hash': gv.get('video_hash', ''),
+                        'face_score': gv.get('face_score', 0.5)  # Preserve cached face score
                     })
 
             # Store failed keywords for potential remix
@@ -2749,24 +2751,45 @@ Topic:"""
                 print("  ⚠ No cached transcripts found - run without skip_transcription first")
                 return {}
 
+            # Build lookup of video info (source, face_score) by path
+            video_info_lookup = {}
+            if hasattr(self, 'downloaded_videos'):
+                for v in self.downloaded_videos:
+                    path = v.get('path') or v.get('file', '')
+                    video_info_lookup[path] = {
+                        'source': v.get('source'),
+                        'face_score': v.get('face_score')
+                    }
+
             # Build text metadata for matching
             self.text_metadata = []
             for video_path, segments in self.transcripts.items():
+                # Get source and face_score for this video
+                vinfo = video_info_lookup.get(video_path, {})
+                source = vinfo.get('source')
+                face_score = vinfo.get('face_score')
+
                 for seg in segments:
                     if hasattr(seg, 'text'):
-                        self.text_metadata.append({
+                        meta = {
                             'text': seg.text,
                             'video_path': video_path,
                             'start_time': seg.start_time,
                             'end_time': seg.end_time
-                        })
+                        }
                     else:
-                        self.text_metadata.append({
+                        meta = {
                             'text': seg.get('text', ''),
                             'video_path': video_path,
                             'start_time': seg.get('start_time', 0),
                             'end_time': seg.get('end_time', 0)
-                        })
+                        }
+                    # Add source and face_score if available (for global cache videos)
+                    if source:
+                        meta['source'] = source
+                    if face_score is not None:
+                        meta['face_score'] = face_score
+                    self.text_metadata.append(meta)
 
             print(f"  ✓ Built {len(self.text_metadata)} text segments")
 
@@ -3095,18 +3118,29 @@ Topic:"""
                 return
             
             print(f"  Detecting faces in {len(uncached)} videos...")
-            
+
             faces_found = 0
             for i, vf in enumerate(uncached):
                 video_path = str(vf)
                 score = detector.get_face_score(video_path, cache_dir)
                 if score > 0.2:  # At least 1 frame with faces
                     faces_found += 1
-                
+
+                # Save face score to global cache registry if available
+                if hasattr(self, 'global_cache') and self.global_cache:
+                    try:
+                        video_hash = self.global_cache.get_video_hash(video_path)
+                        if video_hash:
+                            self.global_cache.mark_video_processed(
+                                video_hash, face_score=score
+                            )
+                    except Exception:
+                        pass  # Don't fail if global cache update fails
+
                 # Progress every 10 videos
                 if (i + 1) % 10 == 0:
                     print(f"    Processed {i + 1}/{len(uncached)}...", end='\r')
-            
+
             print(f"  ✓ Face detection: {faces_found}/{len(uncached)} videos have faces")
 
         except Exception as e:
@@ -3540,6 +3574,11 @@ Be specific and descriptive for semantic matching purposes."""
                         text=meta.get('text', ''),
                         source_file=meta.get('video_path', ''),
                     )
+                    # Add source and face_score for global cache videos
+                    if meta.get('source'):
+                        vid_segment.source = meta['source']
+                    if meta.get('face_score') is not None:
+                        vid_segment.face_score = meta['face_score']
                     video_paths_set.add(meta.get('video_path', ''))
                 else:
                     vid_segment = meta
