@@ -93,12 +93,14 @@ class DeltaAwareIndex:
             try:
                 with open(self.index_path, 'r') as f:
                     data = json.load(f)
-                    self.indexed_videos = set(data.get('indexed', []))
+                    # Normalize paths when loading for consistent matching
+                    raw_paths = data.get('indexed', [])
+                    self.indexed_videos = set(_normalize_path(p) for p in raw_paths)
                     self.indexed_video_ids = set(data.get('indexed_ids', []))
 
                     # Rebuild video IDs from paths if not stored (migration)
                     if not self.indexed_video_ids:
-                        for vp in self.indexed_videos:
+                        for vp in raw_paths:
                             vid_id = _extract_video_id(vp)
                             if vid_id:
                                 self.indexed_video_ids.add(vid_id)
@@ -122,8 +124,11 @@ class DeltaAwareIndex:
 
     def is_indexed(self, video_path: str) -> bool:
         """Check if a video has been indexed (by path or video ID)"""
-        # Check exact path match
-        if str(video_path) in self.indexed_videos:
+        # Normalize path for consistent matching
+        normalized = _normalize_path(video_path)
+
+        # Check normalized path match
+        if normalized in self.indexed_videos:
             return True
 
         # Check video ID match (for segment files matching audio)
@@ -134,17 +139,19 @@ class DeltaAwareIndex:
         return False
 
     def mark_indexed(self, video_path: str):
-        """Mark a video as indexed"""
-        self.indexed_videos.add(str(video_path))
+        """Mark a video as indexed (using normalized path)"""
+        normalized = _normalize_path(video_path)
+        self.indexed_videos.add(normalized)
         vid_id = _extract_video_id(video_path)
         if vid_id:
             self.indexed_video_ids.add(vid_id)
         self._save()
 
     def mark_indexed_batch(self, video_paths: List[str]):
-        """Mark multiple videos as indexed"""
+        """Mark multiple videos as indexed (using normalized paths)"""
         for vp in video_paths:
-            self.indexed_videos.add(str(vp))
+            normalized = _normalize_path(vp)
+            self.indexed_videos.add(normalized)
             vid_id = _extract_video_id(vp)
             if vid_id:
                 self.indexed_video_ids.add(vid_id)
