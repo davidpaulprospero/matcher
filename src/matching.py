@@ -286,7 +286,11 @@ class LLMProvider(ABC):
 
 class GeminiMatcher(LLMProvider):
     """Gemini Flash for matching"""
-    
+
+    # Timeout for API requests in seconds
+    REQUEST_TIMEOUT = 120
+    MAX_RETRIES = 3
+
     def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
@@ -324,50 +328,71 @@ class GeminiMatcher(LLMProvider):
 Respond with ONLY a valid JSON array, no other text. Use simple reasons without special characters:
 [{{"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"}}]"""
 
-        try:
-            response = self.model.generate_content(prompt)
-            
-            # Use robust parser
-            results_list = parse_llm_json(response.text, expected_count=len(items))
-            
-            if results_list:
-                outputs = []
-                for i, (vo_text, candidates) in enumerate(items):
-                    result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
-                    if result:
-                        selected_idx = result.get('selected', 1) - 1
-                        # Clamp to valid range
-                        selected_idx = max(0, min(selected_idx, len(candidates) - 1))
-                        confidence = result.get('confidence', 0.7)
-                        # Clamp confidence to valid range
-                        confidence = max(0.0, min(1.0, float(confidence)))
-                        outputs.append((
-                            selected_idx,
-                            confidence,
-                            str(result.get('reason', 'matched'))[:50]
-                        ))
-                    else:
-                        # Fallback for missing voiceover entry
-                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
-                
-                return outputs
-            else:
-                logger.warning(f"Gemini: Could not parse response, using embedding fallback")
-                raise ValueError("JSON parsing failed after all strategies")
-                
-        except Exception as e:
-            logger.warning(f"Gemini batch error: {e}")
-            raise
-        
+        import time
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Use request_options with timeout to prevent hangs
+                response = self.model.generate_content(
+                    prompt,
+                    request_options={"timeout": self.REQUEST_TIMEOUT}
+                )
+
+                # Use robust parser
+                results_list = parse_llm_json(response.text, expected_count=len(items))
+
+                if results_list:
+                    outputs = []
+                    for i, (vo_text, candidates) in enumerate(items):
+                        result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
+                        if result:
+                            selected_idx = result.get('selected', 1) - 1
+                            # Clamp to valid range
+                            selected_idx = max(0, min(selected_idx, len(candidates) - 1))
+                            confidence = result.get('confidence', 0.7)
+                            # Clamp confidence to valid range
+                            confidence = max(0.0, min(1.0, float(confidence)))
+                            outputs.append((
+                                selected_idx,
+                                confidence,
+                                str(result.get('reason', 'matched'))[:50]
+                            ))
+                        else:
+                            # Fallback for missing voiceover entry
+                            outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
+
+                    return outputs
+                else:
+                    logger.warning(f"Gemini: Could not parse response, using embedding fallback")
+                    raise ValueError("JSON parsing failed after all strategies")
+
+            except Exception as e:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"Gemini API error (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.warning(f"Gemini batch error after {self.MAX_RETRIES} attempts: {e}")
+                    raise
+
         return [(0, 0.5, "error fallback") for _ in items]
 
 
 class ClaudeMatcher(LLMProvider):
     """Claude Haiku for matching (secondary/ambiguous)"""
-    
+
+    # Timeout for API requests in seconds
+    REQUEST_TIMEOUT = 120
+    MAX_RETRIES = 3
+
     def __init__(self, api_key: str, model: str = "claude-3-haiku-20240307"):
         import anthropic
-        self.client = anthropic.Anthropic(api_key=api_key)
+        import httpx
+        # Configure client with timeout to prevent hangs
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=httpx.Timeout(self.REQUEST_TIMEOUT, connect=30.0)
+        )
         self.model_name = model
     
     def match_batch(
@@ -401,46 +426,54 @@ class ClaudeMatcher(LLMProvider):
 Respond with ONLY a valid JSON array, no other text. Use simple reasons without special characters:
 [{{"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"}}]"""
 
-        try:
-            response = self.client.messages.create(
-                model=self.model_name,
-                max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            text = response.content[0].text
-            
-            # Use robust parser
-            results_list = parse_llm_json(text, expected_count=len(items))
-            
-            if results_list:
-                outputs = []
-                for i, (vo_text, candidates) in enumerate(items):
-                    result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
-                    if result:
-                        selected_idx = result.get('selected', 1) - 1
-                        # Clamp to valid range
-                        selected_idx = max(0, min(selected_idx, len(candidates) - 1))
-                        confidence = result.get('confidence', 0.7)
-                        # Clamp confidence to valid range
-                        confidence = max(0.0, min(1.0, float(confidence)))
-                        outputs.append((
-                            selected_idx,
-                            confidence,
-                            str(result.get('reason', 'matched'))[:50]
-                        ))
-                    else:
-                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
-                
-                return outputs
-            else:
-                logger.warning(f"Claude: Could not parse response, using embedding fallback")
-                raise ValueError("JSON parsing failed after all strategies")
-                
-        except Exception as e:
-            logger.warning(f"Claude batch error: {e}")
-            raise
-        
+        import time
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.client.messages.create(
+                    model=self.model_name,
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                text = response.content[0].text
+
+                # Use robust parser
+                results_list = parse_llm_json(text, expected_count=len(items))
+
+                if results_list:
+                    outputs = []
+                    for i, (vo_text, candidates) in enumerate(items):
+                        result = next((r for r in results_list if r.get('voiceover') == i + 1), None)
+                        if result:
+                            selected_idx = result.get('selected', 1) - 1
+                            # Clamp to valid range
+                            selected_idx = max(0, min(selected_idx, len(candidates) - 1))
+                            confidence = result.get('confidence', 0.7)
+                            # Clamp confidence to valid range
+                            confidence = max(0.0, min(1.0, float(confidence)))
+                            outputs.append((
+                                selected_idx,
+                                confidence,
+                                str(result.get('reason', 'matched'))[:50]
+                            ))
+                        else:
+                            outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
+
+                    return outputs
+                else:
+                    logger.warning(f"Claude: Could not parse response, using embedding fallback")
+                    raise ValueError("JSON parsing failed after all strategies")
+
+            except Exception as e:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"Claude API error (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.warning(f"Claude batch error after {self.MAX_RETRIES} attempts: {e}")
+                    raise
+
         return [(0, 0.5, "error fallback") for _ in items]
 
 
@@ -2215,12 +2248,14 @@ def match_all_segments(
         candidate_embeddings[clip_id] = emb
     
     progress = ProgressBar(len(voiceover_segments), "Matching")
-    
+
     results = []
-    
+
     # Calculate timeline start (first segment start time)
     timeline_start = voiceover_segments[0].start_time if voiceover_segments else 0.0
-    
+
+    logger.info(f"Starting matching loop with {len(video_segments)} video candidates...")
+
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Calculate current timeline position (relative to start)
         current_timeline_pos = vo_seg.start_time - timeline_start
