@@ -110,6 +110,115 @@ def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> s
 
 
 # =============================================================================
+# FFMPEG DEBUG LOGGING
+# =============================================================================
+
+# Global FFmpeg debug log path (set by setup_ffmpeg_debug_log)
+_ffmpeg_debug_log_path: Optional[Path] = None
+_ffmpeg_debug_lock = threading.Lock()
+
+
+def setup_ffmpeg_debug_log(log_dir: Union[str, Path]) -> Path:
+    """
+    Set up FFmpeg debug log file in the specified directory.
+
+    Args:
+        log_dir: Directory to create the debug log in
+
+    Returns:
+        Path to the debug log file
+    """
+    global _ffmpeg_debug_log_path
+
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    _ffmpeg_debug_log_path = log_dir / "ffmpeg_debug.log"
+
+    # Write header
+    with open(_ffmpeg_debug_log_path, 'w', encoding='utf-8') as f:
+        f.write(f"# FFmpeg Debug Log\n")
+        f.write(f"# Started: {datetime.now().isoformat()}\n")
+        f.write(f"# This file captures low-level FFmpeg/OpenCV decoder messages\n")
+        f.write(f"# (e.g., H.264 'mmco: unref short failure' warnings)\n")
+        f.write("=" * 60 + "\n\n")
+
+    return _ffmpeg_debug_log_path
+
+
+def log_ffmpeg_debug(message: str, source: str = "ffmpeg"):
+    """
+    Log a message to the FFmpeg debug log file.
+
+    Args:
+        message: Message to log
+        source: Source identifier (e.g., 'opencv', 'ffmpeg', 'scene_detection')
+    """
+    global _ffmpeg_debug_log_path
+
+    if _ffmpeg_debug_log_path is None:
+        return
+
+    with _ffmpeg_debug_lock:
+        try:
+            with open(_ffmpeg_debug_log_path, 'a', encoding='utf-8') as f:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                f.write(f"[{timestamp}] [{source}] {message}\n")
+        except Exception:
+            pass  # Don't let debug logging break the main process
+
+
+class FFmpegStderrCapture:
+    """
+    Context manager to capture stderr (FFmpeg/OpenCV decoder messages)
+    and redirect them to the debug log file.
+
+    Usage:
+        with FFmpegStderrCapture("scene_detection"):
+            cap = cv2.VideoCapture(video_path)
+            # ... process video ...
+    """
+
+    def __init__(self, source: str = "opencv"):
+        self.source = source
+        self.old_stderr = None
+        self.stderr_capture = None
+
+    def __enter__(self):
+        global _ffmpeg_debug_log_path
+
+        # Only capture if debug log is set up
+        if _ffmpeg_debug_log_path is None:
+            return self
+
+        try:
+            import io
+            # Save original stderr
+            self.old_stderr = sys.stderr
+            # Create a string buffer to capture stderr
+            self.stderr_capture = io.StringIO()
+            sys.stderr = self.stderr_capture
+        except Exception:
+            pass
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.old_stderr is not None:
+            # Restore original stderr
+            sys.stderr = self.old_stderr
+
+            # Get captured content and log it
+            if self.stderr_capture:
+                captured = self.stderr_capture.getvalue()
+                if captured.strip():
+                    log_ffmpeg_debug(captured.strip(), self.source)
+                self.stderr_capture.close()
+
+        return False  # Don't suppress exceptions
+
+
+# =============================================================================
 # DATA CLASSES
 # =============================================================================
 
