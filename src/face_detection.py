@@ -52,24 +52,27 @@ class FaceDetector:
         # Check MediaPipe first (preferred)
         if FaceDetector._mediapipe_available is None:
             try:
+                logger.info("      FaceDetector: importing mediapipe...")
                 import mediapipe as mp
+                logger.info("      FaceDetector: mediapipe imported, checking solutions...")
                 # Check if solutions attribute exists (some versions don't have it)
                 if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_detection'):
+                    logger.info("      FaceDetector: initializing FaceDetection model...")
                     FaceDetector._mp_face_detection = mp.solutions.face_detection.FaceDetection(
                         model_selection=0,  # 0 = short-range (within 2m), 1 = full-range
                         min_detection_confidence=0.5
                     )
                     FaceDetector._mediapipe_available = True
-                    logger.debug("MediaPipe face detection available")
+                    logger.info("      FaceDetector: MediaPipe ready")
                 else:
                     FaceDetector._mediapipe_available = False
-                    logger.debug("MediaPipe installed but solutions.face_detection not available")
+                    logger.info("      FaceDetector: MediaPipe solutions.face_detection not available")
             except ImportError:
                 FaceDetector._mediapipe_available = False
-                logger.debug("MediaPipe not installed, trying OpenCV fallback")
+                logger.info("      FaceDetector: MediaPipe not installed")
             except Exception as e:
                 FaceDetector._mediapipe_available = False
-                logger.debug(f"MediaPipe init failed: {e}, trying OpenCV fallback")
+                logger.info(f"      FaceDetector: MediaPipe init failed: {e}")
 
         # Check OpenCV fallback
         if FaceDetector._opencv_available is None:
@@ -486,13 +489,15 @@ def apply_face_preference(
     if face_preference == "neutral":
         return candidates
 
+    logger.info(f"    apply_face_preference: getting FaceDetector instance...")
     detector = FaceDetector.get_instance()
+    logger.info(f"    apply_face_preference: got instance, checking availability...")
 
     if not detector.is_available():
-        logger.debug("Face detection not available, skipping preference adjustment")
+        logger.info("    apply_face_preference: not available, skipping")
         return candidates
 
-    logger.debug(f"Applying segment-level face preference '{face_preference}' to {len(candidates)} candidates")
+    logger.info(f"    apply_face_preference: processing {len(candidates)} candidates...")
 
     adjusted = []
     segments_with_faces = 0
