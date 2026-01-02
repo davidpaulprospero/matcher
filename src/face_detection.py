@@ -13,14 +13,9 @@ import json
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
+from .utils import normalize_path
+
 logger = logging.getLogger(__name__)
-
-
-def _normalize_path(path: str) -> str:
-    """Normalize path for consistent cache matching across platforms."""
-    if not path:
-        return ""
-    return str(path).replace('\\', '/').lower()
 
 
 class FaceDetector:
@@ -109,7 +104,7 @@ class FaceDetector:
             return 0.5  # Neutral if no backend available
 
         # Normalize path for consistent cache matching
-        cache_key = _normalize_path(video_path)
+        cache_key = normalize_path(video_path)
 
         # Check memory cache
         if cache_key in FaceDetector._cache:
@@ -180,7 +175,7 @@ class FaceDetector:
             return 0.5  # Neutral if no backend
 
         # Normalize path for consistent cache matching
-        normalized_path = _normalize_path(video_path)
+        normalized_path = normalize_path(video_path)
 
         # Use time-based cache key for segment-level detection
         # Format: normalized_path:start_time-end_time (times rounded to 0.1s)
