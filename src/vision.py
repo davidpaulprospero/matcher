@@ -219,7 +219,8 @@ class VisionProcessor:
                 temp_path = f.name
             
             cmd = [
-                'ffmpeg', '-ss', str(timestamp),
+                'ffmpeg', '-loglevel', 'error',
+                '-ss', str(timestamp),
                 '-i', video_path,
                 '-vframes', '1',
                 '-y', temp_path

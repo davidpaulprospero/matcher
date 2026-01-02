@@ -129,6 +129,7 @@ class AudioAnalyzer:
         # Try GPU-accelerated decoding first (NVIDIA CUDA)
         cmd = [
             'ffmpeg',
+            '-loglevel', 'error',
             '-y',
             '-hwaccel', 'cuda',
             '-i', video_path,
@@ -153,6 +154,7 @@ class AudioAnalyzer:
             # Fallback to CPU decoding if GPU fails
             cmd_cpu = [
                 'ffmpeg',
+                '-loglevel', 'error',
                 '-y',
                 '-i', video_path,
                 '-vn',
