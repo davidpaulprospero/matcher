@@ -1052,7 +1052,10 @@ class Pipeline:
         start_time: float, end_time: float, min_duration: float
     ) -> List[tuple]:
         """Calculate accurate timing for each part using word-level timestamps."""
-        timings = []
+        duration = end_time - start_time
+
+        # First pass: calculate natural timings from words
+        natural_timings = []
         word_idx = 0
 
         for i, part in enumerate(parts):
@@ -1070,15 +1073,59 @@ class Pipeline:
                 word_idx += 1
                 words_consumed += 1
 
+            natural_timings.append((part_start, part_end))
+
+        # Calculate natural durations and total needed with min_duration
+        natural_durations = [t[1] - t[0] for t in natural_timings]
+        total_needed = sum(max(d, min_duration) for d in natural_durations)
+
+        # If total needed exceeds available time, scale down
+        if total_needed > duration:
+            scale = duration / total_needed
+            logger.debug(f"Pause-split (words): Time budget exceeded ({total_needed:.2f}s > {duration:.2f}s), scaling by {scale:.2f}")
+
+            # Rebuild timings with scaled durations
+            timings = []
+            current_time = start_time
+            for i, nat_dur in enumerate(natural_durations):
+                part_duration = max(nat_dur, min_duration) * scale
+
+                if i == len(parts) - 1:
+                    part_end = end_time
+                else:
+                    part_end = current_time + part_duration
+
+                # Safety: ensure positive duration
+                if part_end <= current_time:
+                    part_end = min(current_time + 0.001, end_time)
+
+                timings.append((current_time, part_end))
+                current_time = part_end
+
+            return timings
+
+        # No overflow - use natural timings with min_duration enforcement
+        timings = []
+        current_time = start_time
+
+        for i, (part_start, part_end) in enumerate(natural_timings):
             # Ensure minimum duration
             if part_end - part_start < min_duration:
                 part_end = part_start + min_duration
 
-            # Last part should end at segment end
+            # Clamp to end_time
+            part_end = min(part_end, end_time)
+
+            # Last part gets remaining time
             if i == len(parts) - 1:
                 part_end = end_time
 
-            timings.append((part_start, part_end))
+            # Safety: ensure positive duration
+            if part_end <= current_time:
+                part_end = min(current_time + 0.001, end_time)
+
+            timings.append((current_time, part_end))
+            current_time = part_end
 
         return timings
 
@@ -1091,19 +1138,41 @@ class Pipeline:
         if total_chars == 0:
             return [(start_time, end_time)]
 
+        # First pass: calculate natural durations
+        natural_durations = []
+        for part in parts:
+            char_ratio = len(part) / total_chars
+            natural_durations.append(duration * char_ratio)
+
+        # Calculate total time needed if we enforce min_duration
+        total_needed = sum(max(d, min_duration) for d in natural_durations)
+
+        # If we need more time than available, scale down proportionally
+        # This prevents overflow and zero-duration segments
+        if total_needed > duration:
+            # Scale factor to fit within available duration
+            scale = duration / total_needed
+            logger.debug(f"Pause-split: Time budget exceeded ({total_needed:.2f}s > {duration:.2f}s), scaling by {scale:.2f}")
+            adjusted_durations = [max(d, min_duration) * scale for d in natural_durations]
+        else:
+            adjusted_durations = [max(d, min_duration) for d in natural_durations]
+
+        # Build timings
         timings = []
         current_time = start_time
 
-        for i, part in enumerate(parts):
-            char_ratio = len(part) / total_chars
-            part_duration = duration * char_ratio
-            part_duration = max(min_duration, part_duration)
-
+        for i, part_duration in enumerate(adjusted_durations):
             if i == len(parts) - 1:
+                # Last part gets remaining time to avoid floating-point drift
                 part_end = end_time
             else:
                 part_end = current_time + part_duration
-                part_end = min(part_end, end_time)
+
+            # Ensure we don't exceed end_time and have at least some duration
+            part_end = min(part_end, end_time)
+            if part_end <= current_time:
+                # Safety: ensure at least 1ms duration
+                part_end = min(current_time + 0.001, end_time)
 
             timings.append((current_time, part_end))
             current_time = part_end
