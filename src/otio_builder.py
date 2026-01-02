@@ -6,6 +6,7 @@ OTIO Timeline builder with:
 - Alternative matches as disabled tracks
 """
 
+import copy
 import logging
 import re
 from pathlib import Path
@@ -121,6 +122,39 @@ def format_path_url(file_path: str) -> str:
     path = str(Path(file_path).resolve()).replace('\\', '/')
     # Return plain path - DaVinci prefers standard paths over file:// URLs
     return path
+
+
+def _get_media_duration(media_path: str) -> Optional[float]:
+    """
+    Get actual duration of audio/video file using ffprobe.
+
+    Returns duration in seconds, or None if ffprobe fails.
+    Used to determine actual voiceover file length for timeline alignment.
+    """
+    import subprocess
+
+    if not media_path:
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(media_path)
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except Exception as e:
+        logger.debug(f"Could not get duration for {media_path}: {e}")
+
+    return None
 
 
 def get_segment_file_offset(file_path: str) -> float:
@@ -591,7 +625,39 @@ def create_timeline(
     
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
-    
+
+    # Get actual voiceover duration for proper timeline alignment
+    actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None
+    if actual_vo_duration:
+        logger.info(f"Voiceover file duration: {actual_vo_duration:.2f}s")
+
+    # Add leading gap if first segment doesn't start at 0
+    # This aligns video clips with the actual voiceover playback timing
+    if matches:
+        first_vo_seg = matches[0].primary_match.voiceover_segment
+        leading_silence = first_vo_seg.start_time
+
+        if leading_silence > 0.1:  # More than 100ms of leading silence
+            leading_frames = round(leading_silence * rate)
+            logger.info(f"Adding {leading_silence:.1f}s leading gap to align with voiceover start")
+
+            leading_gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(leading_frames, rate)
+                )
+            )
+
+            # Add leading gap to all video tracks
+            for track in video_tracks:
+                track.append(copy.deepcopy(leading_gap))
+            # Add leading gap to all audio tracks
+            for track in audio_tracks:
+                track.append(copy.deepcopy(leading_gap))
+
+            # Update timeline position
+            timeline_frames += leading_frames
+
     # Process each match
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
@@ -927,7 +993,34 @@ def create_timeline(
         
         # Update timeline position using integer frames to avoid drift
         timeline_frames += duration_frames
-    
+
+    # Add trailing gap to match actual voiceover duration
+    # This ensures video tracks extend to cover trailing audio (music, silence, outro)
+    if actual_vo_duration and matches:
+        accumulated_duration = timeline_frames / rate  # Current timeline in seconds
+
+        if actual_vo_duration > accumulated_duration + 0.1:  # More than 100ms trailing
+            trailing_seconds = actual_vo_duration - accumulated_duration
+            trailing_frames = round(trailing_seconds * rate)
+            logger.info(f"Adding {trailing_seconds:.1f}s trailing gap to match voiceover end")
+
+            trailing_gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(trailing_frames, rate)
+                )
+            )
+
+            # Add trailing gap to all video tracks
+            for track in video_tracks:
+                track.append(copy.deepcopy(trailing_gap))
+            # Add trailing gap to all audio tracks
+            for track in audio_tracks:
+                track.append(copy.deepcopy(trailing_gap))
+
+            # Update timeline position to include trailing content
+            timeline_frames += trailing_frames
+
     # Add voiceover track
     if voiceover_path and matches:
         # Create absolute path for voiceover (Windows format for DaVinci)
@@ -935,29 +1028,33 @@ def create_timeline(
         vo_folder = Path(voiceover_path).parent.name
         vo_filename = Path(voiceover_path).name
         vo_unique_name = f"{vo_folder}_{vo_filename}"
-        
-        # Total duration should match total frames accumulated
-        total_frames = timeline_frames
-        total_duration_seconds = total_frames / rate
-        
+
+        # Use actual voiceover file duration if available, otherwise use accumulated frames
+        if actual_vo_duration:
+            vo_total_frames = round(actual_vo_duration * rate)
+            logger.info(f"Voiceover clip: using actual duration {actual_vo_duration:.2f}s ({vo_total_frames} frames)")
+        else:
+            vo_total_frames = timeline_frames
+            logger.warning("Could not determine voiceover duration, using accumulated segment total")
+
         # Create proper ExternalReference with available_range
         vo_available_range = otio.opentime.TimeRange(
             start_time=otio.opentime.RationalTime(0, rate),
-            duration=otio.opentime.RationalTime(total_frames, rate)
+            duration=otio.opentime.RationalTime(vo_total_frames, rate)
         )
-        
+
         vo_ref = otio.schema.ExternalReference(
             target_url=abs_vo_path,
             available_range=vo_available_range
         )
         vo_ref.name = vo_unique_name  # Unique name includes folder
-        
+
         vo_clip = otio.schema.Clip(
             name="Voiceover",
             media_reference=vo_ref,
             source_range=otio.opentime.TimeRange(
                 start_time=otio.opentime.RationalTime(0, rate),
-                duration=otio.opentime.RationalTime(total_frames, rate)
+                duration=otio.opentime.RationalTime(vo_total_frames, rate)
             )
         )
         vo_clip.metadata['Resolve_OTIO'] = {}  # Required for DaVinci import
