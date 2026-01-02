@@ -24,6 +24,8 @@ import cv2
 from scenedetect import open_video, SceneManager, ContentDetector
 import opentimelineio as otio
 
+from .utils import log_ffmpeg_debug
+
 logger = logging.getLogger(__name__)
 
 # Supported video extensions
@@ -334,6 +336,9 @@ class SceneDetector:
         Detect scenes in a video using ContentDetector.
         Returns (scene_list, framerate, total_frames)
         """
+        # Log to FFmpeg debug (video open may trigger H.264 decoder warnings)
+        log_ffmpeg_debug(f"Opening video: {video_path.name}", "scene_detection")
+
         # Open video
         video = open_video(str(video_path))
         

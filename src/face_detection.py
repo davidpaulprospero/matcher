@@ -18,7 +18,7 @@ import json
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
-from .utils import normalize_path
+from .utils import normalize_path, log_ffmpeg_debug
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +247,7 @@ class FaceDetector:
         """
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video (mediapipe): {Path(video_path).name}", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -293,6 +294,7 @@ class FaceDetector:
         """
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video (opencv): {Path(video_path).name}", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -351,6 +353,7 @@ class FaceDetector:
         """Detect faces within a specific time range using MediaPipe."""
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video range (mediapipe): {Path(video_path).name} [{start_time:.1f}-{end_time:.1f}s]", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -408,6 +411,7 @@ class FaceDetector:
         """Detect faces within a specific time range using OpenCV."""
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video range (opencv): {Path(video_path).name} [{start_time:.1f}-{end_time:.1f}s]", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():

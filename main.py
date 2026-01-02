@@ -359,16 +359,27 @@ def setup_logging(config: Config, output_dir: Path = None, run_timestamp: str = 
     except Exception as e:
         print(f"  Warning: Could not create verbose log file: {e}")
 
+    # Setup FFmpeg debug log (captures H.264 decoder warnings from OpenCV)
+    try:
+        from src.utils import setup_ffmpeg_debug_log
+        ffmpeg_debug_path = setup_ffmpeg_debug_log(logs_dir)
+    except Exception as e:
+        ffmpeg_debug_path = None
+        print(f"  Warning: Could not create FFmpeg debug log: {e}")
+
     # Log startup info
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized")
     logger.debug(f"Normal log: {normal_log_path}")
     logger.debug(f"Verbose log: {verbose_log_path}")
+    if ffmpeg_debug_path:
+        logger.debug(f"FFmpeg debug log: {ffmpeg_debug_path}")
 
     # Store paths for reference
     logger.log_paths = {
         'normal': str(normal_log_path),
-        'verbose': str(verbose_log_path)
+        'verbose': str(verbose_log_path),
+        'ffmpeg_debug': str(ffmpeg_debug_path) if ffmpeg_debug_path else None
     }
 
     return logger
