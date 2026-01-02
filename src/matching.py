@@ -896,12 +896,11 @@ class TieredMatcher:
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
 
         # Apply face preference if set
+        # TEMPORARILY DISABLED: Face detection causes hangs - need to investigate
+        # The hang occurs during MediaPipe/OpenCV video frame extraction
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
-            logger.info(f"  match_segment: applying face preference '{face_pref}'...")
-            cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
-            candidates = apply_face_preference(candidates, face_pref, cache_dir)
-            logger.info(f"  match_segment: face preference done")
+            logger.info(f"  match_segment: face preference '{face_pref}' SKIPPED (disabled to prevent hang)")
 
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
