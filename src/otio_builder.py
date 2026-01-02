@@ -2000,9 +2000,10 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
         # Speed factor (100 = normal, 200 = 2x fast)
         speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
 
-        # Include segment ID in clip name for post-edit analysis tracing
+        # Include segment ID and folder in clip name for disambiguation
         segment_id = f"S{match_idx:03d}"
-        clip_name = f"[{segment_id}] {Path(vid_seg.source_file).stem}"
+        folder_name = Path(vid_seg.source_file).parent.name
+        clip_name = f"[{segment_id}] {folder_name}_{Path(vid_seg.source_file).stem}"
 
         xml_lines.extend([
             '          <clipitem>',
@@ -2080,7 +2081,8 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
                 source_start_frames = int(source_start * frame_rate)
                 speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
 
-                clip_name = f"[{segment_id}] ALT{alt_idx+1}: {Path(alt_seg.source_file).stem}"
+                alt_folder = Path(alt_seg.source_file).parent.name
+                clip_name = f"[{segment_id}] ALT{alt_idx+1}: {alt_folder}_{Path(alt_seg.source_file).stem}"
 
                 xml_lines.extend([
                     '          <clipitem>',

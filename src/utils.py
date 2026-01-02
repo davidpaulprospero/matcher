@@ -581,48 +581,105 @@ class CacheManager:
 # =============================================================================
 
 class ReuseTracker:
-    """Tracks clip usage to prevent over-reuse"""
-    
-    def __init__(self, max_reuse: int = 2, reuse_penalty: float = 0.2):
+    """
+    Tracks clip usage to prevent over-reuse.
+
+    Tracks both:
+    - Clip-level reuse (same time range from same video)
+    - Source-file-level reuse (any segment from same video file)
+    """
+
+    def __init__(
+        self,
+        max_reuse: int = 2,
+        reuse_penalty: float = 0.2,
+        max_source_file_reuse: int = 0,  # 0 = unlimited
+        source_file_penalty: float = 0.1
+    ):
         self.max_reuse = max_reuse
         self.reuse_penalty = reuse_penalty
+        self.max_source_file_reuse = max_source_file_reuse
+        self.source_file_penalty = source_file_penalty
         self.usage_count: Dict[str, int] = {}  # clip_id -> count
+        self.source_file_count: Dict[str, int] = {}  # source_file -> count
         self.lock = threading.Lock()
-    
+
     def get_clip_id(self, segment: SRTSegment) -> str:
         """Generate unique ID for a clip"""
         return f"{segment.source_file}:{segment.start_time:.2f}-{segment.end_time:.2f}"
-    
+
+    def get_source_file(self, segment: SRTSegment) -> str:
+        """Get normalized source file path"""
+        return str(segment.source_file).replace('\\', '/').lower()
+
     def get_usage_count(self, segment: SRTSegment) -> int:
         """Get how many times a clip has been used"""
         clip_id = self.get_clip_id(segment)
         with self.lock:
             return self.usage_count.get(clip_id, 0)
-    
+
+    def get_source_file_usage(self, segment: SRTSegment) -> int:
+        """Get how many times any segment from this source file has been used"""
+        source = self.get_source_file(segment)
+        with self.lock:
+            return self.source_file_count.get(source, 0)
+
     def record_usage(self, segment: SRTSegment):
         """Record that a clip was used"""
         clip_id = self.get_clip_id(segment)
+        source = self.get_source_file(segment)
         with self.lock:
             self.usage_count[clip_id] = self.usage_count.get(clip_id, 0) + 1
-    
+            self.source_file_count[source] = self.source_file_count.get(source, 0) + 1
+
     def can_use(self, segment: SRTSegment) -> bool:
         """Check if clip can be used (hasn't exceeded max reuse)"""
-        return self.get_usage_count(segment) < self.max_reuse
-    
+        # Check clip-level limit
+        if self.get_usage_count(segment) >= self.max_reuse:
+            return False
+        # Check source-file-level limit (if enabled)
+        if self.max_source_file_reuse > 0:
+            if self.get_source_file_usage(segment) >= self.max_source_file_reuse:
+                return False
+        return True
+
     def get_penalty(self, segment: SRTSegment) -> float:
-        """Get confidence penalty based on reuse count"""
-        count = self.get_usage_count(segment)
-        return count * self.reuse_penalty
-    
+        """Get confidence penalty based on reuse count (clip + source file)"""
+        clip_count = self.get_usage_count(segment)
+        clip_penalty = clip_count * self.reuse_penalty
+
+        # Add source file penalty if over threshold
+        source_penalty = 0.0
+        if self.max_source_file_reuse > 0:
+            source_count = self.get_source_file_usage(segment)
+            # Apply escalating penalty after half the max
+            threshold = self.max_source_file_reuse // 2
+            if source_count > threshold:
+                excess = source_count - threshold
+                source_penalty = excess * self.source_file_penalty
+
+        return clip_penalty + source_penalty
+
     def adjust_confidence(self, segment: SRTSegment, confidence: float) -> float:
         """Adjust confidence based on reuse"""
         penalty = self.get_penalty(segment)
         return max(0.0, confidence - penalty)
-    
+
     def reset(self):
         """Reset usage tracking"""
         with self.lock:
             self.usage_count.clear()
+            self.source_file_count.clear()
+
+    def get_top_sources(self, limit: int = 10) -> List[tuple]:
+        """Get the most-used source files for debugging"""
+        with self.lock:
+            sorted_sources = sorted(
+                self.source_file_count.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            return sorted_sources[:limit]
 
 
 # =============================================================================
