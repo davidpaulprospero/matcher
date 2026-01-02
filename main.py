@@ -3252,6 +3252,7 @@ Be specific and descriptive for semantic matching purposes."""
                 from src.transcription import TranscriptSegment
 
                 synthetic_segment = TranscriptSegment(
+                    index=0,
                     text=description,
                     start_time=0.0,
                     end_time=duration,
