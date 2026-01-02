@@ -323,47 +323,47 @@ def create_clip_with_timewarp(
     media_duration: float = None  # Total duration of the source media file
 ) -> otio.schema.Clip:
     """
-    Create a clip with duration matching the target (voiceover) duration.
-    
-    The clip's source_range is set to target_duration so it aligns perfectly
-    on the timeline. Speed adjustment can be done manually in the NLE.
-    
+    Create a clip with speed adjustment to match target (voiceover) duration.
+
+    Uses LinearTimeWarp to stretch/compress source footage to fit target duration.
+    This ensures clips align with voiceover without manual speed adjustment in NLE.
+
     Args:
         name: Clip name
         source_path: Path to source video/audio
         source_start: Start time in source (seconds)
-        source_duration: Original duration in source (seconds) - stored in metadata
-        target_duration: Desired duration on timeline (seconds) - used for source_range
+        source_duration: Original duration in source (seconds)
+        target_duration: Desired duration on timeline (seconds)
         frame_rate: Frame rate
         metadata: Optional metadata dict
         media_duration: Total duration of the source media file (for available_range)
-    
+
     Returns:
-        OTIO Clip with duration matching target_duration
+        OTIO Clip with LinearTimeWarp applied to match target_duration
     """
     rate = frame_rate
-    
+
     # Create absolute Windows path with backslashes for DaVinci Resolve
     abs_path = _to_windows_path(source_path)
-    
+
     # Make media reference name unique by including parent folder
     # This prevents DaVinci Resolve from confusing clips with same filename in different folders
     folder_name = Path(source_path).parent.name
     filename = Path(source_path).name
     unique_media_name = f"{folder_name}_{filename}"
-    
+
     # Determine available_range for the media file
     # If we don't know the media duration, estimate from source_start + source_duration
     if media_duration is None:
         # Estimate: assume media is at least as long as what we're using
         estimated_duration = source_start + source_duration + 10  # Add buffer
         media_duration = estimated_duration
-    
+
     available_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(0, rate),
         duration=otio.opentime.RationalTime(round(media_duration * rate), rate)
     )
-    
+
     # Create media reference with proper format for DaVinci Resolve
     # Note: name must be set as attribute, not constructor param
     media_ref = otio.schema.ExternalReference(
@@ -371,33 +371,53 @@ def create_clip_with_timewarp(
         available_range=available_range
     )
     media_ref.name = unique_media_name  # Unique name includes folder
-    
+
     # IMPORTANT: Use round() to avoid floating-point precision drift
     # This prevents timing deviation over many clips
     start_frames = round(source_start * rate)
-    duration_frames = round(target_duration * rate)
-    
-    # Source range uses TARGET duration so clips align with voiceover
-    # The clip will be trimmed to fit - user can adjust speed manually
+
+    # Use TARGET duration for source_range.duration to ensure correct timeline duration
+    # DaVinci Resolve may not properly interpret LinearTimeWarp, so we set the
+    # timeline duration directly. The LinearTimeWarp effect and metadata indicate
+    # the speed adjustment needed to fit source_duration into target_duration.
+    target_duration_frames = round(target_duration * rate)
+
+    # Ensure we have at least 1 frame
+    if target_duration_frames < 1:
+        target_duration_frames = 1
+
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),
-        duration=otio.opentime.RationalTime(duration_frames, rate)
+        duration=otio.opentime.RationalTime(target_duration_frames, rate)
     )
-    
+
     # Create clip
     clip = otio.schema.Clip(
         name=name,
         media_reference=media_ref,
         source_range=source_range
     )
-    
+
+    # Apply LinearTimeWarp to match target duration
+    # time_scalar = source_duration / target_duration
+    # - time_scalar < 1: slow down (stretch footage to fill longer duration)
+    # - time_scalar > 1: speed up (compress footage to fit shorter duration)
+    # - time_scalar = 1: no change (source and target match)
+    if target_duration > 0 and source_duration > 0:
+        time_scalar = source_duration / target_duration
+
+        # Only apply time warp if there's a meaningful speed change (>1% difference)
+        if abs(time_scalar - 1.0) > 0.01:
+            time_warp = otio.schema.LinearTimeWarp(time_scalar=time_scalar)
+            clip.effects.append(time_warp)
+
     # Add Resolve_OTIO metadata (required for DaVinci import)
     clip.metadata['Resolve_OTIO'] = {}
-    
+
     # Calculate and store speed info in metadata for reference
     if metadata is None:
         metadata = {}
-    
+
     if target_duration > 0 and source_duration > 0:
         time_scalar = source_duration / target_duration
         metadata['time_scalar'] = time_scalar
@@ -405,12 +425,12 @@ def create_clip_with_timewarp(
         metadata['target_duration'] = target_duration
         metadata['source_duration'] = source_duration
         metadata['suggested_speed'] = f"{time_scalar * 100:.0f}%"
-    
+
     # Add metadata (convert numpy types to Python native types)
     metadata = _sanitize_metadata(metadata)
     for key, value in metadata.items():
         clip.metadata[key] = value
-    
+
     return clip
 
 
@@ -622,7 +642,7 @@ def create_timeline(
         kind=otio.schema.TrackKind.Audio
     )
     voiceover_track.metadata['Resolve_OTIO'] = {'Locked': False}
-    
+
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
 
@@ -631,39 +651,69 @@ def create_timeline(
     if actual_vo_duration:
         logger.info(f"Voiceover file duration: {actual_vo_duration:.2f}s")
 
+    # Get the first segment's start time as timeline reference
+    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+
     # Add leading gap if first segment doesn't start at 0
     # This aligns video clips with the actual voiceover playback timing
-    if matches:
-        first_vo_seg = matches[0].primary_match.voiceover_segment
-        leading_silence = first_vo_seg.start_time
+    if matches and first_segment_start > 0.1:  # More than 100ms of leading silence
+        leading_frames = round(first_segment_start * rate)
+        logger.info(f"Adding {first_segment_start:.1f}s leading gap to align with voiceover start")
 
-        if leading_silence > 0.1:  # More than 100ms of leading silence
-            leading_frames = round(leading_silence * rate)
-            logger.info(f"Adding {leading_silence:.1f}s leading gap to align with voiceover start")
-
-            leading_gap = otio.schema.Gap(
-                source_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, rate),
-                    duration=otio.opentime.RationalTime(leading_frames, rate)
-                )
+        leading_gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(leading_frames, rate)
             )
+        )
 
-            # Add leading gap to all video tracks
-            for track in video_tracks:
-                track.append(copy.deepcopy(leading_gap))
-            # Add leading gap to all audio tracks
-            for track in audio_tracks:
-                track.append(copy.deepcopy(leading_gap))
+        # Add leading gap to all video tracks
+        for track in video_tracks:
+            track.append(copy.deepcopy(leading_gap))
+        # Add leading gap to all audio tracks
+        for track in audio_tracks:
+            track.append(copy.deepcopy(leading_gap))
 
-            # Update timeline position
-            timeline_frames += leading_frames
+        # Update timeline position
+        timeline_frames += leading_frames
 
     # Process each match
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
-        
+
+        # Check for gap before this segment (silence in voiceover)
+        # Expected position = where this segment should start relative to first segment
+        expected_start_frames = round((vo_seg.start_time - first_segment_start) * frame_rate)
+
+        if expected_start_frames > timeline_frames:
+            # There's a gap - insert silence/gap clips on all tracks
+            gap_frames = expected_start_frames - timeline_frames
+            gap_duration = otio.opentime.RationalTime(gap_frames, rate)
+
+            logger.debug(f"Segment {match_idx}: Inserting {gap_frames/rate:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
+
+            # Add gap to all video tracks
+            for track in video_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+
+            # Add gap to all audio tracks
+            for track in audio_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+
+            timeline_frames = expected_start_frames
+
         # Target duration = voiceover segment duration
         target_duration = vo_seg.end_time - vo_seg.start_time
         duration_frames = round(target_duration * frame_rate)
@@ -1049,6 +1099,8 @@ def create_timeline(
         )
         vo_ref.name = vo_unique_name  # Unique name includes folder
 
+        # Voiceover clip starts at 0 and uses actual file duration
+        # Video/audio tracks have leading gap added to align with VO playback
         vo_clip = otio.schema.Clip(
             name="Voiceover",
             media_reference=vo_ref,
@@ -1073,9 +1125,17 @@ def create_timeline(
     
     # Populate image track if entity_images provided
     if entity_images:
+        # Log what we received
+        print(f"  [V9] Entity images received: {len(entity_images)} entities")
+        for ename, eresult in entity_images.items():
+            img_count = len(getattr(eresult, 'images', []))
+            print(f"    • {ename}: {img_count} images")
+
         # Validate and filter entity images before using
         validated_entity_images = _validate_entity_images(entity_images)
         if validated_entity_images:
+            total_images = sum(len(e.images) for e in validated_entity_images.values())
+            print(f"  [V9] After validation: {len(validated_entity_images)} entities, {total_images} images")
             logger.info(f"Entity images: {len(validated_entity_images)} entities with valid images")
             _add_entity_images_to_track(
                 image_track=image_track,
@@ -1091,6 +1151,12 @@ def create_timeline(
 
     # Populate stock video track if entity_videos provided
     if entity_videos:
+        # Log what we received
+        print(f"  [V10] Stock videos received: {len(entity_videos)} entities")
+        for ename, eresult in entity_videos.items():
+            vid_count = len(getattr(eresult, 'videos', []))
+            print(f"    • {ename}: {vid_count} videos")
+
         _add_entity_videos_to_track(
             video_track=stock_video_track,
             entity_videos=entity_videos,
@@ -1225,6 +1291,9 @@ def _add_entity_images_to_track(
     # Track sticky entity across segments
     last_matched_entity = None
 
+    # Track entity match statistics
+    entity_match_stats = {'exact': 0, 'semantic': 0, 'sticky': 0, 'none': 0}
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
@@ -1235,6 +1304,8 @@ def _add_entity_images_to_track(
             vo_text, entity_images, last_matched_entity
         )
 
+        entity_match_stats[match_type] += 1
+
         if entity_name:
             entity_result = entity_images[entity_name]
 
@@ -1244,6 +1315,12 @@ def _add_entity_images_to_track(
             # Get all images for this entity
             all_images = entity_result.images
             num_images = len(all_images)
+
+            # Debug: Log which images are being used for this segment
+            if seg_idx < 5:  # Only log first 5 for brevity
+                logger.debug(f"Segment {seg_idx}: Entity '{entity_name}' ({match_type}), {num_images} images")
+                for img in all_images[:2]:
+                    logger.debug(f"  - {Path(img).name}")
 
             if num_images > 0:
                 # Track used sources within this segment to prevent duplicates
@@ -1360,6 +1437,14 @@ def _add_entity_images_to_track(
         )
         image_track.append(gap)
 
+    # Log entity matching statistics
+    total_segments = len(segment_timing)
+    matched = entity_match_stats['exact'] + entity_match_stats['semantic'] + entity_match_stats['sticky']
+    print(f"  [V9] Entity matching: {matched}/{total_segments} segments")
+    print(f"    Exact: {entity_match_stats['exact']} ({100*entity_match_stats['exact']/max(1,total_segments):.1f}%)")
+    print(f"    Semantic: {entity_match_stats['semantic']} ({100*entity_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    print(f"    Sticky: {entity_match_stats['sticky']} ({100*entity_match_stats['sticky']/max(1,total_segments):.1f}%)")
+
 
 def _add_entity_videos_to_track(
     video_track: otio.schema.Track,
@@ -1399,6 +1484,10 @@ def _add_entity_videos_to_track(
     # Track sticky entity across segments
     last_matched_entity = None
 
+    # Track entity match statistics
+    video_match_stats = {'exact': 0, 'semantic': 0, 'sticky': 0, 'none': 0}
+    clips_added = 0
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
@@ -1409,6 +1498,8 @@ def _add_entity_videos_to_track(
             vo_text, entity_videos, last_matched_entity
         )
 
+        video_match_stats[match_type] += 1
+
         if entity_name:
             entity_result = entity_videos[entity_name]
 
@@ -1418,6 +1509,12 @@ def _add_entity_videos_to_track(
             # Get all videos for this entity
             all_videos = entity_result.videos
             num_videos = len(all_videos)
+
+            # Debug: Log which videos are being used for this segment
+            if seg_idx < 5:  # Only log first 5 for brevity
+                logger.debug(f"V10 Segment {seg_idx}: Entity '{entity_name}' ({match_type}), {num_videos} videos")
+                for vid in all_videos[:2]:
+                    logger.debug(f"  - {Path(vid).name}")
 
             if num_videos > 0:
                 # Track used sources within this segment to prevent duplicates
@@ -1505,6 +1602,7 @@ def _add_entity_videos_to_track(
                     video_clip.metadata['Resolve_OTIO'] = {}
 
                     video_track.append(video_clip)
+                    clips_added += 1
 
                 # Successfully added videos, continue to next segment
                 continue
@@ -1517,6 +1615,14 @@ def _add_entity_videos_to_track(
             )
         )
         video_track.append(gap)
+
+    # Log stock video matching statistics
+    total_segments = len(segment_timing)
+    matched = video_match_stats['exact'] + video_match_stats['semantic'] + video_match_stats['sticky']
+    print(f"  [V10] Stock video matching: {matched}/{total_segments} segments, {clips_added} clips added")
+    print(f"    Exact: {video_match_stats['exact']} ({100*video_match_stats['exact']/max(1,total_segments):.1f}%)")
+    print(f"    Semantic: {video_match_stats['semantic']} ({100*video_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    print(f"    Sticky: {video_match_stats['sticky']} ({100*video_match_stats['sticky']/max(1,total_segments):.1f}%)")
 
 
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
@@ -2025,9 +2131,10 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
         # Speed factor (100 = normal, 200 = 2x fast)
         speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
 
-        # Include segment ID in clip name for post-edit analysis tracing
+        # Include segment ID and folder in clip name for disambiguation
         segment_id = f"S{match_idx:03d}"
-        clip_name = f"[{segment_id}] {Path(vid_seg.source_file).stem}"
+        folder_name = Path(vid_seg.source_file).parent.name
+        clip_name = f"[{segment_id}] {folder_name}_{Path(vid_seg.source_file).stem}"
 
         xml_lines.extend([
             '          <clipitem>',
@@ -2105,7 +2212,8 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
                 source_start_frames = int(source_start * frame_rate)
                 speed = (source_duration / target_duration) * 100 if target_duration > 0 else 100
 
-                clip_name = f"[{segment_id}] ALT{alt_idx+1}: {Path(alt_seg.source_file).stem}"
+                alt_folder = Path(alt_seg.source_file).parent.name
+                clip_name = f"[{segment_id}] ALT{alt_idx+1}: {alt_folder}_{Path(alt_seg.source_file).stem}"
 
                 xml_lines.extend([
                     '          <clipitem>',
@@ -2777,7 +2885,7 @@ def _write_media_xml_part(
         '<!DOCTYPE xmeml>',
         '<xmeml version="4">',
         '    <bin>',
-        f'        <n>{bin_name}</n>',
+        f'        <name>{bin_name}</name>',
         '        <children>',
     ]
     
@@ -2801,7 +2909,7 @@ def _write_media_xml_part(
         part_lines.extend([
             f'            <clip id="clip-{clip_num}">',
             f'                <uuid>{file_info["uuid"]}</uuid>',
-            f'                <n>{unique_name}</n>',
+            f'                <name>{unique_name}</name>',
             '                <rate>',
             f'                    <timebase>{fps_int}</timebase>',
             '                    <ntsc>FALSE</ntsc>',
@@ -2810,9 +2918,9 @@ def _write_media_xml_part(
             '                    <video>',
             '                        <track>',
             f'                            <clipitem id="clipitem-{clip_num}">',
-            f'                                <n>{unique_name}</n>',
+            f'                                <name>{unique_name}</name>',
             f'                                <file id="{file_info["file_id"]}">',
-            f'                                    <n>{unique_name}</n>',
+            f'                                    <name>{unique_name}</name>',
             f'                                    <pathurl>{path_url}</pathurl>',
             '                                    <rate>',
             f'                                        <timebase>{fps_int}</timebase>',
@@ -2839,7 +2947,7 @@ def _write_media_xml_part(
                 '                    <audio>',
                 '                        <track>',
                 f'                            <clipitem id="clipitem-{clip_num}-audio">',
-                f'                                <n>{unique_name}</n>',
+                f'                                <name>{unique_name}</name>',
                 f'                                <file id="{file_info["file_id"]}"/>',
                 '                            </clipitem>',
                 '                        </track>',
@@ -2857,7 +2965,7 @@ def _write_media_xml_part(
         '',
         '    <!-- Empty sequence required for DaVinci Resolve to import bins properly -->',
         f'    <sequence id="media-seq-{part_idx}">',
-        f'        <n>{bin_name} - Import Helper</n>',
+        f'        <name>{bin_name} - Import Helper</name>',
         '        <rate>',
         f'            <timebase>{fps_int}</timebase>',
         '            <ntsc>FALSE</ntsc>',

@@ -8,10 +8,17 @@ B-roll scenes (no faces) are preferred when topic matches voiceover content,
 as they provide relevant visual coverage without talking heads.
 """
 
+import os
+# Suppress FFmpeg H.264 decoder warnings from OpenCV (must be set before cv2 import)
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 import logging
 import json
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+
+from .utils import normalize_path, log_ffmpeg_debug
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +108,12 @@ class FaceDetector:
         if not FaceDetector._mediapipe_available and not FaceDetector._opencv_available:
             return 0.5  # Neutral if no backend available
 
+        # Normalize path for consistent cache matching
+        cache_key = normalize_path(video_path)
+
         # Check memory cache
-        if video_path in FaceDetector._cache:
-            return FaceDetector._cache[video_path]
+        if cache_key in FaceDetector._cache:
+            return FaceDetector._cache[cache_key]
 
         # Check disk cache
         if cache_dir:
@@ -112,9 +122,9 @@ class FaceDetector:
                 try:
                     with open(cache_path, 'r') as f:
                         disk_cache = json.load(f)
-                    if video_path in disk_cache:
-                        score = disk_cache[video_path]
-                        FaceDetector._cache[video_path] = score
+                    if cache_key in disk_cache:
+                        score = disk_cache[cache_key]
+                        FaceDetector._cache[cache_key] = score
                         return score
                 except:
                     pass
@@ -125,7 +135,7 @@ class FaceDetector:
         else:
             score = self._detect_faces_opencv(video_path)
 
-        FaceDetector._cache[video_path] = score
+        FaceDetector._cache[cache_key] = score
 
         # Save to disk cache
         if cache_dir:
@@ -135,7 +145,7 @@ class FaceDetector:
                 if cache_path.exists():
                     with open(cache_path, 'r') as f:
                         disk_cache = json.load(f)
-                disk_cache[video_path] = score
+                disk_cache[cache_key] = score
                 with open(cache_path, 'w') as f:
                     json.dump(disk_cache, f)
             except:
@@ -159,7 +169,7 @@ class FaceDetector:
             video_path: Path to video file
             start_time: Scene start time in seconds
             end_time: Scene end time in seconds
-            scene_index: Scene index for caching
+            scene_index: Scene index for caching (used with time range for unique key)
             sample_frames: Number of frames to sample within the scene
             cache_dir: Directory for cache
 
@@ -169,29 +179,36 @@ class FaceDetector:
         if not self.is_available():
             return 0.5  # Neutral if no backend
 
-        # Check scene cache
-        cache_key = f"{video_path}:{scene_index}"
-        if video_path in FaceDetector._scene_cache:
-            if scene_index in FaceDetector._scene_cache[video_path]:
-                return FaceDetector._scene_cache[video_path][scene_index]
+        # Normalize path for consistent cache matching
+        normalized_path = normalize_path(video_path)
+
+        # Use time-based cache key for segment-level detection
+        # Format: normalized_path:start_time-end_time (times rounded to 0.1s)
+        time_key = f"{start_time:.1f}-{end_time:.1f}"
+        cache_key = f"{normalized_path}:{time_key}"
+
+        # Check memory cache (use time_key as dict key)
+        if normalized_path in FaceDetector._scene_cache:
+            if time_key in FaceDetector._scene_cache[normalized_path]:
+                return FaceDetector._scene_cache[normalized_path][time_key]
 
         # Check disk cache for scene faces
         if cache_dir:
-            cache_path = Path(cache_dir) / '.scene_face_cache.json'
+            cache_path = Path(cache_dir) / '.segment_face_cache.json'
             if cache_path.exists():
                 try:
                     with open(cache_path, 'r') as f:
                         disk_cache = json.load(f)
                     if cache_key in disk_cache:
                         score = disk_cache[cache_key]
-                        if video_path not in FaceDetector._scene_cache:
-                            FaceDetector._scene_cache[video_path] = {}
-                        FaceDetector._scene_cache[video_path][scene_index] = score
+                        if normalized_path not in FaceDetector._scene_cache:
+                            FaceDetector._scene_cache[normalized_path] = {}
+                        FaceDetector._scene_cache[normalized_path][time_key] = score
                         return score
                 except:
                     pass
 
-        # Compute face score for scene
+        # Compute face score for scene/segment
         if FaceDetector._mediapipe_available:
             score = self._detect_faces_in_range_mediapipe(
                 video_path, start_time, end_time, sample_frames
@@ -202,14 +219,14 @@ class FaceDetector:
             )
 
         # Update memory cache
-        if video_path not in FaceDetector._scene_cache:
-            FaceDetector._scene_cache[video_path] = {}
-        FaceDetector._scene_cache[video_path][scene_index] = score
+        if normalized_path not in FaceDetector._scene_cache:
+            FaceDetector._scene_cache[normalized_path] = {}
+        FaceDetector._scene_cache[normalized_path][time_key] = score
 
         # Save to disk cache
         if cache_dir:
             try:
-                cache_path = Path(cache_dir) / '.scene_face_cache.json'
+                cache_path = Path(cache_dir) / '.segment_face_cache.json'
                 disk_cache = {}
                 if cache_path.exists():
                     with open(cache_path, 'r') as f:
@@ -230,6 +247,7 @@ class FaceDetector:
         """
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video (mediapipe): {Path(video_path).name}", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -276,6 +294,7 @@ class FaceDetector:
         """
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video (opencv): {Path(video_path).name}", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -334,6 +353,7 @@ class FaceDetector:
         """Detect faces within a specific time range using MediaPipe."""
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video range (mediapipe): {Path(video_path).name} [{start_time:.1f}-{end_time:.1f}s]", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -391,6 +411,7 @@ class FaceDetector:
         """Detect faces within a specific time range using OpenCV."""
         try:
             import cv2
+            log_ffmpeg_debug(f"Opening video range (opencv): {Path(video_path).name} [{start_time:.1f}-{end_time:.1f}s]", "face_detection")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -448,7 +469,11 @@ def apply_face_preference(
     cache_dir: str = None
 ) -> List[Tuple]:
     """
-    Adjust candidate scores based on face preference.
+    Adjust candidate scores based on face preference using SEGMENT-LEVEL detection.
+
+    Uses the specific time range of each video segment to detect faces,
+    not the entire video. This allows matching clips without faces even
+    from videos that contain faces in other parts.
 
     Args:
         candidates: List of (segment, score) tuples
@@ -463,18 +488,54 @@ def apply_face_preference(
 
     detector = FaceDetector.get_instance()
 
+    if not detector.is_available():
+        logger.debug("Face detection not available, skipping preference adjustment")
+        return candidates
+
+    logger.debug(f"Applying segment-level face preference '{face_preference}' to {len(candidates)} candidates")
+
     adjusted = []
+    segments_with_faces = 0
+    segments_without_faces = 0
+
     for seg, score in candidates:
         video_path = seg.source_file
-        face_score = detector.get_face_score(video_path, cache_dir)
+
+        # Use segment-level face detection (specific time range)
+        start_time = getattr(seg, 'start_time', 0.0)
+        end_time = getattr(seg, 'end_time', 0.0)
+        segment_index = getattr(seg, 'index', 0)
+
+        if end_time > start_time:
+            # Detect faces only within this segment's time range
+            face_score = detector.get_scene_face_score(
+                video_path=video_path,
+                start_time=start_time,
+                end_time=end_time,
+                scene_index=segment_index,
+                sample_frames=3,  # Sample 3 frames within segment
+                cache_dir=cache_dir
+            )
+            logger.debug(
+                f"Segment face score: {video_path}[{start_time:.1f}-{end_time:.1f}] = {face_score:.2f}"
+            )
+        else:
+            # Fallback to video-level if no time range
+            face_score = detector.get_face_score(video_path, cache_dir)
+
+        # Track face statistics
+        if face_score > 0.3:
+            segments_with_faces += 1
+        else:
+            segments_without_faces += 1
 
         # Apply adjustment based on preference
         if face_preference == "more":
-            # Boost videos with faces (face_score: 0-1)
+            # Boost segments with faces (face_score: 0-1)
             # More faces = higher boost (up to +0.1)
             adjustment = face_score * 0.1
         elif face_preference == "none":
-            # Penalize videos with faces
+            # Penalize segments with faces
             # More faces = bigger penalty (up to -0.15)
             adjustment = -face_score * 0.15
         else:
@@ -485,6 +546,11 @@ def apply_face_preference(
 
     # Re-sort by adjusted score
     adjusted.sort(key=lambda x: x[1], reverse=True)
+
+    logger.debug(
+        f"Face preference applied: {segments_without_faces} B-roll (no faces), "
+        f"{segments_with_faces} with faces"
+    )
 
     return adjusted
 

@@ -803,8 +803,8 @@ Only output the JSON array, no other text."""
                 q['cq'] = transcode_crf
         
         # -nostdin prevents FFmpeg from waiting for keyboard input
-        # -hide_banner reduces log noise
-        cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-y']
+        # -hide_banner and -loglevel error suppress decoder warnings (mmco, etc)
+        cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y']
         
         # Add hardware-accelerated DECODING (input side) for NVIDIA
         # Note: For ProRes/DNxHD we don't use CUDA since they require CPU encoding

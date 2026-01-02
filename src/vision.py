@@ -204,6 +204,10 @@ class VisionProcessor:
         elif self.provider == 'openai':
             return os.getenv('OPENAI_API_KEY')
         return None
+
+    def is_available(self) -> bool:
+        """Check if vision API is available (API key is configured)"""
+        return self._get_api_key() is not None
     
     def _extract_frame(self, video_path: str, timestamp: float) -> Optional[bytes]:
         """Extract a frame from video at given timestamp"""
@@ -215,7 +219,8 @@ class VisionProcessor:
                 temp_path = f.name
             
             cmd = [
-                'ffmpeg', '-ss', str(timestamp),
+                'ffmpeg', '-loglevel', 'error',
+                '-ss', str(timestamp),
                 '-i', video_path,
                 '-vframes', '1',
                 '-y', temp_path

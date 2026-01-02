@@ -44,6 +44,11 @@ from __future__ import annotations
 import os
 import sys
 
+# Suppress FFmpeg H.264 decoder warnings from OpenCV (must be set before cv2 import)
+# These "mmco: unref short failure" messages are harmless but noisy
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 # Fix Windows console encoding for Unicode characters
 if sys.platform == 'win32':
     try:
@@ -272,17 +277,112 @@ def validate_config_at_startup(config: Config) -> bool:
 # LOGGING SETUP
 # =============================================================================
 
-def setup_logging(config: Config) -> logging.Logger:
-    """Setup logging based on config"""
+def setup_logging(config: Config, output_dir: Path = None, run_timestamp: str = None) -> logging.Logger:
+    """
+    Setup logging with dual log files per run.
+
+    Creates two log files:
+    1. run_{timestamp}.log - Normal logging (INFO level, matches console)
+    2. run_{timestamp}_verbose.log - Verbose logging (DEBUG level, everything)
+
+    Args:
+        config: Configuration object
+        output_dir: Directory to save log files (default: project output dir)
+        run_timestamp: Timestamp string for filenames (default: auto-generated)
+
+    Returns:
+        Logger instance
+    """
+    from datetime import datetime
+
+    # Get log level from config
     log_level = getattr(logging, config.logging.log_level.upper(), logging.INFO)
-    
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+
+    # Generate timestamp if not provided
+    if run_timestamp is None:
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Determine output directory
+    if output_dir is None:
+        output_dir = Path(config.output.output_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create logs subdirectory
+    logs_dir = output_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Log file paths
+    normal_log_path = logs_dir / f"run_{run_timestamp}.log"
+    verbose_log_path = logs_dir / f"run_{run_timestamp}_verbose.log"
+
+    # Get root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+
+    # Clear any existing handlers
+    root_logger.handlers.clear()
+
+    # Console handler (matches config level)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_format = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%H:%M:%S'
     )
-    
-    return logging.getLogger(__name__)
+    console_handler.setFormatter(console_format)
+    root_logger.addHandler(console_handler)
+
+    # Normal log file handler (INFO level)
+    try:
+        normal_handler = logging.FileHandler(normal_log_path, encoding='utf-8')
+        normal_handler.setLevel(logging.INFO)
+        normal_format = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        normal_handler.setFormatter(normal_format)
+        root_logger.addHandler(normal_handler)
+    except Exception as e:
+        print(f"  Warning: Could not create normal log file: {e}")
+
+    # Verbose log file handler (DEBUG level - everything)
+    try:
+        verbose_handler = logging.FileHandler(verbose_log_path, encoding='utf-8')
+        verbose_handler.setLevel(logging.DEBUG)
+        verbose_format = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        verbose_handler.setFormatter(verbose_format)
+        root_logger.addHandler(verbose_handler)
+    except Exception as e:
+        print(f"  Warning: Could not create verbose log file: {e}")
+
+    # Setup FFmpeg debug log (captures H.264 decoder warnings from OpenCV)
+    try:
+        from src.utils import setup_ffmpeg_debug_log
+        ffmpeg_debug_path = setup_ffmpeg_debug_log(logs_dir)
+    except Exception as e:
+        ffmpeg_debug_path = None
+        print(f"  Warning: Could not create FFmpeg debug log: {e}")
+
+    # Log startup info
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized")
+    logger.debug(f"Normal log: {normal_log_path}")
+    logger.debug(f"Verbose log: {verbose_log_path}")
+    if ffmpeg_debug_path:
+        logger.debug(f"FFmpeg debug log: {ffmpeg_debug_path}")
+
+    # Store paths for reference
+    logger.log_paths = {
+        'normal': str(normal_log_path),
+        'verbose': str(verbose_log_path),
+        'ffmpeg_debug': str(ffmpeg_debug_path) if ffmpeg_debug_path else None
+    }
+
+    return logger
 
 
 # =============================================================================
@@ -421,11 +521,16 @@ class Pipeline:
         # Performance tracking
         self.stage_timings = {}
         self.use_delta_indexing = True
-        
+
         # Checkpoint manager for resume functionality
         self.checkpoint = None  # Initialized in run() with project dir
         self.resume_mode = False
-        
+
+        # Global cache for cross-project video reuse
+        self.global_cache = None
+        self.global_cache_videos = []  # Videos reused from global cache
+        self._init_global_cache()
+
         # Run logger
         self.run_logger = None
         self._init_logger()
@@ -440,7 +545,29 @@ class Pipeline:
                 print(f"  ✓ Logging enabled: {self.run_logger.log_file}")
             except Exception as e:
                 print(f"  ⚠ Could not initialize logger: {e}")
-    
+
+    def _init_global_cache(self):
+        """Initialize global cache for cross-project video reuse"""
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config or not getattr(gc_config, 'enabled', False):
+            logger.debug("Global cache disabled")
+            return
+
+        try:
+            from src.global_cache import GlobalCacheManager
+
+            cache_dir = getattr(gc_config, 'cache_dir', '~/.matcher_global_cache')
+            # Expand ~ to home directory
+            cache_dir = str(Path(cache_dir).expanduser())
+
+            self.global_cache = GlobalCacheManager(cache_dir=cache_dir, config=self.config)
+            stats = self.global_cache.get_stats()
+            logger.info(f"Global cache initialized: {stats['total_videos']} videos, "
+                       f"{stats['total_topics']} topics, {stats['total_keywords']} keywords")
+        except Exception as e:
+            logger.warning(f"Could not initialize global cache: {e}")
+            self.global_cache = None
+
     def _print_banner(self):
         """Print startup banner with config-driven values"""
         config = self.config
@@ -618,10 +745,22 @@ class Pipeline:
             
             # Apply smart splitting for long segments
             segments = self._optimize_segments(segments)
-            
+
+            # Check for word-level timestamps file (generated by transcription)
+            word_data = None
+            words_path = Path(srt_path).with_suffix('.words.json')
+            if words_path.exists():
+                try:
+                    import json
+                    with open(words_path, 'r', encoding='utf-8') as f:
+                        word_data = json.load(f)
+                    logger.info(f"Loaded word timestamps from {words_path.name}")
+                except Exception as e:
+                    logger.debug(f"Could not load word timestamps: {e}")
+
             # Apply pause-based splitting for natural breaks
-            segments = self._pause_split_segments(segments)
-            
+            segments = self._pause_split_segments(segments, word_data=word_data)
+
             return segments
         except ImportError:
             logger.error("srt package not installed. Install with: pip install srt")
@@ -776,151 +915,269 @@ class Pipeline:
         
         return sub_segments
     
-    def _pause_split_segments(self, segments: List[dict]) -> List[dict]:
+    def _pause_split_segments(self, segments: List[dict], word_data: List[dict] = None) -> List[dict]:
         """
         Split segments at natural pauses - aggressive splitting for better matching.
-        
+
         Split patterns (in order of priority):
         1. Sentence boundaries - every sentence becomes its own segment
         2. List item isolation - "Number X, Town" becomes its own segment
         3. Location patterns - "City, State," splits
-        
-        This creates more granular segments for better video matching.
+
+        If word_data is provided (from Whisper word_timestamps), uses accurate
+        word-level timing. Otherwise falls back to character-based estimation.
         """
         import re
-        
+
         config = self.config
         pause_config = getattr(config.transcription, 'pause_split', None)
-        
+
         # Check if pause splitting is enabled
         if not pause_config or not getattr(pause_config, 'enabled', False):
             return segments
-        
+
         # Get config options
         split_sentences = getattr(pause_config, 'split_at_sentences', True)
         split_list_markers = getattr(pause_config, 'split_at_list_markers', True)
         split_locations = getattr(pause_config, 'split_at_locations', True)
         min_phrase_words = getattr(pause_config, 'min_phrase_words', 2)
         min_segment_duration = getattr(pause_config, 'min_segment_duration', 0.5)
-        
+
+        # Build word lookup if word_data available
+        # word_data is list of segments, each with optional 'words' list
+        word_lookup = {}  # Maps segment index -> list of word dicts with timing
+        if word_data:
+            for seg_idx, seg_data in enumerate(word_data):
+                if 'words' in seg_data:
+                    word_lookup[seg_idx] = seg_data['words']
+            if word_lookup:
+                print(f"  ✓ Using word-level timestamps for accurate pause-split timing")
+
         optimized = []
         split_count = 0
-        
-        for seg in segments:
+
+        for seg_idx, seg in enumerate(segments):
             text = seg['text']
             start_time = seg['start_time']
             end_time = seg['end_time']
             duration = seg['duration']
-            
+
             # Skip very short segments
             if duration < min_segment_duration or len(text) < 10:
                 optimized.append(seg)
                 continue
-            
-            parts = []
-            
+
             # PRIORITY 1: List item isolation
-            # Split "...text. Number 10, Pagosa Springs. More text..." into separate parts
             if split_list_markers:
-                # Pattern: "Number X, Town" or "Number X. Town" 
                 list_pattern = re.compile(
                     r'([Nn]umber\s+\d{1,2}[,.\s]+[A-Z][a-zA-Z\s]+?)(?=[.!?]|$)'
                 )
-                
-                # Also handle "X. Town" pattern (e.g., "8. Atlanta")
                 numbered_pattern = re.compile(
                     r'(\d{1,2}\.\s+[A-Z][a-zA-Z\s,]+?)(?=[.!?]|$)'
                 )
-                
-                # Check if text contains list patterns
                 has_list = list_pattern.search(text) or numbered_pattern.search(text)
-                
                 if has_list:
-                    # Split before "Number X" or before "X."
                     text = re.sub(r'(?<=[.!?])\s+(?=[Nn]umber\s+\d{1,2})', '|||SPLIT|||', text)
                     text = re.sub(r'(?<=[.!?])\s+(?=\d{1,2}\.\s+[A-Z])', '|||SPLIT|||', text)
-            
+
             # PRIORITY 2: Sentence-level splitting
             if split_sentences:
-                # Split at sentence boundaries: . ! ? followed by space and capital letter
-                # But preserve abbreviations like "U.S." or "Dr."
                 text = re.sub(r'(?<=[.!?])\s+(?=[A-Z])', '|||SPLIT|||', text)
-            
-            # PRIORITY 3: Location patterns  
+
+            # PRIORITY 3: Location patterns
             if split_locations:
-                # Split after "City, State," patterns - use capture group approach
                 text = re.sub(r'([A-Z][a-z]+,\s+[A-Z][a-z]+,)\s+', r'\1|||SPLIT|||', text)
-            
+
             # Split the text
             parts = text.split('|||SPLIT|||')
             parts = [p.strip() for p in parts if p.strip()]
-            
+
             # Filter out very short fragments
             if len(parts) > 1:
                 valid_parts = []
                 for part in parts:
                     word_count = len(part.split())
-                    
-                    # Keep if it has enough words OR is a list marker OR ends with punctuation
                     is_list_marker = re.match(r'^[Nn]umber\s+\d{1,2}', part) or re.match(r'^\d{1,2}\.', part)
                     ends_with_punct = part and part[-1] in '.!?'
-                    
                     if word_count >= min_phrase_words or is_list_marker or ends_with_punct:
                         valid_parts.append(part)
                     elif valid_parts:
-                        # Merge tiny fragments with previous
                         valid_parts[-1] = valid_parts[-1] + ' ' + part
                     else:
                         valid_parts.append(part)
-                
                 parts = valid_parts
-            
+
             # If no valid splits, keep original
             if len(parts) <= 1:
                 optimized.append(seg)
                 continue
-            
-            # Calculate time distribution based on character length
-            total_chars = sum(len(p) for p in parts)
-            if total_chars == 0:
-                optimized.append(seg)
-                continue
-            
+
             split_count += 1
+
+            # Calculate timing for each part
+            seg_words = word_lookup.get(seg_idx, [])
+
+            if seg_words:
+                # USE WORD-LEVEL TIMESTAMPS for accurate timing
+                part_timings = self._calculate_part_timings_from_words(
+                    parts, seg_words, start_time, end_time, min_segment_duration
+                )
+            else:
+                # Fall back to character-based estimation
+                part_timings = self._calculate_part_timings_from_chars(
+                    parts, start_time, end_time, duration, min_segment_duration
+                )
+
+            for i, (part, (part_start, part_end)) in enumerate(zip(parts, part_timings)):
+                optimized.append({
+                    'index': seg['index'],
+                    'start_time': round(part_start, 3),
+                    'end_time': round(part_end, 3),
+                    'text': part,
+                    'duration': round(part_end - part_start, 3)
+                })
+
+        # Re-index all segments
+        for i, seg in enumerate(optimized):
+            seg['index'] = i + 1
+
+        if split_count > 0:
+            print(f"  ✓ Pause-split: {split_count} segments split ({len(segments)} → {len(optimized)})")
+            logger.info(f"Pause-based splitting: {split_count} segments split, {len(segments)} → {len(optimized)} total")
+
+        return optimized
+
+    def _calculate_part_timings_from_words(
+        self, parts: List[str], words: List[dict],
+        start_time: float, end_time: float, min_duration: float
+    ) -> List[tuple]:
+        """Calculate accurate timing for each part using word-level timestamps."""
+        duration = end_time - start_time
+
+        # First pass: calculate natural timings from words
+        natural_timings = []
+        word_idx = 0
+
+        for i, part in enumerate(parts):
+            part_words = part.split()
+            part_word_count = len(part_words)
+
+            # Find the starting word for this part
+            part_start = words[word_idx]['start'] if word_idx < len(words) else start_time
+
+            # Advance word_idx by part_word_count
+            words_consumed = 0
+            part_end = part_start
+            while words_consumed < part_word_count and word_idx < len(words):
+                part_end = words[word_idx]['end']
+                word_idx += 1
+                words_consumed += 1
+
+            natural_timings.append((part_start, part_end))
+
+        # Calculate natural durations and total needed with min_duration
+        natural_durations = [t[1] - t[0] for t in natural_timings]
+        total_needed = sum(max(d, min_duration) for d in natural_durations)
+
+        # If total needed exceeds available time, scale down
+        if total_needed > duration:
+            scale = duration / total_needed
+            logger.debug(f"Pause-split (words): Time budget exceeded ({total_needed:.2f}s > {duration:.2f}s), scaling by {scale:.2f}")
+
+            # Rebuild timings with scaled durations
+            timings = []
             current_time = start_time
-            
-            for i, part in enumerate(parts):
-                # Proportional duration based on character count
-                char_ratio = len(part) / total_chars
-                part_duration = duration * char_ratio
-                part_duration = max(min_segment_duration, part_duration)
-                
-                # Calculate end time
+            for i, nat_dur in enumerate(natural_durations):
+                part_duration = max(nat_dur, min_duration) * scale
+
                 if i == len(parts) - 1:
                     part_end = end_time
                 else:
                     part_end = current_time + part_duration
-                    part_end = min(part_end, end_time)
-                
-                optimized.append({
-                    'index': seg['index'],
-                    'start_time': round(current_time, 3),
-                    'end_time': round(part_end, 3),
-                    'text': part,
-                    'duration': round(part_end - current_time, 3)
-                })
-                
+
+                # Safety: ensure positive duration
+                if part_end <= current_time:
+                    part_end = min(current_time + 0.001, end_time)
+
+                timings.append((current_time, part_end))
                 current_time = part_end
-        
-        # Re-index all segments
-        for i, seg in enumerate(optimized):
-            seg['index'] = i + 1
-        
-        if split_count > 0:
-            print(f"  ✓ Pause-split: {split_count} segments split ({len(segments)} → {len(optimized)})")
-            logger.info(f"Pause-based splitting: {split_count} segments split, {len(segments)} → {len(optimized)} total")
-        
-        return optimized
+
+            return timings
+
+        # No overflow - use natural timings with min_duration enforcement
+        timings = []
+        current_time = start_time
+
+        for i, (part_start, part_end) in enumerate(natural_timings):
+            # Ensure minimum duration
+            if part_end - part_start < min_duration:
+                part_end = part_start + min_duration
+
+            # Clamp to end_time
+            part_end = min(part_end, end_time)
+
+            # Last part gets remaining time
+            if i == len(parts) - 1:
+                part_end = end_time
+
+            # Safety: ensure positive duration
+            if part_end <= current_time:
+                part_end = min(current_time + 0.001, end_time)
+
+            timings.append((current_time, part_end))
+            current_time = part_end
+
+        return timings
+
+    def _calculate_part_timings_from_chars(
+        self, parts: List[str], start_time: float,
+        end_time: float, duration: float, min_duration: float
+    ) -> List[tuple]:
+        """Calculate timing for each part using character-based estimation (fallback)."""
+        total_chars = sum(len(p) for p in parts)
+        if total_chars == 0:
+            return [(start_time, end_time)]
+
+        # First pass: calculate natural durations
+        natural_durations = []
+        for part in parts:
+            char_ratio = len(part) / total_chars
+            natural_durations.append(duration * char_ratio)
+
+        # Calculate total time needed if we enforce min_duration
+        total_needed = sum(max(d, min_duration) for d in natural_durations)
+
+        # If we need more time than available, scale down proportionally
+        # This prevents overflow and zero-duration segments
+        if total_needed > duration:
+            # Scale factor to fit within available duration
+            scale = duration / total_needed
+            logger.debug(f"Pause-split: Time budget exceeded ({total_needed:.2f}s > {duration:.2f}s), scaling by {scale:.2f}")
+            adjusted_durations = [max(d, min_duration) * scale for d in natural_durations]
+        else:
+            adjusted_durations = [max(d, min_duration) for d in natural_durations]
+
+        # Build timings
+        timings = []
+        current_time = start_time
+
+        for i, part_duration in enumerate(adjusted_durations):
+            if i == len(parts) - 1:
+                # Last part gets remaining time to avoid floating-point drift
+                part_end = end_time
+            else:
+                part_end = current_time + part_duration
+
+            # Ensure we don't exceed end_time and have at least some duration
+            part_end = min(part_end, end_time)
+            if part_end <= current_time:
+                # Safety: ensure at least 1ms duration
+                part_end = min(current_time + 0.001, end_time)
+
+            timings.append((current_time, part_end))
+            current_time = part_end
+
+        return timings
     
     def _detect_list_items(self, segments: List[dict]) -> List[dict]:
         """
@@ -1730,6 +1987,100 @@ Topic:"""
             print(f"  ⚠ Stock video search failed: {e}")
             return {}
     
+    def _check_global_cache_for_videos(self, keywords: List[str]) -> Tuple[List[str], List[dict]]:
+        """
+        Check global cache for relevant videos before downloading.
+
+        Returns:
+            Tuple of (keywords_to_download, reusable_videos)
+            - keywords_to_download: Keywords that need new downloads
+            - reusable_videos: Videos from global cache that can be reused
+        """
+        if not self.global_cache:
+            return keywords, []
+
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config or not getattr(gc_config, 'check_before_download', True):
+            return keywords, []
+
+        print(f"\n  🔍 Checking global cache for existing videos...")
+
+        # Get topics from voiceover for relevance filtering
+        vo_topics = []
+        if hasattr(self, 'voiceover_segments') and self.voiceover_segments:
+            # Extract topics from voiceover text
+            vo_text = ' '.join([
+                s.text if hasattr(s, 'text') else s.get('text', '')
+                for s in self.voiceover_segments[:10]  # First 10 segments
+            ])
+            vo_topics = [kw.lower() for kw in keywords[:5]]  # Use first 5 keywords as topics
+            if self.topic_context:
+                vo_topics.append(self.topic_context.lower())
+
+        # Query global cache
+        min_relevance = getattr(gc_config, 'min_topic_overlap', 0.3)
+        max_reuse = getattr(gc_config, 'max_reuse_videos', 50)
+
+        result = self.global_cache.find_videos_for_keywords(
+            keywords=keywords,
+            topics=vo_topics,
+            min_relevance=min_relevance,
+            max_results=max_reuse
+        )
+
+        logger.info(f"Global cache query: {result.total_cached_matches} matches, "
+                   f"{result.files_exist_count} exist, {result.files_deleted_count} deleted")
+
+        reusable_videos = []
+        covered_keywords = set()
+
+        # Process reusable videos
+        for entry, relevance in result.reuse_videos:
+            if entry.file_exists and entry.current_path:
+                video_info = {
+                    'path': entry.current_path,
+                    'source': 'global_cache',
+                    'relevance': relevance,
+                    'topics': entry.topics,
+                    'keywords': entry.keywords,
+                    'has_transcript': entry.has_transcript,
+                    'video_hash': entry.video_hash
+                }
+                reusable_videos.append(video_info)
+
+                # Track which keywords are covered
+                if entry.download_info and entry.download_info.keyword:
+                    covered_keywords.add(entry.download_info.keyword.lower())
+                for kw in entry.keywords:
+                    covered_keywords.add(kw.lower())
+
+        # Determine which keywords still need downloads
+        keywords_to_download = []
+        for kw in keywords:
+            if kw.lower() not in covered_keywords:
+                keywords_to_download.append(kw)
+
+        if reusable_videos:
+            print(f"  ✓ Found {len(reusable_videos)} reusable videos from global cache")
+            for v in reusable_videos[:3]:
+                print(f"    • {Path(v['path']).name} (relevance: {v['relevance']:.2f})")
+            if len(reusable_videos) > 3:
+                print(f"    ... and {len(reusable_videos) - 3} more")
+
+            self.global_cache_videos = reusable_videos
+            logger.info(f"Reusing {len(reusable_videos)} videos from global cache")
+
+        if result.redownload_keywords:
+            print(f"  📥 {len(result.redownload_keywords)} cached videos were deleted, adding to download queue")
+            keywords_to_download.extend(result.redownload_keywords)
+
+        if result.uncovered_keywords:
+            logger.debug(f"Uncovered keywords: {result.uncovered_keywords}")
+
+        print(f"  → {len(keywords_to_download)} keywords need new downloads")
+
+        return keywords_to_download, reusable_videos
+
     def stage_download(self, keywords: List[str]) -> List[dict]:
         """
         Stage 2: Download footage from YouTube.
@@ -1737,16 +2088,19 @@ Topic:"""
         Includes zero-download keyword remix for failed keywords.
         """
         config = self.config
-        
+
         if config.pipeline.skip_download:
             print("  ⏭ Skipping download (config: skip_download=true)")
             return []
-        
+
         self._print_stage("2", "DOWNLOAD FOOTAGE")
-        
+
+        # Check global cache first
+        keywords_to_download, reusable_videos = self._check_global_cache_for_videos(keywords)
+
         try:
             from src.downloader import VideoDownloader, DownloadCheckpoint
-            
+
             # Initialize downloader with config
             self.downloader = VideoDownloader(config=config)
             
@@ -1758,24 +2112,47 @@ Topic:"""
                 per_kw = self.downloader._get_tier_value(tier_name, 'per_keyword', 5)
                 print(f"    • {tier_name}: {min_s}-{max_s}s ({per_kw}/kw)")
             
-            # Download using download_all() method
+            # Download using download_all() method (only for keywords not covered by cache)
             output_dir = Path(config.downloaded_videos_dir)
-            downloaded_videos, failed = self.downloader.download_all(
-                keywords=keywords,
-                output_dir=output_dir,
-                resume=True,
-                topic=self.topic_context or ""
-            )
+
+            if keywords_to_download:
+                downloaded_videos, failed = self.downloader.download_all(
+                    keywords=keywords_to_download,
+                    output_dir=output_dir,
+                    resume=True,
+                    topic=self.topic_context or ""
+                )
+            else:
+                downloaded_videos = []
+                failed = []
+                print(f"  ⏭ All keywords covered by global cache, skipping download")
+
+            # Combine newly downloaded videos with reusable videos from global cache
+            # Current project videos come first (higher priority)
             self.downloaded_videos = downloaded_videos
-            
+
+            # Add global cache videos (marked with source='global_cache')
+            if reusable_videos:
+                for gv in reusable_videos:
+                    # Convert to format expected by rest of pipeline
+                    self.downloaded_videos.append({
+                        'path': gv['path'],
+                        'file': gv['path'],
+                        'source': 'global_cache',
+                        'relevance': gv.get('relevance', 0.5),
+                        'video_hash': gv.get('video_hash', '')
+                    })
+
             # Store failed keywords for potential remix
             self.failed_keywords = failed
-            
+
             if failed:
-                print(f"  ⚠ Failed keywords: {', '.join(failed[:5])}" + 
+                print(f"  ⚠ Failed keywords: {', '.join(failed[:5])}" +
                       (f" (+{len(failed)-5} more)" if len(failed) > 5 else ""))
-            
-            print(f"\n  ✓ Downloaded {len(self.downloaded_videos)} videos")
+
+            print(f"\n  ✓ Downloaded {len(downloaded_videos)} new videos")
+            if reusable_videos:
+                print(f"  ✓ Reusing {len(reusable_videos)} videos from global cache")
             
             # Zero-download keyword remix
             if failed and hasattr(config, 'zero_download_remix') and config.zero_download_remix.enabled:
@@ -2492,7 +2869,12 @@ Topic:"""
                     logger.warning(f"Failed to transcribe {vf}: {e}")
         
         print(f"  ✓ Transcribed {len(self.transcripts)} videos")
-        
+
+        # Handle silent videos (B-roll) - generate descriptions for matching
+        silent_video_config = getattr(config, 'silent_video', None)
+        if silent_video_config and getattr(silent_video_config, 'enabled', True):
+            self._handle_silent_videos(video_files)
+
         # Embeddings (config-driven batching)
         if self.modules['optimized_embeddings'] and config.pipeline.parallel_embedding:
             from src.embeddings import compute_embeddings, build_embedding_index, get_embedding_provider
@@ -2559,8 +2941,123 @@ Topic:"""
         if config.matching.chapter_matching_enabled and config.matching.extract_video_topics:
             self._extract_video_topics()
 
+        # Share transcripts to global cache (for cross-project reuse)
+        self._share_to_global_cache(video_files)
+
         return self.transcripts
-    
+
+    def _share_to_global_cache(self, video_files: List[Path]):
+        """
+        Share processed video data to global cache for cross-project reuse.
+
+        Registers videos and copies transcripts, topics, and face scores
+        to the global cache so future projects can reuse this data.
+        """
+        if not self.global_cache:
+            return
+
+        gc_config = getattr(self.config, 'global_cache', None)
+        if not gc_config:
+            return
+
+        share_transcripts = getattr(gc_config, 'share_transcripts', True)
+        share_face = getattr(gc_config, 'share_face_detection', True)
+
+        if not share_transcripts and not share_face:
+            return
+
+        print(f"\n  📤 Sharing to global cache...")
+        registered = 0
+
+        for vf in video_files:
+            video_path = str(vf)
+
+            # Skip videos from global cache (already registered)
+            video_info = None
+            for dv in getattr(self, 'downloaded_videos', []):
+                if isinstance(dv, dict):
+                    if dv.get('path') == video_path or dv.get('file') == video_path:
+                        video_info = dv
+                        break
+
+            if video_info and video_info.get('source') == 'global_cache':
+                continue
+
+            try:
+                # Get transcript for this video
+                segments = self.transcripts.get(video_path, [])
+                transcript_text = ' '.join([
+                    s.text if hasattr(s, 'text') else s.get('text', '')
+                    for s in segments[:5]  # First 5 segments as preview
+                ])
+
+                # Get topics if extracted
+                topics = []
+                if hasattr(self, 'video_topics') and video_path in self.video_topics:
+                    vt = self.video_topics[video_path]
+                    topics = vt.topics if hasattr(vt, 'topics') else []
+
+                # Extract keyword from path
+                keyword = self._extract_source_keyword(video_path)
+
+                # Get face score if available
+                face_score = 0.5
+                if share_face:
+                    try:
+                        from src.face_detection import FaceDetector
+                        detector = FaceDetector.get_instance()
+                        if detector.is_available() and video_path in detector._cache:
+                            face_score = detector._cache[video_path]
+                    except:
+                        pass
+
+                # Get video duration
+                duration = 0.0
+                if segments:
+                    last_seg = segments[-1]
+                    duration = last_seg.end_time if hasattr(last_seg, 'end_time') else last_seg.get('end_time', 0)
+
+                # Register in global cache
+                entry = self.global_cache.register_video(
+                    video_path=video_path,
+                    download_keyword=keyword,
+                    topics=topics,
+                    project_id=str(PROJECT_DIR) if PROJECT_DIR else "",
+                    duration=duration
+                )
+
+                if entry:
+                    # Mark as processed
+                    self.global_cache.mark_video_processed(
+                        video_hash=entry.video_hash,
+                        has_transcript=bool(segments),
+                        has_embeddings=hasattr(self, 'embeddings') and self.embeddings is not None,
+                        face_score=face_score
+                    )
+
+                    # Copy transcript to global cache
+                    if share_transcripts and segments:
+                        transcript_data = {
+                            'segments': [
+                                s.to_dict() if hasattr(s, 'to_dict') else s
+                                for s in segments
+                            ],
+                            'video_path': video_path,
+                            'topics': topics
+                        }
+                        self.global_cache.copy_transcript_to_global(
+                            entry.video_hash, transcript_data
+                        )
+
+                    registered += 1
+
+            except Exception as e:
+                logger.debug(f"Failed to register {vf.name} in global cache: {e}")
+
+        if registered > 0:
+            print(f"  ✓ Registered {registered} videos in global cache")
+            logger.info(f"Global cache: registered {registered} videos")
+
     def _predetect_faces(self, video_files: List[Path]):
         """Pre-detect faces in videos and cache results for matching stage."""
         try:
@@ -2652,7 +3149,6 @@ Topic:"""
         try:
             from src.topic_extraction import TopicExtractor
 
-            print(f"\n  Extracting video topics...")
             extractor = TopicExtractor(self.config, self.config.cache.cache_dir)
 
             # Prepare transcripts and metadata for batch extraction
@@ -2681,6 +3177,8 @@ Topic:"""
                     }
 
             # Batch extract topics
+            print(f"\n  Extracting video topics ({len(transcripts_dict)} videos)...")
+            logger.info(f"Extracting topics from {len(transcripts_dict)} videos")
             self.video_topics = extractor.extract_batch(transcripts_dict, metadata_dict)
 
             # Count topics extracted
@@ -2698,6 +3196,234 @@ Topic:"""
         except Exception as e:
             logger.warning(f"Video topic extraction failed: {e}")
             self.video_topics = {}
+
+    def _handle_silent_videos(self, video_files: List[Path]):
+        """
+        Handle videos with no speech (B-roll) by generating descriptions.
+
+        Silent videos are valuable B-roll footage. This method:
+        1. Detects videos with no/sparse transcripts
+        2. Generates descriptions using Vision API or LLM from title/keyword
+        3. Creates synthetic segments for embedding and matching
+        4. Caches descriptions to avoid repeated API calls
+
+        B-roll videos get a confidence boost during matching since they're
+        versatile visual content without talking heads.
+        """
+        config = self.config
+        silent_config = getattr(config, 'silent_video', None)
+
+        # Default settings if no config
+        min_words = getattr(silent_config, 'min_words_threshold', 10) if silent_config else 10
+        use_vision = getattr(silent_config, 'use_vision_api', True) if silent_config else True
+        use_llm = getattr(silent_config, 'use_llm_fallback', True) if silent_config else True
+
+        # B-roll description cache
+        import hashlib
+        import json
+        import time
+        broll_cache_file = Path(config.cache.cache_dir) / "broll_descriptions.json"
+        broll_cache = {}
+        if broll_cache_file.exists():
+            try:
+                with open(broll_cache_file, 'r', encoding='utf-8') as f:
+                    broll_cache = json.load(f)
+                logger.info(f"Loaded B-roll cache: {len(broll_cache)} entries from {broll_cache_file}")
+            except Exception as e:
+                logger.debug(f"Could not load B-roll cache: {e}")
+        else:
+            logger.info(f"No B-roll cache found at {broll_cache_file}")
+
+        def get_cache_key(video_path: str) -> str:
+            """Generate cache key from video path (normalized for consistency)"""
+            # Normalize path: forward slashes, lowercase for consistent matching
+            normalized = str(video_path).replace('\\', '/').lower()
+            return hashlib.md5(normalized.encode()).hexdigest()[:16]
+
+        def save_broll_cache():
+            """Save B-roll cache to disk"""
+            try:
+                with open(broll_cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(broll_cache, f, indent=2)
+            except Exception as e:
+                logger.debug(f"Could not save B-roll cache: {e}")
+
+        # Find silent videos
+        silent_videos = []
+        for vf in video_files:
+            video_path = str(vf)
+            segments = self.transcripts.get(video_path, [])
+
+            # Count words in transcript
+            total_words = 0
+            for seg in segments:
+                text = seg.text if hasattr(seg, 'text') else seg.get('text', '')
+                total_words += len(text.split())
+
+            if total_words < min_words:
+                silent_videos.append(video_path)
+
+        if not silent_videos:
+            return
+
+        print(f"\n  📹 Found {len(silent_videos)} silent/B-roll videos")
+        logger.info(f"Silent video handling: Found {len(silent_videos)} videos with <{min_words} words")
+        for sv in silent_videos:
+            logger.debug(f"  Silent video: {Path(sv).name}")
+
+        # Track which videos we successfully described
+        described = 0
+        cached_count = 0
+        total_silent = len(silent_videos)
+
+        for idx, video_path in enumerate(silent_videos, 1):
+            description = None
+            source = None
+            duration = 30.0
+
+            # Check cache first
+            cache_key = get_cache_key(video_path)
+            from_cache = False
+            if cache_key in broll_cache:
+                cached = broll_cache[cache_key]
+                description = cached.get('description')
+                source = cached.get('source', 'cached')
+                duration = cached.get('duration', 30.0)
+                cached_count += 1
+                from_cache = True
+                logger.debug(f"({idx}/{total_silent}) Using cached B-roll description for {Path(video_path).name}")
+
+            # Try Vision API first (if enabled and available)
+            if use_vision and description is None:
+                try:
+                    from src.vision import VisionProcessor
+
+                    processor = VisionProcessor(config)
+                    if processor.is_available():
+                        # Get video duration for sampling
+                        import subprocess
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                             '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
+
+                        # Sample 3 frames and describe
+                        descriptions = []
+                        sample_times = [duration * 0.25, duration * 0.5, duration * 0.75]
+                        for t in sample_times:
+                            scene = {'start_time': max(0, t - 1), 'end_time': t + 1}
+                            desc = processor.describe_scene(
+                                video_path, scene,
+                                cache_dir=config.cache.cache_dir
+                            )
+                            if desc:
+                                descriptions.append(desc)
+
+                        if descriptions:
+                            description = ' '.join(descriptions)
+                            source = 'vision'
+                            logger.debug(f"({idx}/{total_silent}) Vision API described {Path(video_path).name}: {description[:100]}...")
+                except Exception as e:
+                    logger.debug(f"({idx}/{total_silent}) Vision API failed for {Path(video_path).name}: {e}")
+
+            # Fallback to LLM from title/keyword
+            if use_llm and description is None:
+                try:
+                    keyword = self._extract_source_keyword(video_path)
+                    video_name = Path(video_path).stem
+
+                    # Clean up video name for description
+                    clean_name = video_name.replace('_', ' ').replace('-', ' ')
+                    # Remove video IDs (11-char YouTube IDs)
+                    import re
+                    clean_name = re.sub(r'\b[a-zA-Z0-9_-]{11}\b', '', clean_name).strip()
+
+                    # Generate description from keyword + filename
+                    if self.config.gemini_api_key:
+                        import google.generativeai as genai
+                        genai.configure(api_key=self.config.gemini_api_key)
+                        model = genai.GenerativeModel('gemini-2.0-flash')
+
+                        prompt = f"""Generate a short visual description (2-3 sentences) for a stock video based on:
+- Search keyword: {keyword}
+- Filename: {clean_name}
+
+Describe what visual content this video likely contains. Focus on subjects, actions, and setting.
+Be specific and descriptive for semantic matching purposes."""
+
+                        response = model.generate_content(prompt)
+                        description = response.text.strip()
+                        source = 'llm'
+                        logger.debug(f"({idx}/{total_silent}) LLM described {Path(video_path).name}: {description[:100]}...")
+                    else:
+                        # Simple fallback - use keyword as description
+                        description = f"Video footage of {keyword}. Visual content showing {clean_name}."
+                        source = 'keyword'
+                        logger.debug(f"({idx}/{total_silent}) Keyword fallback for {Path(video_path).name}: {description}")
+
+                except Exception as e:
+                    logger.debug(f"({idx}/{total_silent}) LLM fallback failed for {Path(video_path).name}: {e}")
+
+            # Create synthetic segments if we have a description
+            if description:
+                # Get video duration (skip if already from cache)
+                if cache_key not in broll_cache:
+                    try:
+                        import subprocess
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                             '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
+                    except:
+                        duration = 30.0
+
+                    # Save to cache
+                    broll_cache[cache_key] = {
+                        'description': description,
+                        'source': source,
+                        'duration': duration,
+                        'video_name': Path(video_path).name,
+                        'timestamp': time.time()
+                    }
+
+                # Create synthetic transcript segment
+                from src.transcription import TranscriptSegment
+
+                synthetic_segment = TranscriptSegment(
+                    index=0,
+                    text=description,
+                    start_time=0.0,
+                    end_time=duration,
+                    source_file=video_path
+                )
+
+                # Mark as B-roll for potential boost
+                synthetic_segment.is_broll = True
+                synthetic_segment.description_source = source
+
+                # Add/replace in transcripts
+                self.transcripts[video_path] = [synthetic_segment]
+                described += 1
+
+                # Only print for newly generated descriptions (not cached)
+                if not from_cache:
+                    print(f"    ({idx}/{total_silent}) ✓ {Path(video_path).name}: {source} ({len(description)} chars)")
+                    logger.info(f"({idx}/{total_silent}) B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
+
+        # Save cache after processing
+        save_broll_cache()
+
+        if described > 0:
+            new_count = described - cached_count
+            if cached_count > 0:
+                print(f"  ✓ B-roll descriptions: {cached_count} cached, {new_count} new ({described} total)")
+            else:
+                print(f"  ✓ Generated descriptions for {described}/{len(silent_videos)} silent videos")
+            logger.info(f"Silent video summary: {described}/{len(silent_videos)} described ({cached_count} cached, {new_count} new)")
 
     def _extract_source_keyword(self, video_path: str) -> str:
         """Try to extract the source search keyword from video path structure."""
@@ -2980,11 +3706,15 @@ Topic:"""
 
         self._print_stage("5", "GENERATE OUTPUT")
 
-        output_dir = Path(config.otio_output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         # Generate timestamp for this run's outputs
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Create timestamped subdirectory for this run's outputs
+        base_output_dir = Path(config.otio_output_dir)
+        output_dir = base_output_dir / run_timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"  Output directory: {output_dir}")
 
         outputs = {}
 
@@ -2997,7 +3727,6 @@ Topic:"""
 
             # Generate timeline
             print(f"  Creating timeline...")
-            print(f"  Output timestamp: {run_timestamp}")
             timeline = create_timeline(
                 matches=self.matches,
                 config=config,
@@ -3008,9 +3737,9 @@ Topic:"""
                 downloaded_segments=getattr(self, 'downloaded_segments', None)  # Audio-first video segments
             )
 
-            # Output formats (config-driven) - all use run_timestamp
+            # Output formats (config-driven)
             if config.output.generate_otio:
-                otio_base_path = output_dir / f"timeline_{run_timestamp}"
+                otio_base_path = output_dir / "timeline"
                 
                 # Check if we should split the OTIO
                 split_otio = getattr(config.output, 'split_otio', True)
@@ -3051,7 +3780,7 @@ Topic:"""
                     print(f"  ✓ OTIO: {otio_path}")
             
             if config.output.generate_edl:
-                edl_path = output_dir / f"timeline_{run_timestamp}.edl"
+                edl_path = output_dir / "timeline.edl"
                 save_timeline_as_edl(
                     self.matches,
                     str(edl_path),
@@ -3064,7 +3793,7 @@ Topic:"""
 
             # Generate DaVinci Resolve XML with media bin AND timeline (FALLBACK)
             if getattr(config.output, 'generate_xml', True):
-                xml_base_path = output_dir / f"xml_{run_timestamp}"
+                xml_base_path = output_dir / "timeline"
                 num_parts = getattr(config.output, 'xml_parts', 2)
                 xml_paths = generate_resolve_xml_with_bins(
                     matches=self.matches,
@@ -3081,7 +3810,7 @@ Topic:"""
 
             # Generate report if enabled
             if config.output.generate_report:
-                report_path = output_dir / f"match_report_{run_timestamp}.md"
+                report_path = output_dir / "match_report.md"
                 self._generate_report(self.matches, str(report_path))
                 outputs['report'] = str(report_path)
                 print(f"  ✓ Report: {report_path}")
@@ -4167,8 +4896,20 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
     
-    # Setup logging
-    logger = setup_logging(config)
+    # Setup logging with dual log files (normal + verbose)
+    # Determine output directory from config or project path
+    if hasattr(args, 'project') and args.project:
+        log_output_dir = Path(args.project)
+    else:
+        log_output_dir = Path(config.output.output_dir)
+
+    logger = setup_logging(config, output_dir=log_output_dir)
+
+    # Print log file locations
+    if hasattr(logger, 'log_paths'):
+        print(f"\n  📝 Log files:")
+        print(f"    Normal:  {Path(logger.log_paths['normal']).name}")
+        print(f"    Verbose: {Path(logger.log_paths['verbose']).name}")
     
     # Validate config
     if args.validate_config:
