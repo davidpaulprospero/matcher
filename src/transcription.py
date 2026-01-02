@@ -331,6 +331,15 @@ class TranscriptSegment:
         return asdict(self)
 
 
+def _normalize_path(path: str) -> str:
+    """Normalize path for consistent cache matching across platforms."""
+    if not path:
+        return ""
+    # Convert to forward slashes and lowercase for consistent matching
+    normalized = str(path).replace('\\', '/').lower()
+    return normalized
+
+
 @dataclass
 class TranscriptCache:
     """Cache for video transcripts"""
@@ -385,12 +394,12 @@ class TranscriptCache:
                                 source_file = segs[0].get('source_file', '')
                     
                     if source_file:
-                        # Normalize path for matching
-                        source_file = str(Path(source_file).resolve()) if source_file else ''
-                        self._source_map[source_file] = cache_file
+                        # Normalize path for matching (consistent across platforms)
+                        normalized = _normalize_path(source_file)
+                        self._source_map[normalized] = cache_file
 
                         # Also add just the filename as key for partial matching
-                        filename = Path(source_file).name
+                        filename = Path(source_file).name.lower()
                         self._source_map[filename] = cache_file
 
                         # Extract video ID for segment matching (audio-first mode support)
@@ -416,17 +425,16 @@ class TranscriptCache:
     
     def get(self, video_path: str) -> Optional[List[dict]]:
         """Get cached transcript for a video"""
-        video_path_resolved = str(Path(video_path).resolve())
-        video_name = Path(video_path).name
+        # Normalize path for consistent matching
+        normalized_path = _normalize_path(video_path)
+        video_name = Path(video_path).name.lower()
 
         # Try source map lookup first (most reliable)
         cache_file = None
-        if video_path_resolved in self._source_map:
-            cache_file = self._source_map[video_path_resolved]
+        if normalized_path in self._source_map:
+            cache_file = self._source_map[normalized_path]
         elif video_name in self._source_map:
             cache_file = self._source_map[video_name]
-        elif video_path in self._source_map:
-            cache_file = self._source_map[video_path]
 
         # Fallback to video ID lookup (for segment files matching audio transcripts)
         if not cache_file:
