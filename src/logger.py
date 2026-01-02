@@ -155,6 +155,47 @@ class PerformanceLog:
 
 
 @dataclass
+class VideoProcessLog:
+    """Log entry for video processing (transcription)"""
+    index: int
+    video_id: str
+    duration_seconds: float
+    segments: int
+    vad_removed_seconds: float = 0.0
+    cached: bool = False
+
+
+@dataclass
+class MatchDetailLog:
+    """Detailed match log with alternatives"""
+    segment_index: str  # S001, S002, etc.
+    voiceover_text: str
+    matched_clip: str
+    clip_timecode: str  # 00:12-00:18
+    confidence: float
+    alternatives: List[Dict[str, Any]] = field(default_factory=list)  # [{clip, confidence}, ...]
+
+
+@dataclass
+class TrackVarietyLog:
+    """Track variety statistics"""
+    track: str
+    unique_sources: int
+    most_used: str
+    most_used_count: int
+
+
+@dataclass
+class StageLog:
+    """Log for a pipeline stage"""
+    name: str
+    start_time: str
+    end_time: str
+    duration_seconds: float
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class RunLog:
     """Complete run log"""
     run_id: str
@@ -162,37 +203,41 @@ class RunLog:
     end_time: Optional[str] = None
     config_hash: str = ""
     config_path: str = ""
-    
+    project_name: str = ""
+
     # Summaries
     total_segments: int = 0
     total_matches: int = 0
     avg_confidence: float = 0.0
     total_api_calls: int = 0
     total_api_cost_est_usd: float = 0.0
-    
+
     # Download stats
     videos_downloaded: int = 0
     videos_skipped: int = 0  # Already existed
     videos_failed: int = 0
-    
+
     # Transcription stats
     videos_transcribed: int = 0
     transcription_cache_hits: int = 0
-    
+
     # Embedding stats
     embeddings_computed: int = 0
     embedding_cache_hits: int = 0
-    
+    embedding_dimensions: int = 0
+    embedding_batches: int = 0
+    embedding_rate: float = 0.0
+
     # Entity media stats
     entity_images_downloaded: int = 0
     entity_videos_downloaded: int = 0
-    
+
     # Stage timings (stage_name -> seconds)
     stage_timings: Dict[str, float] = field(default_factory=dict)
-    
+
     # Files generated
     files_generated: Dict[str, str] = field(default_factory=dict)  # type -> path
-    
+
     # Detailed logs
     performance: List[PerformanceLog] = field(default_factory=list)
     api_calls: List[APICallLog] = field(default_factory=list)
@@ -201,6 +246,21 @@ class RunLog:
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     output_files: List[str] = field(default_factory=list)
+
+    # Verbose logging data
+    stages: List[StageLog] = field(default_factory=list)
+    video_process_logs: List[VideoProcessLog] = field(default_factory=list)
+    match_detail_logs: List[MatchDetailLog] = field(default_factory=list)
+    track_variety_logs: List[TrackVarietyLog] = field(default_factory=list)
+
+    # Matching config snapshot
+    matching_config: Dict[str, Any] = field(default_factory=dict)
+
+    # Remix stats
+    remix_videos_scanned: int = 0
+    remix_included: int = 0
+    remix_excluded: int = 0
+    remix_avg_score: float = 0.0
     
     def to_dict(self) -> dict:
         return {
@@ -295,6 +355,7 @@ class RunLogger:
         # File paths
         self.log_file = self.log_dir / f"run_{run_id}.log"
         self.json_file = self.log_dir / f"run_{run_id}.json"
+        self.verbose_md_file = self.log_dir / f"run_{run_id}_verbose.md"
         
         # Initialize run log
         self.run_log = RunLog(
@@ -505,7 +566,126 @@ class RunLogger:
     def log_hardcoded_warning(self, component: str, value_name: str, value: Any):
         """Convenience method for logging hardcoded value warnings"""
         self.log_config_access(component, value_name, value, source="hardcoded")
-    
+
+    # =========================================================================
+    # VERBOSE LOGGING METHODS
+    # =========================================================================
+
+    def set_project_name(self, name: str):
+        """Set the project name for verbose logs"""
+        with self._lock:
+            self.run_log.project_name = name
+
+    def log_stage_start(self, stage_name: str):
+        """Log stage start for verbose markdown"""
+        with self._lock:
+            self._current_stage = {
+                'name': stage_name,
+                'start_time': datetime.now().isoformat(),
+                'details': {}
+            }
+
+    def log_stage_end(self, stage_name: str, **details):
+        """Log stage end with details for verbose markdown"""
+        with self._lock:
+            if hasattr(self, '_current_stage') and self._current_stage:
+                end_time = datetime.now()
+                start = datetime.fromisoformat(self._current_stage['start_time'])
+                duration = (end_time - start).total_seconds()
+
+                stage_log = StageLog(
+                    name=stage_name,
+                    start_time=self._current_stage['start_time'],
+                    end_time=end_time.isoformat(),
+                    duration_seconds=duration,
+                    details=details
+                )
+                self.run_log.stages.append(stage_log)
+                self._current_stage = None
+
+    def log_video_process(
+        self,
+        index: int,
+        video_id: str,
+        duration_seconds: float,
+        segments: int,
+        vad_removed_seconds: float = 0.0,
+        cached: bool = False
+    ):
+        """Log video processing for verbose markdown table"""
+        with self._lock:
+            self.run_log.video_process_logs.append(VideoProcessLog(
+                index=index,
+                video_id=video_id,
+                duration_seconds=duration_seconds,
+                segments=segments,
+                vad_removed_seconds=vad_removed_seconds,
+                cached=cached
+            ))
+
+    def log_match_detail(
+        self,
+        segment_index: int,
+        voiceover_text: str,
+        matched_clip: str,
+        start_time: float,
+        end_time: float,
+        confidence: float,
+        alternatives: List[Dict[str, Any]] = None
+    ):
+        """Log detailed match with alternatives for verbose markdown"""
+        with self._lock:
+            # Format segment ID
+            seg_id = f"S{segment_index + 1:03d}"
+
+            # Format timecode
+            def fmt_time(s):
+                mins = int(s // 60)
+                secs = int(s % 60)
+                return f"{mins:02d}:{secs:02d}"
+
+            timecode = f"{fmt_time(start_time)}-{fmt_time(end_time)}"
+
+            self.run_log.match_detail_logs.append(MatchDetailLog(
+                segment_index=seg_id,
+                voiceover_text=voiceover_text[:50] + "..." if len(voiceover_text) > 50 else voiceover_text,
+                matched_clip=Path(matched_clip).name if matched_clip else "",
+                clip_timecode=timecode,
+                confidence=confidence,
+                alternatives=alternatives or []
+            ))
+
+    def log_track_variety(self, track: str, unique_sources: int, most_used: str, most_used_count: int):
+        """Log track variety stats for verbose markdown"""
+        with self._lock:
+            self.run_log.track_variety_logs.append(TrackVarietyLog(
+                track=track,
+                unique_sources=unique_sources,
+                most_used=most_used,
+                most_used_count=most_used_count
+            ))
+
+    def log_remix_stats(self, videos_scanned: int, included: int, excluded: int, avg_score: float):
+        """Log remix stage stats"""
+        with self._lock:
+            self.run_log.remix_videos_scanned = videos_scanned
+            self.run_log.remix_included = included
+            self.run_log.remix_excluded = excluded
+            self.run_log.remix_avg_score = avg_score
+
+    def log_embedding_stats(self, total: int, dimensions: int, batches: int, rate: float, duration: float):
+        """Log embedding computation stats"""
+        with self._lock:
+            self.run_log.embeddings_computed = total
+            self.run_log.embedding_dimensions = dimensions
+            self.run_log.embedding_batches = batches
+            self.run_log.embedding_rate = rate
+
+    def log_matching_config(self, config_dict: Dict[str, Any]):
+        """Log matching configuration for verbose markdown"""
+        with self._lock:
+            self.run_log.matching_config = config_dict
+
     @contextmanager
     def stage_timer(self, stage_name: str, item_count: int = 0):
         """Context manager for timing pipeline stages"""
@@ -762,16 +942,19 @@ class RunLogger:
         """Generate token-friendly summary files for LLMs"""
         log_dir = Path(self.json_file).parent
         base_name = Path(self.json_file).stem
-        
+
         # Markdown summary
         md_path = log_dir / f"{base_name}_summary.md"
         self._write_markdown_summary(md_path, total_duration)
-        
+
         # Plaintext summary (minimal tokens)
         txt_path = log_dir / f"{base_name}_summary.txt"
         self._write_plaintext_summary(txt_path, total_duration)
-        
-        self.file_logger.info(f"LLM summaries: {md_path.name}, {txt_path.name}")
+
+        # Verbose markdown (detailed, structured for LLM parsing)
+        self._write_verbose_markdown(self.verbose_md_file, total_duration)
+
+        self.file_logger.info(f"LLM summaries: {md_path.name}, {txt_path.name}, {self.verbose_md_file.name}")
     
     def _write_markdown_summary(self, path: Path, total_duration: float):
         """Write markdown summary"""
@@ -857,6 +1040,204 @@ class RunLogger:
         with open(path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
 
+    def _write_verbose_markdown(self, path: Path, total_duration: float):
+        """Write detailed verbose markdown log for LLM parsing"""
+        r = self.run_log
+        lines = []
+
+        # Helper for time formatting
+        def fmt_time(seconds):
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{mins:02d}:{secs:02d}"
+
+        def fmt_duration(seconds):
+            if seconds >= 60:
+                return f"{seconds / 60:.1f}m"
+            return f"{seconds:.1f}s"
+
+        # Header
+        start_dt = datetime.fromisoformat(r.start_time)
+        lines.append(f"# Pipeline Run: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        project = r.project_name or "Unknown Project"
+        config_hash = r.config_hash[:8] if r.config_hash else "N/A"
+        lines.append(f"Project: {project} | Config hash: {config_hash}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        # Generate stage sections from stored stages or stage_timings
+        stages_to_write = []
+        if r.stages:
+            for stage in r.stages:
+                stages_to_write.append({
+                    'name': stage.name,
+                    'start_time': stage.start_time,
+                    'end_time': stage.end_time,
+                    'duration': stage.duration_seconds,
+                    'details': stage.details
+                })
+        else:
+            # Fallback to stage_timings
+            for name, duration in r.stage_timings.items():
+                stages_to_write.append({
+                    'name': name.upper(),
+                    'start_time': '',
+                    'end_time': '',
+                    'duration': duration,
+                    'details': {}
+                })
+
+        # REMIX Stage
+        if r.remix_videos_scanned > 0:
+            lines.append("## Stage: REMIX")
+            lines.append(f"**Duration:** {fmt_duration(r.stage_timings.get('remix', 0))}")
+            lines.append("")
+            lines.append(f"- Scanned {r.remix_videos_scanned} videos")
+            lines.append(f"- Included: {r.remix_included} | Excluded: {r.remix_excluded} | Avg score: {r.remix_avg_score:.3f}")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        # TRANSCRIBE Stage
+        total_transcribed = r.videos_transcribed + r.transcription_cache_hits
+        if total_transcribed > 0 or r.video_process_logs:
+            lines.append("## Stage: TRANSCRIBE")
+            duration = r.stage_timings.get('transcribe', r.stage_timings.get('transcription', 0))
+            lines.append(f"**Duration:** {fmt_duration(duration)}")
+            lines.append("")
+
+            if r.video_process_logs:
+                lines.append(f"### Videos Processed ({len(r.video_process_logs)})")
+                lines.append("| # | Video ID | Duration | Segments | Cached |")
+                lines.append("|---|----------|----------|----------|--------|")
+                for vp in r.video_process_logs[:100]:  # Limit to first 100
+                    cached = "✓" if vp.cached else ""
+                    lines.append(f"| {vp.index} | {vp.video_id[:30]} | {fmt_time(vp.duration_seconds)} | {vp.segments} | {cached} |")
+                if len(r.video_process_logs) > 100:
+                    lines.append(f"| ... | *{len(r.video_process_logs) - 100} more videos* | | | |")
+            else:
+                lines.append(f"- New: {r.videos_transcribed} | Cached: {r.transcription_cache_hits}")
+
+            lines.append("")
+
+            # Embeddings subsection
+            if r.embeddings_computed > 0 or r.embedding_cache_hits > 0:
+                lines.append("### Embeddings")
+                total_emb = r.embeddings_computed + r.embedding_cache_hits
+                lines.append(f"- Total: {total_emb:,} vectors ({r.embedding_dimensions} dim)")
+                if r.embedding_batches > 0:
+                    lines.append(f"- Batches: {r.embedding_batches} | Rate: {r.embedding_rate:.0f}/sec")
+                lines.append("")
+
+            lines.append("---")
+            lines.append("")
+
+        # MATCH Stage
+        if r.total_matches > 0 or r.match_detail_logs:
+            lines.append("## Stage: MATCH")
+            duration = r.stage_timings.get('match', r.stage_timings.get('matching', 0))
+            lines.append(f"**Duration:** {fmt_duration(duration)}")
+            lines.append("")
+
+            # Config section
+            if r.matching_config:
+                lines.append("### Config")
+                mc = r.matching_config
+                lines.append(f"- Candidates: {mc.get('embedding_candidates', 'N/A')} → LLM rerank: {mc.get('llm_rerank_count', 'N/A')}")
+                lines.append(f"- Max reuse: {mc.get('max_clip_reuse', 'N/A')} | Face pref: {mc.get('face_preference', 'none')}")
+                if mc.get('llm_providers'):
+                    lines.append(f"- LLMs: {', '.join(mc.get('llm_providers', []))}")
+                lines.append("")
+
+            # Matches table
+            if r.match_detail_logs:
+                lines.append(f"### Matches ({len(r.match_detail_logs)} total)")
+                lines.append("| Seg | Text | Matched Clip | Conf | Alternatives |")
+                lines.append("|-----|------|--------------|------|--------------|")
+                for md in r.match_detail_logs:
+                    # Format alternatives
+                    alt_str = ""
+                    if md.alternatives:
+                        alt_parts = []
+                        for alt in md.alternatives[:2]:  # Top 2 alternatives
+                            alt_clip = Path(alt.get('clip', '')).name if alt.get('clip') else ''
+                            alt_conf = alt.get('confidence', 0)
+                            if alt_clip:
+                                alt_parts.append(f"{alt_clip[:20]} ({alt_conf:.0%})")
+                        alt_str = ", ".join(alt_parts)
+
+                    text = md.voiceover_text.replace("|", "\\|").replace("\n", " ")
+                    clip = md.matched_clip[:30] if md.matched_clip else ""
+                    lines.append(f"| {md.segment_index} | \"{text}\" | {clip} @ {md.clip_timecode} | {md.confidence:.0%} | {alt_str} |")
+            else:
+                lines.append(f"- Total matches: {r.total_matches}")
+                lines.append(f"- Average confidence: {r.avg_confidence:.1%}")
+
+            lines.append("")
+
+            # Track variety
+            if r.track_variety_logs:
+                lines.append("### Track Variety")
+                lines.append("| Track | Unique Sources | Most Used | Count |")
+                lines.append("|-------|----------------|-----------|-------|")
+                for tv in r.track_variety_logs:
+                    lines.append(f"| {tv.track} | {tv.unique_sources} | {tv.most_used[:30]} | {tv.most_used_count} |")
+                lines.append("")
+
+            lines.append("---")
+            lines.append("")
+
+        # OUTPUT Stage
+        if r.files_generated:
+            lines.append("## Stage: OUTPUT")
+            duration = r.stage_timings.get('output', r.stage_timings.get('otio', 0))
+            lines.append(f"**Duration:** {fmt_duration(duration)}")
+            lines.append("")
+
+            lines.append("### Files Generated")
+            for file_type, file_path in r.files_generated.items():
+                lines.append(f"- ✅ {file_type}: `{Path(file_path).name}`")
+            lines.append("")
+
+        # Warnings section
+        if r.warnings:
+            lines.append("### Warnings")
+            for w in r.warnings:
+                lines.append(f"- ⚠️ {w}")
+            lines.append("")
+
+        # Errors section
+        if r.errors:
+            lines.append("### Errors")
+            for e in r.errors:
+                lines.append(f"- ❌ {e}")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+        # Final Summary
+        lines.append("## Final Summary")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Total Time | {fmt_duration(total_duration)} |")
+        lines.append(f"| Segments | {r.total_segments} |")
+        match_rate = (r.total_matches / max(r.total_segments, 1)) * 100
+        lines.append(f"| Match Rate | {match_rate:.0f}% |")
+        lines.append(f"| Avg Confidence | {r.avg_confidence:.1%} |")
+        total_videos = r.videos_downloaded + r.videos_skipped
+        lines.append(f"| Videos | {total_videos} |")
+        total_emb = r.embeddings_computed + r.embedding_cache_hits
+        lines.append(f"| Embeddings | {total_emb:,} |")
+        lines.append(f"| Errors | {len(r.errors)} |")
+        lines.append(f"| Warnings | {len(r.warnings)} |")
+        lines.append("")
+
+        # Write file
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+
 
 # =============================================================================
 # GLOBAL CONFIG ACCESS LOGGING
@@ -905,6 +1286,10 @@ __all__ = [
     'ConfigAccessLog',
     'PerformanceLog',
     'RunLog',
+    'VideoProcessLog',
+    'MatchDetailLog',
+    'TrackVarietyLog',
+    'StageLog',
     'get_confidence_tier',
     'get_confidence_color',
     'estimate_tokens',

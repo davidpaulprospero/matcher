@@ -127,6 +127,7 @@ class VideoDeduplicator:
         # Try GPU-accelerated decoding first
         cmd = [
             'ffmpeg',
+            '-loglevel', 'error',
             '-y',
             '-hwaccel', 'cuda',  # GPU decoding for NVIDIA
             '-i', video_path,
@@ -149,6 +150,7 @@ class VideoDeduplicator:
             # Fallback to CPU if GPU fails
             cmd_cpu = [
                 'ffmpeg',
+                '-loglevel', 'error',
                 '-y',
                 '-i', video_path,
                 '-vframes', '1',

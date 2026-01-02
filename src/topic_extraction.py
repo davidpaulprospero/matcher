@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 
+from .utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +60,9 @@ class TopicExtractor:
                 with open(self.topics_cache_path, 'r') as f:
                     data = json.load(f)
                     for path, topic_data in data.items():
-                        self._topics_cache[path] = VideoTopics.from_dict(topic_data)
+                        # Normalize path when loading for consistent matching
+                        normalized = normalize_path(path)
+                        self._topics_cache[normalized] = VideoTopics.from_dict(topic_data)
                 logger.debug(f"Loaded {len(self._topics_cache)} cached video topics")
             except Exception as e:
                 logger.warning(f"Could not load topics cache: {e}")
@@ -74,7 +78,8 @@ class TopicExtractor:
 
     def get_cached_topics(self, video_path: str) -> Optional[VideoTopics]:
         """Get cached topics for a video"""
-        return self._topics_cache.get(str(video_path))
+        normalized = normalize_path(video_path)
+        return self._topics_cache.get(normalized)
 
     def extract_topics_from_transcript(
         self,
@@ -96,6 +101,7 @@ class TopicExtractor:
             VideoTopics object with extracted topics
         """
         video_path = str(video_path)
+        normalized_path = normalize_path(video_path)
 
         # Check cache first
         cached = self.get_cached_topics(video_path)
@@ -111,7 +117,7 @@ class TopicExtractor:
                 source_keyword=source_keyword or "",
                 confidence=0.5
             )
-            self._topics_cache[video_path] = result
+            self._topics_cache[normalized_path] = result
             self._save_cache()
             return result
 
@@ -127,7 +133,7 @@ class TopicExtractor:
                 confidence=confidence
             )
 
-            self._topics_cache[video_path] = result
+            self._topics_cache[normalized_path] = result
             self._save_cache()
             return result
 
@@ -227,8 +233,9 @@ No explanation, just the JSON array."""
         """
         results = {}
         video_metadata = video_metadata or {}
+        total = len(transcripts)
 
-        for video_path, transcript in transcripts.items():
+        for idx, (video_path, transcript) in enumerate(transcripts.items(), 1):
             meta = video_metadata.get(video_path, {})
             title = meta.get('title', '')
             keyword = meta.get('keyword', '')
@@ -240,6 +247,9 @@ No explanation, just the JSON array."""
                 source_keyword=keyword
             )
             results[video_path] = result
+
+            if idx % 50 == 0 or idx == total:
+                logger.info(f"({idx}/{total}) Topic extraction progress")
 
         return results
 

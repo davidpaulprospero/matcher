@@ -31,6 +31,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import queue
 
+from .utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -45,29 +47,70 @@ _progress_lock = threading.Lock()
 _progress_data = {"completed": 0, "total": 0, "current": ""}
 
 
+def _extract_video_id(filename: str) -> Optional[str]:
+    """
+    Extract YouTube video ID from filename.
+    Handles: video_id.mp4, video_id.mp3, video_id_0045.mp4 (segments)
+    YouTube IDs are 11 characters: [A-Za-z0-9_-]
+    """
+    import re
+    stem = Path(filename).stem
+
+    # Pattern 1: Segment file like "abc12345678_0045" -> extract "abc12345678"
+    segment_match = re.match(r'^([A-Za-z0-9_-]{11})_\d+$', stem)
+    if segment_match:
+        return segment_match.group(1)
+
+    # Pattern 2: Regular file with 11-char ID at start
+    # Handle names like "abc12345678" or "abc12345678_extra_info"
+    if len(stem) >= 11:
+        potential_id = stem[:11]
+        if re.match(r'^[A-Za-z0-9_-]{11}$', potential_id):
+            return potential_id
+
+    # Pattern 3: Exact 11-char stem
+    if len(stem) == 11 and re.match(r'^[A-Za-z0-9_-]+$', stem):
+        return stem
+
+    return None
+
+
 class DeltaAwareIndex:
     """
     Tracks which videos have been indexed to enable delta-aware processing.
     Only processes NEW videos on subsequent runs.
+    Supports video ID matching for audio-first mode (segments match audio transcripts).
     """
-    
+
     def __init__(self, cache_dir: str):
         self.cache_dir = Path(cache_dir)
         self.index_path = self.cache_dir / "delta_index.json"
         self.indexed_videos = set()
+        self.indexed_video_ids = set()  # Track video IDs for segment matching
         self._load()
-    
+
     def _load(self):
         """Load the index of previously processed videos"""
         if self.index_path.exists():
             try:
                 with open(self.index_path, 'r') as f:
                     data = json.load(f)
-                    self.indexed_videos = set(data.get('indexed', []))
+                    # Normalize paths when loading for consistent matching
+                    raw_paths = data.get('indexed', [])
+                    self.indexed_videos = set(normalize_path(p) for p in raw_paths)
+                    self.indexed_video_ids = set(data.get('indexed_ids', []))
+
+                    # Rebuild video IDs from paths if not stored (migration)
+                    if not self.indexed_video_ids:
+                        for vp in raw_paths:
+                            vid_id = _extract_video_id(vp)
+                            if vid_id:
+                                self.indexed_video_ids.add(vid_id)
             except Exception as e:
                 logger.debug(f"Could not load delta index: {e}")
                 self.indexed_videos = set()
-    
+                self.indexed_video_ids = set()
+
     def _save(self):
         """Save the index"""
         try:
@@ -75,33 +118,55 @@ class DeltaAwareIndex:
             with open(self.index_path, 'w') as f:
                 json.dump({
                     'indexed': list(self.indexed_videos),
+                    'indexed_ids': list(self.indexed_video_ids),
                     'updated_at': time.time()
                 }, f)
         except Exception as e:
             logger.debug(f"Could not save delta index: {e}")
-    
+
     def is_indexed(self, video_path: str) -> bool:
-        """Check if a video has been indexed"""
-        return str(video_path) in self.indexed_videos
-    
+        """Check if a video has been indexed (by path or video ID)"""
+        # Normalize path for consistent matching
+        normalized = normalize_path(video_path)
+
+        # Check normalized path match
+        if normalized in self.indexed_videos:
+            return True
+
+        # Check video ID match (for segment files matching audio)
+        vid_id = _extract_video_id(video_path)
+        if vid_id and vid_id in self.indexed_video_ids:
+            return True
+
+        return False
+
     def mark_indexed(self, video_path: str):
-        """Mark a video as indexed"""
-        self.indexed_videos.add(str(video_path))
+        """Mark a video as indexed (using normalized path)"""
+        normalized = normalize_path(video_path)
+        self.indexed_videos.add(normalized)
+        vid_id = _extract_video_id(video_path)
+        if vid_id:
+            self.indexed_video_ids.add(vid_id)
         self._save()
-    
+
     def mark_indexed_batch(self, video_paths: List[str]):
-        """Mark multiple videos as indexed"""
+        """Mark multiple videos as indexed (using normalized paths)"""
         for vp in video_paths:
-            self.indexed_videos.add(str(vp))
+            normalized = normalize_path(vp)
+            self.indexed_videos.add(normalized)
+            vid_id = _extract_video_id(vp)
+            if vid_id:
+                self.indexed_video_ids.add(vid_id)
         self._save()
-    
+
     def get_new_videos(self, video_paths: List[str]) -> List[str]:
         """Get list of videos that haven't been indexed yet"""
         return [vp for vp in video_paths if not self.is_indexed(vp)]
-    
+
     def clear(self):
         """Clear the index (force full reprocess)"""
         self.indexed_videos = set()
+        self.indexed_video_ids = set()
         self._save()
 
 
@@ -189,7 +254,8 @@ def _transcribe_with_shared_model(
     language: str = None,
     vad_filter: bool = True,
     min_silence_duration_ms: int = 200,
-    speech_pad_ms: int = 10
+    speech_pad_ms: int = 10,
+    word_timestamps: bool = False
 ) -> List[dict]:
     """
     Transcribe audio using the shared model with mutex protection.
@@ -202,12 +268,13 @@ def _transcribe_with_shared_model(
         vad_filter: Whether to apply Voice Activity Detection
         min_silence_duration_ms: Minimum silence duration to split segments (from config)
         speech_pad_ms: Padding around detected speech (from config)
+        word_timestamps: Whether to include word-level timestamps
     """
     print(f"\n  [TRANSCRIBE] Acquiring GPU lock...", flush=True)
     with _gpu_lock:
         print(f"  [TRANSCRIBE] Lock acquired, getting model...", flush=True)
         model = _get_shared_model(model_name, compute_type)
-        
+
         audio_name = Path(audio_path).name[:40]
         print(f"  [TRANSCRIBE] Starting transcription of {audio_name}...", flush=True)
         try:
@@ -218,21 +285,37 @@ def _transcribe_with_shared_model(
                 vad_parameters=dict(
                     min_silence_duration_ms=min_silence_duration_ms,
                     speech_pad_ms=speech_pad_ms
-                )
+                ),
+                word_timestamps=word_timestamps
             )
-            
+
             print(f"  [TRANSCRIBE] Transcription done, processing segments...", flush=True)
             result = []
             for seg in segments:
-                result.append({
+                seg_data = {
                     "start": seg.start,
                     "end": seg.end,
                     "text": seg.text.strip()
-                })
-            
+                }
+                # Include word-level timestamps if available
+                if word_timestamps and hasattr(seg, 'words') and seg.words:
+                    seg_data["words"] = [
+                        {"word": w.word, "start": w.start, "end": w.end}
+                        for w in seg.words
+                    ]
+                result.append(seg_data)
+
+            # Verbose logging for transcription result
+            total_duration = sum(s.get('end', 0) - s.get('start', 0) for s in result)
+            logger.debug(f"Transcription complete: {audio_name}")
+            logger.debug(f"  Segments: {len(result)}, Total duration: {total_duration:.1f}s")
+            if result:
+                logger.debug(f"  First segment: '{result[0].get('text', '')[:50]}...'")
+                logger.debug(f"  Word timestamps: {'yes' if result[0].get('words') else 'no'}")
+
             print(f"  [TRANSCRIBE] Done: {len(result)} segments", flush=True)
             return result
-            
+
         except Exception as e:
             print(f"  [TRANSCRIBE] Error: {e}", flush=True)
             logger.error(f"Transcription error: {e}")
@@ -249,9 +332,14 @@ class TranscriptSegment:
     end_time: float
     text: str
     source_file: str = ""
-    
+    # B-roll/silent video attributes
+    is_broll: bool = False  # True if this is a silent/B-roll video segment
+    description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+
     def to_dict(self) -> dict:
         return asdict(self)
+
+
 
 
 @dataclass
@@ -260,20 +348,22 @@ class TranscriptCache:
     cache_dir: Path
     alt_cache_dir: Path = None
     _source_map: Dict[str, Path] = None  # Maps source_file -> cache_file
-    
+    _video_id_map: Dict[str, Path] = None  # Maps video_id -> cache_file (for segment matching)
+
     def __init__(self, cache_dir: str):
         base_dir = Path(cache_dir)
-        
+
         # Check both possible folder names
         self.cache_dir = base_dir / "transcriptions"
         self.alt_cache_dir = base_dir / "transcripts"
-        
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._source_map = {}
-        
+        self._video_id_map = {}  # Maps video ID -> cache file
+
         print(f"  [DEBUG] Primary cache: {self.cache_dir}", flush=True)
         print(f"  [DEBUG] Alt cache: {self.alt_cache_dir}", flush=True)
-        
+
         # Build reverse lookup by reading source_file from each cache file
         self._build_source_map()
     
@@ -306,18 +396,23 @@ class TranscriptCache:
                                 source_file = segs[0].get('source_file', '')
                     
                     if source_file:
-                        # Normalize path for matching
-                        source_file = str(Path(source_file).resolve()) if source_file else ''
-                        self._source_map[source_file] = cache_file
-                        
+                        # Normalize path for matching (consistent across platforms)
+                        normalized = normalize_path(source_file)
+                        self._source_map[normalized] = cache_file
+
                         # Also add just the filename as key for partial matching
-                        filename = Path(source_file).name
+                        filename = Path(source_file).name.lower()
                         self._source_map[filename] = cache_file
-                        
+
+                        # Extract video ID for segment matching (audio-first mode support)
+                        video_id = _extract_video_id(filename)
+                        if video_id and video_id not in self._video_id_map:
+                            self._video_id_map[video_id] = cache_file
+
                 except Exception as e:
                     continue
-            
-        print(f"  [DEBUG] Built source map with {len(self._source_map)} entries", flush=True)
+
+        print(f"  [DEBUG] Built source map with {len(self._source_map)} entries, {len(self._video_id_map)} video IDs", flush=True)
         if self._source_map:
             sample_keys = list(self._source_map.keys())[:2]
             for k in sample_keys:
@@ -332,18 +427,23 @@ class TranscriptCache:
     
     def get(self, video_path: str) -> Optional[List[dict]]:
         """Get cached transcript for a video"""
-        video_path_resolved = str(Path(video_path).resolve())
-        video_name = Path(video_path).name
-        
+        # Normalize path for consistent matching
+        normalized_path = normalize_path(video_path)
+        video_name = Path(video_path).name.lower()
+
         # Try source map lookup first (most reliable)
         cache_file = None
-        if video_path_resolved in self._source_map:
-            cache_file = self._source_map[video_path_resolved]
+        if normalized_path in self._source_map:
+            cache_file = self._source_map[normalized_path]
         elif video_name in self._source_map:
             cache_file = self._source_map[video_name]
-        elif video_path in self._source_map:
-            cache_file = self._source_map[video_path]
-        
+
+        # Fallback to video ID lookup (for segment files matching audio transcripts)
+        if not cache_file:
+            video_id = _extract_video_id(video_name)
+            if video_id and video_id in self._video_id_map:
+                cache_file = self._video_id_map[video_id]
+
         # Fallback to hash-based lookup
         if not cache_file:
             video_hash = self._get_video_hash(video_path)
@@ -418,35 +518,26 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
     """Extract audio from video file"""
     import subprocess
     import hashlib
-    
+
     video_path = Path(video_path)
-    
+
     # Use hash of full path to avoid collisions with similar filenames
     path_hash = hashlib.md5(str(video_path).encode()).hexdigest()[:8]
     audio_filename = f"{video_path.stem[:80]}_{path_hash}.wav"
-    
+
     if output_dir:
         audio_path = Path(output_dir) / audio_filename
     else:
         audio_path = video_path.parent / audio_filename
-    
+
     # Skip if already extracted
     if audio_path.exists():
         return str(audio_path)
-    
-    video_path = Path(video_path)
-    if output_dir:
-        audio_path = Path(output_dir) / f"{video_path.stem}.wav"
-    else:
-        audio_path = video_path.with_suffix('.wav')
-    
-    # Skip if already extracted
-    if audio_path.exists():
-        return str(audio_path)
-    
+
     try:
         cmd = [
-            'ffmpeg', '-i', str(video_path),
+            'ffmpeg', '-loglevel', 'error',
+            '-i', str(video_path),
             '-vn', '-acodec', 'pcm_s16le',
             '-ar', '16000', '-ac', '1',
             '-y', str(audio_path)
@@ -783,11 +874,12 @@ def transcribe_voiceover_media(
     model_name: str = "base",
     language: str = None,
     compute_type: str = "auto",
-    cache_dir: str = None
+    cache_dir: str = None,
+    word_timestamps: bool = True
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
-    
+
     Args:
         media_path: Path to audio or video file
         output_srt_path: Path for output SRT file (default: same as media with .srt extension)
@@ -795,9 +887,10 @@ def transcribe_voiceover_media(
         language: Language code or None for auto-detect
         compute_type: Compute type (auto, float16, int8)
         cache_dir: Optional cache directory for extracted audio
-    
+        word_timestamps: Whether to generate word-level timestamps (default True)
+
     Returns:
-        Path to the generated SRT file
+        Path to the generated SRT file (also generates .words.json if word_timestamps=True)
     """
     media_path = Path(media_path)
     
@@ -820,28 +913,29 @@ def transcribe_voiceover_media(
             temp_dir.mkdir(parents=True, exist_ok=True)
         else:
             temp_dir = media_path.parent
-        
+
         audio_path = extract_audio(str(media_path), str(temp_dir))
-        
+
         if not audio_path:
             logger.error(f"Could not extract audio from {media_path}")
             raise RuntimeError(f"Could not extract audio from {media_path}")
-        
-        # Transcribe the extracted audio
+
+        # Transcribe the extracted audio with word timestamps
         segments = _transcribe_with_shared_model(
             audio_path,
             model_name,
             compute_type,
             language,
-            vad_filter=False  # Don't filter voiceover
+            vad_filter=False,  # Don't filter voiceover
+            word_timestamps=word_timestamps
         )
-        
+
         # Clean up extracted audio
         try:
             Path(audio_path).unlink()
         except:
             pass
-    
+
     elif media_path.suffix.lower() in audio_extensions:
         # It's already an audio file
         segments = _transcribe_with_shared_model(
@@ -849,17 +943,28 @@ def transcribe_voiceover_media(
             model_name,
             compute_type,
             language,
-            vad_filter=False
+            vad_filter=False,
+            word_timestamps=word_timestamps
         )
     else:
         raise ValueError(f"Unsupported media format: {media_path.suffix}")
-    
+
     if not segments:
         raise RuntimeError(f"No segments generated from transcription of {media_path}")
-    
+
     # Write SRT file
     _write_srt(segments, str(srt_path))
-    
+
+    # Save word-level timestamps to JSON for pause-split accuracy
+    if word_timestamps:
+        words_path = srt_path.with_suffix('.words.json')
+        try:
+            with open(words_path, 'w', encoding='utf-8') as f:
+                json.dump(segments, f, indent=2)
+            logger.info(f"Saved word timestamps to {words_path}")
+        except Exception as e:
+            logger.warning(f"Could not save word timestamps: {e}")
+
     return str(srt_path)
 
 

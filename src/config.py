@@ -93,7 +93,6 @@ class ProjectConfig:
 
 
 @dataclass
-@dataclass
 class PauseSplitConfig:
     """Pause-based segment splitting settings
     
@@ -293,6 +292,10 @@ class MatchingConfig:
     reuse_penalty: float = 0.5
     smart_reuse: bool = True
     sequential_when_reuse: bool = True
+
+    # Source file reuse prevention (limits how many times any segment from same video can be used)
+    max_source_file_reuse: int = 3  # 0 = unlimited, 3 = max 3 clips from same video
+    source_file_penalty: float = 0.05  # Penalty per use after reaching half the max
     
     # Two-stage matching optimization
     embedding_candidates: int = 50  # Retrieve from FAISS (need 50+ for V1-V6)
@@ -351,11 +354,14 @@ class MatchingConfig:
     extract_video_topics: bool = True  # Extract topics from video transcripts
     min_topic_overlap: int = 1  # Minimum topic keywords that must match
 
+    # B-roll boost (silent videos are valuable)
+    # Boosts confidence for: 1) silent/B-roll videos, 2) scenes without faces when topic matches
+    broll_boost: float = 0.2  # Confidence boost for B-roll videos (0.0-0.3)
+
     # B-roll preference (scene-level face detection)
     # When topic matches, prefer scenes without faces (B-roll) over talking heads
     prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference
     broll_face_threshold: float = 0.3  # face_score < this = B-roll (no faces)
-    broll_boost: float = 0.1  # Confidence boost for matching B-roll when topic matches
 
 
 @dataclass
@@ -425,12 +431,28 @@ class ZeroDownloadRemixConfig:
 
 
 @dataclass
-@dataclass
 class StockVideoConfig:
     """Configuration for stock video downloads."""
     min_duration: float = 3.0  # Minimum video duration in seconds
     max_duration: float = 30.0  # Maximum video duration in seconds
     prefer_hd: bool = True  # Prefer HD quality videos
+
+
+@dataclass
+class SilentVideoConfig:
+    """Configuration for handling silent/B-roll videos.
+
+    Silent videos (no speech detected) are valuable B-roll footage.
+    This config controls how they're processed for matching:
+    - Vision API: Extract frame descriptions using Gemini Vision
+    - LLM fallback: Generate descriptions from title/keyword
+    - B-roll boost: Increase match confidence for silent videos
+    """
+    enabled: bool = True  # Enable silent video handling
+    min_words_threshold: int = 10  # Videos with fewer words are considered silent
+    use_vision_api: bool = True  # Use Vision API to describe video frames
+    use_llm_fallback: bool = True  # Fall back to LLM description from title/keyword
+    cache_descriptions: bool = True  # Cache generated descriptions
 
 
 @dataclass
@@ -1058,6 +1080,7 @@ class Config:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     duration_tiers: DurationTiersConfig = field(default_factory=DurationTiersConfig)
     stock_footage: StockFootageConfig = field(default_factory=StockFootageConfig)
+    silent_video: SilentVideoConfig = field(default_factory=SilentVideoConfig)
     deduplication: DeduplicationConfig = field(default_factory=DeduplicationConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     multi_style: MultiStyleConfig = field(default_factory=MultiStyleConfig)

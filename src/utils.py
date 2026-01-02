@@ -63,6 +63,24 @@ def sanitize_path(path: Union[str, Path]) -> str:
     return path_str
 
 
+def normalize_path(path: str) -> str:
+    """
+    Normalize path for consistent cache matching across platforms.
+
+    Converts to forward slashes and lowercase for consistent key matching
+    regardless of OS or path format.
+
+    Args:
+        path: File path string
+
+    Returns:
+        Normalized path (forward slashes, lowercase)
+    """
+    if not path:
+        return ""
+    return str(path).replace('\\', '/').lower()
+
+
 def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> str:
     """
     Resolve a path to absolute and sanitize it.
@@ -89,6 +107,115 @@ def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> s
     
     # Sanitize to remove any extended-length prefix
     return sanitize_path(path)
+
+
+# =============================================================================
+# FFMPEG DEBUG LOGGING
+# =============================================================================
+
+# Global FFmpeg debug log path (set by setup_ffmpeg_debug_log)
+_ffmpeg_debug_log_path: Optional[Path] = None
+_ffmpeg_debug_lock = threading.Lock()
+
+
+def setup_ffmpeg_debug_log(log_dir: Union[str, Path]) -> Path:
+    """
+    Set up FFmpeg debug log file in the specified directory.
+
+    Args:
+        log_dir: Directory to create the debug log in
+
+    Returns:
+        Path to the debug log file
+    """
+    global _ffmpeg_debug_log_path
+
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    _ffmpeg_debug_log_path = log_dir / "ffmpeg_debug.log"
+
+    # Write header
+    with open(_ffmpeg_debug_log_path, 'w', encoding='utf-8') as f:
+        f.write(f"# FFmpeg Debug Log\n")
+        f.write(f"# Started: {datetime.now().isoformat()}\n")
+        f.write(f"# This file captures low-level FFmpeg/OpenCV decoder messages\n")
+        f.write(f"# (e.g., H.264 'mmco: unref short failure' warnings)\n")
+        f.write("=" * 60 + "\n\n")
+
+    return _ffmpeg_debug_log_path
+
+
+def log_ffmpeg_debug(message: str, source: str = "ffmpeg"):
+    """
+    Log a message to the FFmpeg debug log file.
+
+    Args:
+        message: Message to log
+        source: Source identifier (e.g., 'opencv', 'ffmpeg', 'scene_detection')
+    """
+    global _ffmpeg_debug_log_path
+
+    if _ffmpeg_debug_log_path is None:
+        return
+
+    with _ffmpeg_debug_lock:
+        try:
+            with open(_ffmpeg_debug_log_path, 'a', encoding='utf-8') as f:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                f.write(f"[{timestamp}] [{source}] {message}\n")
+        except Exception:
+            pass  # Don't let debug logging break the main process
+
+
+class FFmpegStderrCapture:
+    """
+    Context manager to capture stderr (FFmpeg/OpenCV decoder messages)
+    and redirect them to the debug log file.
+
+    Usage:
+        with FFmpegStderrCapture("scene_detection"):
+            cap = cv2.VideoCapture(video_path)
+            # ... process video ...
+    """
+
+    def __init__(self, source: str = "opencv"):
+        self.source = source
+        self.old_stderr = None
+        self.stderr_capture = None
+
+    def __enter__(self):
+        global _ffmpeg_debug_log_path
+
+        # Only capture if debug log is set up
+        if _ffmpeg_debug_log_path is None:
+            return self
+
+        try:
+            import io
+            # Save original stderr
+            self.old_stderr = sys.stderr
+            # Create a string buffer to capture stderr
+            self.stderr_capture = io.StringIO()
+            sys.stderr = self.stderr_capture
+        except Exception:
+            pass
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.old_stderr is not None:
+            # Restore original stderr
+            sys.stderr = self.old_stderr
+
+            # Get captured content and log it
+            if self.stderr_capture:
+                captured = self.stderr_capture.getvalue()
+                if captured.strip():
+                    log_ffmpeg_debug(captured.strip(), self.source)
+                self.stderr_capture.close()
+
+        return False  # Don't suppress exceptions
 
 
 # =============================================================================
@@ -581,48 +708,105 @@ class CacheManager:
 # =============================================================================
 
 class ReuseTracker:
-    """Tracks clip usage to prevent over-reuse"""
-    
-    def __init__(self, max_reuse: int = 2, reuse_penalty: float = 0.2):
+    """
+    Tracks clip usage to prevent over-reuse.
+
+    Tracks both:
+    - Clip-level reuse (same time range from same video)
+    - Source-file-level reuse (any segment from same video file)
+    """
+
+    def __init__(
+        self,
+        max_reuse: int = 2,
+        reuse_penalty: float = 0.2,
+        max_source_file_reuse: int = 0,  # 0 = unlimited
+        source_file_penalty: float = 0.1
+    ):
         self.max_reuse = max_reuse
         self.reuse_penalty = reuse_penalty
+        self.max_source_file_reuse = max_source_file_reuse
+        self.source_file_penalty = source_file_penalty
         self.usage_count: Dict[str, int] = {}  # clip_id -> count
+        self.source_file_count: Dict[str, int] = {}  # source_file -> count
         self.lock = threading.Lock()
-    
+
     def get_clip_id(self, segment: SRTSegment) -> str:
         """Generate unique ID for a clip"""
         return f"{segment.source_file}:{segment.start_time:.2f}-{segment.end_time:.2f}"
-    
+
+    def get_source_file(self, segment: SRTSegment) -> str:
+        """Get normalized source file path"""
+        return str(segment.source_file).replace('\\', '/').lower()
+
     def get_usage_count(self, segment: SRTSegment) -> int:
         """Get how many times a clip has been used"""
         clip_id = self.get_clip_id(segment)
         with self.lock:
             return self.usage_count.get(clip_id, 0)
-    
+
+    def get_source_file_usage(self, segment: SRTSegment) -> int:
+        """Get how many times any segment from this source file has been used"""
+        source = self.get_source_file(segment)
+        with self.lock:
+            return self.source_file_count.get(source, 0)
+
     def record_usage(self, segment: SRTSegment):
         """Record that a clip was used"""
         clip_id = self.get_clip_id(segment)
+        source = self.get_source_file(segment)
         with self.lock:
             self.usage_count[clip_id] = self.usage_count.get(clip_id, 0) + 1
-    
+            self.source_file_count[source] = self.source_file_count.get(source, 0) + 1
+
     def can_use(self, segment: SRTSegment) -> bool:
         """Check if clip can be used (hasn't exceeded max reuse)"""
-        return self.get_usage_count(segment) < self.max_reuse
-    
+        # Check clip-level limit
+        if self.get_usage_count(segment) >= self.max_reuse:
+            return False
+        # Check source-file-level limit (if enabled)
+        if self.max_source_file_reuse > 0:
+            if self.get_source_file_usage(segment) >= self.max_source_file_reuse:
+                return False
+        return True
+
     def get_penalty(self, segment: SRTSegment) -> float:
-        """Get confidence penalty based on reuse count"""
-        count = self.get_usage_count(segment)
-        return count * self.reuse_penalty
-    
+        """Get confidence penalty based on reuse count (clip + source file)"""
+        clip_count = self.get_usage_count(segment)
+        clip_penalty = clip_count * self.reuse_penalty
+
+        # Add source file penalty if over threshold
+        source_penalty = 0.0
+        if self.max_source_file_reuse > 0:
+            source_count = self.get_source_file_usage(segment)
+            # Apply escalating penalty after half the max
+            threshold = self.max_source_file_reuse // 2
+            if source_count > threshold:
+                excess = source_count - threshold
+                source_penalty = excess * self.source_file_penalty
+
+        return clip_penalty + source_penalty
+
     def adjust_confidence(self, segment: SRTSegment, confidence: float) -> float:
         """Adjust confidence based on reuse"""
         penalty = self.get_penalty(segment)
         return max(0.0, confidence - penalty)
-    
+
     def reset(self):
         """Reset usage tracking"""
         with self.lock:
             self.usage_count.clear()
+            self.source_file_count.clear()
+
+    def get_top_sources(self, limit: int = 10) -> List[tuple]:
+        """Get the most-used source files for debugging"""
+        with self.lock:
+            sorted_sources = sorted(
+                self.source_file_count.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            return sorted_sources[:limit]
 
 
 # =============================================================================

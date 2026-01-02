@@ -557,7 +557,9 @@ class TieredMatcher:
         # Initialize reuse tracker for clip reuse prevention
         self.reuse_tracker = ReuseTracker(
             max_reuse=mc.max_clip_reuse,
-            reuse_penalty=mc.reuse_penalty
+            reuse_penalty=mc.reuse_penalty,
+            max_source_file_reuse=getattr(mc, 'max_source_file_reuse', 0),
+            source_file_penalty=getattr(mc, 'source_file_penalty', 0.05)
         )
 
         # Initialize providers
@@ -632,6 +634,86 @@ class TieredMatcher:
             return adjusted_confidence, reason
 
         return confidence, ""
+
+    def _apply_broll_boost(
+        self,
+        confidence: float,
+        video_segment: SRTSegment
+    ) -> Tuple[float, str]:
+        """
+        Apply confidence boost for B-roll/silent video segments.
+
+        B-roll footage (videos with no speech) is valuable because:
+        - No talking heads to distract from voiceover
+        - Pure visual content that matches well with any narration
+        - More versatile for different contexts
+
+        Args:
+            confidence: Original confidence score
+            video_segment: Video segment being considered
+
+        Returns:
+            Tuple of (boosted_confidence, boost_reason)
+        """
+        # Check if this is a B-roll segment
+        is_broll = getattr(video_segment, 'is_broll', False)
+
+        if not is_broll:
+            return confidence, ""
+
+        # Get boost amount from config (default 0.1 = +10% confidence)
+        mc = self.config.matching
+        broll_boost = getattr(mc, 'broll_boost', 0.1)
+
+        if broll_boost <= 0:
+            return confidence, ""
+
+        boosted = min(1.0, confidence + broll_boost)
+        reason = f"B-roll boost: +{broll_boost:.2f}"
+
+        logger.debug(f"B-roll boost applied: {confidence:.2f} -> {boosted:.2f}")
+
+        return boosted, reason
+
+    def _apply_current_project_boost(
+        self,
+        confidence: float,
+        video_segment: SRTSegment
+    ) -> Tuple[float, str]:
+        """
+        Apply confidence boost for videos from the current project.
+
+        Videos downloaded for the current project are prioritized over
+        videos from the global cache (past projects).
+
+        Args:
+            confidence: Original confidence score
+            video_segment: Video segment being considered
+
+        Returns:
+            Tuple of (boosted_confidence, boost_reason)
+        """
+        # Check if this is from global cache
+        source = getattr(video_segment, 'source', None)
+
+        # If no source attribute, assume it's from current project
+        if source is None or source != 'global_cache':
+            return confidence, ""
+
+        # Videos from global cache get a penalty (current project gets relative boost)
+        gc_config = getattr(self.config, 'global_cache', None)
+        current_project_boost = getattr(gc_config, 'current_project_boost', 0.1) if gc_config else 0.1
+
+        if current_project_boost <= 0:
+            return confidence, ""
+
+        # Apply penalty to global cache videos (equivalent to boosting current project)
+        penalized = max(0.0, confidence - current_project_boost)
+        reason = f"global cache: -{current_project_boost:.2f}"
+
+        logger.debug(f"Global cache penalty applied: {confidence:.2f} -> {penalized:.2f}")
+
+        return penalized, reason
 
     def _init_providers(self):
         """Initialize LLM providers based on config"""
@@ -810,9 +892,23 @@ class TieredMatcher:
                 top_similarity, vo_segment, best_seg
             )
 
+            # Apply B-roll boost (silent videos are valuable)
+            adjusted_confidence, broll_reason = self._apply_broll_boost(
+                adjusted_confidence, best_seg
+            )
+
+            # Apply current project boost (prioritize current project over global cache)
+            adjusted_confidence, project_reason = self._apply_current_project_boost(
+                adjusted_confidence, best_seg
+            )
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
+            if broll_reason:
+                reasoning += f" [{broll_reason}]"
+            if project_reason:
+                reasoning += f" [{project_reason}]"
 
             match = Match(
                 voiceover_segment=vo_segment,
@@ -823,7 +919,7 @@ class TieredMatcher:
                 embedding_similarity=top_similarity,
                 clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
             )
-            
+
             # Get alternatives (prefer different sources)
             alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
             
@@ -864,9 +960,23 @@ class TieredMatcher:
                     confidence, vo_segment, cached_seg
                 )
 
+                # Apply B-roll boost (silent videos are valuable)
+                adjusted_confidence, broll_reason = self._apply_broll_boost(
+                    adjusted_confidence, cached_seg
+                )
+
+                # Apply current project boost (prioritize current project over global cache)
+                adjusted_confidence, project_reason = self._apply_current_project_boost(
+                    adjusted_confidence, cached_seg
+                )
+
                 final_reasoning = f"(cached) {reasoning}"
                 if topic_penalty_reason:
                     final_reasoning += f" [{topic_penalty_reason}]"
+                if broll_reason:
+                    final_reasoning += f" [{broll_reason}]"
+                if project_reason:
+                    final_reasoning += f" [{project_reason}]"
 
                 match = Match(
                     voiceover_segment=vo_segment,
@@ -972,9 +1082,23 @@ class TieredMatcher:
             base_confidence, vo_segment, best_seg
         )
 
+        # Apply B-roll boost (silent videos are valuable)
+        adjusted_confidence, broll_reason = self._apply_broll_boost(
+            adjusted_confidence, best_seg
+        )
+
+        # Apply current project boost (prioritize current project over global cache)
+        adjusted_confidence, project_reason = self._apply_current_project_boost(
+            adjusted_confidence, best_seg
+        )
+
         final_reasoning = reasoning
         if topic_penalty_reason:
             final_reasoning += f" [{topic_penalty_reason}]"
+        if broll_reason:
+            final_reasoning += f" [{broll_reason}]"
+        if project_reason:
+            final_reasoning += f" [{project_reason}]"
 
         match = Match(
             voiceover_segment=vo_segment,
@@ -1016,7 +1140,14 @@ class TieredMatcher:
         # Check for gap (no good match)
         has_gap = confidence < self.config.matching.confidence_threshold
         gap_reason = f"Low confidence ({confidence:.2f})" if has_gap else ""
-        
+
+        # Verbose logging for match decision
+        logger.debug(f"Match decision for segment: '{vo_segment.text[:50]}...'")
+        logger.debug(f"  Video: {Path(best_seg.source_file).name} @ {best_seg.start_time:.1f}s")
+        logger.debug(f"  Confidence: {confidence:.2f}")
+        logger.debug(f"  Reason: {reasoning[:100]}...")
+        logger.debug(f"  Alternatives: {len(alternatives)}, Has gap: {has_gap}")
+
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,

@@ -237,7 +237,13 @@ matching:
   # Reasoning: Variety improves viewer experience
   max_clip_reuse: 1
   reuse_penalty: 0.5
-  
+
+  # Source file reuse prevention
+  # Chain-of-thought: Prevent over-reliance on single video file
+  # Reasoning: One video shouldn't dominate the timeline
+  max_source_file_reuse: 3  # 0 = unlimited, 3 = max 3 clips from same video
+  source_file_penalty: 0.05  # Penalty per use after reaching half the max
+
   # Two-stage matching optimization
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
@@ -296,7 +302,7 @@ matching:
   # Decision: When topic matches, boost scenes without faces
   prefer_broll_when_topic_matches: true  # Enable B-roll preference when topic matches
   broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
-  broll_boost: 0.1  # Confidence boost for matching B-roll (+10%)
+  broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
 
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
@@ -696,25 +702,6 @@ download:
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"
 
-  # Duration tiers
-  tiers:
-    short:
-      min: 20
-      max: 120
-      per_keyword: 5
-    medium:
-      min: 120
-      max: 600
-      count: 8
-    long:
-      min: 600
-      max: 1500
-      per_keyword: 1
-    longer:
-      min: 1500
-      max: 3000
-      per_keyword: 1
-
 # -----------------------------------------------------------------------------
 # DURATION TIERS
 # -----------------------------------------------------------------------------
@@ -756,6 +743,19 @@ stock_footage:
   min_height: 720
   prefer_landscape: true
   <<: *rate_limit
+
+# -----------------------------------------------------------------------------
+# SILENT VIDEO HANDLING (B-ROLL)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Silent videos (no speech) are valuable B-roll footage
+# Reasoning: They're versatile visual content without talking heads
+# Decision: Generate descriptions using Vision API or LLM for matching
+silent_video:
+  enabled: true  # Enable silent video handling
+  min_words_threshold: 10  # Videos with fewer words are considered silent
+  use_vision_api: true  # Use Gemini Vision to describe video frames
+  use_llm_fallback: true  # Fall back to LLM description from title/keyword
+  cache_descriptions: true  # Cache generated descriptions
 
 # -----------------------------------------------------------------------------
 # DEDUPLICATION
