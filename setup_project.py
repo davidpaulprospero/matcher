@@ -773,7 +773,6 @@ def create_project_structure(project_dir: Path) -> dict:
     folders = {
         'voiceover': project_dir / 'voiceover',
         'output': project_dir / 'output',
-        'otio_output': project_dir / 'otio_output',
         'logs': project_dir / 'logs',
         '.cache': project_dir / '.cache',
         '.cache/transcriptions': project_dir / '.cache' / 'transcriptions',
