@@ -31,6 +31,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import queue
 
+from .utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -95,7 +97,7 @@ class DeltaAwareIndex:
                     data = json.load(f)
                     # Normalize paths when loading for consistent matching
                     raw_paths = data.get('indexed', [])
-                    self.indexed_videos = set(_normalize_path(p) for p in raw_paths)
+                    self.indexed_videos = set(normalize_path(p) for p in raw_paths)
                     self.indexed_video_ids = set(data.get('indexed_ids', []))
 
                     # Rebuild video IDs from paths if not stored (migration)
@@ -125,7 +127,7 @@ class DeltaAwareIndex:
     def is_indexed(self, video_path: str) -> bool:
         """Check if a video has been indexed (by path or video ID)"""
         # Normalize path for consistent matching
-        normalized = _normalize_path(video_path)
+        normalized = normalize_path(video_path)
 
         # Check normalized path match
         if normalized in self.indexed_videos:
@@ -140,7 +142,7 @@ class DeltaAwareIndex:
 
     def mark_indexed(self, video_path: str):
         """Mark a video as indexed (using normalized path)"""
-        normalized = _normalize_path(video_path)
+        normalized = normalize_path(video_path)
         self.indexed_videos.add(normalized)
         vid_id = _extract_video_id(video_path)
         if vid_id:
@@ -150,7 +152,7 @@ class DeltaAwareIndex:
     def mark_indexed_batch(self, video_paths: List[str]):
         """Mark multiple videos as indexed (using normalized paths)"""
         for vp in video_paths:
-            normalized = _normalize_path(vp)
+            normalized = normalize_path(vp)
             self.indexed_videos.add(normalized)
             vid_id = _extract_video_id(vp)
             if vid_id:
@@ -338,13 +340,6 @@ class TranscriptSegment:
         return asdict(self)
 
 
-def _normalize_path(path: str) -> str:
-    """Normalize path for consistent cache matching across platforms."""
-    if not path:
-        return ""
-    # Convert to forward slashes and lowercase for consistent matching
-    normalized = str(path).replace('\\', '/').lower()
-    return normalized
 
 
 @dataclass
@@ -402,7 +397,7 @@ class TranscriptCache:
                     
                     if source_file:
                         # Normalize path for matching (consistent across platforms)
-                        normalized = _normalize_path(source_file)
+                        normalized = normalize_path(source_file)
                         self._source_map[normalized] = cache_file
 
                         # Also add just the filename as key for partial matching
@@ -433,7 +428,7 @@ class TranscriptCache:
     def get(self, video_path: str) -> Optional[List[dict]]:
         """Get cached transcript for a video"""
         # Normalize path for consistent matching
-        normalized_path = _normalize_path(video_path)
+        normalized_path = normalize_path(video_path)
         video_name = Path(video_path).name.lower()
 
         # Try source map lookup first (most reliable)

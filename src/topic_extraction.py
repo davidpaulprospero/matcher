@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 
+from .utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,13 +39,6 @@ class VideoTopics:
         )
 
 
-def _normalize_path(path: str) -> str:
-    """Normalize path for consistent cache matching across platforms."""
-    if not path:
-        return ""
-    return str(path).replace('\\', '/').lower()
-
-
 class TopicExtractor:
     """
     Extracts topics from video transcripts using LLM.
@@ -66,7 +61,7 @@ class TopicExtractor:
                     data = json.load(f)
                     for path, topic_data in data.items():
                         # Normalize path when loading for consistent matching
-                        normalized = _normalize_path(path)
+                        normalized = normalize_path(path)
                         self._topics_cache[normalized] = VideoTopics.from_dict(topic_data)
                 logger.debug(f"Loaded {len(self._topics_cache)} cached video topics")
             except Exception as e:
@@ -83,7 +78,7 @@ class TopicExtractor:
 
     def get_cached_topics(self, video_path: str) -> Optional[VideoTopics]:
         """Get cached topics for a video"""
-        normalized = _normalize_path(video_path)
+        normalized = normalize_path(video_path)
         return self._topics_cache.get(normalized)
 
     def extract_topics_from_transcript(
@@ -106,7 +101,7 @@ class TopicExtractor:
             VideoTopics object with extracted topics
         """
         video_path = str(video_path)
-        normalized_path = _normalize_path(video_path)
+        normalized_path = normalize_path(video_path)
 
         # Check cache first
         cached = self.get_cached_topics(video_path)
