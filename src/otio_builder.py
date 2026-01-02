@@ -150,9 +150,15 @@ def _get_media_duration(media_path: str) -> Optional[float]:
         )
 
         if result.returncode == 0 and result.stdout.strip():
-            return float(result.stdout.strip())
+            duration = float(result.stdout.strip())
+            logger.debug(f"ffprobe duration for {Path(media_path).name}: {duration:.2f}s")
+            return duration
+        else:
+            logger.warning(f"ffprobe returned no duration for {media_path}: rc={result.returncode}, stderr={result.stderr[:100] if result.stderr else 'none'}")
+    except FileNotFoundError:
+        logger.warning("ffprobe not found in PATH - cannot determine voiceover duration")
     except Exception as e:
-        logger.debug(f"Could not get duration for {media_path}: {e}")
+        logger.warning(f"Could not get duration for {media_path}: {e}")
 
     return None
 
@@ -650,6 +656,14 @@ def create_timeline(
     actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None
     if actual_vo_duration:
         logger.info(f"Voiceover file duration: {actual_vo_duration:.2f}s")
+        print(f"  ✓ Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
+    elif matches:
+        # Fallback: use last segment end time + buffer for trailing content
+        last_segment = matches[-1].primary_match.voiceover_segment
+        fallback_duration = last_segment.end_time + 30.0  # Add 30s buffer for trailing
+        logger.warning(f"ffprobe unavailable, using fallback duration: {fallback_duration:.2f}s (last segment + 30s buffer)")
+        print(f"  ⚠ Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
+        actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
     first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
@@ -1053,6 +1067,7 @@ def create_timeline(
             trailing_seconds = actual_vo_duration - accumulated_duration
             trailing_frames = round(trailing_seconds * rate)
             logger.info(f"Adding {trailing_seconds:.1f}s trailing gap to match voiceover end")
+            print(f"  ✓ Adding {trailing_seconds:.1f}s trailing gap (VO: {actual_vo_duration:.1f}s, timeline: {accumulated_duration:.1f}s)")
 
             trailing_gap = otio.schema.Gap(
                 source_range=otio.opentime.TimeRange(
