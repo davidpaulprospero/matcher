@@ -16,6 +16,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _normalize_path(path: str) -> str:
+    """Normalize path for consistent cache matching across platforms."""
+    if not path:
+        return ""
+    return str(path).replace('\\', '/').lower()
+
+
 class FaceDetector:
     """
     Detect faces in video files using MediaPipe (preferred) or OpenCV (fallback).
@@ -101,9 +108,12 @@ class FaceDetector:
         if not FaceDetector._mediapipe_available and not FaceDetector._opencv_available:
             return 0.5  # Neutral if no backend available
 
+        # Normalize path for consistent cache matching
+        cache_key = _normalize_path(video_path)
+
         # Check memory cache
-        if video_path in FaceDetector._cache:
-            return FaceDetector._cache[video_path]
+        if cache_key in FaceDetector._cache:
+            return FaceDetector._cache[cache_key]
 
         # Check disk cache
         if cache_dir:
@@ -112,9 +122,9 @@ class FaceDetector:
                 try:
                     with open(cache_path, 'r') as f:
                         disk_cache = json.load(f)
-                    if video_path in disk_cache:
-                        score = disk_cache[video_path]
-                        FaceDetector._cache[video_path] = score
+                    if cache_key in disk_cache:
+                        score = disk_cache[cache_key]
+                        FaceDetector._cache[cache_key] = score
                         return score
                 except:
                     pass
@@ -125,7 +135,7 @@ class FaceDetector:
         else:
             score = self._detect_faces_opencv(video_path)
 
-        FaceDetector._cache[video_path] = score
+        FaceDetector._cache[cache_key] = score
 
         # Save to disk cache
         if cache_dir:
@@ -135,7 +145,7 @@ class FaceDetector:
                 if cache_path.exists():
                     with open(cache_path, 'r') as f:
                         disk_cache = json.load(f)
-                disk_cache[video_path] = score
+                disk_cache[cache_key] = score
                 with open(cache_path, 'w') as f:
                     json.dump(disk_cache, f)
             except:
@@ -169,15 +179,18 @@ class FaceDetector:
         if not self.is_available():
             return 0.5  # Neutral if no backend
 
+        # Normalize path for consistent cache matching
+        normalized_path = _normalize_path(video_path)
+
         # Use time-based cache key for segment-level detection
-        # Format: video_path:start_time-end_time (times rounded to 0.1s)
+        # Format: normalized_path:start_time-end_time (times rounded to 0.1s)
         time_key = f"{start_time:.1f}-{end_time:.1f}"
-        cache_key = f"{video_path}:{time_key}"
+        cache_key = f"{normalized_path}:{time_key}"
 
         # Check memory cache (use time_key as dict key)
-        if video_path in FaceDetector._scene_cache:
-            if time_key in FaceDetector._scene_cache[video_path]:
-                return FaceDetector._scene_cache[video_path][time_key]
+        if normalized_path in FaceDetector._scene_cache:
+            if time_key in FaceDetector._scene_cache[normalized_path]:
+                return FaceDetector._scene_cache[normalized_path][time_key]
 
         # Check disk cache for scene faces
         if cache_dir:
@@ -188,9 +201,9 @@ class FaceDetector:
                         disk_cache = json.load(f)
                     if cache_key in disk_cache:
                         score = disk_cache[cache_key]
-                        if video_path not in FaceDetector._scene_cache:
-                            FaceDetector._scene_cache[video_path] = {}
-                        FaceDetector._scene_cache[video_path][time_key] = score
+                        if normalized_path not in FaceDetector._scene_cache:
+                            FaceDetector._scene_cache[normalized_path] = {}
+                        FaceDetector._scene_cache[normalized_path][time_key] = score
                         return score
                 except:
                     pass
@@ -206,9 +219,9 @@ class FaceDetector:
             )
 
         # Update memory cache
-        if video_path not in FaceDetector._scene_cache:
-            FaceDetector._scene_cache[video_path] = {}
-        FaceDetector._scene_cache[video_path][time_key] = score
+        if normalized_path not in FaceDetector._scene_cache:
+            FaceDetector._scene_cache[normalized_path] = {}
+        FaceDetector._scene_cache[normalized_path][time_key] = score
 
         # Save to disk cache
         if cache_dir:
