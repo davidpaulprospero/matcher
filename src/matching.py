@@ -330,6 +330,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
 
         import time
 
+        logger.info(f"    GeminiMatcher: sending request (timeout={self.REQUEST_TIMEOUT}s)...")
         for attempt in range(self.MAX_RETRIES):
             try:
                 # Use request_options with timeout to prevent hangs
@@ -337,6 +338,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
                     prompt,
                     request_options={"timeout": self.REQUEST_TIMEOUT}
                 )
+                logger.info(f"    GeminiMatcher: received response")
 
                 # Use robust parser
                 results_list = parse_llm_json(response.text, expected_count=len(items))
@@ -889,27 +891,31 @@ class TieredMatcher:
         Returns MatchResult with primary match and alternatives.
         """
         mc = self.config.matching
-        
+
+        # Log entry to match_segment (INFO for diagnostics)
+        logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
+
         # Apply face preference if set
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
             cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
             candidates = apply_face_preference(candidates, face_pref, cache_dir)
-        
+
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
         for seg, sim in candidates:
             if self.reuse_tracker.can_use(seg):
                 adjusted_sim = self.reuse_tracker.adjust_confidence(seg, sim)
                 valid_candidates.append((seg, adjusted_sim))
-        
+
         if not valid_candidates:
             # All candidates overused, use originals with heavy penalty
             valid_candidates = [(seg, sim * 0.5) for seg, sim in candidates[:5]]
-        
+
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
-        
+        logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={mc.skip_llm_threshold}")
+
         if top_similarity >= mc.skip_llm_threshold:
             # Use embedding match directly
             best_seg = valid_candidates[0][0]
@@ -1053,14 +1059,16 @@ class TieredMatcher:
         
         # Use LLM
         provider = self.primary_provider
-        
+
         if provider:
+            logger.info(f"  match_segment: calling {type(provider).__name__}.match_batch()...")
             try:
                 results = provider.match_batch(
                     [(vo_segment.text, valid_candidates[:5])],
                     context=context,
                     negative_rules=negative_rules
                 )
+                logger.info(f"  match_segment: LLM returned results")
                 selected_idx, confidence, reasoning = results[0]
                 
                 # Check if ambiguous - use secondary provider
