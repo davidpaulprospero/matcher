@@ -536,7 +536,8 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
 
     try:
         cmd = [
-            'ffmpeg', '-i', str(video_path),
+            'ffmpeg', '-loglevel', 'error',
+            '-i', str(video_path),
             '-vn', '-acodec', 'pcm_s16le',
             '-ar', '16000', '-ac', '1',
             '-y', str(audio_path)
