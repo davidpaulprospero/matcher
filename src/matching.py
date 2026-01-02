@@ -2240,13 +2240,15 @@ def match_all_segments(
             min_emb = getattr(vc, 'min_embedding_distance', 0.3)
         logger.info(f"  Variety enforcement: different_source={req_diff}, "
                    f"min_time={min_time}s, min_emb_dist={min_emb}")
-    
+
     # Build candidate embeddings lookup
+    logger.info(f"Building candidate embeddings lookup for {len(video_segments)} segments...")
     candidate_embeddings = {}
     for seg, emb in zip(video_segments, video_embeddings):
         clip_id = strategy_matcher.get_clip_id(seg)
         candidate_embeddings[clip_id] = emb
-    
+    logger.info(f"Candidate embeddings lookup built ({len(candidate_embeddings)} entries)")
+
     progress = ProgressBar(len(voiceover_segments), "Matching")
 
     results = []
@@ -2257,14 +2259,21 @@ def match_all_segments(
     logger.info(f"Starting matching loop with {len(video_segments)} video candidates...")
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
+        # Log first segment to confirm loop started
+        if i == 0:
+            logger.info(f"Processing first segment: \"{vo_seg.text[:50]}...\"")
+
         # Calculate current timeline position (relative to start)
         current_timeline_pos = vo_seg.start_time - timeline_start
-        
+
         # Stage 1: Get more candidates from embedding search for variety
         num_embedding_candidates = max(mc.embedding_candidates, 20)
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
         all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
-        
+
+        if i == 0:
+            logger.info(f"First segment: embedding search complete, {len(all_candidates)} candidates")
+
         # Apply timeline variety filtering for V1 (primary track)
         if variety_tracker:
             excluded_v1 = variety_tracker.get_excluded_sources("V1", current_timeline_pos)
@@ -2286,11 +2295,15 @@ def match_all_segments(
         context_after = voiceover_segments[i+1:i+1+mc.context_window] if mc.context_window > 0 else None
         
         # Primary match (V1) - use only llm_rerank_candidates for LLM
+        if i == 0:
+            logger.info(f"First segment: calling LLM matcher with {len(llm_candidates)} candidates...")
         result = matcher.match_segment(
             vo_seg, llm_candidates, scenes,
             context_before, context_after
         )
-        
+        if i == 0:
+            logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
+
         # Record V1 usage for timeline variety
         if variety_tracker and result.primary_match:
             variety_tracker.record_usage(
