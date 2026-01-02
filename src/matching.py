@@ -1142,7 +1142,7 @@ class TieredMatcher:
         # Verbose logging for match decision
         logger.debug(f"Match decision for segment: '{vo_segment.text[:50]}...'")
         logger.debug(f"  Video: {Path(best_seg.source_file).name} @ {best_seg.start_time:.1f}s")
-        logger.debug(f"  Confidence: {confidence:.2f}, LLM: {llm_name}")
+        logger.debug(f"  Confidence: {confidence:.2f}")
         logger.debug(f"  Reason: {reasoning[:100]}...")
         logger.debug(f"  Alternatives: {len(alternatives)}, Has gap: {has_gap}")
 
