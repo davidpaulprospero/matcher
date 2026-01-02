@@ -342,17 +342,19 @@ def create_clip_with_timewarp(
     # This prevents timing deviation over many clips
     start_frames = round(source_start * rate)
 
-    # Source range uses SOURCE duration - the actual footage we're using
-    # LinearTimeWarp will stretch/compress this to target_duration on timeline
-    source_duration_frames = round(source_duration * rate)
+    # Use TARGET duration for source_range.duration to ensure correct timeline duration
+    # DaVinci Resolve may not properly interpret LinearTimeWarp, so we set the
+    # timeline duration directly. The LinearTimeWarp effect and metadata indicate
+    # the speed adjustment needed to fit source_duration into target_duration.
+    target_duration_frames = round(target_duration * rate)
 
     # Ensure we have at least 1 frame
-    if source_duration_frames < 1:
-        source_duration_frames = 1
+    if target_duration_frames < 1:
+        target_duration_frames = 1
 
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),
-        duration=otio.opentime.RationalTime(source_duration_frames, rate)
+        duration=otio.opentime.RationalTime(target_duration_frames, rate)
     )
 
     # Create clip
