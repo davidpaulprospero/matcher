@@ -896,8 +896,8 @@ class TieredMatcher:
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
 
         # Apply face preference if set
-        # Only run face detection on current project videos (not global cache)
-        # Global cache videos may have inaccessible paths causing hangs
+        # Current project videos: run face detection
+        # Global cache videos: use cached face_score from registry
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
             # Split candidates into current project vs global cache
@@ -910,14 +910,38 @@ class TieredMatcher:
                 else:
                     current_project_candidates.append((seg, sim))
 
-            # Only apply face detection to current project videos
+            # Apply face detection to current project videos
             if current_project_candidates:
-                logger.info(f"  match_segment: applying face preference '{face_pref}' to {len(current_project_candidates)} project videos (skipping {len(global_cache_candidates)} cached)")
+                logger.info(f"  match_segment: face preference '{face_pref}' - {len(current_project_candidates)} project, {len(global_cache_candidates)} cached")
                 cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
                 current_project_candidates = apply_face_preference(current_project_candidates, face_pref, cache_dir)
 
-            # Merge back: project videos first, then global cache
+            # Apply cached face scores to global cache candidates
+            if global_cache_candidates:
+                adjusted_cache = []
+                for seg, score in global_cache_candidates:
+                    # Use cached face_score if available
+                    cached_face_score = getattr(seg, 'face_score', None)
+                    if cached_face_score is not None:
+                        # Apply same adjustment as apply_face_preference
+                        if face_pref == "more":
+                            # Boost segments with faces
+                            boost = cached_face_score * 0.3
+                            adjusted_cache.append((seg, min(1.0, score + boost)))
+                        elif face_pref == "none":
+                            # Boost segments without faces (B-roll)
+                            boost = (1.0 - cached_face_score) * 0.3
+                            adjusted_cache.append((seg, min(1.0, score + boost)))
+                        else:
+                            adjusted_cache.append((seg, score))
+                    else:
+                        # No cached score, keep original
+                        adjusted_cache.append((seg, score))
+                global_cache_candidates = adjusted_cache
+
+            # Merge back and re-sort by score
             candidates = current_project_candidates + global_cache_candidates
+            candidates.sort(key=lambda x: x[1], reverse=True)
 
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
