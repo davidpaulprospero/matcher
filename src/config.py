@@ -294,7 +294,7 @@ class MatchingConfig:
     sequential_when_reuse: bool = True
 
     # Source file reuse prevention (limits how many times any segment from same video can be used)
-    max_source_file_reuse: int = 15  # 0 = unlimited, 15 = max 15 clips from same video
+    max_source_file_reuse: int = 3  # 0 = unlimited, 3 = max 3 clips from same video
     source_file_penalty: float = 0.05  # Penalty per use after reaching half the max
     
     # Two-stage matching optimization

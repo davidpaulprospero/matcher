@@ -241,7 +241,7 @@ matching:
   # Source file reuse prevention
   # Chain-of-thought: Prevent over-reliance on single video file
   # Reasoning: One video shouldn't dominate the timeline
-  max_source_file_reuse: 15  # 0 = unlimited, 15 = max 15 clips from same video
+  max_source_file_reuse: 3  # 0 = unlimited, 3 = max 3 clips from same video
   source_file_penalty: 0.05  # Penalty per use after reaching half the max
 
   # Two-stage matching optimization
