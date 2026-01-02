@@ -896,11 +896,28 @@ class TieredMatcher:
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
 
         # Apply face preference if set
-        # TEMPORARILY DISABLED: Face detection causes hangs - need to investigate
-        # The hang occurs during MediaPipe/OpenCV video frame extraction
+        # Only run face detection on current project videos (not global cache)
+        # Global cache videos may have inaccessible paths causing hangs
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
-            logger.info(f"  match_segment: face preference '{face_pref}' SKIPPED (disabled to prevent hang)")
+            # Split candidates into current project vs global cache
+            current_project_candidates = []
+            global_cache_candidates = []
+            for seg, sim in candidates:
+                source = getattr(seg, 'source', None)
+                if source == 'global_cache':
+                    global_cache_candidates.append((seg, sim))
+                else:
+                    current_project_candidates.append((seg, sim))
+
+            # Only apply face detection to current project videos
+            if current_project_candidates:
+                logger.info(f"  match_segment: applying face preference '{face_pref}' to {len(current_project_candidates)} project videos (skipping {len(global_cache_candidates)} cached)")
+                cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
+                current_project_candidates = apply_face_preference(current_project_candidates, face_pref, cache_dir)
+
+            # Merge back: project videos first, then global cache
+            candidates = current_project_candidates + global_cache_candidates
 
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
