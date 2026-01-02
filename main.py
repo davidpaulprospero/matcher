@@ -3143,13 +3143,17 @@ Topic:"""
             try:
                 with open(broll_cache_file, 'r', encoding='utf-8') as f:
                     broll_cache = json.load(f)
-                logger.debug(f"Loaded B-roll cache with {len(broll_cache)} entries")
+                logger.info(f"Loaded B-roll cache: {len(broll_cache)} entries from {broll_cache_file}")
             except Exception as e:
                 logger.debug(f"Could not load B-roll cache: {e}")
+        else:
+            logger.info(f"No B-roll cache found at {broll_cache_file}")
 
         def get_cache_key(video_path: str) -> str:
-            """Generate cache key from video path"""
-            return hashlib.md5(video_path.encode()).hexdigest()[:16]
+            """Generate cache key from video path (normalized for consistency)"""
+            # Normalize path: forward slashes, lowercase for consistent matching
+            normalized = str(video_path).replace('\\', '/').lower()
+            return hashlib.md5(normalized.encode()).hexdigest()[:16]
 
         def save_broll_cache():
             """Save B-roll cache to disk"""
