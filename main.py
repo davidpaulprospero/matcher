@@ -3119,6 +3119,7 @@ Topic:"""
         1. Detects videos with no/sparse transcripts
         2. Generates descriptions using Vision API or LLM from title/keyword
         3. Creates synthetic segments for embedding and matching
+        4. Caches descriptions to avoid repeated API calls
 
         B-roll videos get a confidence boost during matching since they're
         versatile visual content without talking heads.
@@ -3130,6 +3131,32 @@ Topic:"""
         min_words = getattr(silent_config, 'min_words_threshold', 10) if silent_config else 10
         use_vision = getattr(silent_config, 'use_vision_api', True) if silent_config else True
         use_llm = getattr(silent_config, 'use_llm_fallback', True) if silent_config else True
+
+        # B-roll description cache
+        import hashlib
+        import json
+        import time
+        broll_cache_file = Path(config.cache.cache_dir) / "broll_descriptions.json"
+        broll_cache = {}
+        if broll_cache_file.exists():
+            try:
+                with open(broll_cache_file, 'r', encoding='utf-8') as f:
+                    broll_cache = json.load(f)
+                logger.debug(f"Loaded B-roll cache with {len(broll_cache)} entries")
+            except Exception as e:
+                logger.debug(f"Could not load B-roll cache: {e}")
+
+        def get_cache_key(video_path: str) -> str:
+            """Generate cache key from video path"""
+            return hashlib.md5(video_path.encode()).hexdigest()[:16]
+
+        def save_broll_cache():
+            """Save B-roll cache to disk"""
+            try:
+                with open(broll_cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(broll_cache, f, indent=2)
+            except Exception as e:
+                logger.debug(f"Could not save B-roll cache: {e}")
 
         # Find silent videos
         silent_videos = []
@@ -3156,10 +3183,24 @@ Topic:"""
 
         # Track which videos we successfully described
         described = 0
+        cached_count = 0
 
         for video_path in silent_videos:
             description = None
             source = None
+            duration = 30.0
+
+            # Check cache first
+            cache_key = get_cache_key(video_path)
+            from_cache = False
+            if cache_key in broll_cache:
+                cached = broll_cache[cache_key]
+                description = cached.get('description')
+                source = cached.get('source', 'cached')
+                duration = cached.get('duration', 30.0)
+                cached_count += 1
+                from_cache = True
+                logger.debug(f"Using cached B-roll description for {Path(video_path).name}")
 
             # Try Vision API first (if enabled and available)
             if use_vision and description is None:
@@ -3236,17 +3277,27 @@ Be specific and descriptive for semantic matching purposes."""
 
             # Create synthetic segments if we have a description
             if description:
-                # Get video duration
-                try:
-                    import subprocess
-                    result = subprocess.run(
-                        ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
-                         '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
-                except:
-                    duration = 30.0
+                # Get video duration (skip if already from cache)
+                if cache_key not in broll_cache:
+                    try:
+                        import subprocess
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                             '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        duration = float(result.stdout.strip()) if result.stdout.strip() else 30.0
+                    except:
+                        duration = 30.0
+
+                    # Save to cache
+                    broll_cache[cache_key] = {
+                        'description': description,
+                        'source': source,
+                        'duration': duration,
+                        'video_name': Path(video_path).name,
+                        'timestamp': time.time()
+                    }
 
                 # Create synthetic transcript segment
                 from src.transcription import TranscriptSegment
@@ -3267,12 +3318,21 @@ Be specific and descriptive for semantic matching purposes."""
                 self.transcripts[video_path] = [synthetic_segment]
                 described += 1
 
-                print(f"    ✓ {Path(video_path).name}: {source} description ({len(description)} chars)")
-                logger.info(f"B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
+                # Only print for newly generated descriptions (not cached)
+                if not from_cache:
+                    print(f"    ✓ {Path(video_path).name}: {source} description ({len(description)} chars)")
+                    logger.info(f"B-roll description: {Path(video_path).name} via {source} ({len(description)} chars)")
+
+        # Save cache after processing
+        save_broll_cache()
 
         if described > 0:
-            print(f"  ✓ Generated descriptions for {described}/{len(silent_videos)} silent videos")
-            logger.info(f"Silent video summary: {described}/{len(silent_videos)} videos described for matching")
+            new_count = described - cached_count
+            if cached_count > 0:
+                print(f"  ✓ B-roll descriptions: {cached_count} cached, {new_count} new ({described} total)")
+            else:
+                print(f"  ✓ Generated descriptions for {described}/{len(silent_videos)} silent videos")
+            logger.info(f"Silent video summary: {described}/{len(silent_videos)} described ({cached_count} cached, {new_count} new)")
 
     def _extract_source_keyword(self, video_path: str) -> str:
         """Try to extract the source search keyword from video path structure."""
