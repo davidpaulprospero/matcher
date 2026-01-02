@@ -898,8 +898,10 @@ class TieredMatcher:
         # Apply face preference if set
         face_pref = getattr(self, 'face_preference', 'neutral')
         if face_pref != 'neutral':
+            logger.info(f"  match_segment: applying face preference '{face_pref}'...")
             cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
             candidates = apply_face_preference(candidates, face_pref, cache_dir)
+            logger.info(f"  match_segment: face preference done")
 
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
