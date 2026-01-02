@@ -44,6 +44,11 @@ from __future__ import annotations
 import os
 import sys
 
+# Suppress FFmpeg H.264 decoder warnings from OpenCV (must be set before cv2 import)
+# These "mmco: unref short failure" messages are harmless but noisy
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 # Fix Windows console encoding for Unicode characters
 if sys.platform == 'win32':
     try:

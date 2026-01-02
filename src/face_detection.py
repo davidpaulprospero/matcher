@@ -8,6 +8,11 @@ B-roll scenes (no faces) are preferred when topic matches voiceover content,
 as they provide relevant visual coverage without talking heads.
 """
 
+import os
+# Suppress FFmpeg H.264 decoder warnings from OpenCV (must be set before cv2 import)
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 import logging
 import json
 from typing import List, Dict, Optional, Tuple

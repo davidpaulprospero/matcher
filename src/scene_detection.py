@@ -8,6 +8,10 @@ Integration point: After transcription, before matching.
 """
 
 import os
+# Suppress FFmpeg H.264 decoder warnings from OpenCV (must be set before cv2 import)
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 import json
 import logging
 import hashlib
