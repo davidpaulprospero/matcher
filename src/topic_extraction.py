@@ -37,6 +37,13 @@ class VideoTopics:
         )
 
 
+def _normalize_path(path: str) -> str:
+    """Normalize path for consistent cache matching across platforms."""
+    if not path:
+        return ""
+    return str(path).replace('\\', '/').lower()
+
+
 class TopicExtractor:
     """
     Extracts topics from video transcripts using LLM.
@@ -58,7 +65,9 @@ class TopicExtractor:
                 with open(self.topics_cache_path, 'r') as f:
                     data = json.load(f)
                     for path, topic_data in data.items():
-                        self._topics_cache[path] = VideoTopics.from_dict(topic_data)
+                        # Normalize path when loading for consistent matching
+                        normalized = _normalize_path(path)
+                        self._topics_cache[normalized] = VideoTopics.from_dict(topic_data)
                 logger.debug(f"Loaded {len(self._topics_cache)} cached video topics")
             except Exception as e:
                 logger.warning(f"Could not load topics cache: {e}")
@@ -74,7 +83,8 @@ class TopicExtractor:
 
     def get_cached_topics(self, video_path: str) -> Optional[VideoTopics]:
         """Get cached topics for a video"""
-        return self._topics_cache.get(str(video_path))
+        normalized = _normalize_path(video_path)
+        return self._topics_cache.get(normalized)
 
     def extract_topics_from_transcript(
         self,
@@ -96,6 +106,7 @@ class TopicExtractor:
             VideoTopics object with extracted topics
         """
         video_path = str(video_path)
+        normalized_path = _normalize_path(video_path)
 
         # Check cache first
         cached = self.get_cached_topics(video_path)
@@ -111,7 +122,7 @@ class TopicExtractor:
                 source_keyword=source_keyword or "",
                 confidence=0.5
             )
-            self._topics_cache[video_path] = result
+            self._topics_cache[normalized_path] = result
             self._save_cache()
             return result
 
@@ -127,7 +138,7 @@ class TopicExtractor:
                 confidence=confidence
             )
 
-            self._topics_cache[video_path] = result
+            self._topics_cache[normalized_path] = result
             self._save_cache()
             return result
 
