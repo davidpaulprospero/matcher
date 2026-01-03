@@ -2230,6 +2230,7 @@ Topic:"""
 
         if config.pipeline.skip_download:
             print("  ⏭ Skipping download (config: skip_download=true)")
+            logger.info("Skipping DOWNLOAD stage (config: skip_download=true)")
             return []
 
         self._print_stage("2", "DOWNLOAD FOOTAGE")
@@ -2958,6 +2959,7 @@ Topic:"""
         
         if config.pipeline.skip_transcription:
             print("  ⏭ Skipping transcription - loading from cache...")
+            logger.info("Skipping TRANSCRIBE stage (config: skip_transcription=true)")
             return self._load_transcripts_from_cache()
         
         self._print_stage("3", "TRANSCRIBE & INDEX")
@@ -3624,6 +3626,7 @@ Be specific and descriptive for semantic matching purposes."""
 
         if config.pipeline.skip_matching:
             print("  ⏭ Skipping matching (config: skip_matching=true)")
+            logger.info("Skipping MATCH stage (config: skip_matching=true)")
             return []
 
         self._print_stage("4", "MATCH FOOTAGE")
@@ -4288,6 +4291,7 @@ Be specific and descriptive for semantic matching purposes."""
             if self.config.image_search.enabled and not self.config.pipeline.skip_image_search:
                 if self.resume_mode and self.checkpoint.should_skip_stage("ENTITY_IMAGES"):
                     print(f"\n  ⏭ Skipping ENTITY_IMAGES (completed in previous run)")
+                    logger.info("Skipping ENTITY_IMAGES stage (checkpoint resume)")
                 else:
                     stage_start = time.time()
                     self.stage_image_search()
@@ -4313,11 +4317,13 @@ Be specific and descriptive for semantic matching purposes."""
                     })
             elif self.config.pipeline.skip_image_search:
                 print(f"\n  ⏭ Skipping image search (config: skip_image_search=true)")
+                logger.info("Skipping IMAGE_SEARCH stage (config: skip_image_search=true)")
             
             # Stage 1.6: Stock video search (Pexels/Pixabay)
             if self.config.image_search.enabled and self.config.image_search.use_stock_apis and not self.config.pipeline.skip_image_search:
                 if self.resume_mode and self.checkpoint.should_skip_stage("ENTITY_VIDEOS"):
                     print(f"\n  ⏭ Skipping ENTITY_VIDEOS (completed in previous run)")
+                    logger.info("Skipping ENTITY_VIDEOS stage (checkpoint resume)")
                 else:
                     stage_start = time.time()
                     self.stage_stock_video()
@@ -4385,6 +4391,7 @@ Be specific and descriptive for semantic matching purposes."""
             if not self.config.pipeline.skip_download:
                 if self.resume_mode and self.checkpoint.should_skip_stage("DOWNLOAD"):
                     print(f"\n  ⏭ Skipping DOWNLOAD (completed in previous run)")
+                    logger.info("Skipping DOWNLOAD stage (checkpoint resume)")
                     # Load existing videos
                     self._load_existing_videos()
                     # For audio-first mode, rebuild audio_downloads from disk
@@ -4443,6 +4450,7 @@ Be specific and descriptive for semantic matching purposes."""
                         })
             else:
                 print(f"\n  ⏭ Skipping downloads (config: skip_download=true)")
+                logger.info("Skipping DOWNLOAD stage (config: skip_download=true)")
                 # Load existing videos from output directory
                 self._load_existing_videos()
             
@@ -4450,6 +4458,7 @@ Be specific and descriptive for semantic matching purposes."""
             if self.config.remix.enabled:
                 if self.resume_mode and self.checkpoint.should_skip_stage("REMIX"):
                     print(f"\n  ⏭ Skipping REMIX (completed in previous run)")
+                    logger.info("Skipping REMIX stage (checkpoint resume)")
                     # Load remixed videos from downloaded_videos dir
                     self._load_existing_videos()
                 else:
@@ -4472,6 +4481,7 @@ Be specific and descriptive for semantic matching purposes."""
         # but it will be very fast if videos are already cached
         if self.resume_mode and self.checkpoint.should_skip_stage("TRANSCRIBE"):
             print(f"\n  ⏭ Skipping TRANSCRIBE (completed in previous run)")
+            logger.info("Skipping TRANSCRIBE stage (checkpoint resume)")
             # Still need to load transcripts and build index
             self._load_existing_videos()
             # Transcription cache will handle this
@@ -4527,6 +4537,7 @@ Be specific and descriptive for semantic matching purposes."""
         if self._is_audio_first_enabled() and self.matches:
             if self.resume_mode and self.checkpoint.should_skip_stage("VIDEO_SEGMENTS"):
                 print(f"\n  ⏭ Skipping VIDEO_SEGMENTS (completed in previous run)")
+                logger.info("Skipping VIDEO_SEGMENTS stage (checkpoint resume)")
             else:
                 stage_start = time.time()
                 print(f"\n  ─── Downloading Video Segments ───")
