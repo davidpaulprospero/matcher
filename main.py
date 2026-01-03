@@ -4139,6 +4139,10 @@ Be specific and descriptive for semantic matching purposes."""
             self.voiceover_segments = analyze_data.get('segments', [])
             self.topic_context = analyze_data.get('topic_context', '')
             self.extracted_entities = analyze_data.get('entities', [])
+
+            # Detect location chapters (needed for location-aware matching)
+            self._detect_location_chapters()
+
             use_saved = True
             
         # Check if using saved keywords from command line
