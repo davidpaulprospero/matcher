@@ -407,6 +407,11 @@ class LocationMatchingConfig:
     # Caching
     cache_dir: str = ".cache/locations"
 
+    def __post_init__(self):
+        # Read from environment variable if not set in config
+        if not self.geonames_username:
+            self.geonames_username = os.getenv("GEONAMES_USERNAME", "")
+
 
 @dataclass
 class NegativeMatchingConfig:
