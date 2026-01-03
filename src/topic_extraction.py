@@ -3,17 +3,23 @@ Topic Extraction Module
 
 Extracts topic keywords from video transcripts and detects chapters in voiceover.
 Used for chapter-based matching to ensure videos match voiceover topics.
+
+Enhanced with location-aware chapter detection for travel/geographic content.
 """
+from __future__ import annotations
 
 import logging
 import json
 import hashlib
 import re
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, TYPE_CHECKING, Any
 from dataclasses import dataclass, field, asdict
 
 from .utils import normalize_path
+
+if TYPE_CHECKING:
+    from .location_service import GeoLocation, LocationService
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,8 @@ class VideoTopics:
     topics: List[str]
     source_keyword: str = ""  # Original download keyword
     confidence: float = 0.0
+    detected_location: Optional[str] = None  # Location extracted from title/description
+    location_data: Optional[Dict] = None  # Resolved GeoLocation as dict
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -35,8 +43,53 @@ class VideoTopics:
             video_path=data.get('video_path', ''),
             topics=data.get('topics', []),
             source_keyword=data.get('source_keyword', ''),
-            confidence=data.get('confidence', 0.0)
+            confidence=data.get('confidence', 0.0),
+            detected_location=data.get('detected_location'),
+            location_data=data.get('location_data'),
         )
+
+
+@dataclass
+class LocationChapter:
+    """
+    Chapter that focuses on a specific geographic location.
+
+    Used for location-aware matching to ensure videos match
+    the correct geographic context (e.g., Paris, France vs Paris, Texas).
+    """
+    chapter_id: int
+    start_segment_idx: int
+    end_segment_idx: int
+    location_name: str                      # Raw location name: "Paris"
+    location_type: str = "city"             # city, country, landmark, region, natural_feature
+    visual_keywords: List[str] = field(default_factory=list)   # Landmarks: ["Eiffel Tower", "Louvre"]
+    context_keywords: List[str] = field(default_factory=list)  # Themes: ["romantic", "fashion"]
+    title: str = ""                         # Chapter title
+    topics: List[str] = field(default_factory=list)  # General topic keywords
+    location_data: Optional[Dict] = None    # Resolved GeoLocation as dict
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LocationChapter":
+        return cls(
+            chapter_id=data.get('chapter_id', 0),
+            start_segment_idx=data.get('start_segment_idx', 0),
+            end_segment_idx=data.get('end_segment_idx', 0),
+            location_name=data.get('location_name', ''),
+            location_type=data.get('location_type', 'city'),
+            visual_keywords=data.get('visual_keywords', []),
+            context_keywords=data.get('context_keywords', []),
+            title=data.get('title', ''),
+            topics=data.get('topics', []),
+            location_data=data.get('location_data'),
+        )
+
+    @property
+    def segment_range(self) -> Tuple[int, int]:
+        """Get segment index range as tuple"""
+        return (self.start_segment_idx, self.end_segment_idx)
 
 
 class TopicExtractor:
@@ -385,6 +438,193 @@ No explanation, just the JSON array."""
 
         return []
 
+    def detect_location_chapters(
+        self,
+        segments: List[dict],
+        location_service: Any = None,
+        overall_topic: str = None
+    ) -> List[LocationChapter]:
+        """
+        Detect chapters that focus on specific geographic locations.
+
+        This is designed for travel/location content where chapters cover
+        different cities, countries, or landmarks.
+
+        Args:
+            segments: List of voiceover segment dicts with 'text' field
+            location_service: Optional LocationService for geocoding
+            overall_topic: Optional overall topic context
+
+        Returns:
+            List of LocationChapter objects for location-focused chapters
+        """
+        if not segments:
+            return []
+
+        # Combine segment texts with indices
+        indexed_text = "\n".join([
+            f"[{i}] {seg.get('text', '')}"
+            for i, seg in enumerate(segments)
+        ])
+
+        # Truncate if too long
+        max_chars = 8000
+        if len(indexed_text) > max_chars:
+            indexed_text = indexed_text[:max_chars] + "\n..."
+
+        context = f"Overall topic: {overall_topic}\n" if overall_topic else ""
+
+        prompt = f"""Analyze this voiceover transcript and identify chapters that focus on SPECIFIC LOCATIONS.
+
+{context}
+Transcript (with segment indices in brackets):
+{indexed_text}
+
+For each chapter that is primarily about a specific LOCATION (city, country, landmark, region), extract:
+- start_segment_idx: first segment index
+- end_segment_idx: last segment index
+- location_name: the main location name (e.g., "Paris", "Grand Canyon", "Japan")
+- location_type: one of "city", "country", "landmark", "region", "natural_feature"
+- visual_keywords: 2-4 visual landmarks or features associated with this location
+- context_keywords: 2-3 thematic keywords (culture, activities, themes)
+- title: brief chapter title
+
+ONLY include chapters where a location is the PRIMARY SUBJECT.
+Skip chapters about general topics, introductions, or conclusions.
+
+Return ONLY a JSON array like:
+[
+  {{
+    "start_segment_idx": 0,
+    "end_segment_idx": 5,
+    "location_name": "Paris",
+    "location_type": "city",
+    "visual_keywords": ["Eiffel Tower", "Louvre", "Notre Dame", "Seine River"],
+    "context_keywords": ["romantic", "art", "cuisine"],
+    "title": "Exploring Paris"
+  }},
+  {{
+    "start_segment_idx": 6,
+    "end_segment_idx": 12,
+    "location_name": "Tokyo",
+    "location_type": "city",
+    "visual_keywords": ["Shibuya Crossing", "Tokyo Tower", "temples"],
+    "context_keywords": ["modern", "traditional", "technology"],
+    "title": "Tokyo Adventures"
+  }}
+]
+
+If no chapters focus on specific locations, return an empty array: []
+No explanation, just the JSON array."""
+
+        try:
+            if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
+                import google.generativeai as genai
+                genai.configure(api_key=self.config.gemini_api_key)
+                model = genai.GenerativeModel('gemini-2.0-flash')
+                response = model.generate_content(prompt)
+                location_chapters = self._parse_location_chapters_response(
+                    response.text, len(segments)
+                )
+
+                # Resolve locations if service provided
+                if location_service and location_chapters:
+                    location_chapters = self._resolve_chapter_locations(
+                        location_chapters, location_service
+                    )
+
+                if location_chapters:
+                    logger.info(f"Detected {len(location_chapters)} location-focused chapters")
+
+                return location_chapters
+
+            return []
+
+        except Exception as e:
+            logger.warning(f"Location chapter detection failed: {e}")
+            return []
+
+    def _parse_location_chapters_response(
+        self,
+        response: str,
+        num_segments: int
+    ) -> List[LocationChapter]:
+        """Parse LLM response to extract location chapters"""
+        try:
+            # Find JSON array in response
+            match = re.search(r'\[.*\]', response, re.DOTALL)
+            if match:
+                chapters = json.loads(match.group())
+
+                location_chapters = []
+                for i, ch in enumerate(chapters):
+                    if isinstance(ch, dict) and ch.get('location_name'):
+                        start = ch.get('start_segment_idx', 0)
+                        end = ch.get('end_segment_idx', num_segments - 1)
+
+                        # Ensure valid range
+                        start = max(0, min(start, num_segments - 1))
+                        end = max(start, min(end, num_segments - 1))
+
+                        location_chapters.append(LocationChapter(
+                            chapter_id=i,
+                            start_segment_idx=start,
+                            end_segment_idx=end,
+                            location_name=ch.get('location_name', ''),
+                            location_type=ch.get('location_type', 'city'),
+                            visual_keywords=ch.get('visual_keywords', []),
+                            context_keywords=ch.get('context_keywords', []),
+                            title=ch.get('title', f"Chapter {i+1}"),
+                            topics=[ch.get('location_name', '').lower()] +
+                                   [kw.lower() for kw in ch.get('context_keywords', [])],
+                        ))
+
+                return location_chapters
+
+        except Exception as e:
+            logger.warning(f"Failed to parse location chapters response: {e}")
+
+        return []
+
+    def _resolve_chapter_locations(
+        self,
+        chapters: List[LocationChapter],
+        location_service: Any
+    ) -> List[LocationChapter]:
+        """
+        Resolve location names to GeoLocation data using LocationService.
+
+        Args:
+            chapters: List of LocationChapter with raw location names
+            location_service: LocationService instance for geocoding
+
+        Returns:
+            Updated chapters with resolved location_data
+        """
+        for chapter in chapters:
+            if chapter.location_name and not chapter.location_data:
+                try:
+                    # Build context from visual and context keywords
+                    context = " ".join(chapter.visual_keywords + chapter.context_keywords)
+
+                    # Disambiguate location
+                    geo_location = location_service.disambiguate(
+                        chapter.location_name,
+                        context=context
+                    )
+
+                    if geo_location:
+                        chapter.location_data = geo_location.to_dict()
+                        logger.debug(
+                            f"Resolved '{chapter.location_name}' to "
+                            f"{geo_location.name}, {geo_location.country_name}"
+                        )
+
+                except Exception as e:
+                    logger.debug(f"Could not resolve location '{chapter.location_name}': {e}")
+
+        return chapters
+
 
 def compute_topic_overlap(topics1: List[str], topics2: List[str]) -> Tuple[int, float]:
     """
@@ -449,3 +689,198 @@ def compute_topic_penalty(
         return max_penalty * 0.6  # Weak match, medium penalty
 
     return max_penalty  # No match, full penalty
+
+
+def extract_location_from_video_metadata(
+    title: str,
+    description: str = "",
+    source_keyword: str = "",
+    config: Any = None
+) -> Optional[str]:
+    """
+    Extract location name from video metadata (title, description, keyword).
+
+    Uses LLM to intelligently extract location from video title patterns like:
+    - "4K Walk in Paris"
+    - "Tokyo Street Food Tour"
+    - "Exploring the Swiss Alps"
+    - "New York City Skyline Drone Footage"
+
+    Args:
+        title: Video title
+        description: Video description (optional, first 500 chars used)
+        source_keyword: Original search keyword
+        config: Pipeline config with LLM settings
+
+    Returns:
+        Extracted location name or None
+    """
+    if not title:
+        return None
+
+    # Try quick pattern matching first (common title patterns)
+    location = _extract_location_patterns(title)
+    if location:
+        return location
+
+    # If config available, use LLM for more complex extraction
+    if config and hasattr(config, 'gemini_api_key') and config.gemini_api_key:
+        try:
+            location = _extract_location_with_llm(title, description, source_keyword, config)
+            if location:
+                return location
+        except Exception as e:
+            logger.debug(f"LLM location extraction failed: {e}")
+
+    # Fallback: try to extract from source keyword
+    if source_keyword:
+        location = _extract_location_patterns(source_keyword)
+        if location:
+            return location
+
+    return None
+
+
+def _extract_location_patterns(text: str) -> Optional[str]:
+    """
+    Extract location from text using common patterns.
+
+    Patterns detected:
+    - "in Paris" / "in New York"
+    - "Paris, France" / "Tokyo, Japan"
+    - "[City] Walking Tour" / "[City] Drone Footage"
+    - "Exploring [Location]"
+    """
+    if not text:
+        return None
+
+    text_clean = text.strip()
+
+    # Pattern: "in [Location]" or "of [Location]"
+    match = re.search(r'\b(?:in|of|from|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b', text_clean)
+    if match:
+        return match.group(1)
+
+    # Pattern: "[City], [Country/State]"
+    match = re.search(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', text_clean)
+    if match:
+        return f"{match.group(1)}, {match.group(2)}"
+
+    # Pattern: "[Location] Walking Tour" / "[Location] Drone" / "[Location] 4K"
+    match = re.search(
+        r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:Walking|Drone|4K|Travel|Tour|Street|City)',
+        text_clean
+    )
+    if match:
+        return match.group(1)
+
+    # Pattern: "Exploring [Location]" / "Discover [Location]"
+    match = re.search(
+        r'(?:Exploring|Discover|Visit|See|Experience)\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})',
+        text_clean
+    )
+    if match:
+        return match.group(1)
+
+    # Pattern: "[Location] footage" / "[Location] video"
+    match = re.search(
+        r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:footage|video|aerial|skyline)',
+        text_clean,
+        re.IGNORECASE
+    )
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _extract_location_with_llm(
+    title: str,
+    description: str,
+    source_keyword: str,
+    config: Any
+) -> Optional[str]:
+    """Use LLM to extract location from video metadata"""
+    import google.generativeai as genai
+    genai.configure(api_key=config.gemini_api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+
+    desc_snippet = description[:500] if description else ""
+
+    prompt = f"""Extract the PRIMARY LOCATION from this video metadata.
+
+Title: "{title}"
+Description: "{desc_snippet}"
+Search keyword: "{source_keyword}"
+
+If this video is about a specific geographic location (city, country, landmark, etc.),
+return ONLY the location name (e.g., "Paris", "Tokyo", "Grand Canyon", "New York City").
+
+If no specific location is identifiable, return "NONE".
+
+Location:"""
+
+    try:
+        response = model.generate_content(prompt)
+        location = response.text.strip().strip('"').strip("'")
+
+        # Validate response
+        if location and location.upper() != "NONE" and len(location) < 50:
+            return location
+
+    except Exception as e:
+        logger.debug(f"LLM location extraction error: {e}")
+
+    return None
+
+
+def extract_video_locations_batch(
+    videos: List[Dict[str, Any]],
+    config: Any = None,
+    location_service: Any = None
+) -> Dict[str, Any]:
+    """
+    Extract and resolve locations for multiple videos.
+
+    Args:
+        videos: List of video metadata dicts with 'file', 'title', 'keyword' keys
+        config: Pipeline config
+        location_service: Optional LocationService for geocoding
+
+    Returns:
+        Dict mapping video file paths to resolved GeoLocation dicts
+    """
+    results = {}
+
+    for video in videos:
+        file_path = video.get('file', video.get('path', ''))
+        title = video.get('title', '')
+        keyword = video.get('keyword', '')
+        description = video.get('description', '')
+
+        if not file_path:
+            continue
+
+        # Extract location from metadata
+        location_name = extract_location_from_video_metadata(
+            title=title,
+            description=description,
+            source_keyword=keyword,
+            config=config
+        )
+
+        if location_name and location_service:
+            try:
+                # Resolve location using LocationService
+                geo_location = location_service.disambiguate(
+                    location_name,
+                    context=f"{title} {keyword}"
+                )
+                if geo_location:
+                    results[file_path] = geo_location
+                    logger.debug(f"Resolved video location: {title} -> {geo_location.name}, {geo_location.country_name}")
+            except Exception as e:
+                logger.debug(f"Could not resolve location for '{title}': {e}")
+
+    logger.info(f"Extracted locations for {len(results)}/{len(videos)} videos")
+    return results

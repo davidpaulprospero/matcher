@@ -26,8 +26,9 @@ from .utils import (
 )
 from .embeddings import find_top_k_similar, cosine_similarity
 from .keyword_extractor import find_keyword_matches
-from .topic_extraction import compute_topic_penalty, compute_topic_overlap, VideoTopics
+from .topic_extraction import compute_topic_penalty, compute_topic_overlap, VideoTopics, LocationChapter
 from .face_detection import FaceDetector, apply_face_preference, apply_broll_preference
+from .location_service import GeoLocation, LocationService, create_location_service
 
 logger = logging.getLogger(__name__)
 
@@ -589,6 +590,27 @@ class TieredMatcher:
         self.chapter_matching_enabled = getattr(mc, 'chapter_matching_enabled', False)
         self.topic_mismatch_penalty = getattr(mc, 'topic_mismatch_penalty', 0.15)
 
+        # Location-aware matching settings
+        self.location_matching_config = getattr(mc, 'location_matching', None)
+        self.location_matching_enabled = False
+        self.location_service = None
+        self.location_chapters: Dict[int, LocationChapter] = {}  # segment_idx -> LocationChapter
+        self.video_locations: Dict[str, GeoLocation] = {}  # video_path -> GeoLocation
+
+        if self.location_matching_config:
+            if isinstance(self.location_matching_config, dict):
+                self.location_matching_enabled = self.location_matching_config.get('enabled', False)
+            else:
+                self.location_matching_enabled = getattr(self.location_matching_config, 'enabled', False)
+
+            if self.location_matching_enabled:
+                try:
+                    self.location_service = create_location_service(self.config)
+                    logger.info("Location-aware matching enabled")
+                except Exception as e:
+                    logger.warning(f"Could not initialize location service: {e}")
+                    self.location_matching_enabled = False
+
         # Initialize reuse tracker for clip reuse prevention
         self.reuse_tracker = ReuseTracker(
             max_reuse=mc.max_clip_reuse,
@@ -750,6 +772,141 @@ class TieredMatcher:
 
         return penalized, reason
 
+    def set_location_chapters(self, location_chapters: List[LocationChapter]):
+        """
+        Set location chapters for location-aware matching.
+
+        Args:
+            location_chapters: List of LocationChapter objects
+        """
+        self.location_chapters = {}
+        for lc in location_chapters:
+            for idx in range(lc.start_segment_idx, lc.end_segment_idx + 1):
+                self.location_chapters[idx] = lc
+        logger.info(f"Set {len(location_chapters)} location chapters covering {len(self.location_chapters)} segments")
+
+    def set_video_locations(self, video_locations: Dict[str, GeoLocation]):
+        """
+        Set video location data for location-aware matching.
+
+        Args:
+            video_locations: Dict mapping video paths to GeoLocation objects
+        """
+        self.video_locations = video_locations
+        logger.info(f"Set locations for {len(video_locations)} videos")
+
+    def _get_location_chapter(self, segment_idx: int) -> Optional[LocationChapter]:
+        """Get LocationChapter for a segment index"""
+        return self.location_chapters.get(segment_idx)
+
+    def _get_video_location(self, video_path: str) -> Optional[GeoLocation]:
+        """Get GeoLocation for a video path"""
+        return self.video_locations.get(video_path)
+
+    def _apply_location_filter(
+        self,
+        vo_segment: SRTSegment,
+        candidates: List[Tuple[SRTSegment, float]],
+        segment_idx: int = 0
+    ) -> Tuple[List[Tuple[SRTSegment, float]], bool, str]:
+        """
+        Apply location-based filtering to candidates.
+
+        This implements:
+        1. Hard filter: Remove candidates from wrong country
+        2. Soft fallback: If all filtered, apply penalties instead
+
+        Args:
+            vo_segment: Voiceover segment being matched
+            candidates: List of (video_segment, similarity) tuples
+            segment_idx: Index of voiceover segment (for location chapter lookup)
+
+        Returns:
+            Tuple of:
+            - Filtered/adjusted candidates list
+            - Boolean indicating if location filter was applied
+            - Reason string describing what happened
+        """
+        if not self.location_matching_enabled or not self.location_service:
+            return candidates, False, ""
+
+        # Get location chapter for this segment
+        location_chapter = self._get_location_chapter(segment_idx)
+        if not location_chapter or not location_chapter.location_data:
+            return candidates, False, ""
+
+        # Get the chapter's resolved location
+        chapter_location = GeoLocation.from_dict(location_chapter.location_data)
+
+        # Get config values
+        lm_config = self.location_matching_config
+        if isinstance(lm_config, dict):
+            hard_filter_level = lm_config.get('hard_filter_level', 'country')
+            geographic_penalty = lm_config.get('geographic_penalty', 0.4)
+            hierarchy_bonus = lm_config.get('hierarchy_bonus', 0.15)
+        else:
+            hard_filter_level = getattr(lm_config, 'hard_filter_level', 'country')
+            geographic_penalty = getattr(lm_config, 'geographic_penalty', 0.4)
+            hierarchy_bonus = getattr(lm_config, 'hierarchy_bonus', 0.15)
+
+        # Step 1: Try hard filtering
+        filtered_candidates = []
+        for seg, sim in candidates:
+            video_location = self._get_video_location(seg.source_file)
+
+            if video_location:
+                # Check if locations match based on filter level
+                if hard_filter_level == "country":
+                    matches = self.location_service.same_country(chapter_location, video_location)
+                elif hard_filter_level == "continent":
+                    matches = self.location_service.same_continent(chapter_location, video_location)
+                else:
+                    matches = True  # Unknown filter level, allow all
+
+                if matches:
+                    # Apply hierarchy bonus if video is in a parent/child region
+                    if self.location_service.is_parent_region(chapter_location, video_location):
+                        sim = min(1.0, sim + hierarchy_bonus)
+                    elif self.location_service.is_parent_region(video_location, chapter_location):
+                        sim = min(1.0, sim + hierarchy_bonus * 0.5)
+
+                    filtered_candidates.append((seg, sim))
+            else:
+                # No location data for video - include with small penalty
+                filtered_candidates.append((seg, sim - 0.05))
+
+        # Step 2: Check if hard filter removed all candidates
+        if filtered_candidates:
+            # Sort by similarity
+            filtered_candidates.sort(key=lambda x: -x[1])
+            reason = f"location filter: {location_chapter.location_name} ({chapter_location.country_code})"
+            logger.debug(f"Location filter kept {len(filtered_candidates)}/{len(candidates)} candidates for {location_chapter.location_name}")
+            return filtered_candidates, True, reason
+
+        # Step 3: Fallback to soft penalty mode
+        logger.warning(
+            f"Location filter removed all candidates for '{location_chapter.location_name}', "
+            f"falling back to soft penalty mode"
+        )
+
+        penalized_candidates = []
+        for seg, sim in candidates:
+            video_location = self._get_video_location(seg.source_file)
+
+            penalty = 0.0
+            if video_location:
+                if hard_filter_level == "country" and not self.location_service.same_country(chapter_location, video_location):
+                    penalty = geographic_penalty
+                elif hard_filter_level == "continent" and not self.location_service.same_continent(chapter_location, video_location):
+                    penalty = geographic_penalty * 0.5
+
+            adjusted_sim = max(0.0, sim - penalty)
+            penalized_candidates.append((seg, adjusted_sim))
+
+        penalized_candidates.sort(key=lambda x: -x[1])
+        reason = f"location soft penalty: {location_chapter.location_name} (fallback)"
+        return penalized_candidates, True, reason
+
     def _init_providers(self):
         """Initialize LLM providers based on config"""
         mc = self.config.matching
@@ -884,11 +1041,20 @@ class TieredMatcher:
         candidates: List[Tuple[SRTSegment, float]],
         scenes: Optional[Dict[str, List[SceneInfo]]] = None,
         context_before: Optional[List[SRTSegment]] = None,
-        context_after: Optional[List[SRTSegment]] = None
+        context_after: Optional[List[SRTSegment]] = None,
+        segment_idx: int = 0
     ) -> MatchResult:
         """
         Match a single voiceover segment.
         Returns MatchResult with primary match and alternatives.
+
+        Args:
+            vo_segment: Voiceover segment to match
+            candidates: List of (video_segment, similarity) tuples
+            scenes: Optional scene info for videos
+            context_before: Previous voiceover segments for context
+            context_after: Following voiceover segments for context
+            segment_idx: Index of voiceover segment (for location chapter lookup)
         """
         mc = self.config.matching
 
@@ -949,6 +1115,14 @@ class TieredMatcher:
             # Merge back and re-sort by score
             candidates = current_project_candidates + global_cache_candidates
             candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Apply location-based filtering (hard filter or soft penalty)
+        location_filter_applied = False
+        location_reason = ""
+        if self.location_matching_enabled:
+            candidates, location_filter_applied, location_reason = self._apply_location_filter(
+                vo_segment, candidates, segment_idx
+            )
 
         # Apply smart reuse - filter out overused clips and adjust confidence
         valid_candidates = []
@@ -2218,7 +2392,9 @@ def match_all_segments(
     cache: CacheManager,
     embedding_index: Optional[Any] = None,
     face_preference: str = "neutral",
-    video_topics: Optional[Dict[str, VideoTopics]] = None
+    video_topics: Optional[Dict[str, VideoTopics]] = None,
+    location_chapters: Optional[List[LocationChapter]] = None,
+    video_locations: Optional[Dict[str, GeoLocation]] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -2237,13 +2413,25 @@ def match_all_segments(
     - If video_topics provided, applies confidence penalty for topic mismatches
     - Helps ensure videos match the voiceover chapter/topic context
 
+    Location-aware matching:
+    - If location_chapters provided, filters candidates by geographic location
+    - Hard filter by country with soft penalty fallback
+
     Args:
         face_preference: "more" (prefer faces), "none" (avoid faces), or "neutral"
         video_topics: Dict of video_path -> VideoTopics for chapter-based matching
+        location_chapters: List of LocationChapter for location-aware matching
+        video_locations: Dict of video_path -> GeoLocation for location matching
     """
     # EmbeddingIndex import removed - not needed
 
     matcher = TieredMatcher(config, cache, video_topics=video_topics)
+
+    # Set up location-aware matching if provided
+    if location_chapters:
+        matcher.set_location_chapters(location_chapters)
+    if video_locations:
+        matcher.set_video_locations(video_locations)
     strategy_matcher = StrategyMatcher(config, scenes)
     
     # Store face preference for use during matching
@@ -2350,13 +2538,14 @@ def match_all_segments(
         # Get context
         context_before = voiceover_segments[max(0, i - mc.context_window):i] if mc.context_window > 0 else None
         context_after = voiceover_segments[i+1:i+1+mc.context_window] if mc.context_window > 0 else None
-        
+
         # Primary match (V1) - use only llm_rerank_candidates for LLM
         if i == 0:
             logger.info(f"First segment: calling LLM matcher with {len(llm_candidates)} candidates...")
         result = matcher.match_segment(
             vo_seg, llm_candidates, scenes,
-            context_before, context_after
+            context_before, context_after,
+            segment_idx=i  # Pass segment index for location chapter lookup
         )
         if i == 0:
             logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")

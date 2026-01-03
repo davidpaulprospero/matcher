@@ -1736,9 +1736,127 @@ Topic:"""
             else:
                 print(f"  ✓ No distinct chapters detected (treating as single topic)")
 
+            # Detect location-focused chapters if enabled
+            self._detect_location_chapters(detector)
+
         except Exception as e:
             logger.warning(f"Chapter detection failed: {e}")
             self.chapters = []
+
+    def _detect_location_chapters(self, detector=None):
+        """Detect location-focused chapters for location-aware matching."""
+        # Check if location matching is enabled
+        location_config = getattr(self.config.matching, 'location_matching', None)
+        if not location_config:
+            self.location_chapters = []
+            return
+
+        if isinstance(location_config, dict):
+            enabled = location_config.get('enabled', False)
+        else:
+            enabled = getattr(location_config, 'enabled', False)
+
+        if not enabled:
+            self.location_chapters = []
+            return
+
+        try:
+            from src.topic_extraction import ChapterDetector
+            from src.location_service import create_location_service
+
+            if detector is None:
+                detector = ChapterDetector(self.config)
+
+            # Initialize location service
+            location_service = create_location_service(self.config)
+
+            print(f"\n  Detecting location-focused chapters...")
+            self.location_chapters = detector.detect_location_chapters(
+                self.voiceover_segments,
+                location_service=location_service,
+                overall_topic=self.topic_context if hasattr(self, 'topic_context') else None
+            )
+
+            if self.location_chapters:
+                print(f"  ✓ Found {len(self.location_chapters)} location chapters:")
+                for lc in self.location_chapters:
+                    loc_name = lc.location_name
+                    loc_type = lc.location_type
+                    country = ""
+                    if lc.location_data:
+                        country = lc.location_data.get('country_name', '')
+                    print(f"    [{lc.start_segment_idx}-{lc.end_segment_idx}] {loc_name} ({loc_type}) {country}")
+
+                # Store location service for video location extraction
+                self._location_service = location_service
+            else:
+                print(f"  ✓ No location-focused chapters detected")
+                self._location_service = None
+
+        except Exception as e:
+            logger.warning(f"Location chapter detection failed: {e}")
+            self.location_chapters = []
+            self._location_service = None
+
+    def _extract_video_locations(self):
+        """Extract and resolve locations from video metadata."""
+        if not hasattr(self, '_location_service') or not self._location_service:
+            self.video_locations = {}
+            return
+
+        if not self.location_chapters:
+            self.video_locations = {}
+            return
+
+        try:
+            from src.topic_extraction import extract_video_locations_batch
+
+            # Build video metadata list
+            videos = []
+            if hasattr(self, 'downloaded_videos') and self.downloaded_videos:
+                for dv in self.downloaded_videos:
+                    if hasattr(dv, 'to_dict'):
+                        videos.append(dv.to_dict())
+                    elif isinstance(dv, dict):
+                        videos.append(dv)
+
+            if not videos:
+                # Fallback: extract from text_metadata if available
+                if hasattr(self, 'text_metadata') and self.text_metadata:
+                    seen_paths = set()
+                    for meta in self.text_metadata:
+                        if isinstance(meta, dict):
+                            path = meta.get('video_path', '')
+                            title = meta.get('title', meta.get('video_title', ''))
+                            keyword = meta.get('keyword', meta.get('source_keyword', ''))
+                        else:
+                            path = getattr(meta, 'source_file', '')
+                            title = getattr(meta, 'title', '')
+                            keyword = getattr(meta, 'keyword', '')
+
+                        if path and path not in seen_paths:
+                            seen_paths.add(path)
+                            videos.append({
+                                'file': path,
+                                'title': title,
+                                'keyword': keyword
+                            })
+
+            if videos:
+                print(f"\n  Extracting video locations for {len(videos)} videos...")
+                self.video_locations = extract_video_locations_batch(
+                    videos=videos,
+                    config=self.config,
+                    location_service=self._location_service
+                )
+                if self.video_locations:
+                    print(f"  ✓ Resolved locations for {len(self.video_locations)} videos")
+            else:
+                self.video_locations = {}
+
+        except Exception as e:
+            logger.warning(f"Video location extraction failed: {e}")
+            self.video_locations = {}
 
     def _assign_chapters_to_segments(self):
         """Assign chapter_id and chapter_topics to each voiceover segment."""
@@ -3686,6 +3804,18 @@ Be specific and descriptive for semantic matching purposes."""
                 if video_topics and config.matching.chapter_matching_enabled:
                     print(f"  Using chapter-based matching with {len(video_topics)} video topics")
 
+                # Get location chapters and video locations for location-aware matching
+                location_chapters = getattr(self, 'location_chapters', None)
+                video_locations = getattr(self, 'video_locations', None)
+
+                # Extract video locations if we have location chapters
+                if location_chapters and not video_locations:
+                    self._extract_video_locations()
+                    video_locations = getattr(self, 'video_locations', None)
+
+                if location_chapters:
+                    print(f"  Using location-aware matching with {len(location_chapters)} location chapters")
+
                 self.matches = match_all_segments(
                     voiceover_segments=vo_segments,
                     video_segments=video_segments,
@@ -3696,7 +3826,9 @@ Be specific and descriptive for semantic matching purposes."""
                     cache=cache,
                     embedding_index=self.embedding_index,
                     face_preference=getattr(self, 'face_preference', 'neutral'),
-                    video_topics=video_topics
+                    video_topics=video_topics,
+                    location_chapters=location_chapters,
+                    video_locations=video_locations
                 )
 
                 # Save matches to cache for delta matching
