@@ -1771,6 +1771,7 @@ Topic:"""
             location_service = create_location_service(self.config)
 
             print(f"\n  Detecting location-focused chapters...")
+            logger.info("Detecting location-focused chapters...")
             self.location_chapters = detector.detect_location_chapters(
                 self.voiceover_segments,
                 location_service=location_service,
@@ -1779,6 +1780,7 @@ Topic:"""
 
             if self.location_chapters:
                 print(f"  ✓ Found {len(self.location_chapters)} location chapters:")
+                logger.info(f"Found {len(self.location_chapters)} location chapters")
                 for lc in self.location_chapters:
                     loc_name = lc.location_name
                     loc_type = lc.location_type
@@ -1791,6 +1793,7 @@ Topic:"""
                 self._location_service = location_service
             else:
                 print(f"  ✓ No location-focused chapters detected")
+                logger.info("No location-focused chapters detected")
                 self._location_service = None
 
         except Exception as e:
@@ -4132,6 +4135,7 @@ Be specific and descriptive for semantic matching purposes."""
         # Check if resuming from checkpoint
         if self.resume_mode and self.checkpoint.should_skip_stage("ANALYZE"):
             print(f"\n  ⏭ Skipping ANALYZE (completed in previous run)")
+            logger.info("Skipping ANALYZE stage (checkpoint resume)")
             # Restore state from checkpoint
             analyze_data = self.checkpoint.get_stage_data("ANALYZE")
             keywords = analyze_data.get('keywords', [])
