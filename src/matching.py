@@ -880,7 +880,7 @@ class TieredMatcher:
             # Sort by similarity
             filtered_candidates.sort(key=lambda x: -x[1])
             reason = f"location filter: {location_chapter.location_name} ({chapter_location.country_code})"
-            logger.debug(f"Location filter kept {len(filtered_candidates)}/{len(candidates)} candidates for {location_chapter.location_name}")
+            logger.info(f"Location filter: kept {len(filtered_candidates)}/{len(candidates)} candidates for '{location_chapter.location_name}' ({chapter_location.country_name})")
             return filtered_candidates, True, reason
 
         # Step 3: Fallback to soft penalty mode
