@@ -522,12 +522,24 @@ Reply with ONLY the number (1-{min(5, len(candidates))}) of the correct location
         return loc1.continent == loc2.continent
 
     def same_region(self, loc1: GeoLocation, loc2: GeoLocation) -> bool:
-        """Check if two locations are in the same admin1 region"""
+        """Check if two locations are in the same admin1 region (state/province)"""
         return (
             loc1.country_code == loc2.country_code and
             loc1.admin1 == loc2.admin1 and
             loc1.admin1 != ""
         )
+
+    def same_city(self, loc1: GeoLocation, loc2: GeoLocation) -> bool:
+        """Check if two locations are the same city (or within ~25km)"""
+        # Exact name match in same region
+        if (loc1.country_code == loc2.country_code and
+            loc1.admin1 == loc2.admin1 and
+            loc1.name.lower() == loc2.name.lower()):
+            return True
+        # Proximity check - within 25km counts as same city
+        if self.distance_km(loc1, loc2) <= 25.0:
+            return True
+        return False
 
     def distance_km(self, loc1: GeoLocation, loc2: GeoLocation) -> float:
         """
