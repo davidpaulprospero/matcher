@@ -263,7 +263,7 @@ For travel/location-focused content, filters video candidates by geographic prox
 
 **Key gotchas:**
 1. **GeoNames web services:** Must enable at https://www.geonames.org/login (not enabled by default)
-2. **Saved keywords path:** Location detection must run separately when using saved keywords (fixed in main.py)
+2. **Alternate paths:** Location detection must run in saved keywords AND checkpoint resume paths (fixed in main.py)
 3. **401 errors:** Mean web services aren't enabled on GeoNames account
 
 **Config:**
@@ -403,4 +403,4 @@ Before committing changes:
       hard_filter_level: "city"  # city, state, country, or continent
   ```
 - **IMPORTANT:** GeoNames requires enabling web services on your account (not enabled by default)
-- **Bug fixed:** Location detection was skipped when using saved keywords - now runs in all paths
+- **Bug fixed:** Location detection was skipped when using saved keywords or checkpoint resume - now runs in all paths
