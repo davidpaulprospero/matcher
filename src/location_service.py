@@ -286,7 +286,16 @@ class LocationService:
             return data
 
         except requests.RequestException as e:
-            logger.warning(f"GeoNames API request failed: {e}")
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 401:
+                logger.error(
+                    "GeoNames API returned 401 Unauthorized. "
+                    "You need to enable web services on your GeoNames account: "
+                    "1. Log in at https://www.geonames.org/login "
+                    "2. Click 'Click here to enable' for Free Web Services "
+                    "3. Wait ~15 minutes for activation"
+                )
+            else:
+                logger.warning(f"GeoNames API request failed: {e}")
             return None
         except json.JSONDecodeError as e:
             logger.warning(f"GeoNames API response parse error: {e}")
