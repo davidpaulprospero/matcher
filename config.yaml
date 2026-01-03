@@ -889,10 +889,24 @@ cache:
 # - Pre-download check: Find relevant videos before downloading new ones
 # - Smart re-download: Re-add deleted videos to download queue
 # - Priority system: Current project videos always take precedence
+#
+# CONFIGURING CACHE LOCATION:
+# - Use ~ for home directory (default): ~/.matcher_global_cache
+# - Use absolute path for custom location: "D:/matcher_cache" or "/mnt/data/cache"
+# - Forward slashes work on all platforms (Windows/Mac/Linux)
+#
+# To migrate an existing cache to a new location, run:
+#   python migrate_global_cache.py <new_path> --update-config
+#
+# Examples:
+#   cache_dir: "~/.matcher_global_cache"      # Default (home directory)
+#   cache_dir: "D:/matcher_global_cache"      # Windows D: drive
+#   cache_dir: "/mnt/external/matcher_cache"  # Linux external drive
+#   cache_dir: "/Volumes/Data/matcher_cache"  # macOS external drive
 
 global_cache:
   enabled: true
-  cache_dir: "~/.matcher_global_cache"  # ~ expands to home directory
+  cache_dir: "~/.matcher_global_cache"  # Change this to your preferred location
 
   # Pre-download optimization
   check_before_download: true   # Query cache before downloading new videos
