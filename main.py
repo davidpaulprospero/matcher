@@ -4163,6 +4163,10 @@ Be specific and descriptive for semantic matching purposes."""
                 # Still need to parse voiceover segments
                 self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                 print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+
+                # Detect location chapters (needed for location-aware matching)
+                self._detect_location_chapters()
+
                 use_saved = True
             else:
                 print(f"\n  ⚠ Saved keywords '{use_keywords}' not found, extracting new keywords...")
@@ -4183,6 +4187,7 @@ Be specific and descriptive for semantic matching purposes."""
                             self.extracted_entities = preset.entities
                             self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                             print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+                            self._detect_location_chapters()
                             use_saved = True
                         break
                     elif choice == 'L':
@@ -4207,6 +4212,7 @@ Be specific and descriptive for semantic matching purposes."""
                                 self.extracted_entities = preset.entities
                                 self.voiceover_segments = self._load_voiceover_segments(voiceover_path)
                                 print(f"  ✓ Parsed {len(self.voiceover_segments)} voiceover segments")
+                                self._detect_location_chapters()
                                 use_saved = True
                         except (ValueError, IndexError):
                             pass
