@@ -299,9 +299,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :done
-echo.
-REM Keep window open until user manually closes it (no "press any key")
-cmd /k
+exit
 '''
     
     bat_path = project_dir / "run.bat"
