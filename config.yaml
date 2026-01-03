@@ -304,6 +304,20 @@ matching:
   broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
   broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
 
+  # Location-aware matching (for travel/location content)
+  # Chain-of-thought: Travel/location videos need geographic context matching
+  # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
+  # Decision: Hard filter by country, soft fallback when too strict
+  location_matching:
+    enabled: true  # Enable location-aware matching for geographic content
+    geonames_username: ""  # Get free account at https://www.geonames.org/login
+    hard_filter_level: "country"  # "country" or "continent" - filter out wrong locations
+    geographic_penalty: 0.4  # Penalty for wrong location in soft fallback mode (0.0-1.0)
+    hierarchy_bonus: 0.15  # Bonus for parent/child match (France video for Paris chapter)
+    landmark_bonus: 0.2  # Bonus when landmark detected in video
+    use_llm_disambiguation: true  # Use LLM to resolve ambiguous locations (Paris FR vs TX)
+    cache_dir: ".cache/locations"  # Cache geocoding results
+
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
 # -----------------------------------------------------------------------------

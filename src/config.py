@@ -363,6 +363,50 @@ class MatchingConfig:
     prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference
     broll_face_threshold: float = 0.3  # face_score < this = B-roll (no faces)
 
+    # Location-aware matching (for travel/location content)
+    location_matching: LocationMatchingConfig = None
+
+    def __post_init__(self):
+        if self.location_matching is None:
+            self.location_matching = LocationMatchingConfig()
+        elif isinstance(self.location_matching, dict):
+            self.location_matching = LocationMatchingConfig(**self.location_matching)
+
+
+@dataclass
+class LocationMatchingConfig:
+    """Location-aware matching settings for geographic content.
+
+    When chapters focus on specific locations (cities, countries, landmarks),
+    this enables geographic filtering and scoring to ensure videos match
+    the correct geographic context.
+
+    Features:
+    - Hard filtering by country (prevents Paris, TX matching Paris, FR content)
+    - Soft penalty fallback when filter too strict
+    - Hierarchy bonus (France video can match Paris chapter)
+    - GeoNames API integration for geocoding
+    """
+    enabled: bool = True
+
+    # GeoNames API (free account at geonames.org)
+    geonames_username: str = ""  # Required for API calls
+
+    # Filtering level: how strict the hard filter should be
+    # Options: "country" (default), "continent"
+    hard_filter_level: str = "country"
+
+    # Scoring adjustments
+    geographic_penalty: float = 0.4     # Penalty for wrong location (soft mode fallback)
+    hierarchy_bonus: float = 0.15       # Bonus for parent/child match (France for Paris)
+    landmark_bonus: float = 0.2         # Bonus when landmark detected in video
+
+    # Disambiguation
+    use_llm_disambiguation: bool = True  # Use LLM to resolve ambiguous locations
+
+    # Caching
+    cache_dir: str = ".cache/locations"
+
 
 @dataclass
 class NegativeMatchingConfig:
