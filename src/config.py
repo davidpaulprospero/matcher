@@ -394,7 +394,7 @@ class LocationMatchingConfig:
 
     # Filtering level: how strict the hard filter should be
     # Options: "city" (strictest), "state", "country", "continent" (loosest)
-    hard_filter_level: str = "state"
+    hard_filter_level: str = "city"
 
     # Scoring adjustments
     geographic_penalty: float = 0.4     # Penalty for wrong location (soft mode fallback)
