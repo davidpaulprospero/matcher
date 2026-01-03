@@ -251,6 +251,30 @@ else:
     value = getattr(vc, 'require_different_source', True)
 ```
 
+### Location-Aware Matching
+Location: `src/location_service.py`, `src/matching.py`, `main.py`
+For travel/location-focused content, filters video candidates by geographic proximity.
+
+**Filter levels** (strictest to loosest):
+- `city` - Same city name OR within 25km
+- `state` - Same state/province
+- `country` - Same country
+- `continent` - Same continent
+
+**Key gotchas:**
+1. **GeoNames web services:** Must enable at https://www.geonames.org/login (not enabled by default)
+2. **Saved keywords path:** Location detection must run separately when using saved keywords (fixed in main.py)
+3. **401 errors:** Mean web services aren't enabled on GeoNames account
+
+**Config:**
+```yaml
+matching:
+  location_matching:
+    enabled: true
+    geonames_username: "your_username"
+    hard_filter_level: "city"  # city, state, country, continent
+```
+
 ## Git Conventions
 
 - **Commit prefixes:** `feat:`, `fix:`, `docs:`, `refactor:`
@@ -361,3 +385,22 @@ Before committing changes:
   - `main.py` - Added `stage_download_audio()`, `stage_download_video_segments()`, pipeline integration
   - `src/otio_builder.py` - Added `get_segment_file_offset()`, segment offset adjustments
   - `config.yaml` - Added `audio_first` config section
+
+### 2026-01-03: Location-Aware Chapter Matching
+- **Problem:** Travel/location videos need geographic context (Paris, France vs Paris, Texas)
+- **Solution:** GeoNames API integration with location filtering at city/state/country/continent levels
+- **Key files:**
+  - `src/location_service.py` (NEW) - GeoNames API, geocoding, caching, disambiguation
+  - `src/topic_extraction.py` - `LocationChapter`, `detect_location_chapters()`
+  - `src/matching.py` - `_apply_location_filter()`, location-aware scoring
+  - `main.py` - `_detect_location_chapters()`, pipeline integration
+- **Config:**
+  ```yaml
+  matching:
+    location_matching:
+      enabled: true
+      geonames_username: "your_username"  # Required - enable web services at geonames.org
+      hard_filter_level: "city"  # city, state, country, or continent
+  ```
+- **IMPORTANT:** GeoNames requires enabling web services on your account (not enabled by default)
+- **Bug fixed:** Location detection was skipped when using saved keywords - now runs in all paths
