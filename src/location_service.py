@@ -242,7 +242,7 @@ class LocationService:
             try:
                 with open(self.cache_path, 'r', encoding='utf-8') as f:
                     self._cache = json.load(f)
-                logger.debug(f"Loaded location cache with {len(self._cache.get('locations', {}))} entries")
+                logger.info(f"Loaded location cache with {len(self._cache.get('locations', {}))} entries")
             except Exception as e:
                 logger.warning(f"Could not load location cache: {e}")
                 self._cache = {"locations": {}, "disambiguations": {}}
@@ -308,9 +308,11 @@ class LocationService:
         # Check cache
         if cache_key in self._cache["locations"]:
             cached = self._cache["locations"][cache_key]
+            logger.debug(f"Location cache hit: '{location_name}'")
             return [GeoLocation.from_dict(loc) for loc in cached.get("results", [])]
 
         # Call GeoNames API
+        logger.info(f"GeoNames API: geocoding '{location_name}'")
         data = self._call_geonames_api("searchJSON", {
             "q": location_name,
             "maxRows": max_results,

@@ -615,9 +615,9 @@ No explanation, just the JSON array."""
 
                     if geo_location:
                         chapter.location_data = geo_location.to_dict()
-                        logger.debug(
-                            f"Resolved '{chapter.location_name}' to "
-                            f"{geo_location.name}, {geo_location.country_name}"
+                        logger.info(
+                            f"Resolved location: '{chapter.location_name}' -> "
+                            f"{geo_location.name}, {geo_location.country_name} ({geo_location.country_code})"
                         )
 
                 except Exception as e:
@@ -878,7 +878,7 @@ def extract_video_locations_batch(
                 )
                 if geo_location:
                     results[file_path] = geo_location
-                    logger.debug(f"Resolved video location: {title} -> {geo_location.name}, {geo_location.country_name}")
+                    logger.info(f"Video location: '{title[:50]}' -> {geo_location.name}, {geo_location.country_name}")
             except Exception as e:
                 logger.debug(f"Could not resolve location for '{title}': {e}")
 
