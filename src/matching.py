@@ -855,8 +855,12 @@ class TieredMatcher:
             video_location = self._get_video_location(seg.source_file)
 
             if video_location:
-                # Check if locations match based on filter level
-                if hard_filter_level == "country":
+                # Check if locations match based on filter level (strictest to loosest)
+                if hard_filter_level == "city":
+                    matches = self.location_service.same_city(chapter_location, video_location)
+                elif hard_filter_level == "state":
+                    matches = self.location_service.same_region(chapter_location, video_location)
+                elif hard_filter_level == "country":
                     matches = self.location_service.same_country(chapter_location, video_location)
                 elif hard_filter_level == "continent":
                     matches = self.location_service.same_continent(chapter_location, video_location)
@@ -895,8 +899,12 @@ class TieredMatcher:
 
             penalty = 0.0
             if video_location:
-                if hard_filter_level == "country" and not self.location_service.same_country(chapter_location, video_location):
+                if hard_filter_level == "city" and not self.location_service.same_city(chapter_location, video_location):
                     penalty = geographic_penalty
+                elif hard_filter_level == "state" and not self.location_service.same_region(chapter_location, video_location):
+                    penalty = geographic_penalty * 0.9
+                elif hard_filter_level == "country" and not self.location_service.same_country(chapter_location, video_location):
+                    penalty = geographic_penalty * 0.7
                 elif hard_filter_level == "continent" and not self.location_service.same_continent(chapter_location, video_location):
                     penalty = geographic_penalty * 0.5
 

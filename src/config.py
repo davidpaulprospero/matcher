@@ -393,8 +393,8 @@ class LocationMatchingConfig:
     geonames_username: str = ""  # Required for API calls
 
     # Filtering level: how strict the hard filter should be
-    # Options: "country" (default), "continent"
-    hard_filter_level: str = "country"
+    # Options: "city" (strictest), "state", "country", "continent" (loosest)
+    hard_filter_level: str = "state"
 
     # Scoring adjustments
     geographic_penalty: float = 0.4     # Penalty for wrong location (soft mode fallback)
