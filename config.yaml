@@ -310,7 +310,7 @@ matching:
   # Decision: Hard filter by country, soft fallback when too strict
   location_matching:
     enabled: true  # Enable location-aware matching for geographic content
-    geonames_username: ""  # Get free account at https://www.geonames.org/login
+    geonames_username: ""  # Or set GEONAMES_USERNAME in .env (free account at geonames.org)
     hard_filter_level: "city"  # "city", "state", "country", or "continent" - filter strictness
     geographic_penalty: 0.4  # Penalty for wrong location in soft fallback mode (0.0-1.0)
     hierarchy_bonus: 0.15  # Bonus for parent/child match (France video for Paris chapter)
