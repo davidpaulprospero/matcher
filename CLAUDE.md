@@ -84,6 +84,64 @@ re.sub(r'([A-Z][a-z]+,\s+[A-Z][a-z]+,)\s+', r'\1|||SPLIT|||', text)
 | `src/transcription.py` | Audio transcription (faster-whisper) |
 | `src/checkpoint.py` | Resume/checkpoint management |
 | `src/keyword_extractor.py` | LLM-based keyword extraction |
+| `setup_project.py` | Creates new project folders with run scripts |
+
+## Project Directory Architecture
+
+The system uses a **two-directory model**:
+
+### Install Directory (INSTALL_DIR)
+Where the application code lives. Contains `main.py`, `src/`, `config.yaml`, etc.
+```
+E:\voiceover-matcher\          # Central installation
+├── main.py
+├── config.yaml
+├── setup_project.py
+└── src/
+```
+
+### Project Directory (PROJECT_DIR)
+Individual project folders created by `setup_project.py`. Each project has its own voiceover, outputs, and caches.
+```
+E:\Edit Job\Client\Series\MyProject__2026-01-03\
+├── run.bat                    # Generated launcher script
+├── project_config.yaml        # Project-specific overrides
+├── voiceover/                 # User puts audio here
+├── output/                    # Generated OTIO, videos
+├── logs/
+├── checkpoint.json            # Resume state
+├── saved_keywords.json        # Cached keywords
+└── .cache/                    # Transcriptions, embeddings
+```
+
+### How setup_project.py Works
+Location: `setup_project.py`
+
+**Key variables:**
+```python
+INSTALL_DIR = Path(__file__).parent.resolve()  # Where setup_project.py lives
+project_dir = Path(project_path).resolve()      # User-chosen project location
+```
+
+**Generated run.bat structure:**
+```batch
+set INSTALL_DIR=E:\voiceover-matcher
+set PROJECT_DIR=%~dp0
+cd /d "%INSTALL_DIR%"
+python main.py --project "%PROJECT_DIR%" ...
+```
+
+The `run.bat`:
+1. Sets `INSTALL_DIR` to the central installation (hardcoded at creation time)
+2. Sets `PROJECT_DIR` to the folder containing `run.bat` itself (`%~dp0`)
+3. Changes to `INSTALL_DIR` to run `main.py`
+4. Passes `--project` flag so `main.py` knows where project files are
+
+**Regenerating run scripts:**
+```bash
+python setup_project.py --regenerate "E:\Path\To\Project"
+```
+Use this if `INSTALL_DIR` changed or `run.bat` was corrupted.
 
 ## Common Bugs & Fixes
 
@@ -404,3 +462,9 @@ Before committing changes:
   ```
 - **IMPORTANT:** GeoNames requires enabling web services on your account (not enabled by default)
 - **Bug fixed:** Location detection was skipped when using saved keywords or checkpoint resume - now runs in all paths
+
+### 2026-01-03: Project setup and run.bat fix
+- **Problem:** `run.bat` used `cmd /k` which kept window open indefinitely after each run
+- **Solution:** Changed to `exit /b` so batch file exits cleanly after completion
+- **Files changed:** `setup_project.py` → `create_run_bat()` function
+- **Documentation:** Added "Project Directory Architecture" section explaining INSTALL_DIR vs PROJECT_DIR
