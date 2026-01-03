@@ -906,7 +906,7 @@ cache:
 
 global_cache:
   enabled: true
-  cache_dir: "~/.matcher_global_cache"  # Change this to your preferred location
+  cache_dir: "F:/matcher_cache"  # Shared cache location across installations
 
   # Pre-download optimization
   check_before_download: true   # Query cache before downloading new videos
