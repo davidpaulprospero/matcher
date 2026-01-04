@@ -41,6 +41,10 @@ BATCH_SIZES = {
 }
 
 
+# Global reference for cleanup
+_local_embedding_model = None
+
+
 def _to_numpy(embeddings: Union[List, Any]) -> Any:
     """Convert embeddings to numpy array for FAISS compatibility"""
     if not HAS_NUMPY:
@@ -50,6 +54,36 @@ def _to_numpy(embeddings: Union[List, Any]) -> Any:
     if isinstance(embeddings, list):
         return np.array(embeddings, dtype='float32')
     return embeddings
+
+
+def cleanup_embeddings():
+    """
+    Unload local embedding models and free memory.
+
+    Call this after batch embedding is complete to reclaim memory.
+    Note: API-based providers (Gemini, Voyage) don't hold GPU memory.
+    """
+    global _local_embedding_model
+    import gc
+
+    if _local_embedding_model is not None:
+        logger.info("Unloading local embedding model to free memory...")
+        del _local_embedding_model
+        _local_embedding_model = None
+
+        # Force garbage collection
+        gc.collect()
+
+        # Clear CUDA cache if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug("Cleared CUDA cache after embedding cleanup")
+        except ImportError:
+            pass
+
+        logger.info("Embedding model unloaded")
 
 
 def cosine_similarity(a: Any, b: Any) -> float:
@@ -219,12 +253,12 @@ class EmbeddingCache:
         """Cache entire batch of embeddings"""
         batch_hash = self._batch_hash(texts)
         cache_file = self.cache_dir / f"batch_{cache_key}_{batch_hash}.json"
-        
+
         # Convert numpy to list for JSON serialization
         embeddings_list = embeddings
         if HAS_NUMPY and isinstance(embeddings, np.ndarray):
             embeddings_list = embeddings.tolist()
-        
+
         try:
             with open(cache_file, 'w') as f:
                 json.dump({
@@ -235,6 +269,66 @@ class EmbeddingCache:
             logger.debug(f"Cached batch: {len(texts)} embeddings")
         except Exception as e:
             logger.warning(f"Could not cache batch: {e}")
+
+    def cache_incremental(
+        self,
+        batch_idx: int,
+        texts: List[str],
+        embeddings: List[List[float]],
+        cache_key: str = "default"
+    ):
+        """
+        Cache a single batch of embeddings incrementally.
+
+        Used for streaming mode to write progress to disk as batches complete.
+        Reduces memory pressure for very large embedding jobs.
+        """
+        batch_file = self.cache_dir / f"incremental_{cache_key}_{batch_idx:04d}.json"
+
+        try:
+            with open(batch_file, 'w') as f:
+                json.dump({
+                    'batch_idx': batch_idx,
+                    'texts': texts,
+                    'embeddings': embeddings,
+                    'cached_at': time.time()
+                }, f)
+        except Exception as e:
+            logger.warning(f"Could not cache incremental batch {batch_idx}: {e}")
+
+    def load_incremental(self, cache_key: str = "default") -> Tuple[List[str], List[List[float]]]:
+        """
+        Load all incremental batch files and combine them.
+
+        Returns:
+            (all_texts, all_embeddings) combined from batch files
+        """
+        all_texts = []
+        all_embeddings = []
+
+        # Find all incremental files for this cache key
+        pattern = f"incremental_{cache_key}_*.json"
+        batch_files = sorted(self.cache_dir.glob(pattern))
+
+        for batch_file in batch_files:
+            try:
+                with open(batch_file, 'r') as f:
+                    data = json.load(f)
+                    all_texts.extend(data.get('texts', []))
+                    all_embeddings.extend(data.get('embeddings', []))
+            except Exception as e:
+                logger.warning(f"Could not load incremental batch {batch_file}: {e}")
+
+        return all_texts, all_embeddings
+
+    def clear_incremental(self, cache_key: str = "default"):
+        """Remove incremental batch files after successful consolidation"""
+        pattern = f"incremental_{cache_key}_*.json"
+        for batch_file in self.cache_dir.glob(pattern):
+            try:
+                batch_file.unlink()
+            except Exception:
+                pass
 
 
 class EmbeddingProvider:
@@ -334,11 +428,14 @@ class VoyageEmbeddings(EmbeddingProvider):
 
 class LocalEmbeddings(EmbeddingProvider):
     """Local sentence-transformers embeddings"""
-    
+
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        global _local_embedding_model
         from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name)
-    
+        # Store reference for cleanup
+        _local_embedding_model = self.model
+
     def embed(self, texts: List[str]) -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         embeddings = self.model.encode(cleaned, show_progress_bar=False)

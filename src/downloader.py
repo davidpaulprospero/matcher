@@ -1078,7 +1078,8 @@ Only output the JSON array, no other text."""
         
         # Track timeout for retry logic
         self._last_download_timed_out = False
-        
+        process = None
+
         try:
             process = subprocess.Popen(
                 cmd,
@@ -1087,7 +1088,7 @@ Only output the JSON array, no other text."""
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
+
             try:
                 stdout, stderr = process.communicate(timeout=download_timeout)
             except subprocess.TimeoutExpired:
@@ -1096,6 +1097,14 @@ Only output the JSON array, no other text."""
                 logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s")
                 self._last_download_timed_out = True
                 return []
+            finally:
+                # Ensure process is cleaned up if exception occurs during communicate
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
             
             # Only log actual errors
             if stderr:
@@ -1145,26 +1154,35 @@ Only output the JSON array, no other text."""
                         temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
                         transcode_cmd[-1] = str(temp_output)
                         
+                        transcode_process = None
                         try:
                             # Use Popen to avoid hanging on large output
                             # stdin=DEVNULL prevents waiting for input
-                            process = subprocess.Popen(
+                            transcode_process = subprocess.Popen(
                                 transcode_cmd,
                                 stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE,
                                 text=True
                             )
-                            
+
                             # Wait with timeout
                             try:
-                                _, stderr = process.communicate(timeout=download_timeout)
-                                if process.returncode != 0:
+                                _, stderr = transcode_process.communicate(timeout=download_timeout)
+                                if transcode_process.returncode != 0:
                                     logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
                             except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.communicate()
+                                transcode_process.kill()
+                                transcode_process.communicate()
                                 logger.warning(f"Transcode timeout for {video_file}")
+                            finally:
+                                # Ensure transcode process is cleaned up
+                                if transcode_process is not None and transcode_process.poll() is None:
+                                    transcode_process.kill()
+                                    try:
+                                        transcode_process.wait(timeout=5)
+                                    except subprocess.TimeoutExpired:
+                                        pass
                             
                             if temp_output.exists() and temp_output.stat().st_size > 0:
                                 if self.download_config.delete_original:

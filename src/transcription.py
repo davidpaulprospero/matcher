@@ -47,6 +47,39 @@ _progress_lock = threading.Lock()
 _progress_data = {"completed": 0, "total": 0, "current": ""}
 
 
+def cleanup_model():
+    """
+    Unload the shared whisper model and free GPU memory.
+
+    Call this after batch transcription is complete to reclaim memory
+    for subsequent pipeline stages (embedding, matching).
+    """
+    global _shared_model, _model_config
+    import gc
+
+    with _gpu_lock:
+        if _shared_model is not None:
+            logger.info("Unloading transcription model to free memory...")
+            del _shared_model
+            _shared_model = None
+            _model_config = {}
+
+            # Force garbage collection
+            gc.collect()
+
+            # Clear CUDA cache if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    logger.debug("Cleared CUDA cache")
+            except ImportError:
+                pass
+
+            logger.info("Transcription model unloaded")
+
+
 def _extract_video_id(filename: str) -> Optional[str]:
     """
     Extract YouTube video ID from filename.

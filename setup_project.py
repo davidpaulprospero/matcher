@@ -239,29 +239,12 @@ REM Check what exists
 set HAS_CHECKPOINT=0
 set HAS_KEYWORDS=0
 set HAS_CACHE=0
-set TRANS_COUNT=0
-set EMBED_COUNT=0
-set VIDEO_COUNT=0
 
 if exist "%PROJECT_DIR%\\checkpoint.json" set HAS_CHECKPOINT=1
 if exist "%PROJECT_DIR%\\saved_keywords.json" set HAS_KEYWORDS=1
 
-REM Check for cached transcriptions and embeddings
-if exist "%PROJECT_DIR%\\.cache\\transcriptions\\delta_index.json" (
-    if exist "%PROJECT_DIR%\\.cache\\embeddings\\embedding_index.json" (
-        set HAS_CACHE=1
-        REM Count transcriptions
-        for /f %%a in ('python -c "import json,sys; sys.stdout.write(str(len(json.load(open(r'%PROJECT_DIR%\\.cache\\transcriptions\\delta_index.json')))))" 2^>nul') do set TRANS_COUNT=%%a
-        REM Count embeddings
-        for /f %%a in ('python -c "import json,sys; sys.stdout.write(str(len(json.load(open(r'%PROJECT_DIR%\\.cache\\embeddings\\embedding_index.json')))))" 2^>nul') do set EMBED_COUNT=%%a
-    )
-)
-
-REM Count downloaded videos
-for /f %%a in ('dir /b "%PROJECT_DIR%\\videos\\*.mp4" 2^>nul ^| find /c /v ""') do set VIDEO_COUNT=%%a
-if %VIDEO_COUNT%==0 (
-    for /f %%a in ('dir /b "%PROJECT_DIR%\\downloads\\*.mp4" 2^>nul ^| find /c /v ""') do set VIDEO_COUNT=%%a
-)
+REM Check for cached transcriptions and embeddings (fast - just check directories exist)
+if exist "%PROJECT_DIR%\\.cache\\transcriptions" if exist "%PROJECT_DIR%\\.cache\\embeddings" set HAS_CACHE=1
 
 REM If NOTHING saved, run fresh automatically (no prompt)
 if %HAS_CHECKPOINT%==0 if %HAS_KEYWORDS%==0 if %HAS_CACHE%==0 (
@@ -275,10 +258,7 @@ REM Something exists - prompt user
 echo   SAVED DATA FOUND:
 if %HAS_CHECKPOINT%==1 echo     - Checkpoint [resume interrupted run]
 if %HAS_KEYWORDS%==1 echo     - Saved keywords [reuse for same videos]
-if %HAS_CACHE%==1 (
-    echo     - Transcriptions cached [%TRANS_COUNT% videos]
-    echo     - Embeddings cached [%EMBED_COUNT% entries]
-)
+if %HAS_CACHE%==1 echo     - Transcription and embedding caches available
 echo.
 echo   Options:
 if %HAS_CHECKPOINT%==1 echo     [R] Resume from checkpoint
@@ -464,21 +444,12 @@ case "$1" in
         HAS_CHECKPOINT=0
         HAS_KEYWORDS=0
         HAS_CACHE=0
-        TRANS_COUNT=0
-        EMBED_COUNT=0
 
         [ -f "$PROJECT_DIR/checkpoint.json" ] && HAS_CHECKPOINT=1
         [ -f "$PROJECT_DIR/saved_keywords.json" ] && HAS_KEYWORDS=1
 
-        # Check for cached transcriptions and embeddings
-        TRANS_INDEX="$PROJECT_DIR/.cache/transcriptions/delta_index.json"
-        EMBED_INDEX="$PROJECT_DIR/.cache/embeddings/embedding_index.json"
-
-        if [ -f "$TRANS_INDEX" ] && [ -f "$EMBED_INDEX" ]; then
-            HAS_CACHE=1
-            TRANS_COUNT=$(python -c "import json,sys; sys.stdout.write(str(len(json.load(open('$TRANS_INDEX')))))" 2>/dev/null || echo "0")
-            EMBED_COUNT=$(python -c "import json,sys; sys.stdout.write(str(len(json.load(open('$EMBED_INDEX')))))" 2>/dev/null || echo "0")
-        fi
+        # Check for cached transcriptions and embeddings (fast - just check directories exist)
+        [ -d "$PROJECT_DIR/.cache/transcriptions" ] && [ -d "$PROJECT_DIR/.cache/embeddings" ] && HAS_CACHE=1
 
         # If nothing saved, run fresh automatically
         if [ $HAS_CHECKPOINT -eq 0 ] && [ $HAS_KEYWORDS -eq 0 ] && [ $HAS_CACHE -eq 0 ]; then
@@ -491,10 +462,7 @@ case "$1" in
             echo "  SAVED DATA FOUND:"
             [ $HAS_CHECKPOINT -eq 1 ] && echo "    - Checkpoint [resume interrupted run]"
             [ $HAS_KEYWORDS -eq 1 ] && echo "    - Saved keywords [reuse for same videos]"
-            if [ $HAS_CACHE -eq 1 ]; then
-                echo "    - Transcriptions cached [$TRANS_COUNT videos]"
-                echo "    - Embeddings cached [$EMBED_COUNT entries]"
-            fi
+            [ $HAS_CACHE -eq 1 ] && echo "    - Transcription and embedding caches available"
             echo ""
             echo "  Options:"
             [ $HAS_CHECKPOINT -eq 1 ] && echo "    [R] Resume from checkpoint"

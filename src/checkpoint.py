@@ -142,18 +142,97 @@ class CheckpointManager:
             return 0.0
     
     def load(self) -> Optional[CheckpointData]:
-        """Load existing checkpoint"""
+        """
+        Load existing checkpoint with corruption detection.
+
+        If the main checkpoint is corrupt, attempts to restore from backup.
+        Validates required fields and version compatibility.
+        """
         if not self.exists():
             return None
-            
-        try:
-            with open(self.checkpoint_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            self.data = CheckpointData.from_dict(data)
-            return self.data
-        except Exception as e:
-            logger.warning(f"Failed to load checkpoint: {e}")
+
+        # Try main checkpoint first
+        data = self._try_load_file(self.checkpoint_path)
+
+        # If main is corrupt, try backup
+        if data is None and self.backup_path.exists():
+            logger.warning("Main checkpoint corrupted, trying backup...")
+            data = self._try_load_file(self.backup_path)
+            if data is not None:
+                # Restore backup to main
+                try:
+                    shutil.copy2(self.backup_path, self.checkpoint_path)
+                    logger.info("Restored checkpoint from backup")
+                except Exception as e:
+                    logger.warning(f"Could not restore backup: {e}")
+
+        if data is None:
             return None
+
+        # Validate required fields
+        if not self._validate_checkpoint_data(data):
+            logger.warning("Checkpoint validation failed - data may be incomplete")
+            # Continue with partial data rather than failing completely
+
+        self.data = data
+        return self.data
+
+    def _try_load_file(self, path: Path) -> Optional[CheckpointData]:
+        """Try to load and parse a checkpoint file"""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Check for empty or obviously corrupt content
+            if not content or len(content) < 10:
+                logger.warning(f"Checkpoint file is empty or too small: {path}")
+                return None
+
+            data = json.loads(content)
+
+            # Basic structure check
+            if not isinstance(data, dict):
+                logger.warning(f"Checkpoint is not a dict: {path}")
+                return None
+
+            return CheckpointData.from_dict(data)
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Checkpoint JSON parse error in {path}: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to load checkpoint from {path}: {e}")
+            return None
+
+    def _validate_checkpoint_data(self, data: CheckpointData) -> bool:
+        """
+        Validate that checkpoint data has required fields.
+
+        Returns True if valid, False if there are issues (but data is usable).
+        """
+        issues = []
+
+        # Check version compatibility
+        if data.version and data.version != "1.0":
+            issues.append(f"Checkpoint version {data.version} may not be fully compatible")
+
+        # Check for required fields
+        if not data.created_at:
+            issues.append("Missing created_at timestamp")
+
+        if not data.last_completed_stage:
+            issues.append("No completed stages recorded")
+
+        # Validate stage is in known list
+        if data.last_completed_stage and data.last_completed_stage not in STAGE_ORDER:
+            issues.append(f"Unknown stage: {data.last_completed_stage}")
+
+        if issues:
+            for issue in issues:
+                logger.debug(f"Checkpoint validation: {issue}")
+            return False
+
+        return True
     
     def save(self, stage: str, stage_data: Dict[str, Any] = None):
         """Save checkpoint after stage completion"""
