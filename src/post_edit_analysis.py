@@ -688,7 +688,7 @@ def extract_segment_map_from_otio(otio_path: str) -> Optional[str]:
         "segments": segments
     }
 
-    output_path = Path(otio_path).with_suffix('').with_suffix('_extracted_segments.json')
+    output_path = str(Path(otio_path).with_suffix('')) + '_extracted_segments.json'
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(segment_map, f, indent=2)
 
