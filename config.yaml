@@ -239,6 +239,11 @@ matching:
   max_clip_reuse: 1
   reuse_penalty: 0.5
 
+  # Global clip deduplication (hard block mode)
+  # Chain-of-thought: Same clip should NEVER appear twice anywhere in timeline
+  # Reasoning: Prevents exact duplicate footage across segments and tracks
+  clip_hard_block: true  # Each clip can only appear once in entire timeline
+
   # Source file reuse prevention
   # Chain-of-thought: Prevent over-reliance on single video file
   # Reasoning: One video shouldn't dominate the timeline
@@ -488,6 +493,15 @@ image_search:
     max_duration: 30.0       # Maximum video duration in seconds
     prefer_hd: true          # Prefer HD quality videos
 
+  # Cross-project entity image caching
+  # When enabled, shares downloaded entity images across projects
+  entity_cache:
+    enabled: false                          # Enable global entity cache
+    cache_dir: "~/.matcher_entity_cache"    # Shared cache location (~ = home dir)
+    fuzzy_threshold: 0.85                   # Entity name matching threshold (0.0-1.0)
+    max_age_days: 0                         # Cache expiration in days (0 = never expire)
+    cache_strategy: "copy"                  # copy, symlink, or reference
+
 # -----------------------------------------------------------------------------
 # LLM SETTINGS
 # -----------------------------------------------------------------------------
@@ -687,7 +701,9 @@ download:
   # to find videos that match our duration filters
   search_pool_multiplier: 5  # Search 5x what we want to download
   min_search_pool: 40        # Minimum search pool size
-  
+  max_search_pool: 100       # Maximum search pool (for adaptive sizing)
+  # Adaptive pool: automatically expands pool for low-pass-rate keywords
+
   # Timeout settings (seconds)
   search_timeout: 60         # Timeout for search metadata subprocess
   download_timeout: 120      # Default timeout per video download (used for 'short' tier)
@@ -713,6 +729,28 @@ download:
     fallback_full_video: true      # If segment download fails, download full video
     delete_audio_after_video: false # Keep audio files after video download
     checkpoint_phases: true  # Save checkpoint after each phase
+
+  # Zero-download remix: auto-retry with alternative keywords when 0 results
+  # When a keyword returns no videos, automatically try simplified/remixed terms
+  zero_download_remix:
+    enabled: true           # Enable automatic keyword remix on 0 results
+    use_llm: false          # Use LLM for smart remix (costs API calls, slower)
+                            # If false, uses simple heuristics (add "footage", simplify)
+
+  # Speech screening: pre-screen videos by transcribing first N seconds
+  # Filters out videos with talking heads/commentary to ensure only B-roll footage
+  # Only applied to configured tiers (long videos are more likely to have intros)
+  speech_screening:
+    enabled: false          # Enable speech screening (disabled by default)
+    screening_duration: 5.0 # Seconds from start to check for speech
+    min_speech_duration: 0.5 # Minimum speech duration to trigger rejection
+    reject_with_speech: true # If true, reject videos with speech; if false, just log
+    whisper_model: "base"   # Model for screening: tiny, base, small, medium, large
+    timeout_per_video: 30   # Timeout per video screening (seconds)
+    fallback_on_error: "accept"  # "accept" or "reject" on screening errors
+    tiers:                  # Only apply to these duration tiers
+      - "long"              # 10-25 min videos
+      - "longer"            # 25-50 min videos
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
