@@ -135,12 +135,13 @@ def sanitize_name(name: str) -> str:
 def create_run_bat(project_dir: Path, install_dir: Path) -> Path:
     """
     Create Windows batch file to run the matcher.
-    
-    Includes checkpoint & saved keywords support (v3.1):
+
+    Includes checkpoint & saved keywords support (v3.2):
     - run                     Auto-detect: prompt if saves exist, fresh if not
     - run --resume            Resume interrupted run from checkpoint
     - run --fresh             Fresh start, ignore checkpoint
     - run --use-keywords      Use most recent saved keywords
+    - run --match-only        Skip to matching stage using cached data
     - run --list              List saved keyword presets
     """
     bat_content = f'''@echo off
@@ -180,6 +181,7 @@ if "%~1"=="--help" (
     echo   run --resume            Resume from checkpoint
     echo   run --fresh             Fresh start [new keywords]
     echo   run --use-keywords      Use saved keywords
+    echo   run --match-only        Skip to matching [use cached data]
     echo   run --list              List saved keyword presets
     echo   run --help              Show this help
     echo.
@@ -209,6 +211,12 @@ if "%~1"=="--use-keywords" (
     goto :check_error
 )
 
+if "%~1"=="--match-only" (
+    echo   Mode: MATCH ONLY [skip download/transcribe]
+    python main.py --project "%PROJECT_DIR%" --match-only --use-keywords
+    goto :check_error
+)
+
 REM If we got here with an argument, it's unknown
 if not "%~1"=="" (
     echo   Unknown option: %~1
@@ -230,11 +238,33 @@ echo.
 REM Check what exists
 set HAS_CHECKPOINT=0
 set HAS_KEYWORDS=0
+set HAS_CACHE=0
+set TRANS_COUNT=0
+set EMBED_COUNT=0
+set VIDEO_COUNT=0
+
 if exist "%PROJECT_DIR%\\checkpoint.json" set HAS_CHECKPOINT=1
 if exist "%PROJECT_DIR%\\saved_keywords.json" set HAS_KEYWORDS=1
 
+REM Check for cached transcriptions and embeddings
+if exist "%PROJECT_DIR%\\.cache\\transcriptions\\delta_index.json" (
+    if exist "%PROJECT_DIR%\\.cache\\embeddings\\embedding_index.json" (
+        set HAS_CACHE=1
+        REM Count transcriptions
+        for /f %%a in ('python -c "import json,sys; sys.stdout.write(str(len(json.load(open(r'%PROJECT_DIR%\\.cache\\transcriptions\\delta_index.json')))))" 2^>nul') do set TRANS_COUNT=%%a
+        REM Count embeddings
+        for /f %%a in ('python -c "import json,sys; sys.stdout.write(str(len(json.load(open(r'%PROJECT_DIR%\\.cache\\embeddings\\embedding_index.json')))))" 2^>nul') do set EMBED_COUNT=%%a
+    )
+)
+
+REM Count downloaded videos
+for /f %%a in ('dir /b "%PROJECT_DIR%\\videos\\*.mp4" 2^>nul ^| find /c /v ""') do set VIDEO_COUNT=%%a
+if %VIDEO_COUNT%==0 (
+    for /f %%a in ('dir /b "%PROJECT_DIR%\\downloads\\*.mp4" 2^>nul ^| find /c /v ""') do set VIDEO_COUNT=%%a
+)
+
 REM If NOTHING saved, run fresh automatically (no prompt)
-if %HAS_CHECKPOINT%==0 if %HAS_KEYWORDS%==0 (
+if %HAS_CHECKPOINT%==0 if %HAS_KEYWORDS%==0 if %HAS_CACHE%==0 (
     echo   No saves found - starting fresh run...
     echo.
     python main.py --project "%PROJECT_DIR%" --save-keywords
@@ -245,10 +275,19 @@ REM Something exists - prompt user
 echo   SAVED DATA FOUND:
 if %HAS_CHECKPOINT%==1 echo     - Checkpoint [resume interrupted run]
 if %HAS_KEYWORDS%==1 echo     - Saved keywords [reuse for same videos]
+if %HAS_CACHE%==1 (
+    echo     - Transcriptions cached [%TRANS_COUNT% videos]
+    echo     - Embeddings cached [%EMBED_COUNT% entries]
+)
 echo.
 echo   Options:
 if %HAS_CHECKPOINT%==1 echo     [R] Resume from checkpoint
 if %HAS_KEYWORDS%==1 echo     [K] Use saved keywords
+if %HAS_CACHE%==1 (
+    echo     [M] Match only [skip to matching stage]
+) else (
+    echo     [M] Match only [unavailable - missing cached data]
+)
 echo     [F] Fresh start [new keywords]
 echo     [Q] Quit
 echo.
@@ -257,9 +296,10 @@ echo.
 set /p "CHOICE=  Your choice: "
 if /i "%CHOICE%"=="R" goto :do_resume
 if /i "%CHOICE%"=="K" goto :do_keywords
+if /i "%CHOICE%"=="M" goto :do_match_only
 if /i "%CHOICE%"=="F" goto :do_fresh
 if /i "%CHOICE%"=="Q" goto :done
-echo   Invalid choice. Enter R, K, F, or Q.
+echo   Invalid choice. Enter R, K, M, F, or Q.
 goto :ask
 
 :do_resume
@@ -278,6 +318,16 @@ if %HAS_KEYWORDS%==0 (
 )
 echo   Mode: Using saved keywords
 python main.py --project "%PROJECT_DIR%" --use-keywords
+goto :check_error
+
+:do_match_only
+if %HAS_CACHE%==0 (
+    echo   Cannot use Match only - cached data is missing!
+    echo   Run a full pipeline first to build transcription/embedding caches.
+    goto :ask
+)
+echo   Mode: MATCH ONLY
+python main.py --project "%PROJECT_DIR%" --match-only --use-keywords
 goto :check_error
 
 :do_fresh
@@ -309,7 +359,7 @@ exit /b
 
 
 def create_run_sh(project_dir: Path, install_dir: Path) -> Path:
-    """Create Unix shell script to run the matcher with checkpoint support"""
+    """Create Unix shell script to run the matcher with checkpoint support (v3.2)"""
     sh_content = f'''#!/bin/bash
 # ============================================================
 # Voiceover-Matcher Runner
@@ -323,6 +373,7 @@ def create_run_sh(project_dir: Path, install_dir: Path) -> Path:
 #   ./run.sh --fresh             Fresh start, ignore checkpoint
 #   ./run.sh --use-keywords      Use most recent saved keywords
 #   ./run.sh --use-keywords NAME Use specific saved keyword preset
+#   ./run.sh --match-only        Skip to matching using cached data
 #   ./run.sh --list              List saved keyword presets
 #   ./run.sh --help              Show all options
 #
@@ -360,52 +411,28 @@ case "$1" in
         echo "  ./run.sh --fresh             Fresh start, ignore checkpoint"
         echo "  ./run.sh --use-keywords      Use most recent saved keywords"
         echo "  ./run.sh --use-keywords NAME Use specific keyword preset"
+        echo "  ./run.sh --match-only        Skip to matching [use cached data]"
         echo "  ./run.sh --list              List saved keyword presets"
         echo ""
         python main.py --help
         exit 0
         ;;
-esac
-
-# ============================================================
-# Main run modes
-# ============================================================
-
-echo ""
-echo "  ============================================================"
-echo "  VOICEOVER-MATCHER"
-echo "  ============================================================"
-echo "  Project: $PROJECT_DIR"
-echo "  Install: $INSTALL_DIR"
-
-# Check for checkpoint
-if [ -f "$PROJECT_DIR/checkpoint.json" ]; then
-    echo "  Checkpoint: FOUND"
-else
-    echo "  Checkpoint: none"
-fi
-
-# Check for saved keywords
-if [ -f "$PROJECT_DIR/saved_keywords.json" ]; then
-    echo "  Saved keywords: FOUND"
-else
-    echo "  Saved keywords: none"
-fi
-
-echo ""
-
-case "$1" in
     --resume)
+        echo ""
         echo "  Mode: RESUME from checkpoint"
         echo ""
         python main.py --project "$PROJECT_DIR" --resume
+        EXIT_CODE=$?
         ;;
     --fresh)
+        echo ""
         echo "  Mode: FRESH start (ignoring checkpoint)"
         echo ""
         python main.py --project "$PROJECT_DIR" --fresh --save-keywords
+        EXIT_CODE=$?
         ;;
     --use-keywords)
+        echo ""
         if [ -z "$2" ]; then
             echo "  Mode: Using LATEST saved keywords"
             echo ""
@@ -415,16 +442,133 @@ case "$1" in
             echo ""
             python main.py --project "$PROJECT_DIR" --use-keywords "$2"
         fi
+        EXIT_CODE=$?
+        ;;
+    --match-only)
+        echo ""
+        echo "  Mode: MATCH ONLY [skip download/transcribe]"
+        echo ""
+        python main.py --project "$PROJECT_DIR" --match-only --use-keywords
+        EXIT_CODE=$?
+        ;;
+    "")
+        # No arguments - show interactive menu
+        echo ""
+        echo "  ============================================================"
+        echo "  VOICEOVER-MATCHER"
+        echo "  ============================================================"
+        echo "  Project: $PROJECT_DIR"
+        echo ""
+
+        # Check what exists
+        HAS_CHECKPOINT=0
+        HAS_KEYWORDS=0
+        HAS_CACHE=0
+        TRANS_COUNT=0
+        EMBED_COUNT=0
+
+        [ -f "$PROJECT_DIR/checkpoint.json" ] && HAS_CHECKPOINT=1
+        [ -f "$PROJECT_DIR/saved_keywords.json" ] && HAS_KEYWORDS=1
+
+        # Check for cached transcriptions and embeddings
+        TRANS_INDEX="$PROJECT_DIR/.cache/transcriptions/delta_index.json"
+        EMBED_INDEX="$PROJECT_DIR/.cache/embeddings/embedding_index.json"
+
+        if [ -f "$TRANS_INDEX" ] && [ -f "$EMBED_INDEX" ]; then
+            HAS_CACHE=1
+            TRANS_COUNT=$(python -c "import json,sys; sys.stdout.write(str(len(json.load(open('$TRANS_INDEX')))))" 2>/dev/null || echo "0")
+            EMBED_COUNT=$(python -c "import json,sys; sys.stdout.write(str(len(json.load(open('$EMBED_INDEX')))))" 2>/dev/null || echo "0")
+        fi
+
+        # If nothing saved, run fresh automatically
+        if [ $HAS_CHECKPOINT -eq 0 ] && [ $HAS_KEYWORDS -eq 0 ] && [ $HAS_CACHE -eq 0 ]; then
+            echo "  No saves found - starting fresh run..."
+            echo ""
+            python main.py --project "$PROJECT_DIR" --save-keywords
+            EXIT_CODE=$?
+        else
+            # Show menu
+            echo "  SAVED DATA FOUND:"
+            [ $HAS_CHECKPOINT -eq 1 ] && echo "    - Checkpoint [resume interrupted run]"
+            [ $HAS_KEYWORDS -eq 1 ] && echo "    - Saved keywords [reuse for same videos]"
+            if [ $HAS_CACHE -eq 1 ]; then
+                echo "    - Transcriptions cached [$TRANS_COUNT videos]"
+                echo "    - Embeddings cached [$EMBED_COUNT entries]"
+            fi
+            echo ""
+            echo "  Options:"
+            [ $HAS_CHECKPOINT -eq 1 ] && echo "    [R] Resume from checkpoint"
+            [ $HAS_KEYWORDS -eq 1 ] && echo "    [K] Use saved keywords"
+            if [ $HAS_CACHE -eq 1 ]; then
+                echo "    [M] Match only [skip to matching stage]"
+            else
+                echo "    [M] Match only [unavailable - missing cached data]"
+            fi
+            echo "    [F] Fresh start [new keywords]"
+            echo "    [Q] Quit"
+            echo ""
+
+            while true; do
+                read -p "  Your choice: " CHOICE
+                case "$CHOICE" in
+                    [Rr])
+                        if [ $HAS_CHECKPOINT -eq 0 ]; then
+                            echo "  No checkpoint found!"
+                        else
+                            echo "  Mode: RESUME"
+                            python main.py --project "$PROJECT_DIR" --resume
+                            EXIT_CODE=$?
+                            break
+                        fi
+                        ;;
+                    [Kk])
+                        if [ $HAS_KEYWORDS -eq 0 ]; then
+                            echo "  No saved keywords found!"
+                        else
+                            echo "  Mode: Using saved keywords"
+                            python main.py --project "$PROJECT_DIR" --use-keywords
+                            EXIT_CODE=$?
+                            break
+                        fi
+                        ;;
+                    [Mm])
+                        if [ $HAS_CACHE -eq 0 ]; then
+                            echo "  Cannot use Match only - cached data is missing!"
+                            echo "  Run a full pipeline first to build transcription/embedding caches."
+                        else
+                            echo "  Mode: MATCH ONLY"
+                            python main.py --project "$PROJECT_DIR" --match-only --use-keywords
+                            EXIT_CODE=$?
+                            break
+                        fi
+                        ;;
+                    [Ff])
+                        echo "  Mode: FRESH start"
+                        python main.py --project "$PROJECT_DIR" --fresh --save-keywords
+                        EXIT_CODE=$?
+                        break
+                        ;;
+                    [Qq])
+                        echo ""
+                        exit 0
+                        ;;
+                    *)
+                        echo "  Invalid choice. Enter R, K, M, F, or Q."
+                        ;;
+                esac
+            done
+        fi
         ;;
     *)
-        echo "  Mode: Normal run (auto-saving keywords)"
         echo ""
-        python main.py --project "$PROJECT_DIR" --save-keywords "$@"
+        echo "  Unknown option: $1"
+        echo "  Use: ./run.sh --help"
+        exit 1
         ;;
 esac
 
 # Check exit code
-if [ $? -ne 0 ]; then
+if [ "${{EXIT_CODE:-0}}" -ne 0 ]; then
     echo ""
     echo "  [ERROR] Pipeline failed"
     echo ""
