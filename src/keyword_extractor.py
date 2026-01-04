@@ -39,157 +39,213 @@ class LLMKeywordExtractor:
         "documentary footage"
     ]
     
-    SEGMENT_KEYWORD_PROMPT = """Extract ONE optimal YouTube search keyword for finding B-roll footage for this voiceover segment.
+    SEGMENT_KEYWORD_PROMPT = """Extract ONE visual YouTube search keyword for this voiceover segment.
 
 SEGMENT TEXT:
 "{segment_text}"
 
 DOCUMENTARY TOPIC: {topic}
 
+CRITICAL: Do NOT copy phrases from the script. Translate to VISUAL search terms.
+- Script phrase "the death of entertainment" → Search "buffet prices Las Vegas"
+- Script phrase "whale economy" → Search "VIP high roller casino"
+
 RULES:
-1. Return ONE keyword phrase (2-5 words) optimized for YouTube search
-2. Focus on VISUAL elements that can be filmed
-3. Include location/event names if mentioned
-4. Add context words like "footage", "video", "news" if helpful
-5. If segment is very short/generic, use the topic context
+1. Return ONE keyword phrase (2-5 words) describing FILMABLE content
+2. Focus on locations, activities, objects - things a camera can capture
+3. Include specific venue/place names if mentioned
+4. Add "footage", "4K", "tour", "walkthrough" if helpful
+5. If segment is abstract, derive visual content from the topic
 
 Return ONLY the keyword phrase, nothing else.
 
 KEYWORD:"""
 
-    BATCH_SEGMENT_KEYWORDS_PROMPT = """Extract ONE search keyword for EACH voiceover segment to find matching B-roll footage.
+    BATCH_SEGMENT_KEYWORDS_PROMPT = """Extract ONE visual search keyword for EACH voiceover segment to find B-roll footage.
 
 DOCUMENTARY TOPIC: {topic}
 
 SEGMENTS:
 {segments_text}
 
+=== CRITICAL: DO NOT COPY SCRIPT PHRASES ===
+Voiceover segments often contain narrative/poetic language. You must TRANSLATE these into VISUAL search terms.
+
+TRANSLATION EXAMPLES:
+- Script: "the death of free entertainment" → Search: "Las Vegas buffet prices sign"
+- Script: "pricing out the dream" → Search: "expensive hotel room Las Vegas"
+- Script: "the whale economy" → Search: "VIP high roller casino footage"
+- Script: "a quiet confession" → Search: "interview talking head footage"
+- Script: "everything changed" → Search: "Las Vegas strip before after"
+
 RULES:
-1. Return ONE keyword per segment (2-5 words each)
-2. Focus on VISUAL elements - things a camera can capture
-3. Include specific names, places, events if mentioned
-4. Generic segments should relate to the overall topic
-5. Keywords should work for YouTube/stock footage search
+1. Each keyword must be 2-5 words describing something FILMABLE
+2. Focus on locations, activities, objects, people - things a camera captures
+3. If segment mentions a specific place/venue, use that name
+4. If segment is abstract/narrative, derive visual content from the topic
+5. Add "footage", "4K", "tour", "walkthrough" when it helps searchability
+
+❌ NEVER output keywords like:
+- "the quiet confession that changed everything footage"
+- "pricing out the dream footage"
+- Any phrase that sounds like a documentary title
+
+✅ ALWAYS output keywords like:
+- "casino floor slot machines"
+- "Las Vegas strip night aerial"
+- "hotel buffet food spread"
 
 OUTPUT FORMAT:
 Return a JSON array with one keyword string per segment, in order.
-Example: ["flooding aftermath drone", "rescue workers boat", "damaged buildings aerial"]
+Example: ["casino floor walkthrough", "Las Vegas strip aerial", "hotel lobby crowd"]
 
 KEYWORDS:"""
     
-    KEYWORD_EXTRACTION_PROMPT = """You are an expert stock footage researcher for disaster documentaries.
-
-Analyze this voiceover script and extract the BEST YouTube search keywords to find relevant B-roll footage.
+    KEYWORD_EXTRACTION_PROMPT = """You are an expert stock footage researcher. Your job is to generate YouTube search keywords that will find DOWNLOADABLE B-roll footage.
 
 VOICEOVER TEXT:
 {voiceover_text}
 
-CRITICAL EXTRACTION PRIORITIES:
-1. **NAMED ENTITIES FIRST** - Extract ALL proper nouns:
-   - Person names → search as "[Name] [topic context]" (e.g., "President Marcos typhoon response")
-   - Organization names → search as "[Org] [visual action]" (e.g., "Red Cross rescue operation")
-   - Place names → search as "[Place] [event type] footage" (e.g., "Manila flooding 2024")
-   
-2. **DATES & TIME PERIODS** - For each date/year mentioned:
-   - Recent events: "[Event] [Year] footage" (e.g., "Japan earthquake 2024")
-   - Historical: "[Event] [Year] archive footage" (e.g., "Tohoku tsunami 2011")
-   
-3. **LOCATIONS WITH CONTEXT** - Be geographically specific:
-   - Country + City + Event (e.g., "Philippines Cebu typhoon damage")
-   - Region + Specific feature (e.g., "Pacific Ring of Fire volcanic activity")
+=== CRITICAL WARNING ===
+DO NOT extract narrative phrases or section titles from the script!
+Voiceovers contain poetic/thematic language that won't find footage.
+You must TRANSLATE abstract themes into CONCRETE VISUAL CONTENT.
 
-4. **VISUAL SCENES** - Things a camera can capture:
-   - Disasters: destruction, flooding, fires, earthquakes, eruptions
-   - Aftermath: damage, debris, collapsed buildings, rescue operations
-   - Human elements: evacuation, rescue workers, survivors, relief efforts
+❌ BAD KEYWORDS (narrative phrases - won't find footage):
+- "the quiet confession that changed everything" (script phrase)
+- "pricing out the dream" (metaphor)
+- "the death of free entertainment" (thematic title)
+- "the whale economy" (abstract concept)
+- "what really happened" (narrative hook)
+- "the truth about" (clickbait phrase)
 
-RULES:
-- Every named person/place/date MUST generate at least one keyword
-- Combine entities with the documentary topic for relevance
-- Keywords should find FOOTAGE, not articles (add "footage", "video", "news" suffixes)
-- Maximum 3-5 words per keyword phrase
-- Avoid abstract concepts that don't translate to visuals
-- No duplicate or overly similar keywords
+✅ GOOD KEYWORDS (visual/searchable - will find footage):
+- "Las Vegas casino floor walkthrough"
+- "Bellagio fountains night 4K"
+- "slot machine gameplay footage"
+- "Las Vegas buffet tour video"
+- "MGM Grand hotel lobby"
+- "Fremont Street neon signs"
+- "high roller VIP casino"
 
-OUTPUT FORMAT:
-Return ONLY a JSON array of keyword strings, nothing else.
-Maximum {max_keywords} keywords total.
-Group similar searches to avoid redundancy.
+=== EXTRACTION CATEGORIES ===
 
-Example for a script about "Typhoon Yolanda hit Tacloban in 2013":
-["Typhoon Yolanda Tacloban footage", "Haiyan 2013 destruction", "Philippines typhoon aftermath", "Tacloban flooding aerial", "storm surge Visayas"]
+1. **SPECIFIC LOCATIONS** - Named venues, landmarks, cities
+   - Hotels/Casinos: "Caesars Palace exterior", "Venetian gondola ride"
+   - Landmarks: "Las Vegas sign tourists", "High Roller observation wheel"
+   - Streets/Areas: "Las Vegas strip timelapse", "Fremont Street canopy"
+
+2. **FILMABLE ACTIVITIES** - Actions a camera can capture
+   - "blackjack table dealing footage"
+   - "slot machine jackpot win"
+   - "Las Vegas pool party crowd"
+   - "buffet food spread walkthrough"
+
+3. **ESTABLISHING SHOTS** - Aerials, atmospherics, ambience
+   - "Las Vegas aerial night drone"
+   - "casino floor crowd ambience"
+   - "neon signs Las Vegas strip"
+   - "desert highway Nevada"
+
+4. **NAMED ENTITIES** - People, companies, events (with visual context)
+   - "Steve Wynn interview footage" (if mentioned)
+   - "Cirque du Soleil Las Vegas show"
+   - "MGM Resorts properties tour"
+
+=== VALIDATION CHECK ===
+Before adding each keyword, ask: "Can a camera film this? Would a videographer understand what to shoot?"
+- "the whale economy" → NO (abstract metaphor, not filmable)
+- "high roller gambling VIP room" → YES (specific filmable scene)
+- "pricing out the dream" → NO (narrative phrase)
+- "expensive Las Vegas hotel suite tour" → YES (filmable content)
+
+=== OUTPUT ===
+Return ONLY a JSON array of {max_keywords} searchable keywords.
+Maximum 5 words per keyword. Every keyword must describe filmable content.
 
 KEYWORDS:"""
 
-    ENTITY_EXTRACTION_PROMPT = """Extract all named entities from this documentary script that would need specific footage.
+    ENTITY_EXTRACTION_PROMPT = """Extract named entities from this script and generate VISUAL search keywords for each.
 
 TEXT:
 {text}
 
-Extract and categorize:
-1. PEOPLE: Names of officials, experts, victims, responders mentioned
-2. PLACES: Cities, regions, countries, specific locations (buildings, landmarks)
-3. ORGANIZATIONS: Government agencies, NGOs, companies, institutions
-4. DATES: Specific dates, years, time periods mentioned
-5. EVENTS: Named disasters, operations, incidents (e.g., "Operation Damayan", "Great East Japan Earthquake")
+=== IMPORTANT: Generate FILMABLE search keywords ===
+Each search_keyword must describe something a camera can capture on YouTube.
 
-For each entity, suggest a search keyword that would find relevant footage.
+Extract and categorize:
+1. PEOPLE: Names mentioned → search_keyword should find interviews, speeches, or footage of them
+2. PLACES: Specific locations → search_keyword should find walkthrough, aerial, or tour footage
+3. ORGANIZATIONS: Companies/agencies → search_keyword should find their buildings, events, or operations
+4. DATES: Years/periods → search_keyword should find archival or news footage from that time
+5. EVENTS: Named events → search_keyword should find coverage or documentary footage
+
+SEARCH KEYWORD EXAMPLES:
+- Person "Steve Wynn" → "Steve Wynn interview" or "Wynn Las Vegas opening"
+- Place "Las Vegas Strip" → "Las Vegas Strip walkthrough 4K" or "Las Vegas Strip aerial night"
+- Organization "MGM Resorts" → "MGM Grand Las Vegas tour" or "MGM casino floor"
+- Date "1990s" → "Las Vegas 1990s archive footage" or "vintage Las Vegas casino"
+- Event "Fremont Street renovation" → "Fremont Street canopy construction" or "Fremont Experience opening"
 
 OUTPUT FORMAT - JSON object:
 {{
   "people": [
-    {{"name": "Person Name", "context": "role/relevance", "search_keyword": "Person Name topic footage"}}
+    {{"name": "Person Name", "context": "role", "search_keyword": "Person Name interview footage"}}
   ],
   "places": [
-    {{"name": "Place Name", "context": "what happened there", "search_keyword": "Place event footage"}}
+    {{"name": "Venue Name", "context": "significance", "search_keyword": "Venue Name walkthrough 4K"}}
   ],
   "organizations": [
-    {{"name": "Org Name", "context": "their role", "search_keyword": "Org action footage"}}
+    {{"name": "Company", "context": "role", "search_keyword": "Company building tour"}}
   ],
   "dates": [
-    {{"date": "2024", "context": "what event", "search_keyword": "event 2024 footage"}}
+    {{"date": "1990s", "context": "event", "search_keyword": "location 1990s archive"}}
   ],
   "events": [
-    {{"name": "Event Name", "context": "description", "search_keyword": "Event Name footage"}}
+    {{"name": "Event", "context": "description", "search_keyword": "Event footage video"}}
   ]
 }}
 
-Only include entities that are RELEVANT to finding documentary footage.
+Only include entities where you can generate a SEARCHABLE, VISUAL keyword.
 ENTITIES:"""
 
-    KEYWORD_EXPANSION_PROMPT = """You are an expert stock footage researcher.
-
-Given these initial keywords extracted from a documentary script, EXPAND and REFINE them for better YouTube search results.
+    KEYWORD_EXPANSION_PROMPT = """You are an expert stock footage researcher. Expand and refine these B-roll search keywords.
 
 INITIAL KEYWORDS:
 {initial_keywords}
 
 DOCUMENTARY TOPIC: {topic}
 
-CRITICAL RULES:
-1. **PRESERVE ALL NAMED ENTITIES** - Do NOT remove keywords containing:
-   - Person names (presidents, officials, experts, victims)
-   - Specific place names (cities, regions, landmarks)
-   - Organization names (agencies, NGOs, companies)
-   - Specific dates or years
-   - Named events or operations
-   
-2. EXPAND with variants:
-   - Add geographic specificity where missing
-   - Add time-based variants (e.g., "2024", "recent", "archive")
-   - Add visual variants (e.g., "aerial view", "close up", "timelapse", "news footage")
-   - Add related visual phenomena
+=== FIRST: REMOVE ANY ABSTRACT/NARRATIVE KEYWORDS ===
+Delete any keywords that slipped through that are NOT visually searchable:
+❌ Remove: "the quiet confession", "pricing out the dream", "death of entertainment"
+❌ Remove: "whale economy", "the truth about", "what happened to"
+❌ Remove: Any phrase that sounds like a documentary chapter title
 
-3. REFINE for searchability:
-   - Keep 3-5 words per keyword
-   - Ensure keywords find VIDEO FOOTAGE, not articles
-   - Remove abstract concepts that don't show visually
-   - Remove true duplicates (but keep location/time variants)
+=== THEN: EXPAND GOOD KEYWORDS ===
+For keywords that ARE visual/searchable, add variants:
+- Visual style: "aerial", "drone", "4K", "timelapse", "walkthrough"
+- Specificity: "casino" → "Bellagio casino floor", "MGM Grand casino"
+- Time of day: "Las Vegas strip" → "Las Vegas strip night", "Las Vegas strip sunset"
+- Activity: "hotel" → "hotel lobby", "hotel pool", "hotel room tour"
+
+=== PRESERVE NAMED ENTITIES ===
+Keep all keywords with specific names:
+- Place names: "Caesars Palace", "Fremont Street", "Bellagio"
+- Company names: "MGM Resorts", "Wynn Las Vegas"
+- Person names (with visual context): "Steve Wynn interview"
+
+=== QUALITY CHECK ===
+Every keyword in output must pass this test:
+"Can I find this on YouTube?" and "Would a camera operator know what to film?"
+
+Example refinement:
+- INPUT: ["Las Vegas casinos", "whale economy footage", "buffet"]
+- OUTPUT: ["Las Vegas casino floor walkthrough", "Bellagio casino interior", "Las Vegas buffet tour 4K", "MGM Grand buffet spread"]
+(Note: "whale economy footage" was removed as abstract)
 
 OUTPUT FORMAT:
-Return ONLY a JSON array of refined keyword strings.
-Maximum {max_keywords} keywords total.
-KEEP ALL entity-based keywords, then add expanded variants.
+Return ONLY a JSON array of {max_keywords} refined, searchable keywords.
 
 REFINED KEYWORDS:"""
 
@@ -282,7 +338,91 @@ REFINED KEYWORDS:"""
                 keywords.append(line)
         
         return keywords[:50]  # Safety limit
-    
+
+    def _validate_visual_keywords(self, keywords: List[str]) -> List[str]:
+        """
+        Filter out abstract/narrative keywords that won't find B-roll footage.
+
+        Returns only keywords that describe filmable, searchable content.
+        """
+        # Patterns that indicate abstract/narrative content (won't find footage)
+        ABSTRACT_PATTERNS = [
+            r'\b(the\s+)?quiet\s+confession',
+            r'\b(the\s+)?death\s+of\b',
+            r'\bpricing\s+out\b',
+            r'\bthe\s+truth\s+about\b',
+            r'\bthe\s+problem\s+with\b',
+            r'\bwhat\s+happened\s+to\b',
+            r'\bthe\s+rise\s+and\s+fall\b',
+            r'\bchanged\s+everything\b',
+            r'\bthe\s+secret\b',
+            r'\bthe\s+real\s+reason\b',
+            r'\bwhale\s+economy\b',
+            r'\bthe\s+end\s+of\b',
+            r'\bthe\s+future\s+of\b',
+            r'\bthe\s+cost\s+of\b',
+            r'\bthe\s+price\s+of\b',
+            r'\ba\s+new\s+era\b',
+            r'\bthe\s+untold\s+story\b',
+            r'\bhidden\s+truth\b',
+            r'\bbehind\s+the\s+scenes\b(?!\s+(footage|video|tour))',  # Allow "behind the scenes footage"
+        ]
+
+        # Words that strongly indicate visual/filmable content
+        VISUAL_INDICATORS = [
+            'hotel', 'casino', 'street', 'building', 'aerial', 'drone',
+            'walkthrough', 'tour', 'footage', '4k', 'timelapse', 'night',
+            'day', 'crowd', 'people', 'exterior', 'interior', 'lobby',
+            'pool', 'restaurant', 'bar', 'show', 'performance', 'sign',
+            'neon', 'lights', 'skyline', 'view', 'entrance', 'parking',
+            'strip', 'boulevard', 'avenue', 'plaza', 'resort', 'tower',
+            'fountain', 'buffet', 'slot', 'table', 'game', 'room',
+            'suite', 'penthouse', 'rooftop', 'desert', 'highway',
+        ]
+
+        validated = []
+        filtered_count = 0
+
+        for kw in keywords:
+            kw_lower = kw.lower()
+
+            # Check if it matches abstract patterns
+            is_abstract = False
+            for pattern in ABSTRACT_PATTERNS:
+                if re.search(pattern, kw_lower):
+                    logger.debug(f"Filtered abstract keyword: '{kw}'")
+                    is_abstract = True
+                    filtered_count += 1
+                    break
+
+            if is_abstract:
+                continue
+
+            # Check if it's too long (likely a script phrase)
+            word_count = len(kw.split())
+            if word_count > 6:
+                logger.debug(f"Filtered long keyword ({word_count} words): '{kw}'")
+                filtered_count += 1
+                continue
+
+            # Check for visual indicators or proper nouns (locations/names)
+            has_visual = any(ind in kw_lower for ind in VISUAL_INDICATORS)
+            words = kw.split()
+            has_proper_noun = any(w[0].isupper() for w in words if len(w) > 2)
+
+            # Accept if has visual indicator, proper noun, or is short/specific
+            if has_visual or has_proper_noun or word_count <= 3:
+                validated.append(kw)
+            else:
+                # Log but still accept - might be valid
+                logger.debug(f"Keyword without visual indicator (kept): '{kw}'")
+                validated.append(kw)
+
+        if filtered_count > 0:
+            logger.info(f"Filtered {filtered_count} abstract/narrative keywords")
+
+        return validated
+
     def _combine_voiceover_text(self, segments: List[Dict]) -> str:
         """Combine all voiceover segments into single text"""
         texts = []
@@ -496,8 +636,12 @@ Topic:"""
                 keywords = list(dict.fromkeys(merged_keywords))[:max_keywords]
         else:
             keywords = list(dict.fromkeys(merged_keywords))[:max_keywords]
-        
-        logger.info(f"Final keywords: {len(keywords)} (including {len(entity_keywords)} entity-based)")
+
+        # Validate keywords - filter out abstract/narrative phrases
+        pre_validation_count = len(keywords)
+        keywords = self._validate_visual_keywords(keywords)
+
+        logger.info(f"Final keywords: {len(keywords)} (validated from {pre_validation_count}, {len(entity_keywords)} entity-based)")
         
         return KeywordResult(
             keywords=keywords,
