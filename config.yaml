@@ -111,7 +111,8 @@ transcription:
 # Decision: batch_size=100 optimal for Gemini API limits
 
 embedding:
-  provider: gemini  # gemini, voyage, local
+  # Options: gemini, openai, local, sentence_transformers
+  provider: gemini
   
   # Model names per provider
   gemini_model: models/text-embedding-004
@@ -267,6 +268,7 @@ matching:
   # LLM providers (tiered: primary → secondary → local)
   # Chain-of-thought: Fallback chain ensures reliability
   # Reasoning: Gemini fast/cheap, Claude for ambiguous, Ollama offline
+  # Options: gemini, anthropic, local, embedding_only
   primary_provider: gemini
   secondary_provider: anthropic
   local_provider: ollama
@@ -535,7 +537,7 @@ enhanced:
   non_interactive: false  # Set to true for fully automated runs (no prompts)
   
   # Face preference for matching
-  # Options: "neutral" (no preference), "more" (prefer faces), "none" (avoid faces)
+  # Options: neutral (no preference), prefer_faces (boost clips with faces), avoid_faces (penalize faces)
   face_preference: "neutral"
 
 # -----------------------------------------------------------------------------
