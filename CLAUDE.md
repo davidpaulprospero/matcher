@@ -468,3 +468,17 @@ Before committing changes:
 - **Solution:** Changed to `exit /b` so batch file exits cleanly after completion
 - **Files changed:** `setup_project.py` → `create_run_bat()` function
 - **Documentation:** Added "Project Directory Architecture" section explaining INSTALL_DIR vs PROJECT_DIR
+
+### 2026-01-04: Match Only menu option
+- **Problem:** Users want to re-run matching with different config without re-downloading/transcribing
+- **Solution:** Added [M] Match only option to initial menu in run.bat/run.sh
+- **Use cases:**
+  - Re-run matching with different `min_conf`, `candidates`, `face_preference` settings
+  - Test different matching strategies without waiting for transcription/embedding
+  - Regenerate timelines after tweaking `config.yaml`
+- **Cache validation:** Menu checks for transcription + embedding caches before enabling [M]
+- **Menu shows:**
+  - Transcriptions cached [X videos]
+  - Embeddings cached [Y entries]
+- **Command line:** `run --match-only` or `./run.sh --match-only`
+- **Files changed:** `setup_project.py` → `create_run_bat()`, `create_run_sh()` functions (v3.2)

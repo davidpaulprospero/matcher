@@ -2915,26 +2915,22 @@ Topic:"""
 
             print(f"  ✓ Built {len(self.text_metadata)} text segments")
 
-            # Load or compute embeddings
+            # Load embeddings from cache (compute_embeddings checks batch cache first)
             provider = get_embedding_provider(config)
             cache_mgr = CacheManager(config.cache.cache_dir)
+            text_strings = [t['text'] for t in self.text_metadata]
 
-            # Try to load cached embeddings
-            cached_embeddings = cache_mgr.get_embeddings("video_segments")
-            if cached_embeddings and len(cached_embeddings) == len(self.text_metadata):
-                self.embeddings = cached_embeddings
-                print(f"  ✓ Loaded {len(self.embeddings)} embeddings from cache")
-            else:
-                # Recompute embeddings (they may have a different count)
-                print(f"  Computing embeddings...")
-                text_strings = [t['text'] for t in self.text_metadata]
-                self.embeddings = compute_embeddings(
-                    texts=text_strings,
-                    provider=provider,
-                    cache=cache_mgr,
-                    cache_key="video_segments"
-                )
-                print(f"  ✓ Computed {len(self.embeddings)} embeddings")
+            # compute_embeddings uses EmbeddingCache.get_batch_cache() internally
+            # This will return cached embeddings if they exist (very fast)
+            # Only recomputes if the exact same text set isn't already cached
+            self.embeddings = compute_embeddings(
+                texts=text_strings,
+                provider=provider,
+                cache=cache_mgr,
+                cache_key="video_segments",
+                config=config
+            )
+            print(f"  ✓ Loaded/computed {len(self.embeddings)} embeddings")
 
             # Build index
             if self.embeddings is not None and len(self.embeddings) > 0:
@@ -4089,7 +4085,7 @@ Be specific and descriptive for semantic matching purposes."""
                 print(f"\n  🗑️ Auto-clearing stale checkpoint ({age_hours:.1f} hours old, limit: {stale_hours}h)")
                 self.checkpoint.clear()
                 # Don't show interactive prompt - just continue fresh
-            elif not resume and not self.config.enhanced.non_interactive:
+            elif not resume and not self.config.enhanced.non_interactive and not match_only:
                 # Interactive mode: ask user about valid checkpoint
                 validation = self.checkpoint.validate(voiceover_path)
                 print(format_resume_prompt(self.checkpoint))
@@ -4108,6 +4104,10 @@ Be specific and descriptive for semantic matching purposes."""
                     except (EOFError, KeyboardInterrupt):
                         print("\n  Exiting.")
                         return
+            elif match_only:
+                # Match-only mode: skip checkpoint prompt, just clear and proceed
+                print(f"\n  ⏭ Match-only mode: ignoring checkpoint, skipping to matching stage")
+                self.checkpoint.clear()
             elif resume:
                 # --resume flag: automatically resume
                 validation = self.checkpoint.validate(voiceover_path)
@@ -4475,21 +4475,36 @@ Be specific and descriptive for semantic matching purposes."""
                         'remixed_paths': [str(p) for p in getattr(self, 'remixed_video_paths', [])],
                         'video_count': len(getattr(self, 'remixed_video_paths', []))
                     })
-        
-        # Stage 3: Transcribe & index (always run - uses cache internally)
-        # Note: Transcription has its own caching, so we don't skip it entirely
-        # but it will be very fast if videos are already cached
-        if self.resume_mode and self.checkpoint.should_skip_stage("TRANSCRIBE"):
+
+        # Stage 3: Transcribe & index
+        # For match_only mode or resume, load from cache instead of recomputing
+        skip_transcribe = False
+
+        if match_only:
+            # Match-only mode: skip transcription entirely, load from cache
+            print(f"\n  ⏭ Match-only mode: loading transcripts and embeddings from cache")
+            logger.info("Skipping TRANSCRIBE stage (match-only mode)")
+            self._load_existing_videos()
+            stage_start = time.time()
+            self._load_transcripts_from_cache()
+            stage_duration = time.time() - stage_start
+            skip_transcribe = True
+        elif self.resume_mode and self.checkpoint.should_skip_stage("TRANSCRIBE"):
+            # Resume mode: load from cache
             print(f"\n  ⏭ Skipping TRANSCRIBE (completed in previous run)")
             logger.info("Skipping TRANSCRIBE stage (checkpoint resume)")
-            # Still need to load transcripts and build index
             self._load_existing_videos()
-            # Transcription cache will handle this
-        
-        stage_start = time.time()
-        self.stage_transcribe()
-        stage_duration = time.time() - stage_start
-        
+            stage_start = time.time()
+            self._load_transcripts_from_cache()
+            stage_duration = time.time() - stage_start
+            skip_transcribe = True
+
+        if not skip_transcribe:
+            # Normal mode: run transcription
+            stage_start = time.time()
+            self.stage_transcribe()
+            stage_duration = time.time() - stage_start
+
         transcribe_stats = {
             "transcribed": len(getattr(self, 'transcripts', {})),
             "embeddings": len(getattr(self, 'embeddings', [])) if hasattr(self, 'embeddings') and self.embeddings is not None else 0
@@ -4500,12 +4515,13 @@ Be specific and descriptive for semantic matching purposes."""
                 videos_transcribed=transcribe_stats["transcribed"],
                 embeddings_computed=transcribe_stats["embeddings"]
             )
-        
-        # Save checkpoint after transcription
-        self.checkpoint.save("TRANSCRIBE", {
-            'transcribed_count': transcribe_stats["transcribed"],
-            'embedding_count': transcribe_stats["embeddings"]
-        })
+
+        # Save checkpoint after transcription (skip for match_only to avoid overwriting)
+        if not match_only:
+            self.checkpoint.save("TRANSCRIBE", {
+                'transcribed_count': transcribe_stats["transcribed"],
+                'embedding_count': transcribe_stats["embeddings"]
+            })
         
         # Stage 4: Match
         stage_start = time.time()
