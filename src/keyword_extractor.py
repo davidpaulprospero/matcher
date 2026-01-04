@@ -381,7 +381,7 @@ REFINED KEYWORDS:"""
         ]
 
         validated = []
-        filtered_count = 0
+        filtered_keywords = []  # Track what was filtered for debugging
 
         for kw in keywords:
             kw_lower = kw.lower()
@@ -390,9 +390,8 @@ REFINED KEYWORDS:"""
             is_abstract = False
             for pattern in ABSTRACT_PATTERNS:
                 if re.search(pattern, kw_lower):
-                    logger.debug(f"Filtered abstract keyword: '{kw}'")
+                    filtered_keywords.append(f"'{kw}' (abstract pattern)")
                     is_abstract = True
-                    filtered_count += 1
                     break
 
             if is_abstract:
@@ -401,8 +400,7 @@ REFINED KEYWORDS:"""
             # Check if it's too long (likely a script phrase)
             word_count = len(kw.split())
             if word_count > 6:
-                logger.debug(f"Filtered long keyword ({word_count} words): '{kw}'")
-                filtered_count += 1
+                filtered_keywords.append(f"'{kw}' (too long: {word_count} words)")
                 continue
 
             # Check for visual indicators or proper nouns (locations/names)
@@ -418,8 +416,8 @@ REFINED KEYWORDS:"""
                 logger.debug(f"Keyword without visual indicator (kept): '{kw}'")
                 validated.append(kw)
 
-        if filtered_count > 0:
-            logger.info(f"Filtered {filtered_count} abstract/narrative keywords")
+        if filtered_keywords:
+            logger.info(f"Filtered {len(filtered_keywords)} abstract/narrative keywords: {filtered_keywords}")
 
         return validated
 
