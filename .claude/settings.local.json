@@ -6,7 +6,8 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\nfix: Handle OTIO media_references as method in newer versions\n\nIn newer OpenTimelineIO versions, clip.media_references is a method\nthat must be called, not a property. This caused all clips to fail\nfilename extraction silently, resulting in 0 segments in analysis.\n\nAlso replaced Unicode box-drawing characters with ASCII equivalents\nto avoid Windows console encoding errors.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git push)",
       "Bash(git push:*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
