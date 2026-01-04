@@ -40,13 +40,16 @@ logger = logging.getLogger(__name__)
 class TimelineVarietyTracker:
     """
     Tracks source video usage per track to enforce timeline variety.
-    
+
     Prevents the same source video from appearing more than max_repeats times
     within a timeline_window (e.g., 10 minutes).
-    
+
     This solves the problem of one video dominating 90% of a 30-minute timeline.
+
+    Performance: Uses sorted list with binary search for O(log n + k) lookups
+    where k is the number of items in the window (typically small).
     """
-    
+
     def __init__(self, timeline_window: float = 600.0, max_repeats: int = 1):
         """
         Args:
@@ -55,57 +58,90 @@ class TimelineVarietyTracker:
         """
         self.timeline_window = timeline_window
         self.max_repeats = max_repeats
-        
-        # Track source usage per track: {track_name: [(source_file, timeline_position), ...]}
-        self.track_usage: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
-    
+
+        # Track source usage per track: {track_name: [(timeline_position, source_file), ...]}
+        # Sorted by position for binary search
+        self.track_usage: Dict[str, List[Tuple[float, str]]] = defaultdict(list)
+
     def get_excluded_sources(self, track: str, current_timeline_pos: float) -> Set[str]:
         """
         Get set of source files that should be excluded for this track at this position.
-        
+
+        Uses binary search to find window boundaries efficiently.
+
         Args:
             track: Track name (e.g., "V1", "V2", etc.)
             current_timeline_pos: Current position in timeline (seconds from start)
-        
+
         Returns:
             Set of source file paths that should be excluded
         """
-        excluded = set()
+        usages = self.track_usage[track]
+        if not usages:
+            return set()
+
         window_start = current_timeline_pos - self.timeline_window
-        
+
+        # Binary search to find start of window
+        # Find first index where position >= window_start
+        left, right = 0, len(usages)
+        while left < right:
+            mid = (left + right) // 2
+            if usages[mid][0] < window_start:
+                left = mid + 1
+            else:
+                right = mid
+        start_idx = left
+
         # Count occurrences of each source within the window
         source_counts: Dict[str, int] = defaultdict(int)
-        
-        for source_file, pos in self.track_usage[track]:
-            if pos >= window_start and pos < current_timeline_pos:
-                source_counts[source_file] += 1
-        
+
+        for i in range(start_idx, len(usages)):
+            pos, source_file = usages[i]
+            if pos >= current_timeline_pos:
+                break
+            source_counts[source_file] += 1
+
         # Exclude sources that have reached max_repeats
-        for source_file, count in source_counts.items():
-            if count >= self.max_repeats:
-                excluded.add(source_file)
-        
-        return excluded
-    
+        return {src for src, count in source_counts.items() if count >= self.max_repeats}
+
     def record_usage(self, track: str, source_file: str, timeline_pos: float):
         """
         Record that a source file was used on a track at a timeline position.
-        
+
+        Maintains sorted order for efficient lookups.
+
         Args:
             track: Track name (e.g., "V1", "V2", etc.)
             source_file: Path to the source video file
             timeline_pos: Position in timeline where this clip starts (seconds)
         """
-        self.track_usage[track].append((source_file, timeline_pos))
-    
+        usages = self.track_usage[track]
+        # Insert in sorted order (typically appending since timeline is sequential)
+        # Use bisect for insertion point
+        entry = (timeline_pos, source_file)
+        if not usages or usages[-1][0] <= timeline_pos:
+            # Fast path: append at end (most common case)
+            usages.append(entry)
+        else:
+            # Binary search for insertion point
+            left, right = 0, len(usages)
+            while left < right:
+                mid = (left + right) // 2
+                if usages[mid][0] < timeline_pos:
+                    left = mid + 1
+                else:
+                    right = mid
+            usages.insert(left, entry)
+
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about source usage per track."""
         stats = {}
         for track, usages in self.track_usage.items():
             source_counts = defaultdict(int)
-            for source_file, _ in usages:
+            for _, source_file in usages:
                 source_counts[Path(source_file).name] += 1
-            
+
             stats[track] = {
                 "total_clips": len(usages),
                 "unique_sources": len(source_counts),

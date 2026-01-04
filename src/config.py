@@ -1446,17 +1446,23 @@ class Config:
     def validate(self) -> List[str]:
         """
         Validate configuration with clear error messages.
-        
+
+        Checks:
+        - Required API keys for enabled features
+        - Value ranges (min/max, 0-1 percentages)
+        - Enum values (valid options)
+        - Constraint relationships (min <= max)
+
         Returns:
             List of validation error messages (empty if valid)
         """
         global _config_metrics
         errors = []
-        
+
         # API key checks
         api_checks = [
-            (self.matching.primary_provider == "gemini", 
-             self.api_keys.gemini_api_key, 
+            (self.matching.primary_provider == "gemini",
+             self.api_keys.gemini_api_key,
              "GEMINI_API_KEY required for gemini matching"),
             (self.matching.secondary_provider == "anthropic",
              self.api_keys.anthropic_api_key,
@@ -1471,11 +1477,11 @@ class Config:
              self.api_keys.pixabay_api_key,
              "PIXABAY_API_KEY required for Pixabay stock footage"),
         ]
-        
+
         for condition, key, message in api_checks:
             if condition and not key:
                 errors.append(message)
-        
+
         # Value range checks
         range_checks = [
             (0 <= self.matching.min_confidence <= 1,
@@ -1489,13 +1495,126 @@ class Config:
             (self.keyword.max_keywords >= 1,
              f"keyword.max_keywords must be >= 1, got {self.keyword.max_keywords}"),
         ]
-        
+
         for valid, message in range_checks:
             if not valid:
                 errors.append(message)
-        
+
+        # Enum value checks
+        errors.extend(self._validate_enums())
+
+        # Constraint relationship checks
+        errors.extend(self._validate_constraints())
+
         _config_metrics['validation_errors'] += len(errors)
-        
+
+        return errors
+
+    def _validate_enums(self) -> List[str]:
+        """Validate enum-like fields have valid values"""
+        errors = []
+
+        # Location matching filter level
+        location_config = getattr(self.matching, 'location_matching', None)
+        if location_config:
+            if isinstance(location_config, dict):
+                filter_level = location_config.get('hard_filter_level', 'city')
+            else:
+                filter_level = getattr(location_config, 'hard_filter_level', 'city')
+
+            valid_levels = {'city', 'state', 'country', 'continent'}
+            if filter_level not in valid_levels:
+                errors.append(
+                    f"matching.location_matching.hard_filter_level must be one of "
+                    f"{valid_levels}, got '{filter_level}'"
+                )
+
+        # Face preference
+        face_pref = getattr(self.enhanced, 'face_preference', 'neutral')
+        valid_face_prefs = {'prefer_faces', 'avoid_faces', 'neutral'}
+        if face_pref not in valid_face_prefs:
+            errors.append(
+                f"enhanced.face_preference must be one of {valid_face_prefs}, "
+                f"got '{face_pref}'"
+            )
+
+        # Audio quality (0-9)
+        audio_first = getattr(self.download, 'audio_first', None)
+        if audio_first:
+            if isinstance(audio_first, dict):
+                audio_quality = audio_first.get('audio_quality', 5)
+            else:
+                audio_quality = getattr(audio_first, 'audio_quality', 5)
+
+            if not (0 <= audio_quality <= 9):
+                errors.append(
+                    f"download.audio_first.audio_quality must be 0-9, "
+                    f"got {audio_quality}"
+                )
+
+        # Embedding provider
+        valid_providers = {'gemini', 'openai', 'local', 'sentence_transformers'}
+        if self.embedding.provider not in valid_providers:
+            errors.append(
+                f"embedding.provider must be one of {valid_providers}, "
+                f"got '{self.embedding.provider}'"
+            )
+
+        # Matching provider
+        valid_matching = {'gemini', 'anthropic', 'local', 'embedding_only'}
+        if self.matching.primary_provider not in valid_matching:
+            errors.append(
+                f"matching.primary_provider must be one of {valid_matching}, "
+                f"got '{self.matching.primary_provider}'"
+            )
+
+        return errors
+
+    def _validate_constraints(self) -> List[str]:
+        """Validate constraint relationships between config values"""
+        errors = []
+
+        # min_confidence should be <= high_confidence_threshold
+        high_conf = getattr(self.matching, 'high_confidence_threshold', 0.85)
+        if self.matching.min_confidence > high_conf:
+            errors.append(
+                f"matching.min_confidence ({self.matching.min_confidence}) should be <= "
+                f"high_confidence_threshold ({high_conf})"
+            )
+
+        # embedding_candidates should be >= num_alternatives * 3 for diversity
+        num_alts = getattr(self.output, 'num_alternatives', 2)
+        embed_candidates = getattr(self.matching, 'embedding_candidates', 50)
+        min_required = num_alts * 3
+        if embed_candidates < min_required:
+            errors.append(
+                f"matching.embedding_candidates ({embed_candidates}) should be >= "
+                f"num_alternatives * 3 ({min_required}) for proper diversity"
+            )
+
+        # split_otio requires generate_otio
+        if getattr(self.output, 'split_otio', False) and not getattr(self.output, 'generate_otio', True):
+            errors.append(
+                "output.split_otio=true requires output.generate_otio=true"
+            )
+
+        # Pause split thresholds
+        pause_split = getattr(self.transcription, 'pause_split', None)
+        if pause_split:
+            if isinstance(pause_split, dict):
+                min_gap = pause_split.get('min_gap_ms', 300)
+                min_seg = pause_split.get('min_segment_duration', 0.5)
+            else:
+                min_gap = getattr(pause_split, 'min_gap_ms', 300)
+                min_seg = getattr(pause_split, 'min_segment_duration', 0.5)
+
+            # min_gap_ms (in ms) should be greater than min_segment_duration (in s) * 1000
+            if min_gap < min_seg * 1000:
+                errors.append(
+                    f"transcription.pause_split.min_gap_ms ({min_gap}ms) should be >= "
+                    f"min_segment_duration ({min_seg}s = {min_seg * 1000}ms)"
+                )
+
         return errors
     
     def get_nested(self, path: str, default: Any = None) -> Any:

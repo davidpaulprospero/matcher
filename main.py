@@ -232,23 +232,28 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> Config:
     return config
 
 
-def merge_config(config: Config, overrides: dict) -> Config:
-    """Deep merge overrides into config object"""
-    if not overrides:
+def merge_config(config, overrides: dict):
+    """
+    Deep merge overrides into config object.
+
+    Handles nested dataclasses and None values properly.
+    """
+    if not overrides or config is None:
         return config
-    
+
     for key, value in overrides.items():
         if hasattr(config, key):
             current = getattr(config, key)
-            
-            # If both are objects with attributes, recurse
-            if isinstance(value, dict) and hasattr(current, '__dict__'):
+
+            # If both are objects with attributes (but not None), recurse
+            if isinstance(value, dict) and current is not None and hasattr(current, '__dict__'):
                 merge_config(current, value)
             else:
                 setattr(config, key, value)
         else:
-            setattr(config, key, value)
-    
+            # Warn about unknown keys (likely typos in project_config.yaml)
+            logger.warning(f"Unknown config key '{key}' in overrides - ignored")
+
     return config
 
 
@@ -567,6 +572,57 @@ class Pipeline:
         except Exception as e:
             logger.warning(f"Could not initialize global cache: {e}")
             self.global_cache = None
+
+    def _validate_checkpoint_data(self, stage: str, data: dict) -> bool:
+        """
+        Validate data restored from checkpoint before using it.
+
+        Returns True if data is valid, False if checkpoint should be cleared.
+        Logs warnings for recoverable issues, errors for fatal ones.
+        """
+        if data is None:
+            logger.error(f"Checkpoint data for {stage} is None")
+            return False
+
+        if not isinstance(data, dict):
+            logger.error(f"Checkpoint data for {stage} is not a dict: {type(data)}")
+            return False
+
+        # Stage-specific validation
+        if stage == "ANALYZE":
+            keywords = data.get('keywords')
+            if keywords is None:
+                logger.error(f"Checkpoint ANALYZE missing 'keywords' field")
+                return False
+            if not isinstance(keywords, list):
+                logger.error(f"Checkpoint ANALYZE 'keywords' is not a list: {type(keywords)}")
+                return False
+            if len(keywords) == 0:
+                logger.warning("Checkpoint ANALYZE has empty keywords list")
+                # Empty is valid but worth noting
+
+            segments = data.get('segments')
+            if segments is not None and not isinstance(segments, list):
+                logger.warning(f"Checkpoint ANALYZE 'segments' is not a list, ignoring")
+                data['segments'] = []
+
+        elif stage == "DOWNLOAD":
+            video_paths = data.get('video_paths')
+            if video_paths is not None and not isinstance(video_paths, list):
+                logger.warning(f"Checkpoint DOWNLOAD 'video_paths' is not a list")
+                return False
+
+        elif stage == "TRANSCRIBE":
+            transcribed_count = data.get('transcribed_count', 0)
+            if not isinstance(transcribed_count, (int, float)):
+                logger.warning(f"Checkpoint TRANSCRIBE 'transcribed_count' is not numeric")
+
+        elif stage == "MATCH":
+            match_count = data.get('match_count', 0)
+            if not isinstance(match_count, (int, float)):
+                logger.warning(f"Checkpoint MATCH 'match_count' is not numeric")
+
+        return True
 
     def _print_banner(self):
         """Print startup banner with config-driven values"""
@@ -4152,16 +4208,25 @@ Be specific and descriptive for semantic matching purposes."""
             logger.info("Skipping ANALYZE stage (checkpoint resume)")
             # Restore state from checkpoint
             analyze_data = self.checkpoint.get_stage_data("ANALYZE")
-            keywords = analyze_data.get('keywords', [])
-            self.keywords = keywords
-            self.voiceover_segments = analyze_data.get('segments', [])
-            self.topic_context = analyze_data.get('topic_context', '')
-            self.extracted_entities = analyze_data.get('entities', [])
 
-            # Detect location chapters (needed for location-aware matching)
-            self._detect_location_chapters()
+            # Validate checkpoint data before using
+            if not self._validate_checkpoint_data("ANALYZE", analyze_data):
+                logger.warning("Invalid ANALYZE checkpoint data, clearing checkpoint and restarting")
+                print("  ⚠ Checkpoint data invalid, restarting from scratch")
+                self.checkpoint.clear()
+                self.resume_mode = False
+                # Fall through to normal ANALYZE
+            else:
+                keywords = analyze_data.get('keywords', [])
+                self.keywords = keywords
+                self.voiceover_segments = analyze_data.get('segments', [])
+                self.topic_context = analyze_data.get('topic_context', '')
+                self.extracted_entities = analyze_data.get('entities', [])
 
-            use_saved = True
+                # Detect location chapters (needed for location-aware matching)
+                self._detect_location_chapters()
+
+                use_saved = True
             
         # Check if using saved keywords from command line
         elif use_keywords:
