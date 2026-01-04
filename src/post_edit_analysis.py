@@ -1,979 +1,797 @@
 """
 Post-Edit Analysis Tool
 
-Analyzes final XML exported from DaVinci Resolve to understand which clips
-were selected from the original match recommendations. Uses segment IDs
-embedded in clip names ([S001], [S002], etc.) for reliable tracing.
+Analyzes final OTIO/XML exported from DaVinci Resolve to understand which clips
+were selected from the original match recommendations.
+
+Since DaVinci Resolve strips custom metadata and segment IDs from clip names,
+this tool uses TIMECODE POSITION MATCHING against a segment map JSON file
+generated during the original timeline creation.
 
 This tool helps:
 1. Track editor preferences for future matching improvements
 2. Feed successful selections back to global cache
 3. Understand which types of matches get kept vs replaced
+
+Usage:
+    python -m src.post_edit_analysis --edited export.otio --segments timeline_segments.json
 """
 
+from __future__ import annotations
+
+import json
 import logging
+import os
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ClipSelection:
-    """Represents a clip that was selected in the final edit."""
-    segment_id: str  # e.g., "S001" - from clip name, NOT timeline position
-    segment_index: int  # e.g., 1 - original segment this clip was made for
-    clip_name: str  # Full clip name from timeline
-    source_file: Optional[str] = None  # Extracted source file name
-    track: str = "V1"  # Which track it came from
-    track_number: int = 1  # Numeric track number (V2 = 2) for priority comparison
-    was_alternative: bool = False  # True if ALT clip was used
-    alternative_index: Optional[int] = None  # Which ALT (1, 2, etc.)
-    was_secondary: bool = False  # True if secondary source was used
-    is_enabled: bool = True  # False if clip is disabled in timeline
-    is_external: bool = False  # True if clip has no segment ID (external footage)
-    timeline_start: float = 0.0  # Timeline position in seconds
-    timeline_end: float = 0.0  # End position in seconds
-    duration: float = 0.0  # Duration in seconds
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
 
-    # Detected position vs original segment
-    detected_position: Optional[int] = None  # Which segment position this clip is at (by timeline)
-    was_moved: bool = False  # True if clip was moved to a different segment position
+@dataclass
+class SegmentInfo:
+    """Segment information from the segment map."""
+    id: str  # e.g., "S000"
+    index: int  # 0, 1, 2...
+    start_frame: int
+    end_frame: int
+    start_tc: str
+    end_tc: str
+    voiceover_text: str
+    duration_sec: float
+    v1_clip: str  # Original V1 clip filename
+    v1_confidence: float
+    alternatives: List[Dict[str, Any]] = field(default_factory=list)
+    secondary: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class EditedClip:
+    """A clip found in the edited timeline."""
+    filename: str
+    track_name: str
+    track_number: int
+    start_frame: int
+    end_frame: int
+    duration_frames: int
+    is_enabled: bool = True
+    source_start: float = 0.0
+    source_end: float = 0.0
 
 
 @dataclass
 class SegmentSelection:
-    """
-    Represents all clips for a single segment POSITION, with priority logic applied.
+    """Which clip was selected for a segment after editing."""
+    segment_id: str
+    segment_index: int
+    voiceover_text: str
 
-    Note: segment_index here refers to the TIMELINE POSITION (which voiceover segment
-    this covers), not the original segment ID from clip names.
+    # Selection info
+    selected_clip: Optional[str] = None  # Filename of selected clip
+    selected_track: Optional[str] = None  # Track name (e.g., "V1 - Primary")
+    selected_track_number: int = 0
 
-    In DaVinci Resolve workflow:
-    - Editor disables unwanted clips rather than deleting
-    - Higher tracks (V2 > V1) take visual priority
-    - Multiple clips can be active for layered compositions
-    - Clips can be moved from one segment to another
-    """
-    segment_index: int  # Timeline position (0, 1, 2...)
-    segment_id: str  # Expected segment ID for this position (S000, S001...)
-
-    # Primary selection: highest enabled track
-    primary_clip: Optional[ClipSelection] = None
-
-    # All active (enabled) clips for this segment (for layered compositions)
-    active_clips: List[ClipSelection] = field(default_factory=list)
-
-    # All disabled clips (kept for reference)
-    disabled_clips: List[ClipSelection] = field(default_factory=list)
-
-    # External clips (no segment ID - user added footage)
-    external_clips: List[ClipSelection] = field(default_factory=list)
+    # Original recommendation
+    original_v1_clip: str = ""
+    original_confidence: float = 0.0
 
     # Analysis flags
-    is_layered: bool = False  # True if multiple active clips
-    all_disabled: bool = False  # True if all clips for this segment are disabled
-    has_external: bool = False  # True if external clips were added
-    has_moved_clip: bool = False  # True if a clip from another segment was used
-
-    def get_winning_track(self) -> Optional[str]:
-        """Get the track name of the primary (highest) active clip."""
-        return self.primary_clip.track if self.primary_clip else None
+    was_v1_kept: bool = False  # True if V1 clip was kept
+    was_replaced: bool = False  # True if a different clip was selected
+    replacement_source: str = ""  # "alternative", "secondary", "external"
+    is_disabled: bool = False  # True if all clips for this segment are disabled
+    is_missing: bool = False  # True if no clip found for this segment
 
 
 @dataclass
-class EditAnalysisResult:
-    """Results from analyzing a final edit."""
+class AnalysisResult:
+    """Complete analysis results."""
+    analyzed_at: str
+    edited_file: str
+    segment_map_file: str
+    frame_rate: float
+
+    # Summary stats
     total_segments: int = 0
-    clips_kept: int = 0  # Primary clips kept as-is (V1, enabled, not moved)
-    clips_replaced_with_alt: int = 0  # Replaced with alternative (ALT on higher track)
-    clips_replaced_with_secondary: int = 0  # Replaced with secondary source
-    clips_replaced_with_external: int = 0  # Replaced with external footage (no segment ID)
-    clips_moved_from_other: int = 0  # Used a clip from another segment
-    clips_removed: int = 0  # Segments with no clips at all
-    clips_all_disabled: int = 0  # Segments where all clips were disabled
+    v1_kept: int = 0
+    v1_kept_pct: float = 0.0
+    replaced_with_alt: int = 0
+    replaced_with_secondary: int = 0
+    replaced_with_external: int = 0
+    all_disabled: int = 0
+    missing: int = 0
 
-    # Detailed selection data
-    selections: List[ClipSelection] = field(default_factory=list)  # Primary selections only
-    segment_selections: List[SegmentSelection] = field(default_factory=list)  # Full segment data
-    missing_segments: List[int] = field(default_factory=list)  # Segment IDs not found
-    external_clips: List[ClipSelection] = field(default_factory=list)  # All external clips found
+    # Track usage
+    track_usage: Dict[str, int] = field(default_factory=dict)
 
-    # Layered composition tracking
-    segments_with_layers: int = 0  # Segments with multiple active clips
-    layered_segments: List[int] = field(default_factory=list)  # Which segments are layered
+    # Detailed selections
+    selections: List[SegmentSelection] = field(default_factory=list)
+    replacements: List[Dict[str, str]] = field(default_factory=list)
 
-    # Moved clips tracking
-    moved_clips: List[Tuple[int, int, ClipSelection]] = field(default_factory=list)  # (from_seg, to_seg, clip)
-
-    # Track usage statistics
-    track_usage: Dict[str, int] = field(default_factory=dict)  # Count per track
-
-    # Statistics
-    avg_kept_confidence: float = 0.0
-    avg_replaced_confidence: float = 0.0
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return {
+            "analyzed_at": self.analyzed_at,
+            "edited_file": self.edited_file,
+            "segment_map_file": self.segment_map_file,
+            "summary": {
+                "total_segments": self.total_segments,
+                "v1_kept": self.v1_kept,
+                "v1_kept_pct": round(self.v1_kept_pct, 1),
+                "replaced": self.total_segments - self.v1_kept - self.all_disabled - self.missing,
+                "replaced_pct": round(100 - self.v1_kept_pct - (self.all_disabled + self.missing) / max(1, self.total_segments) * 100, 1),
+                "all_disabled": self.all_disabled,
+                "missing": self.missing
+            },
+            "track_usage": self.track_usage,
+            "selections": [
+                {
+                    "segment": s.segment_id,
+                    "track": s.selected_track,
+                    "file": s.selected_clip,
+                    "was_v1": s.was_v1_kept
+                }
+                for s in self.selections
+            ],
+            "replacements": self.replacements
+        }
 
     def summary(self) -> str:
         """Generate human-readable summary."""
         lines = [
-            "=== Post-Edit Analysis Summary ===",
-            f"Total segments analyzed: {self.total_segments}",
-            f"Primary clips kept (V1): {self.clips_kept} ({self.clips_kept/max(1,self.total_segments)*100:.1f}%)",
-            f"Replaced with alternatives: {self.clips_replaced_with_alt}",
-            f"Replaced with secondary: {self.clips_replaced_with_secondary}",
-            f"Replaced with external: {self.clips_replaced_with_external}",
-            f"Moved from other segment: {self.clips_moved_from_other}",
-            f"All disabled (removed): {self.clips_all_disabled}",
-            f"Missing segments: {self.clips_removed}",
+            "=" * 50,
+            "POST-EDIT ANALYSIS SUMMARY",
+            "=" * 50,
+            f"Edited file: {Path(self.edited_file).name}",
+            f"Segment map: {Path(self.segment_map_file).name}",
+            f"Analyzed at: {self.analyzed_at}",
+            "",
+            f"Total segments:     {self.total_segments:>4}",
+            f"V1 clips kept:      {self.v1_kept:>4} ({self.v1_kept_pct:.1f}%)",
+            f"Replaced with alt:  {self.replaced_with_alt:>4}",
+            f"Replaced with sec:  {self.replaced_with_secondary:>4}",
+            f"External clips:     {self.replaced_with_external:>4}",
+            f"All disabled:       {self.all_disabled:>4}",
+            f"Missing:            {self.missing:>4}",
+            "",
+            "Track Usage:",
         ]
 
-        if self.segments_with_layers > 0:
-            lines.append(f"Layered compositions: {self.segments_with_layers} segments")
+        for track, count in sorted(self.track_usage.items()):
+            lines.append(f"  {track}: {count}")
 
-        if self.moved_clips:
-            lines.append(f"Moved clips: {len(self.moved_clips)}")
-            for from_seg, to_seg, clip in self.moved_clips[:5]:
-                lines.append(f"  S{from_seg:03d} → S{to_seg:03d}: {clip.source_file or clip.clip_name[:30]}")
-            if len(self.moved_clips) > 5:
-                lines.append(f"  ... and {len(self.moved_clips) - 5} more")
+        if self.replacements:
+            lines.append("")
+            lines.append(f"Replacements ({len(self.replacements)}):")
+            for r in self.replacements[:10]:
+                lines.append(f"  {r['segment']}: {r['original'][:25]} → {r['replaced_with'][:25]} ({r['new_track']})")
+            if len(self.replacements) > 10:
+                lines.append(f"  ... and {len(self.replacements) - 10} more")
 
-        if self.external_clips:
-            lines.append(f"External clips added: {len(self.external_clips)}")
-
-        if self.track_usage:
-            usage_str = ", ".join(f"{k}:{v}" for k, v in sorted(self.track_usage.items()))
-            lines.append(f"Track usage: {usage_str}")
-
-        if self.missing_segments:
-            lines.append(f"Missing segment IDs: {self.missing_segments[:10]}{'...' if len(self.missing_segments) > 10 else ''}")
-
+        lines.append("=" * 50)
         return "\n".join(lines)
 
 
-class PostEditAnalyzer:
-    """Analyzes edited XML to understand clip selections."""
+# =============================================================================
+# TIMECODE ANALYZER
+# =============================================================================
 
-    # Regex to extract segment ID from clip name: [S001], [S123], etc.
-    SEGMENT_ID_PATTERN = re.compile(r'\[S(\d{3})\]')
+class TimecodeAnalyzer:
+    """
+    Analyzes edited timeline by matching clips to segments via timeline position.
 
-    # Regex to detect alternative clips: ALT1:, ALT2:, etc.
-    ALT_PATTERN = re.compile(r'ALT(\d+):')
+    This approach works even when DaVinci Resolve strips metadata because:
+    1. We know the exact frame range for each segment from the segment map
+    2. Clips in the edited timeline have start/end positions
+    3. We match clips to segments by position overlap
+    """
 
-    # Regex to extract track number from track name: V1, V2, A1, etc.
-    TRACK_NUMBER_PATTERN = re.compile(r'[VA](\d+)')
-
-    # Regex to detect secondary clips (common labels)
-    SECONDARY_PATTERNS = [
-        re.compile(r'^(Different Source|Alternative File|Secondary):'),
-        re.compile(r'^SEC\d*:'),
-    ]
-
-    def __init__(self, original_srt_path: Optional[str] = None):
+    def __init__(self, segment_map_path: str):
         """
-        Initialize analyzer.
+        Initialize with segment map.
 
         Args:
-            original_srt_path: Path to original SRT file for cross-reference
+            segment_map_path: Path to timeline_segments.json
         """
-        self.original_srt_path = original_srt_path
-        self.original_segments: Dict[int, str] = {}
+        self.segment_map_path = segment_map_path
+        self.segments: List[SegmentInfo] = []
+        self.frame_rate: float = 30.0
+        self.timeline_start_tc: str = "01:00:00:00"
 
-        if original_srt_path and Path(original_srt_path).exists():
-            self._load_original_srt(original_srt_path)
+        self._load_segment_map()
 
-    def _load_original_srt(self, srt_path: str) -> None:
-        """Load original SRT to get segment texts."""
-        try:
-            with open(srt_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+    def _load_segment_map(self) -> None:
+        """Load segment map from JSON file."""
+        with open(self.segment_map_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
-            # Simple SRT parsing
-            segments = content.strip().split('\n\n')
-            for i, segment in enumerate(segments):
-                lines = segment.strip().split('\n')
-                if len(lines) >= 3:
-                    # Lines: index, timestamp, text...
-                    text = ' '.join(lines[2:])
-                    self.original_segments[i] = text
+        self.frame_rate = data.get('frame_rate', 30.0)
+        self.timeline_start_tc = data.get('timeline_start_tc', '01:00:00:00')
 
-            logger.info(f"Loaded {len(self.original_segments)} segments from original SRT")
-        except Exception as e:
-            logger.warning(f"Could not load original SRT: {e}")
-
-    def analyze_xml(self, xml_path: str) -> EditAnalysisResult:
-        """
-        Analyze an XML file exported from DaVinci Resolve.
-
-        Implements the following selection logic:
-        1. Disabled clips are ignored (editor disables unwanted clips)
-        2. For each segment POSITION, the highest enabled track wins (V2 > V1)
-        3. Multiple active clips = layered composition (all tracked)
-        4. Clips can be moved to different positions (detected by timeline position vs segment ID)
-        5. External clips (no segment ID) are tracked separately
-        6. Only video tracks are analyzed (audio is ignored)
-
-        Args:
-            xml_path: Path to the exported XML file
-
-        Returns:
-            EditAnalysisResult with analysis details
-        """
-        result = EditAnalysisResult()
-
-        try:
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse XML: {e}")
-            return result
-
-        # Get clips with track information (video tracks only)
-        clip_elements = self._find_clip_elements(root)
-
-        # Parse all clips
-        all_clips: List[ClipSelection] = []
-        external_clips: List[ClipSelection] = []
-
-        for clip_elem, track_name, track_number in clip_elements:
-            selection = self._parse_clip_element(clip_elem, track_name, track_number)
-            if selection:
-                if selection.is_external:
-                    external_clips.append(selection)
-                else:
-                    all_clips.append(selection)
-
-        result.external_clips = external_clips
-
-        if not all_clips:
-            logger.warning("No clips with segment IDs found")
-            return result
-
-        # Determine timeline positions by sorting clips and grouping overlapping ones
-        # Group clips by their timeline position (using start time and small tolerance)
-        clips_by_position = self._group_clips_by_timeline_position(all_clips, external_clips)
-
-        result.total_segments = len(clips_by_position)
-
-        for position_idx, clips_at_position in enumerate(clips_by_position):
-            expected_segment_id = f"S{position_idx:03d}"
-
-            # Separate by type
-            segment_clips = [c for c in clips_at_position if not c.is_external]
-            position_external = [c for c in clips_at_position if c.is_external]
-            enabled_clips = [c for c in segment_clips if c.is_enabled]
-            disabled_clips = [c for c in segment_clips if not c.is_enabled]
-
-            # Create segment selection
-            segment_sel = SegmentSelection(
-                segment_index=position_idx,
-                segment_id=expected_segment_id,
-                active_clips=enabled_clips,
-                disabled_clips=disabled_clips,
-                external_clips=position_external,
-                has_external=len(position_external) > 0
+        for idx, seg in enumerate(data.get('segments', [])):
+            info = SegmentInfo(
+                id=seg['id'],
+                index=idx,
+                start_frame=seg['start_frame'],
+                end_frame=seg['end_frame'],
+                start_tc=seg['start_tc'],
+                end_tc=seg['end_tc'],
+                voiceover_text=seg.get('voiceover_text', ''),
+                duration_sec=seg.get('duration_sec', 0.0),
+                v1_clip=seg.get('v1_clip', {}).get('file', ''),
+                v1_confidence=seg.get('v1_clip', {}).get('confidence', 0.0),
+                alternatives=seg.get('alternatives', []),
+                secondary=seg.get('secondary', [])
             )
+            self.segments.append(info)
 
-            # Check if all clips are disabled
-            if not enabled_clips and not position_external:
-                segment_sel.all_disabled = True
-                result.clips_all_disabled += 1
-                result.segment_selections.append(segment_sel)
-                continue
+        logger.info(f"Loaded segment map with {len(self.segments)} segments")
 
-            # Consider external clips as candidates too (they're enabled by default)
-            all_enabled = enabled_clips + [c for c in position_external if c.is_enabled]
-
-            if not all_enabled:
-                segment_sel.all_disabled = True
-                result.clips_all_disabled += 1
-                result.segment_selections.append(segment_sel)
-                continue
-
-            # Sort by track number (highest first)
-            all_enabled_sorted = sorted(all_enabled, key=lambda c: c.track_number, reverse=True)
-
-            # Primary selection = highest track number
-            primary_clip = all_enabled_sorted[0]
-            segment_sel.primary_clip = primary_clip
-
-            # Detect if this clip was moved from another segment
-            if not primary_clip.is_external:
-                primary_clip.detected_position = position_idx
-                if primary_clip.segment_index != position_idx:
-                    primary_clip.was_moved = True
-                    segment_sel.has_moved_clip = True
-                    result.moved_clips.append((primary_clip.segment_index, position_idx, primary_clip))
-
-            # Check for layered composition
-            if len(all_enabled) > 1:
-                segment_sel.is_layered = True
-                result.segments_with_layers += 1
-                result.layered_segments.append(position_idx)
-
-            result.segment_selections.append(segment_sel)
-            result.selections.append(primary_clip)
-
-            # Track usage statistics
-            track = primary_clip.track
-            result.track_usage[track] = result.track_usage.get(track, 0) + 1
-
-            # Categorize the selection
-            if primary_clip.is_external:
-                result.clips_replaced_with_external += 1
-            elif primary_clip.was_moved:
-                result.clips_moved_from_other += 1
-            elif primary_clip.was_alternative:
-                result.clips_replaced_with_alt += 1
-            elif primary_clip.was_secondary:
-                result.clips_replaced_with_secondary += 1
-            elif primary_clip.track_number == 1:
-                # V1 is the primary/original recommendation, not moved
-                result.clips_kept += 1
-            else:
-                # Higher track but not marked as ALT and not moved
-                result.clips_replaced_with_alt += 1
-
-        logger.info(f"Analyzed {len(clip_elements)} clips from {xml_path}")
-        logger.info(f"Segments: {result.total_segments}, Kept: {result.clips_kept}, "
-                   f"Alt: {result.clips_replaced_with_alt}, Moved: {result.clips_moved_from_other}, "
-                   f"External: {result.clips_replaced_with_external}")
-        return result
-
-    def _group_clips_by_timeline_position(
-        self,
-        segment_clips: List[ClipSelection],
-        external_clips: List[ClipSelection]
-    ) -> List[List[ClipSelection]]:
+    def analyze_otio(self, otio_path: str) -> AnalysisResult:
         """
-        Group clips into timeline positions based on overlap detection.
+        Analyze an edited OTIO file.
 
-        Clips that overlap significantly (>50% of the shorter clip's duration)
-        are grouped together. This handles:
-        - Stacked clips on different tracks covering the same segment
-        - Slightly offset clips that still cover the same voiceover
-        - Editor adjustments like trimming or sliding clips
-
-        Sequential clips (no significant overlap) are in separate positions.
-        Returns a list of clip lists, one per timeline position.
-        """
-        all_clips = segment_clips + external_clips
-
-        if not all_clips:
-            return []
-
-        # Sort by timeline start
-        sorted_clips = sorted(all_clips, key=lambda c: c.timeline_start)
-
-        # Group clips by overlap detection
-        positions: List[List[ClipSelection]] = []
-        current_group: List[ClipSelection] = []
-        group_start = 0.0
-        group_end = 0.0
-
-        for clip in sorted_clips:
-            clip_start = clip.timeline_start
-            clip_end = clip.timeline_end if clip.timeline_end > clip_start else clip_start + 5.0
-            clip_duration = clip_end - clip_start
-
-            if not current_group:
-                # First clip starts a new group
-                current_group = [clip]
-                group_start = clip_start
-                group_end = clip_end
-            else:
-                # Calculate overlap with current group
-                overlap_start = max(group_start, clip_start)
-                overlap_end = min(group_end, clip_end)
-                overlap_duration = max(0.0, overlap_end - overlap_start)
-
-                # Check if overlap is significant (>50% of shorter duration)
-                group_duration = group_end - group_start
-                min_duration = min(clip_duration, group_duration)
-                overlap_ratio = overlap_duration / min_duration if min_duration > 0 else 0
-
-                if overlap_ratio > 0.5:
-                    # Significant overlap - same position
-                    current_group.append(clip)
-                    # Extend group bounds
-                    group_start = min(group_start, clip_start)
-                    group_end = max(group_end, clip_end)
-                else:
-                    # No significant overlap - new position
-                    positions.append(current_group)
-                    current_group = [clip]
-                    group_start = clip_start
-                    group_end = clip_end
-
-        if current_group:
-            positions.append(current_group)
-
-        return positions
-
-    def _find_clip_elements(self, root: ET.Element) -> List[Tuple[ET.Element, str, int]]:
-        """
-        Find all clip/clipitem elements in the XML tree with track info.
+        Args:
+            otio_path: Path to the edited OTIO export
 
         Returns:
-            List of tuples: (clip_element, track_name, track_number)
+            AnalysisResult with detailed analysis
         """
-        clips_with_tracks = []
+        try:
+            import opentimelineio as otio
+        except ImportError:
+            logger.error("OpenTimelineIO not installed")
+            raise ImportError("opentimelineio is required for OTIO analysis")
 
-        # Find video tracks and their clips
-        # FCPXML format: sequence/media/video/track
+        timeline = otio.adapters.read_from_file(otio_path)
+
+        # Extract clips from all video tracks
+        clips_by_track: Dict[str, List[EditedClip]] = {}
+
+        for track in timeline.tracks:
+            if track.kind != otio.schema.TrackKind.Video:
+                continue
+
+            track_name = track.name or "V1"
+
+            # Extract track number
+            track_number = 1
+            num_match = re.search(r'V(\d+)', track_name)
+            if num_match:
+                track_number = int(num_match.group(1))
+
+            clips_by_track[track_name] = []
+            position_frames = 0
+
+            for item in track:
+                if isinstance(item, otio.schema.Gap):
+                    duration = item.source_range.duration if item.source_range else item.duration()
+                    position_frames += int(duration.value)
+                    continue
+
+                if not isinstance(item, otio.schema.Clip):
+                    continue
+
+                # Get duration
+                if item.source_range:
+                    duration_frames = int(item.source_range.duration.value)
+                else:
+                    duration_frames = int(item.duration().value) if item.duration() else 0
+
+                # Get enabled state
+                is_enabled = getattr(item, 'enabled', True)
+                if 'enabled' in item.metadata:
+                    is_enabled = item.metadata.get('enabled', True)
+
+                # Extract filename from media reference
+                filename = self._extract_filename(item)
+
+                clip = EditedClip(
+                    filename=filename,
+                    track_name=track_name,
+                    track_number=track_number,
+                    start_frame=position_frames,
+                    end_frame=position_frames + duration_frames,
+                    duration_frames=duration_frames,
+                    is_enabled=is_enabled
+                )
+
+                clips_by_track[track_name].append(clip)
+                position_frames += duration_frames
+
+        return self._build_analysis(otio_path, clips_by_track)
+
+    def analyze_xml(self, xml_path: str) -> AnalysisResult:
+        """
+        Analyze an edited XML file.
+
+        Args:
+            xml_path: Path to the edited XML export
+
+        Returns:
+            AnalysisResult with detailed analysis
+        """
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        clips_by_track: Dict[str, List[EditedClip]] = {}
+
+        # Find video tracks
         for track_idx, track in enumerate(root.findall('.//video/track')):
             track_name = f"V{track_idx + 1}"
             track_number = track_idx + 1
 
-            # Check for track name attribute
-            track_name_attr = track.get('name')
-            if track_name_attr:
-                track_name = track_name_attr
-                # Extract number from name if possible
-                num_match = self.TRACK_NUMBER_PATTERN.search(track_name_attr)
-                if num_match:
-                    track_number = int(num_match.group(1))
+            clips_by_track[track_name] = []
 
-            for clip in track.findall('clipitem'):
-                clips_with_tracks.append((clip, track_name, track_number))
-
-        # DaVinci FCPXML format: spine with clips
-        for track_idx, spine in enumerate(root.findall('.//spine')):
-            track_name = f"V{track_idx + 1}"
-            track_number = track_idx + 1
-
-            for clip in spine.findall('.//clip'):
-                clips_with_tracks.append((clip, track_name, track_number))
-            for clip in spine.findall('.//asset-clip'):
-                clips_with_tracks.append((clip, track_name, track_number))
-
-        # Fallback: find orphan clips and assign to V1
-        if not clips_with_tracks:
-            for clip in root.findall('.//clipitem'):
-                if clip.find('start') is not None:
-                    clips_with_tracks.append((clip, "V1", 1))
-            for clip in root.findall('.//clip'):
-                if clip.get('offset') is not None:
-                    clips_with_tracks.append((clip, "V1", 1))
-
-        return clips_with_tracks
-
-    def _parse_clip_element(
-        self,
-        clip_elem: ET.Element,
-        track_name: str = "V1",
-        track_number: int = 1
-    ) -> Optional[ClipSelection]:
-        """
-        Parse a clip element into a ClipSelection.
-
-        Args:
-            clip_elem: The XML clip element
-            track_name: Name of the track (e.g., "V1", "V2 - Alternatives")
-            track_number: Numeric track number for priority comparison
-        """
-        # Get clip name from various possible locations
-        name = None
-
-        # Try <name> element
-        name_elem = clip_elem.find('name')
-        if name_elem is not None and name_elem.text:
-            name = name_elem.text
-
-        # Try <n> element (DaVinci format)
-        if not name:
-            n_elem = clip_elem.find('n')
-            if n_elem is not None and n_elem.text:
-                name = n_elem.text
-
-        # Try name attribute
-        if not name:
-            name = clip_elem.get('name')
-
-        if not name:
-            return None
-
-        # Extract segment ID from name
-        match = self.SEGMENT_ID_PATTERN.search(name)
-        is_external = match is None
-
-        if is_external:
-            # No segment ID - this is external footage
-            logger.debug(f"External clip (no segment ID): {name}")
-            segment_index = -1  # Placeholder for external clips
-            segment_id = ""
-        else:
-            segment_index = int(match.group(1))
-            segment_id = f"S{segment_index:03d}"
-
-        # Check if it's an alternative
-        was_alt = False
-        alt_index = None
-        alt_match = self.ALT_PATTERN.search(name)
-        if alt_match:
-            was_alt = True
-            alt_index = int(alt_match.group(1))
-
-        # Check if it's a secondary source
-        was_secondary = False
-        for pattern in self.SECONDARY_PATTERNS:
-            if pattern.search(name):
-                was_secondary = True
-                break
-
-        # Check if clip is enabled/disabled
-        # DaVinci/FCPXML uses <enabled> element or enabled attribute
-        is_enabled = True  # Default to enabled
-
-        # Method 1: <enabled> element (FCPXML)
-        enabled_elem = clip_elem.find('enabled')
-        if enabled_elem is not None and enabled_elem.text:
-            is_enabled = enabled_elem.text.lower() in ('true', '1', 'yes')
-
-        # Method 2: enabled attribute
-        enabled_attr = clip_elem.get('enabled')
-        if enabled_attr is not None:
-            is_enabled = enabled_attr.lower() in ('true', '1', 'yes')
-
-        # Method 3: DaVinci uses <disable> flag (inverted logic)
-        disable_elem = clip_elem.find('disable')
-        if disable_elem is not None:
-            is_enabled = False
-
-        # Method 4: Check for "disabled" in metadata
-        metadata = clip_elem.find('.//metadata')
-        if metadata is not None:
-            for meta in metadata.findall('meta'):
-                key = meta.get('key', '') or meta.find('key')
-                if key and 'disable' in str(key).lower():
-                    is_enabled = False
-
-        # Extract timing info
-        timeline_start = 0.0
-        timeline_end = 0.0
-
-        start_elem = clip_elem.find('start')
-        end_elem = clip_elem.find('end')
-
-        # Try to get frame rate for conversion
-        rate_elem = clip_elem.find('.//rate/timebase')
-        fps = 24.0  # Default
-        if rate_elem is not None and rate_elem.text:
-            try:
-                fps = float(rate_elem.text)
-            except ValueError:
-                pass
-
-        if start_elem is not None and start_elem.text:
-            try:
-                timeline_start = float(start_elem.text) / fps
-            except ValueError:
-                pass
-
-        if end_elem is not None and end_elem.text:
-            try:
-                timeline_end = float(end_elem.text) / fps
-            except ValueError:
-                pass
-
-        # Extract source file name from the clip name
-        # Format: [S001] folder_filename [123.4s]
-        source_file = None
-        name_without_segment = self.SEGMENT_ID_PATTERN.sub('', name).strip()
-        name_without_alt = self.ALT_PATTERN.sub('', name_without_segment).strip()
-        # Remove trailing timestamp like [123.4s]
-        name_cleaned = re.sub(r'\s*\[\d+\.?\d*s\]\s*$', '', name_without_alt).strip()
-        if name_cleaned:
-            source_file = name_cleaned
-
-        return ClipSelection(
-            segment_id=segment_id,
-            segment_index=segment_index,
-            clip_name=name,
-            source_file=source_file,
-            track=track_name,
-            track_number=track_number,
-            was_alternative=was_alt,
-            alternative_index=alt_index,
-            was_secondary=was_secondary,
-            is_enabled=is_enabled,
-            is_external=is_external,
-            timeline_start=timeline_start,
-            timeline_end=timeline_end,
-            duration=timeline_end - timeline_start if timeline_end > timeline_start else 0.0
-        )
-
-    def analyze_otio(self, otio_path: str) -> EditAnalysisResult:
-        """
-        Analyze an OTIO file.
-
-        Implements the same selection logic as analyze_xml:
-        1. Disabled clips are ignored
-        2. Highest enabled track wins (V2 > V1)
-        3. Multiple active clips = layered composition
-
-        Args:
-            otio_path: Path to the OTIO file
-
-        Returns:
-            EditAnalysisResult with analysis details
-        """
-        try:
-            import opentimelineio as otio_lib
-        except ImportError:
-            logger.error("OpenTimelineIO not installed, cannot analyze OTIO files")
-            return EditAnalysisResult()
-
-        result = EditAnalysisResult()
-
-        try:
-            timeline = otio_lib.adapters.read_from_file(otio_path)
-        except Exception as e:
-            logger.error(f"Failed to read OTIO file: {e}")
-            return result
-
-        all_clips: List[ClipSelection] = []
-        external_clips: List[ClipSelection] = []
-
-        # Get video tracks and their index (for track number)
-        video_tracks = [t for t in timeline.tracks if t.kind == otio_lib.schema.TrackKind.Video]
-
-        # Iterate through all video tracks with index
-        for track_idx, track in enumerate(video_tracks):
-            track_name = track.name or f"V{track_idx + 1}"
-            track_number = track_idx + 1
-
-            # Extract track number from name if possible
-            num_match = self.TRACK_NUMBER_PATTERN.search(track_name)
-            if num_match:
-                track_number = int(num_match.group(1))
-
-            for item in track:
-                if not isinstance(item, otio_lib.schema.Clip):
-                    continue
-
-                name = item.name
-                if not name:
-                    continue
-
-                # Extract segment ID
-                match = self.SEGMENT_ID_PATTERN.search(name)
-                is_external = match is None
-
-                if is_external:
-                    segment_index = -1
-                    segment_id = ""
-                else:
-                    segment_index = int(match.group(1))
-                    segment_id = f"S{segment_index:03d}"
-
-                # Check if alternative
-                was_alt = False
-                alt_index = None
-                alt_match = self.ALT_PATTERN.search(name)
-                if alt_match:
-                    was_alt = True
-                    alt_index = int(alt_match.group(1))
-
-                # Check enabled state from metadata
-                is_enabled = True
-                if hasattr(item, 'enabled'):
-                    is_enabled = item.enabled
-                elif 'enabled' in item.metadata:
-                    is_enabled = item.metadata.get('enabled', True)
-                elif 'disabled' in item.metadata:
-                    is_enabled = not item.metadata.get('disabled', False)
-
+            for clipitem in track.findall('clipitem'):
                 # Get timing
-                timeline_start = 0.0
-                if item.range_in_parent():
-                    timeline_start = item.range_in_parent().start_time.to_seconds()
+                start_elem = clipitem.find('start')
+                end_elem = clipitem.find('end')
 
-                duration = 0.0
-                if item.duration():
-                    duration = item.duration().to_seconds()
+                if start_elem is None or end_elem is None:
+                    continue
 
-                selection = ClipSelection(
-                    segment_id=segment_id,
-                    segment_index=segment_index,
-                    clip_name=name,
-                    track=track_name,
+                start_frame = int(start_elem.text or 0)
+                end_frame = int(end_elem.text or 0)
+
+                # Get enabled state
+                is_enabled = True
+                enabled_elem = clipitem.find('enabled')
+                if enabled_elem is not None and enabled_elem.text:
+                    is_enabled = enabled_elem.text.lower() in ('true', '1', 'yes')
+
+                # Get filename
+                filename = ""
+                name_elem = clipitem.find('name')
+                if name_elem is not None and name_elem.text:
+                    filename = name_elem.text
+
+                # Also try pathurl
+                pathurl = clipitem.find('.//pathurl')
+                if pathurl is not None and pathurl.text:
+                    filename = os.path.basename(pathurl.text)
+
+                clip = EditedClip(
+                    filename=filename,
+                    track_name=track_name,
                     track_number=track_number,
-                    was_alternative=was_alt,
-                    alternative_index=alt_index,
-                    is_enabled=is_enabled,
-                    is_external=is_external,
-                    timeline_start=timeline_start,
-                    timeline_end=timeline_start + duration,
-                    duration=duration
+                    start_frame=start_frame,
+                    end_frame=end_frame,
+                    duration_frames=end_frame - start_frame,
+                    is_enabled=is_enabled
                 )
 
-                if is_external:
-                    external_clips.append(selection)
-                else:
-                    all_clips.append(selection)
+                clips_by_track[track_name].append(clip)
 
-        result.external_clips = external_clips
+        return self._build_analysis(xml_path, clips_by_track)
 
-        if not all_clips:
-            logger.warning("No clips with segment IDs found in OTIO")
-            return result
+    def _extract_filename(self, clip) -> str:
+        """Extract filename from OTIO clip's media reference."""
+        try:
+            # Try DEFAULT_MEDIA reference
+            if hasattr(clip, 'media_references') and clip.media_references:
+                ref = clip.media_references.get('DEFAULT_MEDIA')
+                if ref and hasattr(ref, 'target_url') and ref.target_url:
+                    return os.path.basename(ref.target_url)
 
-        # Group clips by timeline position
-        clips_by_position = self._group_clips_by_timeline_position(all_clips, external_clips)
-        result.total_segments = len(clips_by_position)
+            # Try direct media_reference
+            if hasattr(clip, 'media_reference'):
+                ref = clip.media_reference
+                if ref and hasattr(ref, 'target_url') and ref.target_url:
+                    return os.path.basename(ref.target_url)
 
-        for position_idx, clips_at_position in enumerate(clips_by_position):
-            expected_segment_id = f"S{position_idx:03d}"
+            # Fall back to clip name
+            return clip.name or ""
 
-            # Separate by type
-            segment_clips = [c for c in clips_at_position if not c.is_external]
-            position_external = [c for c in clips_at_position if c.is_external]
-            enabled_clips = [c for c in segment_clips if c.is_enabled]
-            disabled_clips = [c for c in segment_clips if not c.is_enabled]
+        except Exception:
+            return clip.name or ""
 
-            # Create segment selection
-            segment_sel = SegmentSelection(
-                segment_index=position_idx,
-                segment_id=expected_segment_id,
-                active_clips=enabled_clips,
-                disabled_clips=disabled_clips,
-                external_clips=position_external,
-                has_external=len(position_external) > 0
+    def _build_analysis(
+        self,
+        edited_path: str,
+        clips_by_track: Dict[str, List[EditedClip]]
+    ) -> AnalysisResult:
+        """
+        Build analysis result by matching clips to segments.
+
+        Args:
+            edited_path: Path to the edited file
+            clips_by_track: Clips organized by track name
+
+        Returns:
+            AnalysisResult with complete analysis
+        """
+        result = AnalysisResult(
+            analyzed_at=datetime.now().isoformat(),
+            edited_file=edited_path,
+            segment_map_file=self.segment_map_path,
+            frame_rate=self.frame_rate,
+            total_segments=len(self.segments)
+        )
+
+        # Build lookup of all known clips (original + alternatives)
+        original_clips: Dict[str, Tuple[str, str]] = {}  # filename -> (segment_id, source_type)
+        for seg in self.segments:
+            original_clips[seg.v1_clip] = (seg.id, "v1")
+            for alt in seg.alternatives:
+                original_clips[alt['file']] = (seg.id, "alternative")
+            for sec in seg.secondary:
+                original_clips[sec['file']] = (seg.id, "secondary")
+
+        # Match each segment to clips by position
+        for seg in self.segments:
+            selection = SegmentSelection(
+                segment_id=seg.id,
+                segment_index=seg.index,
+                voiceover_text=seg.voiceover_text[:50] if seg.voiceover_text else "",
+                original_v1_clip=seg.v1_clip,
+                original_confidence=seg.v1_confidence
             )
 
-            # Check if all clips are disabled
-            if not enabled_clips and not position_external:
-                segment_sel.all_disabled = True
-                result.clips_all_disabled += 1
-                result.segment_selections.append(segment_sel)
+            # Find clips that overlap with this segment's frame range
+            overlapping_clips: List[EditedClip] = []
+
+            for track_name, clips in clips_by_track.items():
+                for clip in clips:
+                    # Check if clip overlaps with segment
+                    overlap_start = max(clip.start_frame, seg.start_frame)
+                    overlap_end = min(clip.end_frame, seg.end_frame)
+
+                    if overlap_end > overlap_start:
+                        # Calculate overlap ratio
+                        overlap_frames = overlap_end - overlap_start
+                        segment_frames = seg.end_frame - seg.start_frame
+                        overlap_ratio = overlap_frames / segment_frames if segment_frames > 0 else 0
+
+                        # Consider it a match if >50% overlap
+                        if overlap_ratio > 0.5:
+                            overlapping_clips.append(clip)
+
+            if not overlapping_clips:
+                selection.is_missing = True
+                result.missing += 1
+                result.selections.append(selection)
                 continue
 
-            # Consider external clips as candidates too
-            all_enabled = enabled_clips + [c for c in position_external if c.is_enabled]
+            # Filter to enabled clips
+            enabled_clips = [c for c in overlapping_clips if c.is_enabled]
 
-            if not all_enabled:
-                segment_sel.all_disabled = True
-                result.clips_all_disabled += 1
-                result.segment_selections.append(segment_sel)
+            if not enabled_clips:
+                selection.is_disabled = True
+                result.all_disabled += 1
+                result.selections.append(selection)
                 continue
 
-            # Sort by track number (highest first)
-            all_enabled_sorted = sorted(all_enabled, key=lambda c: c.track_number, reverse=True)
+            # Sort by track number (lowest = V1 takes priority for visual)
+            # But for analysis, we want the HIGHEST enabled track (editor's choice)
+            # DaVinci stacking: V2 renders on top of V1
+            enabled_clips.sort(key=lambda c: c.track_number, reverse=True)
 
-            # Primary selection = highest track number
-            primary_clip = all_enabled_sorted[0]
-            segment_sel.primary_clip = primary_clip
-
-            # Detect if this clip was moved from another segment
-            if not primary_clip.is_external:
-                primary_clip.detected_position = position_idx
-                if primary_clip.segment_index != position_idx:
-                    primary_clip.was_moved = True
-                    segment_sel.has_moved_clip = True
-                    result.moved_clips.append((primary_clip.segment_index, position_idx, primary_clip))
-
-            # Check for layered composition
-            if len(all_enabled) > 1:
-                segment_sel.is_layered = True
-                result.segments_with_layers += 1
-                result.layered_segments.append(position_idx)
-
-            result.segment_selections.append(segment_sel)
-            result.selections.append(primary_clip)
+            # The highest enabled track is the selection
+            selected = enabled_clips[0]
+            selection.selected_clip = selected.filename
+            selection.selected_track = selected.track_name
+            selection.selected_track_number = selected.track_number
 
             # Track usage
-            track = primary_clip.track
-            result.track_usage[track] = result.track_usage.get(track, 0) + 1
+            result.track_usage[selected.track_name] = result.track_usage.get(selected.track_name, 0) + 1
 
-            # Categorize the selection
-            if primary_clip.is_external:
-                result.clips_replaced_with_external += 1
-            elif primary_clip.was_moved:
-                result.clips_moved_from_other += 1
-            elif primary_clip.was_alternative:
-                result.clips_replaced_with_alt += 1
-            elif primary_clip.was_secondary:
-                result.clips_replaced_with_secondary += 1
-            elif primary_clip.track_number == 1:
-                result.clips_kept += 1
+            # Determine if V1 was kept or replaced
+            # Compare filenames (may be different path but same file)
+            selected_base = self._normalize_filename(selected.filename)
+            v1_base = self._normalize_filename(seg.v1_clip)
+
+            if selected_base == v1_base:
+                selection.was_v1_kept = True
+                result.v1_kept += 1
             else:
-                result.clips_replaced_with_alt += 1
+                selection.was_replaced = True
+
+                # Determine replacement source
+                if selected.filename in original_clips:
+                    _, source_type = original_clips[selected.filename]
+                    selection.replacement_source = source_type
+
+                    if source_type == "alternative":
+                        result.replaced_with_alt += 1
+                    elif source_type == "secondary":
+                        result.replaced_with_secondary += 1
+                else:
+                    selection.replacement_source = "external"
+                    result.replaced_with_external += 1
+
+                # Record replacement
+                result.replacements.append({
+                    "segment": seg.id,
+                    "original": seg.v1_clip,
+                    "replaced_with": selected.filename,
+                    "new_track": selected.track_name
+                })
+
+            result.selections.append(selection)
+
+        # Calculate percentages
+        if result.total_segments > 0:
+            result.v1_kept_pct = (result.v1_kept / result.total_segments) * 100
 
         return result
 
-    def compare_before_after(
-        self,
-        original_matches_path: str,
-        final_edit_path: str
-    ) -> Dict[str, any]:
-        """
-        Compare original match results with final edit to understand preferences.
+    def _normalize_filename(self, filename: str) -> str:
+        """Normalize filename for comparison."""
+        if not filename:
+            return ""
 
-        Args:
-            original_matches_path: Path to original OTIO/XML with match results
-            final_edit_path: Path to final exported XML after editing
+        # Get just the filename without path
+        name = os.path.basename(filename)
 
-        Returns:
-            Dictionary with comparison statistics
-        """
-        # Determine file type and analyze
-        original_ext = Path(original_matches_path).suffix.lower()
-        final_ext = Path(final_edit_path).suffix.lower()
+        # Remove extension
+        name = os.path.splitext(name)[0]
 
-        if original_ext == '.otio':
-            original_result = self.analyze_otio(original_matches_path)
-        else:
-            original_result = self.analyze_xml(original_matches_path)
-
-        if final_ext == '.otio':
-            final_result = self.analyze_otio(final_edit_path)
-        else:
-            final_result = self.analyze_xml(final_edit_path)
-
-        # Build comparison
-        comparison = {
-            'original_segments': original_result.total_segments,
-            'final_segments': final_result.total_segments,
-            'clips_kept': 0,
-            'clips_changed': 0,
-            'clips_removed': 0,
-            'changes': []
-        }
-
-        # Map original selections by segment
-        original_by_seg = {s.segment_index: s for s in original_result.selections}
-        final_by_seg = {s.segment_index: s for s in final_result.selections}
-
-        all_segments = set(original_by_seg.keys()) | set(final_by_seg.keys())
-
-        for seg_idx in sorted(all_segments):
-            orig = original_by_seg.get(seg_idx)
-            final = final_by_seg.get(seg_idx)
-
-            if orig and final:
-                # Both exist - check if same clip
-                if orig.source_file == final.source_file:
-                    comparison['clips_kept'] += 1
-                else:
-                    comparison['clips_changed'] += 1
-                    comparison['changes'].append({
-                        'segment': seg_idx,
-                        'original': orig.clip_name,
-                        'final': final.clip_name,
-                        'used_alternative': final.was_alternative
-                    })
-            elif orig and not final:
-                comparison['clips_removed'] += 1
-            elif final and not orig:
-                # New clip added (unusual)
-                comparison['clips_changed'] += 1
-
-        return comparison
-
-    def generate_feedback_for_cache(
-        self,
-        analysis: EditAnalysisResult,
-        original_srt_path: Optional[str] = None
-    ) -> List[Dict[str, any]]:
-        """
-        Generate feedback data for global cache learning.
-
-        Args:
-            analysis: EditAnalysisResult from analyzing final edit
-            original_srt_path: Path to original SRT for segment text
-
-        Returns:
-            List of feedback entries for cache learning
-        """
-        feedback = []
-
-        # Load SRT if provided
-        segment_texts = {}
-        if original_srt_path:
-            self._load_original_srt(original_srt_path)
-            segment_texts = self.original_segments
-
-        for selection in analysis.selections:
-            entry = {
-                'segment_index': selection.segment_index,
-                'segment_text': segment_texts.get(selection.segment_index, ''),
-                'selected_clip': selection.source_file,
-                'was_original_choice': not selection.was_alternative,
-                'was_alternative': selection.was_alternative,
-                'alternative_index': selection.alternative_index,
-                'duration': selection.duration,
-                # Score boost/penalty for future matching
-                'preference_signal': 1.0 if not selection.was_alternative else -0.5
-            }
-            feedback.append(entry)
-
-        return feedback
+        # Lowercase for comparison
+        return name.lower()
 
 
-def analyze_final_edit(
-    xml_path: str,
-    original_srt_path: Optional[str] = None,
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+def analyze_edited_timeline(
+    edited_path: str,
+    segment_map_path: str,
+    output_path: Optional[str] = None,
     verbose: bool = True
-) -> EditAnalysisResult:
+) -> AnalysisResult:
     """
-    Convenience function to analyze a final edit XML.
+    Analyze an edited timeline against the segment map.
 
     Args:
-        xml_path: Path to exported XML from DaVinci Resolve
-        original_srt_path: Optional path to original SRT file
+        edited_path: Path to edited OTIO or XML file
+        segment_map_path: Path to segment map JSON
+        output_path: Optional path to save JSON report
         verbose: Whether to print summary
 
     Returns:
-        EditAnalysisResult with analysis
+        AnalysisResult with analysis
     """
-    analyzer = PostEditAnalyzer(original_srt_path)
+    analyzer = TimecodeAnalyzer(segment_map_path)
 
-    ext = Path(xml_path).suffix.lower()
+    ext = Path(edited_path).suffix.lower()
     if ext == '.otio':
-        result = analyzer.analyze_otio(xml_path)
+        result = analyzer.analyze_otio(edited_path)
+    elif ext in ('.xml', '.fcpxml'):
+        result = analyzer.analyze_xml(edited_path)
     else:
-        result = analyzer.analyze_xml(xml_path)
+        raise ValueError(f"Unsupported file type: {ext}")
 
     if verbose:
         print(result.summary())
 
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(result.to_dict(), f, indent=2)
+        logger.info(f"Saved analysis report to {output_path}")
+
     return result
 
 
-if __name__ == '__main__':
+def extract_segment_map_from_otio(otio_path: str) -> Optional[str]:
+    """
+    Extract segment information from an original (non-edited) OTIO file.
+
+    This is a fallback when segment map JSON is not available.
+    Works only if the OTIO was generated by this tool (has segment metadata).
+
+    Args:
+        otio_path: Path to original OTIO file
+
+    Returns:
+        Path to generated segment map JSON, or None if extraction failed
+    """
+    try:
+        import opentimelineio as otio
+    except ImportError:
+        logger.error("OpenTimelineIO not installed")
+        return None
+
+    timeline = otio.adapters.read_from_file(otio_path)
+
+    # Get frame rate
+    frame_rate = 30.0
+    if timeline.global_start_time:
+        frame_rate = timeline.global_start_time.rate
+
+    segments = []
+    position_frames = 0
+
+    # Find V1 track
+    v1_track = None
+    for track in timeline.tracks:
+        if track.kind != otio.schema.TrackKind.Video:
+            continue
+        if 'V1' in track.name or 'Primary' in track.name.lower():
+            v1_track = track
+            break
+
+    if not v1_track:
+        # Use first video track
+        for track in timeline.tracks:
+            if track.kind == otio.schema.TrackKind.Video:
+                v1_track = track
+                break
+
+    if not v1_track:
+        logger.error("No video track found in OTIO")
+        return None
+
+    seg_idx = 0
+    for item in v1_track:
+        if isinstance(item, otio.schema.Gap):
+            duration = item.source_range.duration if item.source_range else item.duration()
+            position_frames += int(duration.value)
+            continue
+
+        if not isinstance(item, otio.schema.Clip):
+            continue
+
+        duration_frames = int(item.source_range.duration.value) if item.source_range else 0
+        end_frame = position_frames + duration_frames
+
+        # Extract metadata
+        metadata = item.metadata or {}
+        segment_id = metadata.get('segment_id', f"S{seg_idx:03d}")
+        voiceover_text = metadata.get('voiceover_text', '')
+        confidence = metadata.get('confidence', 0.0)
+
+        # Get filename
+        filename = ""
+        if hasattr(item, 'media_reference') and item.media_reference:
+            ref = item.media_reference
+            if hasattr(ref, 'target_url') and ref.target_url:
+                filename = os.path.basename(ref.target_url)
+
+        segments.append({
+            "id": segment_id,
+            "start_frame": position_frames,
+            "end_frame": end_frame,
+            "start_tc": "",  # Would need frame-to-tc conversion
+            "end_tc": "",
+            "voiceover_text": voiceover_text,
+            "duration_sec": duration_frames / frame_rate,
+            "v1_clip": {
+                "file": filename,
+                "confidence": confidence
+            }
+        })
+
+        position_frames = end_frame
+        seg_idx += 1
+
+    if not segments:
+        logger.error("No segments found in OTIO")
+        return None
+
+    # Write segment map
+    segment_map = {
+        "generated_at": datetime.now().isoformat(),
+        "source_srt": "",
+        "frame_rate": frame_rate,
+        "total_segments": len(segments),
+        "segments": segments
+    }
+
+    output_path = Path(otio_path).with_suffix('').with_suffix('_extracted_segments.json')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(segment_map, f, indent=2)
+
+    logger.info(f"Extracted segment map to {output_path}")
+    return str(output_path)
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+def main():
+    """Command-line interface for post-edit analysis."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Analyze final edit to understand clip selections'
+        description='Analyze edited timeline to understand clip selections',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze with segment map
+  python -m src.post_edit_analysis --edited export.otio --segments timeline_segments.json
+
+  # Analyze with output report
+  python -m src.post_edit_analysis --edited export.otio --segments timeline_segments.json --output report.json
+
+  # Extract segment map from original OTIO (fallback)
+  python -m src.post_edit_analysis --edited export.otio --original timeline_FULL.otio
+        """
     )
-    parser.add_argument('xml_path', help='Path to exported XML/OTIO file')
-    parser.add_argument('--srt', help='Path to original SRT file')
-    parser.add_argument('--compare', help='Path to original OTIO for comparison')
-    parser.add_argument('--output', help='Output JSON file for feedback data')
+
+    parser.add_argument(
+        '--edited', '-e',
+        required=True,
+        help='Path to edited OTIO/XML export from DaVinci Resolve'
+    )
+
+    parser.add_argument(
+        '--segments', '-s',
+        help='Path to segment map JSON (timeline_segments.json)'
+    )
+
+    parser.add_argument(
+        '--original', '-o',
+        help='Path to original OTIO (extracts segment map if --segments not provided)'
+    )
+
+    parser.add_argument(
+        '--output', '-O',
+        help='Path to save JSON analysis report'
+    )
+
+    parser.add_argument(
+        '--quiet', '-q',
+        action='store_true',
+        help='Suppress summary output'
+    )
 
     args = parser.parse_args()
 
-    analyzer = PostEditAnalyzer(args.srt)
+    # Determine segment map path
+    segment_map_path = args.segments
 
-    if args.compare:
-        comparison = analyzer.compare_before_after(args.compare, args.xml_path)
-        print("\n=== Before/After Comparison ===")
-        print(f"Clips kept: {comparison['clips_kept']}")
-        print(f"Clips changed: {comparison['clips_changed']}")
-        print(f"Clips removed: {comparison['clips_removed']}")
-        if comparison['changes']:
-            print("\nChanges made:")
-            for change in comparison['changes'][:10]:
-                print(f"  S{change['segment']:03d}: {change['original'][:30]} -> {change['final'][:30]}")
-    else:
-        result = analyze_final_edit(args.xml_path, args.srt)
+    if not segment_map_path and args.original:
+        # Extract from original OTIO
+        print(f"Extracting segment map from {args.original}...")
+        segment_map_path = extract_segment_map_from_otio(args.original)
+        if not segment_map_path:
+            print("ERROR: Could not extract segment map from original OTIO")
+            return 1
+
+    if not segment_map_path:
+        print("ERROR: Must provide either --segments or --original")
+        return 1
+
+    if not Path(segment_map_path).exists():
+        print(f"ERROR: Segment map not found: {segment_map_path}")
+        return 1
+
+    if not Path(args.edited).exists():
+        print(f"ERROR: Edited file not found: {args.edited}")
+        return 1
+
+    # Run analysis
+    try:
+        result = analyze_edited_timeline(
+            edited_path=args.edited,
+            segment_map_path=segment_map_path,
+            output_path=args.output,
+            verbose=not args.quiet
+        )
 
         if args.output:
-            import json
-            feedback = analyzer.generate_feedback_for_cache(result, args.srt)
-            with open(args.output, 'w') as f:
-                json.dump(feedback, f, indent=2)
-            print(f"\nFeedback data saved to {args.output}")
+            print(f"\nReport saved to: {args.output}")
+
+        return 0
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+        logger.exception("Analysis failed")
+        return 1
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())

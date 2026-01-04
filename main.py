@@ -3913,7 +3913,7 @@ Be specific and descriptive for semantic matching purposes."""
             return outputs
 
         try:
-            from src.otio_builder import create_timeline, save_timeline, save_timeline_split, save_timeline_as_edl, generate_resolve_xml_with_bins
+            from src.otio_builder import create_timeline, save_timeline, save_timeline_split, save_timeline_as_edl, generate_resolve_xml_with_bins, generate_segment_map
 
             # Generate timeline
             print(f"  Creating timeline...")
@@ -3968,7 +3968,18 @@ Be specific and descriptive for semantic matching purposes."""
                     save_timeline(timeline, otio_path)
                     outputs['otio'] = otio_path
                     print(f"  ✓ OTIO: {otio_path}")
-            
+
+                # Generate segment map for post-edit analysis
+                segment_map_path = generate_segment_map(
+                    matches=self.matches,
+                    output_path=str(otio_base_path),
+                    frame_rate=getattr(config.output, 'frame_rate', 30.0),
+                    source_srt=str(getattr(self, 'voiceover_path', '')),
+                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00")
+                )
+                outputs['segment_map'] = segment_map_path
+                print(f"  ✓ Segment map: {Path(segment_map_path).name}")
+
             if config.output.generate_edl:
                 edl_path = output_dir / "timeline.edl"
                 save_timeline_as_edl(

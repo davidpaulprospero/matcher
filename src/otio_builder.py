@@ -1941,6 +1941,137 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     return generated_paths
 
 
+def generate_segment_map(
+    matches: List[MatchResult],
+    output_path: str,
+    frame_rate: float = 30.0,
+    source_srt: str = "",
+    timeline_start_tc: str = "01:00:00:00"
+) -> str:
+    """
+    Generate a segment map JSON file for post-edit analysis.
+
+    This file maps timeline positions to segment IDs, enabling accurate
+    comparison between the original generated timeline and an edited export
+    from DaVinci Resolve (which strips custom metadata).
+
+    Args:
+        matches: List of MatchResult from matching stage
+        output_path: Base output path (will append _segments.json)
+        frame_rate: Timeline frame rate
+        source_srt: Path to source SRT file (for reference)
+        timeline_start_tc: Timeline start timecode (default 01:00:00:00)
+
+    Returns:
+        Path to the generated segment map JSON file
+    """
+    import json
+    from datetime import datetime
+
+    # Parse timeline start timecode to frame offset
+    tc_parts = timeline_start_tc.split(':')
+    start_frame_offset = (
+        int(tc_parts[0]) * 3600 +
+        int(tc_parts[1]) * 60 +
+        int(tc_parts[2])
+    ) * int(frame_rate) + int(tc_parts[3])
+
+    def frames_to_tc(frames: int) -> str:
+        """Convert frame count to timecode string."""
+        total_frames = frames + start_frame_offset
+        fps = int(frame_rate)
+
+        frame_in_sec = total_frames % fps
+        total_secs = total_frames // fps
+        secs = total_secs % 60
+        total_mins = total_secs // 60
+        mins = total_mins % 60
+        hours = total_mins // 60
+
+        return f"{hours:02d}:{mins:02d}:{secs:02d}:{frame_in_sec:02d}"
+
+    segments = []
+    current_frame = 0
+
+    for match_idx, match_result in enumerate(matches):
+        match = match_result.primary_match
+        vo_seg = match.voiceover_segment
+        vid_seg = match.video_segment
+
+        # Calculate segment duration
+        target_duration = vo_seg.end_time - vo_seg.start_time
+        duration_frames = int(target_duration * frame_rate)
+
+        end_frame = current_frame + duration_frames
+
+        # Extract clip filename
+        clip_file = Path(vid_seg.source_file).name
+
+        # Build segment entry
+        segment_entry = {
+            "id": f"S{match_idx:03d}",
+            "start_frame": current_frame,
+            "end_frame": end_frame,
+            "start_tc": frames_to_tc(current_frame),
+            "end_tc": frames_to_tc(end_frame),
+            "voiceover_text": vo_seg.text,
+            "duration_sec": round(target_duration, 3),
+            "v1_clip": {
+                "file": clip_file,
+                "confidence": round(match.confidence, 3),
+                "source_start": round(vid_seg.start_time, 3),
+                "source_end": round(vid_seg.end_time, 3)
+            }
+        }
+
+        # Add alternatives (V2-V3)
+        if match_result.alternatives:
+            segment_entry["alternatives"] = []
+            for alt_idx, alt in enumerate(match_result.alternatives):
+                alt_file = Path(alt.video_segment.source_file).name
+                segment_entry["alternatives"].append({
+                    "track": f"V{alt_idx + 2}",
+                    "file": alt_file,
+                    "confidence": round(alt.confidence, 3)
+                })
+
+        # Add secondary matches (V4-V6)
+        if match_result.secondary_matches:
+            segment_entry["secondary"] = []
+            for sec_idx, sec in enumerate(match_result.secondary_matches):
+                sec_file = Path(sec.video_segment.source_file).name
+                segment_entry["secondary"].append({
+                    "track": f"V{sec_idx + 4}",
+                    "file": sec_file,
+                    "confidence": round(sec.confidence, 3)
+                })
+
+        segments.append(segment_entry)
+        current_frame = end_frame
+
+    # Build output structure
+    segment_map = {
+        "generated_at": datetime.now().isoformat(),
+        "source_srt": source_srt,
+        "frame_rate": frame_rate,
+        "timeline_start_tc": timeline_start_tc,
+        "total_segments": len(segments),
+        "total_frames": current_frame,
+        "total_duration_sec": round(current_frame / frame_rate, 3),
+        "segments": segments
+    }
+
+    # Write to file
+    base_path = Path(output_path).with_suffix('')
+    json_path = f"{base_path}_segments.json"
+
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(segment_map, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"Generated segment map: {json_path} ({len(segments)} segments)")
+
+    return json_path
+
 
 def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0, 
                          timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
