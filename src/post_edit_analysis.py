@@ -95,9 +95,9 @@ class FilenameAnalysisResult:
         total_used = self.v1_kept + self.v2_v3_used + self.v4_v6_used + self.v7_plus_used + self.external_added
 
         lines = [
-            "═" * 65,
+            "=" * 65,
             "                    POST-EDIT ANALYSIS REPORT",
-            "═" * 65,
+            "=" * 65,
             "",
             f"Original: {Path(self.original_file).name}",
             f"Edited:   {Path(self.edited_file).name}",
@@ -105,16 +105,16 @@ class FilenameAnalysisResult:
             "",
             f"ORIGINAL RECOMMENDATIONS: {self.total_segments} segments",
             "",
-            f"V1 CLIPS USED:           {self.v1_kept:>4} ({self.v1_kept_pct:>5.1f}%)  ✓ System picks kept",
-            f"V2-V3 ALTERNATIVES:      {self.v2_v3_used:>4} ({self._pct(self.v2_v3_used):>5.1f}%)  ↑ Editor preferred alt",
-            f"V4-V6 SECONDARY:         {self.v4_v6_used:>4} ({self._pct(self.v4_v6_used):>5.1f}%)  ↑ Editor preferred secondary",
-            f"V7+ STRATEGY:            {self.v7_plus_used:>4} ({self._pct(self.v7_plus_used):>5.1f}%)  ↑ Diversity/experimental",
-            f"EXTERNAL CLIPS:          {self.external_added:>4} ({self._pct(self.external_added):>5.1f}%)  ★ Editor's own footage",
-            f"SEGMENTS DROPPED:        {self.segments_dropped:>4} ({self._pct(self.segments_dropped):>5.1f}%)  ✗ Deleted from final",
+            f"V1 CLIPS USED:           {self.v1_kept:>4} ({self.v1_kept_pct:>5.1f}%)  [OK] System picks kept",
+            f"V2-V3 ALTERNATIVES:      {self.v2_v3_used:>4} ({self._pct(self.v2_v3_used):>5.1f}%)  [^] Editor preferred alt",
+            f"V4-V6 SECONDARY:         {self.v4_v6_used:>4} ({self._pct(self.v4_v6_used):>5.1f}%)  [^] Editor preferred secondary",
+            f"V7+ STRATEGY:            {self.v7_plus_used:>4} ({self._pct(self.v7_plus_used):>5.1f}%)  [^] Diversity/experimental",
+            f"EXTERNAL CLIPS:          {self.external_added:>4} ({self._pct(self.external_added):>5.1f}%)  [*] Editor's own footage",
+            f"SEGMENTS DROPPED:        {self.segments_dropped:>4} ({self._pct(self.segments_dropped):>5.1f}%)  [X] Deleted from final",
             "",
-            "─" * 65,
+            "-" * 65,
             "TRACK PREFERENCE BREAKDOWN",
-            "─" * 65,
+            "-" * 65,
         ]
 
         for track, count in sorted(self.track_breakdown.items()):
@@ -122,9 +122,9 @@ class FilenameAnalysisResult:
 
         if self.external_clips:
             lines.append("")
-            lines.append("─" * 65)
+            lines.append("-" * 65)
             lines.append("EXTERNAL CLIPS ADDED")
-            lines.append("─" * 65)
+            lines.append("-" * 65)
             for clip in self.external_clips[:10]:
                 lines.append(f"  - {clip}")
             if len(self.external_clips) > 10:
@@ -132,16 +132,16 @@ class FilenameAnalysisResult:
 
         if self.dropped_v1_clips:
             lines.append("")
-            lines.append("─" * 65)
+            lines.append("-" * 65)
             lines.append(f"DROPPED V1 CLIPS ({len(self.dropped_v1_clips)} total)")
-            lines.append("─" * 65)
+            lines.append("-" * 65)
             for clip in self.dropped_v1_clips[:10]:
                 lines.append(f"  - {clip}")
             if len(self.dropped_v1_clips) > 10:
                 lines.append(f"  ... and {len(self.dropped_v1_clips) - 10} more")
 
         lines.append("")
-        lines.append("═" * 65)
+        lines.append("=" * 65)
 
         return "\n".join(lines)
 
@@ -408,11 +408,16 @@ class FilenameAnalyzer:
     def _extract_filename(self, clip) -> str:
         """Extract normalized filename from OTIO clip."""
         try:
-            # Try media_references dict
-            if hasattr(clip, 'media_references') and clip.media_references:
-                ref = clip.media_references.get('DEFAULT_MEDIA')
-                if ref and hasattr(ref, 'target_url') and ref.target_url:
-                    return self._normalize(os.path.basename(ref.target_url))
+            # Try media_references (may be a method in newer OTIO versions)
+            if hasattr(clip, 'media_references'):
+                refs = clip.media_references
+                # Handle both method (newer OTIO) and property (older OTIO)
+                if callable(refs):
+                    refs = refs()
+                if isinstance(refs, dict):
+                    ref = refs.get('DEFAULT_MEDIA')
+                    if ref and hasattr(ref, 'target_url') and ref.target_url:
+                        return self._normalize(os.path.basename(ref.target_url))
 
             # Try direct media_reference
             if hasattr(clip, 'media_reference') and clip.media_reference:
@@ -625,10 +630,16 @@ class PositionAnalyzer:
     def _extract_filename(self, clip) -> str:
         """Extract filename from OTIO clip."""
         try:
-            if hasattr(clip, 'media_references') and clip.media_references:
-                ref = clip.media_references.get('DEFAULT_MEDIA')
-                if ref and hasattr(ref, 'target_url') and ref.target_url:
-                    return os.path.basename(ref.target_url)
+            # Try media_references (may be a method in newer OTIO versions)
+            if hasattr(clip, 'media_references'):
+                refs = clip.media_references
+                # Handle both method (newer OTIO) and property (older OTIO)
+                if callable(refs):
+                    refs = refs()
+                if isinstance(refs, dict):
+                    ref = refs.get('DEFAULT_MEDIA')
+                    if ref and hasattr(ref, 'target_url') and ref.target_url:
+                        return os.path.basename(ref.target_url)
 
             if hasattr(clip, 'media_reference') and clip.media_reference:
                 ref = clip.media_reference
