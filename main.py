@@ -4089,7 +4089,7 @@ Be specific and descriptive for semantic matching purposes."""
                 print(f"\n  🗑️ Auto-clearing stale checkpoint ({age_hours:.1f} hours old, limit: {stale_hours}h)")
                 self.checkpoint.clear()
                 # Don't show interactive prompt - just continue fresh
-            elif not resume and not self.config.enhanced.non_interactive:
+            elif not resume and not self.config.enhanced.non_interactive and not match_only:
                 # Interactive mode: ask user about valid checkpoint
                 validation = self.checkpoint.validate(voiceover_path)
                 print(format_resume_prompt(self.checkpoint))
@@ -4108,6 +4108,10 @@ Be specific and descriptive for semantic matching purposes."""
                     except (EOFError, KeyboardInterrupt):
                         print("\n  Exiting.")
                         return
+            elif match_only:
+                # Match-only mode: skip checkpoint prompt, just clear and proceed
+                print(f"\n  ⏭ Match-only mode: ignoring checkpoint, skipping to matching stage")
+                self.checkpoint.clear()
             elif resume:
                 # --resume flag: automatically resume
                 validation = self.checkpoint.validate(voiceover_path)
