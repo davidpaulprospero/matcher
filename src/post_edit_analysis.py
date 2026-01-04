@@ -175,6 +175,15 @@ class FilenameAnalysisResult:
     coverage_map: List[Dict[str, Any]] = field(default_factory=list)
     coverage_map_enabled: bool = False
 
+    # Position matching (optional) - checks what clip is at each segment's timeline position
+    position_match_enabled: bool = False
+    position_exact_matches: int = 0      # V1 clip at correct position
+    position_alt_used: int = 0           # Alternative used at that position
+    position_secondary_used: int = 0     # Secondary used at that position
+    position_external_used: int = 0      # External clip at that position
+    position_gaps: int = 0               # No clip at that position (gap/cut)
+    position_mismatches: List[Dict[str, Any]] = field(default_factory=list)  # Details of non-V1 positions
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dict."""
         result = {
@@ -235,6 +244,17 @@ class FilenameAnalysisResult:
                 }
                 for b in self.coverage_map
             ]
+
+        # Add position matching if enabled
+        if self.position_match_enabled:
+            result["position_matching"] = {
+                "exact_matches": self.position_exact_matches,
+                "alt_used": self.position_alt_used,
+                "secondary_used": self.position_secondary_used,
+                "external_used": self.position_external_used,
+                "gaps": self.position_gaps,
+                "mismatches": self.position_mismatches[:30]  # Limit for readability
+            }
 
         return result
 
@@ -319,6 +339,34 @@ class FilenameAnalysisResult:
                 )
             lines.append("")
             lines.append("  Legend: # = covered, . = dropped/cut")
+
+        # Position matching section
+        if self.position_match_enabled:
+            total_positions = (self.position_exact_matches + self.position_alt_used +
+                               self.position_secondary_used + self.position_external_used +
+                               self.position_gaps)
+            exact_pct = (self.position_exact_matches / total_positions * 100) if total_positions > 0 else 0
+
+            lines.extend([
+                "",
+                "-" * 65,
+                "POSITION MATCHING (what clip is at each segment's position)",
+                "-" * 65,
+                f"  V1 at correct position:  {self.position_exact_matches:>4} ({exact_pct:>5.1f}%) [OK]",
+                f"  Alternative used:        {self.position_alt_used:>4}  [^] Editor chose alt",
+                f"  Secondary used:          {self.position_secondary_used:>4}  [^] Editor chose secondary",
+                f"  External/other:          {self.position_external_used:>4}  [*] Different clip",
+                f"  Gap (cut/removed):       {self.position_gaps:>4}  [X] Segment removed",
+            ])
+
+            # Show some mismatches
+            if self.position_mismatches:
+                lines.append("")
+                lines.append("  Sample replacements:")
+                for m in self.position_mismatches[:5]:
+                    lines.append(f"    {m['segment']}: {m['expected'][:20]} -> {m['actual'][:20]} ({m['type']})")
+                if len(self.position_mismatches) > 5:
+                    lines.append(f"    ... and {len(self.position_mismatches) - 5} more")
 
         lines.extend([
             "",
@@ -490,6 +538,10 @@ class FilenameAnalyzer:
         self.segment_order: List[str] = []  # ['S000', 'S001', 'S002', ...]
         self.segment_to_filename: Dict[str, str] = {}  # 'S000' -> 'abc.mp4'
 
+        # For position matching - track each segment's timeline position
+        # 'S000' -> {'start_frame': 0, 'end_frame': 150, 'filename': 'abc.mp4'}
+        self.segment_positions: Dict[str, Dict[str, Any]] = {}
+
         self._load_recommendations()
 
     def _load_recommendations(self) -> None:
@@ -532,9 +584,26 @@ class FilenameAnalyzer:
             if is_primary_v1:
                 found_v1_track = True
 
+            # Track timeline position for primary V1 track
+            position_frames = 0
+
             for item in track:
+                # Handle gaps - update position but don't process
+                if isinstance(item, otio.schema.Gap):
+                    if is_primary_v1:
+                        gap_duration = item.source_range.duration if item.source_range else item.duration()
+                        position_frames += int(gap_duration.value)
+                    continue
+
                 if not isinstance(item, otio.schema.Clip):
                     continue
+
+                # Get clip duration for position tracking
+                clip_duration_frames = 0
+                if item.source_range:
+                    clip_duration_frames = int(item.source_range.duration.value)
+                elif item.duration():
+                    clip_duration_frames = int(item.duration().value)
 
                 filename = self._extract_filename(item)
                 if filename:
@@ -551,6 +620,14 @@ class FilenameAnalyzer:
                             seg_id = f"S{v1_segment_idx:03d}"
                         self.segment_order.append(seg_id)
                         self.segment_to_filename[seg_id] = filename
+
+                        # Store segment position for position matching
+                        self.segment_positions[seg_id] = {
+                            'start_frame': position_frames,
+                            'end_frame': position_frames + clip_duration_frames,
+                            'filename': filename
+                        }
+
                         v1_segment_idx += 1
 
                         # Get confidence
@@ -558,10 +635,12 @@ class FilenameAnalyzer:
                         if isinstance(confidence, (int, float)):
                             self.v1_confidences[filename] = float(confidence)
 
-                        # Calculate duration
-                        if item.source_range:
-                            duration_frames = int(item.source_range.duration.value)
-                            v1_total_frames += duration_frames
+                        # Track total V1 duration
+                        v1_total_frames += clip_duration_frames
+
+                # Update position for V1 track
+                if is_primary_v1:
+                    position_frames += clip_duration_frames
 
         # Calculate original voiceover duration from V1 track
         self.original_duration_sec = v1_total_frames / self.frame_rate if self.frame_rate > 0 else 0
@@ -580,6 +659,7 @@ class FilenameAnalyzer:
         include_duration: bool = False,
         include_confidence: bool = False,
         include_coverage_map: bool = False,
+        include_position_matching: bool = False,
         bucket_size: int = 25
     ) -> FilenameAnalysisResult:
         """
@@ -590,6 +670,7 @@ class FilenameAnalyzer:
             include_duration: Include duration comparison analysis
             include_confidence: Include confidence correlation analysis
             include_coverage_map: Include segment coverage map visualization
+            include_position_matching: Check what clip is at each segment's timeline position
             bucket_size: Number of segments per coverage map bucket
 
         Returns:
@@ -771,6 +852,11 @@ class FilenameAnalyzer:
                 bucket_size=bucket_size
             )
 
+        # Position matching - check what clip is at each segment's timeline position
+        if include_position_matching and self.segment_positions:
+            result.position_match_enabled = True
+            self._analyze_position_matching(timeline, otio, result)
+
         return result
 
     def _extract_filename(self, clip) -> str:
@@ -867,6 +953,129 @@ class FilenameAnalyzer:
             })
 
         return coverage_map
+
+    def _analyze_position_matching(
+        self,
+        edited_timeline,
+        otio,
+        result: FilenameAnalysisResult
+    ) -> None:
+        """
+        Check what clip is at each segment's original timeline position.
+
+        For each V1 segment position from the original timeline, find what
+        clip (if any) is at that position in the edited timeline and check
+        if it matches the original V1 recommendation.
+
+        Args:
+            edited_timeline: The loaded edited OTIO timeline
+            otio: The opentimelineio module
+            result: The result object to update with position matching data
+        """
+        # Build a list of clips with positions from the edited timeline
+        # Only consider enabled clips
+        edited_clips: List[Dict[str, Any]] = []
+
+        for track in edited_timeline.tracks:
+            # Check if video track
+            track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+            if track_kind not in ('Video', 'TrackKind.Video'):
+                continue
+
+            track_name = track.name or "Unknown"
+            position_frames = 0
+
+            for item in track:
+                # Handle gaps
+                if isinstance(item, otio.schema.Gap):
+                    gap_duration = item.source_range.duration if item.source_range else item.duration()
+                    position_frames += int(gap_duration.value)
+                    continue
+
+                if not isinstance(item, otio.schema.Clip):
+                    continue
+
+                # Get clip duration
+                clip_duration_frames = 0
+                if item.source_range:
+                    clip_duration_frames = int(item.source_range.duration.value)
+                elif item.duration():
+                    clip_duration_frames = int(item.duration().value)
+
+                # Check enabled state
+                is_enabled = getattr(item, 'enabled', True)
+                if hasattr(item, 'metadata') and 'enabled' in item.metadata:
+                    is_enabled = item.metadata.get('enabled', True)
+
+                if is_enabled:
+                    filename = self._extract_filename(item)
+                    edited_clips.append({
+                        'filename': filename,
+                        'track_name': track_name,
+                        'start_frame': position_frames,
+                        'end_frame': position_frames + clip_duration_frames
+                    })
+
+                position_frames += clip_duration_frames
+
+        # For each original segment, find what clip is at that position
+        for seg_id in self.segment_order:
+            seg_pos = self.segment_positions.get(seg_id)
+            if not seg_pos:
+                continue
+
+            seg_start = seg_pos['start_frame']
+            seg_end = seg_pos['end_frame']
+            expected_filename = seg_pos['filename']
+            seg_midpoint = (seg_start + seg_end) / 2
+
+            # Find clip that covers the segment midpoint (best match for "what's at this position")
+            found_clip = None
+            for clip in edited_clips:
+                if clip['start_frame'] <= seg_midpoint < clip['end_frame']:
+                    found_clip = clip
+                    break
+
+            if not found_clip:
+                # Gap or cut at this position
+                result.position_gaps += 1
+                result.position_mismatches.append({
+                    'segment': seg_id,
+                    'expected': expected_filename,
+                    'actual': '(gap/cut)',
+                    'type': 'gap'
+                })
+                continue
+
+            actual_filename = found_clip['filename']
+
+            # Check if it matches original V1
+            if actual_filename == expected_filename:
+                result.position_exact_matches += 1
+            elif actual_filename in self.recommendations['v2_v3']:
+                result.position_alt_used += 1
+                result.position_mismatches.append({
+                    'segment': seg_id,
+                    'expected': expected_filename,
+                    'actual': actual_filename,
+                    'type': 'alternative'
+                })
+            elif actual_filename in self.recommendations['v4_v6']:
+                result.position_secondary_used += 1
+                result.position_mismatches.append({
+                    'segment': seg_id,
+                    'expected': expected_filename,
+                    'actual': actual_filename,
+                    'type': 'secondary'
+                })
+            else:
+                result.position_external_used += 1
+                result.position_mismatches.append({
+                    'segment': seg_id,
+                    'expected': expected_filename,
+                    'actual': actual_filename,
+                    'type': 'external'
+                })
 
 
 # =============================================================================
@@ -1090,6 +1299,7 @@ def analyze_filename_based(
     include_duration: bool = False,
     include_confidence: bool = False,
     include_coverage_map: bool = False,
+    include_position_matching: bool = False,
     bucket_size: int = 25
 ) -> FilenameAnalysisResult:
     """
@@ -1103,6 +1313,7 @@ def analyze_filename_based(
         include_duration: Include duration comparison analysis
         include_confidence: Include confidence correlation analysis
         include_coverage_map: Include segment coverage map visualization
+        include_position_matching: Check what clip is at each segment's timeline position
         bucket_size: Number of segments per coverage map bucket
 
     Returns:
@@ -1114,6 +1325,7 @@ def analyze_filename_based(
         include_duration=include_duration,
         include_confidence=include_confidence,
         include_coverage_map=include_coverage_map,
+        include_position_matching=include_position_matching,
         bucket_size=bucket_size
     )
 
@@ -1293,6 +1505,9 @@ Examples:
   # Coverage map with custom bucket size
   python -m src.post_edit_analysis --edited export.otio --original timeline_FULL.otio --coverage-map -b 10
 
+  # Include position matching (what clip is at each segment's position)
+  python -m src.post_edit_analysis --edited export.otio --original timeline_FULL.otio --position
+
   # Full analysis with all metrics
   python -m src.post_edit_analysis --edited export.otio --original timeline_FULL.otio --verbose
 
@@ -1353,13 +1568,19 @@ Examples:
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',
-        help='Include all available metrics (duration + confidence + coverage map)'
+        help='Include all available metrics (duration + confidence + coverage map + position)'
     )
 
     parser.add_argument(
         '--coverage-map',
         action='store_true',
         help='Include segment coverage map visualization'
+    )
+
+    parser.add_argument(
+        '--position', '-p',
+        action='store_true',
+        help='Include position matching (what clip is at each segment\'s timeline position)'
     )
 
     parser.add_argument(
@@ -1388,6 +1609,7 @@ Examples:
         include_duration = args.duration or args.verbose
         include_confidence = args.confidence or args.verbose
         include_coverage_map = getattr(args, 'coverage_map', False) or args.verbose
+        include_position = getattr(args, 'position', False) or args.verbose
 
         try:
             analyze_filename_based(
@@ -1398,6 +1620,7 @@ Examples:
                 include_duration=include_duration,
                 include_confidence=include_confidence,
                 include_coverage_map=include_coverage_map,
+                include_position_matching=include_position,
                 bucket_size=args.bucket_size
             )
             return 0
