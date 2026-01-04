@@ -270,7 +270,9 @@ class FilenameAnalyzer:
         timeline = otio.adapters.read_from_file(self.original_path)
 
         for track in timeline.tracks:
-            if track.kind != otio.schema.TrackKind.Video:
+            # Check if video track (handle both enum and string)
+            track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+            if track_kind not in ('Video', 'TrackKind.Video'):
                 continue
 
             track_name = track.name or ""
@@ -337,7 +339,9 @@ class FilenameAnalyzer:
         used_files: Dict[str, str] = {}  # filename -> track_name
 
         for track in timeline.tracks:
-            if track.kind != otio.schema.TrackKind.Video:
+            # Check if video track (handle both enum and string)
+            track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+            if track_kind not in ('Video', 'TrackKind.Video'):
                 continue
 
             track_name = track.name or "Unknown"
@@ -516,7 +520,9 @@ class PositionAnalyzer:
         clips_by_track: Dict[str, List[Dict]] = {}
 
         for track in timeline.tracks:
-            if track.kind != otio.schema.TrackKind.Video:
+            # Check if video track (handle both enum and string)
+            track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+            if track_kind not in ('Video', 'TrackKind.Video'):
                 continue
 
             track_name = track.name or "V1"
@@ -738,7 +744,8 @@ def extract_segment_map_from_otio(otio_path: str) -> Optional[str]:
     # Find V1 track
     v1_track = None
     for track in timeline.tracks:
-        if track.kind != otio.schema.TrackKind.Video:
+        track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+        if track_kind not in ('Video', 'TrackKind.Video'):
             continue
         if 'V1' in (track.name or '') or 'Primary' in (track.name or '').lower():
             v1_track = track
@@ -746,7 +753,8 @@ def extract_segment_map_from_otio(otio_path: str) -> Optional[str]:
 
     if not v1_track:
         for track in timeline.tracks:
-            if track.kind == otio.schema.TrackKind.Video:
+            track_kind = str(track.kind) if hasattr(track.kind, 'name') else track.kind
+            if track_kind in ('Video', 'TrackKind.Video'):
                 v1_track = track
                 break
 
