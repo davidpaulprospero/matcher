@@ -18,7 +18,7 @@ import logging
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set, Any
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -235,7 +235,16 @@ class VideoDownloader:
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
         self._cookies_path = None
         self._last_download_timed_out = False  # Track timeouts for retry logic
-        
+
+        # Adaptive search pool tracking
+        # Stores pass rates by keyword category for adaptive pool sizing
+        self._search_pass_rates: Dict[str, List[float]] = {}  # category -> list of pass rates
+
+        # Inter-keyword source diversity tracking
+        # Tracks which video sources are used by each keyword to detect overlap
+        self._keyword_sources: Dict[str, Set[str]] = {}  # keyword -> set of video IDs
+        self._source_keywords: Dict[str, List[str]] = {}  # video_id -> list of keywords that used it
+
         if self._cookies_from_browser:
             logger.info(f"Using cookies from browser: {self._cookies_from_browser}")
         else:
@@ -620,38 +629,38 @@ class VideoDownloader:
         topic: str = ""
     ) -> List[Dict]:
         """
-        Filter video titles using LLM to check relevance.
-        
+        Filter and RANK video titles using LLM to check relevance.
+
         Args:
             videos: List of video metadata dicts
             keyword: The search keyword
             topic: Optional topic context
-            
+
         Returns:
-            List of approved videos
+            List of approved videos, SORTED by relevance score (highest first)
         """
         llm_config = getattr(self.download_config, 'llm_title_filter', None)
         if not llm_config or not getattr(llm_config, 'enabled', False):
             return videos  # Return all if LLM filter disabled
-        
+
         if not videos:
             return []
-        
+
         provider = getattr(llm_config, 'provider', 'gemini')
         model = getattr(llm_config, 'model', 'gemini-2.0-flash')
         min_relevance = getattr(llm_config, 'min_relevance', 0.7)
         batch_size = getattr(llm_config, 'batch_size', 20)
-        
+
         approved = []
-        
+
         # Process in batches
         for i in range(0, len(videos), batch_size):
             batch = videos[i:i + batch_size]
-            
-            # Build prompt
+
+            # Build prompt - now includes relevance scoring
             titles_list = "\n".join([f"{j+1}. {v['title']}" for j, v in enumerate(batch)])
-            
-            prompt = f"""You are filtering YouTube video titles for a video editing project.
+
+            prompt = f"""You are filtering and ranking YouTube video titles for a video editing project.
 
 SEARCH KEYWORD: "{keyword}"
 {f'TOPIC CONTEXT: {topic}' if topic else ''}
@@ -660,8 +669,9 @@ VIDEO TITLES:
 {titles_list}
 
 For each title, determine if it would provide relevant B-roll footage for the keyword/topic.
+Also rate its relevance from 0.0 to 1.0 (higher = more relevant/useful footage).
 
-REJECT videos that are:
+REJECT (relevance=0) videos that are:
 - Live streams, webcams, 24/7 streams, live cams
 - Sports highlights, game recaps, match footage
 - Music videos, lyric videos, karaoke
@@ -671,18 +681,18 @@ REJECT videos that are:
 - Reaction videos
 - Compilations of memes/fails
 
-APPROVE videos that are:
-- Documentary or educational content
-- Stock footage, travel footage, city views
-- Nature, landscapes, aerial shots
-- Professional productions about the topic
-- News reports with actual footage
-- Explainer videos with relevant visuals
+APPROVE and RATE videos that are:
+- Documentary or educational content (0.8-1.0)
+- Stock footage, travel footage, city views (0.7-0.9)
+- Nature, landscapes, aerial shots (0.6-0.8)
+- Professional productions about the topic (0.8-1.0)
+- News reports with actual footage (0.6-0.8)
+- Explainer videos with relevant visuals (0.5-0.7)
 
 Respond with a JSON array of objects, one per video:
 [
-  {{"index": 1, "approve": true, "reason": "Documentary about topic"}},
-  {{"index": 2, "approve": false, "reason": "Sports highlights"}}
+  {{"index": 1, "approve": true, "relevance": 0.9, "reason": "Documentary about topic"}},
+  {{"index": 2, "approve": false, "relevance": 0.0, "reason": "Sports highlights"}}
 ]
 
 Only output the JSON array, no other text."""
@@ -723,17 +733,24 @@ Only output the JSON array, no other text."""
                         if 0 <= idx < len(batch) and result.get('approve', False):
                             video = batch[idx]
                             video['llm_reason'] = result.get('reason', 'Approved')
+                            # Store relevance score for ranking (default 0.7 for backwards compat)
+                            video['llm_relevance'] = float(result.get('relevance', 0.7))
                             approved.append(video)
-                            logger.debug(f"    ✓ Approved: {video['title'][:50]}...")
+                            logger.debug(f"    ✓ Approved ({video['llm_relevance']:.1f}): {video['title'][:50]}...")
                         elif 0 <= idx < len(batch):
                             logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({result.get('reason', 'No reason')})")
-                            
+
             except Exception as e:
                 logger.warning(f"LLM title filter error: {e}")
-                # On error, approve all in batch (fail open)
+                # On error, approve all in batch with default relevance (fail open)
+                for v in batch:
+                    v['llm_relevance'] = 0.5  # Lower default for error case
                 approved.extend(batch)
-        
-        logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved")
+
+        # SORT by relevance score (highest first) before returning
+        approved.sort(key=lambda v: v.get('llm_relevance', 0.5), reverse=True)
+
+        logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved (sorted by relevance)")
         return approved
     
     def _call_gemini(self, prompt: str, model: str) -> str:
@@ -781,7 +798,177 @@ Only output the JSON array, no other text."""
         except Exception as e:
             logger.warning(f"Anthropic API error: {e}")
             return "[]"
-    
+
+    # =========================================================================
+    # SPEECH SCREENING METHODS
+    # =========================================================================
+
+    def _download_audio_clip(
+        self,
+        video_url: str,
+        video_id: str,
+        temp_dir: Path,
+        duration: float = 5.0
+    ) -> Optional[Path]:
+        """Download first N seconds of audio for speech screening.
+
+        Reuses the same yt-dlp audio pattern from download_audio_for_keyword().
+
+        Args:
+            video_url: YouTube video URL
+            video_id: Video ID for naming
+            temp_dir: Temporary directory for audio files
+            duration: Seconds from start to download
+
+        Returns:
+            Path to downloaded audio file, or None on failure
+        """
+        audio_config = getattr(self.download_config, 'audio_first', None)
+        audio_quality = getattr(audio_config, 'audio_quality', 5) if audio_config else 5
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '--download-sections', f'*0-{duration}',  # Only first N seconds
+            '-x',  # Extract audio
+            '--audio-format', 'mp3',
+            '--audio-quality', str(audio_quality),
+            '-o', str(temp_dir / f'{video_id}.%(ext)s'),
+            '--no-playlist',
+            '--no-warnings',
+            '--quiet',
+        ]
+
+        # Add ffmpeg location if configured
+        ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
+        if ffmpeg_loc:
+            cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+
+        # Add cookies
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            speech_config = getattr(self.download_config, 'speech_screening', None)
+            timeout = getattr(speech_config, 'timeout_per_video', 30) if speech_config else 30
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode == 0:
+                matches = list(temp_dir.glob(f"{video_id}.*"))
+                return matches[0] if matches else None
+        except subprocess.TimeoutExpired:
+            logger.debug(f"[SPEECH SCREEN] {video_id}: download timeout")
+        except Exception as e:
+            logger.debug(f"[SPEECH SCREEN] {video_id}: download error: {e}")
+        return None
+
+    def _screen_video_for_speech(
+        self,
+        video: Dict[str, Any],
+        temp_dir: Path
+    ) -> Tuple[bool, float]:
+        """Download first N seconds and check for speech using Whisper VAD.
+
+        Args:
+            video: Video metadata dict with 'id', 'webpage_url', etc.
+            temp_dir: Temporary directory for audio files
+
+        Returns:
+            Tuple[bool, float]: (has_speech, speech_duration_seconds)
+        """
+        video_id = video.get('id', '')
+        video_url = video.get('webpage_url', f"https://www.youtube.com/watch?v={video_id}")
+
+        speech_config = getattr(self.download_config, 'speech_screening', None)
+        screening_duration = getattr(speech_config, 'screening_duration', 5.0) if speech_config else 5.0
+        min_speech_duration = getattr(speech_config, 'min_speech_duration', 0.5) if speech_config else 0.5
+        whisper_model = getattr(speech_config, 'whisper_model', 'base') if speech_config else 'base'
+        fallback = getattr(speech_config, 'fallback_on_error', 'accept') if speech_config else 'accept'
+
+        # Download first N seconds of audio
+        logger.debug(f"[SPEECH SCREEN] {video_id}: downloading first {screening_duration}s audio...")
+        audio_path = self._download_audio_clip(video_url, video_id, temp_dir, screening_duration)
+
+        if not audio_path or not audio_path.exists():
+            logger.debug(f"[SPEECH SCREEN] {video_id}: audio download failed, fallback={fallback}")
+            return (fallback == 'reject', 0.0)  # has_speech=True if fallback is reject
+
+        try:
+            # Import transcription module
+            from src.transcription import _transcribe_with_shared_model
+
+            # Transcribe with VAD to detect speech
+            segments = _transcribe_with_shared_model(
+                audio_path=str(audio_path),
+                model_name=whisper_model,
+                compute_type="auto",  # Let faster-whisper auto-detect best type
+                vad_filter=True,
+                language=None  # Auto-detect
+            )
+
+            # Calculate total speech duration (segments are dicts with 'start', 'end', 'text')
+            speech_duration = sum(seg['end'] - seg['start'] for seg in segments) if segments else 0.0
+            has_speech = speech_duration >= min_speech_duration
+
+            return (has_speech, speech_duration)
+
+        except Exception as e:
+            logger.debug(f"[SPEECH SCREEN] {video_id}: transcription error: {e}, fallback={fallback}")
+            return (fallback == 'reject', 0.0)
+        finally:
+            # Clean up audio file
+            try:
+                if audio_path and audio_path.exists():
+                    audio_path.unlink()
+            except Exception:
+                pass
+
+    def _screen_approved_videos(
+        self,
+        approved_videos: List[Dict[str, Any]],
+        keyword: str
+    ) -> List[Dict[str, Any]]:
+        """Screen approved videos for speech, filter out those with talking.
+
+        Args:
+            approved_videos: Videos that passed LLM title filter
+            keyword: Current search keyword (for temp dir naming)
+
+        Returns:
+            List of videos that passed speech screening (no speech detected)
+        """
+        import tempfile
+
+        speech_config = getattr(self.download_config, 'speech_screening', None)
+        reject_with_speech = getattr(speech_config, 'reject_with_speech', True) if speech_config else True
+
+        passed = []
+        rejected = []
+
+        # Create temp directory for audio clips
+        safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)[:20]
+        with tempfile.TemporaryDirectory(prefix=f"speech_screen_{safe_keyword}_") as temp_dir:
+            temp_path = Path(temp_dir)
+
+            for video in approved_videos:
+                video_id = video.get('id', 'unknown')
+                has_speech, speech_duration = self._screen_video_for_speech(video, temp_path)
+
+                if has_speech:
+                    if reject_with_speech:
+                        logger.info(f"[SPEECH SCREEN] {video_id}: SPEECH DETECTED ({speech_duration:.1f}s) - REJECT")
+                        rejected.append(video)
+                    else:
+                        logger.info(f"[SPEECH SCREEN] {video_id}: SPEECH DETECTED ({speech_duration:.1f}s) - PASS (logging only)")
+                        passed.append(video)
+                else:
+                    logger.info(f"[SPEECH SCREEN] {video_id}: NO SPEECH ({speech_duration:.1f}s) - PASS")
+                    passed.append(video)
+
+        if rejected:
+            logger.info(f"[SPEECH SCREEN] Result: {len(passed)}/{len(approved_videos)} passed ({len(rejected)} rejected with speech)")
+
+        return passed
+
     def _get_ffmpeg_transcode_cmd(self, input_path: str, output_path: str) -> List[str]:
         """Build FFmpeg transcode command for DaVinci with GPU acceleration"""
         codec = self.download_config.davinci_codec
@@ -866,11 +1053,9 @@ Only output the JSON array, no other text."""
     ) -> List[DownloadedVideo]:
         """Download videos for a single keyword and tier with optional LLM filtering"""
         max_downloads = self._get_tier_value(tier, 'per_keyword', 5)
-        
-        # Search a larger pool to find videos that match duration filters
-        multiplier = getattr(self.download_config, 'search_pool_multiplier', 5)
-        min_pool = getattr(self.download_config, 'min_search_pool', 30)
-        search_pool = max(max_downloads * multiplier, min_pool)
+
+        # ADAPTIVE SEARCH POOL: Adjust based on historical pass rates for this keyword type
+        search_pool = self._get_adaptive_search_pool(keyword, max_downloads)
         
         # Get path length settings from config
         max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
@@ -915,9 +1100,29 @@ Only output the JSON array, no other text."""
             # Apply LLM filter
             approved_videos = self._filter_titles_with_llm(videos[:search_pool], keyword, topic)
 
+            # Track pass rate for adaptive pool sizing
+            searched_count = min(len(videos), search_pool)
+            approved_count = len(approved_videos) if approved_videos else 0
+            self._record_search_pass_rate(keyword, searched_count, approved_count)
+
             if not approved_videos:
                 logger.debug(f"    No videos passed LLM filter for '{keyword}'")
                 return []
+
+            # Speech screening: filter out videos with speech in first N seconds
+            # Only applies to configured tiers (default: long, longer)
+            speech_config = getattr(self.download_config, 'speech_screening', None)
+            speech_enabled = speech_config and getattr(speech_config, 'enabled', False)
+            speech_tiers = getattr(speech_config, 'tiers', ['long', 'longer']) if speech_config else []
+
+            if speech_enabled and tier in speech_tiers:
+                logger.info(f"[SPEECH SCREEN] Tier '{tier}' - screening {len(approved_videos)} approved videos...")
+                approved_videos = self._screen_approved_videos(approved_videos, keyword)
+                logger.info(f"[SPEECH SCREEN] After screening: {len(approved_videos)} videos remain")
+
+                if not approved_videos:
+                    logger.debug(f"    No videos passed speech screening for '{keyword}'")
+                    return []
 
             # Download only approved videos (by ID)
             video_ids = [v['id'] for v in approved_videos[:max_downloads]]
@@ -1214,8 +1419,13 @@ Only output the JSON array, no other text."""
                     download_date=datetime.now().strftime('%Y-%m-%d'),
                     license=metadata.get('license', 'Unknown')
                 )
-                
+
                 downloaded.append(source)
+
+                # Track source for inter-keyword diversity analysis
+                video_id = metadata.get('id', '')
+                if video_id:
+                    self._record_source_for_keyword(keyword, video_id)
                 
                 # Clean up info.json
                 if info_file.exists():
@@ -1311,17 +1521,304 @@ Only output the JSON array, no other text."""
                     self.sources.extend(downloaded)
                     self._save_sources()
             else:
-                logger.debug(f"  [{tier}] No results")
-            
+                # ZERO-DOWNLOAD REMIX: Try LLM-based keyword remix when 0 results
+                remix_keyword = self._get_remix_keyword(keyword, topic)
+                if remix_keyword and remix_keyword != keyword:
+                    logger.info(f"  [{tier}] No results - trying remix: '{remix_keyword}'")
+                    downloaded = self._download_single(remix_keyword, tier, output_dir, topic)
+                    if downloaded:
+                        logger.debug(f"  [{tier}] ✓ Remix success: {len(downloaded)} video(s)")
+                        all_downloaded.extend(downloaded)
+                        with self._lock:
+                            self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
+                            self.sources.extend(downloaded)
+                            self._save_sources()
+                    else:
+                        logger.debug(f"  [{tier}] Remix also returned no results")
+                else:
+                    logger.debug(f"  [{tier}] No results")
+
             # Update checkpoint
             if self.checkpoint:
                 logger.debug(f"  [{tier}] Saving checkpoint...")
                 self.checkpoint.completed_videos.append(f"{keyword}|{tier}")
                 self._save_checkpoint()
                 logger.debug(f"  [{tier}] Checkpoint saved")
-        
+
         return all_downloaded
-    
+
+    def _get_remix_keyword(self, keyword: str, topic: str = "") -> Optional[str]:
+        """
+        Generate an alternative keyword using LLM when original returns 0 results.
+
+        Args:
+            keyword: Original keyword that returned 0 results
+            topic: Optional topic context
+
+        Returns:
+            Remixed keyword, or None if remix not possible/enabled
+        """
+        # Check if remix is enabled
+        remix_config = getattr(self.download_config, 'zero_download_remix', None)
+        if not remix_config:
+            # Default: try simple remix without LLM
+            return self._simple_remix_keyword(keyword)
+
+        if isinstance(remix_config, dict):
+            enabled = remix_config.get('enabled', True)
+            use_llm = remix_config.get('use_llm', False)
+        else:
+            enabled = getattr(remix_config, 'enabled', True)
+            use_llm = getattr(remix_config, 'use_llm', False)
+
+        if not enabled:
+            return None
+
+        if not use_llm:
+            return self._simple_remix_keyword(keyword)
+
+        # LLM-based remix
+        llm_config = getattr(self.download_config, 'llm_title_filter', None)
+        if not llm_config:
+            return self._simple_remix_keyword(keyword)
+
+        provider = getattr(llm_config, 'provider', 'gemini')
+        model = getattr(llm_config, 'model', 'gemini-2.0-flash')
+
+        prompt = f"""The YouTube search "{keyword}" returned 0 relevant results for B-roll footage.
+{f'Topic context: {topic}' if topic else ''}
+
+Suggest ONE alternative search keyword that:
+1. Keeps the core concept
+2. Uses more common/searchable terms
+3. Is likely to find documentary, travel, or stock footage
+
+Respond with ONLY the new search keyword, nothing else."""
+
+        try:
+            if provider == 'gemini':
+                response = self._call_gemini(prompt, model)
+            else:
+                response = self._call_anthropic(prompt, model)
+
+            remix = response.strip().strip('"\'')
+            if remix and len(remix) < 100:
+                logger.debug(f"    LLM remix: '{keyword}' → '{remix}'")
+                return remix
+        except Exception as e:
+            logger.debug(f"LLM remix error: {e}")
+
+        return self._simple_remix_keyword(keyword)
+
+    def _simple_remix_keyword(self, keyword: str) -> Optional[str]:
+        """
+        Simple keyword remix without LLM.
+
+        Strategies:
+        1. Add "footage" suffix
+        2. Remove qualifiers like "best", "top"
+        3. Simplify to core words
+        """
+        words = keyword.lower().split()
+
+        # Remove common non-searchable qualifiers
+        skip_words = {'the', 'a', 'an', 'best', 'top', 'famous', 'popular', 'amazing', 'incredible'}
+        core_words = [w for w in words if w not in skip_words]
+
+        if not core_words:
+            return None
+
+        # Strategy 1: Add "footage" if not present
+        if 'footage' not in keyword.lower() and 'video' not in keyword.lower():
+            return ' '.join(core_words[:3]) + ' footage'
+
+        # Strategy 2: Simplify to first 2 core words
+        if len(core_words) >= 2:
+            return ' '.join(core_words[:2])
+
+        return None
+
+    def _get_keyword_category(self, keyword: str) -> str:
+        """
+        Categorize keyword for adaptive pool sizing.
+
+        Categories help group similar keywords that likely have similar pass rates.
+        """
+        kw_lower = keyword.lower()
+
+        # Check for common keyword patterns
+        if any(term in kw_lower for term in ['footage', 'stock', 'b-roll', 'broll']):
+            return 'stock_footage'
+        elif any(term in kw_lower for term in ['documentary', 'history', 'explained']):
+            return 'documentary'
+        elif any(term in kw_lower for term in ['tour', 'walkthrough', 'walk through', 'travel']):
+            return 'travel'
+        elif any(term in kw_lower for term in ['aerial', 'drone', '4k', 'timelapse']):
+            return 'cinematic'
+        elif any(term in kw_lower for term in ['interview', 'speech', 'talk']):
+            return 'interview'
+        else:
+            return 'general'
+
+    def _get_adaptive_search_pool(self, keyword: str, max_downloads: int) -> int:
+        """
+        Calculate adaptive search pool size based on historical pass rates.
+
+        Args:
+            keyword: The search keyword
+            max_downloads: Target number of downloads
+
+        Returns:
+            Optimized search pool size
+        """
+        # Get config defaults
+        multiplier = getattr(self.download_config, 'search_pool_multiplier', 5)
+        min_pool = getattr(self.download_config, 'min_search_pool', 30)
+        max_pool = getattr(self.download_config, 'max_search_pool', 100)
+
+        # Default pool size
+        default_pool = max(max_downloads * multiplier, min_pool)
+
+        # Get category and historical pass rates
+        category = self._get_keyword_category(keyword)
+        pass_rates = self._search_pass_rates.get(category, [])
+
+        if len(pass_rates) < 2:
+            # Not enough data yet, use default
+            return default_pool
+
+        # Calculate average pass rate for this category
+        avg_pass_rate = sum(pass_rates[-10:]) / len(pass_rates[-10:])  # Use last 10
+
+        if avg_pass_rate <= 0.01:
+            # Very low pass rate - expand significantly
+            adaptive_pool = min(max_pool, default_pool * 3)
+            logger.debug(f"    Adaptive pool: {adaptive_pool} (low pass rate {avg_pass_rate:.1%} for '{category}')")
+        elif avg_pass_rate < 0.2:
+            # Low pass rate - expand pool
+            adaptive_pool = min(max_pool, int(default_pool * 2))
+            logger.debug(f"    Adaptive pool: {adaptive_pool} (pass rate {avg_pass_rate:.1%} for '{category}')")
+        elif avg_pass_rate > 0.6:
+            # High pass rate - can use smaller pool
+            adaptive_pool = max(min_pool, int(default_pool * 0.7))
+            logger.debug(f"    Adaptive pool: {adaptive_pool} (high pass rate {avg_pass_rate:.1%} for '{category}')")
+        else:
+            # Normal pass rate - use default
+            adaptive_pool = default_pool
+
+        return adaptive_pool
+
+    def _record_search_pass_rate(self, keyword: str, searched: int, approved: int):
+        """
+        Record pass rate for adaptive pool sizing.
+
+        Args:
+            keyword: The search keyword
+            searched: Number of videos searched
+            approved: Number that passed LLM filter
+        """
+        if searched <= 0:
+            return
+
+        category = self._get_keyword_category(keyword)
+        pass_rate = approved / searched
+
+        if category not in self._search_pass_rates:
+            self._search_pass_rates[category] = []
+
+        self._search_pass_rates[category].append(pass_rate)
+
+        # Keep only last 50 entries per category
+        if len(self._search_pass_rates[category]) > 50:
+            self._search_pass_rates[category] = self._search_pass_rates[category][-50:]
+
+    def _record_source_for_keyword(self, keyword: str, video_id: str):
+        """
+        Record that a video was downloaded for a keyword.
+
+        Used for inter-keyword source diversity analysis.
+        """
+        # Track keyword -> sources
+        if keyword not in self._keyword_sources:
+            self._keyword_sources[keyword] = set()
+        self._keyword_sources[keyword].add(video_id)
+
+        # Track source -> keywords
+        if video_id not in self._source_keywords:
+            self._source_keywords[video_id] = []
+        if keyword not in self._source_keywords[video_id]:
+            self._source_keywords[video_id].append(keyword)
+
+    def get_source_diversity_report(self) -> Dict[str, Any]:
+        """
+        Generate inter-keyword source diversity report.
+
+        Returns:
+            Dict with diversity metrics and overlap warnings
+        """
+        report = {
+            'total_keywords': len(self._keyword_sources),
+            'total_unique_sources': len(self._source_keywords),
+            'sources_per_keyword': {},
+            'overlap_warnings': [],
+            'heavily_reused_sources': [],
+        }
+
+        # Calculate sources per keyword
+        for kw, sources in self._keyword_sources.items():
+            report['sources_per_keyword'][kw] = len(sources)
+
+        # Find overlap: sources used by multiple keywords
+        for video_id, keywords in self._source_keywords.items():
+            if len(keywords) > 1:
+                report['overlap_warnings'].append({
+                    'video_id': video_id,
+                    'keywords': keywords,
+                    'count': len(keywords)
+                })
+
+        # Sort overlaps by count
+        report['overlap_warnings'].sort(key=lambda x: -x['count'])
+
+        # Find heavily reused sources (used by 3+ keywords)
+        report['heavily_reused_sources'] = [
+            o for o in report['overlap_warnings'] if o['count'] >= 3
+        ]
+
+        return report
+
+    def log_source_diversity_report(self):
+        """Log the source diversity report after download phase"""
+        report = self.get_source_diversity_report()
+
+        if report['total_keywords'] == 0:
+            return
+
+        logger.info("=" * 60)
+        logger.info("INTER-KEYWORD SOURCE DIVERSITY REPORT")
+        logger.info("=" * 60)
+        logger.info(f"  Total keywords: {report['total_keywords']}")
+        logger.info(f"  Total unique video sources: {report['total_unique_sources']}")
+
+        # Average sources per keyword
+        if report['sources_per_keyword']:
+            avg_sources = sum(report['sources_per_keyword'].values()) / len(report['sources_per_keyword'])
+            logger.info(f"  Average sources per keyword: {avg_sources:.1f}")
+
+        # Overlap warnings
+        overlap_count = len(report['overlap_warnings'])
+        if overlap_count > 0:
+            logger.warning(f"  Source overlap detected: {overlap_count} videos used by multiple keywords")
+            for o in report['overlap_warnings'][:5]:  # Show top 5
+                logger.warning(f"    {o['video_id']}: used by {o['count']} keywords ({', '.join(o['keywords'][:3])}...)")
+
+        # Heavy reuse warnings
+        if report['heavily_reused_sources']:
+            logger.warning(f"  Heavily reused sources (3+ keywords): {len(report['heavily_reused_sources'])}")
+            logger.warning("  Consider diversifying keywords or downloading more videos")
+
+        logger.info("=" * 60)
+
     def _get_retry_keyword(self, keyword: str, retry_count: int) -> str:
         """Generate alternative keyword for retry after timeout
         
@@ -1451,9 +1948,12 @@ Only output the JSON array, no other text."""
         print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
         print(f"  ✓ Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
 
+        # Log inter-keyword source diversity report
+        self.log_source_diversity_report()
+
         # Clear checkpoint on success
         self._clear_checkpoint()
-        
+
         return all_downloaded, failed_keywords
     
     def get_download_estimate(self, num_keywords: int) -> Dict:

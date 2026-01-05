@@ -149,6 +149,71 @@ class TimelineVarietyTracker:
             }
         return stats
 
+
+class GlobalClipTracker:
+    """
+    Hard-block clip reuse across entire timeline.
+
+    Tracks all clips used across ALL segments and ALL tracks (V1-V7+).
+    Prevents the same clip from ever appearing twice in the timeline.
+
+    For audio-first segment files (e.g., abc12345678_0045.mp4), the clip ID
+    is calculated using the original video coordinates to properly detect
+    overlapping segments from the same source video.
+    """
+
+    def __init__(self):
+        self.used_clips: Set[str] = set()
+        self.clip_track_map: Dict[str, str] = {}  # clip_id -> "V1@S003"
+
+    def get_clip_id(self, segment: SRTSegment) -> str:
+        """
+        Generate unique clip ID using ORIGINAL video coordinates.
+
+        For audio-first segment files (e.g., abc12345678_0045.mp4):
+        - Extract video ID from filename
+        - Add file offset to segment times to get original coords
+
+        Format: "{video_id}:{original_start:.2f}-{original_end:.2f}"
+        """
+        file_path = segment.source_file
+        filename = Path(file_path).stem
+
+        # Check for audio-first segment file pattern: {video_id}_{offset:04d}
+        match = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
+        if match:
+            video_id = match.group(1)
+            file_offset = float(match.group(2))
+            original_start = file_offset + segment.start_time
+            original_end = file_offset + segment.end_time
+            return f"{video_id}:{original_start:.2f}-{original_end:.2f}"
+
+        # Fallback for regular video files
+        path = file_path.replace('\\', '/').lower()
+        return f"{path}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+
+    def is_used(self, segment: SRTSegment) -> bool:
+        """Check if this exact clip has been used anywhere in the timeline."""
+        return self.get_clip_id(segment) in self.used_clips
+
+    def record_usage(self, segment: SRTSegment, track: str, segment_idx: int):
+        """Record that a clip was used on a specific track."""
+        clip_id = self.get_clip_id(segment)
+        self.used_clips.add(clip_id)
+        self.clip_track_map[clip_id] = f"{track}@S{segment_idx:03d}"
+
+    def get_used_clips(self) -> Set[str]:
+        """Get all used clip IDs for filtering."""
+        return self.used_clips.copy()
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get statistics for logging."""
+        return {
+            "total_clips_used": len(self.used_clips),
+            "tracks_used": len(set(v.split('@')[0] for v in self.clip_track_map.values()))
+        }
+
+
 # =============================================================================
 # ROBUST JSON PARSING
 # =============================================================================
@@ -1105,6 +1170,19 @@ class TieredMatcher:
         # Log entry to match_segment (INFO for diagnostics)
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
 
+        # Guard: return gap if no candidates at all
+        if not candidates:
+            logger.warning(f"  match_segment: no candidates for '{vo_segment.text[:30]}...'")
+            # Return a gap result
+            gap_match = Match(
+                voiceover_segment=vo_segment,
+                video_segment=vo_segment,  # Placeholder
+                video_scene=None,
+                confidence=0.0,
+                reasoning="No video candidates available"
+            )
+            return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="No candidates")
+
         # Apply face preference if set
         # Current project videos: run face detection
         # Global cache videos: use cached face_score from registry
@@ -1178,6 +1256,18 @@ class TieredMatcher:
         if not valid_candidates:
             # All candidates overused, use originals with heavy penalty
             valid_candidates = [(seg, sim * 0.5) for seg, sim in candidates[:5]]
+
+        # Final guard: if still no valid candidates after fallback, return gap
+        if not valid_candidates:
+            logger.warning(f"  match_segment: no valid candidates after filtering for '{vo_segment.text[:30]}...'")
+            gap_match = Match(
+                voiceover_segment=vo_segment,
+                video_segment=vo_segment,
+                video_scene=None,
+                confidence=0.0,
+                reasoning="No valid candidates after filtering"
+            )
+            return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="All candidates filtered")
 
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
@@ -2139,7 +2229,8 @@ class StrategyMatcher:
         primary_match: SRTSegment,
         alternatives: List[SRTSegment],
         vo_embedding: List[float],
-        candidate_embeddings: Dict[str, List[float]]
+        candidate_embeddings: Dict[str, List[float]],
+        global_used_clips: Set[str] = None
     ) -> List[AlternativeMatch]:
         """
         Get secondary matches (V4-V6) using diversity scoring.
@@ -2154,6 +2245,7 @@ class StrategyMatcher:
             alternatives: V2-V3 match segments
             vo_embedding: Voiceover embedding
             candidate_embeddings: Dict of clip_id -> embedding
+            global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
 
         Returns:
             List of up to 3 AlternativeMatch objects for V4, V5, V6
@@ -2199,12 +2291,17 @@ class StrategyMatcher:
                     continue
 
                 cand_id = self.get_clip_id(seg)
+
+                # Global deduplication: skip clips already used in any previous segment
+                if global_used_clips and cand_id in global_used_clips:
+                    continue
+
                 cand_emb = candidate_embeddings.get(cand_id)
 
                 if not _has_emb(cand_emb):
                     continue
 
-                # Skip if same exact clip already used
+                # Skip if same exact clip already used in this segment's secondary matches
                 if any(self.get_clip_id(sm.video_segment) == cand_id for sm in secondary_matches):
                     continue
 
@@ -2234,6 +2331,48 @@ class StrategyMatcher:
                     best_candidate = seg
                     best_diversity = avg_diversity
                     best_emb = cand_emb
+
+            # FALLBACK: If no candidate found with strict threshold, try relaxed threshold
+            if best_candidate is None:
+                # Try with relaxed relevance threshold (0.2 instead of 0.3)
+                for seg, text_sim in all_candidates:
+                    if seg.source_file in used_sources:
+                        continue
+
+                    cand_id = self.get_clip_id(seg)
+                    if global_used_clips and cand_id in global_used_clips:
+                        continue
+
+                    cand_emb = candidate_embeddings.get(cand_id)
+                    if not _has_emb(cand_emb):
+                        continue
+
+                    if any(self.get_clip_id(sm.video_segment) == cand_id for sm in secondary_matches):
+                        continue
+
+                    # Calculate scores (same as above)
+                    if existing_embeddings:
+                        distances = []
+                        for existing_emb in existing_embeddings:
+                            if _has_emb(existing_emb):
+                                sim = cosine_similarity(cand_emb, existing_emb)
+                                distances.append(1.0 - sim)
+                        avg_diversity = sum(distances) / len(distances) if distances else 0
+                    else:
+                        avg_diversity = 0.5
+
+                    vo_relevance = cosine_similarity(cand_emb, vo_embedding) if _has_emb(vo_embedding) else text_sim
+                    combined_score = vo_relevance * 0.4 + avg_diversity * 0.6
+
+                    # Relaxed threshold: 0.2 instead of 0.3
+                    if vo_relevance < 0.2:
+                        continue
+
+                    if combined_score > best_score:
+                        best_score = combined_score
+                        best_candidate = seg
+                        best_diversity = avg_diversity
+                        best_emb = cand_emb
 
             if best_candidate:
                 scene = self._get_scene_for_segment(best_candidate)
@@ -2353,12 +2492,22 @@ class StrategyMatcher:
         alternatives: List[SRTSegment],
         vo_embedding: List[float],
         candidate_embeddings: Dict[str, List[float]],
-        segment_index: int = 0
+        segment_index: int = 0,
+        global_used_clips: Set[str] = None
     ) -> List[StrategyMatch]:
         """
         Get all strategy matches for a voiceover segment.
         Ensures variety across all tracks.
+
+        Args:
+            global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
         """
+        # Pre-filter candidates by global used clips
+        if global_used_clips:
+            all_candidates = [
+                (seg, dist) for seg, dist in all_candidates
+                if self.get_clip_id(seg) not in global_used_clips
+            ]
         strategies = self.config.output.strategy_tracks
         
         if not self.config.output.include_strategy_tracks:
@@ -2515,6 +2664,13 @@ def match_all_segments(
             max_repeats=max_repeats
         )
         logger.info(f"  Timeline variety: {timeline_window/60:.0f}min window, max {max_repeats} repeat(s) per source")
+
+    # Global clip tracker for cross-segment deduplication (P1 requirement)
+    global_clip_tracker = None
+    clip_hard_block = getattr(mc, 'clip_hard_block', True)
+    if clip_hard_block:
+        global_clip_tracker = GlobalClipTracker()
+        logger.info(f"  Global clip deduplication: ENABLED (no clip reuse across timeline)")
     
     if oc.include_strategy_tracks:
         logger.info(f"  Strategy tracks: {', '.join(oc.strategy_tracks)}")
@@ -2563,6 +2719,16 @@ def match_all_segments(
         if i == 0:
             logger.info(f"First segment: embedding search complete, {len(all_candidates)} candidates")
 
+        # Global clip deduplication: filter out clips already used anywhere in timeline
+        if global_clip_tracker:
+            pre_filter_count = len(all_candidates)
+            all_candidates = [
+                (seg, dist) for seg, dist in all_candidates
+                if not global_clip_tracker.is_used(seg)
+            ]
+            if i == 0 and pre_filter_count != len(all_candidates):
+                logger.info(f"First segment: global dedup filtered {pre_filter_count - len(all_candidates)} used clips")
+
         # Apply timeline variety filtering for V1 (primary track)
         if variety_tracker:
             excluded_v1 = variety_tracker.get_excluded_sources("V1", current_timeline_pos)
@@ -2594,22 +2760,32 @@ def match_all_segments(
         if i == 0:
             logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
 
-        # Record V1 usage for timeline variety
-        if variety_tracker and result.primary_match:
-            variety_tracker.record_usage(
-                "V1", 
-                result.primary_match.video_segment.source_file,
-                current_timeline_pos
-            )
-        
-        # Record V2, V3 (alternatives) usage
-        if variety_tracker and result.alternatives:
-            for alt_idx, alt in enumerate(result.alternatives, start=2):
+        # Record V1 usage for timeline variety and global clip tracker
+        if result.primary_match:
+            if variety_tracker:
                 variety_tracker.record_usage(
-                    f"V{alt_idx}",
-                    alt.video_segment.source_file,
+                    "V1",
+                    result.primary_match.video_segment.source_file,
                     current_timeline_pos
                 )
+            if global_clip_tracker:
+                global_clip_tracker.record_usage(
+                    result.primary_match.video_segment, "V1", i
+                )
+
+        # Record V2, V3 (alternatives) usage
+        if result.alternatives:
+            for alt_idx, alt in enumerate(result.alternatives, start=2):
+                if variety_tracker:
+                    variety_tracker.record_usage(
+                        f"V{alt_idx}",
+                        alt.video_segment.source_file,
+                        current_timeline_pos
+                    )
+                if global_clip_tracker:
+                    global_clip_tracker.record_usage(
+                        alt.video_segment, f"V{alt_idx}", i
+                    )
         
         # Strategy matches (V4-V8) - use all embedding candidates for variety
         if oc.include_strategy_tracks:
@@ -2629,7 +2805,8 @@ def match_all_segments(
                         strategy_candidates = filtered_strategy
             
             # Compute strategy matches with variety enforcement
-            # Pass segment_index for source_rotation strategy
+            # V4-V7 don't use global clip tracker - they can reuse clips from V1-V3
+            # This gives more options for strategy tracks without exhausting the candidate pool
             strategy_matches = strategy_matcher.get_strategy_matches(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,  # Use filtered candidates
@@ -2637,12 +2814,14 @@ def match_all_segments(
                 alternatives=alt_segments,
                 vo_embedding=vo_emb,
                 candidate_embeddings=candidate_embeddings,
-                segment_index=i
+                segment_index=i,
+                global_used_clips=None  # V7+ can reuse clips
             )
             
             result.strategy_matches = strategy_matches
 
-            # Record strategy track usage
+            # Record strategy track usage (variety tracker only - NOT global clip tracker)
+            # V7+ can reuse clips from V1-V3, so we don't add them to global tracker
             if variety_tracker:
                 for sm in strategy_matches:
                     variety_tracker.record_usage(
@@ -2650,27 +2829,34 @@ def match_all_segments(
                         sm.video_segment.source_file,
                         current_timeline_pos
                     )
+            # NOTE: Intentionally NOT recording V7+ in global_clip_tracker
+            # This allows strategy tracks to reuse clips without exhausting the pool
 
             # Compute secondary matches (V4-V6) using diversity scoring
             # This overrides the secondary_matches from match_segment with strict source enforcement
+            # V4-V6 don't use global clip tracker - they can reuse clips from V1-V3
             secondary_matches = strategy_matcher.get_secondary_matches_diversity(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,
                 primary_match=result.primary_match.video_segment,
                 alternatives=alt_segments,
                 vo_embedding=vo_emb,
-                candidate_embeddings=candidate_embeddings
+                candidate_embeddings=candidate_embeddings,
+                global_used_clips=None  # V4-V6 can reuse clips
             )
             result.secondary_matches = secondary_matches
 
-            # Record V4-V6 usage for timeline variety
-            if variety_tracker and secondary_matches:
+            # Record V4-V6 usage for timeline variety only (NOT global clip tracker)
+            # This allows secondary tracks to reuse clips without exhausting the pool
+            if secondary_matches:
                 for sec_idx, sec_match in enumerate(secondary_matches, start=4):
-                    variety_tracker.record_usage(
-                        f"V{sec_idx}",
-                        sec_match.video_segment.source_file,
-                        current_timeline_pos
-                    )
+                    if variety_tracker:
+                        variety_tracker.record_usage(
+                            f"V{sec_idx}",
+                            sec_match.video_segment.source_file,
+                            current_timeline_pos
+                        )
+                    # NOTE: Intentionally NOT recording V4-V6 in global_clip_tracker
         
         results.append(result)
         
@@ -2708,5 +2894,74 @@ def match_all_segments(
                 if track_stats["top_sources"]:
                     top = track_stats["top_sources"][0]
                     logger.info(f"      Most used: {top[0]} ({top[1]} times)")
-    
+
+    # Report global clip deduplication stats
+    if global_clip_tracker:
+        global_stats = global_clip_tracker.get_stats()
+        logger.info(f"  Global clip deduplication:")
+        logger.info(f"    Total clips placed: {global_stats['total_clips_used']}")
+        logger.info(f"    All clips unique: YES (hard block enforced)")
+
+    # === VARIETY METRICS DASHBOARD ===
+    logger.info("=" * 60)
+    logger.info("VARIETY METRICS DASHBOARD")
+    logger.info("=" * 60)
+
+    # Track coverage stats
+    v1_matched = sum(1 for r in results if r.primary_match and r.primary_match.confidence >= mc.min_confidence)
+    v2_matched = sum(1 for r in results if r.alternatives and len(r.alternatives) >= 1)
+    v3_matched = sum(1 for r in results if r.alternatives and len(r.alternatives) >= 2)
+    v4_matched = sum(1 for r in results if r.secondary_matches and len(r.secondary_matches) >= 1)
+    v5_matched = sum(1 for r in results if r.secondary_matches and len(r.secondary_matches) >= 2)
+    v6_matched = sum(1 for r in results if r.secondary_matches and len(r.secondary_matches) >= 3)
+    v7_matched = sum(1 for r in results if r.strategy_matches and len(r.strategy_matches) >= 1)
+
+    total_segs = len(results)
+    logger.info(f"  Track Coverage:")
+    logger.info(f"    V1 (Primary):    {v1_matched:4d}/{total_segs} ({v1_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V2 (Alt 1):      {v2_matched:4d}/{total_segs} ({v2_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V3 (Alt 2):      {v3_matched:4d}/{total_segs} ({v3_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V4 (Sec Pri):    {v4_matched:4d}/{total_segs} ({v4_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V5 (Sec Alt 1):  {v5_matched:4d}/{total_segs} ({v5_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V6 (Sec Alt 2):  {v6_matched:4d}/{total_segs} ({v6_matched/total_segs*100:.1f}%)")
+    logger.info(f"    V7 (Strategy):   {v7_matched:4d}/{total_segs} ({v7_matched/total_segs*100:.1f}%)")
+
+    # Source concentration analysis
+    v1_sources: Dict[str, int] = defaultdict(int)
+    for r in results:
+        if r.primary_match:
+            src_name = Path(r.primary_match.video_segment.source_file).stem[:20]
+            v1_sources[src_name] += 1
+
+    if v1_sources:
+        sorted_sources = sorted(v1_sources.items(), key=lambda x: -x[1])
+        top3_count = sum(count for _, count in sorted_sources[:3])
+        top3_pct = top3_count / total_segs * 100 if total_segs > 0 else 0
+
+        logger.info(f"  Source Concentration (V1):")
+        logger.info(f"    Unique sources: {len(v1_sources)}")
+        logger.info(f"    Top 3 sources: {top3_pct:.1f}% of clips")
+        for src, count in sorted_sources[:3]:
+            logger.info(f"      {src}: {count} clips ({count/total_segs*100:.1f}%)")
+
+    # Gap analysis
+    low_alt_segments = sum(1 for r in results if len(r.alternatives or []) < 2)
+    no_secondary = sum(1 for r in results if not r.secondary_matches)
+    logger.info(f"  Gap Analysis:")
+    logger.info(f"    Segments with <2 alternatives: {low_alt_segments}/{total_segs} ({low_alt_segments/total_segs*100:.1f}%)")
+    logger.info(f"    Segments with no V4-V6:       {no_secondary}/{total_segs} ({no_secondary/total_segs*100:.1f}%)")
+
+    # Confidence distribution
+    confidences = [r.primary_match.confidence for r in results if r.primary_match]
+    if confidences:
+        avg_conf = sum(confidences) / len(confidences)
+        high_conf = sum(1 for c in confidences if c >= 0.85)
+        med_conf = sum(1 for c in confidences if 0.5 <= c < 0.85)
+        low_conf = sum(1 for c in confidences if c < 0.5)
+        logger.info(f"  Confidence Distribution (V1):")
+        logger.info(f"    Average: {avg_conf:.2f}")
+        logger.info(f"    High (≥0.85): {high_conf} | Medium (0.5-0.85): {med_conf} | Low (<0.5): {low_conf}")
+
+    logger.info("=" * 60)
+
     return results

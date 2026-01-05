@@ -1999,8 +1999,21 @@ Topic:"""
             output_dir.mkdir(parents=True, exist_ok=True)
             
             print(f"  Output directory: {output_dir}")
-            
-            # Download images
+
+            # Initialize entity cache if enabled
+            entity_cache = None
+            cache_config = getattr(config.image_search, 'entity_cache', None)
+            if cache_config and getattr(cache_config, 'enabled', False):
+                try:
+                    from src.entity_cache import EntityCache
+                    entity_cache = EntityCache(cache_config)
+                    stats = entity_cache.get_stats()
+                    if stats.get('total_entities', 0) > 0:
+                        print(f"  Global entity cache: {stats['total_entities']} entities available")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize entity cache: {e}")
+
+            # Download images (checks local cache first, then global cache if enabled)
             entity_results = download_entity_images(
                 entities=entities_to_search,
                 output_dir=str(output_dir),
@@ -2015,7 +2028,10 @@ Topic:"""
                 download_timeout=getattr(config.image_search, 'download_timeout', 10),
                 max_search_time=getattr(config.image_search, 'max_search_time', 300),
                 max_results_to_check=getattr(config.image_search, 'max_results_to_check', 500),
-                search_until_found=getattr(config.image_search, 'search_until_found', True)
+                search_until_found=getattr(config.image_search, 'search_until_found', True),
+                entity_cache=entity_cache,
+                source_project=PROJECT_DIR.name if PROJECT_DIR else "unknown",
+                skip_local_cache=getattr(self, 'refresh_entities', False)
             )
             
             # Map entities to segments for timeline placement
@@ -2058,7 +2074,44 @@ Topic:"""
             traceback.print_exc()
             print(f"  ⚠ Image search failed: {e}")
             return {}
-    
+
+    def _restore_entity_images_from_disk(self) -> None:
+        """
+        Restore entity images from .entity.json metadata files on disk.
+        Called when resuming from checkpoint to populate self.entity_images.
+        """
+        global PROJECT_DIR
+        from src.entity_images import restore_entity_images_from_disk, map_entities_to_segments
+
+        # Determine images directory (same logic as stage_image_search)
+        image_cfg = self.config.image_search
+        if getattr(image_cfg, 'root_dir', '') and image_cfg.root_dir:
+            project_name = PROJECT_DIR.name[:15] if PROJECT_DIR else "project"
+            images_dir = Path(image_cfg.root_dir) / project_name
+        elif PROJECT_DIR:
+            folder_name = getattr(image_cfg, 'folder_name', 'images')
+            images_dir = PROJECT_DIR / folder_name
+        else:
+            images_dir = Path(getattr(image_cfg, 'output_dir', './images'))
+
+        if not images_dir.exists():
+            logger.info(f"Images directory not found for restore: {images_dir}")
+            self.entity_images = {}
+            return
+
+        # Restore from disk using voiceover segments for mapping
+        voiceover_segments = getattr(self, 'voiceover_segments', None)
+        self.entity_images = restore_entity_images_from_disk(
+            str(images_dir),
+            voiceover_segments=voiceover_segments
+        )
+
+        if self.entity_images:
+            total = sum(len(r.images) for r in self.entity_images.values())
+            print(f"  ✓ Restored {total} images for {len(self.entity_images)} entities from disk")
+        else:
+            print(f"  ⚠ No entity images found on disk to restore")
+
     def stage_stock_video(self) -> Dict[str, any]:
         """
         Stage 1.6: Download stock videos for entities.
@@ -3854,6 +3907,24 @@ Be specific and descriptive for semantic matching purposes."""
                     print("  ⚠ Failed to compute voiceover embeddings")
                     return []
 
+                # Save matching fixtures if requested (for testing new algorithms)
+                save_fixtures_path = getattr(self, 'save_matching_fixtures', None)
+                if save_fixtures_path:
+                    try:
+                        from tests.test_matching import save_matching_fixtures
+                        project_dir = PROJECT_DIR or Path(getattr(self, 'voiceover_path', '.')).parent
+                        save_matching_fixtures(
+                            output_path=save_fixtures_path,
+                            vo_segments=vo_segments,
+                            video_segments=video_segments,
+                            vo_embeddings=vo_embeddings,
+                            video_embeddings=self.embeddings,
+                            config=config,
+                            project_dir=str(project_dir)
+                        )
+                    except Exception as e:
+                        print(f"  ⚠ Failed to save matching fixtures: {e}")
+
                 # Match all segments using the high-level function
                 print(f"  Running two-stage matching...")
 
@@ -4110,7 +4181,8 @@ Be specific and descriptive for semantic matching purposes."""
     def run(self, voiceover_path: str, num_keywords: int = None, match_only: bool = False,
             resume: bool = False, fresh: bool = False,
             use_keywords: str = None, save_keywords: str = None,
-            force_rematch: bool = False):
+            force_rematch: bool = False, save_matching_fixtures: str = None,
+            refresh_entities: bool = False):
         """
         Run the complete pipeline.
         All settings from config.yaml.
@@ -4124,9 +4196,15 @@ Be specific and descriptive for semantic matching purposes."""
             use_keywords: Use saved keywords preset (name or 'latest')
             save_keywords: Save extracted keywords with this name ('auto' for auto-name)
             force_rematch: Force rematch all videos, ignoring cached matches
+            save_matching_fixtures: Path to save matching fixtures for testing
+            refresh_entities: Force re-download entity images (ignore local cache)
         """
         # Store force_rematch for use in stage_match
         self.force_rematch = force_rematch
+        # Store save_matching_fixtures for use in stage_match
+        self.save_matching_fixtures = save_matching_fixtures
+        # Store refresh_entities for use in stage_image_search
+        self.refresh_entities = refresh_entities
         start_time = time.time()
         
         # Initialize checkpoint and keyword managers
@@ -4368,6 +4446,8 @@ Be specific and descriptive for semantic matching purposes."""
                 if self.resume_mode and self.checkpoint.should_skip_stage("ENTITY_IMAGES"):
                     print(f"\n  ⏭ Skipping ENTITY_IMAGES (completed in previous run)")
                     logger.info("Skipping ENTITY_IMAGES stage (checkpoint resume)")
+                    # Restore entity images from disk for OTIO timeline
+                    self._restore_entity_images_from_disk()
                 else:
                     stage_start = time.time()
                     self.stage_image_search()
@@ -5039,7 +5119,20 @@ Examples:
         action='store_true',
         help='Run in non-interactive mode (skip all prompts, use defaults)'
     )
-    
+
+    parser.add_argument(
+        '--save-matching-fixtures',
+        type=str,
+        metavar='PATH',
+        help='Save matching inputs to fixture file for testing (e.g., fixtures/test.json)'
+    )
+
+    parser.add_argument(
+        '--refresh-entities',
+        action='store_true',
+        help='Force re-download entity images (ignore local cache)'
+    )
+
     return parser.parse_args()
 
 
@@ -5271,7 +5364,9 @@ def main():
         fresh=getattr(args, 'fresh', False),
         use_keywords=getattr(args, 'use_keywords', None),
         save_keywords=getattr(args, 'save_keywords', None),
-        force_rematch=getattr(args, 'force_rematch', False)
+        force_rematch=getattr(args, 'force_rematch', False),
+        save_matching_fixtures=getattr(args, 'save_matching_fixtures', None),
+        refresh_entities=getattr(args, 'refresh_entities', False)
     )
 
 

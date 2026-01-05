@@ -21,10 +21,13 @@ import requests
 import string
 import time
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+if TYPE_CHECKING:
+    from src.entity_cache import EntityCache
 
 logger = logging.getLogger(__name__)
 
@@ -1369,6 +1372,60 @@ def build_entity_query(entity: Dict, topic: str = "") -> str:
     return query
 
 
+def check_local_entity_images(
+    images_dir: str,
+    entity_name: str,
+    entity_type: str = ""
+) -> List[str]:
+    """
+    Check if entity images already exist locally.
+
+    Scans for .entity.json files matching this entity and returns
+    paths to existing image files.
+
+    Args:
+        images_dir: Directory containing downloaded images
+        entity_name: Entity name to search for
+        entity_type: Optional entity type filter
+
+    Returns:
+        List of existing image file paths for this entity
+    """
+    images_path = Path(images_dir)
+    if not images_path.exists():
+        logger.debug(f"check_local_entity_images: Directory not found: {images_dir}")
+        return []
+
+    matching_images = []
+
+    # Find .entity.json files for this entity
+    meta_files = list(images_path.glob("*.entity.json"))
+
+    for meta_path in meta_files:
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+
+            meta_entity_name = meta.get('entity_name', '')
+            # Match by entity name (case-insensitive)
+            if meta_entity_name.lower() == entity_name.lower():
+                # Find corresponding image file
+                # meta_path is like "28207239.entity.json", need to get "28207239"
+                base_name = meta_path.stem  # "28207239.entity"
+                if base_name.endswith('.entity'):
+                    base_name = base_name[:-7]  # Strip ".entity" -> "28207239"
+
+                for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                    img_path = meta_path.parent / f"{base_name}{ext}"
+                    if img_path.exists():
+                        matching_images.append(str(img_path))
+                        break
+        except (json.JSONDecodeError, IOError):
+            continue
+
+    return matching_images
+
+
 def download_entity_images(
     entities: List[Dict],
     output_dir: str,
@@ -1383,11 +1440,14 @@ def download_entity_images(
     download_timeout: int = 10,
     max_search_time: int = 300,
     max_results_to_check: int = 500,
-    search_until_found: bool = True
+    search_until_found: bool = True,
+    entity_cache: Optional['EntityCache'] = None,
+    source_project: str = "",
+    skip_local_cache: bool = False
 ) -> Dict[str, EntityImageResult]:
     """
     Download images for entities extracted from voiceover.
-    
+
     Args:
         entities: List of entity dicts with 'text', 'type', 'context' keys
         output_dir: Directory to save images
@@ -1401,7 +1461,10 @@ def download_entity_images(
         max_search_time: Max seconds for entire search per entity (default 300)
         max_results_to_check: Max search results to check per entity (default 500)
         search_until_found: If True, keep trying query variations until images found
-    
+        entity_cache: Optional EntityCache for cross-project image reuse
+        source_project: Project name for cache attribution
+        skip_local_cache: If True, ignore local cached images and re-download
+
     Returns:
         Dict mapping entity name to EntityImageResult
     """
@@ -1473,7 +1536,40 @@ def download_entity_images(
         # Skip if already processed (same entity name)
         if entity_name in results:
             continue
-        
+
+        # Check local images first (unless force refresh)
+        if not skip_local_cache:
+            existing_images = check_local_entity_images(output_dir, entity_name, entity_type)
+            if existing_images and len(existing_images) >= images_per_entity:
+                results[entity_name] = EntityImageResult(
+                    entity_name=entity_name,
+                    entity_type=entity_type,
+                    context=context,
+                    query="(local cache)",
+                    images=existing_images[:images_per_entity]  # Use only needed count
+                )
+                total_downloaded += len(existing_images[:images_per_entity])
+                logger.info(f"  ✓ Local cache: '{entity_name}' ({len(existing_images)} images)")
+                continue
+
+        # Check global cache (if enabled)
+        if entity_cache:
+            cached = entity_cache.find_entity(entity_name, entity_type)
+            if cached:
+                # Get images from cache
+                image_paths = entity_cache.get_images_for_project(cached, output_dir)
+                if image_paths:
+                    results[entity_name] = EntityImageResult(
+                        entity_name=entity_name,
+                        entity_type=entity_type,
+                        context=context,
+                        query=cached.query,
+                        images=image_paths
+                    )
+                    total_downloaded += len(image_paths)
+                    logger.info(f"  ✓ Global cache: '{entity_name}' ({len(image_paths)} images)")
+                    continue
+
         # Build search query
         query = build_entity_query(entity, topic)
         
@@ -1582,6 +1678,16 @@ def download_entity_images(
                 )
                 total_downloaded += len(valid_paths)
                 logger.info(f"  ✓ Downloaded {len(valid_paths)} images for '{entity_name}'")
+
+                # Add to global cache for future projects
+                if entity_cache:
+                    entity_cache.add_entity(
+                        entity_name=entity_name,
+                        entity_type=entity_type,
+                        image_paths=valid_paths,
+                        source_project=source_project,
+                        query=query
+                    )
         else:
             logger.warning(f"  ⚠ No images found for '{entity_name}'")
         
@@ -1618,3 +1724,96 @@ def map_entities_to_segments(
                 entity_segments[entity_name].append(i)
     
     return entity_segments
+
+
+def restore_entity_images_from_disk(
+    images_dir: str,
+    voiceover_segments: Optional[List[Dict]] = None
+) -> Dict[str, 'EntityImageResult']:
+    """
+    Scan images directory for .entity.json metadata files and reconstruct
+    EntityImageResult objects. Used for checkpoint resume.
+
+    Args:
+        images_dir: Path to project images directory
+        voiceover_segments: Optional voiceover segments for segment mapping
+
+    Returns:
+        Dict mapping entity_name -> EntityImageResult
+    """
+    images_path = Path(images_dir)
+    if not images_path.exists():
+        logger.info(f"Images directory not found: {images_dir}")
+        return {}
+
+    # Group images by entity name
+    entity_images: Dict[str, List[Tuple[str, Dict]]] = {}  # name -> [(image_path, metadata), ...]
+
+    # Find all .entity.json metadata files
+    meta_files = list(images_path.glob("**/*.entity.json"))
+    logger.info(f"Found {len(meta_files)} entity metadata files in {images_dir}")
+
+    for meta_path in meta_files:
+        try:
+            with open(meta_path, 'r') as f:
+                metadata = json.load(f)
+
+            entity_name = metadata.get('entity_name', '')
+            if not entity_name:
+                continue
+
+            # Find corresponding image file (same name, different extension)
+            image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+            image_path = None
+
+            for ext in image_extensions:
+                candidate = meta_path.with_suffix(ext)
+                if candidate.exists():
+                    image_path = str(candidate)
+                    break
+
+            if not image_path:
+                logger.debug(f"No image file found for metadata: {meta_path}")
+                continue
+
+            if entity_name not in entity_images:
+                entity_images[entity_name] = []
+
+            entity_images[entity_name].append((image_path, metadata))
+
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to read metadata file {meta_path}: {e}")
+            continue
+
+    # Build EntityImageResult objects
+    results: Dict[str, EntityImageResult] = {}
+
+    for entity_name, image_list in entity_images.items():
+        if not image_list:
+            continue
+
+        # Use first metadata entry for entity info
+        first_meta = image_list[0][1]
+
+        results[entity_name] = EntityImageResult(
+            entity_name=entity_name,
+            entity_type=first_meta.get('entity_type', ''),
+            context=first_meta.get('context', ''),
+            query=first_meta.get('query', ''),
+            images=[img_path for img_path, _ in image_list],
+            segment_indices=[]
+        )
+
+    # Map to voiceover segments if provided
+    if voiceover_segments and results:
+        # Build simple entity list for mapping function
+        entities = [{'text': name, 'type': r.entity_type} for name, r in results.items()]
+        entity_segments = map_entities_to_segments(entities, voiceover_segments)
+
+        for entity_name, result in results.items():
+            result.segment_indices = entity_segments.get(entity_name, [])
+
+    total_images = sum(len(r.images) for r in results.values())
+    logger.info(f"Restored {total_images} images for {len(results)} entities from disk")
+
+    return results
