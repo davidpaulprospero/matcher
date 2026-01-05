@@ -293,6 +293,10 @@ class MatchingConfig:
     smart_reuse: bool = True
     sequential_when_reuse: bool = True
 
+    # Global clip deduplication (hard block mode)
+    # When True, same clip can NEVER appear twice anywhere in timeline (P1 requirement)
+    clip_hard_block: bool = True
+
     # Source file reuse prevention (limits how many times any segment from same video can be used)
     max_source_file_reuse: int = 3  # 0 = unlimited, 3 = max 3 clips from same video
     source_file_penalty: float = 0.05  # Penalty per use after reaching half the max
@@ -505,12 +509,41 @@ class SilentVideoConfig:
 
 
 @dataclass
+class EntityCacheConfig:
+    """Configuration for cross-project entity image caching.
+
+    Enables sharing entity images (people, places, organizations) across
+    projects. When searching for an entity, checks global cache first.
+    """
+    # Enable global caching
+    enabled: bool = False
+
+    # Global cache directory (shared across all projects)
+    # Expands ~ to home directory
+    cache_dir: str = "~/.matcher_entity_cache"
+
+    # Fuzzy matching threshold for entity names (0.0-1.0)
+    # 0.0 = exact match only, 1.0 = match anything
+    # Recommended: 0.85 for reasonable fuzzy matching
+    fuzzy_threshold: float = 0.85
+
+    # Maximum age of cached images in days (0 = never expire)
+    max_age_days: int = 0
+
+    # How to use cached images in projects:
+    # "copy" = copy to project folder (default, most portable)
+    # "symlink" = create symlink to cache (saves space, but Windows issues)
+    # "reference" = use absolute paths to cache (least portable)
+    cache_strategy: str = "copy"
+
+
+@dataclass
 class ImageSearchConfig:
     """Configuration for entity image and video search.
-    
+
     Downloads images representing entities (people, places, organizations)
     mentioned in the voiceover for use as stills/overlays on V9 track.
-    
+
     Also downloads stock videos from Pexels/Pixabay for V10 track.
     """
     enabled: bool = True
@@ -557,6 +590,16 @@ class ImageSearchConfig:
     
     # Stock video settings
     stock_video: StockVideoConfig = field(default_factory=StockVideoConfig)
+
+    # Cross-project entity image caching
+    entity_cache: EntityCacheConfig = field(default_factory=EntityCacheConfig)
+
+    def __post_init__(self):
+        """Convert nested dicts to dataclasses if needed"""
+        if isinstance(self.stock_video, dict):
+            self.stock_video = StockVideoConfig(**self.stock_video)
+        if isinstance(self.entity_cache, dict):
+            self.entity_cache = EntityCacheConfig(**self.entity_cache)
 
 
 @dataclass
@@ -680,6 +723,18 @@ class LLMTitleFilterConfig:
 
 
 @dataclass
+class ZeroDownloadRemixConfig:
+    """Config for automatic keyword remix when 0 results are found during download.
+
+    When a keyword returns 0 videos, this feature automatically generates
+    alternative search terms to maximize coverage.
+    """
+    enabled: bool = True  # Enable zero-download remix
+    use_llm: bool = False  # Use LLM for smart remix (costs API calls)
+    # If use_llm=False, uses simple heuristics (add "footage", simplify terms)
+
+
+@dataclass
 class AudioFirstConfig:
     """Audio-first download pipeline configuration.
 
@@ -715,6 +770,44 @@ class AudioFirstConfig:
 
     # Checkpoint between phases for resume capability
     checkpoint_phases: bool = True
+
+
+@dataclass
+class SpeechScreeningConfig:
+    """Pre-screen videos by transcribing first N seconds to detect speech.
+
+    Filters out videos with talking heads, commentary, or voiceover intros
+    to ensure only true B-roll footage (no speech) gets downloaded.
+
+    Only applied to configured tiers (default: long/longer videos 10+ min)
+    since those are more likely to have speech intros and take longer to download.
+    """
+    # Enable/disable speech screening
+    enabled: bool = False
+
+    # Duration to check (seconds from start of video)
+    screening_duration: float = 5.0
+
+    # Minimum speech duration to trigger rejection (seconds)
+    # Brief sounds/clicks under this threshold are ignored
+    min_speech_duration: float = 0.5
+
+    # If True, reject videos with speech; if False, just log detection
+    reject_with_speech: bool = True
+
+    # Whisper model size for screening (smaller = faster)
+    # Options: tiny, base, small, medium, large
+    whisper_model: str = "base"
+
+    # Timeout per video for screening (seconds)
+    # Bypasses the normal download timeout for quick screening
+    timeout_per_video: int = 30
+
+    # Fallback behavior on screening errors: "accept" or "reject"
+    fallback_on_error: str = "accept"
+
+    # Only apply to these duration tiers (skip short/medium for speed)
+    tiers: List[str] = field(default_factory=lambda: ["long", "longer"])
 
 
 @dataclass
@@ -767,10 +860,11 @@ class DownloadConfig:
     cookies_path: str = ""  # Path to cookies.txt (auto-detected if empty)
     cookies_from_browser: str = ""  # Browser to extract cookies from: chrome, firefox, edge, etc.
     
-    # Search pool multiplier - ytsearch returns limited results, so we need to 
+    # Search pool multiplier - ytsearch returns limited results, so we need to
     # search more than we want to download to find videos matching duration filters
     search_pool_multiplier: int = 5  # Search 5x what we want to download
     min_search_pool: int = 40  # Minimum search pool size
+    max_search_pool: int = 100  # Maximum search pool size (for adaptive sizing)
     
     # Timeout settings
     search_timeout: int = 60  # Seconds for search metadata subprocess
@@ -796,6 +890,13 @@ class DownloadConfig:
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
 
+    # Zero-download remix: auto-retry with alternative keywords when 0 results
+    zero_download_remix: ZeroDownloadRemixConfig = field(default_factory=ZeroDownloadRemixConfig)
+
+    # Speech screening: pre-screen videos by transcribing first N seconds
+    # Rejects videos with speech in intro to ensure only B-roll footage
+    speech_screening: SpeechScreeningConfig = field(default_factory=SpeechScreeningConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -806,6 +907,10 @@ class DownloadConfig:
             self.llm_title_filter = LLMTitleFilterConfig(**self.llm_title_filter)
         if isinstance(self.audio_first, dict):
             self.audio_first = AudioFirstConfig(**self.audio_first)
+        if isinstance(self.zero_download_remix, dict):
+            self.zero_download_remix = ZeroDownloadRemixConfig(**self.zero_download_remix)
+        if isinstance(self.speech_screening, dict):
+            self.speech_screening = SpeechScreeningConfig(**self.speech_screening)
 
 
 @dataclass
