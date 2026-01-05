@@ -8,7 +8,21 @@
       "Bash(git push:*)",
       "Bash(git fetch:*)",
       "Bash(git commit:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(dir \"d:\\\\matcher-alt - Copy - Copy - Copy - Copy\\\\tests\\\\fixtures\"\" 2>nul || echo \"Directory not found \")",
+      "Bash(set PYTHONIOENCODING=utf-8:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(dir:*)",
+      "Bash(tasklist:*)",
+      "Bash(dir \"E:\\\\i\\\\5__2025-12-31\\\\*.entity.json\")",
+      "Bash(grep:*)",
+      "Bash(cmd /c \"dir /b E:\\\\i\\\\5__2025-12-31\\\\*.entity.json 2>nul\")",
+      "Bash(cmd /c \"dir /s /b E:\\\\i\\\\*checkpoint.json 2>nul\")",
+      "Bash(cmd /c \"dir /s /b E:\\\\i\\\\*saved_keywords.json 2>nul\")",
+      "Bash(cmd /c \"dir E:\\\\i\\\\ /b 2>nul\")",
+      "Bash(xxd:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Add entity caching, adaptive search pools, and test fixtures\n\nMajor features:\n- Entity image caching: cross-project sharing with fuzzy matching\n- Adaptive search pools: auto-expand pool for low-pass-rate keywords\n- Inter-keyword source diversity tracking\n- LLM title filter now ranks by relevance score\n- Test fixture generation for matching algorithm testing\n\nNew files:\n- src/entity_cache.py: EntityCache class with fuzzy matching\n- generate_entity_json.py: Utility to generate metadata for existing images\n- tests/test_download.py, tests/test_matching.py: Test infrastructure\n\nConfig additions \\(src/config.py\\):\n- EntityCacheConfig dataclass\n- clip_hard_block for global deduplication\n- ZeroDownloadRemixConfig, SpeechScreeningConfig\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git reset:*)"
     ]
   }
 }

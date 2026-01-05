@@ -528,10 +528,16 @@ class ProgressBar:
         status_str = f" | {status}" if status else ""
         
         line = f"\r{desc}|{bar}| {percent:5.1f}% [{self.current}/{self.total}] ETA: {eta_str}{status_str}"
-        
-        # Print
-        sys.stdout.write(line + " " * 10)  # Extra spaces to clear previous longer lines
-        sys.stdout.flush()
+
+        # Print with encoding error handling for Windows consoles
+        try:
+            sys.stdout.write(line + " " * 10)  # Extra spaces to clear previous longer lines
+            sys.stdout.flush()
+        except UnicodeEncodeError:
+            # Fallback: replace non-ASCII characters
+            safe_line = line.encode('ascii', 'replace').decode('ascii')
+            sys.stdout.write(safe_line + " " * 10)
+            sys.stdout.flush()
         
         if self.current >= self.total:
             sys.stdout.write("\n")
