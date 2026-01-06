@@ -29,6 +29,7 @@ from .keyword_extractor import find_keyword_matches
 from .topic_extraction import compute_topic_penalty, compute_topic_overlap, VideoTopics, LocationChapter
 from .face_detection import FaceDetector, apply_face_preference, apply_broll_preference
 from .location_service import GeoLocation, LocationService, create_location_service
+from .logger import get_global_logger
 
 logger = logging.getLogger(__name__)
 
@@ -1449,13 +1450,15 @@ class TieredMatcher:
                 logger.warning(f"LLM matching failed: {e}")
                 # Fallback to embedding similarity
                 selected_idx = 0
-                confidence = valid_candidates[0][1]
-                reasoning = "LLM fallback"
+                embedding_sim = valid_candidates[0][1]
+                confidence = 0.60  # Reasonable fallback for embedding-only match
+                reasoning = f"LLM fallback (emb_sim={embedding_sim:.2f})"
         else:
             # No LLM available
             selected_idx = 0
-            confidence = valid_candidates[0][1]
-            reasoning = "Embedding similarity only"
+            embedding_sim = valid_candidates[0][1]
+            confidence = 0.60  # Reasonable fallback for embedding-only match
+            reasoning = f"Embedding similarity only (sim={embedding_sim:.2f})"
         
         # Build result
         selected_idx = min(selected_idx, len(valid_candidates) - 1)
@@ -1509,7 +1512,27 @@ class TieredMatcher:
             embedding_similarity=valid_candidates[selected_idx][1],
             clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
         )
-        
+
+        # Log match decision
+        run_logger = get_global_logger()
+        if run_logger:
+            run_logger.log_match_decision(
+                segment_index=segment_idx,
+                voiceover_text=vo_segment.text,
+                selected_clip=best_seg.source_file,
+                confidence=adjusted_confidence,
+                reasoning=final_reasoning,
+                embedding_similarity=valid_candidates[selected_idx][1],
+                duration_penalty=0.0,  # Not tracked separately in this function
+                keyword_boost=keyword_boost,
+                entity_boost=0.0,  # Not tracked separately in this function
+                is_keyword_match=is_kw_match,
+                is_visual_match=is_vis_match,
+                alternatives_considered=len(candidates),
+                llm_reranked=True if self.primary_provider else False,
+                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
+            )
+
         # Get alternatives (prefer different sources) - V2-V3
         alternatives = self._get_alternatives(
             [c for i, c in enumerate(valid_candidates[:4]) if i != selected_idx],
@@ -2222,6 +2245,70 @@ class StrategyMatcher:
 
         return None
 
+    def match_broll_only(
+        self,
+        vo_segment: SRTSegment,
+        all_candidates: List[Tuple[SRTSegment, float]],
+        existing_matches: List[SRTSegment],
+        existing_embeddings: List[List[float]],
+        candidate_embeddings: Dict[str, List[float]],
+        vo_embedding: List[float]
+    ) -> Optional[StrategyMatch]:
+        """
+        Strategy: B-roll Only
+        Find clips that are EXCLUSIVELY B-roll (no speech/faces).
+        Provides editors with a guaranteed silent footage option.
+
+        B-roll is detected during scene analysis via face_score < threshold.
+        This track only considers candidates with is_broll=True.
+        """
+        def _has_emb(e):
+            return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
+
+        # Get used sources and clips to enforce variety
+        used_sources = set(seg.source_file for seg in existing_matches)
+        used_clips = set(self.get_clip_id(seg) for seg in existing_matches)
+
+        best_candidate = None
+        best_score = -1
+
+        for seg, text_sim in all_candidates:
+            # CRITICAL: Only consider B-roll segments
+            if not getattr(seg, 'is_broll', False):
+                continue
+
+            cand_id = self.get_clip_id(seg)
+
+            # Exclude already-used clips (same clip can't appear on multiple tracks)
+            if cand_id in used_clips:
+                continue
+
+            # Prefer different source files for variety
+            if seg.source_file in used_sources:
+                continue
+
+            # Score by embedding similarity to voiceover (relevance)
+            cand_emb = candidate_embeddings.get(cand_id)
+            if _has_emb(cand_emb) and _has_emb(vo_embedding):
+                vo_relevance = cosine_similarity(cand_emb, vo_embedding)
+            else:
+                vo_relevance = text_sim
+
+            if vo_relevance > best_score:
+                best_score = vo_relevance
+                best_candidate = seg
+
+        if best_candidate:
+            return StrategyMatch(
+                video_segment=best_candidate,
+                video_scene=self._get_scene_for_segment(best_candidate),
+                confidence=best_score,
+                reasoning="B-roll only match (silent footage)",
+                strategy="broll_only"
+            )
+
+        return None
+
     def get_secondary_matches_diversity(
         self,
         vo_segment: SRTSegment,
@@ -2568,7 +2655,12 @@ class StrategyMatcher:
                     vo_segment, all_candidates, all_existing,
                     all_existing_embs, candidate_embeddings, segment_index
                 )
-            
+            elif strategy == "broll_only":
+                match = self.match_broll_only(
+                    vo_segment, all_candidates, all_existing,
+                    all_existing_embs, candidate_embeddings, vo_embedding
+                )
+
             if match:
                 strategy_matches.append(match)
         

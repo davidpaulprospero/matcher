@@ -10,9 +10,12 @@ import hashlib
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 from dataclasses import dataclass, field, asdict
 import logging
+
+if TYPE_CHECKING:
+    from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,7 @@ class CheckpointData:
     entity_images: Dict[str, Any] = field(default_factory=dict)
     entity_videos: Dict[str, Any] = field(default_factory=dict)
     download: Dict[str, Any] = field(default_factory=dict)
+    stock: Dict[str, Any] = field(default_factory=dict)
     remix: Dict[str, Any] = field(default_factory=dict)
     transcribe: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
@@ -83,13 +87,14 @@ class CheckpointManager:
     
     CHECKPOINT_FILE = "checkpoint.json"
     CHECKPOINT_BACKUP = "checkpoint.backup.json"
-    
-    def __init__(self, project_dir: Path, config_hash: str = ""):
+
+    def __init__(self, project_dir: Path, config_hash: str = "", config: 'Config' = None):
         self.project_dir = Path(project_dir)
         self.checkpoint_path = self.project_dir / self.CHECKPOINT_FILE
         self.backup_path = self.project_dir / self.CHECKPOINT_BACKUP
         self.config_hash = config_hash
         self.data: Optional[CheckpointData] = None
+        self._config = config  # Store config for stage restore
         
     def exists(self) -> bool:
         """Check if a checkpoint exists"""
@@ -195,7 +200,8 @@ class CheckpointManager:
                 logger.warning(f"Checkpoint is not a dict: {path}")
                 return None
 
-            return CheckpointData.from_dict(data)
+            # Migrate checkpoint if needed
+            return self._migrate_checkpoint_if_needed(data)
 
         except json.JSONDecodeError as e:
             logger.warning(f"Checkpoint JSON parse error in {path}: {e}")
@@ -203,6 +209,66 @@ class CheckpointManager:
         except Exception as e:
             logger.warning(f"Failed to load checkpoint from {path}: {e}")
             return None
+
+    def _migrate_checkpoint_if_needed(self, data: dict) -> CheckpointData:
+        """
+        Migrate old checkpoint format to new format.
+
+        Handles version upgrades transparently, including:
+        - Version 0.9 -> 1.0: Uppercase stage keys to lowercase
+        - Missing 'stock' field addition
+        """
+        # Check for version field
+        version = data.get('version', '0.9')
+
+        if version == '0.9' or version != '1.0':
+            logger.info(f"Migrating checkpoint from v{version} to v1.0")
+
+            # Map old stage keys (uppercase) to new (lowercase)
+            stage_mapping = {
+                'ANALYZE': 'analyze',
+                'ENTITY_IMAGES': 'entity_images',
+                'ENTITY_VIDEOS': 'entity_videos',
+                'DOWNLOAD': 'download',
+                'STOCK': 'stock',
+                'REMIX': 'remix',
+                'TRANSCRIBE': 'transcribe',
+                'MATCH': 'match',
+                'OUTPUT': 'output'
+            }
+
+            # Build new CheckpointData
+            migrated_data = {
+                'version': '1.0',
+                'created_at': data.get('created_at', datetime.now().isoformat()),
+                'updated_at': data.get('updated_at', datetime.now().isoformat()),
+                'last_completed_stage': data.get('last_completed_stage', ''),
+                'config_hash': data.get('config_hash', ''),
+                'voiceover_path': data.get('voiceover_path', ''),
+                'voiceover_hash': data.get('voiceover_hash', '')
+            }
+
+            # Copy stage data with key mapping
+            for old_key, new_key in stage_mapping.items():
+                # Check both old format (uppercase) and new format (lowercase)
+                stage_data = data.get(old_key) or data.get(new_key) or {}
+                migrated_data[new_key] = stage_data
+
+            # Convert to CheckpointData
+            migrated = CheckpointData.from_dict(migrated_data)
+
+            # Save migrated checkpoint immediately
+            try:
+                self.data = migrated
+                self._atomic_save()
+                logger.info("Migrated checkpoint saved successfully")
+            except Exception as e:
+                logger.warning(f"Could not save migrated checkpoint: {e}")
+
+            return migrated
+
+        # Already v1.0 - just convert to CheckpointData
+        return CheckpointData.from_dict(data)
 
     def _validate_checkpoint_data(self, data: CheckpointData) -> bool:
         """

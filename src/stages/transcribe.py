@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage
+from ..utils import is_embeddings_empty
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -97,7 +98,7 @@ class TranscribeStage(Stage):
             # Prepare checkpoint data
             checkpoint_data = {
                 'transcript_count': len(transcripts),
-                'embedding_count': len(state.embeddings) if state.embeddings else 0,
+                'embedding_count': 0 if is_embeddings_empty(state.embeddings) else len(state.embeddings),
                 'video_files': [str(vf) for vf in video_files],
             }
 

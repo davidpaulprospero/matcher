@@ -56,7 +56,7 @@ class PipelineOrchestrator:
 
         # Initialize checkpoint manager
         config_hash = getattr(config, '_config_hash', '')
-        self.checkpoint = CheckpointManager(project_dir, config_hash)
+        self.checkpoint = CheckpointManager(project_dir, config_hash, config=config)
 
         # Runtime state
         self.resume_mode = False
@@ -213,15 +213,25 @@ def create_default_pipeline(
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
     from .stages.download import DownloadStage, DownloadVideoSegmentsStage
+    from .stages.stock import StockVideoStage
+    from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
+    from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.output import OutputStage
 
-    # Add stages in order
+    # Add stages in STAGE_ORDER
     pipeline.add_stage(AnalyzeStage())
+    pipeline.add_stage(EntityImagesStage())
+    pipeline.add_stage(EntityVideosStage())
     pipeline.add_stage(DownloadStage())
+    pipeline.add_stage(StockVideoStage())
+    pipeline.add_stage(RemixStage())
     pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
 
     # Audio-first mode adds video segment download after matching
@@ -252,9 +262,28 @@ def create_match_only_pipeline(
     """
     pipeline = PipelineOrchestrator(config, project_dir)
 
+    from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.download import DownloadStage
+    from .stages.stock import StockVideoStage
+    from .stages.remix import RemixStage
+    from .stages.transcribe import TranscribeStage
+    from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.output import OutputStage
 
+    # Add prerequisite stages for restoration only (will be skipped via checkpoint)
+    pipeline.add_stage(AnalyzeStage())
+    pipeline.add_stage(EntityImagesStage())  # For V9 track
+    pipeline.add_stage(EntityVideosStage())  # For V10 track
+    pipeline.add_stage(DownloadStage())
+    pipeline.add_stage(StockVideoStage())    # For general B-roll
+    pipeline.add_stage(RemixStage())         # Filter videos by relevance
+    pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
+
+    # Add stages to actually run
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(OutputStage())
 

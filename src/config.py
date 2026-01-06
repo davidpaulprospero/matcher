@@ -594,6 +594,10 @@ class ImageSearchConfig:
     # Cross-project entity image caching
     entity_cache: EntityCacheConfig = field(default_factory=EntityCacheConfig)
 
+    # Entity matching settings (V9/V10 track gap control)
+    enable_sticky_matching: bool = False  # Reuse last entity when no match (creates continuous blocks)
+    semantic_match_threshold: float = 0.15  # Minimum word overlap for semantic match (0.0-1.0)
+
     def __post_init__(self):
         """Convert nested dicts to dataclasses if needed"""
         if isinstance(self.stock_video, dict):
@@ -878,14 +882,6 @@ class DownloadConfig:
         'long': 600,     # 10 min timeout for videos 10-25 min
         'longer': 900,   # 15 min timeout for videos 25-50 min
     })
-    
-    # Duration tiers (can be overridden)
-    tiers: dict = field(default_factory=lambda: {
-        'short': {'min': 20, 'max': 120, 'per_keyword': 8},
-        'medium': {'min': 120, 'max': 600, 'per_keyword': 8},
-        'long': {'min': 600, 'max': 1500, 'per_keyword': 5},
-        'longer': {'min': 1500, 'max': 3000, 'per_keyword': 5}
-    })
 
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
@@ -1043,7 +1039,8 @@ class OutputConfig:
     include_alternatives: bool = True
     include_strategy_tracks: bool = True
     strategy_tracks: List[str] = field(default_factory=lambda: [
-        "embedding_diversity"  # V7 only - V4-V6 are now secondary matches
+        "embedding_diversity",  # V7 - maximally different clips from V1-V3
+        "broll_only"            # V8 - B-roll only matching (silent footage)
     ])
     
     # Variety enforcement for strategy tracks

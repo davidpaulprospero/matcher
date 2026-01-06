@@ -396,11 +396,32 @@ class DownloadVideoSegmentsStage(Stage):
         warnings = []
 
         try:
+            # Check if we have audio downloads (audio-first mode indicator)
+            has_audio = state.downloaded_audio and len(state.downloaded_audio) > 0
+
+            # Edge case: skip_download=true BUT we have audio files
+            # This means user interrupted audio-first pipeline before video download
+            if config.pipeline.skip_download and has_audio:
+                warning_msg = (
+                    "WARNING: skip_download=true but audio files exist. "
+                    "This indicates incomplete audio-first pipeline. "
+                    "Video segments have NOT been downloaded yet. "
+                    "OTIO will reference audio files (.mp3) instead of video files. "
+                    "To fix: Set skip_download=false and re-run to download matched video segments."
+                )
+                print(f"\n  ⚠️  {warning_msg}")
+                logger.warning(warning_msg)
+                warnings.append("Incomplete audio-first pipeline - no video segments")
+                return StageResult.ok({'skipped': True, 'reason': 'skip_download_with_audio'}, warnings)
+
+            # Normal skip: not in audio-first mode
+            if config.pipeline.skip_download or not has_audio:
+                print("  >> Skipping segment download (not audio-first mode)")
+                logger.info("Skipping DOWNLOAD_SEGMENTS (not audio-first mode)")
+                return StageResult.ok({'skipped': True}, warnings)
+
             if not state.matches:
                 return StageResult.fail("No matches - run matching first", warnings)
-
-            if not state.downloaded_audio:
-                return StageResult.fail("No audio downloads - run audio download first", warnings)
 
             print(f"\n  --- Stage 2B: DOWNLOAD VIDEO SEGMENTS ---")
 
@@ -487,8 +508,11 @@ class DownloadVideoSegmentsStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs"""
+        # Skip validation if not in audio-first mode
+        # (stage will skip itself in run())
+        if config.pipeline.skip_download or not state.downloaded_audio:
+            return None
+
         if not state.matches:
             return "No matches available for segment download"
-        if not state.downloaded_audio:
-            return "No audio downloads available"
         return None
