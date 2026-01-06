@@ -302,9 +302,44 @@ transcription:
 
 ## Git Conventions
 
-- **Prefixes:** `feat:`, `fix:`, `docs:`, `refactor:`
-- **Branches:** Claude Code branches start with `claude/`
-- Push to feature branch, not main
+### Branch Strategy
+
+**Main branch protection:**
+- Keep `main` stable and production-ready
+- Never push major refactors directly to main
+- Use feature branches for all significant changes
+
+**Branch naming:**
+- Feature branches: `feature/descriptive-name`
+- Bug fixes: `fix/issue-description`
+- Refactors: `refactor/component-name`
+- Claude Code branches: `claude/auto-generated-name`
+
+**Workflow for major changes:**
+```bash
+# Create feature branch
+git checkout -b feature/pipeline-stages
+
+# Work and commit incrementally
+git add -A
+git commit -m "feat: Add AnalyzeStage class"
+
+# Push to remote
+git push -u origin feature/pipeline-stages
+
+# Create PR when ready
+gh pr create --title "Feature: Modular pipeline stages" --base main
+
+# After review and testing, merge to main via PR
+```
+
+**Commit prefixes:**
+- `feat:` - New features
+- `fix:` - Bug fixes
+- `docs:` - Documentation only
+- `refactor:` - Code restructuring without behavior change
+- `test:` - Test additions/modifications
+- `chore:` - Build/config changes
 
 ## Session History
 
