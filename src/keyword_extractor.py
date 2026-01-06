@@ -406,6 +406,21 @@ REFINED KEYWORDS:"""
         for kw in keywords:
             kw_lower = kw.lower()
 
+            # Strip " footage" suffix from abstract phrases
+            # e.g., "the quiet confession footage" → reject entirely
+            # This prevents bad keywords like those in your error log
+            if ' footage' in kw_lower:
+                # Check if the part before " footage" is abstract
+                base_kw = kw_lower.replace(' footage', '').strip()
+                is_abstract_with_footage = False
+                for pattern in ABSTRACT_PATTERNS:
+                    if re.search(pattern, base_kw):
+                        filtered_keywords.append(f"'{kw}' (abstract phrase with footage suffix)")
+                        is_abstract_with_footage = True
+                        break
+                if is_abstract_with_footage:
+                    continue
+
             # Check if it matches abstract patterns
             is_abstract = False
             for pattern in ABSTRACT_PATTERNS:
@@ -537,16 +552,22 @@ REFINED KEYWORDS:"""
         return '\n'.join(texts)
     
     def _detect_topic(self, text: str) -> str:
-        """Detect the main topic from the text using LLM or heuristics"""
-        
-        # Try LLM-based topic detection first
+        """Detect the main topic from the text using LLM"""
+
+        logger.debug("=== TOPIC DETECTION STARTING (code updated 2026-01-06 03:54) ===")
+
+        # Use LLM-based topic detection (required for accurate topic detection)
         if self.llm_client:
             topic = self._detect_topic_llm(text[:3000])  # Limit text length
             if topic:
                 return topic
-        
-        # Fallback to keyword-based detection
-        return self._detect_topic_heuristic(text)
+            else:
+                logger.warning("LLM topic detection returned empty result")
+        else:
+            logger.warning("No LLM client configured - topic detection disabled")
+
+        # Return empty if LLM not available or failed
+        return ""
     
     def _detect_topic_llm(self, text: str) -> str:
         """Use LLM to detect the main topic"""
@@ -557,7 +578,7 @@ Transcript excerpt:
 
 Respond with ONLY the topic (2-5 words), nothing else. Examples:
 - "opioid crisis homelessness"
-- "climate change documentary"  
+- "climate change documentary"
 - "wildlife conservation Africa"
 - "tech startup journey"
 - "World War 2 veterans"
@@ -567,10 +588,26 @@ Topic:"""
         try:
             if hasattr(self, 'gemini_model') and self.gemini_model:
                 response = self.gemini_model.generate_content(prompt)
-                topic = response.text.strip().strip('"').strip("'")
-                if topic and len(topic) < 100:  # Sanity check
-                    logger.info(f"LLM detected topic: {topic}")
-                    return topic
+
+                # Check if response was blocked
+                if hasattr(response, 'prompt_feedback'):
+                    logger.debug(f"Gemini prompt feedback: {response.prompt_feedback}")
+
+                # Try to get text from response
+                if hasattr(response, 'text'):
+                    raw_text = response.text if response.text else ""
+                    logger.debug(f"Gemini raw response text: '{raw_text[:100]}'")
+                    topic = raw_text.strip().strip('"').strip("'")
+                    logger.debug(f"After stripping: '{topic[:100]}'")
+
+                    if topic and len(topic) < 100:  # Sanity check
+                        logger.info(f"LLM detected topic: {topic}")
+                        return topic
+                    else:
+                        logger.warning(f"LLM topic too long or empty. Raw='{raw_text[:100]}', Stripped='{topic[:100]}'")
+                else:
+                    logger.warning(f"Gemini response has no text attribute: {dir(response)}")
+
             elif hasattr(self, 'anthropic_client') and self.anthropic_client:
                 # Use model from config
                 anthropic_model = getattr(self.config.llm, 'anthropic_model', 'claude-3-haiku-20240307')
@@ -583,72 +620,24 @@ Topic:"""
                 if topic and len(topic) < 100:
                     logger.info(f"LLM detected topic: {topic}")
                     return topic
+                else:
+                    logger.warning(f"LLM topic too long or empty: '{topic[:50]}...'")
         except Exception as e:
-            logger.debug(f"LLM topic detection failed: {e}")
-        
+            logger.warning(f"LLM topic detection failed: {e}", exc_info=True)
+
         return ""
     
     def _detect_topic_heuristic(self, text: str) -> str:
-        """Fallback heuristic-based topic detection"""
-        text_lower = text.lower()
-        
-        # Expanded topic keywords
-        topic_keywords = {
-            # Disasters
-            'earthquake': 'earthquake disaster',
-            'tsunami': 'tsunami disaster',
-            'typhoon': 'typhoon disaster',
-            'hurricane': 'hurricane disaster',
-            'volcano': 'volcanic eruption',
-            'eruption': 'volcanic eruption',
-            'flood': 'flooding disaster',
-            'wildfire': 'wildfire disaster',
-            'tornado': 'tornado disaster',
-            'landslide': 'landslide disaster',
-            # Social issues
-            'homeless': 'homelessness crisis',
-            'opioid': 'opioid crisis',
-            'fentanyl': 'fentanyl crisis',
-            'addiction': 'addiction crisis',
-            'poverty': 'poverty documentary',
-            'refugee': 'refugee crisis',
-            'immigration': 'immigration documentary',
-            # Environment
-            'climate': 'climate change',
-            'pollution': 'pollution documentary',
-            'conservation': 'conservation documentary',
-            'wildlife': 'wildlife documentary',
-            'ocean': 'ocean documentary',
-            # Technology
-            'artificial intelligence': 'AI technology',
-            'startup': 'tech startup',
-            'innovation': 'technology innovation',
-            # History
-            'world war': 'World War documentary',
-            'civil war': 'civil war documentary',
-            'revolution': 'historical revolution',
-            # Health
-            'pandemic': 'pandemic documentary',
-            'covid': 'COVID-19 documentary',
-            'cancer': 'cancer documentary',
-            'mental health': 'mental health documentary'
-        }
-        
-        for keyword, topic in topic_keywords.items():
-            if keyword in text_lower:
-                return topic
-        
-        # If no specific topic found, try to extract from first sentences
-        sentences = text.split('.')[:3]
-        if sentences:
-            # Look for proper nouns or key subjects
-            first_text = ' '.join(sentences)
-            # Simple extraction: take significant words
-            words = [w for w in first_text.split() if len(w) > 4 and w[0].isupper()]
-            if words:
-                return ' '.join(words[:3]) + " documentary"
-        
-        return "documentary video content"
+        """
+        DEPRECATED: Heuristic-based topic detection removed.
+        This method is kept for backwards compatibility but always returns empty string.
+        Use LLM-based detection (_detect_topic_llm) instead for accurate results.
+
+        The old heuristic approach caused false positives (e.g., "Mirage volcano"
+        in Las Vegas content being detected as "volcanic eruption disaster").
+        """
+        logger.warning("Heuristic topic detection is deprecated - configure LLM for accurate topic detection")
+        return ""
     
     def extract_keywords(
         self,

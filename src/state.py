@@ -127,6 +127,9 @@ class PipelineState:
     text_metadata: List[Dict[str, Any]] = field(default_factory=list)
     embedding_index: Any = None  # FAISS index
 
+    # === SCENE DETECTION STATE ===
+    scene_data: Dict[str, Any] = field(default_factory=dict)  # video_name -> VideoSceneData
+
     # === MATCHING STATE ===
     matches: List[Match] = field(default_factory=list)
     alternatives: Dict[int, List[Match]] = field(default_factory=dict)  # segment_idx -> alt matches

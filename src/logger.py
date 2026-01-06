@@ -789,13 +789,17 @@ class RunLogger:
             if self.run_log.total_matches == 0:
                 self.run_log.total_matches = len(self.run_log.match_decisions)
 
-        # Calculate total duration
+        # Calculate both wall-clock time and stage time
         try:
             start = datetime.fromisoformat(self.run_log.start_time)
             end = datetime.fromisoformat(self.run_log.end_time)
-            total_duration = (end - start).total_seconds()
+            wall_clock_time = (end - start).total_seconds()
         except:
-            total_duration = sum(self.run_log.stage_timings.values())
+            wall_clock_time = sum(self.run_log.stage_timings.values())
+
+        # Stage time (actual work)
+        stage_total = sum(self.run_log.stage_timings.values())
+        overhead = wall_clock_time - stage_total
 
         # =================================================================
         # CONSOLE SUMMARY (clean, organized format)
@@ -841,16 +845,22 @@ class RunLogger:
             if self.run_log.entity_images_downloaded > 0 or self.run_log.entity_videos_downloaded > 0:
                 print(f"  Entity:     {self.run_log.entity_images_downloaded:>4} images     | {self.run_log.entity_videos_downloaded:>4} videos")
 
-        # Stage timings
+        # Stage timings (with overhead shown separately)
         if self.run_log.stage_timings:
             print("\n  " + "-" * 56)
-            print("  STAGE TIMINGS")
+            print(f"  STAGE TIMINGS ({stage_total:.1f}s active, {wall_clock_time:.1f}s total)")
             print("  " + "-" * 56)
             for stage, duration in self.run_log.stage_timings.items():
-                pct = (duration / total_duration * 100) if total_duration > 0 else 0
+                # Percentages based on stage time (always sum to 100%)
+                pct = (duration / stage_total * 100) if stage_total > 0 else 0
                 bar_len = int(pct / 5)  # 20 char max bar
                 bar = "█" * bar_len + "░" * (20 - bar_len)
                 print(f"  {stage:<12} {duration:>6.1f}s  {bar} {pct:>5.1f}%")
+
+            # Show overhead if significant
+            if overhead > 0.1:
+                overhead_pct = (overhead / wall_clock_time * 100)
+                print(f"\n  Overhead: {overhead:.1f}s ({overhead_pct:.1f}% - checkpoints, I/O)")
 
         # API usage
         if self.run_log.total_api_calls > 0:
@@ -886,12 +896,12 @@ class RunLogger:
 
         # Total time
         print("\n  " + "-" * 56)
-        mins = int(total_duration // 60)
-        secs = total_duration % 60
+        mins = int(wall_clock_time // 60)
+        secs = wall_clock_time % 60
         if mins > 0:
             print(f"  TOTAL TIME: {mins}m {secs:.1f}s")
         else:
-            print(f"  TOTAL TIME: {total_duration:.1f}s")
+            print(f"  TOTAL TIME: {wall_clock_time:.1f}s")
         print("=" * 60 + "\n")
 
         # =================================================================
@@ -927,7 +937,7 @@ class RunLogger:
 
         self.file_logger.info(f"Warnings: {len(self.run_log.warnings)}")
         self.file_logger.info(f"Errors: {len(self.run_log.errors)}")
-        self.file_logger.info(f"Total time: {total_duration:.1f}s")
+        self.file_logger.info(f"Total time: {wall_clock_time:.1f}s")
 
         # Save JSON
         with open(self.json_file, 'w', encoding='utf-8') as f:
@@ -936,7 +946,7 @@ class RunLogger:
         self.file_logger.info(f"JSON log saved: {self.json_file}")
 
         # Generate LLM-friendly summary files
-        self._generate_llm_summary(total_duration)
+        self._generate_llm_summary(wall_clock_time)
     
     def _generate_llm_summary(self, total_duration: float):
         """Generate token-friendly summary files for LLMs"""

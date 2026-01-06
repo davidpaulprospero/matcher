@@ -7,11 +7,13 @@ OTIO Timeline builder with:
 """
 
 import copy
+import json
 import logging
 import re
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
+import numpy as np
 import opentimelineio as otio
 
 from .config import Config
@@ -19,6 +21,18 @@ from .utils import SRTSegment, MatchResult, AlternativeMatch
 from .embeddings import cosine_similarity
 
 logger = logging.getLogger(__name__)
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that converts numpy types to Python native types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 def _validate_entity_images(entity_images: Dict) -> Dict:
@@ -555,15 +569,14 @@ def create_timeline(
     # Secondary tracks (V4-V6) - always 3
     num_secondary = 3
     
-    # Strategy tracks (V7 only - embedding_diversity)
+    # Strategy tracks (V7+)
     strategy_names = []
     if config.output.include_strategy_tracks:
-        # Only include embedding_diversity for V7
-        if "embedding_diversity" in config.output.strategy_tracks:
-            strategy_names = ["embedding_diversity"]
-    
+        strategy_names = list(config.output.strategy_tracks)
+
     strategy_display_names = {
-        "embedding_diversity": "Embedding-Diversity"
+        "embedding_diversity": "Embedding-Diversity",
+        "broll_only": "B-roll Only"
     }
     
     # Create video tracks
@@ -1018,7 +1031,8 @@ def create_timeline(
 
                 # Color based on strategy
                 strategy_colors = {
-                    "embedding_diversity": "PINK"
+                    "embedding_diversity": "PINK",
+                    "broll_only": "TEAL"
                 }
                 strat_v_clip.metadata['clip_color'] = strategy_colors.get(strategy, "GRAY")
 
@@ -1156,7 +1170,8 @@ def create_timeline(
                 image_track=image_track,
                 entity_images=validated_entity_images,
                 matches=matches,
-                frame_rate=rate
+                frame_rate=rate,
+                config=config
             )
         else:
             logger.warning("No valid entity images after validation")
@@ -1176,7 +1191,8 @@ def create_timeline(
             video_track=stock_video_track,
             entity_videos=entity_videos,
             matches=matches,
-            frame_rate=rate
+            frame_rate=rate,
+            config=config
         )
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
@@ -1190,7 +1206,9 @@ def create_timeline(
 def _find_best_entity_match(
     vo_text: str,
     entity_dict: Dict,
-    last_matched_entity: Optional[str] = None
+    last_matched_entity: Optional[str] = None,
+    enable_sticky: bool = False,
+    semantic_threshold: float = 0.15
 ) -> Tuple[Optional[str], str]:
     """
     Find the best matching entity for a voiceover segment.
@@ -1198,12 +1216,14 @@ def _find_best_entity_match(
     Strategy:
     1. Exact match: Entity name appears in voiceover text
     2. Semantic match: Use embedding similarity between voiceover and entity query
-    3. Sticky: Use last matched entity if no match found
+    3. Sticky (optional): Use last matched entity if no match found
 
     Args:
         vo_text: Voiceover segment text (lowercase)
         entity_dict: Dict of entity_name -> EntityResult
         last_matched_entity: Previous segment's matched entity name
+        enable_sticky: Whether to fall back to previous entity (creates continuous blocks if True)
+        semantic_threshold: Minimum word overlap score for semantic match (0.0-1.0)
 
     Returns:
         (entity_name, match_type) where match_type is 'exact', 'semantic', or 'sticky'
@@ -1248,13 +1268,13 @@ def _find_best_entity_match(
                     best_entity = entity_name
 
         # Require minimum semantic score threshold
-        if best_entity and best_score >= 0.05:
+        if best_entity and best_score >= semantic_threshold:
             return best_entity, 'semantic'
     except Exception as e:
         logger.debug(f"Semantic matching failed: {e}")
 
-    # 3. Fall back to sticky entity
-    if last_matched_entity and last_matched_entity in entity_dict:
+    # 3. Fall back to sticky entity (if enabled)
+    if enable_sticky and last_matched_entity and last_matched_entity in entity_dict:
         entity_result = entity_dict[last_matched_entity]
         assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
         if assets:
@@ -1267,7 +1287,8 @@ def _add_entity_images_to_track(
     image_track: otio.schema.Track,
     entity_images: Dict,
     matches: List[MatchResult],
-    frame_rate: float
+    frame_rate: float,
+    config: Config
 ):
     """
     Add entity images to V9 track at segment positions.
@@ -1315,8 +1336,12 @@ def _add_entity_images_to_track(
         vo_text = match.voiceover_segment.text.lower()
 
         # Find best matching entity (exact -> semantic -> sticky)
+        enable_sticky = getattr(config.image_search, 'enable_sticky_matching', False)
+        semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
         entity_name, match_type = _find_best_entity_match(
-            vo_text, entity_images, last_matched_entity
+            vo_text, entity_images, last_matched_entity,
+            enable_sticky=enable_sticky,
+            semantic_threshold=semantic_threshold
         )
 
         entity_match_stats[match_type] += 1
@@ -1465,7 +1490,8 @@ def _add_entity_videos_to_track(
     video_track: otio.schema.Track,
     entity_videos: Dict,
     matches: List[MatchResult],
-    frame_rate: float
+    frame_rate: float,
+    config: Config
 ):
     """
     Add stock videos to V10 track at segment positions.
@@ -1509,8 +1535,12 @@ def _add_entity_videos_to_track(
         vo_text = match.voiceover_segment.text.lower()
 
         # Find best matching entity (exact -> semantic -> sticky)
+        enable_sticky = getattr(config.image_search, 'enable_sticky_matching', False)
+        semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
         entity_name, match_type = _find_best_entity_match(
-            vo_text, entity_videos, last_matched_entity
+            vo_text, entity_videos, last_matched_entity,
+            enable_sticky=enable_sticky,
+            semantic_threshold=semantic_threshold
         )
 
         video_match_stats[match_type] += 1
@@ -2066,7 +2096,7 @@ def generate_segment_map(
     json_path = f"{base_path}_segments.json"
 
     with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(segment_map, f, indent=2, ensure_ascii=False)
+        json.dump(segment_map, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
     logger.info(f"Generated segment map: {json_path} ({len(segments)} segments)")
 

@@ -278,7 +278,7 @@ class AnalyzeStage(Stage):
         max_keywords: int,
         config: 'Config'
     ) -> tuple:
-        """Extract keywords from segments"""
+        """Extract keywords from segments using per-segment method"""
         try:
             from ..keyword_extractor import LLMKeywordExtractor
 
@@ -290,17 +290,26 @@ class AnalyzeStage(Stage):
                 for s in segments
             ]
 
+            # First, extract overall keywords and entities for context
             result = extractor.extract_keywords(segment_dicts, max_keywords=max_keywords)
-
-            keywords = result.keywords
             entities = result.entities if result.entities else []
             topic = result.topic if hasattr(result, 'topic') else ''
 
             # Detect topic from keywords if not provided
-            if not topic and keywords:
-                topic = self._detect_topic_from_keywords(keywords, config)
+            if not topic and result.keywords:
+                topic = self._detect_topic_from_keywords(result.keywords, config)
 
-            return keywords, entities, topic
+            # Use per-segment extraction for better, more specific keywords
+            # This generates ONE keyword per segment instead of general keywords
+            print(f"  Using per-segment keyword extraction for {len(segments)} segments...")
+            keywords = extractor.extract_keyword_per_segment(segment_dicts, topic=topic)
+
+            # Take unique keywords up to max_keywords limit
+            unique_keywords = list(dict.fromkeys(keywords))[:max_keywords]
+
+            logger.info(f"Per-segment extraction: {len(keywords)} total → {len(unique_keywords)} unique keywords")
+
+            return unique_keywords, entities, topic
 
         except Exception as e:
             logger.error(f"Keyword extraction failed: {e}")

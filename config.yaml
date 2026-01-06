@@ -92,7 +92,7 @@ transcription:
   # Detects silences between SRT segments and splits at natural breaks
   pause_split:
     enabled: true  # Enable pause-based splitting
-    min_gap_ms: 300  # Minimum gap between SRT segments to consider a pause (ms)
+    min_gap_ms: 500  # Minimum gap between SRT segments to consider a pause (ms)
     split_at_sentences: true  # Split at sentence boundaries (. ! ?) - most aggressive
     split_at_list_markers: true  # Split before "1.", "2.", "8." etc. (countdown patterns)
     split_at_locations: true  # Split at "City, State" patterns
@@ -360,9 +360,10 @@ negative_matching:
 # Enables filtering/remixing of downloaded videos based on keyword relevance
 # before transcription, without additional downloads.
 # Triggered after initial batch downloads complete.
+# Controls REMIX pipeline stage (keyword-based video filtering).
 
 remix:
-  enabled: true
+  enabled: true  # Controls REMIX stage (filters videos before transcription)
   trigger_after_download: true
   
   # Scoring thresholds
@@ -442,9 +443,10 @@ zero_download_remix:
 # -----------------------------------------------------------------------------
 # Downloads images for entities (people, places, organizations) mentioned
 # in the voiceover. Images are placed on V9 track as stills/overlays.
+# Controls ENTITY_IMAGES and ENTITY_VIDEOS pipeline stages.
 
 image_search:
-  enabled: true
+  enabled: true  # Controls ENTITY_IMAGES and ENTITY_VIDEOS stages
   
   # Short path settings (like download config)
   # Set root_dir to a short path near drive root for best results
@@ -452,7 +454,7 @@ image_search:
   folder_name: "images" # Subfolder name when root_dir is empty
   
   # Images per entity (5 recommended for variety and backup options)
-  images_per_entity: 2
+  images_per_entity: 1
   
   # Videos per entity for stock footage (3 recommended)
   videos_per_entity: 1
@@ -496,11 +498,16 @@ image_search:
   # Cross-project entity image caching
   # When enabled, shares downloaded entity images across projects
   entity_cache:
-    enabled: false                          # Enable global entity cache
+    enabled: true                           # Enable global entity cache
     cache_dir: "~/.matcher_entity_cache"    # Shared cache location (~ = home dir)
     fuzzy_threshold: 0.85                   # Entity name matching threshold (0.0-1.0)
     max_age_days: 0                         # Cache expiration in days (0 = never expire)
     cache_strategy: "copy"                  # copy, symlink, or reference
+
+  # Entity matching settings (V9/V10 track gap control)
+  # Controls how entities match to voiceover segments in timeline
+  enable_sticky_matching: false        # Reuse last entity when no match (creates continuous blocks)
+  semantic_match_threshold: 0.15       # Minimum word overlap for match (0.0-1.0, default 0.15)
 
 # -----------------------------------------------------------------------------
 # LLM SETTINGS
@@ -532,15 +539,15 @@ llm:
 # Decision: Enable keyword remix for automatic improvement
 
 enhanced:
-  enabled: true
+  enabled: true  # Controls STOCK stage (generic stock footage)
   min_confidence: 0.90  # 90% minimum target
   max_retries: 3
-  
+
   # Keyword remix
   remix_enabled: true
   remix_keyword_count: 10
-  
-  # Stock footage integration
+
+  # Stock footage integration (STOCK stage)
   enable_pexels: true
   enable_pixabay: true
   stock_per_keyword: 2
@@ -741,12 +748,12 @@ download:
   # Filters out videos with talking heads/commentary to ensure only B-roll footage
   # Only applied to configured tiers (long videos are more likely to have intros)
   speech_screening:
-    enabled: false          # Enable speech screening (disabled by default)
-    screening_duration: 5.0 # Seconds from start to check for speech
-    min_speech_duration: 0.5 # Minimum speech duration to trigger rejection
+    enabled: true           # Enable speech screening for long videos
+    screening_duration: 10.0 # Seconds from start to check for speech (increased for better accuracy)
+    min_speech_duration: 1.0 # Minimum speech duration to trigger rejection (stricter threshold)
     reject_with_speech: true # If true, reject videos with speech; if false, just log
     whisper_model: "base"   # Model for screening: tiny, base, small, medium, large
-    timeout_per_video: 30   # Timeout per video screening (seconds)
+    timeout_per_video: 45   # Timeout per video screening (seconds) - increased for 10s clips
     fallback_on_error: "accept"  # "accept" or "reject" on screening errors
     tiers:                  # Only apply to these duration tiers
       - "long"              # 10-25 min videos
@@ -766,23 +773,23 @@ duration_tiers:
   short:
     min: 20
     max: 120
-    count: 5
+    count: 0            # Disabled - focusing on medium/long videos
     max_total: 0        # 0 = no limit
   medium:
     min: 120
     max: 600
-    count: 3
+    count: 5            # Increased from 3
     max_total: 0
   long:
     min: 600
     max: 1500
-    count: 1
+    count: 3            # Increased from 1
     max_total: 0
   longer:
     min: 1500
     max: 3000
-    count: 1
-    max_total: 1        # Only 1 longer video per project (saves ~5 min download time)
+    count: 2            # Increased from 1
+    max_total: 0        # Removed limit - allow multiple longer videos
 
 # -----------------------------------------------------------------------------
 # STOCK FOOTAGE (Pexels, Pixabay)
@@ -852,7 +859,8 @@ output:
   num_alternatives: 2  # V2-V3
   include_strategy_tracks: true
   strategy_tracks:
-    - embedding_diversity  # V7 only - V4-V6 are now secondary matches
+    - embedding_diversity  # V7 - maximally different clips from V1-V3
+    - broll_only           # V8 - B-roll only matching (silent footage)
   
   # Variety enforcement - prevents same source video from dominating timeline
   # This solves the problem of one video being used for 90% of a 30-minute project

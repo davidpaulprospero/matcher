@@ -89,6 +89,30 @@ class OutputStage(Stage):
 
             # Generate timeline
             print(f"  Creating timeline...")
+
+            # Debug: Check entity data availability for V9/V10 tracks
+            if state.entity_images:
+                total_images = sum(len(getattr(r, 'images', [])) for r in state.entity_images.values())
+                print(f"  [V9] Entity images available: {len(state.entity_images)} entities, {total_images} images")
+                for name, result in list(state.entity_images.items())[:3]:
+                    img_count = len(getattr(result, 'images', []))
+                    print(f"    • {name}: {img_count} images")
+                if len(state.entity_images) > 3:
+                    print(f"    ... and {len(state.entity_images) - 3} more entities")
+            else:
+                print(f"  [V9] ⚠ No entity images available for V9 track")
+
+            if state.entity_videos:
+                total_videos = sum(len(getattr(r, 'videos', [])) for r in state.entity_videos.values())
+                print(f"  [V10] Stock videos available: {len(state.entity_videos)} entities, {total_videos} videos")
+                for name, result in list(state.entity_videos.items())[:3]:
+                    vid_count = len(getattr(result, 'videos', []))
+                    print(f"    • {name}: {vid_count} videos")
+                if len(state.entity_videos) > 3:
+                    print(f"    ... and {len(state.entity_videos) - 3} more entities")
+            else:
+                print(f"  [V10] ⚠ No stock videos available for V10 track")
+
             timeline = create_timeline(
                 matches=state.matches,
                 config=config,

@@ -206,11 +206,12 @@ class VideoDownloader:
         """Initialize downloader with config."""
         self.config = config
         self.download_config = config.download
-        
-        # Override tiers from config if present
-        if hasattr(self.download_config, 'tiers') and self.download_config.tiers:
-            self.DURATION_TIERS = self.download_config.tiers
-        
+
+        # Load duration tiers from config.duration_tiers (the YAML config)
+        # Falls back to hardcoded DURATION_TIERS if not configured
+        if hasattr(config, 'duration_tiers') and config.duration_tiers:
+            self.DURATION_TIERS = self._load_duration_tiers(config.duration_tiers)
+
         # Source tracking
         self.sources: List[DownloadedVideo] = []
         self.sources_file = Path(config.downloaded_videos_dir) / "sources.json"
@@ -262,7 +263,25 @@ class VideoDownloader:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
-    
+
+    def _load_duration_tiers(self, duration_tiers_config) -> Dict[str, Dict]:
+        """Convert DurationTiersConfig dataclass to dict format for DURATION_TIERS.
+
+        Maps config.duration_tiers (from YAML) to the dict format expected by
+        the rest of the downloader code.
+        """
+        tiers = {}
+        for tier_name in ['short', 'medium', 'long', 'longer']:
+            tier_config = getattr(duration_tiers_config, tier_name, None)
+            if tier_config:
+                tiers[tier_name] = {
+                    'min': getattr(tier_config, 'min_seconds', 0),
+                    'max': getattr(tier_config, 'max_seconds', 120),
+                    'per_keyword': getattr(tier_config, 'videos_per_keyword', 5),
+                    'max_total': getattr(tier_config, 'max_total', 0)
+                }
+        return tiers if tiers else self.DURATION_TIERS
+
     def _get_tier_value(self, tier: str, key: str, default: int = 0) -> int:
         """Get tier config value, handling both dict and dataclass formats"""
         tier_config = self.DURATION_TIERS.get(tier, {})
@@ -281,7 +300,24 @@ class VideoDownloader:
             else:
                 value = getattr(tier_config, key, default)
             return value if value is not None else default
-    
+
+    def _cleanup_partial_files(self, directory: Path, video_id: str) -> None:
+        """Remove partial download files for a video ID.
+
+        Cleans up .part, .ytdl, and other temporary files left by failed/timed out downloads.
+        """
+        if not directory.exists():
+            return
+
+        patterns = [f"{video_id}.*part*", f"{video_id}.*.ytdl", f"{video_id}.ytdl"]
+        for pattern in patterns:
+            for partial_file in directory.glob(pattern):
+                try:
+                    partial_file.unlink()
+                    logger.debug(f"Cleaned up partial file: {partial_file.name}")
+                except Exception as e:
+                    logger.debug(f"Could not remove {partial_file.name}: {e}")
+
     def _find_cookies_file(self) -> Optional[Path]:
         """
         Find cookies.txt file for YouTube authentication.
@@ -705,40 +741,55 @@ Only output the JSON array, no other text."""
 
                 # Parse response - extract JSON array
                 import re
-                json_match = re.search(r'\[[\s\S]*\]', response)
-                if json_match:
-                    json_str = json_match.group()
-                    try:
-                        results = json.loads(json_str)
-                    except json.JSONDecodeError:
-                        # Try to fix truncated JSON by closing brackets
-                        json_str = json_str.rstrip()
-                        if not json_str.endswith(']'):
-                            # Find last complete object
-                            last_brace = json_str.rfind('}')
-                            if last_brace > 0:
-                                json_str = json_str[:last_brace + 1] + ']'
-                                try:
-                                    results = json.loads(json_str)
-                                    logger.debug("Fixed truncated JSON response")
-                                except json.JSONDecodeError:
-                                    raise
-                            else:
+
+                # Strip markdown code blocks if present
+                clean_response = response.strip()
+                if clean_response.startswith('```'):
+                    # Remove ```json or ``` prefix and trailing ```
+                    lines = clean_response.split('\n')
+                    if lines[0].startswith('```'):
+                        lines = lines[1:]  # Remove opening ```json
+                    if lines and lines[-1].strip() == '```':
+                        lines = lines[:-1]  # Remove closing ```
+                    clean_response = '\n'.join(lines)
+
+                json_match = re.search(r'\[[\s\S]*\]', clean_response)
+                if not json_match:
+                    logger.warning(f"No JSON array found in LLM response (len={len(response)})")
+                    raise ValueError("No JSON array in response")
+
+                json_str = json_match.group()
+                try:
+                    results = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Try to fix truncated JSON by closing brackets
+                    json_str = json_str.rstrip()
+                    if not json_str.endswith(']'):
+                        # Find last complete object
+                        last_brace = json_str.rfind('}')
+                        if last_brace > 0:
+                            json_str = json_str[:last_brace + 1] + ']'
+                            try:
+                                results = json.loads(json_str)
+                                logger.debug("Fixed truncated JSON response")
+                            except json.JSONDecodeError:
                                 raise
                         else:
                             raise
+                    else:
+                        raise
 
-                    for result in results:
-                        idx = result.get('index', 0) - 1
-                        if 0 <= idx < len(batch) and result.get('approve', False):
-                            video = batch[idx]
-                            video['llm_reason'] = result.get('reason', 'Approved')
-                            # Store relevance score for ranking (default 0.7 for backwards compat)
-                            video['llm_relevance'] = float(result.get('relevance', 0.7))
-                            approved.append(video)
-                            logger.debug(f"    ✓ Approved ({video['llm_relevance']:.1f}): {video['title'][:50]}...")
-                        elif 0 <= idx < len(batch):
-                            logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({result.get('reason', 'No reason')})")
+                for result in results:
+                    idx = result.get('index', 0) - 1
+                    if 0 <= idx < len(batch) and result.get('approve', False):
+                        video = batch[idx]
+                        video['llm_reason'] = result.get('reason', 'Approved')
+                        # Store relevance score for ranking (default 0.7 for backwards compat)
+                        video['llm_relevance'] = float(result.get('relevance', 0.7))
+                        approved.append(video)
+                        logger.debug(f"    ✓ Approved ({video['llm_relevance']:.1f}): {video['title'][:50]}...")
+                    elif 0 <= idx < len(batch):
+                        logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({result.get('reason', 'No reason')})")
 
             except Exception as e:
                 logger.warning(f"LLM title filter error: {e}")
@@ -885,17 +936,19 @@ Only output the JSON array, no other text."""
         fallback = getattr(speech_config, 'fallback_on_error', 'accept') if speech_config else 'accept'
 
         # Download first N seconds of audio
-        logger.debug(f"[SPEECH SCREEN] {video_id}: downloading first {screening_duration}s audio...")
+        video_title = video.get('title', 'Unknown')[:50]
+        logger.info(f"[SPEECH SCREEN] {video_id} - '{video_title}': downloading first {screening_duration}s audio...")
         audio_path = self._download_audio_clip(video_url, video_id, temp_dir, screening_duration)
 
         if not audio_path or not audio_path.exists():
-            logger.debug(f"[SPEECH SCREEN] {video_id}: audio download failed, fallback={fallback}")
+            logger.warning(f"[SPEECH SCREEN] {video_id}: audio download failed, fallback={fallback}")
             return (fallback == 'reject', 0.0)  # has_speech=True if fallback is reject
 
         try:
             # Import transcription module
             from src.transcription import _transcribe_with_shared_model
 
+            logger.info(f"[SPEECH SCREEN] {video_id}: transcribing with Whisper ({whisper_model})...")
             # Transcribe with VAD to detect speech
             segments = _transcribe_with_shared_model(
                 audio_path=str(audio_path),
@@ -909,10 +962,17 @@ Only output the JSON array, no other text."""
             speech_duration = sum(seg['end'] - seg['start'] for seg in segments) if segments else 0.0
             has_speech = speech_duration >= min_speech_duration
 
+            # Log detected text if speech found
+            if has_speech and segments:
+                text_preview = " ".join(seg.get('text', '') for seg in segments[:3])[:100]
+                logger.info(f"[SPEECH SCREEN] {video_id}: detected speech ({speech_duration:.1f}s): '{text_preview}...'")
+            else:
+                logger.info(f"[SPEECH SCREEN] {video_id}: no significant speech ({speech_duration:.1f}s < {min_speech_duration}s threshold)")
+
             return (has_speech, speech_duration)
 
         except Exception as e:
-            logger.debug(f"[SPEECH SCREEN] {video_id}: transcription error: {e}, fallback={fallback}")
+            logger.warning(f"[SPEECH SCREEN] {video_id}: transcription error: {e}, fallback={fallback}")
             return (fallback == 'reject', 0.0)
         finally:
             # Clean up audio file
@@ -944,28 +1004,37 @@ Only output the JSON array, no other text."""
         passed = []
         rejected = []
 
+        logger.info(f"[SPEECH SCREEN] Starting screening for keyword '{keyword}': {len(approved_videos)} videos to check")
+
         # Create temp directory for audio clips
         safe_keyword = "".join(c if c.isalnum() or c in '-_' else '_' for c in keyword)[:20]
         with tempfile.TemporaryDirectory(prefix=f"speech_screen_{safe_keyword}_") as temp_dir:
             temp_path = Path(temp_dir)
 
-            for video in approved_videos:
+            for idx, video in enumerate(approved_videos, 1):
                 video_id = video.get('id', 'unknown')
+                logger.info(f"[SPEECH SCREEN] Progress: {idx}/{len(approved_videos)} - checking {video_id}")
                 has_speech, speech_duration = self._screen_video_for_speech(video, temp_path)
 
                 if has_speech:
                     if reject_with_speech:
-                        logger.info(f"[SPEECH SCREEN] {video_id}: SPEECH DETECTED ({speech_duration:.1f}s) - REJECT")
+                        logger.info(f"[SPEECH SCREEN] {video_id}: ❌ REJECTED - Speech detected ({speech_duration:.1f}s)")
                         rejected.append(video)
                     else:
-                        logger.info(f"[SPEECH SCREEN] {video_id}: SPEECH DETECTED ({speech_duration:.1f}s) - PASS (logging only)")
+                        logger.info(f"[SPEECH SCREEN] {video_id}: ⚠️  PASS (logging only) - Speech detected ({speech_duration:.1f}s)")
                         passed.append(video)
                 else:
-                    logger.info(f"[SPEECH SCREEN] {video_id}: NO SPEECH ({speech_duration:.1f}s) - PASS")
+                    logger.info(f"[SPEECH SCREEN] {video_id}: ✅ PASSED - No speech ({speech_duration:.1f}s)")
                     passed.append(video)
 
-        if rejected:
-            logger.info(f"[SPEECH SCREEN] Result: {len(passed)}/{len(approved_videos)} passed ({len(rejected)} rejected with speech)")
+        # Summary logging
+        pass_rate = (len(passed) / len(approved_videos) * 100) if approved_videos else 0
+        logger.info(f"[SPEECH SCREEN] ═══════════════════════════════════════")
+        logger.info(f"[SPEECH SCREEN] Keyword: '{keyword}'")
+        logger.info(f"[SPEECH SCREEN] Total screened: {len(approved_videos)}")
+        logger.info(f"[SPEECH SCREEN] ✅ Passed (B-roll): {len(passed)} ({pass_rate:.1f}%)")
+        logger.info(f"[SPEECH SCREEN] ❌ Rejected (speech): {len(rejected)} ({100-pass_rate:.1f}%)")
+        logger.info(f"[SPEECH SCREEN] ═══════════════════════════════════════")
 
         return passed
 
@@ -2041,6 +2110,12 @@ Respond with ONLY the new search keyword, nothing else."""
             logger.error("Audio-first config not found")
             return []
 
+        # Check max_total limit for this tier (e.g., only 1 LONGER video total)
+        max_total = self._get_tier_value(tier, 'max_total', 0)  # 0 = no limit
+        if max_total > 0 and self.tier_download_counts.get(tier, 0) >= max_total:
+            logger.debug(f"  [{tier}] Skipped (max_total={max_total} reached)")
+            return []
+
         # Get tier settings
         tier_min = self._get_tier_value(tier, 'min', 20)
         tier_max = self._get_tier_value(tier, 'max', 120)
@@ -2087,6 +2162,16 @@ Respond with ONLY the new search keyword, nothing else."""
         # Take top N
         to_download = filtered[:per_keyword]
 
+        # Clean up any leftover .part files from previous failed downloads
+        # These can interfere with new downloads
+        if audio_dir.exists():
+            for part_file in audio_dir.glob('*.part*'):
+                try:
+                    part_file.unlink()
+                    logger.debug(f"Cleaned up stale partial file: {part_file.name}")
+                except Exception:
+                    pass
+
         # Download audio for each
         audio_downloads = []
         audio_quality = getattr(audio_config, 'audio_quality', 5)
@@ -2120,16 +2205,18 @@ Respond with ONLY the new search keyword, nothing else."""
                 continue
 
             # Build yt-dlp command for audio only
-            # Use %(ext)s and let yt-dlp determine the final extension
+            # Use -f bestaudio/best to prefer audio-only stream, fallback to video+audio if needed
             cmd = [
                 'yt-dlp',
                 video_url,
-                '-x',  # Extract audio
+                '-f', 'bestaudio/best',  # Download audio stream, fallback to combined format if needed
+                '-x',  # Extract/convert audio
                 '--audio-format', 'mp3',
                 '--audio-quality', str(audio_quality),
                 '-o', str(audio_dir / '%(id)s.%(ext)s'),
                 '--no-playlist',
                 '--no-warnings',
+                '--no-keep-video',  # Don't keep intermediate video file
             ]
 
             # Add ffmpeg location if configured (required for audio conversion)
@@ -2141,11 +2228,19 @@ Respond with ONLY the new search keyword, nothing else."""
             cmd.extend(self._get_cookies_args())
 
             try:
+                # Use tier-specific timeout for audio extraction
+                # Long videos need more time to extract audio
+                tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
+                if isinstance(tier_timeouts, dict):
+                    audio_timeout = tier_timeouts.get(tier, 120)
+                else:
+                    audio_timeout = getattr(tier_timeouts, tier, 120)
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=120  # Audio should be fast
+                    timeout=audio_timeout
                 )
 
                 # Find the actual downloaded file (could be .mp3, .m4a, .opus, etc.)
@@ -2180,12 +2275,25 @@ Respond with ONLY the new search keyword, nothing else."""
                     err_msg = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
                     # Also list files in dir for debugging
                     dir_files = [f.name for f in audio_dir.iterdir()] if audio_dir.exists() else []
-                    logger.warning(f"Audio download failed for {video_id} (rc={result.returncode}). Files in dir: {dir_files[:5]}")
+                    logger.warning(f"Audio download failed for {video_id} (rc={result.returncode})")
+                    logger.warning(f"  Error output: {err_msg}")
+                    logger.debug(f"  Files in dir: {dir_files[:5]}")
+
+                    # Clean up partial files left by failed download
+                    self._cleanup_partial_files(audio_dir, video_id)
 
             except subprocess.TimeoutExpired:
                 logger.warning(f"Audio download timeout for {video_id}")
+                # Clean up partial files
+                self._cleanup_partial_files(audio_dir, video_id)
             except Exception as e:
                 logger.warning(f"Audio download error for {video_id}: {e}")
+                self._cleanup_partial_files(audio_dir, video_id)
+
+        # Update tier download count for max_total tracking
+        if audio_downloads:
+            with self._lock:
+                self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(audio_downloads)
 
         logger.info(f"  Downloaded {len(audio_downloads)} audio files for '{keyword}' ({tier})")
         return audio_downloads
