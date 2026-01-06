@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage
+from ..logger import get_global_logger
+from ..utils import is_embeddings_empty
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -66,7 +68,7 @@ class MatchStage(Stage):
                 warnings.append("No voiceover segments")
                 return StageResult.ok({'matches': []}, warnings)
 
-            if not state.text_metadata or state.embeddings is None or len(state.embeddings) == 0:
+            if not state.text_metadata or is_embeddings_empty(state.embeddings):
                 print("  ! No video data to match against")
                 warnings.append("No video embeddings")
                 return StageResult.ok({'matches': []}, warnings)
@@ -101,6 +103,14 @@ class MatchStage(Stage):
 
             print(f"\n  + Matched {len(matches)} segments")
             print(f"  Average confidence: {avg_conf:.1%}")
+
+            # Update logger stats for match-only mode
+            run_logger = get_global_logger()
+            if run_logger:
+                run_logger.set_stats(
+                    total_segments=len(state.voiceover_segments) if hasattr(state, 'voiceover_segments') else len(matches),
+                    total_matches=len(matches)
+                )
 
             checkpoint_data = {
                 'match_count': len(matches),
@@ -149,7 +159,7 @@ class MatchStage(Stage):
         """Validate inputs before running"""
         if not state.voiceover_segments:
             return "No voiceover segments available for matching"
-        if not state.embeddings or len(state.embeddings) == 0:
+        if is_embeddings_empty(state.embeddings):
             return "No video embeddings available for matching"
         return None
 
@@ -219,6 +229,10 @@ class MatchStage(Stage):
                     vid_segment.source = meta['source']
                 if meta.get('face_score') is not None:
                     vid_segment.face_score = meta['face_score']
+                if meta.get('is_broll') is not None:
+                    vid_segment.is_broll = meta['is_broll']
+                if meta.get('scene_index') is not None:
+                    vid_segment.scene_index = meta['scene_index']
                 video_paths_set.add(meta.get('video_path', ''))
             else:
                 vid_segment = meta

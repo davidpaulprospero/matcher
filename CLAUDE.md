@@ -68,8 +68,13 @@ python main.py --use-keywords mypreset
 | Stage | Class | Purpose |
 |-------|-------|---------|
 | ANALYZE | AnalyzeStage | Keywords, topics, entities, location chapters |
+| ENTITY_IMAGES | EntityImagesStage | Download entity images (Google, Bing, Pexels) |
+| ENTITY_VIDEOS | EntityVideosStage | Download stock videos for entities |
 | DOWNLOAD | DownloadStage | YouTube video/audio download |
+| STOCK | StockVideoStage | Download generic stock footage (B-roll) |
+| REMIX | RemixStage | Filter videos by keyword relevance |
 | TRANSCRIBE | TranscribeStage | Whisper + embeddings |
+| SCENE_DETECTION | SceneDetectionStage | Scene boundaries + face detection for B-roll |
 | MATCH | MatchStage | Embedding + LLM matching |
 | OUTPUT | OutputStage | OTIO, EDL, XML generation |
 
@@ -81,9 +86,32 @@ python main.py --use-keywords mypreset
 | V2-V3 | Alternatives 1-2 | Disabled |
 | V4-V6 | Secondary (diversity-scored, strict different source) | Disabled |
 | V7 | Embedding-Diversity strategy | Disabled |
+| V8 | B-roll Only (silent footage) | Disabled |
 | V9 | Entity Images (Google stills) | Disabled |
 | V10 | Stock Videos (Pexels/Pixabay) | Disabled |
-| A1-A7 | Corresponding audio | Matches video |
+| A1-A8 | Corresponding audio | Matches video |
+
+### V8-V10 Track Requirements
+
+**V8 - B-roll Only:**
+- Requires: SCENE_DETECTION stage (sets `is_broll=True` on segments with face_score < 0.3)
+- Config: `pipeline.skip_scene_detection: false` (default), `scene_detection.detect_faces_per_scene: true` (default)
+- **Detection**: Samples 3 frames/scene, MediaPipe/OpenCV face detection, face_score = (frames_with_faces / 3)
+- **Threshold**: `broll_face_threshold: 0.3` - scenes with < 30% face presence = B-roll
+- **Data flow**: SceneDetectionStage sets is_broll on transcripts + text_metadata → MatchStage restores flag → broll_only strategy filters by is_broll
+- **Troubleshooting**: If V8 empty, check logs for "B-roll: X/Y scenes" and "Updated X text_metadata entries". If 0 B-roll, lower threshold
+
+**V9 - Entity Images:**
+- Requires: Entity extraction (ANALYZE stage) + EntityImagesStage
+- Config: `pipeline.skip_image_search: false`
+- Sources: Google Images, Bing Images, Pexels, Pixabay
+- **Troubleshooting**: If using `--match-only`, ensure `EntityImagesStage` is in the pipeline (fixed in src/pipeline.py:275)
+
+**V10 - Stock Videos:**
+- Requires: Entity extraction + EntityVideosStage + API keys
+- Config: `pipeline.skip_image_search: false`, `image_search.use_stock_apis: true`
+- Sources: Pexels, Pixabay stock video APIs
+- **Troubleshooting**: Same as V9. EntityVideosStage runs independently from YouTube downloads (fixed: removed incorrect `skip_download` check)
 
 ### Project Directory Structure
 
@@ -123,8 +151,19 @@ python main.py --fresh
 # Re-download entity images
 python main.py --refresh-entities
 
-# Delete caches manually
+# Delete caches manually (bash/Git Bash)
 rm -rf .cache/
+
+# Delete specific caches to force re-transcription (for V8 B-roll fix)
+rm -rf .cache/transcriptions
+rm -rf .cache/scene_detection
+```
+
+**Note for run.bat users**: When using `run.bat`, the working directory is the project folder (e.g., `E:\Projects\MyDoc__2026-01-03\`). Use relative paths:
+```bash
+# From project directory via run.bat
+rm -rf .cache/transcriptions
+rm -rf .cache/scene_detection
 ```
 
 ## Configuration
@@ -195,6 +234,30 @@ else:
     value = getattr(vc, 'require_different_source', True)
 ```
 
+### Rule 7: Embeddings Truthiness Checks
+Never use `state.embeddings` directly in boolean contexts. Numpy arrays raise "truth value of array is ambiguous" errors.
+
+```python
+# BAD: Direct truthiness check
+if state.embeddings:           # ValueError!
+if not state.embeddings:       # ValueError!
+
+# GOOD: Use helper function
+from src.utils import is_embeddings_empty
+if is_embeddings_empty(state.embeddings):
+if not is_embeddings_empty(state.embeddings):
+```
+
+### Rule 8: B-roll Face Detection & Propagation
+B-roll detection logic and data flow:
+- **face_score**: Ratio of frames with faces (0.0-1.0), from 3 sampled frames per scene
+- **is_broll**: Set `True` when `face_score < broll_face_threshold` (default 0.3)
+- **Data flow**: SceneDetectionStage MUST update both `state.transcripts` AND `state.text_metadata` with is_broll/face_score/scene_index
+- **MatchStage**: Restores is_broll from text_metadata dict to SRTSegment objects before matching
+- **"no faces" in logs**: Shorthand for "below threshold", not literally zero
+- **Backends**: MediaPipe (primary), OpenCV Haar (fallback)
+- **Threshold tuning**: Lower (0.1) = stricter, Higher (0.5) = more lenient
+
 ### Testing Checklist
 
 - [ ] `python -m py_compile main.py`
@@ -247,6 +310,7 @@ transcription:
 
 | Date | Changes |
 |------|---------|
+| 2026-01-06 | Fixed V8 B-roll track (0→238 clips): SceneDetectionStage now propagates is_broll to text_metadata, MatchStage restores from metadata |
 | 2026-01-05 | Pipeline architecture refactor, entity image caching |
 | 2026-01-04 | Match-only mode |
 | 2026-01-03 | Location-aware matching, project setup fix |
