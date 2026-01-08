@@ -58,7 +58,8 @@ def with_retry(
                 )
 
     # All retries exhausted
-    if "timeout" in str(last_exception).lower():
+    error_msg = str(last_exception).lower()
+    if "timeout" in error_msg or "deadline" in error_msg:
         raise LLMTimeoutError(f"Request timed out after {max_retries} attempts") from last_exception
     else:
         raise LLMProviderError(f"Request failed after {max_retries} attempts: {str(last_exception)}") from last_exception

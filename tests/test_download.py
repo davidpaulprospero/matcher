@@ -758,7 +758,7 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
         "vid1": [
             MatchedSegment(
                 video_id="vid1",
-                url="https://youtube.com/watch?v=vid1",
+                video_url="https://youtube.com/watch?v=vid1",
                 start_time=60.0,
                 end_time=70.0,
                 track="V1",
@@ -766,7 +766,7 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
             ),
             MatchedSegment(
                 video_id="vid1",
-                url="https://youtube.com/watch?v=vid1",
+                video_url="https://youtube.com/watch?v=vid1",
                 start_time=65.0,
                 end_time=75.0,
                 track="V2",
