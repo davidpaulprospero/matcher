@@ -198,11 +198,15 @@ def restore_entity_images_from_disk(
                 continue
 
             # Find corresponding image file (same name, different extension)
+            # meta_path is like "img1.entity.json", we need "img1.jpg"
             image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
             image_path = None
 
+            # Remove .entity.json suffix to get base name
+            base_name = str(meta_path).replace('.entity.json', '')
+
             for ext in image_extensions:
-                candidate = meta_path.with_suffix(ext)
+                candidate = Path(base_name + ext)
                 if candidate.exists():
                     image_path = str(candidate)
                     break

@@ -286,7 +286,7 @@ def test_config_loading() -> Tuple[bool, str]:
 
 def test_face_detector_init() -> Tuple[bool, str]:
     """Test FaceDetector initialization and backend detection"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     # Reset class state to force re-initialization
     FaceDetector._instance = None
@@ -312,7 +312,7 @@ def test_face_detector_init() -> Tuple[bool, str]:
 
 def test_face_detection_with_faces(video_path: str) -> Tuple[bool, str]:
     """Test face detection on video expected to have faces"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -329,7 +329,7 @@ def test_face_detection_with_faces(video_path: str) -> Tuple[bool, str]:
 
 def test_face_detection_without_faces(video_path: str) -> Tuple[bool, str]:
     """Test face detection on video expected to have no faces"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -347,7 +347,7 @@ def test_face_detection_without_faces(video_path: str) -> Tuple[bool, str]:
 
 def test_face_detection_caching(video_path: str, cache_dir: Path) -> Tuple[bool, str]:
     """Test that face detection results are cached"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -485,7 +485,7 @@ def test_logger_stage_timing(temp_dir: Path) -> Tuple[bool, str]:
 
 def test_apply_face_preference() -> Tuple[bool, str]:
     """Test face preference score adjustment"""
-    from src.matching import apply_face_preference, FaceDetector
+    from src.face_detection import apply_face_preference, FaceDetector
     from src.utils import SRTSegment
     
     # Create mock segments with cached face scores

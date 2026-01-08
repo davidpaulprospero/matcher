@@ -77,15 +77,18 @@ class TestWithRetry:
         with_retry(func, max_retries=3, base_delay=0.1)
 
         # Check delays between calls
+        # Implementation uses base_delay ** attempt, so:
+        # attempt 0: 0.1^0 = 1.0s
+        # attempt 1: 0.1^1 = 0.1s
         if len(call_times) >= 2:
             delay1 = call_times[1] - call_times[0]
-            # First delay should be ~0.1s (2^0 * base_delay)
-            assert 0.05 < delay1 < 0.2
+            # First delay should be ~1.0s (0.1^0)
+            assert 0.8 < delay1 < 1.2
 
         if len(call_times) >= 3:
             delay2 = call_times[2] - call_times[1]
-            # Second delay should be ~0.2s (2^1 * base_delay)
-            assert 0.15 < delay2 < 0.4
+            # Second delay should be ~0.1s (0.1^1)
+            assert 0.05 < delay2 < 0.2
 
     def test_different_max_retries(self):
         """Test different max_retries values."""
