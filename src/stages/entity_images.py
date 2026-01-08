@@ -93,7 +93,7 @@ class EntityImagesStage(Stage):
         print(f"\n  ─── Stage 1.5: ENTITY IMAGE SEARCH ───")
 
         try:
-            from ..entity_images import download_entity_images, map_entities_to_segments
+            from ..media_sources import download_entity_images, map_entities_to_segments
 
             # Filter entities by configured types
             allowed_types = config.image_search.entity_types
@@ -147,7 +147,8 @@ class EntityImagesStage(Stage):
                 search_until_found=getattr(config.image_search, 'search_until_found', True),
                 entity_cache=entity_cache,
                 source_project=checkpoint.project_dir.name,
-                skip_local_cache=getattr(checkpoint, 'refresh_entities', False)
+                skip_local_cache=getattr(checkpoint, 'refresh_entities', False),
+                config=config
             )
 
             # Map entities to segments for timeline placement
@@ -210,7 +211,7 @@ class EntityImagesStage(Stage):
     ) -> bool:
         """Restore entity images from disk using .entity.json metadata files"""
         try:
-            from ..entity_images import restore_entity_images_from_disk
+            from ..media_sources import restore_entity_images_from_disk
 
             data = checkpoint.get_stage_data(self.name)
             if not data:

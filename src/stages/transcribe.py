@@ -406,6 +406,111 @@ class TranscribeStage(Stage):
         except Exception as e:
             logger.warning(f"Video topic extraction failed: {e}")
 
+    def can_skip(
+        self,
+        state: 'PipelineState',
+        checkpoint: 'CheckpointManager'
+    ) -> bool:
+        """Check if transcribe stage can be skipped"""
+        # If we can skip via checkpoint, rebuild text_metadata from cache
+        if checkpoint.should_skip_stage(self.name):
+            # CRITICAL: Rebuild text_metadata when skipping
+            # This is needed for --match-only mode to have B-roll flags
+            logger.info("===== TRANSCRIBE can_skip: TRUE, rebuilding text_metadata =====")
+            logger.info(f"  Before rebuild: text_metadata has {len(state.text_metadata)} entries")
+            self._rebuild_text_metadata(state, checkpoint)
+            logger.info(f"  After rebuild: text_metadata has {len(state.text_metadata)} entries")
+            broll_before = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+            logger.info(f"  B-roll entries after rebuild: {broll_before}")
+            return True
+        logger.info("===== TRANSCRIBE can_skip: FALSE =====")
+        return False
+
+    def _rebuild_text_metadata(
+        self,
+        state: 'PipelineState',
+        checkpoint: 'CheckpointManager'
+    ):
+        """
+        Rebuild state.text_metadata from cached transcripts.
+
+        This is critical for --match-only mode: when TRANSCRIBE is skipped,
+        state.text_metadata would be empty, losing all B-roll flags added
+        by SCENE_DETECTION.
+
+        Strategy:
+        1. Load cached transcripts
+        2. Rebuild text_metadata list from transcripts
+        3. Let SCENE_DETECTION update it with is_broll flags
+        """
+        try:
+            from ..config import Config
+            config_path = checkpoint.checkpoint_path.parent / "project_config.yaml"
+            if not config_path.exists():
+                config_path = Path("config.yaml")
+
+            # Load config to get cache dir
+            import yaml
+            try:
+                from yaml import CSafeLoader as SafeLoader
+            except ImportError:
+                from yaml import SafeLoader
+
+            with open(config_path) as f:
+                config_data = yaml.load(f, Loader=SafeLoader)
+
+            cache_dir = config_data.get('cache', {}).get('cache_dir', '.cache')
+            cache_dir = checkpoint.checkpoint_path.parent / cache_dir
+
+            # Load cached transcripts
+            from ..transcription import TranscriptCache
+            trans_cache = TranscriptCache(str(cache_dir))
+
+            # Rebuild transcripts dict
+            state.transcripts = {}
+            texts = []
+
+            # Get all cached transcript files
+            import glob
+            import json
+            transcript_files = glob.glob(str(cache_dir / "transcriptions" / "*.json"))
+
+            for tf in transcript_files:
+                try:
+                    with open(tf) as f:
+                        data = json.load(f)
+                        if isinstance(data, list) and data:
+                            # Find video path (stored in first segment usually)
+                            video_path = None
+                            for seg in data:
+                                if isinstance(seg, dict) and seg.get('video_path'):
+                                    video_path = seg['video_path']
+                                    break
+
+                            if video_path:
+                                state.transcripts[video_path] = data
+
+                                # Rebuild text_metadata
+                                for seg in data:
+                                    if isinstance(seg, dict):
+                                        texts.append({
+                                            'text': seg.get('text', ''),
+                                            'video_path': video_path,
+                                            'start_time': seg.get('start_time', 0),
+                                            'end_time': seg.get('end_time', 0)
+                                        })
+                except Exception as e:
+                    logger.debug(f"Could not load transcript {tf}: {e}")
+                    continue
+
+            state.text_metadata = texts
+            logger.info(f"Rebuilt text_metadata: {len(texts)} entries from {len(state.transcripts)} videos")
+
+        except Exception as e:
+            logger.warning(f"Failed to rebuild text_metadata: {e}")
+            logger.warning("B-roll detection may not work in --match-only mode")
+            state.text_metadata = []
+
     def _load_transcripts_from_cache(self, config: 'Config') -> Dict[str, List[Any]]:
         """Load transcripts from cache when skipping transcription"""
         try:

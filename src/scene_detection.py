@@ -26,6 +26,9 @@ import opentimelineio as otio
 
 from .utils import log_ffmpeg_debug
 
+# Import unified cache (cache consolidation refactor - Jan 7, 2026)
+from .cache import BaseCache, CacheEntry
+
 logger = logging.getLogger(__name__)
 
 # Supported video extensions
@@ -181,6 +184,31 @@ PRESETS = {
 }
 
 
+class SceneCache(BaseCache):
+    """
+    Cache for scene detection results.
+
+    Caches VideoSceneData keyed by video name (filename stem).
+    """
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize VideoSceneData entry"""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize to VideoSceneData entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
+
 class SceneDetector:
     """
     Scene detection with OTIO export, index generation, and audio analysis.
@@ -211,11 +239,23 @@ class SceneDetector:
         cache_dir = getattr(config.cache, 'cache_dir', '.cache') if hasattr(config, 'cache') else '.cache'
         
         self.otio_output_dir = Path(output_dir) / "scene_otio"
-        self.scene_index_path = Path(cache_dir) / "scene_index.json"
-        
-        # Scene index (loaded or created)
+
+        # Use unified SceneCache (cache consolidation refactor - Jan 7, 2026)
+        self._cache_obj = SceneCache(
+            cache_dir=Path(cache_dir) / "scene_detection",
+            index_name="scene_index.json"
+        )
+
+        # Build in-memory dict from cache for compatibility
         self.scene_index: Dict[str, VideoSceneData] = {}
-        self._load_scene_index()
+        for video_name, entry in self._cache_obj.get_all().items():
+            try:
+                self.scene_index[video_name] = VideoSceneData.from_dict(entry.data)
+            except Exception as e:
+                logger.warning(f"Could not deserialize scene entry for {video_name}: {e}")
+
+        if self.scene_index:
+            logger.info(f"Loaded scene index with {len(self.scene_index)} videos")
         
         # Setup hardware acceleration
         self._setup_hw_accel()
@@ -300,25 +340,11 @@ class SceneDetector:
             logger.warning(f"Could not import face_detection module: {e}")
             self.face_detector = None
 
-    def _load_scene_index(self):
-        """Load existing scene index"""
-        if self.scene_index_path.exists():
-            try:
-                with open(self.scene_index_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    for video_name, scene_data in data.items():
-                        self.scene_index[video_name] = VideoSceneData.from_dict(scene_data)
-                logger.info(f"Loaded scene index with {len(self.scene_index)} videos")
-            except Exception as e:
-                logger.warning(f"Could not load scene index: {e}")
-                self.scene_index = {}
-    
     def _save_scene_index(self):
-        """Save scene index to disk"""
-        self.scene_index_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.scene_index_path, 'w') as f:
-            data = {name: sd.to_dict() for name, sd in self.scene_index.items()}
-            json.dump(data, f, indent=2, default=self._json_default)
+        """Save scene index to disk using SceneCache"""
+        for video_name, scene_data in self.scene_index.items():
+            self._cache_obj.set(video_name, scene_data.to_dict())
+        # Save is automatic with auto_save=True (default)
     
     def _json_default(self, obj):
         """Handle numpy types for JSON serialization"""
@@ -521,7 +547,7 @@ class SceneDetector:
             # Face detection per scene (B-roll identification)
             if self.face_detector:
                 broll_count = 0
-                cache_dir = str(self.scene_index_path.parent)
+                cache_dir = str(self._cache_obj.cache_dir)
                 for scene in scenes:
                     face_score = self.face_detector.get_scene_face_score(
                         str(video_path),

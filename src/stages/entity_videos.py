@@ -96,7 +96,7 @@ class EntityVideosStage(Stage):
         print(f"\n  ─── Stage 1.6: STOCK VIDEO SEARCH ───")
 
         try:
-            from ..entity_images import download_entity_videos, map_entities_to_segments
+            from ..media_sources import download_entity_videos, map_entities_to_segments
 
             # Filter entities by configured types
             allowed_types = config.image_search.entity_types
@@ -140,7 +140,8 @@ class EntityVideosStage(Stage):
                 min_duration=3.0,
                 max_duration=30.0,
                 pexels_key=os.getenv("PEXELS_API_KEY"),
-                pixabay_key=os.getenv("PIXABAY_API_KEY")
+                pixabay_key=os.getenv("PIXABAY_API_KEY"),
+                config=config
             )
 
             # Map entities to segments for timeline placement
@@ -218,7 +219,7 @@ class EntityVideosStage(Stage):
             entities_data = data.get('entities', {})
 
             # Reconstruct EntityVideoResult objects
-            from ..entity_images import EntityVideoResult
+            from ..media_sources.models import EntityVideoResult
 
             entity_videos = {}
             for entity_name, entity_info in entities_data.items():

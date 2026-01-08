@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Union
 from dataclasses import dataclass
 
+from .cache import BaseCache, CacheEntry, compute_hash as cache_compute_hash, batch_hash as cache_batch_hash
+
 logger = logging.getLogger(__name__)
 
 # Try to import numpy early
@@ -119,43 +121,42 @@ def cosine_similarity(a: Any, b: Any) -> float:
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
-@dataclass 
-class EmbeddingCache:
+class EmbeddingCache(BaseCache):
     """Persistent embedding cache with incremental updates"""
-    
+
     def __init__(self, cache_dir: str):
-        self.cache_dir = Path(cache_dir) / "embeddings"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.index_path = self.cache_dir / "embedding_index.json"
-        self.index: Dict[str, dict] = {}
-        self._load_index()
-    
-    def _load_index(self):
-        """Load the embedding index"""
-        if self.index_path.exists():
-            try:
-                with open(self.index_path, 'r') as f:
-                    self.index = json.load(f)
-            except Exception as e:
-                logger.warning(f"Could not load embedding index: {e}")
-                self.index = {}
-    
-    def _save_index(self):
-        """Save the embedding index"""
-        try:
-            with open(self.index_path, 'w') as f:
-                json.dump(self.index, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Could not save embedding index: {e}")
-    
+        cache_path = Path(cache_dir) / "embeddings"
+        super().__init__(
+            cache_dir=cache_path,
+            index_name="embedding_index.json",
+            ttl_seconds=0,  # No expiration for embeddings
+            auto_save=True
+        )
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize embedding cache entry"""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize embedding cache entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
     def _text_hash(self, text: str) -> str:
         """Get hash for a text string"""
-        return hashlib.md5(text.encode()).hexdigest()[:12]
-    
+        return cache_compute_hash(text, length=12)
+
     def _batch_hash(self, texts: List[str]) -> str:
         """Get hash for a batch of texts"""
-        combined = json.dumps(sorted(texts), sort_keys=True)
-        return hashlib.md5(combined.encode()).hexdigest()[:16]
+        return cache_batch_hash(texts, length=16)
     
     def get_cached_embeddings(
         self, 

@@ -61,7 +61,7 @@ def print_result(name: str, passed: bool, details: str = ""):
     return passed
 
 
-class TestRecentFeatures:
+class RecentFeaturesRunner:
     """Test suite for recent feature additions"""
 
     def __init__(self, verbose: bool = False):
@@ -1003,7 +1003,7 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = parser.parse_args()
 
-    suite = TestRecentFeatures(verbose=args.verbose)
+    suite = RecentFeaturesRunner(verbose=args.verbose)
     success = suite.run_all()
 
     sys.exit(0 if success else 1)

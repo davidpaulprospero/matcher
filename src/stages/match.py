@@ -216,6 +216,11 @@ class MatchStage(Stage):
         video_segments = []
         video_paths_set = set()
 
+        # DEBUG: Count B-roll entries in text_metadata
+        broll_count = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+        logger.info(f"text_metadata has {broll_count}/{len(state.text_metadata)} entries with is_broll=True")
+
+        broll_segments_created = 0
         for i, meta in enumerate(state.text_metadata):
             if isinstance(meta, dict):
                 vid_segment = SRTSegment(
@@ -231,6 +236,8 @@ class MatchStage(Stage):
                     vid_segment.face_score = meta['face_score']
                 if meta.get('is_broll') is not None:
                     vid_segment.is_broll = meta['is_broll']
+                    if meta['is_broll']:
+                        broll_segments_created += 1
                 if meta.get('scene_index') is not None:
                     vid_segment.scene_index = meta['scene_index']
                 video_paths_set.add(meta.get('video_path', ''))
@@ -239,6 +246,8 @@ class MatchStage(Stage):
                 video_paths_set.add(getattr(meta, 'source_file', ''))
 
             video_segments.append(vid_segment)
+
+        logger.info(f"Created {broll_segments_created} video_segments with is_broll=True")
 
         return vo_segments, video_segments, list(video_paths_set)
 
