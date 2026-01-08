@@ -40,6 +40,7 @@ import time
 import argparse
 import tempfile
 import shutil
+import pytest
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
@@ -904,6 +905,7 @@ def test_filename_sanitization() -> Tuple[bool, str]:
 # FIXTURE TESTS
 # =============================================================================
 
+@pytest.mark.integration
 def test_fixture_merge_consistency(runner: DownloadTestRunner) -> Tuple[bool, str]:
     """Test that fixture merged segments are consistent with merge logic"""
     from src.downloader import prepare_merged_segments
@@ -932,6 +934,7 @@ def test_fixture_merge_consistency(runner: DownloadTestRunner) -> Tuple[bool, st
     return True, f"Merge consistency verified ({len(recomputed)} segments)"
 
 
+@pytest.mark.integration
 def test_fixture_buffer_application(runner: DownloadTestRunner) -> Tuple[bool, str]:
     """Test that buffers are correctly applied in fixtures"""
     if not runner.merged_segments:
