@@ -244,7 +244,7 @@ def test_imports():
     required_modules = [
         ('src.config', 'Config'),
         ('src.logger', 'RunLogger'),
-        ('src.matching', 'FaceDetector'),
+        ('src.face_detection', 'FaceDetector'),  # Fixed: FaceDetector is in face_detection, not matching
     ]
     
     failed = []
@@ -475,7 +475,7 @@ def test_apply_face_preference():
     """Test face preference score adjustment"""
     from src.face_detection import apply_face_preference, FaceDetector
     from src.utils import SRTSegment
-    
+
     # Create mock segments with cached face scores
     segments = []
     for i, score in enumerate([0.8, 0.2, 0.5]):  # High, low, medium face scores
@@ -487,8 +487,13 @@ def test_apply_face_preference():
             source_file=f"/fake/video_{i}.mp4"
         )
         segments.append(seg)
-        # Pre-cache face scores
-        FaceDetector._cache[f"/fake/video_{i}.mp4"] = score
+        # Pre-cache face scores in SCENE cache (segment-level detection)
+        # Cache key format: normalized_path -> time_key -> score
+        video_path = f"/fake/video_{i}.mp4"
+        time_key = f"{seg.start_time:.1f}-{seg.end_time:.1f}"
+        if video_path not in FaceDetector._scene_cache:
+            FaceDetector._scene_cache[video_path] = {}
+        FaceDetector._scene_cache[video_path][time_key] = score
     
     # Test "more" preference
     candidates = [(seg, 0.7) for seg in segments]
