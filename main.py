@@ -884,10 +884,11 @@ def main():
 
     # Save keywords if requested
     if save_keywords and pipeline.state.keywords:
-        keyword_manager.save_preset(
+        keyword_manager.save_keywords(
             name=save_keywords,
             keywords=pipeline.state.keywords,
-            topic=pipeline.state.topic_context or ""
+            topic_context=pipeline.state.topic_context or "",
+            entities=pipeline.state.entities or []
         )
         print(f"\n  ✓ Saved keyword preset: {save_keywords}")
 

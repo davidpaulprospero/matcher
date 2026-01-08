@@ -18,6 +18,9 @@ from dataclasses import dataclass, field, asdict
 
 from .utils import normalize_path
 
+# Import unified cache (cache consolidation refactor - Jan 7, 2026)
+from .cache import BaseCache, CacheEntry
+
 if TYPE_CHECKING:
     from .location_service import GeoLocation, LocationService
 
@@ -92,6 +95,32 @@ class LocationChapter:
         return (self.start_segment_idx, self.end_segment_idx)
 
 
+class TopicCache(BaseCache):
+    """
+    Cache for video topics extracted from transcripts.
+
+    Stores normalized path -> VideoTopics mapping.
+    """
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize VideoTopics entry to dict"""
+        # Store the VideoTopics dict directly
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize dict to VideoTopics entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
+
 class TopicExtractor:
     """
     Extracts topics from video transcripts using LLM.
@@ -102,32 +131,29 @@ class TopicExtractor:
         self.config = config
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.topics_cache_path = self.cache_dir / "video_topics.json"
-        self._topics_cache: Dict[str, VideoTopics] = {}
-        self._load_cache()
 
-    def _load_cache(self):
-        """Load cached topics from disk"""
-        if self.topics_cache_path.exists():
+        # Use unified TopicCache (cache consolidation refactor - Jan 7, 2026)
+        self._cache_obj = TopicCache(
+            cache_dir=self.cache_dir,
+            index_name="video_topics.json"
+        )
+
+        # Build in-memory dict from cache for compatibility
+        self._topics_cache: Dict[str, VideoTopics] = {}
+        for path, entry in self._cache_obj.get_all().items():
             try:
-                with open(self.topics_cache_path, 'r') as f:
-                    data = json.load(f)
-                    for path, topic_data in data.items():
-                        # Normalize path when loading for consistent matching
-                        normalized = normalize_path(path)
-                        self._topics_cache[normalized] = VideoTopics.from_dict(topic_data)
-                logger.debug(f"Loaded {len(self._topics_cache)} cached video topics")
+                self._topics_cache[path] = VideoTopics.from_dict(entry.data)
             except Exception as e:
-                logger.warning(f"Could not load topics cache: {e}")
+                logger.warning(f"Could not deserialize topic entry for {path}: {e}")
+
+        logger.debug(f"Loaded {len(self._topics_cache)} cached video topics")
 
     def _save_cache(self):
         """Save topics cache to disk"""
-        try:
-            data = {path: vt.to_dict() for path, vt in self._topics_cache.items()}
-            with open(self.topics_cache_path, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Could not save topics cache: {e}")
+        # Convert in-memory dict back to cache format
+        for path, video_topics in self._topics_cache.items():
+            self._cache_obj.set(path, video_topics.to_dict())
+        # Save is automatic with auto_save=True (default)
 
     def get_cached_topics(self, video_path: str) -> Optional[VideoTopics]:
         """Get cached topics for a video"""
@@ -236,11 +262,18 @@ No explanation, just the JSON array."""
         try:
             # Try Gemini first
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
-                import google.generativeai as genai
-                genai.configure(api_key=self.config.gemini_api_key)
-                model = genai.GenerativeModel('gemini-2.0-flash')
-                response = model.generate_content(prompt)
-                return self._parse_topics_response(response.text)
+                from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                request = LLMRequest(
+                    prompt=prompt,
+                    response_format=ResponseFormat.JSON_ARRAY,
+                    cache_key_prefix="topic_extraction"
+                )
+                response = client.generate(request)
+
+                if response.parsed_data and isinstance(response.parsed_data, list):
+                    return [str(t).lower().strip() for t in response.parsed_data if t]
 
             # Fallback: extract from source keyword
             if source_keyword:
@@ -393,11 +426,18 @@ No explanation, just the JSON array."""
 
         try:
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
-                import google.generativeai as genai
-                genai.configure(api_key=self.config.gemini_api_key)
-                model = genai.GenerativeModel('gemini-2.0-flash')
-                response = model.generate_content(prompt)
-                return self._parse_chapters_response(response.text, num_segments)
+                from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                request = LLMRequest(
+                    prompt=prompt,
+                    response_format=ResponseFormat.JSON_ARRAY,
+                    cache_key_prefix="chapter_detection"
+                )
+                response = client.generate(request)
+
+                if response.parsed_data and isinstance(response.parsed_data, list):
+                    return self._parse_chapters_response(json.dumps(response.parsed_data), num_segments)
 
             return []
 
@@ -519,13 +559,21 @@ No explanation, just the JSON array."""
 
         try:
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
-                import google.generativeai as genai
-                genai.configure(api_key=self.config.gemini_api_key)
-                model = genai.GenerativeModel('gemini-2.0-flash')
-                response = model.generate_content(prompt)
-                location_chapters = self._parse_location_chapters_response(
-                    response.text, len(segments)
+                from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                request = LLMRequest(
+                    prompt=prompt,
+                    response_format=ResponseFormat.JSON_ARRAY,
+                    cache_key_prefix="location_chapters"
                 )
+                response = client.generate(request)
+
+                location_chapters = []
+                if response.parsed_data and isinstance(response.parsed_data, list):
+                    location_chapters = self._parse_location_chapters_response(
+                        json.dumps(response.parsed_data), len(segments)
+                    )
 
                 # Resolve locations if service provided
                 if location_service and location_chapters:
@@ -801,9 +849,9 @@ def _extract_location_with_llm(
     config: Any
 ) -> Optional[str]:
     """Use LLM to extract location from video metadata"""
-    import google.generativeai as genai
-    genai.configure(api_key=config.gemini_api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+    client = create_client("gemini", api_key=config.gemini_api_key, model="gemini-2.0-flash")
 
     desc_snippet = description[:500] if description else ""
 
@@ -821,7 +869,12 @@ If no specific location is identifiable, return "NONE".
 Location:"""
 
     try:
-        response = model.generate_content(prompt)
+        request = LLMRequest(
+            prompt=prompt,
+            response_format=ResponseFormat.TEXT,
+            cache_key_prefix="location_extraction"
+        )
+        response = client.generate(request)
         location = response.text.strip().strip('"').strip("'")
 
         # Validate response

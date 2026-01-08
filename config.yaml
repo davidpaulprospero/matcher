@@ -517,19 +517,56 @@ image_search:
 # Decision: "google" provider uses Gemini, "anthropic" uses Claude
 
 llm:
-  provider: google  # google, anthropic
+  provider: google  # google, anthropic, ollama
   model: gemini-2.0-flash
-  
+
   # Anthropic specific (used when provider is "anthropic")
   anthropic_model: claude-3-haiku-20240307
-  
-  # Generation settings
+
+  # Ollama specific (used when provider is "ollama")
+  ollama_model: llama3.2
+  ollama_host: http://localhost:11434
+
+  # Generation settings (legacy compatibility)
   temperature: 0.7
   max_tokens: 2000
-  
-  # API key loaded from environment:
-  #   - google: GEMINI_API_KEY
+
+  # Retry configuration - unified for all LLM operations
+  retry:
+    max_retries: 3
+    retry_delay_seconds: 2.0
+    timeout_seconds: 120
+    exponential_backoff: true
+
+  # Cache configuration - unified LLM response caching with TTL
+  cache:
+    enabled: true
+    ttl_hours: 24  # 0 = never expire
+    cache_dir: .cache/llm_responses
+
+  # Provider-specific configurations
+  gemini:
+    model: gemini-2.0-flash
+    max_tokens: 2000
+    temperature: 0.7
+
+  anthropic:
+    model: claude-3-haiku-20240307
+    max_tokens: 2000
+    temperature: 0.7
+
+  ollama:
+    model: llama3.2
+    max_tokens: 2000
+    temperature: 0.7
+
+  # API keys loaded from environment:
+  #   - google/gemini: GEMINI_API_KEY or GOOGLE_API_KEY
   #   - anthropic: ANTHROPIC_API_KEY
+  #   - ollama: (no API key required for local models)
+  #
+  # New in v3.1: Unified LLM client with automatic retry, caching, and JSON parsing
+  # See CLAUDE.md Rule 9 for usage examples
 
 # -----------------------------------------------------------------------------
 # ENHANCED FEATURES
