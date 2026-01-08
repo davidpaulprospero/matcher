@@ -27,6 +27,7 @@ import shutil
 import argparse
 import tempfile
 import subprocess
+import pytest
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -418,6 +419,7 @@ def test_config_loading() -> Tuple[bool, str]:
         return False, str(e)
 
 
+@pytest.mark.integration
 def test_keyword_extraction_llm(srt_path: Path, config) -> Tuple[bool, str, Dict]:
     """Test LLM-based keyword extraction"""
     try:
@@ -454,6 +456,7 @@ def test_keyword_extraction_llm(srt_path: Path, config) -> Tuple[bool, str, Dict
         return False, f"LLM extraction failed: {e}", {}
 
 
+@pytest.mark.integration
 def test_keyword_extraction_fallback(srt_path: Path) -> Tuple[bool, str, Dict]:
     """Test TF-IDF fallback keyword extraction"""
     try:
@@ -488,6 +491,7 @@ def test_keyword_extraction_fallback(srt_path: Path) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_video_download(output_dir: Path, cookies_path: str = None) -> Tuple[bool, str, Dict]:
     """Test video downloading with yt-dlp"""
     videos_downloaded = []
@@ -511,6 +515,7 @@ def test_video_download(output_dir: Path, cookies_path: str = None) -> Tuple[boo
         return False, f"Only {len(videos_downloaded)} videos (need {TEST_CONFIG['min_videos_downloaded']})", {'videos': videos_downloaded}
 
 
+@pytest.mark.integration
 def test_transcription(video_paths: List[str], cache_dir: Path, config) -> Tuple[bool, str, Dict]:
     """Test video transcription with Whisper"""
     try:
@@ -554,6 +559,7 @@ def test_transcription(video_paths: List[str], cache_dir: Path, config) -> Tuple
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_transcription_cache(video_path: str, cache_dir: Path, config) -> Tuple[bool, str]:
     """Test transcription caching"""
     try:
@@ -581,6 +587,7 @@ def test_transcription_cache(video_path: str, cache_dir: Path, config) -> Tuple[
         return False, str(e)
 
 
+@pytest.mark.integration
 def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
     """Test Gemini embeddings"""
     try:
@@ -606,6 +613,7 @@ def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_embeddings_fallback(texts: List[str]) -> Tuple[bool, str]:
     """Test embedding fallback (sentence-transformers or TF-IDF)"""
     try:
@@ -801,6 +809,7 @@ Respond with JSON array:
         return []
 
 
+@pytest.mark.integration
 def test_matching_algorithm(
     voiceover_segments: List[Dict],
     video_segments: List[Dict],
@@ -870,6 +879,7 @@ def test_matching_algorithm(
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_otio_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
     """Test OTIO file generation"""
     try:
@@ -913,6 +923,7 @@ def test_otio_generation(matches, voiceover_segments, video_segments, config, ou
         return False, f"OTIO error: {str(e)}", {'traceback': traceback.format_exc()}
 
 
+@pytest.mark.integration
 def test_xml_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
     """Test XML (FCP) file generation"""
     try:

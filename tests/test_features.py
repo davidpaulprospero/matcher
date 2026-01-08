@@ -20,6 +20,7 @@ import time
 import shutil
 import argparse
 import tempfile
+import pytest
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -286,7 +287,7 @@ def test_config_loading() -> Tuple[bool, str]:
 
 def test_face_detector_init() -> Tuple[bool, str]:
     """Test FaceDetector initialization and backend detection"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     # Reset class state to force re-initialization
     FaceDetector._instance = None
@@ -310,9 +311,10 @@ def test_face_detector_init() -> Tuple[bool, str]:
     return True, f"Using {backend} backend"
 
 
+@pytest.mark.integration
 def test_face_detection_with_faces(video_path: str) -> Tuple[bool, str]:
     """Test face detection on video expected to have faces"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -327,9 +329,10 @@ def test_face_detection_with_faces(video_path: str) -> Tuple[bool, str]:
         return False, f"Face score too low: {score:.2f} (expected >= 0.2)"
 
 
+@pytest.mark.integration
 def test_face_detection_without_faces(video_path: str) -> Tuple[bool, str]:
     """Test face detection on video expected to have no faces"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -345,9 +348,10 @@ def test_face_detection_without_faces(video_path: str) -> Tuple[bool, str]:
         return False, f"Face score too high: {score:.2f} (expected <= 0.8)"
 
 
+@pytest.mark.integration
 def test_face_detection_caching(video_path: str, cache_dir: Path) -> Tuple[bool, str]:
     """Test that face detection results are cached"""
-    from src.matching import FaceDetector
+    from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
         return False, "Test video not available"
@@ -385,6 +389,7 @@ def test_face_detection_caching(video_path: str, cache_dir: Path) -> Tuple[bool,
         return True, f"Cache created, timing: {time1:.3f}s → {time2:.3f}s"
 
 
+@pytest.mark.integration
 def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
     """Test logger stats tracking and summary generation"""
     from src.logger import RunLogger
@@ -450,6 +455,7 @@ def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
     return True, f"All stats tracked, 3 files created"
 
 
+@pytest.mark.integration
 def test_logger_stage_timing(temp_dir: Path) -> Tuple[bool, str]:
     """Test logger stage timing accuracy"""
     from src.logger import RunLogger
@@ -485,7 +491,7 @@ def test_logger_stage_timing(temp_dir: Path) -> Tuple[bool, str]:
 
 def test_apply_face_preference() -> Tuple[bool, str]:
     """Test face preference score adjustment"""
-    from src.matching import apply_face_preference, FaceDetector
+    from src.face_detection import apply_face_preference, FaceDetector
     from src.utils import SRTSegment
     
     # Create mock segments with cached face scores

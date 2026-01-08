@@ -18,6 +18,26 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# EMBEDDINGS UTILITIES
+# =============================================================================
+
+def is_embeddings_empty(embeddings: Any) -> bool:
+    """
+    Check if embeddings are None or empty.
+
+    Handles numpy arrays, lists, and None safely without triggering
+    "truth value of array is ambiguous" errors.
+
+    Args:
+        embeddings: Embeddings to check (numpy array, list, or None)
+
+    Returns:
+        True if embeddings are None or have length 0, False otherwise
+    """
+    return embeddings is None or len(embeddings) == 0
+
+
+# =============================================================================
 # PATH UTILITIES
 # =============================================================================
 
@@ -252,6 +272,7 @@ class SRTSegment:
     entities: List = field(default_factory=list)  # List of entity dicts with text, type, context
     topic_id: Optional[int] = None
     topics: List[str] = field(default_factory=list)  # Topic keywords for this segment/video
+    is_broll: bool = False  # True if silent/B-roll video (no speech, face_score < threshold)
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict (handles numpy types)"""
@@ -264,7 +285,8 @@ class SRTSegment:
             'keywords': list(self.keywords) if self.keywords else [],
             'entities': list(self.entities) if self.entities else [],
             'topic_id': int(self.topic_id) if self.topic_id is not None else None,
-            'topics': list(self.topics) if self.topics else []
+            'topics': list(self.topics) if self.topics else [],
+            'is_broll': bool(self.is_broll)
         }
 
     @classmethod
@@ -284,6 +306,7 @@ class SRTSegment:
         filtered_data.setdefault('entities', [])
         filtered_data.setdefault('topic_id', None)
         filtered_data.setdefault('topics', [])
+        filtered_data.setdefault('is_broll', False)
 
         return cls(**filtered_data)
 

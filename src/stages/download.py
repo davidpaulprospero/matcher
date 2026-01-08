@@ -202,7 +202,8 @@ class DownloadStage(Stage):
         print(f"    Merge gap: {getattr(audio_config, 'merge_gap_seconds', 15)}s")
 
         try:
-            from ..downloader import VideoDownloader, AudioDownload
+            from ..downloader import VideoDownloader
+            from ..state import AudioDownload
 
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
@@ -221,7 +222,7 @@ class DownloadStage(Stage):
                         if per_kw <= 0:
                             continue
 
-                        audio_downloads = self.downloader.download_audio_for_keyword(
+                        audio_downloads = self.downloader.audio_first.download_audio_for_keyword(
                             keyword=keyword,
                             output_dir=output_dir,
                             tier=tier,
@@ -396,11 +397,32 @@ class DownloadVideoSegmentsStage(Stage):
         warnings = []
 
         try:
+            # Check if we have audio downloads (audio-first mode indicator)
+            has_audio = state.downloaded_audio and len(state.downloaded_audio) > 0
+
+            # Edge case: skip_download=true BUT we have audio files
+            # This means user interrupted audio-first pipeline before video download
+            if config.pipeline.skip_download and has_audio:
+                warning_msg = (
+                    "WARNING: skip_download=true but audio files exist. "
+                    "This indicates incomplete audio-first pipeline. "
+                    "Video segments have NOT been downloaded yet. "
+                    "OTIO will reference audio files (.mp3) instead of video files. "
+                    "To fix: Set skip_download=false and re-run to download matched video segments."
+                )
+                print(f"\n  ⚠️  {warning_msg}")
+                logger.warning(warning_msg)
+                warnings.append("Incomplete audio-first pipeline - no video segments")
+                return StageResult.ok({'skipped': True, 'reason': 'skip_download_with_audio'}, warnings)
+
+            # Normal skip: not in audio-first mode
+            if config.pipeline.skip_download or not has_audio:
+                print("  >> Skipping segment download (not audio-first mode)")
+                logger.info("Skipping DOWNLOAD_SEGMENTS (not audio-first mode)")
+                return StageResult.ok({'skipped': True}, warnings)
+
             if not state.matches:
                 return StageResult.fail("No matches - run matching first", warnings)
-
-            if not state.downloaded_audio:
-                return StageResult.fail("No audio downloads - run audio download first", warnings)
 
             print(f"\n  --- Stage 2B: DOWNLOAD VIDEO SEGMENTS ---")
 
@@ -446,12 +468,15 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
 
-            downloaded_segments = self.downloader.download_video_segments(
+            downloaded_segments = self.downloader.audio_first.download_video_segments(
                 merged_segments,
                 output_dir
             )
 
             print(f"\n  + Downloaded {len(downloaded_segments)} video segments")
+
+            # Update Match objects to reference downloaded video segments (.mp4) instead of audio files (.mp3)
+            self._remap_matches_to_video_segments(state, downloaded_segments, audio_downloads_by_id)
 
             checkpoint_data = {
                 'segment_count': len(downloaded_segments),
@@ -463,6 +488,148 @@ class DownloadVideoSegmentsStage(Stage):
         except Exception as e:
             logger.exception(f"Video segment download failed: {e}")
             return StageResult.fail(str(e), warnings)
+
+    def _remap_matches_to_video_segments(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List,
+        audio_downloads_by_id: dict
+    ) -> None:
+        """
+        Update Match objects to reference downloaded video segment files instead of audio files.
+
+        In audio-first mode, matches initially reference .mp3 audio files. After downloading
+        video segments, we need to remap them to the actual .mp4 segment files.
+
+        Args:
+            state: Pipeline state with matches to update
+            downloaded_segments: List of DownloadedSegment objects
+            audio_downloads_by_id: Dict mapping video_id to AudioDownload
+        """
+        from ..downloader.types import DownloadedSegment
+
+        # Build mapping: (video_id, original_time) -> segment_file
+        # Each DownloadedSegment contains multiple matches within its time range
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                # Key by video_id and the original video time
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Helper function to remap a single Match object
+        def remap_match(match_obj):
+            """Remap a single Match object to video segment file"""
+            # Handle two different Match structures:
+            # 1. state.Match: has video_file, video_start fields
+            # 2. utils.Match: has video_segment.source_file field
+
+            if hasattr(match_obj, 'video_file'):
+                # state.Match structure
+                audio_file = Path(match_obj.video_file).stem
+                start_time = match_obj.video_start
+            elif hasattr(match_obj, 'video_segment'):
+                # utils.Match structure - use the video_segment
+                if not hasattr(match_obj.video_segment, 'source_file'):
+                    return False
+                audio_file = Path(match_obj.video_segment.source_file).stem
+                start_time = match_obj.video_segment.start_time
+            else:
+                logger.warning(f"Unknown Match structure: {type(match_obj)}")
+                return False
+
+            # Find corresponding video_id from audio downloads
+            video_id = None
+            for vid, audio in audio_downloads_by_id.items():
+                audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
+                if Path(audio_path).stem == audio_file:
+                    video_id = vid
+                    break
+
+            if not video_id:
+                logger.warning(f"Could not find video_id for audio file: {audio_file}")
+                return False
+
+            # Look up the downloaded segment containing this match
+            key = (video_id, start_time)
+            if key in segment_map:
+                segment_file, original_start = segment_map[key]
+
+                # Update match to reference video segment file
+                if hasattr(match_obj, 'video_file'):
+                    old_file = match_obj.video_file
+                    match_obj.video_file = segment_file
+                else:
+                    old_file = match_obj.video_segment.source_file
+                    match_obj.video_segment.source_file = segment_file
+
+                logger.debug(f"Remapped match: {old_file} -> {segment_file}")
+                return True
+            else:
+                logger.warning(f"Could not find downloaded segment for match: video_id={video_id}, time={start_time}")
+                return False
+
+        # Helper to remap video_segment.source_file (for AlternativeMatch/StrategyMatch)
+        def remap_segment(video_segment):
+            """Remap video_segment.source_file to video segment file"""
+            if not hasattr(video_segment, 'source_file'):
+                return False
+
+            audio_file = Path(video_segment.source_file).stem
+
+            # Find corresponding video_id
+            video_id = None
+            for vid, audio in audio_downloads_by_id.items():
+                audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
+                if Path(audio_path).stem == audio_file:
+                    video_id = vid
+                    break
+
+            if not video_id:
+                return False
+
+            # Look up segment file
+            # For video_segments, we need to use start_time instead of video_start
+            key = (video_id, video_segment.start_time)
+            if key in segment_map:
+                segment_file, _ = segment_map[key]
+                old_file = video_segment.source_file
+                video_segment.source_file = segment_file
+                logger.debug(f"Remapped segment: {old_file} -> {segment_file}")
+                return True
+            return False
+
+        # Update all Match objects (handling both Match and MatchResult)
+        updated_count = 0
+        for item in state.matches:
+            # Check if this is a MatchResult wrapper or a plain Match
+            if hasattr(item, 'primary_match'):
+                # MatchResult object - update primary match
+                if remap_match(item.primary_match):
+                    updated_count += 1
+
+                # Update alternatives (V2-V3) - these have video_segment field
+                for alt in item.alternatives:
+                    if hasattr(alt, 'video_segment') and remap_segment(alt.video_segment):
+                        updated_count += 1
+
+                # Update secondary matches (V4-V6) - these have video_segment field
+                for sec in item.secondary_matches:
+                    if hasattr(sec, 'video_segment') and remap_segment(sec.video_segment):
+                        updated_count += 1
+
+                # Update strategy matches (V7+) - these have video_segment field
+                for strat in item.strategy_matches:
+                    if hasattr(strat, 'video_segment') and remap_segment(strat.video_segment):
+                        updated_count += 1
+            else:
+                # Plain Match object
+                if remap_match(item):
+                    updated_count += 1
+
+        logger.info(f"Remapped {updated_count} match objects to video segment files")
+        print(f"  ✓ Updated {updated_count} matches to reference video segments")
 
     def can_skip(
         self,
@@ -487,8 +654,11 @@ class DownloadVideoSegmentsStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs"""
+        # Skip validation if not in audio-first mode
+        # (stage will skip itself in run())
+        if config.pipeline.skip_download or not state.downloaded_audio:
+            return None
+
         if not state.matches:
             return "No matches available for segment download"
-        if not state.downloaded_audio:
-            return "No audio downloads available"
         return None

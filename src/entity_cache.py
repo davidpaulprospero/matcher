@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from dataclasses import dataclass, asdict
 from difflib import SequenceMatcher
 
+from .cache import BaseCache, CacheEntry
+
 if TYPE_CHECKING:
     from src.config import EntityCacheConfig
 
@@ -41,7 +43,7 @@ class CachedEntity:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
-class EntityCache:
+class EntityCache(BaseCache):
     """
     Global cache for entity images.
 
@@ -52,7 +54,6 @@ class EntityCache:
     - Multiple cache strategies (copy, symlink, reference)
     """
 
-    INDEX_FILE = "entity_cache_index.json"
     IMAGES_SUBDIR = "images"
 
     def __init__(self, config: 'EntityCacheConfig'):
@@ -61,48 +62,99 @@ class EntityCache:
             config: EntityCacheConfig object with cache settings
         """
         self.enabled = getattr(config, 'enabled', False)
-        self.cache_dir = Path(os.path.expanduser(getattr(config, 'cache_dir', '~/.matcher_entity_cache')))
+        cache_dir = Path(os.path.expanduser(getattr(config, 'cache_dir', '~/.matcher_entity_cache')))
         self.fuzzy_threshold = getattr(config, 'fuzzy_threshold', 0.85)
         self.max_age_days = getattr(config, 'max_age_days', 0)
         self.cache_strategy = getattr(config, 'cache_strategy', 'copy')
 
-        self.index: Dict[str, CachedEntity] = {}
+        # Convert max_age_days to TTL seconds (0 = no expiration)
+        ttl_seconds = self.max_age_days * 24 * 3600 if self.max_age_days > 0 else 0
+
+        # Initialize BaseCache
+        super().__init__(
+            cache_dir=cache_dir,
+            index_name="entity_cache_index.json",
+            ttl_seconds=ttl_seconds,
+            auto_save=True
+        )
 
         if self.enabled:
             self._ensure_cache_dir()
-            self._load_index()
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize CachedEntity to dict"""
+        return {
+            'data': entry.data,  # CachedEntity.to_dict()
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize dict to CachedEntity entry
+
+        Handles both new BaseCache format and legacy format for migration.
+        """
+        # New format: {"data": {...}, "cached_at": ..., "metadata": {}}
+        if 'data' in data and isinstance(data['data'], dict):
+            return CacheEntry(
+                data=data['data'],
+                cached_at=data['cached_at'],
+                key='',
+                metadata=data.get('metadata', {})
+            )
+        # Legacy format: entity data directly (migration path)
+        # Assume it's a CachedEntity dict with entity_name, entity_type, images, etc.
+        elif 'entity_name' in data:
+            return CacheEntry(
+                data=data,  # Use the entity data directly
+                cached_at=data.get('cached_at', ''),
+                key='',
+                metadata={}
+            )
+        else:
+            # Unknown format, log and return empty entry
+            logger.warning(f"Unknown cache entry format, skipping: {list(data.keys())}")
+            return CacheEntry(data={}, cached_at='', key='', metadata={})
+
+    def _load_index(self) -> None:
+        """Load index with migration support for old format"""
+        if not self.index_path.exists():
+            self.index = {}
+            logger.debug(f"Created new cache index at {self.index_path}")
+            return
+
+        try:
+            with open(self.index_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Check if this is the old format with "entities" key
+            if 'entities' in data and isinstance(data['entities'], dict):
+                logger.info(f"Migrating old entity cache format to BaseCache format")
+                # Migrate old format to new format
+                migrated_index = {}
+                for entity_name, entity_data in data['entities'].items():
+                    # Wrap in new format
+                    migrated_index[entity_name] = {
+                        'data': entity_data,
+                        'cached_at': entity_data.get('cached_at', ''),
+                        'metadata': {}
+                    }
+                self.index = migrated_index
+                # Save migrated format
+                self._save_index()
+                logger.info(f"Migrated {len(migrated_index)} entities to new format")
+            else:
+                # Already in new format
+                self.index = data
+                logger.debug(f"Loaded cache index: {len(self.index)} entries from {self.index_path}")
+
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to load cache index: {e}. Starting fresh.")
+            self.index = {}
 
     def _ensure_cache_dir(self) -> None:
         """Create cache directory structure if it doesn't exist"""
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
         (self.cache_dir / self.IMAGES_SUBDIR).mkdir(exist_ok=True)
-
-    def _load_index(self) -> None:
-        """Load cache index from disk"""
-        index_path = self.cache_dir / self.INDEX_FILE
-        if index_path.exists():
-            try:
-                with open(index_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                for name, entry in data.get('entities', {}).items():
-                    self.index[name] = CachedEntity.from_dict(entry)
-                logger.info(f"Loaded entity cache index: {len(self.index)} entities")
-            except Exception as e:
-                logger.warning(f"Failed to load cache index: {e}")
-
-    def _save_index(self) -> None:
-        """Save cache index to disk"""
-        index_path = self.cache_dir / self.INDEX_FILE
-        data = {
-            'version': '1.0',
-            'updated_at': datetime.now().isoformat(),
-            'entities': {name: e.to_dict() for name, e in self.index.items()}
-        }
-        try:
-            with open(index_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save cache index: {e}")
 
     def find_entity(self, entity_name: str, entity_type: str = "") -> Optional[CachedEntity]:
         """
@@ -118,9 +170,13 @@ class EntityCache:
         if not self.enabled:
             return None
 
+        # Get all entries and convert to CachedEntity objects
+        all_entries = self.get_all()
+
         # Exact match first (case-insensitive)
         name_lower = entity_name.lower()
-        for cached_name, cached in self.index.items():
+        for cached_name, entry in all_entries.items():
+            cached = CachedEntity.from_dict(entry.data)
             if cached_name.lower() == name_lower:
                 if not entity_type or cached.entity_type == entity_type:
                     if self._is_valid(cached):
@@ -131,7 +187,8 @@ class EntityCache:
         best_match = None
         best_score = 0.0
 
-        for name, cached in self.index.items():
+        for name, entry in all_entries.items():
+            cached = CachedEntity.from_dict(entry.data)
             if entity_type and cached.entity_type != entity_type:
                 continue
 
@@ -226,7 +283,7 @@ class EntityCache:
                 cached_paths.append(str(dst))
 
         if cached_paths:
-            self.index[entity_name] = CachedEntity(
+            entity = CachedEntity(
                 entity_name=entity_name,
                 entity_type=entity_type,
                 images=cached_paths,
@@ -234,7 +291,8 @@ class EntityCache:
                 cached_at=datetime.now().isoformat(),
                 query=query
             )
-            self._save_index()
+            # Use BaseCache's set method (auto-saves)
+            self.set(entity_name, entity.to_dict())
             logger.info(f"Cached entity '{entity_name}': {len(cached_paths)} images")
 
     def _safe_name(self, name: str) -> str:
@@ -314,13 +372,14 @@ class EntityCache:
 
         removed = []
 
-        for name, cached in list(self.index.items()):
+        # Get all entries and check validity
+        for name, entry in list(self.get_all().items()):
+            cached = CachedEntity.from_dict(entry.data)
             if not self._is_valid(cached):
                 removed.append(name)
-                del self.index[name]
+                self.delete(name)  # Use BaseCache's delete method
 
         if removed:
-            self._save_index()
             logger.info(f"Cleaned up {len(removed)} expired/invalid cache entries")
 
         return len(removed)
@@ -330,13 +389,17 @@ class EntityCache:
         if not self.enabled:
             return {'enabled': False}
 
-        total_images = sum(len(e.images) for e in self.index.values())
-        valid_entries = sum(1 for e in self.index.values() if self._is_valid(e))
+        # Get all entries and convert to CachedEntity objects
+        all_entries = self.get_all()
+        entities = [CachedEntity.from_dict(entry.data) for entry in all_entries.values()]
+
+        total_images = sum(len(e.images) for e in entities)
+        valid_entries = sum(1 for e in entities if self._is_valid(e))
 
         return {
             'enabled': True,
             'cache_dir': str(self.cache_dir),
-            'total_entities': len(self.index),
+            'total_entities': len(entities),
             'valid_entities': valid_entries,
             'total_images': total_images,
             'fuzzy_threshold': self.fuzzy_threshold,
