@@ -67,6 +67,7 @@ llm_context.txt
 !TESTING.md
 !CHANGELOG.md
 !README.md
+!REFACTORING.md
 !docs/*.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
