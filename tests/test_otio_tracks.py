@@ -54,27 +54,57 @@ class MockVoiceoverSegment:
 
 
 @dataclass
+class MockVideoSegment:
+    """Mock video segment."""
+    source_file: str
+    start_time: float
+    end_time: float
+    text: str = "Test video text"
+
+
+@dataclass
 class MockMatch:
     """Mock Match object."""
     file: str
     start: float
     end: float
+    confidence: float = 0.8
+    speed: float = 1.0
+    reasoning: str = "Test reasoning"
+    strategy: str = "embedding"
+    is_keyword_match: bool = False
+    is_visual_match: bool = False
+    keyword: str = ""
+    embedding_similarity: float = 0.85
+    clip_reuse_count: int = 0
     voiceover_segment: MockVoiceoverSegment = None
+    video_segment: MockVideoSegment = None
 
     def __post_init__(self):
         if self.voiceover_segment is None:
             self.voiceover_segment = MockVoiceoverSegment(self.start, self.end)
+        if self.video_segment is None:
+            self.video_segment = MockVideoSegment(self.file, self.start, self.end)
 
 
 @dataclass
 class MockMatchResult:
     """Mock MatchResult object."""
     primary: MockMatch
+    alternatives: List[MockMatch] = None
+    secondary_matches: List[MockMatch] = None
+    strategy_matches: List[MockMatch] = None
     primary_match: MockMatch = None
 
     def __post_init__(self):
         if self.primary_match is None:
             self.primary_match = self.primary
+        if self.alternatives is None:
+            self.alternatives = []
+        if self.secondary_matches is None:
+            self.secondary_matches = []
+        if self.strategy_matches is None:
+            self.strategy_matches = []
 
 
 class TestTrackBuilderFactory:
