@@ -86,7 +86,7 @@ class DownloadMetrics:
 
 
 @dataclass
-class TestResult:
+class DownloadTestResult:
     """Result of a single test"""
     name: str
     passed: bool
@@ -349,7 +349,7 @@ class DownloadTestRunner:
         self.fixture_path = ""
 
         # Test results
-        self.results: List[TestResult] = []
+        self.results: List[DownloadTestResult] = []
 
         # Temp directory for tests
         self.temp_dir = None
@@ -402,7 +402,7 @@ class DownloadTestRunner:
             self.log(f"Failed to load fixtures: {e}")
             return False
 
-    def run_test(self, name: str, test_func, *args, **kwargs) -> TestResult:
+    def run_test(self, name: str, test_func, *args, **kwargs) -> DownloadTestResult:
         """Run a single test"""
         self.log(f"  {name}...", indent=0)
         start = time.time()
@@ -422,7 +422,7 @@ class DownloadTestRunner:
                 message = "OK" if passed else "Failed"
                 details = {}
 
-            test_result = TestResult(
+            test_result = DownloadTestResult(
                 name=name,
                 passed=passed,
                 duration=duration,
@@ -432,7 +432,7 @@ class DownloadTestRunner:
 
         except Exception as e:
             duration = time.time() - start
-            test_result = TestResult(
+            test_result = DownloadTestResult(
                 name=name,
                 passed=False,
                 duration=duration,
@@ -515,7 +515,7 @@ class DownloadTestRunner:
 # UNIT TESTS
 # =============================================================================
 
-def test_segment_merging_basic() -> Tuple[bool, str]:
+def test_segment_merging_basic():
     """Test basic segment merging functionality"""
     from src.downloader import merge_segments_with_buffer
 
@@ -533,20 +533,18 @@ def test_segment_merging_basic() -> Tuple[bool, str]:
 
     # Expect 2 separate segments (too far apart to merge)
     if len(merged) != 2:
-        return False, f"Expected 2 segments, got {len(merged)}"
+        assert False, f"Expected 2 segments, got {len(merged)}"
 
     # First segment: 60-30=30 to 70+30=100
     if merged[0] != (30.0, 100.0):
-        return False, f"First segment wrong: {merged[0]}"
+        assert False, f"First segment wrong: {merged[0]}"
 
     # Second segment: 200-30=170 to 210+30=240
     if merged[1] != (170.0, 240.0):
-        return False, f"Second segment wrong: {merged[1]}"
-
-    return True, "Basic merging works correctly"
+        assert False, f"Second segment wrong: {merged[1]}"
 
 
-def test_segment_merging_overlap() -> Tuple[bool, str]:
+def test_segment_merging_overlap():
     """Test segment merging with overlapping segments"""
     from src.downloader import merge_segments_with_buffer
 
@@ -565,26 +563,24 @@ def test_segment_merging_overlap() -> Tuple[bool, str]:
 
     # All should merge into one segment
     if len(merged) != 1:
-        return False, f"Expected 1 merged segment, got {len(merged)}"
+        assert False, f"Expected 1 merged segment, got {len(merged)}"
 
     # Should span from 30 (60-30) to 125 (95+30)
     start, end = merged[0]
     if start != 30.0:
-        return False, f"Expected start 30.0, got {start}"
+        assert False, f"Expected start 30.0, got {start}"
     if end != 125.0:
-        return False, f"Expected end 125.0, got {end}"
-
-    return True, "Overlapping segments merged correctly"
+        assert False, f"Expected end 125.0, got {end}"
 
 
-def test_segment_merging_edge_cases() -> Tuple[bool, str]:
+def test_segment_merging_edge_cases():
     """Test segment merging edge cases"""
     from src.downloader import merge_segments_with_buffer
 
     # Empty list
     result = merge_segments_with_buffer([], buffer_seconds=30.0)
     if result != []:
-        return False, f"Empty list should return empty, got {result}"
+        assert False, f"Empty list should return empty, got {result}"
 
     # Single segment
     result = merge_segments_with_buffer(
@@ -593,9 +589,9 @@ def test_segment_merging_edge_cases() -> Tuple[bool, str]:
         video_duration=100.0
     )
     if len(result) != 1:
-        return False, f"Single segment should stay single"
+        assert False, f"Single segment should stay single"
     if result[0] != (20.0, 90.0):
-        return False, f"Single segment wrong: {result[0]}"
+        assert False, f"Single segment wrong: {result[0]}"
 
     # Segment at start (negative buffer should clamp to 0)
     result = merge_segments_with_buffer(
@@ -604,7 +600,7 @@ def test_segment_merging_edge_cases() -> Tuple[bool, str]:
         video_duration=100.0
     )
     if result[0][0] != 0.0:
-        return False, f"Start should clamp to 0, got {result[0][0]}"
+        assert False, f"Start should clamp to 0, got {result[0][0]}"
 
     # Segment at end (buffer should clamp to duration)
     result = merge_segments_with_buffer(
@@ -613,7 +609,7 @@ def test_segment_merging_edge_cases() -> Tuple[bool, str]:
         video_duration=100.0
     )
     if result[0][1] != 100.0:
-        return False, f"End should clamp to 100, got {result[0][1]}"
+        assert False, f"End should clamp to 100, got {result[0][1]}"
 
     # Invalid segment (end <= start) should be skipped
     result = merge_segments_with_buffer(
@@ -622,61 +618,55 @@ def test_segment_merging_edge_cases() -> Tuple[bool, str]:
         video_duration=100.0
     )
     if len(result) != 1:
-        return False, f"Invalid segment should be skipped, got {len(result)} segments"
-
-    return True, "Edge cases handled correctly"
+        assert False, f"Invalid segment should be skipped, got {len(result)} segments"
 
 
-def test_segment_filename() -> Tuple[bool, str]:
+def test_segment_filename():
     """Test segment filename generation"""
     from src.downloader import get_segment_filename
 
     # Basic case
     filename = get_segment_filename("abc123", 330.0)
     if filename != "abc123_0330.mp4":
-        return False, f"Expected abc123_0330.mp4, got {filename}"
+        assert False, f"Expected abc123_0330.mp4, got {filename}"
 
     # Zero start
     filename = get_segment_filename("xyz789", 0.0)
     if filename != "xyz789_0000.mp4":
-        return False, f"Expected xyz789_0000.mp4, got {filename}"
+        assert False, f"Expected xyz789_0000.mp4, got {filename}"
 
     # Large number
     filename = get_segment_filename("test", 9999.0)
     if filename != "test_9999.mp4":
-        return False, f"Expected test_9999.mp4, got {filename}"
-
-    return True, "Filename generation correct"
+        assert False, f"Expected test_9999.mp4, got {filename}"
 
 
-def test_video_id_extraction() -> Tuple[bool, str]:
+def test_video_id_extraction():
     """Test video ID extraction from file paths"""
     from src.downloader import _extract_video_id
 
     # Simple format
     video_id = _extract_video_id("/path/to/abc123.mp3")
     if video_id != "abc123":
-        return False, f"Simple format failed: {video_id}"
+        assert False, f"Simple format failed: {video_id}"
 
     # Segment format
     video_id = _extract_video_id("/path/to/abc123_0330.mp4")
     if video_id != "abc123":
-        return False, f"Segment format failed: {video_id}"
+        assert False, f"Segment format failed: {video_id}"
 
     # Empty path
     video_id = _extract_video_id("")
     if video_id is not None:
-        return False, f"Empty path should return None"
+        assert False, f"Empty path should return None"
 
     # None path
     video_id = _extract_video_id(None)
     if video_id is not None:
-        return False, f"None path should return None"
-
-    return True, "Video ID extraction correct"
+        assert False, f"None path should return None"
 
 
-def test_collect_matched_segments() -> Tuple[bool, str]:
+def test_collect_matched_segments():
     """Test collecting matched segments from match results"""
     from src.downloader import collect_matched_segments, AudioDownload
 
@@ -722,20 +712,18 @@ def test_collect_matched_segments() -> Tuple[bool, str]:
     segments = collect_matched_segments(match_results, audio_downloads)
 
     if "vid1" not in segments:
-        return False, "Video ID not in results"
+        assert False, "Video ID not in results"
 
     if len(segments["vid1"]) != 2:
-        return False, f"Expected 2 segments, got {len(segments['vid1'])}"
+        assert False, f"Expected 2 segments, got {len(segments['vid1'])}"
 
     # Check tracks
     tracks = [s.track for s in segments["vid1"]]
     if "V1" not in tracks or "V2" not in tracks:
-        return False, f"Wrong tracks: {tracks}"
-
-    return True, "Segment collection works"
+        assert False, f"Wrong tracks: {tracks}"
 
 
-def test_prepare_merged_segments() -> Tuple[bool, str]:
+def test_prepare_merged_segments():
     """Test preparing merged segments"""
     from src.downloader import (
         prepare_merged_segments,
@@ -784,23 +772,21 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
     )
 
     if len(merged) != 1:
-        return False, f"Expected 1 merged segment, got {len(merged)}"
+        assert False, f"Expected 1 merged segment, got {len(merged)}"
 
     # Check merged segment
     m = merged[0]
     if m.video_id != "vid1":
-        return False, f"Wrong video_id: {m.video_id}"
+        assert False, f"Wrong video_id: {m.video_id}"
 
     # Start: 60-10=50, End: 75+10=85
     if m.start_time != 50.0:
-        return False, f"Expected start 50.0, got {m.start_time}"
+        assert False, f"Expected start 50.0, got {m.start_time}"
     if m.end_time != 85.0:
-        return False, f"Expected end 85.0, got {m.end_time}"
-
-    return True, "Merged segment preparation works"
+        assert False, f"Expected end 85.0, got {m.end_time}"
 
 
-def test_filter_string_building() -> Tuple[bool, str]:
+def test_filter_string_building():
     """Test filter string building for yt-dlp"""
     from src.downloader import VideoDownloader
     from src.config import load_config
@@ -812,16 +798,14 @@ def test_filter_string_building() -> Tuple[bool, str]:
     filter_str = downloader._build_filter_string('short')
 
     if 'duration>' not in filter_str:
-        return False, "Missing duration min filter"
+        assert False, "Missing duration min filter"
     if 'duration<' not in filter_str:
-        return False, "Missing duration max filter"
+        assert False, "Missing duration max filter"
     if '!is_live' not in filter_str:
-        return False, "Missing live stream filter"
-
-    return True, "Filter string built correctly"
+        assert False, "Missing live stream filter"
 
 
-def test_format_string_building() -> Tuple[bool, str]:
+def test_format_string_building():
     """Test format string building for yt-dlp"""
     from src.downloader import VideoDownloader
     from src.config import load_config
@@ -833,12 +817,10 @@ def test_format_string_building() -> Tuple[bool, str]:
 
     # Should have video and audio selection
     if 'bestvideo' not in format_str and 'best' not in format_str:
-        return False, "Missing video format selection"
-
-    return True, "Format string built correctly"
+        assert False, "Missing video format selection"
 
 
-def test_needs_transcoding() -> Tuple[bool, str]:
+def test_needs_transcoding():
     """Test transcoding detection logic"""
     from src.downloader import VideoDownloader
     from src.config import load_config
@@ -853,7 +835,7 @@ def test_needs_transcoding() -> Tuple[bool, str]:
         needs, reason = downloader._needs_transcoding('/fake/video.webm')
 
         if not needs:
-            return False, f"VP9 should need transcoding, reason: {reason}"
+            assert False, f"VP9 should need transcoding, reason: {reason}"
 
     # Mock ffprobe to return h264 codec
     with patch('subprocess.run') as mock_run:
@@ -862,12 +844,10 @@ def test_needs_transcoding() -> Tuple[bool, str]:
         needs, reason = downloader._needs_transcoding('/fake/video.mp4')
 
         if needs:
-            return False, f"H264/MP4 should not need transcoding, reason: {reason}"
-
-    return True, "Transcoding detection works"
+            assert False, f"H264/MP4 should not need transcoding, reason: {reason}"
 
 
-def test_filename_sanitization() -> Tuple[bool, str]:
+def test_filename_sanitization():
     """Test filename sanitization for NLE compatibility"""
     from src.downloader import sanitize_filename_for_nle
 
@@ -885,20 +865,18 @@ def test_filename_sanitization() -> Tuple[bool, str]:
 
         # Check result
         if '%' in safe_path.name or '&' in safe_path.name or '$' in safe_path.name or '#' in safe_path.name:
-            return False, f"Unsafe chars remain: {safe_path.name}"
+            assert False, f"Unsafe chars remain: {safe_path.name}"
 
         # Clean up
         if safe_path.exists():
             safe_path.unlink()
-
-        return True, "Filename sanitization works"
 
     except Exception as e:
         # Clean up on error
         for p in [temp_path, unsafe_path if 'unsafe_path' in dir() else None]:
             if p and p.exists():
                 p.unlink()
-        return False, f"Error: {e}"
+        assert False, f"Error: {e}"
 
 
 # =============================================================================
@@ -906,12 +884,12 @@ def test_filename_sanitization() -> Tuple[bool, str]:
 # =============================================================================
 
 @pytest.mark.integration
-def test_fixture_merge_consistency(runner: DownloadTestRunner) -> Tuple[bool, str]:
+def test_fixture_merge_consistency(runner: DownloadTestRunner):
     """Test that fixture merged segments are consistent with merge logic"""
     from src.downloader import prepare_merged_segments
 
     if not runner.audio_downloads:
-        return True, "No fixtures to test"
+        pytest.skip("No audio downloads in fixture")
 
     # Build audio_downloads dict
     audio_dict = {a.video_id: a for a in runner.audio_downloads}
@@ -929,16 +907,14 @@ def test_fixture_merge_consistency(runner: DownloadTestRunner) -> Tuple[bool, st
 
     # Compare counts
     if len(recomputed) != len(runner.merged_segments):
-        return False, f"Count mismatch: fixture={len(runner.merged_segments)}, recomputed={len(recomputed)}"
-
-    return True, f"Merge consistency verified ({len(recomputed)} segments)"
+        assert False, f"Count mismatch: fixture={len(runner.merged_segments)}, recomputed={len(recomputed)}"
 
 
 @pytest.mark.integration
-def test_fixture_buffer_application(runner: DownloadTestRunner) -> Tuple[bool, str]:
+def test_fixture_buffer_application(runner: DownloadTestRunner):
     """Test that buffers are correctly applied in fixtures"""
     if not runner.merged_segments:
-        return True, "No merged segments to test"
+        pytest.skip("No merged segments in fixture")
 
     buffer = runner.config_snapshot.get('buffer_seconds', 30.0)
 
@@ -946,18 +922,16 @@ def test_fixture_buffer_application(runner: DownloadTestRunner) -> Tuple[bool, s
         for match in merged.original_matches:
             # Check that match is within merged segment
             if match.start_time < merged.start_time:
-                return False, f"Match start {match.start_time} before merged start {merged.start_time}"
+                assert False, f"Match start {match.start_time} before merged start {merged.start_time}"
             if match.end_time > merged.end_time:
-                return False, f"Match end {match.end_time} after merged end {merged.end_time}"
-
-    return True, "Buffer application verified"
+                assert False, f"Match end {match.end_time} after merged end {merged.end_time}"
 
 
 # =============================================================================
 # LIVE TESTS (require network)
 # =============================================================================
 
-def test_ytdlp_available() -> Tuple[bool, str]:
+def test_ytdlp_available():
     """Test that yt-dlp is installed and accessible"""
     import subprocess
 
@@ -969,16 +943,15 @@ def test_ytdlp_available() -> Tuple[bool, str]:
             timeout=10
         )
         version = result.stdout.strip()
-        return True, f"yt-dlp version: {version}"
     except FileNotFoundError:
-        return False, "yt-dlp not found"
+        assert False, "yt-dlp not found"
     except subprocess.TimeoutExpired:
-        return False, "yt-dlp timed out"
+        assert False, "yt-dlp timed out"
     except Exception as e:
-        return False, f"Error: {e}"
+        assert False, f"Error: {e}"
 
 
-def test_youtube_search_metadata() -> Tuple[bool, str]:
+def test_youtube_search_metadata():
     """Test YouTube metadata search (no download)"""
     from src.downloader import VideoDownloader
     from src.config import load_config
@@ -995,17 +968,15 @@ def test_youtube_search_metadata() -> Tuple[bool, str]:
 
     if not videos:
         # This can fail without cookies - not a critical failure
-        return True, "No videos found (may need YouTube cookies)"
+        pytest.skip("No videos returned (may need cookies.txt)")
 
     # Verify structure
     for v in videos:
         if 'id' not in v or 'title' not in v:
-            return False, f"Missing required fields in: {v}"
-
-    return True, f"Found {len(videos)} videos"
+            assert False, f"Missing required fields in: {v}"
 
 
-def test_dependency_check() -> Tuple[bool, str]:
+def test_dependency_check():
     """Test dependency check method"""
     from src.downloader import VideoDownloader
     from src.config import load_config
@@ -1015,15 +986,11 @@ def test_dependency_check() -> Tuple[bool, str]:
 
     success, message = downloader.check_dependencies()
 
-    if not success:
-        # Remove unicode characters for console compatibility
-        message = message.encode('ascii', 'replace').decode('ascii')
-        return False, message
-
-    # Remove unicode characters and format for console
-    message = message.replace('\n', ', ')
+    # Remove unicode characters for console compatibility
     message = message.encode('ascii', 'replace').decode('ascii')
-    return True, message
+    message = message.replace('\n', ', ')
+
+    assert success, f"Dependency check failed: {message}"
 
 
 # =============================================================================

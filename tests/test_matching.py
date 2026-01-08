@@ -108,7 +108,7 @@ class ComparisonResult:
 
 
 @dataclass
-class TestResult:
+class MatchingTestResult:
     """Result of a single test"""
     name: str
     passed: bool
@@ -493,7 +493,7 @@ class MatchingTestRunner:
         self.fixture_path = ""
 
         # Test results
-        self.results: List[TestResult] = []
+        self.results: List[MatchingTestResult] = []
 
     def log(self, message: str, indent: int = 0):
         """Print message with optional indent"""
@@ -621,7 +621,7 @@ class MatchingTestRunner:
             metrics_b=metrics_b
         )
 
-    def run_test(self, name: str, test_func, *args, **kwargs) -> TestResult:
+    def run_test(self, name: str, test_func, *args, **kwargs) -> MatchingTestResult:
         """Run a single test"""
         self.log(f"  {name}...", indent=0)
         start = time.time()
@@ -641,7 +641,7 @@ class MatchingTestRunner:
                 message = "OK" if passed else "Failed"
                 details = {}
 
-            test_result = TestResult(
+            test_result = MatchingTestResult(
                 name=name,
                 passed=passed,
                 duration=duration,
@@ -651,7 +651,7 @@ class MatchingTestRunner:
 
         except Exception as e:
             duration = time.time() - start
-            test_result = TestResult(
+            test_result = MatchingTestResult(
                 name=name,
                 passed=False,
                 duration=duration,
