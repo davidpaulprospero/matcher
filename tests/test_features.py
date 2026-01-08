@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # =============================================================================
 
 @dataclass
-class TestResult:
+class FeatureTestResult:
     name: str
     passed: bool
     duration: float
@@ -44,14 +44,14 @@ class TestResult:
     actual: str = ""
 
 
-class TestRunner:
+class FeatureTestRunner:
     """Simple test runner with timing and reporting"""
-    
+
     def __init__(self):
-        self.results: List[TestResult] = []
+        self.results: List[FeatureTestResult] = []
         self.start_time = time.time()
-    
-    def run_test(self, name: str, test_func, *args, **kwargs) -> TestResult:
+
+    def run_test(self, name: str, test_func, *args, **kwargs) -> FeatureTestResult:
         """Run a single test and record result"""
         print(f"\n  ├─ Testing: {name}...", end=" ", flush=True)
         start = time.time()
@@ -66,7 +66,7 @@ class TestRunner:
                 passed = bool(result)
                 message = "OK" if passed else "Failed"
             
-            test_result = TestResult(
+            test_result = FeatureTestResult(
                 name=name,
                 passed=passed,
                 duration=duration,
@@ -81,7 +81,7 @@ class TestRunner:
                 
         except Exception as e:
             duration = time.time() - start
-            test_result = TestResult(
+            test_result = FeatureTestResult(
                 name=name,
                 passed=False,
                 duration=duration,
@@ -239,7 +239,7 @@ def download_test_videos(output_dir: Path, cookies_path: str = None) -> dict:
 # FEATURE TESTS
 # =============================================================================
 
-def test_imports() -> Tuple[bool, str]:
+def test_imports():
     """Test that all required modules can be imported"""
     required_modules = [
         ('src.config', 'Config'),
@@ -257,11 +257,10 @@ def test_imports() -> Tuple[bool, str]:
             failed.append(f"{module_name}: {e}")
     
     if failed:
-        return False, f"Import failures: {', '.join(failed)}"
-    return True, f"All {len(required_modules)} modules imported"
+        assert False, f"Import failures: {', '.join(failed)}"
 
 
-def test_config_loading() -> Tuple[bool, str]:
+def test_config_loading():
     """Test config loading with new fields (face_preference, root_dir)"""
     from src.config import load_config
     
@@ -269,23 +268,21 @@ def test_config_loading() -> Tuple[bool, str]:
     
     # Check face_preference exists
     if not hasattr(config.enhanced, 'face_preference'):
-        return False, "config.enhanced.face_preference not found"
+        assert False, "config.enhanced.face_preference not found"
     
     face_pref = config.enhanced.face_preference
     if face_pref not in ['neutral', 'more', 'none']:
-        return False, f"Invalid face_preference: {face_pref}"
+        assert False, f"Invalid face_preference: {face_pref}"
     
     # Check root_dir fields exist
     if not hasattr(config.download, 'root_dir'):
-        return False, "config.download.root_dir not found"
+        assert False, "config.download.root_dir not found"
     
     if not hasattr(config.image_search, 'root_dir'):
-        return False, "config.image_search.root_dir not found"
-    
-    return True, f"face_preference={face_pref}, root_dirs OK"
+        assert False, "config.image_search.root_dir not found"
 
 
-def test_face_detector_init() -> Tuple[bool, str]:
+def test_face_detector_init():
     """Test FaceDetector initialization and backend detection"""
     from src.face_detection import FaceDetector
     
@@ -306,55 +303,47 @@ def test_face_detector_init() -> Tuple[bool, str]:
     elif opencv_ok:
         backend = "OpenCV (fallback)"
     else:
-        return False, "No face detection backend available (install mediapipe or opencv-python)"
-    
-    return True, f"Using {backend} backend"
+        assert False, "No face detection backend available (install mediapipe or opencv-python)"
 
 
 @pytest.mark.integration
-def test_face_detection_with_faces(video_path: str) -> Tuple[bool, str]:
+def test_face_detection_with_faces(video_path: str):
     """Test face detection on video expected to have faces"""
     from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
-        return False, "Test video not available"
+        assert False, "Test video not available"
     
     detector = FaceDetector.get_instance()
     score = detector.get_face_score(video_path)
     
     # Video with faces should score > 0.2
-    if score >= 0.2:
-        return True, f"Face score: {score:.2f} (expected >= 0.2)"
-    else:
-        return False, f"Face score too low: {score:.2f} (expected >= 0.2)"
+    assert score >= 0.2, f"Face score too low: {score:.2f} (expected >= 0.2)"
 
 
 @pytest.mark.integration
-def test_face_detection_without_faces(video_path: str) -> Tuple[bool, str]:
+def test_face_detection_without_faces(video_path: str):
     """Test face detection on video expected to have no faces"""
     from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
-        return False, "Test video not available"
+        assert False, "Test video not available"
     
     detector = FaceDetector.get_instance()
     score = detector.get_face_score(video_path)
     
     # Video without faces should score < 0.5
     # (we're lenient here since search results aren't guaranteed)
-    if score <= 0.8:
-        return True, f"Face score: {score:.2f} (expected <= 0.8)"
-    else:
-        return False, f"Face score too high: {score:.2f} (expected <= 0.8)"
+    assert score <= 0.8, f"Face score too high: {score:.2f} (expected <= 0.8)"
 
 
 @pytest.mark.integration
-def test_face_detection_caching(video_path: str, cache_dir: Path) -> Tuple[bool, str]:
+def test_face_detection_caching(video_path: str, cache_dir: Path):
     """Test that face detection results are cached"""
     from src.face_detection import FaceDetector
     
     if not video_path or not Path(video_path).exists():
-        return False, "Test video not available"
+        assert False, "Test video not available"
     
     # Clear cache
     FaceDetector._cache.clear()
@@ -376,21 +365,18 @@ def test_face_detection_caching(video_path: str, cache_dir: Path) -> Tuple[bool,
     
     # Check scores match
     if score1 != score2:
-        return False, f"Cache returned different score: {score1} vs {score2}"
+        assert False, f"Cache returned different score: {score1} vs {score2}"
     
     # Check disk cache was created
     if not cache_file.exists():
-        return False, "Disk cache not created"
+        assert False, "Disk cache not created"
     
-    # Second call should be much faster (at least 10x)
-    if time2 < time1 / 5:
-        return True, f"Cache working: {time1:.3f}s → {time2:.3f}s"
-    else:
-        return True, f"Cache created, timing: {time1:.3f}s → {time2:.3f}s"
+    # Second call should be much faster (at least 5x)
+    assert time2 < time1 / 5, f"Cache didn't speed up: {time1:.3f}s vs {time2:.3f}s"
 
 
 @pytest.mark.integration
-def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
+def test_logger_stats_tracking(temp_dir: Path):
     """Test logger stats tracking and summary generation"""
     from src.logger import RunLogger
     
@@ -425,7 +411,7 @@ def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
     
     # Check JSON was created
     if not Path(logger.json_file).exists():
-        return False, "JSON log not created"
+        assert False, "JSON log not created"
     
     # Check summary files were created
     base_name = Path(logger.json_file).stem
@@ -433,10 +419,10 @@ def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
     txt_path = log_dir / f"{base_name}_summary.txt"
     
     if not md_path.exists():
-        return False, "Markdown summary not created"
+        assert False, "Markdown summary not created"
     
     if not txt_path.exists():
-        return False, "Plaintext summary not created"
+        assert False, "Plaintext summary not created"
     
     # Verify JSON content
     with open(logger.json_file, 'r') as f:
@@ -444,19 +430,17 @@ def test_logger_stats_tracking(temp_dir: Path) -> Tuple[bool, str]:
     
     summary = data.get('summary', {})
     if summary.get('total_segments') != 100:
-        return False, f"total_segments wrong: {summary.get('total_segments')}"
+        assert False, f"total_segments wrong: {summary.get('total_segments')}"
     
     if summary.get('videos_downloaded') != 50:
-        return False, f"videos_downloaded wrong: {summary.get('videos_downloaded')}"
+        assert False, f"videos_downloaded wrong: {summary.get('videos_downloaded')}"
     
     if 'TEST_STAGE' not in data.get('stage_timings', {}):
-        return False, "Stage timing not recorded"
-    
-    return True, f"All stats tracked, 3 files created"
+        assert False, "Stage timing not recorded"
 
 
 @pytest.mark.integration
-def test_logger_stage_timing(temp_dir: Path) -> Tuple[bool, str]:
+def test_logger_stage_timing(temp_dir: Path):
     """Test logger stage timing accuracy"""
     from src.logger import RunLogger
     
@@ -474,22 +458,20 @@ def test_logger_stage_timing(temp_dir: Path) -> Tuple[bool, str]:
     timings = logger.run_log.stage_timings
     
     if len(timings) != 3:
-        return False, f"Expected 3 stages, got {len(timings)}"
+        assert False, f"Expected 3 stages, got {len(timings)}"
     
     if timings.get("STAGE_A") != 1.5:
-        return False, f"STAGE_A timing wrong"
+        assert False, f"STAGE_A timing wrong"
     
     if timings.get("STAGE_B") != 2.5:
-        return False, f"STAGE_B timing wrong"
+        assert False, f"STAGE_B timing wrong"
     
     total = sum(timings.values())
     if abs(total - 4.5) > 0.01:
-        return False, f"Total timing wrong: {total}"
-    
-    return True, f"3 stages tracked, total: {total}s"
+        assert False, f"Total timing wrong: {total}"
 
 
-def test_apply_face_preference() -> Tuple[bool, str]:
+def test_apply_face_preference():
     """Test face preference score adjustment"""
     from src.face_detection import apply_face_preference, FaceDetector
     from src.utils import SRTSegment
@@ -515,7 +497,7 @@ def test_apply_face_preference() -> Tuple[bool, str]:
     # Video with most faces (0.8) should be boosted most
     scores_more = {seg.source_file: score for seg, score in adjusted_more}
     if scores_more["/fake/video_0.mp4"] <= scores_more["/fake/video_1.mp4"]:
-        return False, "MORE preference didn't boost high-face video"
+        assert False, "MORE preference didn't boost high-face video"
     
     # Test "none" preference
     adjusted_none = apply_face_preference(candidates, "none")
@@ -523,7 +505,7 @@ def test_apply_face_preference() -> Tuple[bool, str]:
     # Video with most faces should be penalized most
     scores_none = {seg.source_file: score for seg, score in adjusted_none}
     if scores_none["/fake/video_0.mp4"] >= scores_none["/fake/video_1.mp4"]:
-        return False, "NONE preference didn't penalize high-face video"
+        assert False, "NONE preference didn't penalize high-face video"
     
     # Test "neutral" preference (no change)
     adjusted_neutral = apply_face_preference(candidates, "neutral")
@@ -531,9 +513,7 @@ def test_apply_face_preference() -> Tuple[bool, str]:
     
     for seg, orig_score in candidates:
         if scores_neutral[seg.source_file] != orig_score:
-            return False, "NEUTRAL preference modified scores"
-    
-    return True, "All face preference modes work correctly"
+            assert False, "NEUTRAL preference modified scores"
 
 
 # =============================================================================
@@ -556,7 +536,7 @@ def main():
     print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Working dir: {Path.cwd()}")
     
-    runner = TestRunner()
+    runner = FeatureTestRunner()
     
     # Setup
     test_dir = Path(__file__).parent / 'test_data'
