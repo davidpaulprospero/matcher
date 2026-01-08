@@ -36,6 +36,7 @@ import json
 import time
 import argparse
 import numpy as np
+import pytest
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
@@ -774,6 +775,7 @@ class MatchingTestRunner:
 # TEST CASES
 # =============================================================================
 
+@pytest.mark.integration
 def test_matching_runs(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
     """Test that matching runs without errors"""
     try:
@@ -787,6 +789,7 @@ def test_matching_runs(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_confidence_thresholds(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
     """Test that min_confidence filtering works"""
     try:
@@ -805,6 +808,7 @@ def test_confidence_thresholds(runner: MatchingTestRunner) -> Tuple[bool, str, D
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_reuse_prevention(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
     """Test that reuse prevention works"""
     try:
@@ -823,6 +827,7 @@ def test_reuse_prevention(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_strategy_matches(runner: MatchingTestRunner) -> Tuple[bool, str, Dict]:
     """Test that strategy matches (V4-V7) are generated"""
     try:

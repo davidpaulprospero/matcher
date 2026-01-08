@@ -26,6 +26,9 @@ from typing import Dict, List, Optional, Tuple, Any
 
 import requests
 
+# Import unified cache (cache consolidation refactor - Jan 7, 2026)
+from .cache import BaseCache, CacheEntry
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,6 +172,47 @@ class GeoLocation:
         )
 
 
+class LocationCache(BaseCache):
+    """
+    Cache for GeoNames API responses.
+
+    Stores two types of data:
+    - locations: Geocoding results (location_name -> List[GeoLocation])
+    - disambiguations: Disambiguation results (context_key -> country_code)
+    """
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize cache entry to dict"""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize dict to cache entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',  # Key is stored in index
+            metadata=data.get('metadata', {})
+        )
+
+    def _get_default_index(self) -> dict:
+        """Default structure with locations and disambiguations sections"""
+        return {
+            "locations": {},
+            "disambiguations": {}
+        }
+
+    def _count_entries(self) -> int:
+        """Count entries across both sections"""
+        return (
+            len(self.index.get('locations', {})) +
+            len(self.index.get('disambiguations', {}))
+        )
+
+
 class LocationService:
     """
     Service for geocoding, disambiguation, and location comparison.
@@ -225,35 +269,23 @@ class LocationService:
             rate_limit_delay: Delay between API calls (GeoNames rate limits)
         """
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_path = self.cache_dir / "location_cache.json"
-
         self.geonames_username = geonames_username
         self.llm_client = llm_client
         self.rate_limit_delay = rate_limit_delay
         self._last_api_call = 0.0
 
-        self._cache: Dict[str, Any] = {"locations": {}, "disambiguations": {}}
-        self._load_cache()
-
-    def _load_cache(self):
-        """Load cache from disk"""
-        if self.cache_path.exists():
-            try:
-                with open(self.cache_path, 'r', encoding='utf-8') as f:
-                    self._cache = json.load(f)
-                logger.info(f"Loaded location cache with {len(self._cache.get('locations', {}))} entries")
-            except Exception as e:
-                logger.warning(f"Could not load location cache: {e}")
-                self._cache = {"locations": {}, "disambiguations": {}}
+        # Use unified LocationCache (cache consolidation refactor - Jan 7, 2026)
+        self._cache_obj = LocationCache(
+            cache_dir=self.cache_dir,
+            index_name="location_cache.json"
+        )
+        # Provide compatibility property for existing code
+        self._cache = self._cache_obj.index
+        logger.info(f"Loaded location cache with {len(self._cache.get('locations', {}))} entries")
 
     def _save_cache(self):
         """Save cache to disk"""
-        try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f:
-                json.dump(self._cache, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.warning(f"Could not save location cache: {e}")
+        self._cache_obj._save_index()
 
     def _rate_limit(self):
         """Enforce rate limiting for API calls"""
@@ -484,21 +516,17 @@ Options:
 Reply with ONLY the number (1-{min(5, len(candidates))}) of the correct location."""
 
         try:
-            # Support both Gemini and Anthropic clients
-            if hasattr(self.llm_client, 'generate_content'):
-                # Gemini
-                response = self.llm_client.generate_content(prompt)
-                text = response.text.strip()
-            elif hasattr(self.llm_client, 'messages'):
-                # Anthropic
-                response = self.llm_client.messages.create(
-                    model="claude-3-haiku-20240307",
-                    max_tokens=10,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                text = response.content[0].text.strip()
-            else:
-                return None
+            from src.llm_client import LLMRequest, ResponseFormat
+
+            # Use unified LLM client
+            request = LLMRequest(
+                prompt=prompt,
+                response_format=ResponseFormat.TEXT,
+                max_tokens=10,
+                cache_key_prefix="location_disambiguation"
+            )
+            response = self.llm_client.generate(request)
+            text = response.text.strip()
 
             # Parse response
             match = re.search(r'\d+', text)
@@ -707,11 +735,11 @@ def create_location_service(config) -> LocationService:
     # Try to get LLM client for disambiguation
     llm_client = None
     try:
+        from src.llm_client import create_client
+
         gemini_key = getattr(config, 'gemini_api_key', None)
         if gemini_key:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            llm_client = genai.GenerativeModel('gemini-2.0-flash')
+            llm_client = create_client("gemini", api_key=gemini_key, model="gemini-2.0-flash")
     except Exception as e:
         logger.debug(f"Could not initialize LLM for disambiguation: {e}")
 
