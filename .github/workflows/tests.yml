@@ -2,143 +2,86 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop, feature/* ]
+    branches: [ main, feature/* ]
   pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:  # Allow manual trigger
+    branches: [ main ]
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ['3.9', '3.10', '3.11']
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        cache: 'pip'
 
-    - name: Install system dependencies (Ubuntu)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
-    - name: Install system dependencies (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        choco install ffmpeg -y
-
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-xdist
         pip install -r requirements.txt
-        pip install pytest pytest-cov
 
-    - name: Run unit tests (fast)
+    - name: Run tests with coverage
       run: |
-        python -m pytest tests/ -v --tb=short -m "not slow" --ignore=tests/test_integration_full.py --ignore=tests/test_e2e.py
-      continue-on-error: true
-
-    - name: Run all tests
-      run: |
-        python -m pytest tests/ -v --tb=line --maxfail=5
-      continue-on-error: true
-
-    - name: Generate coverage report
-      if: matrix.python-version == '3.10' && matrix.os == 'ubuntu-latest'
-      run: |
-        python -m pytest tests/ --cov=src --cov-report=xml --cov-report=term
-      continue-on-error: true
+        pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing --cov-report=html -n auto --tb=short -v
 
     - name: Upload coverage to Codecov
-      if: matrix.python-version == '3.10' && matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests
-        name: codecov-umbrella
+        name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
         fail_ci_if_error: false
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+
+    - name: Archive coverage HTML report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: htmlcov/
+      if: always()
 
   lint:
-    name: Linting and Type Checking
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
-        cache: 'pip'
+        python-version: "3.10"
 
-    - name: Install dependencies
+    - name: Install linting tools
       run: |
         python -m pip install --upgrade pip
-        pip install ruff mypy
+        pip install flake8 black isort
 
-    - name: Run ruff
-      run: |
-        ruff check src/ --select E,F,W --ignore E501,F401,F841
+    - name: Check code formatting with black
+      run: black --check --diff src/ tests/
       continue-on-error: true
 
-    - name: Check Python syntax
-      run: |
-        python -m py_compile src/*.py
-        python -m py_compile src/*/*.py
+    - name: Check import sorting with isort
+      run: isort --check-only --diff src/ tests/
       continue-on-error: true
 
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        cache: 'pip'
-
-    - name: Install dependencies
+    - name: Lint with flake8
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest
-
-    - name: Run integration tests
-      run: |
-        python -m pytest tests/test_*integration*.py -v --tb=short
+        flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
       continue-on-error: true
-
-    - name: Run OTIO tests
-      run: |
-        python -m pytest tests/test_otio*.py -v --tb=short
-
-  test-summary:
-    name: Test Summary
-    runs-on: ubuntu-latest
-    needs: [test, lint, integration-tests]
-    if: always()
-
-    steps:
-    - name: Check test results
-      run: |
-        echo "Test job status: ${{ needs.test.result }}"
-        echo "Lint job status: ${{ needs.lint.result }}"
-        echo "Integration job status: ${{ needs.integration-tests.result }}"
