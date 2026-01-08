@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Union
 from dataclasses import dataclass
 
+from .cache import BaseCache, CacheEntry, compute_hash as cache_compute_hash, batch_hash as cache_batch_hash
+
 logger = logging.getLogger(__name__)
 
 # Try to import numpy early
@@ -119,43 +121,42 @@ def cosine_similarity(a: Any, b: Any) -> float:
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
-@dataclass 
-class EmbeddingCache:
+class EmbeddingCache(BaseCache):
     """Persistent embedding cache with incremental updates"""
-    
+
     def __init__(self, cache_dir: str):
-        self.cache_dir = Path(cache_dir) / "embeddings"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.index_path = self.cache_dir / "embedding_index.json"
-        self.index: Dict[str, dict] = {}
-        self._load_index()
-    
-    def _load_index(self):
-        """Load the embedding index"""
-        if self.index_path.exists():
-            try:
-                with open(self.index_path, 'r') as f:
-                    self.index = json.load(f)
-            except Exception as e:
-                logger.warning(f"Could not load embedding index: {e}")
-                self.index = {}
-    
-    def _save_index(self):
-        """Save the embedding index"""
-        try:
-            with open(self.index_path, 'w') as f:
-                json.dump(self.index, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Could not save embedding index: {e}")
-    
+        cache_path = Path(cache_dir) / "embeddings"
+        super().__init__(
+            cache_dir=cache_path,
+            index_name="embedding_index.json",
+            ttl_seconds=0,  # No expiration for embeddings
+            auto_save=True
+        )
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize embedding cache entry"""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize embedding cache entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
     def _text_hash(self, text: str) -> str:
         """Get hash for a text string"""
-        return hashlib.md5(text.encode()).hexdigest()[:12]
-    
+        return cache_compute_hash(text, length=12)
+
     def _batch_hash(self, texts: List[str]) -> str:
         """Get hash for a batch of texts"""
-        combined = json.dumps(sorted(texts), sort_keys=True)
-        return hashlib.md5(combined.encode()).hexdigest()[:16]
+        return cache_batch_hash(texts, length=16)
     
     def get_cached_embeddings(
         self, 
@@ -508,12 +509,21 @@ def compute_embeddings(
     # Get cache directory
     cache_dir = cache.cache_dir if hasattr(cache, 'cache_dir') else str(cache)
     embedding_cache = EmbeddingCache(cache_dir)
-    
-    # Try batch cache first (fastest) - already returns numpy
-    cached = embedding_cache.get_batch_cache(cleaned_texts, cache_key)
-    if cached is not None:
-        return cached
-    
+
+    # Check individual text cache (survives text changes between runs)
+    cached_results, uncached_texts, uncached_indices = embedding_cache.get_cached_embeddings(
+        cleaned_texts, cache_key
+    )
+
+    # If all texts are cached, return immediately
+    if not uncached_texts:
+        embeddings = [None] * len(cleaned_texts)
+        for idx, emb in cached_results:
+            embeddings[idx] = emb
+        if show_progress:
+            logger.info(f"  Loaded {len(cleaned_texts)} embeddings from cache")
+        return _to_numpy(embeddings)
+
     # Get batch size from config (with provider-specific fallbacks)
     if config and hasattr(config, 'embedding'):
         batch_size = getattr(config.embedding, 'batch_size', 100)
@@ -532,28 +542,56 @@ def compute_embeddings(
             batch_size = 100
         max_retries = 3
         retry_delay = 2.0
-    
-    # Compute embeddings in batches
+
+    # Compute embeddings only for uncached texts, caching incrementally per batch
     if show_progress:
-        logger.info(f"  Computing embeddings: {len(cleaned_texts)} texts, batch size {batch_size}")
-    
+        cache_pct = len(cached_results) * 100 // len(cleaned_texts) if cleaned_texts else 0
+        logger.info(f"  Computing embeddings: {len(uncached_texts)}/{len(cleaned_texts)} texts ({cache_pct}% cached)")
+
     start_time = time.time()
-    embeddings = provider.embed_batch(
-        cleaned_texts, 
-        batch_size, 
-        show_progress,
-        max_retries=max_retries,
-        retry_delay=retry_delay
-    )
+    new_embeddings = []
+    total_batches = (len(uncached_texts) + batch_size - 1) // batch_size
+
+    for i in range(0, len(uncached_texts), batch_size):
+        batch_texts = uncached_texts[i:i + batch_size]
+        batch_indices = uncached_indices[i:i + batch_size]
+        batch_num = i // batch_size + 1
+
+        if show_progress:
+            logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch_texts)} texts)")
+
+        # Compute this batch with retries
+        for attempt in range(max_retries):
+            try:
+                batch_embeddings = provider.embed(batch_texts)
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = retry_delay * (2 ** attempt)
+                    logger.warning(f"    Batch failed, retrying in {wait:.1f}s: {e}")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"    Batch failed after {max_retries} attempts: {e}")
+                    dim = len(new_embeddings[0]) if new_embeddings else 768
+                    batch_embeddings = [[0.0] * dim] * len(batch_texts)
+
+        # Cache this batch immediately (survives interruption)
+        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, cache_key)
+        new_embeddings.extend(batch_embeddings)
+
     elapsed = time.time() - start_time
-    
+
     if show_progress:
-        rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
-        logger.info(f"  ✓ Computed {len(embeddings)} embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
-    
-    # Cache the batch (as list for JSON)
-    embedding_cache.cache_batch(cleaned_texts, embeddings, cache_key)
-    
+        rate = len(uncached_texts) / elapsed if elapsed > 0 else 0
+        logger.info(f"  Computed {len(new_embeddings)} new embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+
+    # Merge cached and new embeddings in correct order
+    embeddings = [None] * len(cleaned_texts)
+    for idx, emb in cached_results:
+        embeddings[idx] = emb
+    for emb, idx in zip(new_embeddings, uncached_indices):
+        embeddings[idx] = emb
+
     # Convert to numpy for FAISS compatibility
     return _to_numpy(embeddings)
 

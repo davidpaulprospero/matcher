@@ -35,6 +35,22 @@ class VoiceoverSegment:
 
 
 @dataclass
+class TranscriptSegment:
+    """A single transcript segment from video transcription"""
+    index: int
+    start_time: float
+    end_time: float
+    text: str
+    source_file: str = ""
+    # B-roll/silent video attributes
+    is_broll: bool = False  # True if this is a silent/B-roll video segment
+    description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class DownloadedVideo:
     """Metadata for a downloaded video file"""
     file: str
@@ -126,6 +142,9 @@ class PipelineState:
     embeddings: List[Any] = field(default_factory=list)  # numpy arrays
     text_metadata: List[Dict[str, Any]] = field(default_factory=list)
     embedding_index: Any = None  # FAISS index
+
+    # === SCENE DETECTION STATE ===
+    scene_data: Dict[str, Any] = field(default_factory=dict)  # video_name -> VideoSceneData
 
     # === MATCHING STATE ===
     matches: List[Match] = field(default_factory=list)
