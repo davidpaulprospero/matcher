@@ -35,6 +35,22 @@ class VoiceoverSegment:
 
 
 @dataclass
+class TranscriptSegment:
+    """A single transcript segment from video transcription"""
+    index: int
+    start_time: float
+    end_time: float
+    text: str
+    source_file: str = ""
+    # B-roll/silent video attributes
+    is_broll: bool = False  # True if this is a silent/B-roll video segment
+    description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class DownloadedVideo:
     """Metadata for a downloaded video file"""
     file: str

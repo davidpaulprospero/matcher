@@ -701,14 +701,12 @@ def test_collect_matched_segments() -> Tuple[bool, str]:
     # Create audio downloads map
     audio_downloads = {
         "vid1": AudioDownload(
-            audio_file="/tmp/vid1.mp3",
+            file="/tmp/vid1.mp3",
             video_id="vid1",
-            video_url="https://youtube.com/watch?v=vid1",
+            url="https://youtube.com/watch?v=vid1",
             title="Video 1",
-            channel="Channel",
             duration=300.0,
-            keyword="test",
-            duration_tier="medium"
+            keyword="test"
         )
     }
 
@@ -747,14 +745,12 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
     # Create test data
     audio_downloads = {
         "vid1": AudioDownload(
-            audio_file="/tmp/vid1.mp3",
+            file="/tmp/vid1.mp3",
             video_id="vid1",
-            video_url="https://youtube.com/watch?v=vid1",
+            url="https://youtube.com/watch?v=vid1",
             title="Video 1",
-            channel="Channel",
             duration=300.0,
-            keyword="test",
-            duration_tier="medium"
+            keyword="test"
         )
     }
 
@@ -762,7 +758,7 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
         "vid1": [
             MatchedSegment(
                 video_id="vid1",
-                video_url="https://youtube.com/watch?v=vid1",
+                url="https://youtube.com/watch?v=vid1",
                 start_time=60.0,
                 end_time=70.0,
                 track="V1",
@@ -770,7 +766,7 @@ def test_prepare_merged_segments() -> Tuple[bool, str]:
             ),
             MatchedSegment(
                 video_id="vid1",
-                video_url="https://youtube.com/watch?v=vid1",
+                url="https://youtube.com/watch?v=vid1",
                 start_time=65.0,
                 end_time=75.0,
                 track="V2",

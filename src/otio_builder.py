@@ -91,7 +91,7 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
         if valid_images:
             # Create a copy with filtered images
             # Import here to avoid circular imports
-            from .entity_images import EntityImageResult
+            from .media_sources.models import EntityImageResult
             filtered[entity_name] = EntityImageResult(
                 entity_name=entity_result.entity_name,
                 entity_type=entity_result.entity_type,

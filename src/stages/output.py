@@ -74,18 +74,18 @@ class OutputStage(Stage):
                 warnings.append("No matches to export")
                 return StageResult.ok({'outputs': outputs, 'output_dir': str(output_dir)}, warnings)
 
-            # Import OTIO builder
+            # Import OTIO package (modular refactored version)
             try:
-                from ..otio_builder import (
+                from ..otio import (
                     create_timeline,
                     save_timeline,
                     save_timeline_split,
                     save_timeline_as_edl,
-                    generate_resolve_xml_with_bins,
-                    generate_segment_map
+                    generate_segment_map,
+                    generate_resolve_xml_with_bins
                 )
             except ImportError as e:
-                return StageResult.fail(f"Could not import otio_builder: {e}", warnings)
+                return StageResult.fail(f"Could not import OTIO modules: {e}", warnings)
 
             # Generate timeline
             print(f"  Creating timeline...")
