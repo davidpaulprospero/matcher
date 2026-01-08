@@ -65,6 +65,7 @@ llm_context.txt
 *.md
 !CLAUDE.md
 !TESTING.md
+!TESTING_IMPROVEMENTS.md
 !CHANGELOG.md
 !README.md
 !REFACTORING.md
