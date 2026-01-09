@@ -16,11 +16,15 @@ Created: 2026-01-09 (Phase 10.2)
 """
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.stages.download import DownloadStage, DownloadVideoSegmentsStage
 from src.state import PipelineState, DownloadedVideo, AudioDownload
