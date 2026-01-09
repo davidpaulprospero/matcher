@@ -12,11 +12,15 @@ Created Jan 8, 2026.
 """
 
 import unittest
+import sys
 from unittest.mock import Mock, patch, MagicMock, mock_open
 from pathlib import Path
 import tempfile
 import shutil
 import json
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.vision import (
     TranscriptAnalyzer,
