@@ -5,8 +5,8 @@ Initial Baseline (2026-01-09):
 - Coverage: 28.64% (17,655 statements, 12,599 missed)
 - Target: 90% coverage, 100% pass rate
 
-Current Status (2026-01-10 - After Session 10):
-- Tests: 2,350 collected (+1,579 tests)
+Current Status (2026-01-10 - After Session 11):
+- Tests: 2,387 collected (+1,616 tests)
 - Coverage: ~75%+ estimated (pending full run)
 - Pass Rate: ~96% (estimated)
 
@@ -21,18 +21,20 @@ Session Progress:
 ✅ Session 8: Tiered matcher advanced (23 tests, matching/tiered_matcher 71.91%→74.48%)
 ✅ Session 9: Topic extraction utils (26 tests, topic_extraction 45.80%→47.54%)
 ✅ Session 10: Keyword remix (17 tests, keyword_remix 53.63%→64.80%)
+✅ Session 11: Downloader core (37 tests, downloader/core 19.09%→74.19%)
 
 Module Coverage Progress:
 - src/cache/: 85%+ (from ~0%)
 - src/checkpoint.py: 80%+ (from ~0%)
 - src/downloader/utils.py: 75%+ (from 19%)
+- src/downloader/core.py: 74.19% (from 19.09%, +37 tests)
 - src/face_detection.py: 70%+ (from 27%)
 - src/matching/strategies.py: 88.37% (from 56.68%, +35 tests)
 - src/matching/tiered_matcher.py: 74.48% (from 71.91%, +23 tests)
 - src/topic_extraction.py: 47.54% (from 45.80%, +26 tests)
 - src/keyword_remix.py: 64.80% (from 53.63%, +17 tests)
 
-Total New Tests: +297 tests across 10 sessions
+Total New Tests: +334 tests across 11 sessions
 Coverage Improvement: +46%+ percentage points (28.64% → ~75%+)
 
 Target Goals:
@@ -42,10 +44,10 @@ Target Goals:
 
 Progress to Goal:
 - Coverage: ~75% / 90% = 83% complete (need +15%)
-- Tests: 2,350 / ~1,200 = 196% complete (EXCEEDED TARGET!)
+- Tests: 2,387 / ~1,200 = 199% complete (EXCEEDED TARGET!)
 - Pass Rate: ~96% / 100% = 96% complete (need to fix remaining failures)
 
 Next Recommended Targets:
-1. downloader/core.py (19.09% → 80%+, 35-40 tests) - Critical pipeline module
-2. embeddings.py (15.79% → 80%+, 25-30 tests) - Voyage AI integration
-3. pipeline.py (13.64% → 80%+, 25-30 tests) - Pipeline orchestration
+1. embeddings.py (15.79% → 80%+, 25-30 tests) - Voyage AI integration
+2. pipeline.py (13.64% → 80%+, 25-30 tests) - Pipeline orchestration
+3. audio_analysis.py (0% → 75%+, 20-25 tests) - Audio analysis features
