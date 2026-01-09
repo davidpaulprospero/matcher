@@ -205,14 +205,16 @@ def add_entity_media_to_track(
     match_stats = {'exact': 0, 'semantic': 0, 'sticky': 0, 'none': 0}
     clips_added = 0
 
+    # Get config values once (outside loop to avoid UnboundLocalError when matches is empty)
+    enable_sticky = getattr(config.image_search, 'enable_sticky_matching', False)
+    semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
+
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
         match = matches[seg_idx].primary_match
         vo_text = match.voiceover_segment.text.lower()
 
         # Find best matching entity (exact -> semantic -> sticky)
-        enable_sticky = getattr(config.image_search, 'enable_sticky_matching', False)
-        semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
         entity_name, match_type = _find_best_entity_match(
             vo_text, entity_data, last_matched_entity,
             enable_sticky=enable_sticky,
