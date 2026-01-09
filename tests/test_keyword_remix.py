@@ -19,10 +19,14 @@ Created: 2026-01-09 (Phase 5.1)
 """
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch, mock_open
 import pytest
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.keyword_remix import (
     VideoScore,
