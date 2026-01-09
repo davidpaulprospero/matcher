@@ -69,7 +69,8 @@
       "Bash(coverage run:*)",
       "Bash(coverage report:*)",
       "Bash(test:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(gh pr create:*)"
     ]
   }
 }
