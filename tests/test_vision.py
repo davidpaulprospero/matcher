@@ -18,6 +18,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import json
+import time
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,8 +28,11 @@ from src.vision import (
     VisionProcessor,
     VideoVisionDecision,
     SceneAnalysis,
-    process_video_vision
+    VisionCache,
+    process_video_vision,
+    process_video_vision_full
 )
+from src.cache.base import CacheEntry
 
 
 class TestTranscriptAnalyzer(unittest.TestCase):
@@ -40,6 +44,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.config.vision = Mock()
         self.config.vision.min_words_per_scene = 5
         self.config.vision.coverage_threshold = 0.3
+        self.config.vision.max_scenes_per_video = 50
         self.analyzer = TranscriptAnalyzer(self.config)
 
     def test_analyze_video_with_full_transcript(self):
@@ -149,6 +154,80 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         # Should handle SRTSegment objects correctly
         self.assertIsInstance(decision, VideoVisionDecision)
         self.assertEqual(decision.total_scenes, 1)
+
+    def test_get_priority_scenes_by_word_count(self):
+        """Test get_priority_scenes prioritizes scenes with least text"""
+        scenes = [
+            {"start_time": 0.0, "end_time": 5.0},   # Scene 0
+            {"start_time": 5.0, "end_time": 10.0},  # Scene 1
+            {"start_time": 10.0, "end_time": 15.0}, # Scene 2
+            {"start_time": 15.0, "end_time": 20.0}  # Scene 3
+        ]
+
+        transcript = [
+            {"start_time": 0.0, "end_time": 5.0, "text": "One two three four five six seven eight nine ten"},  # 10 words
+            {"start_time": 5.0, "end_time": 10.0, "text": "Short"},  # 1 word
+            {"start_time": 10.0, "end_time": 15.0, "text": ""},  # 0 words
+            {"start_time": 15.0, "end_time": 20.0, "text": "Medium length text here"}  # 4 words
+        ]
+
+        priority = self.analyzer.get_priority_scenes(scenes, transcript, max_scenes=2)
+
+        # Should return indices for scenes with least text (scene 2, scene 1)
+        self.assertEqual(len(priority), 2)
+        self.assertIn(2, priority)  # Scene 2 has 0 words
+        self.assertIn(1, priority)  # Scene 1 has 1 word
+
+    def test_get_priority_scenes_with_srt_objects(self):
+        """Test get_priority_scenes with SRTSegment objects"""
+        scenes = [
+            {"start_time": 0.0, "end_time": 5.0},
+            {"start_time": 5.0, "end_time": 10.0}
+        ]
+
+        seg1 = Mock()
+        seg1.start_time = 0.0
+        seg1.end_time = 5.0
+        seg1.text = "This has many words in it to count"
+
+        seg2 = Mock()
+        seg2.start_time = 5.0
+        seg2.end_time = 10.0
+        seg2.text = "Few"
+
+        transcript = [seg1, seg2]
+
+        priority = self.analyzer.get_priority_scenes(scenes, transcript, max_scenes=1)
+
+        # Should prioritize scene 1 (fewer words)
+        self.assertEqual(priority, [1])
+
+    def test_get_priority_scenes_max_limit(self):
+        """Test get_priority_scenes respects max_scenes limit"""
+        scenes = [{"start_time": i*5.0, "end_time": (i+1)*5.0} for i in range(10)]
+        transcript = []  # All scenes are sparse
+
+        priority = self.analyzer.get_priority_scenes(scenes, transcript, max_scenes=3)
+
+        # Should return only 3 scenes
+        self.assertEqual(len(priority), 3)
+
+    def test_get_priority_scenes_overlapping_transcript(self):
+        """Test word counting with transcript segments overlapping scenes"""
+        scenes = [
+            {"start_time": 0.0, "end_time": 10.0},
+            {"start_time": 10.0, "end_time": 20.0}
+        ]
+
+        transcript = [
+            {"start_time": 5.0, "end_time": 15.0, "text": "This segment overlaps both scenes with text"}
+        ]
+
+        priority = self.analyzer.get_priority_scenes(scenes, transcript, max_scenes=2)
+
+        # Both scenes get some words from overlapping segment
+        # Should prioritize based on actual overlap amount
+        self.assertEqual(len(priority), 2)
 
 
 class TestVisionProcessor(unittest.TestCase):
@@ -393,6 +472,286 @@ class TestProcessVideoVision(unittest.TestCase):
 
         # Should return original transcript without vision descriptions
         self.assertEqual(updated_transcript, transcript)
+
+    def test_process_video_vision_disabled(self):
+        """Test when vision is disabled in config"""
+        # Disable vision
+        self.config.vision.enabled = False
+
+        scenes = [{"start_time": 0.0, "end_time": 5.0}]
+        transcript = []
+
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should skip processing
+        self.assertEqual(results, [])
+        self.assertTrue(stats['skipped'])
+        self.assertEqual(stats['reason'], 'Vision disabled')
+
+    @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
+    @patch('src.vision.VisionProcessor')
+    def test_process_video_vision_good_coverage(self, mock_processor_class, mock_analyze):
+        """Test when transcript coverage is good - no vision needed"""
+        # Mock good transcript coverage decision
+        mock_decision = Mock()
+        mock_decision.needs_vision = False
+        mock_decision.reason = "Good transcript coverage"
+        mock_decision.transcript_coverage = 0.9
+        mock_analyze.return_value = mock_decision
+
+        scenes = [{"start_time": 0.0, "end_time": 5.0}]
+        transcript = [{"start_time": 0.0, "end_time": 5.0, "text": "Lots of text here"}]
+
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should skip vision processing
+        self.assertEqual(results, [])
+        self.assertTrue(stats['skipped'])
+        self.assertEqual(stats['reason'], "Good transcript coverage")
+        self.assertEqual(stats['coverage'], 0.9)
+
+    @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
+    @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
+    @patch('src.vision.VisionProcessor.describe_scene')
+    @patch('src.vision.VisionProcessor.get_stats')
+    def test_process_video_vision_full_workflow(
+        self, mock_get_stats, mock_describe, mock_priority, mock_analyze
+    ):
+        """Test full process_video_vision_full workflow with sparse coverage"""
+        # Mock sparse coverage decision
+        mock_decision = Mock()
+        mock_decision.needs_vision = True
+        mock_decision.reason = "Sparse transcript"
+        mock_decision.transcript_coverage = 0.2
+        mock_analyze.return_value = mock_decision
+
+        # Mock priority scenes
+        mock_priority.return_value = [0, 2]  # Process scenes 0 and 2
+
+        # Mock vision descriptions
+        mock_describe.side_effect = [
+            "Mountain landscape with snow",
+            "Forest trail with hikers"
+        ]
+
+        # Mock stats
+        mock_get_stats.return_value = {
+            'api_calls': 2,
+            'total_cost': 0.002
+        }
+
+        scenes = [
+            {"start_time": 0.0, "end_time": 5.0},
+            {"start_time": 5.0, "end_time": 10.0},
+            {"start_time": 10.0, "end_time": 15.0}
+        ]
+
+        transcript = [
+            {"start_time": 0.0, "end_time": 5.0, "text": "Mountains"},
+            {"start_time": 10.0, "end_time": 15.0, "text": ""}
+        ]
+
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should return scene analyses
+        self.assertEqual(len(results), 2)
+        self.assertIsInstance(results[0], SceneAnalysis)
+
+        # Check first scene
+        self.assertEqual(results[0].scene_index, 0)
+        self.assertEqual(results[0].vision_description, "Mountain landscape with snow")
+        self.assertIn("Visual:", results[0].combined_description)
+
+        # Check stats
+        self.assertEqual(stats['scenes_processed'], 2)
+        self.assertEqual(stats['coverage'], 0.2)
+
+    @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
+    @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
+    @patch('src.vision.VisionProcessor.describe_scene')
+    def test_process_video_vision_with_srt_segments(
+        self, mock_describe, mock_priority, mock_analyze
+    ):
+        """Test process_video_vision_full handles SRTSegment objects"""
+        # Mock decision
+        mock_decision = Mock()
+        mock_decision.needs_vision = True
+        mock_decision.transcript_coverage = 0.1
+        mock_analyze.return_value = mock_decision
+
+        # Mock priority scenes
+        mock_priority.return_value = [0]
+
+        # Mock description
+        mock_describe.return_value = "Test description"
+
+        scenes = [{"start_time": 0.0, "end_time": 5.0}]
+
+        # Create SRTSegment mock
+        seg = Mock()
+        seg.start_time = 0.0
+        seg.end_time = 5.0
+        seg.text = "Brief"
+
+        transcript = [seg]
+
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should process successfully
+        self.assertEqual(len(results), 1)
+
+    @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
+    @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
+    @patch('src.vision.VisionProcessor.describe_scene')
+    def test_process_video_vision_empty_description(
+        self, mock_describe, mock_priority, mock_analyze
+    ):
+        """Test handling when vision description is empty/None"""
+        # Mock decision
+        mock_decision = Mock()
+        mock_decision.needs_vision = True
+        mock_decision.transcript_coverage = 0.0
+        mock_analyze.return_value = mock_decision
+
+        # Mock priority scenes
+        mock_priority.return_value = [0]
+
+        # Mock empty description
+        mock_describe.return_value = None
+
+        scenes = [{"start_time": 0.0, "end_time": 5.0}]
+        transcript = []
+
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should still create result but with no vision description
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0].vision_description)
+
+    @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
+    @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
+    def test_process_video_vision_scene_index_out_of_range(
+        self, mock_priority, mock_analyze
+    ):
+        """Test handling when priority scene index is out of range"""
+        # Mock decision
+        mock_decision = Mock()
+        mock_decision.needs_vision = True
+        mock_analyze.return_value = mock_decision
+
+        # Mock priority scenes with out-of-range index
+        mock_priority.return_value = [0, 10]  # Scene 10 doesn't exist
+
+        scenes = [{"start_time": 0.0, "end_time": 5.0}]  # Only 1 scene
+        transcript = []
+
+        # Should not crash
+        results, stats = process_video_vision_full(
+            video_path="/test/video.mp4",
+            scenes=scenes,
+            transcript_segments=transcript,
+            cache_dir="/tmp/cache",
+            config=self.config
+        )
+
+        # Should skip out-of-range scene
+        self.assertTrue(len(results) <= 1)
+
+
+class TestVisionCache(unittest.TestCase):
+    """Test VisionCache class"""
+
+    def setUp(self):
+        """Set up test cache directory"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.cache = VisionCache(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up test cache"""
+        if Path(self.temp_dir).exists():
+            shutil.rmtree(self.temp_dir)
+
+    def test_cache_entry_serialization(self):
+        """Test VisionCache can serialize and deserialize entries"""
+        # Create a cache entry
+        entry = CacheEntry(
+            key="test_key",
+            data="A beautiful mountain scene with snow",
+            cached_at=1234567890.0,
+            metadata={"video": "/test/video.mp4", "scene": 1}
+        )
+
+        # Serialize
+        serialized = self.cache._serialize_entry(entry)
+
+        # Should contain all fields
+        self.assertIn('data', serialized)
+        self.assertIn('cached_at', serialized)
+        self.assertIn('metadata', serialized)
+        self.assertEqual(serialized['data'], "A beautiful mountain scene with snow")
+
+    def test_cache_entry_deserialization(self):
+        """Test VisionCache can deserialize entries"""
+        # Create serialized data
+        data = {
+            'data': "Mountain landscape",
+            'cached_at': 1234567890.0,
+            'metadata': {'scene': 1}
+        }
+
+        # Deserialize
+        entry = self.cache._deserialize_entry(data)
+
+        # Should reconstruct CacheEntry
+        self.assertIsInstance(entry, CacheEntry)
+        self.assertEqual(entry.data, "Mountain landscape")
+        self.assertEqual(entry.cached_at, 1234567890.0)
+        self.assertEqual(entry.metadata, {'scene': 1})
+
+    def test_cache_stores_and_retrieves(self):
+        """Test storing and retrieving vision descriptions"""
+        # Store a description using the set() API
+        self.cache.set(
+            key="video1_scene1",
+            value="Mountain scene description",
+            metadata={"video": "/test/video1.mp4"}
+        )
+
+        # Retrieve it
+        retrieved = self.cache.get("video1_scene1")
+
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(retrieved.data, "Mountain scene description")
 
 
 class TestVisionCaching(unittest.TestCase):
