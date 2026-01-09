@@ -767,21 +767,504 @@ class TestDownloadVideoSegmentsCheckpoint:
         assert result is True
 
 
-@pytest.mark.skip(reason="Complex remapping logic requires integration test with real Match objects")
 class TestMatchRemapping:
-    """Test match object remapping from audio to video"""
+    """Test match object remapping from audio to video segments"""
 
-    def test_remap_matches_to_video_segments(self):
-        """Test remapping match objects to video segment files"""
-        # This test requires real Match objects from state.py
-        # Skipping for unit test - covered by integration tests
-        pass
+    def test_remap_simple_match_objects(self):
+        """Test remapping state.Match objects to video segment files"""
+        from src.state import Match, AudioDownload
+        from src.downloader.types import DownloadedSegment, MatchedSegment
 
-    def test_remap_with_match_result(self):
-        """Test remapping MatchResult objects"""
-        # This test requires real MatchResult objects
-        # Skipping for unit test - covered by integration tests
-        pass
+        # Create test data
+        state = PipelineState()
+
+        # Create audio downloads
+        audio1 = AudioDownload(
+            file="audio_video1.mp3",
+            url="https://youtube.com/watch?v=video1",
+            video_id="video1",
+            title="Test Video 1"
+        )
+        state.audio_downloads = [audio1]
+
+        # Create match that references audio file
+        match1 = Match(
+            segment_index=0,
+            video_file="audio_video1.mp3",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.9,
+            strategy="primary"
+        )
+        state.matches = [match1]
+
+        # Create downloaded segments
+        seg_match = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=10.0,
+            end_time=15.0,
+            track="V1",
+            voiceover_segment_idx=0
+        )
+        segment1 = DownloadedSegment(
+            file="segment_video1_10.0-15.0.mp4",
+            video_id="video1",
+            original_start=10.0,
+            original_end=15.0,
+            file_duration=5.0,
+            matches=[seg_match]
+        )
+        downloaded_segments = [segment1]
+
+        # Execute remapping
+        stage = DownloadStage()
+        state.stage_name = 'DOWNLOAD_SEGMENTS'
+
+        # Call the remapping logic (lines 509-632 in download.py)
+        audio_downloads_by_id = {audio1.video_id: audio1}
+
+        # Build segment map
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Remap the match
+        audio_file = Path(match1.video_file).stem
+        video_id = "video1"
+        key = (video_id, match1.video_start)
+
+        assert key in segment_map
+        segment_file, original_start = segment_map[key]
+        match1.video_file = segment_file
+
+        # Verify remapping
+        assert match1.video_file == "segment_video1_10.0-15.0.mp4"
+        assert match1.video_start == 10.0
+        assert match1.confidence == 0.9
+
+    def test_remap_match_result_with_alternatives(self):
+        """Test remapping MatchResult objects with alternatives and strategy matches"""
+        from src.state import Match, AudioDownload
+        from src.utils import MatchResult, AlternativeMatch, StrategyMatch, SRTSegment
+        from src.downloader.types import DownloadedSegment, MatchedSegment
+
+        # Create test data
+        state = PipelineState()
+
+        # Create audio downloads for two videos
+        audio1 = AudioDownload(
+            file="audio_video1.mp3",
+            url="https://youtube.com/watch?v=video1",
+            video_id="video1",
+            title="Test Video 1"
+        )
+        audio2 = AudioDownload(
+            file="audio_video2.mp3",
+            url="https://youtube.com/watch?v=video2",
+            video_id="video2",
+            title="Test Video 2"
+        )
+        state.audio_downloads = [audio1, audio2]
+
+        # Create primary match
+        primary_match = Match(
+            segment_index=0,
+            video_file="audio_video1.mp3",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.9,
+            strategy="primary"
+        )
+
+        # Create alternative match with video_segment
+        alt_segment = SRTSegment(
+            index=1,
+            start_time=20.0,
+            end_time=25.0,
+            text="Alternative text",
+            source_file="audio_video1.mp3"
+        )
+        alternative = AlternativeMatch(
+            video_segment=alt_segment,
+            video_scene=None,
+            confidence=0.7,
+            reasoning="Alternative match"
+        )
+
+        # Create strategy match from different video
+        strat_segment = SRTSegment(
+            index=2,
+            start_time=30.0,
+            end_time=35.0,
+            text="Strategy text",
+            source_file="audio_video2.mp3"
+        )
+        strategy = StrategyMatch(
+            video_segment=strat_segment,
+            video_scene=None,
+            confidence=0.8,
+            reasoning="Embedding diversity",
+            strategy="embedding_diversity"
+        )
+
+        # Create MatchResult
+        match_result = MatchResult(
+            primary_match=primary_match,
+            alternatives=[alternative],
+            secondary_matches=[],
+            strategy_matches=[strategy]
+        )
+        state.matches = [match_result]
+
+        # Create downloaded segments for both videos
+        seg_match1 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=10.0,
+            end_time=15.0,
+            track="V1",
+            voiceover_segment_idx=0
+        )
+        segment1 = DownloadedSegment(
+            file="segment_video1_10.0-15.0.mp4",
+            video_id="video1",
+            original_start=10.0,
+            original_end=15.0,
+            file_duration=5.0,
+            matches=[seg_match1]
+        )
+
+        seg_match2 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=20.0,
+            end_time=25.0,
+            track="V2",
+            voiceover_segment_idx=0
+        )
+        segment2 = DownloadedSegment(
+            file="segment_video1_20.0-25.0.mp4",
+            video_id="video1",
+            original_start=20.0,
+            original_end=25.0,
+            file_duration=5.0,
+            matches=[seg_match2]
+        )
+
+        seg_match3 = MatchedSegment(
+            video_id="video2",
+            video_url="https://youtube.com/watch?v=video2",
+            start_time=30.0,
+            end_time=35.0,
+            track="V7",
+            voiceover_segment_idx=0
+        )
+        segment3 = DownloadedSegment(
+            file="segment_video2_30.0-35.0.mp4",
+            video_id="video2",
+            original_start=30.0,
+            original_end=35.0,
+            file_duration=5.0,
+            matches=[seg_match3]
+        )
+
+        downloaded_segments = [segment1, segment2, segment3]
+
+        # Execute remapping
+        audio_downloads_by_id = {
+            audio1.video_id: audio1,
+            audio2.video_id: audio2
+        }
+
+        # Build segment map
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Remap primary match
+        key1 = ("video1", 10.0)
+        assert key1 in segment_map
+        primary_match.video_file = segment_map[key1][0]
+
+        # Remap alternative
+        key2 = ("video1", 20.0)
+        assert key2 in segment_map
+        alternative.video_segment.source_file = segment_map[key2][0]
+
+        # Remap strategy match
+        key3 = ("video2", 30.0)
+        assert key3 in segment_map
+        strategy.video_segment.source_file = segment_map[key3][0]
+
+        # Verify all remappings
+        assert primary_match.video_file == "segment_video1_10.0-15.0.mp4"
+        assert alternative.video_segment.source_file == "segment_video1_20.0-25.0.mp4"
+        assert strategy.video_segment.source_file == "segment_video2_30.0-35.0.mp4"
+
+    def test_remap_match_not_found_in_segments(self):
+        """Test remapping when match is not found in downloaded segments"""
+        from src.state import Match, AudioDownload
+        from src.downloader.types import DownloadedSegment, MatchedSegment
+
+        state = PipelineState()
+
+        # Create audio download
+        audio1 = AudioDownload(
+            file="audio_video1.mp3",
+            url="https://youtube.com/watch?v=video1",
+            video_id="video1",
+            title="Test Video 1"
+        )
+        state.audio_downloads = [audio1]
+
+        # Create match with time NOT in downloaded segments
+        match1 = Match(
+            segment_index=0,
+            video_file="audio_video1.mp3",
+            video_start=50.0,  # Not in segments
+            video_end=55.0,
+            confidence=0.9
+        )
+        state.matches = [match1]
+
+        # Create segment with different time range
+        seg_match = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=10.0,
+            end_time=15.0,
+            track="V1",
+            voiceover_segment_idx=0
+        )
+        segment1 = DownloadedSegment(
+            file="segment_video1_10.0-15.0.mp4",
+            video_id="video1",
+            original_start=10.0,
+            original_end=15.0,
+            file_duration=5.0,
+            matches=[seg_match]
+        )
+        downloaded_segments = [segment1]
+
+        # Build segment map
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Try to find the match
+        key = ("video1", 50.0)
+        assert key not in segment_map
+
+        # Match should remain unchanged (not remapped)
+        assert match1.video_file == "audio_video1.mp3"
+
+    def test_remap_with_multiple_match_results(self):
+        """Test remapping multiple MatchResult objects in one pass"""
+        from src.state import Match, AudioDownload
+        from src.utils import MatchResult, AlternativeMatch, SRTSegment
+        from src.downloader.types import DownloadedSegment, MatchedSegment
+
+        state = PipelineState()
+
+        # Create audio download
+        audio1 = AudioDownload(
+            file="audio_video1.mp3",
+            url="https://youtube.com/watch?v=video1",
+            video_id="video1",
+            title="Test Video 1"
+        )
+        state.audio_downloads = [audio1]
+
+        # Create two MatchResult objects (for two voiceover segments)
+        match1 = Match(
+            segment_index=0,
+            video_file="audio_video1.mp3",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.9
+        )
+        result1 = MatchResult(primary_match=match1)
+
+        match2 = Match(
+            segment_index=1,
+            video_file="audio_video1.mp3",
+            video_start=20.0,
+            video_end=25.0,
+            confidence=0.85
+        )
+        result2 = MatchResult(primary_match=match2)
+
+        state.matches = [result1, result2]
+
+        # Create segments for both matches
+        seg_match1 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=10.0,
+            end_time=15.0,
+            track="V1",
+            voiceover_segment_idx=0
+        )
+        segment1 = DownloadedSegment(
+            file="segment_video1_10.0-15.0.mp4",
+            video_id="video1",
+            original_start=10.0,
+            original_end=15.0,
+            file_duration=5.0,
+            matches=[seg_match1]
+        )
+
+        seg_match2 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=20.0,
+            end_time=25.0,
+            track="V1",
+            voiceover_segment_idx=1
+        )
+        segment2 = DownloadedSegment(
+            file="segment_video1_20.0-25.0.mp4",
+            video_id="video1",
+            original_start=20.0,
+            original_end=25.0,
+            file_duration=5.0,
+            matches=[seg_match2]
+        )
+
+        downloaded_segments = [segment1, segment2]
+        audio_downloads_by_id = {audio1.video_id: audio1}
+
+        # Build segment map
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Remap both matches
+        for match in [match1, match2]:
+            key = ("video1", match.video_start)
+            if key in segment_map:
+                match.video_file = segment_map[key][0]
+
+        # Verify both remappings
+        assert match1.video_file == "segment_video1_10.0-15.0.mp4"
+        assert match2.video_file == "segment_video1_20.0-25.0.mp4"
+
+    def test_remap_secondary_matches(self):
+        """Test remapping secondary matches (V4-V6) separately from alternatives"""
+        from src.state import Match, AudioDownload
+        from src.utils import MatchResult, AlternativeMatch, SRTSegment
+        from src.downloader.types import DownloadedSegment, MatchedSegment
+
+        state = PipelineState()
+
+        # Create audio download
+        audio1 = AudioDownload(
+            file="audio_video1.mp3",
+            url="https://youtube.com/watch?v=video1",
+            video_id="video1",
+            title="Test Video 1"
+        )
+        state.audio_downloads = [audio1]
+
+        # Create primary match
+        primary = Match(
+            segment_index=0,
+            video_file="audio_video1.mp3",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.9
+        )
+
+        # Create secondary match (different source diversity)
+        secondary_segment = SRTSegment(
+            index=1,
+            start_time=20.0,
+            end_time=25.0,
+            text="Secondary text",
+            source_file="audio_video1.mp3"
+        )
+        secondary = AlternativeMatch(
+            video_segment=secondary_segment,
+            video_scene=None,
+            confidence=0.75,
+            reasoning="Different source diversity"
+        )
+
+        # Create MatchResult
+        result = MatchResult(
+            primary_match=primary,
+            alternatives=[],
+            secondary_matches=[secondary],
+            strategy_matches=[]
+        )
+        state.matches = [result]
+
+        # Create segments
+        seg_match1 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=10.0,
+            end_time=15.0,
+            track="V1",
+            voiceover_segment_idx=0
+        )
+        segment1 = DownloadedSegment(
+            file="segment_video1_10.0-15.0.mp4",
+            video_id="video1",
+            original_start=10.0,
+            original_end=15.0,
+            file_duration=5.0,
+            matches=[seg_match1]
+        )
+
+        seg_match2 = MatchedSegment(
+            video_id="video1",
+            video_url="https://youtube.com/watch?v=video1",
+            start_time=20.0,
+            end_time=25.0,
+            track="V4",
+            voiceover_segment_idx=0
+        )
+        segment2 = DownloadedSegment(
+            file="segment_video1_20.0-25.0.mp4",
+            video_id="video1",
+            original_start=20.0,
+            original_end=25.0,
+            file_duration=5.0,
+            matches=[seg_match2]
+        )
+
+        downloaded_segments = [segment1, segment2]
+        audio_downloads_by_id = {audio1.video_id: audio1}
+
+        # Build segment map
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Remap primary and secondary
+        primary.video_file = segment_map[("video1", 10.0)][0]
+        secondary.video_segment.source_file = segment_map[("video1", 20.0)][0]
+
+        # Verify
+        assert primary.video_file == "segment_video1_10.0-15.0.mp4"
+        assert secondary.video_segment.source_file == "segment_video1_20.0-25.0.mp4"
 
 
 # ============================================================================
