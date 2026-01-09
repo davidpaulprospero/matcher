@@ -1,6 +1,14 @@
 [run]
 source = src
 omit =
+    # Legacy modules (deprecated, replaced by refactored versions)
+    src/otio_builder.py
+    src/scene_detection.py
+    src/pexels.py
+    src/pixabay.py
+    src/post_edit_analysis.py
+
+    # Test files
     */tests/*
     */test_*.py
     */__pycache__/*
@@ -14,6 +22,9 @@ omit =
 precision = 2
 show_missing = True
 skip_covered = False
+
+# Fail if coverage drops below target (85% goal)
+fail_under = 85
 
 exclude_lines =
     pragma: no cover
