@@ -617,5 +617,361 @@ class TestEdgeCases:
         assert len(cached) == 1
 
 
+# ============================================================================
+# Test Batch Caching
+# ============================================================================
+
+class TestBatchCaching:
+    """Test batch-level caching operations"""
+
+    def test_cache_batch_creates_file(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test batch caching creates cache file"""
+        cache_key = "test_batch"
+
+        embedding_cache.cache_batch(sample_texts, sample_embeddings, cache_key)
+
+        # Should create batch cache file
+        batch_files = list(embedding_cache.cache_dir.glob(f"batch_{cache_key}_*.json"))
+        assert len(batch_files) == 1
+
+    def test_get_batch_cache_hit(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test batch cache hit"""
+        cache_key = "test_batch"
+
+        # Cache the batch
+        embedding_cache.cache_batch(sample_texts, sample_embeddings, cache_key)
+
+        # Retrieve it
+        result = embedding_cache.get_batch_cache(sample_texts, cache_key)
+
+        assert result is not None
+        if HAS_NUMPY:
+            import numpy as np
+            assert isinstance(result, np.ndarray)
+
+    def test_get_batch_cache_miss(self, embedding_cache, sample_texts):
+        """Test batch cache miss"""
+        cache_key = "nonexistent"
+
+        result = embedding_cache.get_batch_cache(sample_texts, cache_key)
+
+        assert result is None
+
+    def test_cache_batch_with_numpy(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test batch caching with numpy arrays"""
+        import numpy as np
+
+        cache_key = "numpy_batch"
+        embeddings = np.array(sample_embeddings, dtype=np.float32)
+
+        embedding_cache.cache_batch(sample_texts, embeddings, cache_key)
+
+        # Should convert to list for JSON and cache successfully
+        result = embedding_cache.get_batch_cache(sample_texts, cache_key)
+        assert result is not None
+
+    def test_cache_batch_length_mismatch(self, embedding_cache, sample_texts):
+        """Test batch cache rejects length mismatch"""
+        import numpy as np
+
+        cache_key = "test_batch"
+        # Cache with 3 embeddings
+        embeddings = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        embedding_cache.cache_batch(sample_texts, embeddings, cache_key)
+
+        # Try to retrieve with 2 texts
+        result = embedding_cache.get_batch_cache(sample_texts[:2], cache_key)
+
+        # Should be None due to length mismatch
+        assert result is None
+
+
+# ============================================================================
+# Test Incremental Caching
+# ============================================================================
+
+class TestIncrementalCaching:
+    """Test incremental batch caching for streaming"""
+
+    def test_cache_incremental_creates_files(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test incremental caching creates numbered batch files"""
+        cache_key = "streaming"
+
+        for i in range(3):
+            embedding_cache.cache_incremental(i, sample_texts, sample_embeddings, cache_key)
+
+        # Should create 3 incremental files
+        incremental_files = list(embedding_cache.cache_dir.glob(f"incremental_{cache_key}_*.json"))
+        assert len(incremental_files) == 3
+
+    def test_load_incremental_combines_batches(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test loading incremental batches combines them"""
+        cache_key = "streaming"
+
+        # Cache 3 batches
+        for i in range(3):
+            embedding_cache.cache_incremental(i, sample_texts, sample_embeddings, cache_key)
+
+        # Load combined
+        all_texts, all_embeddings = embedding_cache.load_incremental(cache_key)
+
+        assert len(all_texts) == 9  # 3 batches × 3 texts
+        assert len(all_embeddings) == 9
+
+    def test_load_incremental_empty(self, embedding_cache):
+        """Test loading incremental with no files"""
+        cache_key = "nonexistent"
+
+        all_texts, all_embeddings = embedding_cache.load_incremental(cache_key)
+
+        assert len(all_texts) == 0
+        assert len(all_embeddings) == 0
+
+    def test_load_incremental_handles_corrupted_file(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test loading incremental handles corrupted files"""
+        cache_key = "partial"
+
+        # Cache 2 batches
+        embedding_cache.cache_incremental(0, sample_texts, sample_embeddings, cache_key)
+        embedding_cache.cache_incremental(1, sample_texts, sample_embeddings, cache_key)
+
+        # Corrupt one file
+        corrupt_file = embedding_cache.cache_dir / f"incremental_{cache_key}_0001.json"
+        with open(corrupt_file, 'w') as f:
+            f.write("{invalid json")
+
+        # Should load only valid batch
+        all_texts, all_embeddings = embedding_cache.load_incremental(cache_key)
+
+        assert len(all_texts) == 3  # Only batch 0
+        assert len(all_embeddings) == 3
+
+    def test_clear_incremental_removes_files(self, embedding_cache, sample_texts, sample_embeddings):
+        """Test clearing incremental files"""
+        cache_key = "streaming"
+
+        # Cache 3 batches
+        for i in range(3):
+            embedding_cache.cache_incremental(i, sample_texts, sample_embeddings, cache_key)
+
+        # Clear them
+        embedding_cache.clear_incremental(cache_key)
+
+        # Should be empty
+        incremental_files = list(embedding_cache.cache_dir.glob(f"incremental_{cache_key}_*.json"))
+        assert len(incremental_files) == 0
+
+
+# ============================================================================
+# Test Embedding Providers
+# ============================================================================
+
+class TestEmbeddingProvider:
+    """Test base EmbeddingProvider class"""
+
+    def test_embed_batch_with_single_batch(self):
+        """Test batch embedding with texts that fit in one batch"""
+        from src.embeddings import EmbeddingProvider
+
+        class MockProvider(EmbeddingProvider):
+            def embed(self, texts):
+                return [[1.0, 2.0] for _ in texts]
+
+        provider = MockProvider()
+        texts = ["text1", "text2", "text3"]
+
+        result = provider.embed_batch(texts, batch_size=10, show_progress=False)
+
+        assert len(result) == 3
+        assert result[0] == [1.0, 2.0]
+
+    def test_embed_batch_with_multiple_batches(self):
+        """Test batch embedding across multiple batches"""
+        from src.embeddings import EmbeddingProvider
+
+        class MockProvider(EmbeddingProvider):
+            def embed(self, texts):
+                return [[1.0, 2.0] for _ in texts]
+
+        provider = MockProvider()
+        texts = [f"text{i}" for i in range(25)]
+
+        result = provider.embed_batch(texts, batch_size=10, show_progress=False)
+
+        assert len(result) == 25
+
+    def test_embed_batch_with_retry_success(self):
+        """Test batch embedding retries on failure then succeeds"""
+        from src.embeddings import EmbeddingProvider
+
+        class FlakyProvider(EmbeddingProvider):
+            def __init__(self):
+                self.attempt = 0
+
+            def embed(self, texts):
+                self.attempt += 1
+                if self.attempt == 1:
+                    raise Exception("API Error")
+                return [[1.0, 2.0] for _ in texts]
+
+        provider = FlakyProvider()
+        texts = ["text1", "text2"]
+
+        result = provider.embed_batch(texts, batch_size=10, show_progress=False, max_retries=3)
+
+        assert len(result) == 2
+        assert provider.attempt == 2  # Failed once, succeeded on retry
+
+    def test_embed_batch_with_retry_exhausted(self):
+        """Test batch embedding fills with zeros after max retries"""
+        from src.embeddings import EmbeddingProvider
+
+        class FailingProvider(EmbeddingProvider):
+            def embed(self, texts):
+                raise Exception("Permanent failure")
+
+        provider = FailingProvider()
+        texts = ["text1", "text2"]
+
+        result = provider.embed_batch(texts, batch_size=10, show_progress=False, max_retries=2, retry_delay=0.1)
+
+        # Should fill with zeros (default 768-dim)
+        assert len(result) == 2
+        assert result[0] == [0.0] * 768
+        assert result[1] == [0.0] * 768
+
+    def test_embed_batch_retry_uses_existing_dimension(self):
+        """Test retry uses dimension from successful batches"""
+        from src.embeddings import EmbeddingProvider
+
+        class MixedProvider(EmbeddingProvider):
+            def __init__(self):
+                self.call_count = 0
+
+            def embed(self, texts):
+                self.call_count += 1
+                if self.call_count == 1:
+                    return [[1.0, 2.0, 3.0] for _ in texts]  # 3-dim
+                else:
+                    raise Exception("Batch 2 fails")
+
+        provider = MixedProvider()
+        texts = [f"text{i}" for i in range(12)]
+
+        result = provider.embed_batch(texts, batch_size=10, show_progress=False, max_retries=1, retry_delay=0.1)
+
+        # First batch succeeds with 3-dim, second batch fills with zeros (3-dim)
+        assert len(result) == 12
+        assert result[0] == [1.0, 2.0, 3.0]
+        assert result[10] == [0.0, 0.0, 0.0]  # Uses dimension from successful batch
+
+
+# ============================================================================
+# Test Gemini Provider
+# ============================================================================
+
+class TestGeminiEmbeddings:
+    """Test GeminiEmbeddings provider"""
+
+    @patch('google.generativeai.configure')
+    @patch('google.generativeai.embed_content')
+    def test_gemini_embed_single_batch(self, mock_embed, mock_configure):
+        """Test Gemini embedding single batch"""
+        from src.embeddings import GeminiEmbeddings
+
+        # Mock batch response - Gemini returns list of embeddings for multiple texts
+        mock_response = {'embedding': [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]}
+        mock_embed.return_value = mock_response
+
+        provider = GeminiEmbeddings(api_key="test_key")
+        texts = ["text1", "text2"]
+
+        result = provider.embed(texts)
+
+        assert len(result) == 2
+        assert result[0] == [1.0, 2.0, 3.0]
+        assert result[1] == [4.0, 5.0, 6.0]
+        mock_configure.assert_called_once()
+
+    @patch('google.generativeai.configure')
+    @patch('google.generativeai.embed_content')
+    def test_gemini_embed_batch_mode(self, mock_embed, mock_configure):
+        """Test Gemini batch mode uses embed_content correctly"""
+        from src.embeddings import GeminiEmbeddings
+
+        # Mock batch response
+        mock_response = {
+            'embedding': [[1.0, 2.0], [3.0, 4.0]]
+        }
+        mock_embed.return_value = mock_response
+
+        provider = GeminiEmbeddings(api_key="test_key")
+        texts = ["text1", "text2"]
+
+        result = provider.embed(texts)
+
+        # Should call with batch
+        assert mock_embed.called
+        call_args = mock_embed.call_args
+        assert 'content' in call_args.kwargs or len(call_args.args) > 1
+
+
+# ============================================================================
+# Test Voyage Provider
+# ============================================================================
+
+class TestVoyageEmbeddings:
+    """Test VoyageEmbeddings provider"""
+
+    @patch('voyageai.Client')
+    def test_voyage_embed(self, mock_client_class):
+        """Test Voyage embedding"""
+        from src.embeddings import VoyageEmbeddings
+
+        # Mock client and response
+        mock_client = Mock()
+        mock_response = Mock()
+        mock_response.embeddings = [[1.0, 2.0], [3.0, 4.0]]
+        mock_client.embed.return_value = mock_response
+        mock_client_class.return_value = mock_client
+
+        provider = VoyageEmbeddings(api_key="test_key")
+        texts = ["text1", "text2"]
+
+        result = provider.embed(texts)
+
+        assert len(result) == 2
+        assert result[0] == [1.0, 2.0]
+        mock_client.embed.assert_called_once()
+
+
+# ============================================================================
+# Test Local Provider
+# ============================================================================
+
+class TestLocalEmbeddings:
+    """Test LocalEmbeddings provider"""
+
+    @patch('sentence_transformers.SentenceTransformer')
+    def test_local_embed(self, mock_st_class):
+        """Test local embedding with SentenceTransformer"""
+        from src.embeddings import LocalEmbeddings
+        import numpy as np
+
+        # Mock model
+        mock_model = Mock()
+        mock_model.encode.return_value = np.array([[1.0, 2.0], [3.0, 4.0]])
+        mock_st_class.return_value = mock_model
+
+        provider = LocalEmbeddings(model_name="all-MiniLM-L6-v2")
+        texts = ["text1", "text2"]
+
+        result = provider.embed(texts)
+
+        assert len(result) == 2
+        # Check that encode was called with correct parameters (no convert_to_numpy)
+        mock_model.encode.assert_called_once_with(texts, show_progress_bar=False)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
