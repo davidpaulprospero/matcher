@@ -72,6 +72,7 @@ llm_context.txt
 !FEATURE_BRANCH_SUMMARY.md
 !*BUGFIXES.md
 !*SUMMARY.md
+!*SESSION*.md
 !docs/*.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
