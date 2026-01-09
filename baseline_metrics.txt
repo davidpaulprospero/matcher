@@ -1,0 +1,25 @@
+=== BASELINE TEST & COVERAGE METRICS (2026-01-09) ===
+
+Test Suite Status:
+tests/test_vision.py::TestProcessVideoVision::test_process_video_vision_no_api_key
+tests/test_vision.py::TestProcessVideoVision::test_process_video_vision_with_cache
+tests/test_vision.py::TestVisionCaching::test_cache_prevents_redundant_api_calls
+
+757 tests collected in 0.47s
+
+Test Results:
+- Total: 771 tests collected
+- Passing: 707 (91.7%)
+- Failing: 26 (3.4%)
+- Errors: 14 (1.8%)
+- Skipped: 24 (3.1%)
+
+Coverage:
+- Overall: 28.64%
+- Total Statements: 17,655
+- Missed: 12,599
+
+Target Goals:
+- Coverage: 90% minimum
+- Pass Rate: 100% (0 failures, 0 errors)
+- Total Tests: ~1,200 (add ~430 new tests)
