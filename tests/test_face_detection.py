@@ -647,5 +647,338 @@ class TestEdgeCases:
         assert score == 0.5
 
 
+# ============================================================================
+# Test Scene Detection (MediaPipe)
+# ============================================================================
+
+class TestSceneDetectionMediaPipe:
+    """Test MediaPipe scene detection"""
+
+    @patch('cv2.VideoCapture')
+    @patch('cv2.cvtColor')
+    def test_detect_faces_in_range_mediapipe_success(self, mock_cvtColor, mock_cv2):
+        """Test successful MediaPipe scene detection"""
+        # Mock video capture
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0  # FPS
+        mock_cap.read.return_value = (True, MagicMock())
+        mock_cv2.return_value = mock_cap
+
+        # Mock RGB conversion
+        mock_cvtColor.return_value = MagicMock()
+
+        # Mock MediaPipe detection
+        mock_detection = MagicMock()
+        mock_results = MagicMock()
+        mock_results.detections = [MagicMock()]  # 1 face detected
+        mock_detection.process.return_value = mock_results
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = mock_detection
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 0.0, 10.0, sample_frames=3)
+
+        assert 0.0 <= score <= 1.0
+        assert mock_cap.release.called
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_mediapipe_zero_fps(self, mock_cv2):
+        """Test scene detection with zero FPS"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 0.0  # Zero FPS
+        mock_cv2.return_value = mock_cap
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = MagicMock()
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 0.0, 10.0)
+
+        assert score == 0.5
+        assert mock_cap.release.called
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_mediapipe_invalid_range(self, mock_cv2):
+        """Test scene detection with end < start"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_cv2.return_value = mock_cap
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = MagicMock()
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 10.0, 5.0)
+
+        assert score == 0.5
+
+    @patch('cv2.VideoCapture')
+    @patch('cv2.cvtColor')
+    def test_detect_faces_in_range_mediapipe_no_detections(self, mock_cvtColor, mock_cv2):
+        """Test scene with no faces detected"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_cap.read.return_value = (True, MagicMock())
+        mock_cv2.return_value = mock_cap
+
+        mock_cvtColor.return_value = MagicMock()
+
+        # No faces detected
+        mock_detection = MagicMock()
+        mock_results = MagicMock()
+        mock_results.detections = None
+        mock_detection.process.return_value = mock_results
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = mock_detection
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 0.0, 10.0)
+
+        assert score == 0.0  # No faces
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_mediapipe_read_failure(self, mock_cv2):
+        """Test scene detection when frame read fails"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_cap.read.return_value = (False, None)  # Read fails
+        mock_cv2.return_value = mock_cap
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = MagicMock()
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 0.0, 10.0)
+
+        assert score == 0.5  # No samples checked
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_mediapipe_exception(self, mock_cv2):
+        """Test scene detection exception handling"""
+        mock_cv2.side_effect = Exception("Video error")
+
+        FaceDetector._mediapipe_available = True
+        FaceDetector._mp_face_detection = MagicMock()
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_mediapipe("test.mp4", 0.0, 10.0)
+
+        assert score == 0.5  # Default on error
+
+
+# ============================================================================
+# Test Scene Detection (OpenCV)
+# ============================================================================
+
+class TestSceneDetectionOpenCV:
+    """Test OpenCV scene detection"""
+
+    @patch('cv2.CascadeClassifier')
+    @patch('cv2.VideoCapture')
+    @patch('cv2.cvtColor')
+    def test_detect_faces_in_range_opencv_success(self, mock_cvtColor, mock_cv2, mock_cascade_class):
+        """Test successful OpenCV scene detection"""
+        # Mock video capture
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_cap.read.return_value = (True, MagicMock())
+        mock_cv2.return_value = mock_cap
+
+        # Mock grayscale conversion
+        mock_cvtColor.return_value = MagicMock()
+
+        # Mock cascade with faces detected
+        mock_cascade = MagicMock()
+        mock_cascade.detectMultiScale.return_value = [(0, 0, 50, 50)]  # 1 face
+        mock_cascade_class.return_value = mock_cascade
+
+        FaceDetector._opencv_available = True
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_opencv("test.mp4", 0.0, 10.0)
+
+        assert 0.0 <= score <= 1.0
+        assert mock_cap.release.called
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_opencv_zero_fps(self, mock_cv2):
+        """Test OpenCV scene detection with zero FPS"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 0.0
+        mock_cv2.return_value = mock_cap
+
+        FaceDetector._opencv_available = True
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_opencv("test.mp4", 0.0, 10.0)
+
+        assert score == 0.5
+
+    @patch('cv2.CascadeClassifier')
+    @patch('cv2.VideoCapture')
+    @patch('cv2.cvtColor')
+    def test_detect_faces_in_range_opencv_no_faces(self, mock_cvtColor, mock_cv2, mock_cascade_class):
+        """Test OpenCV scene with no faces"""
+        mock_cap = MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.return_value = 30.0
+        mock_cap.read.return_value = (True, MagicMock())
+        mock_cv2.return_value = mock_cap
+
+        mock_cvtColor.return_value = MagicMock()
+
+        # No faces detected
+        mock_cascade = MagicMock()
+        mock_cascade.detectMultiScale.return_value = []
+        mock_cascade_class.return_value = mock_cascade
+
+        FaceDetector._opencv_available = True
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_opencv("test.mp4", 0.0, 10.0)
+
+        assert score == 0.0
+
+    @patch('cv2.VideoCapture')
+    def test_detect_faces_in_range_opencv_exception(self, mock_cv2):
+        """Test OpenCV scene detection exception"""
+        mock_cv2.side_effect = Exception("Video error")
+
+        FaceDetector._opencv_available = True
+        detector = FaceDetector()
+
+        score = detector._detect_faces_in_range_opencv("test.mp4", 0.0, 10.0)
+
+        assert score == 0.5
+
+
+# ============================================================================
+# Test Backend Error Handling
+# ============================================================================
+
+class TestBackendErrors:
+    """Test backend initialization error handling"""
+
+    def test_mediapipe_import_error(self):
+        """Test MediaPipe import error handling"""
+        with patch('builtins.__import__', side_effect=ImportError("MediaPipe not found")):
+            FaceDetector._mediapipe_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._mediapipe_available is False
+
+    def test_mediapipe_no_solutions_attribute(self):
+        """Test MediaPipe without solutions attribute"""
+        mock_mp = MagicMock()
+        del mock_mp.solutions  # Remove solutions attribute
+
+        with patch.dict('sys.modules', {'mediapipe': mock_mp}):
+            FaceDetector._mediapipe_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._mediapipe_available is False
+
+    def test_mediapipe_init_exception(self):
+        """Test MediaPipe initialization exception"""
+        mock_mp = MagicMock()
+        mock_mp.solutions.face_detection.FaceDetection.side_effect = Exception("Init failed")
+
+        with patch.dict('sys.modules', {'mediapipe': mock_mp}):
+            FaceDetector._mediapipe_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._mediapipe_available is False
+
+    def test_opencv_import_error(self):
+        """Test OpenCV import error handling"""
+        with patch('builtins.__import__', side_effect=ImportError("cv2 not found")):
+            FaceDetector._opencv_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._opencv_available is False
+
+    def test_opencv_cascade_not_found(self):
+        """Test OpenCV cascade file missing"""
+        mock_cv2 = MagicMock()
+        mock_cv2.data.haarcascades = "/nonexistent/"
+
+        with patch.dict('sys.modules', {'cv2': mock_cv2}):
+            FaceDetector._opencv_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._opencv_available is False
+
+    def test_opencv_init_exception(self):
+        """Test OpenCV initialization exception"""
+        mock_cv2 = MagicMock()
+        mock_cv2.data.haarcascades = property(lambda self: (_ for _ in ()).throw(Exception("Error")))
+
+        with patch.dict('sys.modules', {'cv2': mock_cv2}):
+            FaceDetector._opencv_available = None
+            detector = FaceDetector()
+
+            assert FaceDetector._opencv_available is False
+
+
+# ============================================================================
+# Test Scene Cache Persistence
+# ============================================================================
+
+class TestSceneCachePersistence:
+    """Test scene-level cache persistence"""
+
+    def test_get_scene_face_score_from_cache(self, temp_dir):
+        """Test retrieving scene score from cache"""
+        cache_file = temp_dir / ".segment_face_cache.json"
+        # Cache key format: {normalized_path}:{start_time:.1f}-{end_time:.1f}
+        cache_data = {
+            "test.mp4:0.0-10.0": 0.8
+        }
+
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f)
+
+        FaceDetector._mediapipe_available = True
+        detector = FaceDetector()
+
+        score = detector.get_scene_face_score("test.mp4", 0.0, 10.0, scene_index=0, cache_dir=str(temp_dir))
+
+        assert score == 0.8
+
+    def test_get_scene_face_score_compute_new(self, temp_dir):
+        """Test computing new scene score"""
+        FaceDetector._mediapipe_available = True
+
+        with patch('src.face_detection.FaceDetector._detect_faces_in_range_mediapipe', return_value=0.6):
+            detector = FaceDetector()
+            score = detector.get_scene_face_score("test.mp4", 0.0, 10.0, scene_index=0, cache_dir=str(temp_dir))
+
+            assert score == 0.6
+
+            # Verify cache was updated (uses .segment_face_cache.json)
+            cache_file = temp_dir / ".segment_face_cache.json"
+            assert cache_file.exists()
+
+    def test_scene_cache_uses_memory_cache(self):
+        """Test scene cache uses memory cache first"""
+        # Memory cache uses {video_path: {time_key: score}} format
+        FaceDetector._scene_cache["test.mp4"] = {"0.0-10.0": 0.9}
+        FaceDetector._mediapipe_available = True
+
+        detector = FaceDetector()
+        score = detector.get_scene_face_score("test.mp4", 0.0, 10.0, scene_index=0)
+
+        assert score == 0.9
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
