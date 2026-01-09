@@ -68,7 +68,8 @@
       "Bash(pip install:*)",
       "Bash(coverage run:*)",
       "Bash(coverage report:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(git restore:*)"
     ]
   }
 }
