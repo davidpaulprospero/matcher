@@ -349,5 +349,108 @@ class TestHashLength:
         assert isinstance(hash_value, str)
 
 
+# ============================================================================
+# Test file_content_hash() (Lines 53-72)
+# ============================================================================
+
+class TestFileContentHash:
+    """Test file_content_hash function for missing coverage (lines 53-72)."""
+
+    def test_file_content_hash_large_file(self):
+        """Test file_content_hash with file > 2MB to cover lines 64-66."""
+        from src.cache.utils import file_content_hash
+
+        # Create a file > 2MB to trigger last chunk reading
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dat") as f:
+            # Write 3MB of data
+            f.write(b'A' * (1024 * 1024))  # 1MB first chunk
+            f.write(b'B' * (1024 * 1024))  # 1MB middle
+            f.write(b'C' * (1024 * 1024))  # 1MB last chunk
+            temp_path = Path(f.name)
+
+        try:
+            hash_value = file_content_hash(temp_path)
+
+            # Should return a hash
+            assert isinstance(hash_value, str)
+            assert len(hash_value) == 32  # MD5 hex digest
+
+            # Create another file with same size but different content
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".dat") as f2:
+                f2.write(b'X' * (3 * 1024 * 1024))
+                temp_path2 = Path(f2.name)
+
+            try:
+                hash_value2 = file_content_hash(temp_path2)
+                # Should be different (different content)
+                assert hash_value != hash_value2
+            finally:
+                temp_path2.unlink()
+        finally:
+            temp_path.unlink()
+
+    def test_file_content_hash_small_file(self):
+        """Test file_content_hash with small file (<= 2MB) to cover line 68."""
+        from src.cache.utils import file_content_hash
+
+        # Create a small file (< 2MB)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
+            f.write(b'Small content')
+            temp_path = Path(f.name)
+
+        try:
+            hash_value = file_content_hash(temp_path)
+
+            # Should return a hash
+            assert isinstance(hash_value, str)
+            assert len(hash_value) == 32
+        finally:
+            temp_path.unlink()
+
+    def test_file_content_hash_nonexistent_file(self):
+        """Test file_content_hash with nonexistent file to cover lines 55-56."""
+        from src.cache.utils import file_content_hash
+
+        with pytest.raises(FileNotFoundError):
+            file_content_hash("/nonexistent/file.dat")
+
+
+# ============================================================================
+# Test file_metadata_hash() (Lines 95-101)
+# ============================================================================
+
+class TestFileMetadataHash:
+    """Test file_metadata_hash function for missing coverage (lines 95-101)."""
+
+    def test_file_metadata_hash_success(self):
+        """Test file_metadata_hash with existing file."""
+        from src.cache.utils import file_metadata_hash
+
+        # Create a temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
+            f.write(b'Test content')
+            temp_path = Path(f.name)
+
+        try:
+            hash_value = file_metadata_hash(temp_path)
+
+            # Should return a hash
+            assert isinstance(hash_value, str)
+            assert len(hash_value) > 0
+
+            # Hash should be consistent
+            hash_value2 = file_metadata_hash(temp_path)
+            assert hash_value == hash_value2
+        finally:
+            temp_path.unlink()
+
+    def test_file_metadata_hash_nonexistent_file(self):
+        """Test file_metadata_hash with nonexistent file to cover lines 97-98."""
+        from src.cache.utils import file_metadata_hash
+
+        with pytest.raises(FileNotFoundError):
+            file_metadata_hash("/nonexistent/file.txt")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

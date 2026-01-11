@@ -5,10 +5,14 @@ Tests parallel video transcription with two-phase processing,
 single video transcription, voiceover transcription, and cache integration.
 """
 
+import sys
 import pytest
 from unittest.mock import Mock, MagicMock, patch, call
 from pathlib import Path
 import time
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.transcription.parallel_processor import (
     transcribe_videos_parallel,
@@ -359,7 +363,7 @@ class TestTranscribeVideosParallel:
         mock_whisper.transcribe.assert_called_once()
         call_kwargs = mock_whisper.transcribe.call_args[1]
         assert call_kwargs['language'] is None
-        assert call_kwargs['vad_filter'] is True
+        assert call_kwargs['vad_filter'] is False  # Default is False when no config
 
 
 class TestTranscribeVideo:

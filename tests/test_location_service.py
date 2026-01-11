@@ -208,13 +208,11 @@ class TestGeoLocationSerialization:
 # Test LocationService (requires mocked API)
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires LocationService with specific methods")
 class TestLocationService:
-    """Test LocationService with mocked API (integration tests)"""
+    """Test LocationService initialization"""
 
     def test_init_creates_cache(self, temp_dir):
-        """Test LocationService initialization"""
+        """Test LocationService initialization creates cache directory"""
         cache_dir = str(temp_dir / "locations")
 
         service = LocationService(
@@ -222,7 +220,19 @@ class TestLocationService:
             geonames_username="test_user"
         )
 
-        assert service.username == "test_user"
+        assert service.geonames_username == "test_user"
+        assert service.cache_dir.exists()
+
+    def test_init_without_username(self, temp_dir):
+        """Test LocationService initialization without username"""
+        cache_dir = str(temp_dir / "locations")
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username=""
+        )
+
+        assert service.geonames_username == ""
         assert service.cache_dir.exists()
 
 
@@ -325,13 +335,11 @@ class TestLocationTypes:
 # Test Cache Key Generation
 # ============================================================================
 
-@pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires LocationService with _cache_key method")
 class TestCacheKeyGeneration:
-    """Test cache key generation (integration tests)"""
+    """Test cache key generation behavior"""
 
-    def test_cache_key_consistent(self, temp_dir):
-        """Test cache keys are consistent"""
+    def test_cache_uses_lowercase_keys(self, temp_dir):
+        """Test cache uses lowercase location names as keys"""
         cache_dir = str(temp_dir / "locations")
 
         service = LocationService(
@@ -339,10 +347,64 @@ class TestCacheKeyGeneration:
             geonames_username="test_user"
         )
 
-        key1 = service._cache_key("Tokyo")
-        key2 = service._cache_key("Tokyo")
+        # Pre-populate cache with lowercase key
+        service._cache["locations"]["tokyo"] = {
+            "results": [{
+                "name": "Tokyo",
+                "location_type": "city",
+                "country_code": "JP",
+                "country_name": "Japan",
+                "coordinates": [35.6762, 139.6503],
+                "population": 13960000,
+                "geoname_id": 1850144,
+                "feature_class": "P",
+                "feature_code": "PPLC",
+                "admin1": "Tokyo",
+                "admin2": "",
+                "timezone": "Asia/Tokyo"
+            }]
+        }
 
-        assert key1 == key2
+        # Geocode should find cache regardless of case
+        results = service.geocode("Tokyo")
+        assert len(results) == 1
+        assert results[0].name == "Tokyo"
+
+    def test_cache_key_case_insensitive(self, temp_dir):
+        """Test cache lookup is case insensitive"""
+        cache_dir = str(temp_dir / "locations")
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        # Pre-populate cache
+        service._cache["locations"]["paris"] = {
+            "results": [{
+                "name": "Paris",
+                "location_type": "city",
+                "country_code": "FR",
+                "country_name": "France",
+                "coordinates": [48.8566, 2.3522],
+                "population": 2200000,
+                "geoname_id": 2988507,
+                "feature_class": "P",
+                "feature_code": "PPLC",
+                "admin1": "Ile-de-France",
+                "admin2": "",
+                "timezone": "Europe/Paris"
+            }]
+        }
+
+        # Test with different cases
+        results_upper = service.geocode("PARIS")
+        results_mixed = service.geocode("Paris")
+        results_lower = service.geocode("paris")
+
+        assert len(results_upper) == 1
+        assert len(results_mixed) == 1
+        assert len(results_lower) == 1
 
 
 # ============================================================================

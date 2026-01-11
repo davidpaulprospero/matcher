@@ -487,6 +487,59 @@ class TestDownloadCheckpoint:
         assert state.downloaded_videos[0].file == 'video1.mp4'
         assert "mountain" in state.failed_keywords
 
+    def test_restore_audio_downloads(self, mock_checkpoint):
+        """Test successful restore of audio downloads (audio-first mode)"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'audio_downloads': [
+                {'file': 'audio1.mp3', 'url': 'url1', 'video_id': 'vid1',
+                 'title': 'Test Audio', 'duration': 120.0, 'keyword': 'beach'},
+                {'file': 'audio2.mp3', 'url': 'url2', 'video_id': 'vid2',
+                 'title': 'Test Audio 2', 'duration': 180.0, 'keyword': 'ocean'}
+            ],
+            'failed_keywords': ['mountain']
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.downloaded_audio) == 2
+        assert state.downloaded_audio[0].file == 'audio1.mp3'
+        assert state.downloaded_audio[0].video_id == 'vid1'
+        assert state.downloaded_audio[1].file == 'audio2.mp3'
+        assert state.downloaded_audio[1].video_id == 'vid2'
+        assert "mountain" in state.failed_keywords
+
+    def test_restore_audio_downloads_legacy_field_names(self, mock_checkpoint):
+        """Test restore with old checkpoint field names (audio_file, video_url)"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        # Simulate old checkpoint with incorrect field names
+        mock_checkpoint.get_stage_data.return_value = {
+            'audio_downloads': [
+                {'audio_file': 'audio1.mp3', 'video_url': 'url1', 'video_id': 'vid1',
+                 'title': 'Test Audio', 'duration': 120.0, 'keyword': 'beach'},
+                {'audio_file': 'audio2.mp3', 'video_url': 'url2', 'video_id': 'vid2',
+                 'title': 'Test Audio 2', 'duration': 180.0, 'keyword': 'ocean'}
+            ],
+            'failed_keywords': []
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.downloaded_audio) == 2
+        # Verify field names were mapped correctly
+        assert state.downloaded_audio[0].file == 'audio1.mp3'
+        assert state.downloaded_audio[0].url == 'url1'
+        assert state.downloaded_audio[0].video_id == 'vid1'
+        assert state.downloaded_audio[1].file == 'audio2.mp3'
+        assert state.downloaded_audio[1].url == 'url2'
+        assert state.downloaded_audio[1].video_id == 'vid2'
+
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = DownloadStage()
@@ -1325,3 +1378,279 @@ class TestDownloadEdgeCases:
         # Should succeed but download nothing
         assert result.success is True
         assert len(state.downloaded_audio) == 0
+
+
+# ============================================================================
+# Test Global Cache Coverage
+# ============================================================================
+
+class TestGlobalCacheBranch:
+    """Test global cache coverage branch"""
+
+    @patch('src.downloader.VideoDownloader')
+    def test_all_keywords_from_cache(self, mock_downloader_class, mock_config, mock_checkpoint):
+        """Test when all keywords are covered by global cache (lines 188-190)"""
+        stage = DownloadStage()
+        state = PipelineState()
+        state.keywords = ["beach", "ocean"]
+
+        mock_downloader = Mock()
+        mock_downloader._get_tier_value.return_value = 60
+        mock_downloader_class.return_value = mock_downloader
+
+        # Return empty list for keywords_to_download (all from cache)
+        # and non-empty reusable videos list
+        reusable = [
+            {'path': 'cached_video1.mp4', 'face_score': 0.7},
+            {'path': 'cached_video2.mp4', 'face_score': 0.8}
+        ]
+        with patch.object(stage, '_check_global_cache', return_value=([], reusable)):
+            result = stage._run_full_download(state, mock_config, mock_checkpoint, [])
+
+        assert result.success is True
+        # All videos should be from cache
+        assert len(state.downloaded_videos) == 2
+        assert all(v.source == 'global_cache' for v in state.downloaded_videos)
+        # download_all should NOT be called since keywords_to_download is empty
+        mock_downloader.download_all.assert_not_called()
+
+
+# ============================================================================
+# Test Download Segments Exception
+# ============================================================================
+
+class TestDownloadSegmentsException:
+    """Test exception handling in download segments stage"""
+
+    @patch('src.downloader.VideoDownloader')
+    @patch('src.downloader.collect_matched_segments')
+    @patch('src.downloader.prepare_merged_segments')
+    def test_run_exception_handling(self, mock_prepare, mock_collect, mock_downloader_class,
+                                    mock_config, mock_checkpoint):
+        """Test segment download handles exceptions (lines 514-516)"""
+        stage = DownloadVideoSegmentsStage()
+        state = PipelineState()
+        state.downloaded_audio = [Mock(file="audio.mp3", video_id="vid123")]
+        state.matches = [Mock(video_file="audio.mp3", video_start=10.0)]
+
+        mock_collect.return_value = {'vid123': [state.matches[0]]}
+        mock_prepare.return_value = [{'video_id': 'vid123', 'start': 0, 'end': 30}]
+
+        # Make the downloader raise an exception
+        mock_downloader = Mock()
+        mock_downloader.audio_first.download_video_segments.side_effect = Exception("Download failed")
+        mock_downloader_class.return_value = mock_downloader
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is False
+        assert "Download failed" in result.error
+
+
+# ============================================================================
+# Test Actual Remap Method Call
+# ============================================================================
+
+class TestRemapMethodIntegration:
+    """Test _remap_matches_to_video_segments is actually called"""
+
+    @patch('src.downloader.VideoDownloader')
+    @patch('src.downloader.collect_matched_segments')
+    @patch('src.downloader.prepare_merged_segments')
+    def test_remap_called_with_correct_args(self, mock_prepare, mock_collect, mock_downloader_class,
+                                            mock_config, mock_checkpoint):
+        """Test _remap_matches_to_video_segments is called with correct arguments"""
+        stage = DownloadVideoSegmentsStage()
+        state = PipelineState()
+
+        # Setup audio download
+        audio = Mock(file="audio.mp3", video_id="vid123")
+        audio.__getitem__ = Mock(side_effect=lambda k: {'video_id': 'vid123', 'file': 'audio.mp3'}.get(k))
+        state.downloaded_audio = [audio]
+
+        # Setup match
+        match = Mock(video_file="audio.mp3", video_start=10.0)
+        state.matches = [match]
+
+        mock_collect.return_value = {'vid123': [match]}
+        mock_prepare.return_value = [{'video_id': 'vid123', 'start': 0, 'end': 30, 'matches': [match]}]
+
+        # Create mock downloaded segment
+        downloaded_seg = Mock(
+            file="segment.mp4",
+            video_id="vid123",
+            original_start=0,
+            matches=[Mock(start_time=10.0)]
+        )
+        mock_downloader = Mock()
+        mock_downloader.audio_first.download_video_segments.return_value = [downloaded_seg]
+        mock_downloader_class.return_value = mock_downloader
+
+        # Track if remap was called
+        with patch.object(stage, '_remap_matches_to_video_segments') as mock_remap:
+            result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        # Verify remap was called
+        mock_remap.assert_called_once()
+
+
+# ============================================================================
+# Test Audio Dict Handling
+# ============================================================================
+
+class TestAudioDictHandling:
+    """Test _audio_to_dict with dict input"""
+
+    def test_audio_to_dict_with_dict_input(self):
+        """Test _audio_to_dict returns same dict when input is dict (line 391)"""
+        stage = DownloadStage()
+        audio_dict = {
+            'file': 'audio.mp3',
+            'video_id': 'vid123',
+            'url': 'https://example.com',
+            'title': 'Test Audio'
+        }
+
+        result = stage._audio_to_dict(audio_dict)
+
+        assert result == audio_dict
+
+    def test_audio_to_dict_with_object_input(self):
+        """Test _audio_to_dict converts object to dict"""
+        stage = DownloadStage()
+        audio = AudioDownload(
+            file="audio.mp3",
+            video_id="vid123",
+            url="https://example.com",
+            title="Test Audio"
+        )
+
+        result = stage._audio_to_dict(audio)
+
+        assert isinstance(result, dict)
+        assert result['file'] == 'audio.mp3'
+        assert result['video_id'] == 'vid123'
+
+
+# ============================================================================
+# Test Store Download Results Additional Coverage
+# ============================================================================
+
+class TestStoreDownloadResultsExtended:
+    """Extended tests for _store_download_results"""
+
+    def test_store_download_with_path_field(self):
+        """Test storing downloads when dict uses 'path' instead of 'file'"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        downloaded = [
+            {'path': 'video1.mp4', 'url': 'url1', 'title': 'Test'}
+        ]
+
+        stage._store_download_results(state, downloaded, [], [])
+
+        assert len(state.downloaded_videos) == 1
+        assert state.downloaded_videos[0].file == 'video1.mp4'
+
+    def test_store_download_with_tier_field(self):
+        """Test storing downloads when dict uses 'tier' instead of 'duration_tier'"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        downloaded = [
+            {'file': 'video1.mp4', 'tier': 'short'}
+        ]
+
+        stage._store_download_results(state, downloaded, [], [])
+
+        assert len(state.downloaded_videos) == 1
+        assert state.downloaded_videos[0].duration_tier == 'short'
+
+    def test_store_download_with_reusable_and_failed(self):
+        """Test storing with both reusable videos and failed keywords"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        downloaded = [
+            {'file': 'new_video.mp4', 'url': 'url1', 'source': 'download'}
+        ]
+        reusable = [
+            {'path': 'cached.mp4', 'face_score': 0.9}
+        ]
+        failed = ['mountain', 'desert']
+
+        stage._store_download_results(state, downloaded, reusable, failed)
+
+        assert len(state.downloaded_videos) == 2
+        assert state.downloaded_videos[0].file == 'new_video.mp4'
+        assert state.downloaded_videos[0].source == 'download'
+        assert state.downloaded_videos[1].file == 'cached.mp4'
+        assert state.downloaded_videos[1].source == 'global_cache'
+        assert state.downloaded_videos[1].face_score == 0.9
+        assert state.failed_keywords == ['mountain', 'desert']
+
+
+# ============================================================================
+# Test Restore Obsolete Fields
+# ============================================================================
+
+class TestRestoreObsoleteFields:
+    """Test restore handles obsolete fields from old checkpoints"""
+
+    def test_restore_removes_obsolete_fields(self, mock_checkpoint):
+        """Test restore removes channel, duration_tier, upload_date, license from audio"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        # Simulate old checkpoint with obsolete fields
+        mock_checkpoint.get_stage_data.return_value = {
+            'audio_downloads': [
+                {
+                    'file': 'audio.mp3',
+                    'url': 'https://example.com',
+                    'video_id': 'vid123',
+                    'title': 'Test',
+                    'duration': 120.0,
+                    'keyword': 'beach',
+                    # Obsolete fields that were removed from AudioDownload
+                    'channel': 'TestChannel',
+                    'duration_tier': 'medium',
+                    'upload_date': '2026-01-01',
+                    'license': 'CC-BY'
+                }
+            ],
+            'failed_keywords': []
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.downloaded_audio) == 1
+        assert state.downloaded_audio[0].file == 'audio.mp3'
+        # Obsolete fields should not cause errors
+        assert not hasattr(state.downloaded_audio[0], 'channel')
+        assert not hasattr(state.downloaded_audio[0], 'upload_date')
+
+    def test_restore_audio_already_object(self, mock_checkpoint):
+        """Test restore when audio downloads are already AudioDownload objects"""
+        stage = DownloadStage()
+        state = PipelineState()
+
+        audio_obj = AudioDownload(
+            file='audio.mp3',
+            video_id='vid123',
+            url='https://example.com'
+        )
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'audio_downloads': [audio_obj],  # Already an object
+            'failed_keywords': []
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.downloaded_audio) == 1
+        assert state.downloaded_audio[0] is audio_obj

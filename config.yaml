@@ -76,8 +76,10 @@ transcription:
   batch_size: 10
   
   # Voice Activity Detection
-  # Chain-of-thought: VAD skips silence, improves accuracy
-  vad_filter: true
+  # Chain-of-thought: VAD skips silence, improves accuracy FOR VOICEOVER
+  # WARNING: VAD can be too aggressive for YouTube videos with varying audio quality
+  # Recommendation: Set to false for YouTube downloads, true only for voiceover
+  vad_filter: false  # Changed from true - YouTube videos have inconsistent audio quality
   min_silence_duration_ms: 200
   speech_pad_ms: 10
   
@@ -815,17 +817,17 @@ duration_tiers:
   medium:
     min: 120
     max: 600
-    count: 5            # Increased from 3
+    count: 10            # Increased from 3
     max_total: 0
   long:
     min: 600
     max: 1500
-    count: 3            # Increased from 1
+    count: 0            # Increased from 1
     max_total: 0
   longer:
     min: 1500
     max: 3000
-    count: 2            # Increased from 1
+    count: 0            # Increased from 1
     max_total: 0        # Removed limit - allow multiple longer videos
 
 # -----------------------------------------------------------------------------

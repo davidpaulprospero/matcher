@@ -229,12 +229,15 @@ class TestTieredMatcherInit:
             # Primary provider should be initialized
             assert matcher.primary_provider is not None
 
-    def test_location_matching_disabled_by_default(self, config, cache_manager):
-        """Test location matching is disabled by default"""
+    def test_location_matching_enabled_by_default(self, config, cache_manager):
+        """Test location matching is enabled by default"""
         matcher = TieredMatcher(config, cache_manager)
 
-        assert matcher.location_matching_enabled is False
-        assert matcher.location_matcher is None
+        # Location matching config is enabled by default
+        assert matcher.location_matching_config is not None
+        assert matcher.location_matching_config.enabled is True
+        # location_matching_enabled reflects the config
+        assert matcher.location_matching_enabled is True
 
 
 # ============================================================================

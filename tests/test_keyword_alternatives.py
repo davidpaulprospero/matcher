@@ -406,6 +406,82 @@ class TestConfigurationHelpers:
 # Test Edge Cases
 # ============================================================================
 
+class TestCoverageGaps:
+    """Tests for specific coverage gaps (lines 98-99, 226, 292, 319-325)."""
+
+    def test_generate_single_no_api_key_from_config(self):
+        """Test line 98-99: when _get_api_key returns None from config."""
+        # Config without api_keys attribute
+        config = Mock(spec=[])  # No attributes
+        generator = KeywordAlternativeGenerator(config)
+
+        result = generator.generate_single_alternative(
+            keyword="test",
+            provider="gemini"
+            # No api_key parameter, so it will try to get from config
+        )
+
+        assert result is None
+
+    def test_simple_remix_only_video_no_footage(self):
+        """Test line 226: Return None when keyword has 'video' and only 1 core word."""
+        config = Mock()
+        generator = KeywordAlternativeGenerator(config)
+
+        # Keyword with 'video' and only 1 core word after filtering
+        result = generator.simple_remix_keyword("the video")
+
+        # After filtering 'the', only 'video' remains
+        # Since 'video' is in keyword, doesn't add footage
+        # Since only 1 word, can't simplify to 2
+        # Should return None
+        assert result is None
+
+    def test_get_api_key_unknown_provider(self):
+        """Test line 292: _get_api_key returns None for unknown provider."""
+        config = Mock()
+        config.api_keys = Mock()
+        config.api_keys.gemini_api_key = "key"
+        generator = KeywordAlternativeGenerator(config)
+
+        result = generator._get_api_key("unknown_provider")
+
+        assert result is None
+
+    def test_get_model_from_llm_config_gemini(self):
+        """Test lines 319-321: get model from llm config (not matching)."""
+        config = Mock(spec=['llm'])  # Only has llm, not matching
+        config.llm = Mock()
+        config.llm.model = "gemini-1.5-pro"
+        generator = KeywordAlternativeGenerator(config)
+
+        result = generator._get_model("gemini")
+
+        assert result == "gemini-1.5-pro"
+
+    def test_get_model_from_llm_config_anthropic(self):
+        """Test lines 322-323: get anthropic model from llm config."""
+        config = Mock(spec=['llm'])  # Only has llm, not matching
+        config.llm = Mock()
+        config.llm.anthropic_model = "claude-3-opus"
+        generator = KeywordAlternativeGenerator(config)
+
+        result = generator._get_model("anthropic")
+
+        assert result == "claude-3-opus"
+
+    def test_get_model_llm_config_missing_attr(self):
+        """Test line 325: fallback when llm config doesn't have model attr."""
+        config = Mock(spec=['llm'])
+        config.llm = Mock(spec=[])  # No model attributes
+        generator = KeywordAlternativeGenerator(config)
+
+        result = generator._get_model("gemini")
+
+        # Should return default
+        assert result == "gemini-2.0-flash"
+
+
 class TestEdgeCases:
     """Test edge cases"""
 

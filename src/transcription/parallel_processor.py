@@ -61,14 +61,14 @@ def transcribe_videos_parallel(
         model_name = getattr(config.transcription, 'model', 'base')
         compute_type = getattr(config.transcription, 'compute_type', 'auto')
         language = getattr(config.transcription, 'language', None)
-        vad_filter = getattr(config.transcription, 'vad_filter', True)
+        vad_filter = getattr(config.transcription, 'vad_filter', False)  # Default False for YouTube
         min_silence_duration_ms = getattr(config.transcription, 'min_silence_duration_ms', 200)
         speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
     else:
         model_name = "base"
         compute_type = "auto"
         language = None
-        vad_filter = True
+        vad_filter = False  # Default False when no config
         min_silence_duration_ms = 200
         speech_pad_ms = 10
 
@@ -227,7 +227,7 @@ def transcribe_video(
     compute_type: str = "auto",
     language: str = None,
     temp_dir: str = None,
-    vad_filter: bool = True,
+    vad_filter: bool = False,  # Default False - VAD too aggressive for YouTube
     min_silence_duration_ms: int = 200,
     speech_pad_ms: int = 10
 ) -> List[TranscriptSegment]:

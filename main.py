@@ -155,18 +155,72 @@ def load_environment(project_dir: Path = None):
         pass  # dotenv not installed, rely on system env vars
 
 
+def validate_root_directories(config: Config) -> None:
+    """
+    Validate and create root directories for short paths.
+
+    Checks:
+    - download.root_dir (e.g., "E:/v")
+    - image_search.root_dir (e.g., "E:/i")
+
+    Creates base directories if they don't exist.
+    Raises clear errors if paths are invalid.
+    """
+    import sys
+
+    # Validate download root_dir
+    if hasattr(config, 'download') and getattr(config.download, 'root_dir', ''):
+        root = Path(config.download.root_dir)
+
+        # Check if it's an absolute path
+        if not root.is_absolute():
+            print(f"\n  ✗ ERROR: download.root_dir must be an absolute path: {config.download.root_dir}")
+            print(f"           Example: 'E:/v' or 'D:/videos'")
+            sys.exit(1)
+
+        # Try to create it
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            print(f"  ✓ Videos root directory: {root}")
+        except Exception as e:
+            print(f"\n  ✗ ERROR: Cannot create download.root_dir: {root}")
+            print(f"           {e}")
+            print(f"           Check that drive exists and you have write permissions")
+            sys.exit(1)
+
+    # Validate image_search root_dir
+    if hasattr(config, 'image_search') and getattr(config.image_search, 'root_dir', ''):
+        root = Path(config.image_search.root_dir)
+
+        # Check if it's an absolute path
+        if not root.is_absolute():
+            print(f"\n  ✗ ERROR: image_search.root_dir must be an absolute path: {config.image_search.root_dir}")
+            print(f"           Example: 'E:/i' or 'D:/images'")
+            sys.exit(1)
+
+        # Try to create it
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            print(f"  ✓ Images root directory: {root}")
+        except Exception as e:
+            print(f"\n  ✗ ERROR: Cannot create image_search.root_dir: {root}")
+            print(f"           {e}")
+            print(f"           Check that drive exists and you have write permissions")
+            sys.exit(1)
+
+
 def make_paths_project_relative(config: Config, project_dir: Path) -> Config:
     """Update config paths to be relative to project directory"""
     project_dir = project_dir.resolve()
     config.project_dir = str(project_dir)
     project_name = project_dir.name  # e.g., "zerokeyword__2025-12-24"
-    
+
     # Shorten project name for folder (first 15 chars)
     short_project = project_name[:15].rstrip('_-')
-    
+
     # Update downloading output dir - use new short path settings
     download_cfg = config.download if hasattr(config, 'download') else None
-    
+
     if download_cfg and download_cfg.root_dir:
         # Use explicit root_dir (e.g., "E:/vids")
         folder_name = getattr(download_cfg, 'folder_name', 'videos')
@@ -179,21 +233,21 @@ def make_paths_project_relative(config: Config, project_dir: Path) -> Config:
         config.downloaded_videos_dir = str(project_dir / folder_name)
     else:
         config.downloaded_videos_dir = str(project_dir / 'videos')
-    
+
     # Update output dir
     if config.output.output_dir and not Path(config.output.output_dir).is_absolute():
         config.otio_output_dir = str(project_dir / config.output.output_dir)
-    
+
     # Update cache dir (both nested and top-level for compatibility)
     if config.cache.cache_dir and not Path(config.cache.cache_dir).is_absolute():
         config.cache.cache_dir = str(project_dir / config.cache.cache_dir)
     # Also sync top-level cache_dir with nested cache.cache_dir
     config.cache_dir = config.cache.cache_dir
-    
+
     # Update log dir
     if config.logging.log_dir and not Path(config.logging.log_dir).is_absolute():
         config.logging.log_dir = str(project_dir / config.logging.log_dir)
-    
+
     return config
 
 
@@ -755,10 +809,13 @@ def main():
         config = load_project_config(PROJECT_DIR, config_path)
     else:
         config = load_config(str(config_path))
-    
+
     _config = config
     set_config(config)
-    
+
+    # Validate root directories (E:/v, E:/i, etc.) and create them if needed
+    validate_root_directories(config)
+
     # Apply --non-interactive flag
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True

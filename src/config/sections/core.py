@@ -61,7 +61,7 @@ class TranscriptionConfig:
     batch_size: int = 10
 
     # VAD settings
-    vad_filter: bool = True
+    vad_filter: bool = False  # Default False - YouTube audio quality varies, VAD too aggressive
     min_silence_duration_ms: int = 200
     speech_pad_ms: int = 10
 

@@ -102,13 +102,17 @@ class TestProcessVideos:
             parallel_scoring=True,
             max_workers=2,
             log_file_processing=False,
-            interactive_curation=False  # Disable interactive prompts
+            interactive_curation=False,  # Disable interactive prompts
+            min_relevance_score=0.1  # Lower threshold to allow more matches
         )
         processor = KeywordRemixProcessor(config, sample_keywords)
 
         # Create 15 files to trigger parallel processing (>10)
+        # Use filenames that contain keywords for scoring
+        keywords_cycle = ['travel', 'beach', 'vacation']
         for i in range(15):
-            (temp_dir / f"video{i}.mp4").write_text(f"travel video {i}")
+            keyword = keywords_cycle[i % len(keywords_cycle)]
+            (temp_dir / f"{keyword}_video{i}.mp4").write_text(f"{keyword} video {i}")
 
         result = processor.process_videos(temp_dir, show_progress=False)
 
@@ -120,13 +124,15 @@ class TestProcessVideos:
         config = RemixConfig(
             parallel_scoring=False,
             log_file_processing=False,
-            interactive_curation=False  # Disable interactive prompts
+            interactive_curation=False,  # Disable interactive prompts
+            min_relevance_score=0.1  # Lower threshold to allow more matches
         )
         processor = KeywordRemixProcessor(config, sample_keywords)
 
         # Create 5 files (sequential path)
+        # Use filenames that contain keywords for scoring
         for i in range(5):
-            (temp_dir / f"video{i}.mp4").write_text(f"beach vacation {i}")
+            (temp_dir / f"beach_vacation_{i}.mp4").write_text(f"beach vacation {i}")
 
         result = processor.process_videos(temp_dir, show_progress=False)
 

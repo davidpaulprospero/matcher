@@ -204,6 +204,8 @@ class CheckpointManager:
         Args:
             sources: List of DownloadedVideo objects to save
         """
+        from dataclasses import asdict
+
         self.sources_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.sources_file, 'w') as f:
-            json.dump([s.to_dict() for s in sources], f, indent=2)
+            json.dump([asdict(s) for s in sources], f, indent=2)

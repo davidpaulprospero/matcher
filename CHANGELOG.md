@@ -17,8 +17,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test suite organization and documentation
   - 426 total tests with 92% pass rate
   - Unit tests (76%), integration tests (19%), e2e tests (5%)
+- Test for audio downloads checkpoint restore
+  - `test_restore_audio_downloads`: Validates proper restoration of `downloaded_audio` list from checkpoint
+  - `test_restore_audio_downloads_legacy_field_names`: Tests backward compatibility with old field names
+  - Ensures AudioDownload objects have correct field names (56/56 download stage tests passing)
+- **Obsolete Field Removal Tests** (`tests/test_obsolete_fields_fix.py`)
+  - `test_restore_audio_downloads_with_obsolete_fields`: Validates removal of obsolete fields during checkpoint restore
+  - `test_audio_download_dataclass_fields`: Verifies AudioDownload only has expected fields
+  - Comprehensive backward compatibility testing for legacy checkpoints (2 new tests, 100% passing)
 
 ### Fixed
+- **AudioDownload Checkpoint Restore Bug**: Obsolete fields causing restore failures
+  - Root cause: Old checkpoints contained obsolete fields (`channel`, `duration_tier`, `upload_date`, `license`) that are no longer in the AudioDownload dataclass
+  - Symptoms: `AudioDownload.__init__() got an unexpected keyword argument 'channel'` error during checkpoint resume
+  - Fixed: Added obsolete field removal in [src/stages/download.py:118-121](src/stages/download.py#L118-L121)
+  - Impact: Checkpoints from pre-refactoring versions now restore successfully without errors
+  - Tests: Added comprehensive backward compatibility tests in `tests/test_obsolete_fields_fix.py` (96 total tests passing)
+- **Empty Transcriptions Bug**: VAD filter too aggressive for YouTube videos
+  - Root cause: `vad_filter: true` default was filtering out all speech from YouTube audio downloads
+  - Symptoms: "No text segments to embed" error, empty transcription cache files (`[]`)
+  - Fixed: Changed dataclass default `vad_filter: bool = False` in [src/config/sections/core.py:64](src/config/sections/core.py#L64)
+  - Fixed: Changed function defaults to `False` in parallel_processor.py (lines 64, 71, 230) and whisper_client.py (line 135)
+  - Fixed: Changed config.yaml default to `false` (line 82)
+  - Fixed: Added explicit `vad_filter=False` in sequential transcription (src/stages/transcribe.py:239)
+  - Impact: YouTube videos now transcribe correctly with all speech detected
+  - **ACTION REQUIRED**: Clear transcription cache to re-transcribe: `rm -rf .cache/transcriptions`
+  - Note: VAD can be re-enabled in config.yaml if needed for high-quality voiceover audio
+- **Audio-First Mode Checkpoint Restore Bug**: REMIX stage `'AudioDownload' object has no attribute 'file'` error
+  - Root cause 1: `DownloadStage.restore()` was only restoring `downloaded_videos`, not `downloaded_audio`
+  - Root cause 2: Old checkpoints had incorrect field names (`audio_file`, `video_url` instead of `file`, `url`)
+  - Fixed: Added audio downloads restoration in checkpoint restore logic (src/stages/download.py:102-121)
+  - Fixed: Added backward compatibility mapping for old checkpoint field names (audio_file→file, video_url→url)
+  - Impact: Audio-first mode now properly resumes from checkpoint without re-downloading audio
+  - Tests: Added `test_restore_audio_downloads` and `test_restore_audio_downloads_legacy_field_names` (56/56 tests passing)
+- **Unicode Encoding Errors**: Windows console compatibility fixes
+  - Replaced emoji characters (⚠️, ✓, →, ─) with ASCII equivalents (!, +, ->, -)
+  - Fixed in `src/stages/download.py` (line 420) and `src/stages/remix.py` (lines 85, 136, 147, 164, 169)
+  - Prevents `'charmap' codec can't encode characters` errors on Windows
+- **Checkpoint Stage Order**: Added missing SCENE_DETECTION to STAGE_ORDER
+  - Fixed: Added "SCENE_DETECTION" to checkpoint.py STAGE_ORDER (line 32)
+  - Impact: Checkpoint resume now recognizes SCENE_DETECTION as a valid completed stage
+  - Prevents "Unknown stage 'SCENE_DETECTION' in checkpoint" warning
 - pytest collection warning in `tests/test_recent_features.py` (renamed class to avoid "Test" prefix)
 
 ## [0.3.0] - 2026-01-07

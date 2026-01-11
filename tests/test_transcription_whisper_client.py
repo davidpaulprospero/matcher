@@ -506,6 +506,86 @@ class TestThreadSafety:
             assert call_count == 1
 
 
+class TestCoverageGaps:
+    """Test coverage gaps for uncovered lines"""
+
+    # Note: Line 71 (double-check pattern inside lock) is a defensive coding pattern
+    # that's nearly impossible to test reliably without race conditions. It's covered
+    # by the thread safety test in TestThreadSafety.test_concurrent_model_access.
+
+    @patch('src.transcription.whisper_client.logger')
+    def test_get_model_cuda_not_available_lines_98_99(self, mock_logger):
+        """Test lines 98-99: device='cpu', actual_compute='int8' when CUDA is False"""
+        mock_model_instance = Mock()
+        MockWhisperModel = Mock(return_value=mock_model_instance)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = False  # CUDA not available
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch  # Torch is available but CUDA is not
+            return __import__(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            client = WhisperClient(model_name="base", compute_type="auto")
+            model = client.get_model()
+
+            # Should use CPU with int8 when CUDA is not available
+            MockWhisperModel.assert_called_once_with(
+                "base",
+                device="cpu",  # Line 98
+                compute_type="int8",  # Line 99
+                num_workers=1,
+                cpu_threads=4
+            )
+
+    @patch('src.transcription.whisper_client.logger')
+    def test_cleanup_torch_import_error_lines_237_238(self, mock_logger):
+        """Test lines 237-238: pass when torch ImportError during cleanup"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model = Mock()
+        MockWhisperModel = Mock(return_value=mock_model)
+
+        original_import = builtins.__import__
+        cleanup_called = [False]
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                # During cleanup, raise ImportError (lines 237-238)
+                if cleanup_called[0]:
+                    raise ImportError("torch not available during cleanup")
+                else:
+                    # During model init, return mock with CUDA unavailable
+                    mock_torch = Mock()
+                    mock_torch.cuda.is_available.return_value = False
+                    return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            client = WhisperClient()
+            client.get_model()
+
+            # Mark that cleanup is now happening
+            cleanup_called[0] = True
+
+            # Cleanup should not error even when torch import fails
+            client.cleanup()
+
+            # Model should still be unloaded
+            assert wc._shared_model is None
+
+
 class TestEdgeCases:
     """Test edge cases and error conditions"""
 
