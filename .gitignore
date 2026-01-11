@@ -52,6 +52,9 @@ venv.bak/
 *.swp
 *.swo
 
+# --- Project Settings ---
+.project_settings.json
+
 # --- OS Generated Files ---
 .DS_Store
 .DS_Store?
