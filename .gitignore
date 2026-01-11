@@ -11,6 +11,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# --- Testing/Coverage ---
+.coverage
+coverage.json
+htmlcov/
+.pytest_cache/
+
 # Distribution / packaging
 build/
 develop-eggs/
@@ -67,6 +73,16 @@ context.py
 llm_context.txt
 *.md
 !CLAUDE.md
+!TESTING.md
+!TESTING_IMPROVEMENTS.md
+!CHANGELOG.md
+!README.md
+!REFACTORING.md
+!FEATURE_BRANCH_SUMMARY.md
+!*BUGFIXES.md
+!*SUMMARY.md
+!*SESSION*.md
+!docs/*.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
 *.zip

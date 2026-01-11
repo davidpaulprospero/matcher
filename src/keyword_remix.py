@@ -973,130 +973,67 @@ Respond with a JSON object mapping each original keyword to its alternatives:
             logger.warning(f"Failed to cache remix: {e}")
     
     def remix_keyword_gemini(self, keyword: str, attempt: int = 1) -> Tuple[List[str], str]:
-        """Remix a single keyword using Gemini."""
+        """Remix a single keyword using Gemini.
+
+        Delegates to unified KeywordAlternativeGenerator.
+        """
         if not self.gemini_api_key:
             raise ValueError("Gemini API key not available")
-        
-        import google.generativeai as genai
-        genai.configure(api_key=self.gemini_api_key)
-        
-        # Get model from config
-        gemini_model = 'gemini-2.0-flash'
-        if self.config:
-            if hasattr(self.config, 'matching'):
-                gemini_model = getattr(self.config.matching, 'gemini_model', gemini_model)
-            elif hasattr(self.config, 'llm'):
-                gemini_model = getattr(self.config.llm, 'model', gemini_model)
-        
-        model = genai.GenerativeModel(gemini_model)
-        
-        prompt = self.REMIX_PROMPT.format(
+
+        from src.keyword_alternatives import KeywordAlternativeGenerator
+
+        generator = KeywordAlternativeGenerator(self.config)
+        remixed, reasoning = generator.generate_multiple_alternatives(
             keyword=keyword,
-            topic_context=self.topic_context
+            topic_context=self.topic_context,
+            provider="gemini",
+            api_key=self.gemini_api_key
         )
-        
-        try:
-            response = model.generate_content(prompt)
-            text = response.text.strip()
-            
-            # Parse JSON response
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-            
-            remixed = json.loads(text)
-            
-            if isinstance(remixed, list) and len(remixed) > 0:
-                self.stats['api_calls'] += 1
-                logger.debug(f"Remixed '{keyword}' → {remixed}")
-                return remixed, "Gemini remix successful"
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse Gemini response for '{keyword}': {e}")
-        except Exception as e:
-            logger.warning(f"Gemini remix failed for '{keyword}': {e}")
-        
-        return [], "Gemini remix failed"
-    
+
+        if remixed:
+            self.stats['api_calls'] += 1
+
+        return remixed, reasoning
+
     def remix_keyword_anthropic(self, keyword: str, attempt: int = 1) -> Tuple[List[str], str]:
-        """Remix a single keyword using Claude."""
+        """Remix a single keyword using Claude.
+
+        Delegates to unified KeywordAlternativeGenerator.
+        """
         if not self.anthropic_api_key:
             raise ValueError("Anthropic API key not available")
-        
-        import anthropic
-        client = anthropic.Anthropic(api_key=self.anthropic_api_key)
-        
-        prompt = self.REMIX_PROMPT.format(
-            keyword=keyword,
-            topic_context=self.topic_context
-        )
-        
-        # Get model and max_tokens from config
-        anthropic_model = 'claude-3-haiku-20240307'
+
+        from src.keyword_alternatives import KeywordAlternativeGenerator
+
+        # Get max_tokens from config
         max_tokens = 500
         if self.config:
-            if hasattr(self.config, 'matching'):
-                anthropic_model = getattr(self.config.matching, 'anthropic_model', anthropic_model)
-            elif hasattr(self.config, 'llm'):
-                anthropic_model = getattr(self.config.llm, 'anthropic_model', anthropic_model)
+            if hasattr(self.config, 'llm'):
                 max_tokens = getattr(self.config.llm, 'max_tokens', max_tokens)
-        
-        try:
-            response = client.messages.create(
-                model=anthropic_model,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            text = response.content[0].text.strip()
-            
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-            
-            remixed = json.loads(text)
-            
-            if isinstance(remixed, list) and len(remixed) > 0:
-                self.stats['api_calls'] += 1
-                return remixed, "Claude remix successful"
-            
-        except Exception as e:
-            logger.warning(f"Claude remix failed for '{keyword}': {e}")
-        
-        return [], "Claude remix failed"
+
+        generator = KeywordAlternativeGenerator(self.config)
+        remixed, reasoning = generator.generate_multiple_alternatives(
+            keyword=keyword,
+            topic_context=self.topic_context,
+            provider="anthropic",
+            api_key=self.anthropic_api_key,
+            max_tokens=max_tokens
+        )
+
+        if remixed:
+            self.stats['api_calls'] += 1
+
+        return remixed, reasoning
     
     def _fallback_remix(self, keyword: str) -> List[str]:
-        """Rule-based fallback when LLM is unavailable."""
-        remixed = []
-        
-        # Remove year patterns
-        no_year = re.sub(r'\b(19|20)\d{2}\b', '', keyword).strip()
-        if no_year and no_year != keyword:
-            remixed.append(no_year)
-        
-        # Remove "footage" suffix
-        no_footage = re.sub(r'\s*footage\s*$', '', keyword, flags=re.IGNORECASE).strip()
-        if no_footage and no_footage != keyword:
-            remixed.append(no_footage)
-            remixed.append(f"{no_footage} video")
-        
-        # Remove specific locations
-        states = ['Kansas', 'Texas', 'California', 'Florida', 'New York', 'Ohio']
-        simplified = keyword
-        for state in states:
-            simplified = re.sub(rf'\b{state}\b', '', simplified, flags=re.IGNORECASE)
-        simplified = ' '.join(simplified.split())
-        if simplified and simplified != keyword:
-            remixed.append(simplified)
-        
-        # Take subsets of words
-        words = keyword.split()
-        if len(words) >= 3:
-            remixed.append(' '.join(words[:2]))
-            remixed.append(' '.join(words[-2:]))
-        
-        return list(dict.fromkeys([r.strip() for r in remixed if r.strip()]))[:3]
+        """Rule-based fallback when LLM is unavailable.
+
+        Delegates to unified KeywordAlternativeGenerator.
+        """
+        from src.keyword_alternatives import KeywordAlternativeGenerator
+
+        generator = KeywordAlternativeGenerator(self.config)
+        return generator.fallback_remix(keyword)
     
     def remix_keyword(self, keyword: str, attempt: int = 1) -> KeywordRemixResult:
         """
@@ -1223,11 +1160,10 @@ Respond with a JSON object mapping each original keyword to its alternatives:
         """Batch remix using Gemini"""
         if not self.gemini_api_key:
             return []
-        
+
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=self.gemini_api_key)
-            
+            from src.llm_client import create_client, LLMRequest, ResponseFormat
+
             # Get model from config
             gemini_model = 'gemini-2.0-flash'
             if self.config:
@@ -1235,42 +1171,42 @@ Respond with a JSON object mapping each original keyword to its alternatives:
                     gemini_model = getattr(self.config.matching, 'gemini_model', gemini_model)
                 elif hasattr(self.config, 'llm'):
                     gemini_model = getattr(self.config.llm, 'model', gemini_model)
-            
-            model = genai.GenerativeModel(gemini_model)
-            
+
+            client = create_client("gemini", api_key=self.gemini_api_key, model=gemini_model)
+
             keywords_list = "\n".join([f"- {kw}" for kw in keywords])
             prompt = self.BATCH_REMIX_PROMPT.format(
                 keywords_list=keywords_list,
                 topic_context=self.topic_context
             )
-            
-            response = model.generate_content(prompt)
-            text = response.text.strip()
-            
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-            
-            mapping = json.loads(text)
-            
-            results = []
-            for original, remixed in mapping.items():
-                if isinstance(remixed, list) and remixed:
-                    self._cache_remix(original, attempt, remixed, "Gemini batch")
-                    results.append(KeywordRemixResult(
-                        original_keyword=original,
-                        remixed_keywords=remixed,
-                        reasoning="Gemini batch remix",
-                        success=True,
-                        provider="gemini",
-                        attempt=attempt
-                    ))
-                    self.stats['successful_remixes'] += 1
-            
-            self.stats['api_calls'] += 1
-            return results
-            
+
+            request = LLMRequest(
+                prompt=prompt,
+                response_format=ResponseFormat.JSON,
+                cache_key_prefix="keyword_remix_batch"
+            )
+            response = client.generate(request)
+
+            if response.parsed_data and isinstance(response.parsed_data, dict):
+                mapping = response.parsed_data
+
+                results = []
+                for original, remixed in mapping.items():
+                    if isinstance(remixed, list) and remixed:
+                        self._cache_remix(original, attempt, remixed, "Gemini batch")
+                        results.append(KeywordRemixResult(
+                            original_keyword=original,
+                            remixed_keywords=remixed,
+                            reasoning="Gemini batch remix",
+                            success=True,
+                            provider="gemini",
+                            attempt=attempt
+                        ))
+                        self.stats['successful_remixes'] += 1
+
+                self.stats['api_calls'] += 1
+                return results
+
         except Exception as e:
             logger.warning(f"Batch remix failed: {e}")
             return []
