@@ -2,8 +2,8 @@
 
 This document tracks technical debt and refactoring opportunities in the matcher-pipeline codebase. It provides a prioritized list of improvements, estimated impact, and implementation guidance.
 
-**Last Updated:** 2026-01-09
-**Status:** 11 major refactorings completed + OTIO enhancements (Pipeline Stages, LLM Client, OTIO + Track Builders + Testing, Matching, Downloader, Keyword Alternative, Media Sources, Cache Consolidation, Config Modularization, Transcription, Keyword Extractor)
+**Last Updated:** 2026-01-12
+**Status:** 12 major refactorings completed + OTIO enhancements (Pipeline Stages, LLM Client, OTIO + Track Builders + Testing, Matching, Downloader, Keyword Alternative, Media Sources, Cache Consolidation, Config Modularization, Transcription, Keyword Extractor, CLI Extraction)
 
 ---
 
@@ -12,12 +12,12 @@ This document tracks technical debt and refactoring opportunities in the matcher
 The matcher-pipeline codebase has successfully completed a major pipeline stages refactor and modularization effort. This document identifies remaining opportunities for code quality improvement, modularization, and technical debt reduction.
 
 **Key Metrics:**
-- ✅ **11 major refactorings completed** (~16,500+ lines refactored into modular packages)
+- ✅ **12 major refactorings completed** (~17,200+ lines refactored into modular packages)
 - ✅ **OTIO enhancements:** Track builders (530 lines), comprehensive testing (97 tests), integration analysis
 - ✅ Eliminated ~663 lines of duplication (290 LLM + 200 keyword + 30 media + 143 cache)
 - ✅ **6 of 12 caches** successfully migrated to unified BaseCache abstraction (50% coverage)
 - ✅ **1 critical bug fixed** (duplicate ZeroDownloadRemixConfig class)
-- ✅ **Test suite:** 517 tests passing (100% pass rate, 21 skipped integration tests)
+- ✅ **Test suite:** 5,074 tests passing (100% pass rate, 21 skipped integration tests)
 
 **Completed Refactorings:**
 1. ✅ **Pipeline Stages Architecture** - 10 modular stage classes
@@ -33,10 +33,10 @@ The matcher-pipeline codebase has successfully completed a major pipeline stages
 9. ✅ **Config Modularization** (1,921 lines) → src/config/ package (13 modules)
 10. ✅ **Transcription Module Split** (1,036 lines) → src/transcription/ package (6 modules)
 11. ✅ **Keyword Extractor Module Split** (1,161 lines) → src/keyword_extractor/ package (10 modules)
+12. ✅ **CLI Extraction** (959→273 lines main.py) → src/cli/ package (6 modules)
 
 **Remaining Opportunities:**
 1. **Testing Gaps** - Add unit tests for refactored modules
-2. **Main.py Cleanup** (901 lines) - Extract CLI handling, project setup utilities
 
 ---
 
@@ -1518,29 +1518,49 @@ src/parallel/
 
 ---
 
-### 11. main.py Cleanup (901 lines)
+### 11. ✅ main.py CLI Extraction (COMPLETED - Jan 12, 2026)
 
 **Priority:** MEDIUM
-**Status:** Not started (already improved by pipeline refactor)
+**Status:** ✅ COMPLETED
 
 **Problem:**
-- Large CLI argument handling
-- Project setup logic mixed with pipeline orchestration
-- Could delegate more to pipeline.py
+- main.py had 959 lines with CLI handling mixed with orchestration
+- Argument parsing, environment loading, config utilities, logging setup all in one file
+- Interactive prompts mixed with pipeline startup logic
+- Difficult to reuse CLI utilities
 
-**Proposed Solution:**
-Extract `cli/` package:
-- `args.py` - Argument parsing
-- `project_setup.py` - Project directory setup
-- `prompts.py` - User prompts and interaction
+**Solution Implemented:**
+Created `src/cli/` package with 6 focused modules:
 
-Move more orchestration logic to `pipeline.py`
+```
+src/cli/
+├── __init__.py              (48 lines) - Public API exports
+├── args.py                  (123 lines) - Argument parsing with all CLI options
+├── environment.py           (75 lines) - .env loading (install/project order)
+├── config_utils.py          (145 lines) - Config loading, validation, project overrides
+├── logging_setup.py         (118 lines) - Dual-file logging (normal + verbose)
+└── interactive.py           (115 lines) - Voiceover file selection prompts
+```
 
-**Impact:**
-- Reduce 901 lines to ~400 lines entry point + cli modules
-- Clearer separation of CLI vs pipeline logic
+**Code Metrics:**
+- **Before:** 959 lines in main.py
+- **After:** 273 lines in main.py + 624 lines in src/cli/ (6 modules)
+- **main.py reduction:** 72% (959 → 273 lines)
+- **Average module size:** ~104 lines
 
-**Effort:** 2-3 days
+**Benefits:**
+- ✅ main.py now focused on orchestration only
+- ✅ CLI utilities reusable for future entry points
+- ✅ Better testability of individual components
+- ✅ Follows established src/ package patterns
+- ✅ 100% backward compatible
+
+**Testing:**
+- ✅ All modules compile successfully
+- ✅ All imports work correctly
+- ✅ 5,074 tests passing, 21 skipped
+
+**Effort:** 2 hours
 
 **Dependencies:** None
 
