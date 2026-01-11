@@ -26,6 +26,9 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 
+# Import unified cache (cache consolidation refactor - Jan 7, 2026)
+from .cache import BaseCache, CacheEntry, compute_hash
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,6 +187,31 @@ class TranscriptAnalyzer:
         return [idx for idx, _ in scene_scores[:max_scenes]]
 
 
+class VisionCache(BaseCache):
+    """
+    Cache for vision API scene descriptions.
+
+    Caches descriptions keyed by video_path + start_time + end_time.
+    """
+
+    def _serialize_entry(self, entry: CacheEntry) -> dict:
+        """Serialize vision entry"""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: dict) -> CacheEntry:
+        """Deserialize vision entry"""
+        return CacheEntry(
+            data=data['data'],
+            cached_at=data['cached_at'],
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
+
 class VisionProcessor:
     """Processes video frames with vision API"""
     
@@ -242,28 +270,31 @@ class VisionProcessor:
     def _describe_frame_gemini(self, frame_data: bytes) -> Optional[str]:
         """Describe frame using Gemini Vision"""
         try:
-            import google.generativeai as genai
-            
+            from src.llm_client import create_client, LLMRequest, ResponseFormat
+
             api_key = self._get_api_key()
             if not api_key:
                 return None
-            
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(self.model)
-            
-            # Encode frame as base64
-            frame_b64 = base64.b64encode(frame_data).decode('utf-8')
-            
-            response = model.generate_content([
-                "Describe this video frame in 2-3 sentences. Focus on: main subjects, actions, setting, mood. Be specific and concise.",
-                {"mime_type": "image/jpeg", "data": frame_b64}
-            ])
-            
+
+            client = create_client("gemini", api_key=api_key, model=self.model)
+
+            prompt = "Describe this video frame in 2-3 sentences. Focus on: main subjects, actions, setting, mood. Be specific and concise."
+
+            request = LLMRequest(
+                prompt=prompt,
+                response_format=ResponseFormat.TEXT,
+                images=[frame_data],
+                image_format="jpeg",
+                cache_key_prefix="vision"
+            )
+
+            response = client.generate(request)
+
             self.api_calls += 1
             self.total_cost += self.cost_per_call  # Use config value
-            
+
             return response.text.strip()
-            
+
         except Exception as e:
             logger.error(f"Gemini vision error: {e}")
             return None
@@ -278,42 +309,37 @@ class VisionProcessor:
         start_time = scene.get('start_time', 0)
         end_time = scene.get('end_time', start_time + 5)
         mid_time = (start_time + end_time) / 2
-        
-        # Check cache
+
+        # Check cache using VisionCache (cache consolidation refactor - Jan 7, 2026)
+        vision_cache = None
+        cache_key = None
         if cache_dir:
-            cache_key = f"{Path(video_path).stem}_{start_time:.1f}_{end_time:.1f}"
-            cache_file = Path(cache_dir) / "vision_cache" / f"{hashlib.md5(cache_key.encode()).hexdigest()[:12]}.json"
-            
-            if cache_file.exists():
-                try:
-                    with open(cache_file, 'r') as f:
-                        data = json.load(f)
-                        return data.get('description')
-                except:
-                    pass
-        
+            vision_cache = VisionCache(
+                cache_dir=Path(cache_dir) / "vision_cache",
+                index_name="vision_index.json"
+            )
+            cache_key = compute_hash(f"{Path(video_path).stem}_{start_time:.1f}_{end_time:.1f}", length=12)
+
+            cached_entry = vision_cache.get(cache_key)
+            if cached_entry:
+                return cached_entry.data.get('description')
+
         # Extract and describe frame
         frame_data = self._extract_frame(video_path, mid_time)
         if not frame_data:
             return None
-        
+
         description = self._describe_frame_gemini(frame_data)
-        
+
         # Cache result
-        if description and cache_dir:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with open(cache_file, 'w') as f:
-                    json.dump({
-                        'video': video_path,
-                        'start': start_time,
-                        'end': end_time,
-                        'description': description,
-                        'cached_at': time.time()
-                    }, f)
-            except:
-                pass
-        
+        if description and vision_cache and cache_key:
+            vision_cache.set(cache_key, {
+                'video': video_path,
+                'start': start_time,
+                'end': end_time,
+                'description': description
+            })
+
         return description
     
     def get_stats(self) -> dict:

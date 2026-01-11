@@ -27,6 +27,7 @@ import shutil
 import argparse
 import tempfile
 import subprocess
+import pytest
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -92,7 +93,7 @@ TEST_CONFIG = {
 # =============================================================================
 
 @dataclass
-class TestResult:
+class CoreTestResult:
     name: str
     passed: bool
     duration: float
@@ -103,7 +104,7 @@ class TestResult:
 @dataclass
 class ComponentTestResult:
     component: str
-    tests: List[TestResult] = field(default_factory=list)
+    tests: List[CoreTestResult] = field(default_factory=list)
     
     @property
     def passed(self) -> int:
@@ -145,7 +146,7 @@ class CoreTestRunner:
         self.components.append(component)
         return component
     
-    def run_test(self, component: ComponentTestResult, name: str, test_func, *args, **kwargs) -> TestResult:
+    def run_test(self, component: ComponentTestResult, name: str, test_func, *args, **kwargs) -> CoreTestResult:
         """Run a single test within a component"""
         self.log(f"  ├─ {name}...", indent=0)
         start = time.time()
@@ -165,7 +166,7 @@ class CoreTestRunner:
                 message = "OK" if passed else "Failed"
                 details = {}
             
-            test_result = TestResult(
+            test_result = CoreTestResult(
                 name=name,
                 passed=passed,
                 duration=duration,
@@ -175,7 +176,7 @@ class CoreTestRunner:
             
         except Exception as e:
             duration = time.time() - start
-            test_result = TestResult(
+            test_result = CoreTestResult(
                 name=name,
                 passed=False,
                 duration=duration,
@@ -381,43 +382,39 @@ def create_test_srt(output_path: Path, duration: float = 60.0, segments: int = 1
 # COMPONENT TESTS
 # =============================================================================
 
-def test_api_keys_available() -> Tuple[bool, str, Dict]:
+def test_api_keys_available():
     """Check that required API keys are available"""
     from dotenv import load_dotenv
-    
+
     # Load .env file
     env_path = Path(__file__).parent.parent / '.env'
     if env_path.exists():
         load_dotenv(env_path)
-    
+
     keys = {
         'GEMINI_API_KEY': os.environ.get('GEMINI_API_KEY'),
         'ANTHROPIC_API_KEY': os.environ.get('ANTHROPIC_API_KEY'),
         'VOYAGE_API_KEY': os.environ.get('VOYAGE_API_KEY'),
     }
-    
+
     available = {k: bool(v) for k, v in keys.items()}
-    
+
     # Need at least Gemini OR Anthropic for LLM
     has_llm = available['GEMINI_API_KEY'] or available['ANTHROPIC_API_KEY']
-    
-    if not has_llm:
-        return False, "No LLM API key (need GEMINI or ANTHROPIC)", available
-    
+
     available_str = ", ".join(k.replace('_API_KEY', '') for k, v in available.items() if v)
-    return True, f"Available: {available_str}", available
+    assert has_llm, f"No LLM API key (need GEMINI or ANTHROPIC). Available: {available_str}"
 
 
-def test_config_loading() -> Tuple[bool, str]:
+def test_config_loading():
     """Test config loading"""
-    try:
-        from src.config import load_config
-        config = load_config()
-        return True, f"Loaded config (hash: {config._config_hash[:8]})"
-    except Exception as e:
-        return False, str(e)
+    from src.config import load_config
+    config = load_config()
+    assert config is not None
+    assert hasattr(config, '_config_hash')
 
 
+@pytest.mark.integration
 def test_keyword_extraction_llm(srt_path: Path, config) -> Tuple[bool, str, Dict]:
     """Test LLM-based keyword extraction"""
     try:
@@ -454,6 +451,7 @@ def test_keyword_extraction_llm(srt_path: Path, config) -> Tuple[bool, str, Dict
         return False, f"LLM extraction failed: {e}", {}
 
 
+@pytest.mark.integration
 def test_keyword_extraction_fallback(srt_path: Path) -> Tuple[bool, str, Dict]:
     """Test TF-IDF fallback keyword extraction"""
     try:
@@ -488,6 +486,8 @@ def test_keyword_extraction_fallback(srt_path: Path) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires actual video downloads and cookies")
 def test_video_download(output_dir: Path, cookies_path: str = None) -> Tuple[bool, str, Dict]:
     """Test video downloading with yt-dlp"""
     videos_downloaded = []
@@ -511,6 +511,7 @@ def test_video_download(output_dir: Path, cookies_path: str = None) -> Tuple[boo
         return False, f"Only {len(videos_downloaded)} videos (need {TEST_CONFIG['min_videos_downloaded']})", {'videos': videos_downloaded}
 
 
+@pytest.mark.integration
 def test_transcription(video_paths: List[str], cache_dir: Path, config) -> Tuple[bool, str, Dict]:
     """Test video transcription with Whisper"""
     try:
@@ -554,6 +555,7 @@ def test_transcription(video_paths: List[str], cache_dir: Path, config) -> Tuple
         return False, str(e), {}
 
 
+@pytest.mark.integration
 def test_transcription_cache(video_path: str, cache_dir: Path, config) -> Tuple[bool, str]:
     """Test transcription caching"""
     try:
@@ -581,6 +583,8 @@ def test_transcription_cache(video_path: str, cache_dir: Path, config) -> Tuple[
         return False, str(e)
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires Gemini API key")
 def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
     """Test Gemini embeddings"""
     try:
@@ -606,6 +610,8 @@ def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
         return False, str(e), {}
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires sentence-transformers or TF-IDF")
 def test_embeddings_fallback(texts: List[str]) -> Tuple[bool, str]:
     """Test embedding fallback (sentence-transformers or TF-IDF)"""
     try:
@@ -801,6 +807,8 @@ Respond with JSON array:
         return []
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires actual matching setup with voiceover and video data")
 def test_matching_algorithm(
     voiceover_segments: List[Dict],
     video_segments: List[Dict],
@@ -870,6 +878,8 @@ def test_matching_algorithm(
         return False, str(e), {}
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires actual match data and OTIO library")
 def test_otio_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
     """Test OTIO file generation"""
     try:
@@ -913,6 +923,8 @@ def test_otio_generation(matches, voiceover_segments, video_segments, config, ou
         return False, f"OTIO error: {str(e)}", {'traceback': traceback.format_exc()}
 
 
+@pytest.mark.integration
+@pytest.mark.skip(reason="Integration test - requires actual match data and XML generation")
 def test_xml_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
     """Test XML (FCP) file generation"""
     try:
