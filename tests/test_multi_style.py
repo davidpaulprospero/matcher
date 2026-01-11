@@ -461,3 +461,363 @@ class TestEdgeCases:
 
         # But with same content
         assert style1.strategy_tracks == style2.strategy_tracks
+
+
+# ============================================================================
+# Test Interactive Prompts
+# ============================================================================
+
+class TestPromptForSecondStyle:
+    """Test prompt_for_second_style function"""
+
+    def test_select_preset_1_strict(self):
+        """Test selecting preset 1 (strict)"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="1"):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_select_preset_2_stock_heavy(self):
+        """Test selecting preset 2 (stock_heavy)"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="2"):
+            style = prompt_for_second_style()
+
+        assert style.name == "stock_heavy"
+
+    def test_select_preset_3_fast_paced(self):
+        """Test selecting preset 3 (fast_paced)"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="3"):
+            style = prompt_for_second_style()
+
+        assert style.name == "fast_paced"
+
+    def test_select_preset_4_cinematic(self):
+        """Test selecting preset 4 (cinematic)"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="4"):
+            style = prompt_for_second_style()
+
+        assert style.name == "cinematic"
+
+    def test_select_preset_by_name_strict(self):
+        """Test selecting preset by name 'strict'"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="strict"):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_select_preset_by_name_stock_heavy(self):
+        """Test selecting preset by name 'stock_heavy'"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="stock_heavy"):
+            style = prompt_for_second_style()
+
+        assert style.name == "stock_heavy"
+
+    def test_select_preset_by_name_fast_paced(self):
+        """Test selecting preset by name 'fast_paced'"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="fast_paced"):
+            style = prompt_for_second_style()
+
+        assert style.name == "fast_paced"
+
+    def test_select_preset_by_name_cinematic(self):
+        """Test selecting preset by name 'cinematic'"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="cinematic"):
+            style = prompt_for_second_style()
+
+        assert style.name == "cinematic"
+
+    def test_default_selection_empty_input(self):
+        """Test default selection with empty input"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value=""):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_invalid_selection_defaults_to_strict(self):
+        """Test invalid selection defaults to strict"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', return_value="invalid_choice"):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_eof_error_handling(self):
+        """Test EOFError returns strict style"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', side_effect=EOFError):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_keyboard_interrupt_handling(self):
+        """Test KeyboardInterrupt returns strict style"""
+        from src.multi_style import prompt_for_second_style
+
+        with patch('builtins.input', side_effect=KeyboardInterrupt):
+            style = prompt_for_second_style()
+
+        assert style.name == "strict"
+
+    def test_select_custom_option_5(self):
+        """Test selecting custom option 5"""
+        from src.multi_style import prompt_for_second_style
+
+        # Mock sequence for custom style
+        inputs = iter(["5", "0.65", "2", "1", "2", "y", "mycustom", "My custom desc"])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = prompt_for_second_style()
+
+        assert style.name == "mycustom"
+        assert style.confidence_threshold == 0.65
+
+    def test_select_custom_by_name(self):
+        """Test selecting 'custom' by name"""
+        from src.multi_style import prompt_for_second_style
+
+        inputs = iter(["custom", "", "", "", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = prompt_for_second_style()
+
+        assert style.name == "custom"
+
+
+class TestPromptCustomStyle:
+    """Test _prompt_custom_style function"""
+
+    def test_all_defaults(self):
+        """Test custom style with all defaults"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.name == "custom"
+        assert style.confidence_threshold == 0.5
+        assert style.num_alternatives == 2
+        assert style.prefer_shorter_clips is False
+        assert style.prefer_longer_clips is False
+        assert style.include_strategy_tracks is True
+
+    def test_custom_confidence(self):
+        """Test custom confidence threshold"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["0.75", "", "", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.confidence_threshold == 0.75
+
+    def test_custom_alternatives(self):
+        """Test custom number of alternatives"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "5", "", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.num_alternatives == 5
+
+    def test_prefer_shorter_clips(self):
+        """Test selecting shorter clips preference"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "2", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.prefer_shorter_clips is True
+        assert style.prefer_longer_clips is False
+
+    def test_prefer_longer_clips(self):
+        """Test selecting longer clips preference"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "3", "", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.prefer_longer_clips is True
+        assert style.prefer_shorter_clips is False
+
+    def test_prefer_stock_footage(self):
+        """Test selecting stock footage preference"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "2", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.prefer_stock_footage is True
+        assert style.prefer_youtube is False
+
+    def test_prefer_youtube(self):
+        """Test selecting YouTube preference"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "3", "", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.prefer_stock_footage is False
+        assert style.prefer_youtube is True
+
+    def test_disable_strategy_tracks(self):
+        """Test disabling strategy tracks"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "", "n", "", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.include_strategy_tracks is False
+
+    def test_custom_name(self):
+        """Test custom style name"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "", "", "my_named_style", ""])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.name == "my_named_style"
+
+    def test_custom_description(self):
+        """Test custom style description"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["", "", "", "", "", "", "My custom description"])
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        assert style.description == "My custom description"
+
+    def test_eof_error_returns_partial_style(self):
+        """Test EOFError returns partial custom style"""
+        from src.multi_style import _prompt_custom_style
+
+        with patch('builtins.input', side_effect=EOFError):
+            style = _prompt_custom_style()
+
+        assert style.name == "custom"
+
+    def test_keyboard_interrupt_returns_partial_style(self):
+        """Test KeyboardInterrupt returns partial custom style"""
+        from src.multi_style import _prompt_custom_style
+
+        with patch('builtins.input', side_effect=KeyboardInterrupt):
+            style = _prompt_custom_style()
+
+        assert style.name == "custom"
+
+    def test_value_error_returns_partial_style(self):
+        """Test invalid number input returns partial style"""
+        from src.multi_style import _prompt_custom_style
+
+        inputs = iter(["not_a_number"])  # Invalid confidence value
+
+        with patch('builtins.input', lambda _: next(inputs)):
+            style = _prompt_custom_style()
+
+        # Should return style with default confidence
+        assert style.name == "custom"
+
+
+class TestPromptMultiStyleEnabled:
+    """Test prompt_multi_style_enabled function"""
+
+    def test_yes_lowercase(self):
+        """Test 'y' returns True"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', return_value="y"):
+            result = prompt_multi_style_enabled()
+
+        assert result is True
+
+    def test_yes_full_word(self):
+        """Test 'yes' returns True"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', return_value="yes"):
+            result = prompt_multi_style_enabled()
+
+        assert result is True
+
+    def test_no_returns_false(self):
+        """Test 'n' returns False"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', return_value="n"):
+            result = prompt_multi_style_enabled()
+
+        assert result is False
+
+    def test_empty_returns_false(self):
+        """Test empty input returns False (default)"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', return_value=""):
+            result = prompt_multi_style_enabled()
+
+        assert result is False
+
+    def test_random_input_returns_false(self):
+        """Test random input returns False"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', return_value="maybe"):
+            result = prompt_multi_style_enabled()
+
+        assert result is False
+
+    def test_eof_error_returns_false(self):
+        """Test EOFError returns False"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', side_effect=EOFError):
+            result = prompt_multi_style_enabled()
+
+        assert result is False
+
+    def test_keyboard_interrupt_returns_false(self):
+        """Test KeyboardInterrupt returns False"""
+        from src.multi_style import prompt_multi_style_enabled
+
+        with patch('builtins.input', side_effect=KeyboardInterrupt):
+            result = prompt_multi_style_enabled()
+
+        assert result is False

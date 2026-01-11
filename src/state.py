@@ -7,7 +7,7 @@ replacing the 30+ instance attributes scattered across the Pipeline class.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

@@ -235,7 +235,10 @@ class TranscribeStage(Stage):
                     str(vf),
                     cache=cache,
                     model_name=config.transcription.model,
-                    language=config.transcription.language if config.transcription.language != 'auto' else None
+                    language=config.transcription.language if config.transcription.language != 'auto' else None,
+                    vad_filter=False,  # Disable VAD for YouTube videos - speech quality varies
+                    min_silence_duration_ms=getattr(config.transcription, 'min_silence_duration_ms', 200),
+                    speech_pad_ms=getattr(config.transcription, 'speech_pad_ms', 10)
                 )
                 transcripts[str(vf)] = segments
             except Exception as e:

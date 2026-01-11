@@ -1,0 +1,1072 @@
+"""
+Tests for src/media_sources/base.py and video clients (pexels.py, pixabay.py).
+
+Targets:
+- BaseMediaClient initialization and methods
+- PexelsVideoClient search, download, error handling
+- PixabayVideoClient search, download, error handling
+"""
+
+import pytest
+import time
+import json
+from pathlib import Path
+from unittest.mock import patch, MagicMock, Mock
+import requests
+
+from src.media_sources.base import BaseMediaClient
+from src.media_sources.videos.pexels import PexelsVideoClient, PEXELS_VIDEOS_API
+from src.media_sources.videos.pixabay import PixabayVideoClient, PIXABAY_VIDEOS_API
+from src.media_sources.models import VideoResult
+
+
+# Concrete implementation for testing abstract BaseMediaClient
+class ConcreteMediaClient(BaseMediaClient):
+    """Concrete implementation for testing the abstract base class."""
+
+    def search(self, query: str, max_results: int = 10):
+        """Minimal implementation of abstract method."""
+        return []
+
+
+class TestBaseMediaClient:
+    """Test BaseMediaClient abstract base class."""
+
+    def test_init_creates_output_dir(self, tmp_path):
+        """Test that initialization creates output directory."""
+        output_dir = tmp_path / "new_output_dir"
+        config = MagicMock()
+
+        client = ConcreteMediaClient(config=config, output_dir=str(output_dir))
+
+        assert output_dir.exists()
+        assert client.output_dir == output_dir
+        assert client.config == config
+
+    def test_init_with_custom_params(self, tmp_path):
+        """Test initialization with custom parameters."""
+        config = MagicMock()
+
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            min_size_mb=2.5,
+            download_timeout=60,
+            rate_limit_delay=0.5,
+            user_agent="CustomAgent/1.0"
+        )
+
+        assert client.min_size == int(2.5 * 1024 * 1024)
+        assert client.download_timeout == 60
+        assert client._min_interval == 0.5
+        assert client.session.headers["User-Agent"] == "CustomAgent/1.0"
+
+    def test_rate_limit_delays(self, tmp_path):
+        """Test that _rate_limit() enforces minimum delay."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            rate_limit_delay=0.1
+        )
+
+        # First call should not delay
+        start = time.time()
+        client._rate_limit()
+        first_call_time = time.time() - start
+        assert first_call_time < 0.1  # Should be nearly instant
+
+        # Second call should delay
+        start = time.time()
+        client._rate_limit()
+        second_call_time = time.time() - start
+        # Should have delayed close to 0.1 seconds
+        assert second_call_time >= 0.05  # Allow some tolerance
+
+    def test_rate_limit_no_delay_after_interval(self, tmp_path):
+        """Test that _rate_limit() doesn't delay after interval passes."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            rate_limit_delay=0.01
+        )
+
+        client._rate_limit()
+        time.sleep(0.02)  # Wait longer than rate limit
+
+        start = time.time()
+        client._rate_limit()
+        elapsed = time.time() - start
+        # Should not have delayed much
+        assert elapsed < 0.02
+
+    def test_download_with_timeout_success(self, tmp_path):
+        """Test successful download."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            min_size_mb=0.001  # Very small minimum
+        )
+
+        # Create mock response
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 10000]  # 10KB
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            output_path = tmp_path / "test_file.mp4"
+            result = client.download_with_timeout("http://example.com/video.mp4", output_path)
+
+            assert result is True
+            assert output_path.exists()
+
+    def test_download_with_timeout_file_too_small(self, tmp_path):
+        """Test download failure due to small file size."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            min_size_mb=1.0  # 1MB minimum
+        )
+
+        # Create mock response with small content
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"small"]
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            output_path = tmp_path / "small_file.mp4"
+            result = client.download_with_timeout("http://example.com/video.mp4", output_path)
+
+            assert result is False
+            assert not output_path.exists()  # Should be deleted
+
+    def test_download_with_timeout_exception(self, tmp_path):
+        """Test download failure due to exception."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path)
+        )
+
+        with patch.object(client.session, 'get', side_effect=requests.RequestException("Network error")):
+            output_path = tmp_path / "failed_file.mp4"
+            result = client.download_with_timeout("http://example.com/video.mp4", output_path)
+
+            assert result is False
+            assert not output_path.exists()
+
+    def test_download_with_timeout_exception_cleanup(self, tmp_path):
+        """Test that partial download is cleaned up on exception."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path)
+        )
+
+        # Create the file first to test cleanup
+        output_path = tmp_path / "partial_file.mp4"
+        output_path.write_bytes(b"partial content")
+
+        with patch.object(client.session, 'get', side_effect=Exception("Error")):
+            result = client.download_with_timeout("http://example.com/video.mp4", output_path)
+
+            assert result is False
+            assert not output_path.exists()  # Should be deleted
+
+    def test_download_with_timeout_custom_timeout(self, tmp_path):
+        """Test download with custom timeout override."""
+        config = MagicMock()
+        client = ConcreteMediaClient(
+            config=config,
+            output_dir=str(tmp_path),
+            download_timeout=30
+        )
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 1000]
+
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            output_path = tmp_path / "test.mp4"
+            # Override with custom timeout
+            client.download_with_timeout("http://example.com/video.mp4", output_path, timeout=60)
+
+            # Verify custom timeout was used
+            mock_get.assert_called_once()
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs['timeout'] == 60
+
+    def test_cleanup(self, tmp_path):
+        """Test cleanup method closes session."""
+        config = MagicMock()
+        client = ConcreteMediaClient(config=config, output_dir=str(tmp_path))
+
+        mock_session = MagicMock()
+        client.session = mock_session
+
+        client.cleanup()
+
+        mock_session.close.assert_called_once()
+
+    def test_cleanup_no_session(self, tmp_path):
+        """Test cleanup when session doesn't exist."""
+        config = MagicMock()
+        client = ConcreteMediaClient(config=config, output_dir=str(tmp_path))
+
+        # Remove session attribute
+        delattr(client, 'session')
+
+        # Should not raise
+        client.cleanup()
+
+
+class TestPexelsVideoClient:
+    """Test PexelsVideoClient."""
+
+    def test_init_with_api_key(self, tmp_path):
+        """Test initialization with API key."""
+        config = MagicMock()
+
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_api_key"
+        )
+
+        assert client.api_key == "test_api_key"
+        assert client.min_duration == 3.0
+        assert client.max_duration == 30.0
+        assert client.prefer_hd is True
+
+    def test_init_api_key_from_env(self, tmp_path):
+        """Test initialization with API key from environment."""
+        config = MagicMock()
+
+        with patch.dict('os.environ', {'PEXELS_API_KEY': 'env_api_key'}):
+            client = PexelsVideoClient(
+                config=config,
+                output_dir=str(tmp_path)
+            )
+            assert client.api_key == "env_api_key"
+
+    def test_init_custom_params(self, tmp_path):
+        """Test initialization with custom parameters."""
+        config = MagicMock()
+
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="key",
+            min_duration=5.0,
+            max_duration=60.0,
+            prefer_hd=False,
+            download_timeout=120
+        )
+
+        assert client.min_duration == 5.0
+        assert client.max_duration == 60.0
+        assert client.prefer_hd is False
+        assert client.download_timeout == 120
+
+    def test_search_no_api_key(self, tmp_path):
+        """Test search returns empty list when no API key."""
+        config = MagicMock()
+
+        with patch.dict('os.environ', {}, clear=True):
+            # Ensure env var is not set
+            import os
+            if 'PEXELS_API_KEY' in os.environ:
+                del os.environ['PEXELS_API_KEY']
+
+            client = PexelsVideoClient(
+                config=config,
+                output_dir=str(tmp_path),
+                api_key=None
+            )
+            client.api_key = None  # Force None
+
+            results = client.search("test")
+            assert results == []
+
+    def test_search_success(self, tmp_path):
+        """Test successful video search."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {
+                    "id": 12345,
+                    "url": "https://pexels.com/video/12345",
+                    "duration": 10,
+                    "video_files": [
+                        {"link": "https://video.pexels.com/12345.mp4", "height": 1080, "width": 1920, "quality": "hd", "file_type": "mp4"},
+                        {"link": "https://video.pexels.com/12345_sd.mp4", "height": 480, "width": 640, "quality": "sd", "file_type": "mp4"}
+                    ]
+                },
+                {
+                    "id": 12346,
+                    "url": "https://pexels.com/video/12346",
+                    "duration": 15,
+                    "video_files": [
+                        {"link": "https://video.pexels.com/12346.mp4", "height": 720, "width": 1280, "quality": "hd", "file_type": "mp4"}
+                    ]
+                }
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("nature", max_results=10)
+
+            assert len(results) == 2
+            assert results[0].id == "12345"
+            assert results[0].source == "pexels"
+            assert results[0].height == 1080  # Prefer HD
+            assert results[0].duration == 10
+
+    def test_search_duration_filter(self, tmp_path):
+        """Test that duration filter works."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key",
+            min_duration=5.0,
+            max_duration=20.0
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {"id": 1, "duration": 2, "video_files": [{"link": "url", "height": 720}]},  # Too short
+                {"id": 2, "duration": 10, "video_files": [{"link": "url", "height": 720}]},  # OK
+                {"id": 3, "duration": 25, "video_files": [{"link": "url", "height": 720}]},  # Too long
+                {"id": 4, "duration": 15, "video_files": [{"link": "url", "height": 720}]},  # OK
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 2
+            assert all(r.duration >= 5.0 and r.duration <= 20.0 for r in results)
+
+    def test_search_no_video_files(self, tmp_path):
+        """Test that videos without files are skipped."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {"id": 1, "duration": 10, "video_files": []},  # No files
+                {"id": 2, "duration": 10},  # No video_files key
+                {"id": 3, "duration": 10, "video_files": [{"link": "url", "height": 720}]},  # OK
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 1
+            assert results[0].id == "3"
+
+    def test_search_exception(self, tmp_path):
+        """Test search handles exception gracefully."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        with patch.object(client.session, 'get', side_effect=Exception("API error")):
+            results = client.search("test")
+            assert results == []
+
+    def test_download_video_success(self, tmp_path):
+        """Test successful video download."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pexels",
+            url="https://pexels.com/video/12345678",
+            download_url="https://video.pexels.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 10000]
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            result = client.download_video(video)
+
+            assert result is not None
+            assert Path(result).exists()
+            assert "p12345678.mp4" in result  # Source letter + short ID
+
+    def test_download_video_no_download_url(self, tmp_path):
+        """Test download returns None when no download URL."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="123",
+            source="pexels",
+            url="https://pexels.com/video/123",
+            download_url="",  # Empty
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        result = client.download_video(video)
+        assert result is None
+
+    def test_download_video_file_exists(self, tmp_path):
+        """Test download returns existing file path."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # Pre-create the file
+        existing_file = tmp_path / "p12345678.mp4"
+        existing_file.write_bytes(b"existing content")
+
+        video = VideoResult(
+            id="12345678",
+            source="pexels",
+            url="https://pexels.com/video/12345678",
+            download_url="https://video.pexels.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        result = client.download_video(video)
+
+        assert result == str(existing_file)
+
+    def test_download_video_exception(self, tmp_path):
+        """Test download handles exception and cleans up."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pexels",
+            url="https://pexels.com/video/12345678",
+            download_url="https://video.pexels.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        with patch.object(client.session, 'get', side_effect=Exception("Download error")):
+            result = client.download_video(video)
+
+            assert result is None
+            # File should not exist
+            assert not (tmp_path / "p12345678.mp4").exists()
+
+    def test_download_video_exception_cleanup(self, tmp_path):
+        """Test that partial file is cleaned up on exception."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pexels",
+            url="https://pexels.com/video/12345678",
+            download_url="https://video.pexels.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        # Create a mock that creates a partial file then raises
+        def mock_get(*args, **kwargs):
+            # Create partial file
+            partial_file = tmp_path / "p12345678.mp4"
+            partial_file.write_bytes(b"partial")
+            raise Exception("Download error")
+
+        with patch.object(client.session, 'get', side_effect=mock_get):
+            result = client.download_video(video)
+
+            assert result is None
+            # Partial file should be cleaned up
+            assert not (tmp_path / "p12345678.mp4").exists()
+
+    def test_search_and_download(self, tmp_path):
+        """Test search_and_download method."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # Mock search to return videos
+        mock_videos = [
+            VideoResult(id="1", source="pexels", url="", download_url="http://v1.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+            VideoResult(id="2", source="pexels", url="", download_url="http://v2.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+            VideoResult(id="3", source="pexels", url="", download_url="http://v3.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+        ]
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 1000]
+
+        with patch.object(client, 'search', return_value=mock_videos):
+            with patch.object(client.session, 'get', return_value=mock_response):
+                results = client.search_and_download("nature", max_videos=2)
+
+                assert len(results) == 2
+
+    def test_search_and_download_partial_success(self, tmp_path):
+        """Test search_and_download when some downloads fail."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_videos = [
+            VideoResult(id="1", source="pexels", url="", download_url="http://v1.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+            VideoResult(id="2", source="pexels", url="", download_url="http://v2.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+        ]
+
+        # Mock download_video to succeed for first, fail for second
+        with patch.object(client, 'search', return_value=mock_videos):
+            with patch.object(client, 'download_video', side_effect=["/path/to/v1.mp4", None]):
+                results = client.search_and_download("nature", max_videos=2)
+
+                assert len(results) == 1
+                assert results[0] == "/path/to/v1.mp4"
+
+
+class TestPixabayVideoClient:
+    """Test PixabayVideoClient."""
+
+    def test_init_with_api_key(self, tmp_path):
+        """Test initialization with API key."""
+        config = MagicMock()
+
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_api_key"
+        )
+
+        assert client.api_key == "test_api_key"
+
+    def test_init_api_key_from_env(self, tmp_path):
+        """Test initialization with API key from environment."""
+        config = MagicMock()
+
+        with patch.dict('os.environ', {'PIXABAY_API_KEY': 'env_pixabay_key'}):
+            client = PixabayVideoClient(
+                config=config,
+                output_dir=str(tmp_path)
+            )
+            assert client.api_key == "env_pixabay_key"
+
+    def test_search_no_api_key(self, tmp_path):
+        """Test search returns empty list when no API key."""
+        config = MagicMock()
+
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key=None
+        )
+        client.api_key = None  # Force None
+
+        results = client.search("test")
+        assert results == []
+
+    def test_search_success(self, tmp_path):
+        """Test successful video search."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "hits": [
+                {
+                    "id": 12345,
+                    "pageURL": "https://pixabay.com/videos/12345",
+                    "duration": 10,
+                    "videos": {
+                        "large": {"url": "https://pixabay.com/12345_large.mp4", "width": 1920, "height": 1080, "size": "large"},
+                        "medium": {"url": "https://pixabay.com/12345_medium.mp4", "width": 1280, "height": 720, "size": "medium"}
+                    }
+                }
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("nature", max_results=10)
+
+            assert len(results) == 1
+            assert results[0].id == "12345"
+            assert results[0].source == "pixabay"
+            assert results[0].height == 1080  # Large preferred
+
+    def test_search_duration_filter(self, tmp_path):
+        """Test that duration filter works."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key",
+            min_duration=5.0,
+            max_duration=20.0
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "hits": [
+                {"id": 1, "duration": 2, "videos": {"large": {"url": "url", "width": 1920, "height": 1080}}},  # Too short
+                {"id": 2, "duration": 10, "videos": {"large": {"url": "url", "width": 1920, "height": 1080}}},  # OK
+                {"id": 3, "duration": 25, "videos": {"large": {"url": "url", "width": 1920, "height": 1080}}},  # Too long
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 1
+            assert results[0].id == "2"
+
+    def test_search_video_size_fallback(self, tmp_path):
+        """Test that video size falls back from large to medium to small."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "hits": [
+                # Only medium available
+                {"id": 1, "duration": 10, "videos": {"medium": {"url": "medium_url", "width": 1280, "height": 720}}},
+                # Only small available
+                {"id": 2, "duration": 10, "videos": {"small": {"url": "small_url", "width": 640, "height": 480}}},
+                # No valid URL in large, falls back to medium
+                {"id": 3, "duration": 10, "videos": {"large": {"url": ""}, "medium": {"url": "med_url", "width": 1280, "height": 720}}},
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 3
+            assert results[0].download_url == "medium_url"
+            assert results[1].download_url == "small_url"
+            assert results[2].download_url == "med_url"
+
+    def test_search_no_valid_video_url(self, tmp_path):
+        """Test that videos without valid URLs are skipped."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "hits": [
+                {"id": 1, "duration": 10, "videos": {}},  # Empty videos
+                {"id": 2, "duration": 10, "videos": {"large": {"url": ""}, "medium": {"url": ""}}},  # No valid URLs
+                {"id": 3, "duration": 10, "videos": {"large": {"url": "valid_url", "width": 1920, "height": 1080}}},  # OK
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 1
+            assert results[0].id == "3"
+
+    def test_search_exception(self, tmp_path):
+        """Test search handles exception gracefully."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        with patch.object(client.session, 'get', side_effect=Exception("API error")):
+            results = client.search("test")
+            assert results == []
+
+    def test_download_video_success(self, tmp_path):
+        """Test successful video download."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pixabay",
+            url="https://pixabay.com/videos/12345678",
+            download_url="https://pixabay.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 10000]
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            result = client.download_video(video)
+
+            assert result is not None
+            assert Path(result).exists()
+
+    def test_download_video_no_download_url(self, tmp_path):
+        """Test download returns None when no download URL."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="123",
+            source="pixabay",
+            url="",
+            download_url="",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        result = client.download_video(video)
+        assert result is None
+
+    def test_download_video_file_exists(self, tmp_path):
+        """Test download returns existing file path."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # Pre-create the file
+        existing_file = tmp_path / "p12345678.mp4"
+        existing_file.write_bytes(b"existing content")
+
+        video = VideoResult(
+            id="12345678",
+            source="pixabay",
+            url="",
+            download_url="https://pixabay.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        result = client.download_video(video)
+
+        assert result == str(existing_file)
+
+    def test_download_video_exception(self, tmp_path):
+        """Test download handles exception and cleans up."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pixabay",
+            url="",
+            download_url="https://pixabay.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        with patch.object(client.session, 'get', side_effect=Exception("Error")):
+            result = client.download_video(video)
+            assert result is None
+
+    def test_download_video_cleanup_partial_file(self, tmp_path):
+        """Test that partial file is cleaned up on exception."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pixabay",
+            url="",
+            download_url="https://pixabay.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        # Create partial file
+        partial_file = tmp_path / "p12345678.mp4"
+
+        def mock_get(*args, **kwargs):
+            partial_file.write_bytes(b"partial")
+            raise Exception("Error")
+
+        with patch.object(client.session, 'get', side_effect=mock_get):
+            result = client.download_video(video)
+
+            assert result is None
+            assert not partial_file.exists()
+
+    def test_search_and_download(self, tmp_path):
+        """Test search_and_download method."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_videos = [
+            VideoResult(id="1", source="pixabay", url="", download_url="http://v1.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+            VideoResult(id="2", source="pixabay", url="", download_url="http://v2.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4"),
+        ]
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 1000]
+
+        with patch.object(client, 'search', return_value=mock_videos):
+            with patch.object(client.session, 'get', return_value=mock_response):
+                results = client.search_and_download("nature", max_videos=2)
+
+                assert len(results) == 2
+
+    def test_search_and_download_max_limit(self, tmp_path):
+        """Test search_and_download respects max_videos limit."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_videos = [
+            VideoResult(id=str(i), source="pixabay", url="", download_url=f"http://v{i}.mp4", width=1920, height=1080, duration=10, quality="hd", file_type="mp4")
+            for i in range(10)
+        ]
+
+        with patch.object(client, 'search', return_value=mock_videos):
+            with patch.object(client, 'download_video', return_value="/path/to/video.mp4"):
+                results = client.search_and_download("nature", max_videos=3)
+
+                assert len(results) == 3
+
+
+class TestVideoClientLongIds:
+    """Test handling of long video IDs."""
+
+    def test_pexels_long_id_truncation(self, tmp_path):
+        """Test Pexels truncates long IDs to 8 chars."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="1234567890123456",  # 16 chars
+            source="pexels",
+            url="",
+            download_url="https://video.pexels.com/long.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 1000]
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            result = client.download_video(video)
+
+            assert result is not None
+            filename = Path(result).name
+            # Should be p + last 8 chars + .mp4
+            assert filename == "p90123456.mp4"
+
+    def test_pixabay_short_id_unchanged(self, tmp_path):
+        """Test Pixabay keeps short IDs unchanged."""
+        config = MagicMock()
+        client = PixabayVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345",  # 5 chars - short
+            source="pixabay",
+            url="",
+            download_url="https://pixabay.com/short.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        mock_response = MagicMock()
+        mock_response.iter_content.return_value = [b"x" * 1000]
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            result = client.download_video(video)
+
+            assert result is not None
+            filename = Path(result).name
+            # Should keep full ID
+            assert filename == "p12345.mp4"
+
+
+class TestVideoClientPreferHD:
+    """Test HD preference behavior."""
+
+    def test_pexels_prefer_hd_true(self, tmp_path):
+        """Test Pexels prefers HD when enabled."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key",
+            prefer_hd=True
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {
+                    "id": 1,
+                    "duration": 10,
+                    "video_files": [
+                        {"link": "sd_url", "height": 480, "width": 640, "quality": "sd"},
+                        {"link": "hd_url", "height": 1080, "width": 1920, "quality": "hd"}
+                    ]
+                }
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 1
+            assert results[0].download_url == "hd_url"
+            assert results[0].height == 1080
+
+    def test_pexels_prefer_hd_false(self, tmp_path):
+        """Test Pexels doesn't sort by height when HD not preferred."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key",
+            prefer_hd=False
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {
+                    "id": 1,
+                    "duration": 10,
+                    "video_files": [
+                        {"link": "sd_url", "height": 480, "width": 640, "quality": "sd"},
+                        {"link": "hd_url", "height": 1080, "width": 1920, "quality": "hd"}
+                    ]
+                }
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+
+            assert len(results) == 1
+            # First file in list is used when not preferring HD
+            assert results[0].download_url == "sd_url"

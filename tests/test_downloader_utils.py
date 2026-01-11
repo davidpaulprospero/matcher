@@ -5,13 +5,15 @@ Tests filename sanitization, time formatting, and cookie handling.
 """
 
 import pytest
+import tempfile
 from pathlib import Path
 import sys
+from unittest.mock import Mock
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.downloader.utils import sanitize_filename_for_nle, format_time
+from src.downloader.utils import sanitize_filename_for_nle, format_time, get_cookies_args
 
 
 class TestSanitizeFilenameForNLE:
@@ -244,6 +246,123 @@ class TestTimeEdgeCases:
 
         assert isinstance(formatted, str)
         assert ":" in formatted
+
+
+class TestGetCookiesArgs:
+    """Test cookie argument generation for yt-dlp."""
+
+    def test_get_cookies_args_browser_cookies(self):
+        """Test getting cookies from browser."""
+        mock_config = Mock()
+        mock_download = Mock()
+        mock_download.cookies_from_browser = "firefox"
+        mock_download.cookies_path = ""
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        assert args == ['--cookies-from-browser', 'firefox']
+
+    def test_get_cookies_args_file_path(self):
+        """Test getting cookies from file."""
+        # Create temporary cookies file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".txt") as f:
+            f.write("# Cookies file\n")
+            cookies_path = f.name
+
+        try:
+            mock_config = Mock()
+            mock_download = Mock()
+            mock_download.cookies_from_browser = ""  # No browser
+            mock_download.cookies_path = cookies_path
+            mock_config.download = mock_download
+
+            args = get_cookies_args(mock_config)
+
+            assert args == ['--cookies', cookies_path]
+        finally:
+            Path(cookies_path).unlink()
+
+    def test_get_cookies_args_no_cookies(self):
+        """Test when no cookies are configured."""
+        mock_config = Mock()
+        mock_download = Mock()
+        mock_download.cookies_from_browser = ""
+        mock_download.cookies_path = ""
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        assert args == []
+
+    def test_get_cookies_args_browser_priority(self):
+        """Test browser cookies take priority over file."""
+        # Create temporary cookies file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".txt") as f:
+            f.write("# Cookies file\n")
+            cookies_path = f.name
+
+        try:
+            mock_config = Mock()
+            mock_download = Mock()
+            mock_download.cookies_from_browser = "chrome"  # Has browser
+            mock_download.cookies_path = cookies_path      # Also has file
+            mock_config.download = mock_download
+
+            args = get_cookies_args(mock_config)
+
+            # Should prefer browser over file
+            assert args == ['--cookies-from-browser', 'chrome']
+        finally:
+            Path(cookies_path).unlink()
+
+    def test_get_cookies_args_nonexistent_file(self):
+        """Test with nonexistent cookies file path."""
+        mock_config = Mock()
+        mock_download = Mock()
+        mock_download.cookies_from_browser = ""
+        mock_download.cookies_path = "/nonexistent/cookies.txt"
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        # Should return empty list if file doesn't exist
+        assert args == []
+
+    def test_get_cookies_args_edge_browser(self):
+        """Test with Edge browser."""
+        mock_config = Mock()
+        mock_download = Mock()
+        mock_download.cookies_from_browser = "edge"
+        mock_download.cookies_path = ""
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        assert args == ['--cookies-from-browser', 'edge']
+
+    def test_get_cookies_args_safari_browser(self):
+        """Test with Safari browser."""
+        mock_config = Mock()
+        mock_download = Mock()
+        mock_download.cookies_from_browser = "safari"
+        mock_download.cookies_path = ""
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        assert args == ['--cookies-from-browser', 'safari']
+
+    def test_get_cookies_args_missing_attributes(self):
+        """Test with missing config attributes (uses getattr defaults)."""
+        mock_config = Mock()
+        mock_download = Mock(spec=[])  # No attributes
+        mock_config.download = mock_download
+
+        args = get_cookies_args(mock_config)
+
+        # Should handle missing attributes gracefully
+        assert args == []
 
 
 if __name__ == "__main__":

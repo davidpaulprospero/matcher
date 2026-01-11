@@ -6,6 +6,7 @@ Tests all pipeline state dataclasses with correct field names.
 
 import pytest
 from pathlib import Path
+from unittest.mock import Mock
 import sys
 
 # Add src to path
@@ -407,6 +408,492 @@ class TestPipelineState:
 
         assert state.face_preference == "more"
         assert state.stage_timings["DOWNLOAD"] == 45.2
+
+
+class TestTranscriptSegmentToDict:
+    """Test TranscriptSegment to_dict method."""
+
+    def test_to_dict_basic(self):
+        """Test basic to_dict conversion."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Test text"
+        )
+
+        # Note: to_dict uses asdict from dataclasses
+        from dataclasses import asdict
+        result = asdict(segment)
+
+        assert isinstance(result, dict)
+        assert result['index'] == 0
+        assert result['start_time'] == 0.0
+        assert result['end_time'] == 5.0
+        assert result['text'] == "Test text"
+        assert result['source_file'] == ""
+        assert result['is_broll'] is False
+        assert result['description_source'] == ""
+
+    def test_to_dict_with_all_fields(self):
+        """Test to_dict with all fields populated."""
+        segment = TranscriptSegment(
+            index=5,
+            start_time=10.5,
+            end_time=25.5,
+            text="Vision-generated description",
+            source_file="/path/to/video.mp4",
+            is_broll=True,
+            description_source="vision"
+        )
+
+        from dataclasses import asdict
+        result = asdict(segment)
+
+        assert result['index'] == 5
+        assert result['start_time'] == 10.5
+        assert result['end_time'] == 25.5
+        assert result['text'] == "Vision-generated description"
+        assert result['source_file'] == "/path/to/video.mp4"
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+
+class TestPipelineStateClearMatches:
+    """Test clear_matches method."""
+
+    def test_clear_matches_empty(self):
+        """Test clearing matches when already empty."""
+        state = PipelineState()
+        assert state.matches == []
+        assert state.alternatives == {}
+
+        state.clear_matches()
+
+        assert state.matches == []
+        assert state.alternatives == {}
+
+    def test_clear_matches_with_data(self):
+        """Test clearing matches when data exists."""
+        state = PipelineState()
+
+        # Add matches
+        match1 = Match(
+            segment_index=0,
+            video_file="/path/video1.mp4",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.9
+        )
+        match2 = Match(
+            segment_index=1,
+            video_file="/path/video2.mp4",
+            video_start=5.0,
+            video_end=10.0,
+            confidence=0.85
+        )
+        state.matches = [match1, match2]
+
+        # Add alternatives
+        alt_match = Match(
+            segment_index=0,
+            video_file="/path/video3.mp4",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.75
+        )
+        state.alternatives = {0: [alt_match]}
+
+        assert len(state.matches) == 2
+        assert len(state.alternatives) == 1
+
+        # Clear
+        state.clear_matches()
+
+        assert state.matches == []
+        assert state.alternatives == {}
+
+
+class TestPipelineStateFromLegacy:
+    """Test from_legacy_pipeline class method."""
+
+    def test_from_legacy_basic(self):
+        """Test creating PipelineState from legacy pipeline object."""
+        # Create mock legacy pipeline
+        legacy = Mock()
+        legacy.keywords = ["beach", "ocean", "sunset"]
+        legacy.topic_context = "Travel Photography"
+        legacy.extracted_entities = [{"name": "Eiffel Tower", "type": "landmark"}]
+        legacy.failed_keywords = ["mountain"]
+        legacy.face_preference = "more"
+        legacy.stage_timings = {"DOWNLOAD": 45.2, "TRANSCRIBE": 120.5}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = []
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert state.keywords == ["beach", "ocean", "sunset"]
+        assert state.topic_context == "Travel Photography"
+        assert len(state.extracted_entities) == 1
+        assert state.failed_keywords == ["mountain"]
+        assert state.face_preference == "more"
+        assert state.stage_timings["DOWNLOAD"] == 45.2
+
+    def test_from_legacy_voiceover_segments_dict(self):
+        """Test converting voiceover segments from dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = [
+            {"index": 0, "start": 0.0, "end": 5.0, "text": "First segment"},
+            {"index": 1, "start": 5.0, "end": 10.0, "text": "Second segment"}
+        ]
+        legacy.downloaded_videos = []
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = []
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.voiceover_segments) == 2
+        assert state.voiceover_segments[0].index == 0
+        assert state.voiceover_segments[0].start == 0.0
+        assert state.voiceover_segments[0].text == "First segment"
+        assert state.voiceover_segments[1].index == 1
+        assert state.voiceover_segments[1].end == 10.0
+
+    def test_from_legacy_voiceover_segments_objects(self):
+        """Test converting voiceover segments when already objects."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+
+        # Pre-created VoiceoverSegment objects
+        seg = VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        legacy.voiceover_segments = [seg]
+
+        legacy.downloaded_videos = []
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = []
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.voiceover_segments) == 1
+        assert state.voiceover_segments[0] is seg
+
+    def test_from_legacy_downloaded_videos_dict(self):
+        """Test converting downloaded videos from dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = [
+            {"file": "video1.mp4", "url": "https://example.com/1", "title": "Beach Video",
+             "channel": "TravelCh", "duration": 120.0, "duration_tier": "medium",
+             "keyword": "beach", "source": "download"},
+            {"path": "video2.mp4", "tier": "short"}  # Alt field names
+        ]
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = []
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.downloaded_videos) == 2
+        assert state.downloaded_videos[0].file == "video1.mp4"
+        assert state.downloaded_videos[0].channel == "TravelCh"
+        assert state.downloaded_videos[1].file == "video2.mp4"  # 'path' -> 'file'
+        assert state.downloaded_videos[1].duration_tier == "short"  # 'tier' -> 'duration_tier'
+
+    def test_from_legacy_downloaded_videos_objects(self):
+        """Test converting downloaded videos when already objects."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+
+        video = DownloadedVideo(file="video.mp4", url="https://example.com", source="download")
+        legacy.downloaded_videos = [video]
+
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = []
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.downloaded_videos) == 1
+        assert state.downloaded_videos[0] is video
+
+    def test_from_legacy_matches_dict(self):
+        """Test converting matches from dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+        legacy.matches = [
+            {"segment_index": 0, "video_file": "video.mp4", "video_start": 10.0,
+             "video_end": 15.0, "confidence": 0.9, "strategy": "primary", "reason": "Good match"},
+            {"vo_index": 1, "file": "video2.mp4", "start": 20.0, "end": 25.0, "confidence": 0.8}  # Alt field names
+        ]
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.matches) == 2
+        assert state.matches[0].segment_index == 0
+        assert state.matches[0].video_file == "video.mp4"
+        assert state.matches[0].strategy == "primary"
+        assert state.matches[1].segment_index == 1  # 'vo_index' -> 'segment_index'
+        assert state.matches[1].video_file == "video2.mp4"  # 'file' -> 'video_file'
+
+    def test_from_legacy_matches_objects(self):
+        """Test converting matches when already objects."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.transcripts = {}
+        legacy.embeddings = []
+        legacy.text_metadata = []
+        legacy.embedding_index = None
+
+        match_obj = Match(segment_index=0, video_file="video.mp4",
+                         video_start=0.0, video_end=5.0, confidence=0.9)
+        legacy.matches = [match_obj]
+
+        legacy.entity_images = {}
+        legacy.entity_videos = {}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.matches) == 1
+        assert state.matches[0] is match_obj
+
+    def test_from_legacy_entity_media(self):
+        """Test copying entity media dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.transcripts = {"video1": [{"text": "test"}]}
+        legacy.embeddings = [[0.1, 0.2, 0.3]]
+        legacy.text_metadata = [{"source": "video1"}]
+        legacy.embedding_index = Mock()
+        legacy.matches = []
+
+        img = EntityImage(entity="Tower", file="tower.jpg")
+        vid = EntityVideo(entity="Tower", file="tower.mp4", source="pexels")
+        legacy.entity_images = {"Tower": img}
+        legacy.entity_videos = {"Tower": vid}
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert "Tower" in state.entity_images
+        assert "Tower" in state.entity_videos
+        assert state.entity_images["Tower"] is img
+        assert state.entity_videos["Tower"] is vid
+        assert state.transcripts == {"video1": [{"text": "test"}]}
+        assert len(state.embeddings) == 1
+        assert state.embedding_index is legacy.embedding_index
+
+    def test_from_legacy_missing_attributes(self):
+        """Test handling missing attributes gracefully."""
+        # Create minimal mock with getattr defaults
+        legacy = Mock(spec=[])  # Empty spec means no attributes
+        # Most attributes will return Mock objects when accessed
+        # The from_legacy_pipeline should use getattr with defaults
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # Should create valid state with defaults
+        assert state is not None
+        assert isinstance(state.keywords, list)
+        assert isinstance(state.voiceover_segments, list)
+
+
+class TestPipelineStateToCheckpointDict:
+    """Test to_checkpoint_dict method."""
+
+    def test_to_checkpoint_dict_empty(self):
+        """Test checkpoint dict from empty state."""
+        state = PipelineState()
+
+        result = state.to_checkpoint_dict()
+
+        assert isinstance(result, dict)
+        assert result['voiceover_path'] == ""
+        assert result['keywords'] == []
+        assert result['topic_context'] == ""
+        assert result['segment_count'] == 0
+        assert result['video_count'] == 0
+        assert result['match_count'] == 0
+        assert result['stage_timings'] == {}
+
+    def test_to_checkpoint_dict_with_data(self):
+        """Test checkpoint dict with data."""
+        state = PipelineState()
+        state.voiceover_path = "/path/to/voiceover.srt"
+        state.keywords = ["beach", "ocean"]
+        state.topic_context = "Travel"
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        ]
+        state.downloaded_videos = [
+            DownloadedVideo(file="video.mp4")
+        ]
+        state.matches = [
+            Match(segment_index=0, video_file="video.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.9)
+        ]
+        state.stage_timings = {"DOWNLOAD": 45.2}
+
+        result = state.to_checkpoint_dict()
+
+        assert result['voiceover_path'] == "/path/to/voiceover.srt"
+        assert result['keywords'] == ["beach", "ocean"]
+        assert result['topic_context'] == "Travel"
+        assert result['segment_count'] == 1
+        assert result['video_count'] == 1
+        assert result['match_count'] == 1
+        assert result['stage_timings'] == {"DOWNLOAD": 45.2}
+
+
+# ============================================================================
+# Coverage Tests - Lines 18-20, 50
+# ============================================================================
+
+class TestTranscriptSegmentToDict:
+    """Test TranscriptSegment.to_dict() method (line 50)."""
+
+    def test_to_dict_returns_dict(self):
+        """Test to_dict converts segment to dictionary."""
+        from dataclasses import asdict
+        segment = TranscriptSegment(
+            index=5,
+            start_time=10.5,
+            end_time=25.3,
+            text="Test transcript text",
+            source_file="video.mp4",
+            is_broll=True,
+            description_source="vision"
+        )
+
+        result = segment.to_dict()
+
+        assert isinstance(result, dict)
+        assert result['index'] == 5
+        assert result['start_time'] == 10.5
+        assert result['end_time'] == 25.3
+        assert result['text'] == "Test transcript text"
+        assert result['source_file'] == "video.mp4"
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+    def test_to_dict_with_defaults(self):
+        """Test to_dict with default field values."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Default test"
+        )
+
+        result = segment.to_dict()
+
+        assert result['is_broll'] is False
+        assert result['description_source'] == ""
+        assert result['source_file'] == ""
+
+
+class TestNumpyImportFallback:
+    """Test numpy import fallback (lines 18-20)."""
+
+    def test_has_numpy_flag_exists(self):
+        """Test HAS_NUMPY flag is set correctly when numpy is available."""
+        # This tests the import path when numpy IS available
+        from src import state
+        # If numpy is installed, HAS_NUMPY should be True
+        import importlib.util
+        numpy_available = importlib.util.find_spec("numpy") is not None
+
+        if numpy_available:
+            assert state.HAS_NUMPY is True
+            assert state.np is not None
+        else:
+            # If numpy not installed, test the fallback path
+            assert state.HAS_NUMPY is False
+            assert state.np is None
+
+    def test_state_works_without_numpy_dependency(self):
+        """Test state module doesn't require numpy for basic operations."""
+        # The state module should work even if numpy operations aren't used
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="No numpy needed"
+        )
+        assert segment.text == "No numpy needed"
 
 
 if __name__ == "__main__":

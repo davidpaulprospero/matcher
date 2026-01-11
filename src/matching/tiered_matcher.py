@@ -99,7 +99,7 @@ class TieredMatcher:
             if self.location_matching_enabled:
                 try:
                     self.location_service = create_location_service(self.config)
-                    self.location_matcher = LocationMatcher(self.location_service, self.location_matching_config)
+                    self.location_matcher = LocationMatcher(self.location_service)
                     logger.info("Location-aware matching enabled")
                 except Exception as e:
                     logger.warning(f"Could not initialize location service: {e}")
@@ -326,7 +326,8 @@ class TieredMatcher:
         location_reason = ""
         if self.location_matcher:
             candidates, location_filter_applied, location_reason = self.location_matcher.apply_location_filter(
-                vo_segment, candidates, segment_idx
+                vo_segment, candidates, segment_idx,
+                self.location_matching_enabled, self.location_matching_config
             )
 
         # Apply smart reuse filtering

@@ -70,7 +70,21 @@
       "Bash(coverage report:*)",
       "Bash(test:*)",
       "Bash(git restore:*)",
-      "Bash(gh pr create:*)"
+      "Bash(gh pr create:*)",
+      "Bash(timeout 30 tail:*)",
+      "Bash(ffprobe:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(dir \"E:\\\\v\\\\6__2026-01-10\\\\*.mp3\" /B)",
+      "Bash(find .cache/transcriptions/ -name \"*.json\" -exec sh -c 'echo \"\"=== {} ===\"\"; head -5 \"\"{}\"\"' ;)",
+      "Bash(python -c \"\nwith open\\(''tests/test_stock_api_clients.py'', ''a''\\) as f:\n    f.write\\(''''''\n\n# ============================================================================\n# Test Download Functionality\n# ============================================================================\n\nclass TestPexelsImageDownload:\n    \"\"\"\"\"\"Test Pexels image download functionality\"\"\"\"\"\"\n\n    @pytest.fixture\n    def sample_image\\(self\\):\n        \"\"\"\"\"\"Create a sample ImageResult\"\"\"\"\"\"\n        return ImageResult\\(\n            source=\"\"pexels\"\",\n            id=12345678,\n            url=\"\"https://www.pexels.com/photo/12345678/\"\",\n            download_url=\"\"https://images.pexels.com/photos/12345678/photo.jpg\"\",\n            photographer=\"\"Test Photographer\"\",\n            width=1920,\n            height=1080,\n            description=\"\"Test image\"\",\n            tags=[\"\"test\"\", \"\"image\"\"]\n        \\)\n\n    def test_download_image_success\\(self, mock_config, temp_output_dir, sample_image\\):\n        \"\"\"\"\"\"Test successful image download\"\"\"\"\"\"\n        client = PexelsImageClient\\(\n            config=mock_config,\n            output_dir=temp_output_dir,\n            api_key=\"\"test_key\"\"\n        \\)\n\n        # Mock the HTTP response\n        mock_response = Mock\\(\\)\n        mock_response.headers = {''''''content-length'''''': ''''''5000000''''''}  # 5MB\n        mock_response.iter_content.return_value = [b''''''x'''''' * 1000 for _ in range\\(5000\\)]\n\n        with patch.object\\(client.session, ''''''get'''''', return_value=mock_response\\):\n            result = client.download_image\\(sample_image, check_size=False\\)\n\n        assert result is not None\n        assert Path\\(result\\).exists\\(\\)\n        assert Path\\(result\\).stat\\(\\).st_size == 5000000\n        assert len\\(client.downloaded_files\\) == 1\n\n    def test_download_image_skips_existing\\(self, mock_config, temp_output_dir, sample_image\\):\n        \"\"\"\"\"\"Test download skips existing files\"\"\"\"\"\"\n        client = PexelsImageClient\\(\n            config=mock_config,\n            output_dir=temp_output_dir,\n            api_key=\"\"test_key\"\"\n        \\)\n\n        # Create existing file\n        existing_path = Path\\(temp_output_dir\\) / \"\"12345678.jpg\"\"\n        existing_path.write_bytes\\(b''''''x'''''' * 5000000\\)  # 5MB\n\n        result = client.download_image\\(sample_image, check_size=False\\)\n\n        assert result == str\\(existing_path\\)\n        # No HTTP request should be made\n        assert len\\(client.downloaded_files\\) == 0\n\n    def test_download_image_network_error\\(self, mock_config, temp_output_dir, sample_image\\):\n        \"\"\"\"\"\"Test download handles network errors\"\"\"\"\"\"\n        client = PexelsImageClient\\(\n            config=mock_config,\n            output_dir=temp_output_dir,\n            api_key=\"\"test_key\"\"\n        \\)\n\n        with patch.object\\(client.session, ''''''get'''''', side_effect=Exception\\(\"\"Network error\"\"\\)\\):\n            result = client.download_image\\(sample_image, check_size=False\\)\n\n        assert result is None\n        assert sample_image.id in client.failed_downloads\n''''''\\)\nprint\\(''Tests appended successfully''\\)\")",
+      "Bash(sort:*)",
+      "Bash(python test_root_dir_validation.py:*)",
+      "Bash(python -m pytest --cov=src --cov-report=term -q tests/)",
+      "Bash(python -m coverage run:*)",
+      "Bash(python -m coverage:*)",
+      "Bash(PYTHONPATH=. python:*)",
+      "Bash(set:*)",
+      "Bash(python -m coverage run -m pytest:*)"
     ]
   }
 }
