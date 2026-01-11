@@ -11,6 +11,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# --- Testing/Coverage ---
+.coverage
+coverage.json
+htmlcov/
+.pytest_cache/
+
 # Distribution / packaging
 build/
 develop-eggs/
