@@ -107,7 +107,7 @@ class SceneDetectionStage(Stage):
 
             # Update transcripts with scene metadata
             if state.transcripts:
-                self._merge_scene_data_to_transcripts(state, scene_data_dict)
+                self._merge_scene_data_to_transcripts(state, scene_data_dict, config)
 
             print(f"  ✓ Scene detection complete:")
             print(f"    • {len(scene_data_dict)} videos processed")
@@ -193,7 +193,8 @@ class SceneDetectionStage(Stage):
     def _merge_scene_data_to_transcripts(
         self,
         state: 'PipelineState',
-        scene_data_dict: Dict[str, Any]
+        scene_data_dict: Dict[str, Any],
+        config: 'Config'
     ):
         """
         Merge scene metadata into transcript segments.
@@ -203,7 +204,13 @@ class SceneDetectionStage(Stage):
         - face_score: float
         - scene_index: int
         """
+        logger.info("===== SCENE_DETECTION _merge_scene_data_to_transcripts START =====")
+        logger.info(f"  text_metadata entries: {len(state.text_metadata)}")
+        logger.info(f"  embeddings empty: {is_embeddings_empty(state.embeddings)}")
+        logger.info(f"  transcripts: {len(state.transcripts)} video sets")
+
         if not state.transcripts:
+            logger.info("  ! No transcripts to update")
             return
 
         for video_path, segments in state.transcripts.items():
@@ -231,9 +238,24 @@ class SceneDetectionStage(Stage):
 
         logger.info(f"Merged scene metadata into {len(state.transcripts)} transcript sets")
 
+        # Create text_metadata entries for silent videos (stock footage)
+        # These videos have scene data but no transcripts, so we need to create
+        # text_metadata entries manually for them to be available for matching
+        silent_videos_processed = self._create_text_metadata_for_silent_videos(
+            state, scene_data_dict, config
+        )
+        if silent_videos_processed > 0:
+            logger.info(f"Created text_metadata entries for {silent_videos_processed} silent videos")
+
         # Also update text_metadata if it exists (for matching stage)
+        logger.info(f"  Checking text_metadata update condition:")
+        logger.info(f"    embeddings empty? {is_embeddings_empty(state.embeddings)}")
+        logger.info(f"    text_metadata exists? {bool(state.text_metadata)}")
         if not is_embeddings_empty(state.embeddings) and state.text_metadata:
             updated_count = 0
+            broll_found = 0
+            direct_updates = 0  # For videos with no transcripts
+
             for meta in state.text_metadata:
                 if not isinstance(meta, dict):
                     continue
@@ -242,20 +264,222 @@ class SceneDetectionStage(Stage):
                 if not video_path:
                     continue
 
-                # Find matching transcript segment
+                # Try to find matching transcript segment first
                 segments = state.transcripts.get(video_path, [])
+                matched = False
+
                 for transcript in segments:
                     # Match by video path and time (with tolerance)
                     transcript_start = getattr(transcript, 'start_time', getattr(transcript, 'start', 0))
                     meta_start = meta.get('start_time', 0)
 
                     if abs(float(transcript_start) - float(meta_start)) < 0.1:
-                        # Copy scene metadata to text_metadata
-                        meta['is_broll'] = getattr(transcript, 'is_broll', False)
+                        # Copy scene metadata from transcript
+                        is_broll_val = getattr(transcript, 'is_broll', False)
+                        meta['is_broll'] = is_broll_val
                         meta['face_score'] = getattr(transcript, 'face_score', 0.5)
                         meta['scene_index'] = getattr(transcript, 'scene_index', None)
                         updated_count += 1
+                        if is_broll_val:
+                            broll_found += 1
+                        matched = True
                         break
 
-            if updated_count > 0:
-                logger.info(f"Updated {updated_count} text_metadata entries with scene data")
+                # If no transcript match (silent video), get scene data directly
+                if not matched:
+                    video_name = Path(video_path).stem
+                    scene_data = scene_data_dict.get(video_name)
+
+                    if scene_data:
+                        meta_start = meta.get('start_time', 0)
+                        meta_end = meta.get('end_time', meta_start + 1.0)
+                        meta_mid = (meta_start + meta_end) / 2
+
+                        # Find which scene this text_metadata entry belongs to
+                        for scene in scene_data.scenes:
+                            if scene.start_time <= meta_mid <= scene.end_time:
+                                # Update directly from scene data
+                                meta['is_broll'] = scene.is_broll
+                                meta['face_score'] = scene.face_score
+                                meta['scene_index'] = scene.scene_index
+                                direct_updates += 1
+                                if scene.is_broll:
+                                    broll_found += 1
+                                break
+                    elif direct_updates == 0:  # Log only first few misses
+                        logger.debug(f"  No scene data for silent video: {video_name}")
+
+            if updated_count > 0 or direct_updates > 0:
+                logger.info(f"Updated {updated_count} text_metadata entries from transcripts")
+                logger.info(f"Updated {direct_updates} text_metadata entries directly from scene data (silent videos)")
+                logger.info(f"  B-roll entries found during update: {broll_found}")
+
+            # Count B-roll entries for debugging
+            broll_count = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+            logger.info(f"  After update: {broll_count}/{len(state.text_metadata)} entries have is_broll=True")
+
+            if broll_count == 0 and broll_found > 0:
+                logger.warning(f"  !!! B-roll data LOST: found {broll_found} during update but final count is 0")
+        else:
+            logger.info("  ! SKIPPED text_metadata update (embeddings empty or text_metadata missing)")
+
+    def _create_text_metadata_for_silent_videos(
+        self,
+        state: 'PipelineState',
+        scene_data_dict: Dict[str, Any],
+        config: 'Config'
+    ) -> int:
+        """
+        Create text_metadata entries for silent videos (stock footage).
+
+        Silent videos have scene data but no transcripts, so they're never
+        added to text_metadata during transcription. We need to create entries
+        manually so they can be used for matching (especially B-roll matching).
+
+        Optionally uses Vision API to generate descriptions instead of placeholder text.
+
+        Returns: Number of silent videos processed
+        """
+        from pathlib import Path
+
+        # Find videos in downloaded_videos that have scene data but no transcripts
+        silent_videos = []
+        for dv in state.downloaded_videos:
+            video_path = getattr(dv, 'file', None)
+            if not video_path:
+                continue
+
+            video_name = Path(video_path).stem
+
+            # Has scene data but not in transcripts = silent video
+            if video_name in scene_data_dict and video_path not in state.transcripts:
+                silent_videos.append((video_path, video_name))
+
+        if not silent_videos:
+            return 0
+
+        # Initialize vision processor if enabled
+        vision_processor = None
+        use_vision = getattr(config.vision, 'enabled', False)
+
+        if use_vision:
+            try:
+                from src.vision import VisionProcessor
+                vision_processor = VisionProcessor(config)
+                if not vision_processor.is_available():
+                    logger.info("  Vision API not available (no API key), using placeholder text")
+                    vision_processor = None
+                else:
+                    logger.info(f"  Vision API enabled for {len(silent_videos)} silent videos")
+            except Exception as e:
+                logger.warning(f"  Failed to initialize vision processor: {e}")
+                vision_processor = None
+
+        # Create text_metadata entries for each scene in silent videos
+        new_entries = []
+        vision_calls = 0
+
+        for video_path, video_name in silent_videos:
+            scene_data = scene_data_dict.get(video_name)
+            if not scene_data:
+                continue
+
+            # Create one text_metadata entry per scene
+            for scene in scene_data.scenes:
+                # Try to get vision description if available
+                description = None
+                if vision_processor:
+                    try:
+                        scene_dict = {
+                            'start_time': scene.start_time,
+                            'end_time': scene.end_time
+                        }
+                        description = vision_processor.describe_scene(
+                            video_path,
+                            scene_dict,
+                            cache_dir=config.cache.cache_dir
+                        )
+                        if description:
+                            vision_calls += 1
+                    except Exception as e:
+                        logger.debug(f"  Vision API failed for {video_name} scene {scene.scene_index}: {e}")
+
+                # Use vision description or fallback to placeholder
+                text = description if description else f"[Silent video: {video_name}]"
+
+                entry = {
+                    'video_path': video_path,
+                    'text': text,
+                    'start_time': scene.start_time,
+                    'end_time': scene.end_time,
+                    'is_broll': scene.is_broll,
+                    'face_score': scene.face_score,
+                    'scene_index': scene.scene_index,
+                }
+                new_entries.append(entry)
+
+        # Add to state.text_metadata
+        if new_entries:
+            if state.text_metadata is None:
+                state.text_metadata = []
+            state.text_metadata.extend(new_entries)
+
+            broll_count = sum(1 for e in new_entries if e.get('is_broll'))
+            logger.info(f"  Created {len(new_entries)} text_metadata entries for {len(silent_videos)} silent videos ({broll_count} B-roll)")
+
+            if vision_processor and vision_calls > 0:
+                stats = vision_processor.get_stats()
+                logger.info(f"  Vision API: {vision_calls} scenes described, estimated cost: ${stats['estimated_cost']:.4f}")
+
+            # Compute embeddings for the new entries and add to FAISS index
+            self._compute_embeddings_for_silent_videos(state, new_entries)
+
+        return len(silent_videos)
+
+    def _compute_embeddings_for_silent_videos(
+        self,
+        state: 'PipelineState',
+        new_entries: List[Dict[str, Any]]
+    ):
+        """
+        Compute embeddings for silent video entries and add to FA ISS index.
+
+        Silent video entries are created after the main embedding computation,
+        so we need to compute their embeddings separately and add them to the index.
+        """
+        if not new_entries:
+            return
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+
+            # Get existing embeddings
+            if is_embeddings_empty(state.embeddings):
+                logger.warning("  Cannot add silent video embeddings: no existing embeddings")
+                return
+
+            # Extract text from new entries
+            texts = [e['text'] for e in new_entries]
+
+            # Load embedding model
+            model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+
+            # Compute embeddings
+            new_embeddings = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+
+            # Add to state.embeddings
+            state.embeddings = np.vstack([state.embeddings, new_embeddings])
+
+            # Rebuild FAISS index with new embeddings
+            if state.embedding_index is not None:
+                import faiss
+                dimension = state.embeddings.shape[1]
+                index = faiss.IndexFlatL2(dimension)
+                index.add(state.embeddings.astype('float32'))
+                state.embedding_index = index
+
+                logger.info(f"  Added {len(new_embeddings)} embeddings for silent videos to index")
+
+        except Exception as e:
+            logger.warning(f"Failed to compute embeddings for silent videos: {e}")

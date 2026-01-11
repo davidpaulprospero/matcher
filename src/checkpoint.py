@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 # Stage order for resume logic
 STAGE_ORDER = [
     "ANALYZE",
-    "ENTITY_IMAGES", 
+    "ENTITY_IMAGES",
     "ENTITY_VIDEOS",
     "DOWNLOAD",
     "STOCK",
     "REMIX",
     "TRANSCRIBE",
+    "SCENE_DETECTION",
     "MATCH",
     "OUTPUT"
 ]

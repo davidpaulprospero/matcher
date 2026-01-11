@@ -1,0 +1,16 @@
+# Development dependencies for testing and code quality
+
+# Testing
+pytest>=8.1.0
+pytest-cov>=7.0.0
+pytest-benchmark>=5.2.0
+pytest-xdist  # Parallel test execution
+pytest-timeout  # Timeout for slow tests
+
+# Code Quality
+coverage>=7.0.0
+coverage-badge  # Generate coverage badge
+
+# Type Checking (optional)
+# mypy
+# types-requests

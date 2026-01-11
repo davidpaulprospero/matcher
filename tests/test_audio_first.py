@@ -44,7 +44,7 @@ def print_result(name: str, passed: bool, details: str = ""):
     return passed
 
 
-class TestAudioFirstFeatures:
+class AudioFirstFeaturesTester:
     """Test suite for audio-first pipeline features"""
 
     def __init__(self, verbose: bool = False):
@@ -647,7 +647,7 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = parser.parse_args()
 
-    tester = TestAudioFirstFeatures(verbose=args.verbose)
+    tester = AudioFirstFeaturesTester(verbose=args.verbose)
     results = tester.run_all()
 
     # Exit with error code if any tests failed

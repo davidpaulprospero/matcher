@@ -92,17 +92,43 @@ class DownloadStage(Stage):
                 return False
 
             # Restore downloaded videos
-            from ..state import DownloadedVideo
+            from ..state import DownloadedVideo, AudioDownload
             videos = data.get('downloaded_videos', [])
             state.downloaded_videos = [
                 DownloadedVideo(**v) if isinstance(v, dict) else v
                 for v in videos
             ]
 
+            # Restore downloaded audio (audio-first mode)
+            audio_downloads = data.get('audio_downloads', [])
+            restored_audio = []
+            for a in audio_downloads:
+                if isinstance(a, dict):
+                    # Handle backward compatibility: old checkpoints used different field names
+                    a_copy = dict(a)  # Create copy to avoid modifying checkpoint data
+
+                    # Map 'audio_file' → 'file'
+                    if 'audio_file' in a_copy and 'file' not in a_copy:
+                        a_copy['file'] = a_copy.pop('audio_file')
+
+                    # Map 'video_url' → 'url'
+                    if 'video_url' in a_copy and 'url' not in a_copy:
+                        a_copy['url'] = a_copy.pop('video_url')
+
+                    # Remove obsolete fields that are no longer in AudioDownload
+                    # (channel, duration_tier, upload_date, license were removed in refactoring)
+                    for obsolete_field in ['channel', 'duration_tier', 'upload_date', 'license']:
+                        a_copy.pop(obsolete_field, None)
+
+                    restored_audio.append(AudioDownload(**a_copy))
+                else:
+                    restored_audio.append(a)
+            state.downloaded_audio = restored_audio
+
             # Restore failed keywords
             state.failed_keywords = data.get('failed_keywords', [])
 
-            logger.info(f"Restored DOWNLOAD: {len(state.downloaded_videos)} videos")
+            logger.info(f"Restored DOWNLOAD: {len(state.downloaded_videos)} videos, {len(state.downloaded_audio)} audio")
             return True
 
         except Exception as e:
@@ -202,7 +228,8 @@ class DownloadStage(Stage):
         print(f"    Merge gap: {getattr(audio_config, 'merge_gap_seconds', 15)}s")
 
         try:
-            from ..downloader import VideoDownloader, AudioDownload
+            from ..downloader import VideoDownloader
+            from ..state import AudioDownload
 
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
@@ -221,7 +248,7 @@ class DownloadStage(Stage):
                         if per_kw <= 0:
                             continue
 
-                        audio_downloads = self.downloader.download_audio_for_keyword(
+                        audio_downloads = self.downloader.audio_first.download_audio_for_keyword(
                             keyword=keyword,
                             output_dir=output_dir,
                             tier=tier,
@@ -409,7 +436,7 @@ class DownloadVideoSegmentsStage(Stage):
                     "OTIO will reference audio files (.mp3) instead of video files. "
                     "To fix: Set skip_download=false and re-run to download matched video segments."
                 )
-                print(f"\n  ⚠️  {warning_msg}")
+                print(f"\n  ! WARNING: {warning_msg}")
                 logger.warning(warning_msg)
                 warnings.append("Incomplete audio-first pipeline - no video segments")
                 return StageResult.ok({'skipped': True, 'reason': 'skip_download_with_audio'}, warnings)
@@ -467,12 +494,15 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
 
-            downloaded_segments = self.downloader.download_video_segments(
+            downloaded_segments = self.downloader.audio_first.download_video_segments(
                 merged_segments,
                 output_dir
             )
 
             print(f"\n  + Downloaded {len(downloaded_segments)} video segments")
+
+            # Update Match objects to reference downloaded video segments (.mp4) instead of audio files (.mp3)
+            self._remap_matches_to_video_segments(state, downloaded_segments, audio_downloads_by_id)
 
             checkpoint_data = {
                 'segment_count': len(downloaded_segments),
@@ -484,6 +514,172 @@ class DownloadVideoSegmentsStage(Stage):
         except Exception as e:
             logger.exception(f"Video segment download failed: {e}")
             return StageResult.fail(str(e), warnings)
+
+    def _remap_matches_to_video_segments(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List,
+        audio_downloads_by_id: dict
+    ) -> None:
+        """
+        Update Match objects to reference downloaded video segment files instead of audio files.
+
+        In audio-first mode, matches initially reference .mp3 audio files. After downloading
+        video segments, we need to remap them to the actual .mp4 segment files.
+
+        Args:
+            state: Pipeline state with matches to update
+            downloaded_segments: List of DownloadedSegment objects
+            audio_downloads_by_id: Dict mapping video_id to AudioDownload
+        """
+        from ..downloader.types import DownloadedSegment
+
+        # Build mapping: (video_id, original_time) -> segment_file
+        # Each DownloadedSegment contains multiple matches within its time range
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                # Key by video_id and the original video time
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Helper function to remap a single Match object
+        def remap_match(match_obj):
+            """Remap a single Match object to video segment file"""
+            # Handle two different Match structures:
+            # 1. state.Match: has video_file, video_start fields
+            # 2. utils.Match: has video_segment.source_file field
+
+            if hasattr(match_obj, 'video_file'):
+                # state.Match structure
+                audio_file = Path(match_obj.video_file).stem
+                start_time = match_obj.video_start
+            elif hasattr(match_obj, 'video_segment'):
+                # utils.Match structure - use the video_segment
+                if not hasattr(match_obj.video_segment, 'source_file'):
+                    return False
+                audio_file = Path(match_obj.video_segment.source_file).stem
+                start_time = match_obj.video_segment.start_time
+            else:
+                logger.warning(f"Unknown Match structure: {type(match_obj)}")
+                return False
+
+            # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping
+            if audio_file.startswith(('pexels_', 'pixabay_', 'entity_')):
+                return False
+
+            # Find corresponding video_id from audio downloads
+            # Strip timestamp suffix (_0000, _1234, etc.) from audio_file if present
+            base_audio_file = audio_file
+            if '_' in audio_file:
+                # Check if last part after underscore is all digits (timestamp)
+                parts = audio_file.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    base_audio_file = parts[0]
+
+            video_id = None
+            for vid, audio in audio_downloads_by_id.items():
+                audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
+                if Path(audio_path).stem == base_audio_file:
+                    video_id = vid
+                    break
+
+            if not video_id:
+                logger.warning(f"Could not find video_id for audio file: {audio_file} (base: {base_audio_file})")
+                return False
+
+            # Look up the downloaded segment containing this match
+            key = (video_id, start_time)
+            if key in segment_map:
+                segment_file, original_start = segment_map[key]
+
+                # Update match to reference video segment file
+                if hasattr(match_obj, 'video_file'):
+                    old_file = match_obj.video_file
+                    match_obj.video_file = segment_file
+                else:
+                    old_file = match_obj.video_segment.source_file
+                    match_obj.video_segment.source_file = segment_file
+
+                logger.debug(f"Remapped match: {old_file} -> {segment_file}")
+                return True
+            else:
+                logger.warning(f"Could not find downloaded segment for match: video_id={video_id}, time={start_time}")
+                return False
+
+        # Helper to remap video_segment.source_file (for AlternativeMatch/StrategyMatch)
+        def remap_segment(video_segment):
+            """Remap video_segment.source_file to video segment file"""
+            if not hasattr(video_segment, 'source_file'):
+                return False
+
+            audio_file = Path(video_segment.source_file).stem
+
+            # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping
+            if audio_file.startswith(('pexels_', 'pixabay_', 'entity_')):
+                return False
+
+            # Strip timestamp suffix (_0000, _1234, etc.) from audio_file if present
+            base_audio_file = audio_file
+            if '_' in audio_file:
+                # Check if last part after underscore is all digits (timestamp)
+                parts = audio_file.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    base_audio_file = parts[0]
+
+            # Find corresponding video_id
+            video_id = None
+            for vid, audio in audio_downloads_by_id.items():
+                audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
+                if Path(audio_path).stem == base_audio_file:
+                    video_id = vid
+                    break
+
+            if not video_id:
+                return False
+
+            # Look up segment file
+            # For video_segments, we need to use start_time instead of video_start
+            key = (video_id, video_segment.start_time)
+            if key in segment_map:
+                segment_file, _ = segment_map[key]
+                old_file = video_segment.source_file
+                video_segment.source_file = segment_file
+                logger.debug(f"Remapped segment: {old_file} -> {segment_file}")
+                return True
+            return False
+
+        # Update all Match objects (handling both Match and MatchResult)
+        updated_count = 0
+        for item in state.matches:
+            # Check if this is a MatchResult wrapper or a plain Match
+            if hasattr(item, 'primary_match'):
+                # MatchResult object - update primary match
+                if remap_match(item.primary_match):
+                    updated_count += 1
+
+                # Update alternatives (V2-V3) - these have video_segment field
+                for alt in item.alternatives:
+                    if hasattr(alt, 'video_segment') and remap_segment(alt.video_segment):
+                        updated_count += 1
+
+                # Update secondary matches (V4-V6) - these have video_segment field
+                for sec in item.secondary_matches:
+                    if hasattr(sec, 'video_segment') and remap_segment(sec.video_segment):
+                        updated_count += 1
+
+                # Update strategy matches (V7+) - these have video_segment field
+                for strat in item.strategy_matches:
+                    if hasattr(strat, 'video_segment') and remap_segment(strat.video_segment):
+                        updated_count += 1
+            else:
+                # Plain Match object
+                if remap_match(item):
+                    updated_count += 1
+
+        logger.info(f"Remapped {updated_count} match objects to video segment files")
+        print(f"  ✓ Updated {updated_count} matches to reference video segments")
 
     def can_skip(
         self,

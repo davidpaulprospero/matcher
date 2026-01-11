@@ -7,7 +7,7 @@ replacing the 30+ instance attributes scattered across the Pipeline class.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +32,22 @@ class VoiceoverSegment:
     def __post_init__(self):
         if self.duration == 0.0:
             self.duration = self.end - self.start
+
+
+@dataclass
+class TranscriptSegment:
+    """A single transcript segment from video transcription"""
+    index: int
+    start_time: float
+    end_time: float
+    text: str
+    source_file: str = ""
+    # B-roll/silent video attributes
+    is_broll: bool = False  # True if this is a silent/B-roll video segment
+    description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass

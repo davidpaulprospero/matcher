@@ -1,0 +1,43 @@
+[run]
+source = src
+omit =
+    # Legacy modules (deprecated, replaced by refactored versions)
+    src/otio_builder.py
+    src/scene_detection.py
+    src/pexels.py
+    src/pixabay.py
+    src/post_edit_analysis.py
+
+    # Test files
+    */tests/*
+    */test_*.py
+    */__pycache__/*
+    */venv/*
+    */env/*
+    */.venv/*
+    */setup.py
+    */conftest.py
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+
+# Fail if coverage drops below target (85% goal)
+fail_under = 85
+
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    @abc.abstractmethod
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml
