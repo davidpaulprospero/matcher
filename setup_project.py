@@ -34,7 +34,7 @@ def load_settings() -> dict:
         try:
             with open(SETTINGS_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, IOError, OSError):
             pass
     return {}
 
@@ -44,13 +44,103 @@ def save_settings(settings: dict):
     try:
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
-    except:
+    except (IOError, OSError):
         pass  # Non-critical
 
 
 def get_install_dir() -> Path:
     """Get the central installation directory"""
     return INSTALL_DIR
+
+
+def list_projects(base_path: Path = None) -> list:
+    """
+    List existing projects in the base path.
+    Projects are identified by having a run.bat/run.sh or project_config.yaml.
+    """
+    if base_path is None:
+        settings = load_settings()
+        base_path = Path(settings.get('last_base_path', DEFAULT_BASE_PATH))
+
+    if not base_path.exists():
+        return []
+
+    projects = []
+
+    def scan_dir(path: Path, depth: int = 0):
+        """Recursively scan for project directories (max depth 3)"""
+        if depth > 3:
+            return
+        try:
+            for item in path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    # Check if this is a project directory
+                    has_run_script = (item / 'run.bat').exists() or (item / 'run.sh').exists()
+                    has_config = (item / 'project_config.yaml').exists()
+
+                    if has_run_script or has_config:
+                        # Get project info
+                        has_checkpoint = (item / 'checkpoint.json').exists()
+                        has_keywords = (item / 'saved_keywords.json').exists()
+                        has_cache = (item / '.cache' / 'transcriptions').exists()
+                        has_voiceover = any((item / 'voiceover').glob('*')) if (item / 'voiceover').exists() else False
+
+                        projects.append({
+                            'path': item,
+                            'name': item.name,
+                            'has_checkpoint': has_checkpoint,
+                            'has_keywords': has_keywords,
+                            'has_cache': has_cache,
+                            'has_voiceover': has_voiceover,
+                        })
+                    else:
+                        # Not a project, scan deeper
+                        scan_dir(item, depth + 1)
+        except PermissionError:
+            pass
+
+    scan_dir(base_path)
+    return sorted(projects, key=lambda p: p['path'].stat().st_mtime, reverse=True)
+
+
+def show_projects(base_path: Path = None):
+    """Display list of existing projects"""
+    print()
+    print("=" * 60)
+    print("  EXISTING PROJECTS")
+    print("=" * 60)
+
+    settings = load_settings()
+    if base_path is None:
+        base_path = Path(settings.get('last_base_path', DEFAULT_BASE_PATH))
+
+    print(f"  Scanning: {base_path}")
+    print()
+
+    projects = list_projects(base_path)
+
+    if not projects:
+        print("  No projects found.")
+        print(f"\n  Create one with: python setup_project.py")
+        return
+
+    print(f"  Found {len(projects)} project(s):\n")
+
+    for i, proj in enumerate(projects, 1):
+        status_flags = []
+        if proj['has_checkpoint']:
+            status_flags.append('checkpoint')
+        if proj['has_keywords']:
+            status_flags.append('keywords')
+        if proj['has_cache']:
+            status_flags.append('cached')
+        if proj['has_voiceover']:
+            status_flags.append('voiceover')
+
+        status = f" [{', '.join(status_flags)}]" if status_flags else ""
+        print(f"  {i}. {proj['name']}{status}")
+        print(f"     {proj['path']}")
+        print()
 
 
 def list_folders(path: Path) -> list:
@@ -151,8 +241,12 @@ REM Project: {project_dir.name}
 REM Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 REM ============================================================
 
-REM Set FFmpeg path
-set IMAGEIO_FFMPEG_EXE=C:\\ffmpeg\\bin\\ffmpeg.exe
+REM Set FFmpeg path (use FFMPEG_PATH env var if set, otherwise default)
+if defined FFMPEG_PATH (
+    set IMAGEIO_FFMPEG_EXE=%FFMPEG_PATH%
+) else (
+    set IMAGEIO_FFMPEG_EXE=C:\\ffmpeg\\bin\\ffmpeg.exe
+)
 
 REM Central installation location
 set INSTALL_DIR={install_dir}
@@ -776,13 +870,17 @@ if "%~1"=="" (
     exit /b
 )
 
-:: Set FFmpeg path
-set FFMPEG=C:\\ffmpeg\\bin\\ffmpeg.exe
+:: Set FFmpeg path (use environment variable if set, otherwise default)
+if defined FFMPEG_PATH (
+    set FFMPEG=%FFMPEG_PATH%
+) else (
+    set FFMPEG=C:\\ffmpeg\\bin\\ffmpeg.exe
+)
 
 :: Check if FFmpeg exists
 if not exist "%FFMPEG%" (
     echo   ERROR: FFmpeg not found at %FFMPEG%
-    echo   Please install FFmpeg or update the path in this script.
+    echo   Set FFMPEG_PATH environment variable or install FFmpeg to C:\\ffmpeg
     pause
     exit /b 1
 )
@@ -822,10 +920,94 @@ if %ERRORLEVEL% EQU 0 (
 echo.
 pause
 '''
-    
+
     bat_path = project_dir / "convert.bat"
     bat_path.write_text(bat_content)
     return bat_path
+
+
+def create_convert_sh(project_dir: Path) -> Path:
+    """
+    Create convert.sh for converting HEVC/CapCut videos to DaVinci-compatible ProRes on Unix.
+
+    Usage: ./convert.sh video.mp4
+    """
+    sh_content = '''#!/bin/bash
+# ============================================================
+# Video Converter for DaVinci Resolve
+# Converts HEVC/H.265 videos to ProRes 4444 (DaVinci compatible)
+# Usage: ./convert.sh <video_file>
+# ============================================================
+
+# Check if a file was provided
+if [ -z "$1" ]; then
+    echo ""
+    echo "  ============================================================"
+    echo "  VIDEO CONVERTER FOR DAVINCI RESOLVE"
+    echo "  ============================================================"
+    echo ""
+    echo "  Usage: ./convert.sh <video_file>"
+    echo ""
+    echo "  Converts video to ProRes 4444 format compatible with DaVinci Resolve."
+    echo ""
+    echo "  This is useful for:"
+    echo "    - CapCut exports (HEVC/H.265)"
+    echo "    - iPhone recordings"
+    echo "    - Any video that shows artifacts in DaVinci"
+    echo ""
+    exit 0
+fi
+
+# Set FFmpeg path (use environment variable if set, otherwise use system ffmpeg)
+if [ -n "$FFMPEG_PATH" ]; then
+    FFMPEG="$FFMPEG_PATH"
+else
+    FFMPEG="ffmpeg"
+fi
+
+# Check if FFmpeg exists
+if ! command -v "$FFMPEG" &> /dev/null; then
+    echo "  ERROR: FFmpeg not found"
+    echo "  Install FFmpeg or set FFMPEG_PATH environment variable"
+    exit 1
+fi
+
+# Input file
+INPUT="$1"
+INPUT_DIR="$(dirname "$INPUT")"
+INPUT_NAME="$(basename "${INPUT%.*}")"
+
+# Output file (same directory, _prores suffix)
+OUTPUT="${INPUT_DIR}/${INPUT_NAME}_prores.mov"
+
+echo ""
+echo "  ============================================================"
+echo "  VIDEO CONVERTER"
+echo "  ============================================================"
+echo ""
+echo "  Input:  $INPUT"
+echo "  Output: $OUTPUT"
+echo ""
+echo "  Converting to ProRes 4444..."
+echo ""
+
+# Convert to ProRes 4444
+"$FFMPEG" -i "$INPUT" -c:v prores_ks -profile:v 4 -c:a pcm_s16le -y "$OUTPUT"
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "  SUCCESS! Converted file saved to:"
+    echo "  $OUTPUT"
+else
+    echo ""
+    echo "  ERROR: Conversion failed."
+fi
+'''
+
+    sh_path = project_dir / "convert.sh"
+    sh_path.write_text(sh_content)
+    sh_path.chmod(0o755)
+    return sh_path
 
 
 def create_project_config(project_dir: Path) -> Path:
@@ -950,6 +1132,11 @@ def setup_project(project_path: str, install_dir: Path = None):
         sh_path = create_run_sh(project_dir, install_dir)
         print(f"  + run.sh")
         result['run_script'] = str(sh_path)
+
+        # Create convert.sh for HEVC->ProRes conversion
+        convert_path = create_convert_sh(project_dir)
+        print(f"  + convert.sh")
+        result['convert_script'] = str(convert_path)
 
         # Create analyze.sh for post-edit timeline analysis
         analyze_path = create_analyze_sh(project_dir, install_dir)
@@ -1147,7 +1334,9 @@ def main():
 Examples:
   python setup_project.py                           # Interactive mode
   python setup_project.py "E:\\Projects\\MyDoc"     # Direct path
-  python setup_project.py --regenerate "E:\\Projects\\MyDoc"  # Fix run.bat
+  python setup_project.py --regenerate "E:\\Path"   # Fix run.bat
+  python setup_project.py --list-projects           # List existing projects
+  python setup_project.py --list-projects --base-path "D:\\Work"
         '''
     )
     
@@ -1167,10 +1356,25 @@ Examples:
         metavar='PROJECT_PATH',
         help='Regenerate run.bat/run.sh for an existing project'
     )
-    
+
+    parser.add_argument(
+        '--list-projects',
+        action='store_true',
+        help='List existing projects in base path'
+    )
+
+    parser.add_argument(
+        '--base-path',
+        metavar='PATH',
+        help='Base path to scan for --list-projects'
+    )
+
     args = parser.parse_args()
-    
-    if args.regenerate:
+
+    if args.list_projects:
+        base = Path(args.base_path) if args.base_path else None
+        show_projects(base)
+    elif args.regenerate:
         # Regenerate run script for existing project
         regenerate_run_script(args.regenerate, args.install_dir)
     elif args.project_path:
