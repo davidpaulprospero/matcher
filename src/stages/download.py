@@ -92,17 +92,43 @@ class DownloadStage(Stage):
                 return False
 
             # Restore downloaded videos
-            from ..state import DownloadedVideo
+            from ..state import DownloadedVideo, AudioDownload
             videos = data.get('downloaded_videos', [])
             state.downloaded_videos = [
                 DownloadedVideo(**v) if isinstance(v, dict) else v
                 for v in videos
             ]
 
+            # Restore downloaded audio (audio-first mode)
+            audio_downloads = data.get('audio_downloads', [])
+            restored_audio = []
+            for a in audio_downloads:
+                if isinstance(a, dict):
+                    # Handle backward compatibility: old checkpoints used different field names
+                    a_copy = dict(a)  # Create copy to avoid modifying checkpoint data
+
+                    # Map 'audio_file' → 'file'
+                    if 'audio_file' in a_copy and 'file' not in a_copy:
+                        a_copy['file'] = a_copy.pop('audio_file')
+
+                    # Map 'video_url' → 'url'
+                    if 'video_url' in a_copy and 'url' not in a_copy:
+                        a_copy['url'] = a_copy.pop('video_url')
+
+                    # Remove obsolete fields that are no longer in AudioDownload
+                    # (channel, duration_tier, upload_date, license were removed in refactoring)
+                    for obsolete_field in ['channel', 'duration_tier', 'upload_date', 'license']:
+                        a_copy.pop(obsolete_field, None)
+
+                    restored_audio.append(AudioDownload(**a_copy))
+                else:
+                    restored_audio.append(a)
+            state.downloaded_audio = restored_audio
+
             # Restore failed keywords
             state.failed_keywords = data.get('failed_keywords', [])
 
-            logger.info(f"Restored DOWNLOAD: {len(state.downloaded_videos)} videos")
+            logger.info(f"Restored DOWNLOAD: {len(state.downloaded_videos)} videos, {len(state.downloaded_audio)} audio")
             return True
 
         except Exception as e:
@@ -410,7 +436,7 @@ class DownloadVideoSegmentsStage(Stage):
                     "OTIO will reference audio files (.mp3) instead of video files. "
                     "To fix: Set skip_download=false and re-run to download matched video segments."
                 )
-                print(f"\n  ⚠️  {warning_msg}")
+                print(f"\n  ! WARNING: {warning_msg}")
                 logger.warning(warning_msg)
                 warnings.append("Incomplete audio-first pipeline - no video segments")
                 return StageResult.ok({'skipped': True, 'reason': 'skip_download_with_audio'}, warnings)
@@ -539,16 +565,28 @@ class DownloadVideoSegmentsStage(Stage):
                 logger.warning(f"Unknown Match structure: {type(match_obj)}")
                 return False
 
+            # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping
+            if audio_file.startswith(('pexels_', 'pixabay_', 'entity_')):
+                return False
+
             # Find corresponding video_id from audio downloads
+            # Strip timestamp suffix (_0000, _1234, etc.) from audio_file if present
+            base_audio_file = audio_file
+            if '_' in audio_file:
+                # Check if last part after underscore is all digits (timestamp)
+                parts = audio_file.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    base_audio_file = parts[0]
+
             video_id = None
             for vid, audio in audio_downloads_by_id.items():
                 audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
-                if Path(audio_path).stem == audio_file:
+                if Path(audio_path).stem == base_audio_file:
                     video_id = vid
                     break
 
             if not video_id:
-                logger.warning(f"Could not find video_id for audio file: {audio_file}")
+                logger.warning(f"Could not find video_id for audio file: {audio_file} (base: {base_audio_file})")
                 return False
 
             # Look up the downloaded segment containing this match
@@ -578,11 +616,23 @@ class DownloadVideoSegmentsStage(Stage):
 
             audio_file = Path(video_segment.source_file).stem
 
+            # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping
+            if audio_file.startswith(('pexels_', 'pixabay_', 'entity_')):
+                return False
+
+            # Strip timestamp suffix (_0000, _1234, etc.) from audio_file if present
+            base_audio_file = audio_file
+            if '_' in audio_file:
+                # Check if last part after underscore is all digits (timestamp)
+                parts = audio_file.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    base_audio_file = parts[0]
+
             # Find corresponding video_id
             video_id = None
             for vid, audio in audio_downloads_by_id.items():
                 audio_path = audio.file if hasattr(audio, 'file') else audio.get('file', '')
-                if Path(audio_path).stem == audio_file:
+                if Path(audio_path).stem == base_audio_file:
                     video_id = vid
                     break
 

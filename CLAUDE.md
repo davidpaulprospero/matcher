@@ -217,6 +217,49 @@ pipeline:
   skip_image_search: true
 ```
 
+### Short Path Configuration (E:/v, E:/i)
+
+To avoid Windows path length limits and improve NLE import performance, you can use short root paths:
+
+```yaml
+# config.yaml
+download:
+  root_dir: "E:/v"  # Videos stored in E:/v/ProjectName
+  folder_name: "videos"  # Subfolder within root_dir
+
+image_search:
+  root_dir: "E:/i"  # Images stored in E:/i/ProjectName
+  folder_name: "images"  # Subfolder within root_dir
+```
+
+**How it works:**
+1. Pipeline validates that `root_dir` exists (or can be created) at startup
+2. Creates project subdirectory: `{root_dir}/{ProjectName[:15]}/`
+3. Example: `E:/v/MyProject__202/` instead of `E:/Projects/MyProject__2026-01-10/videos/`
+
+**Benefits:**
+- ✅ Avoids 260-char Windows path limit
+- ✅ Faster NLE imports (shorter file paths)
+- ✅ Shared drive organization (all projects in E:/v/)
+- ✅ Easier to manually browse/clean up
+
+**Error handling:**
+- Invalid path: "download.root_dir must be an absolute path"
+- Missing drive: "Cannot create download.root_dir: E:/v - Check drive exists"
+- No permissions: "Check you have write permissions"
+
+**Validation:** The pipeline automatically creates base directories on startup and prints confirmation:
+```
+✓ Videos root directory: E:/v
+✓ Images root directory: E:/i
+```
+
+**Troubleshooting:**
+- Ensure drive letter exists (E:/, D:/, etc.)
+- Use forward slashes: `E:/v` not `E:\v`
+- Must be absolute path (not relative like `./videos`)
+- Run as administrator if permission errors occur
+
 ## Development Rules
 
 ### Rule 1: Config Synchronization
@@ -515,6 +558,7 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
+| 2026-01-10 | **AudioDownload Checkpoint Restore Bug FIXED**: Fixed obsolete field error preventing checkpoint resume; Old checkpoints contained fields (`channel`, `duration_tier`, `upload_date`, `license`) no longer in AudioDownload dataclass; Added obsolete field removal in src/stages/download.py:118-121; Created comprehensive backward compatibility tests in tests/test_obsolete_fields_fix.py; Fixed user checkpoint corruption (empty transcript cache, missing embeddings) by resetting checkpoint from SCENE_DETECTION → REMIX; Test results: 96/96 passing (56 download stage + 2 obsolete fields + 38 checkpoint tests); Updated CHANGELOG.md with fix details |
 | 2026-01-09 | **Test Infrastructure Overhaul COMPLETED**: Fixed all pytest warnings (0 collection, 0 return value warnings) - renamed 6 classes to avoid pytest collection (TestResult → CoreTestResult, etc.), converted 26 test functions from return tuples to assertions; Added GitHub Actions CI/CD with matrix testing (Ubuntu/Windows × Python 3.10/3.11/3.12), pytest-cov, Codecov integration; Created 4 performance benchmark suites with 30+ benchmarks (keyword extraction, embeddings, matching, OTIO) - established baselines for regression detection; Expanded matching module test coverage by 125% (20 new unit tests) - comprehensive tests for scoring algorithms, LLM matchers (Gemini/Anthropic/Ollama), location filtering, diversity strategies; Test results: 514 passing, 22 skipped, 0 warnings, 27.17% coverage; Created TESTING_IMPROVEMENTS.md documentation; 4 commits: test warnings fix, CI/CD config, performance benchmarks, matching tests |
 | 2026-01-09 | **OTIO Pipeline Integration Tests COMPLETED**: Created comprehensive test_otio_pipeline_integration.py with 21 end-to-end tests (100% passing) - tests all 10 tracks (V1-V10, A1-A8) with realistic match data; Validates audio-first mode with segment resolution and time adjustment; Tests gap handling (leading, between-segment, trailing); Verifies timewarp and speed calculations for clip duration matching; Tests entity images (V9) and stock videos (V10) track population; Validates DaVinci Resolve compatibility (global_start_time, metadata, track names); Tests OTIO export to file and JSON structure; Edge cases (empty matches, single match, very short segments, different frame rates); Total test count now **517 passing** (up from 496 = +21 tests), 21 skipped; Comprehensive test coverage for complete OTIO timeline generation pipeline |
 | 2026-01-09 | **OTIO Utils Test Suite COMPLETED**: Created comprehensive test_otio_utils.py with 53 unit tests (100% passing) - covers NumpyEncoder JSON serialization (6 tests), path utilities with Windows extended-length paths and URL formatting (10 tests), type conversion for numpy to Python types (9 tests), media utilities including ffprobe duration and segment offset extraction (11 tests), formatting utilities for timecode and confidence colors (11 tests), OTIO clip creation with timewarp and speed changes (7 tests); Total test count now 496 passing (up from 443), 21 skipped; OTIO module coverage significantly improved; All path edge cases tested (extended-length prefixes, backslash conversion, double slash removal); Clip creation tested with speed up/down scenarios, metadata, and unique naming |

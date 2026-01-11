@@ -538,6 +538,52 @@ class TestPipelineTimingTracking:
         assert "stage2" not in pipeline.stage_timings
 
 
+# ============================================================================
+# Coverage Tests - Lines 83, 119
+# ============================================================================
+
+class TestPipelineCoverage:
+    """Test pipeline coverage gaps."""
+
+    def test_load_checkpoint_returns_false_when_data_is_none(self):
+        """Test line 83: Returns False when checkpoint.load() returns None."""
+        from src.pipeline import PipelineOrchestrator
+        from unittest.mock import Mock, MagicMock
+
+        # Create a mock pipeline with checkpoint that returns None on load
+        pipeline = MagicMock(spec=PipelineOrchestrator)
+        pipeline.checkpoint = Mock()
+        pipeline.checkpoint.exists.return_value = True
+        pipeline.checkpoint.load.return_value = None  # Triggers line 83
+
+        # Call the actual method
+        result = PipelineOrchestrator.load_checkpoint(pipeline)
+
+        assert result is False
+
+    def test_run_calls_load_checkpoint_when_resume_true(self, temp_dir):
+        """Test line 119: load_checkpoint() is called when resume=True."""
+        from src.pipeline import PipelineOrchestrator
+        from src.config import Config
+        from unittest.mock import patch
+
+        # Create a minimal config
+        config = Config()
+        config.project_dir = str(temp_dir)
+        config.cache_dir = str(temp_dir / ".cache")
+
+        # Create orchestrator with no stages
+        pipeline = PipelineOrchestrator(config, temp_dir, stages=[])
+
+        # Mock load_checkpoint to track calls
+        with patch.object(pipeline, 'load_checkpoint') as mock_load:
+            mock_load.return_value = False  # Simulate no checkpoint found
+            pipeline.run(resume=True)
+
+        # load_checkpoint should have been called
+        mock_load.assert_called_once()
+
+
 # Pytest fixtures
 
 @pytest.fixture

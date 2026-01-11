@@ -82,7 +82,7 @@ class RemixStage(Stage):
                 'reason': 'no_keywords'
             })
 
-        print(f"\n  ─── Stage 2.5: KEYWORD REMIX (Zero-Download) ───")
+        print(f"\n  --- Stage 2.5: KEYWORD REMIX (Zero-Download) ---")
 
         try:
             from ..keyword_remix import remix_downloaded_videos, remix_audio_files, RemixConfig
@@ -133,7 +133,7 @@ class RemixStage(Stage):
                     if ad.file in included_set
                 ]
                 filtered_count = len(state.downloaded_audio)
-                print(f"  ✓ Filtered: {original_count} → {filtered_count} audio files")
+                print(f"  + Filtered: {original_count} -> {filtered_count} audio files")
 
             else:  # video mode
                 # Filter downloaded_videos
@@ -144,7 +144,7 @@ class RemixStage(Stage):
                     if dv.file in included_set
                 ]
                 filtered_count = len(state.downloaded_videos)
-                print(f"  ✓ Filtered: {original_count} → {filtered_count} videos")
+                print(f"  + Filtered: {original_count} -> {filtered_count} videos")
 
             # Build checkpoint data
             checkpoint_data = {
@@ -161,12 +161,12 @@ class RemixStage(Stage):
         except ImportError as e:
             error_msg = f"Could not import keyword_remix module: {e}"
             logger.error(error_msg)
-            print(f"  ⚠ Remix module not available")
+            print(f"  ! Remix module not available")
             return StageResult.fail(error_msg)
 
         except Exception as e:
             logger.error(f"Remix failed: {e}", exc_info=True)
-            print(f"  ⚠ Remix failed: {e}")
+            print(f"  ! Remix failed: {e}")
             return StageResult.fail(str(e))
 
     def can_skip(

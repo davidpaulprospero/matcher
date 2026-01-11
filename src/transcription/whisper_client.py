@@ -132,7 +132,7 @@ class WhisperClient:
         self,
         audio_path: str,
         language: str = None,
-        vad_filter: bool = True,
+        vad_filter: bool = False,  # Default False - VAD too aggressive for YouTube
         min_silence_duration_ms: int = 200,
         speech_pad_ms: int = 10,
         word_timestamps: bool = False

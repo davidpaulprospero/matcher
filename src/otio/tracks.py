@@ -10,6 +10,7 @@ This breaks up the 749-line create_timeline() function into manageable, testable
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import copy
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
