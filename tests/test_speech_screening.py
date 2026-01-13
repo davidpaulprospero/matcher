@@ -29,10 +29,10 @@ from src.downloader.speech_screening import SpeechScreener
 
 @contextmanager
 def mock_transcription_module(return_value):
-    """Context manager to mock src.transcription module with _transcribe_with_shared_model"""
+    """Context manager to mock src.transcription module with transcribe_voiceover_audio"""
     mock_transcription = MagicMock()
     mock_transcribe = MagicMock(return_value=return_value)
-    mock_transcription._transcribe_with_shared_model = mock_transcribe
+    mock_transcription.transcribe_voiceover_audio = mock_transcribe
 
     with patch.dict(sys.modules, {'src.transcription': mock_transcription}):
         yield mock_transcribe
@@ -353,7 +353,7 @@ class TestSpeechDetection:
                 # Create mock that raises an exception
                 mock_transcription = MagicMock()
                 mock_transcribe = MagicMock(side_effect=Exception("Whisper error"))
-                mock_transcription._transcribe_with_shared_model = mock_transcribe
+                mock_transcription.transcribe_voiceover_audio = mock_transcribe
 
                 # Change fallback
                 screener.download_config.speech_screening.fallback_on_error = "reject"

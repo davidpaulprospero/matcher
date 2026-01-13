@@ -31,6 +31,34 @@ class DurationTiersConfig:
     long: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(600, 1500, 5, 0))
     longer: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(1500, 3000, 1, 1))  # 1 per project
 
+    def __post_init__(self):
+        """Convert dict fields to DurationTierConfig instances."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        for tier_name in ['short', 'medium', 'long', 'longer']:
+            tier = getattr(self, tier_name)
+            if isinstance(tier, dict):
+                # Map various key formats to internal format
+                min_sec = tier.get('min_seconds', tier.get('min', 0))
+                max_sec = tier.get('max_seconds', tier.get('max', 0))
+                count = tier.get('videos_per_keyword', tier.get('count', tier.get('per_keyword', 5)))
+                max_total = tier.get('max_total', 0)
+
+                # Validate min/max
+                if min_sec > 0 and max_sec > 0:
+                    if min_sec >= max_sec:
+                        logger.warning(
+                            f"duration_tiers.{tier_name}: min >= max ({min_sec} >= {max_sec}), values may need adjustment"
+                        )
+
+                setattr(self, tier_name, DurationTierConfig(
+                    min_seconds=min_sec,
+                    max_seconds=max_sec,
+                    videos_per_keyword=count,
+                    max_total=max_total
+                ))
+
 
 @dataclass
 class StockFootageConfig:

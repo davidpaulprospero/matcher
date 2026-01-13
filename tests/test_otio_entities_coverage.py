@@ -428,7 +428,7 @@ class TestBackwardCompatibility:
             _add_entity_images_to_track(mock_track, {}, [], 24.0, config)
 
             mock_add.assert_called_once_with(
-                mock_track, {}, [], 24.0, config, "images"
+                mock_track, {}, [], 24.0, config, "images", 1.0
             )
 
     def test_add_entity_videos_wrapper(self):
@@ -442,5 +442,5 @@ class TestBackwardCompatibility:
             _add_entity_videos_to_track(mock_track, {}, [], 24.0, config)
 
             mock_add.assert_called_once_with(
-                mock_track, {}, [], 24.0, config, "videos"
+                mock_track, {}, [], 24.0, config, "videos", 1.0
             )

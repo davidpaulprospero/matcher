@@ -27,10 +27,12 @@ STAGE_ORDER = [
     "ENTITY_VIDEOS",
     "DOWNLOAD",
     "STOCK",
+    "BROLL_DOWNLOAD",
     "REMIX",
     "TRANSCRIBE",
     "SCENE_DETECTION",
     "MATCH",
+    "BROLL_MATCH",
     "OUTPUT"
 ]
 
@@ -71,9 +73,12 @@ class CheckpointData:
     entity_videos: Dict[str, Any] = field(default_factory=dict)
     download: Dict[str, Any] = field(default_factory=dict)
     stock: Dict[str, Any] = field(default_factory=dict)
+    broll_download: Dict[str, Any] = field(default_factory=dict)
     remix: Dict[str, Any] = field(default_factory=dict)
     transcribe: Dict[str, Any] = field(default_factory=dict)
+    scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
+    broll_match: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return asdict(self)

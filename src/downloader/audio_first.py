@@ -312,6 +312,30 @@ class AudioFirstPipeline:
             video_dir = output_dir / f"{safe_keyword}_segments"
             video_dir.mkdir(parents=True, exist_ok=True)
 
+            # Check if segments already exist (skip re-download)
+            existing_segments = self._check_existing_segments(video_dir, video_id, segments)
+            # Count actual existing files (non-None entries)
+            existing_count = sum(1 for p in existing_segments if p is not None)
+            if existing_count > 0:
+                logger.debug(f"Found {existing_count}/{len(segments)} existing segments for {video_id}")
+                all_exist = existing_count == len(segments)
+                if all_exist:
+                    print(f"      ✓ Already downloaded ({existing_count} segments)")
+                    # Add existing segments to results
+                    for seg, file_path in zip(segments, existing_segments):
+                        if file_path and Path(file_path).exists():
+                            file_duration = seg.end_time - seg.start_time
+                            downloaded_segments.append(DownloadedSegment(
+                                file=str(file_path),
+                                video_id=video_id,
+                                original_start=seg.start_time,
+                                original_end=seg.end_time,
+                                file_duration=file_duration,
+                                matches=seg.original_matches,
+                                keyword=keyword
+                            ))
+                    continue  # Skip to next video
+
             # Build --download-sections arguments
             section_args = []
             for seg in segments:
@@ -487,6 +511,47 @@ class AudioFirstPipeline:
         except Exception as e:
             logger.error(f"Full video fallback error for {video_id}: {e}")
             return []
+
+    def _check_existing_segments(
+        self,
+        video_dir: Path,
+        video_id: str,
+        segments: List['MergedSegment']
+    ) -> List[Optional[str]]:
+        """
+        Check if video segments already exist on disk.
+
+        Looks for files matching the expected naming pattern from segment_utils.
+        Returns list of existing file paths (None for missing segments).
+
+        Args:
+            video_dir: Directory where segments are stored
+            video_id: YouTube video ID
+            segments: List of segments to check
+
+        Returns:
+            List of file paths (or None) for each segment
+        """
+        from . import segment_utils
+
+        existing = []
+        for seg in segments:
+            # Expected filename pattern: {video_id}_{start_seconds:04d}.mp4
+            # Using same logic as segment_utils.get_segment_filename
+            start_int = int(seg.start_time)
+            expected_base = f"{video_id}_{start_int:04d}"
+
+            # Check for file with any video extension
+            found = None
+            for ext in ['.mp4', '.mkv', '.webm', '.m4v']:
+                candidate = video_dir / f"{expected_base}{ext}"
+                if candidate.exists():
+                    found = str(candidate)
+                    break
+
+            existing.append(found)
+
+        return existing
 
     def _get_video_duration(self, video_path: Path) -> Optional[float]:
         """

@@ -135,12 +135,12 @@ class SpeechScreener:
 
         try:
             # Import transcription module
-            from src.transcription import _transcribe_with_shared_model
+            from src.transcription import transcribe_voiceover_audio
 
             logger.info(f"[SPEECH SCREEN] {video_id}: transcribing with Whisper ({whisper_model})...")
             # Transcribe with VAD to detect speech
-            segments = _transcribe_with_shared_model(
-                audio_path=str(audio_path),
+            segments = transcribe_voiceover_audio(
+                str(audio_path),
                 model_name=whisper_model,
                 compute_type="auto",  # Let faster-whisper auto-detect best type
                 vad_filter=True,

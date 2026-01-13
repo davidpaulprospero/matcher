@@ -665,6 +665,154 @@ class GlobalCacheManager:
         """Get content hash for a video file"""
         return self._compute_content_hash(video_path)
 
+    def touch_video(self, video_hash: str):
+        """Update last_used timestamp for a video (LRU tracking)"""
+        entry = self.get_video_entry(video_hash)
+        if entry:
+            entry.last_used = datetime.now().isoformat()
+            self._save_video_entry(entry)
+
+    def cleanup_orphaned_entries(self) -> int:
+        """Remove entries for videos that no longer exist on disk"""
+        self._load_indices()
+        removed = 0
+
+        for video_hash in list(self._registry_index.keys()):
+            entry = self.get_video_entry(video_hash)
+            if entry and not self._check_file_exists(entry):
+                # Remove the entry file
+                entry_path = self.video_registry_dir / f"{video_hash}.json"
+                if entry_path.exists():
+                    entry_path.unlink()
+                # Remove from index
+                del self._registry_index[video_hash]
+                removed += 1
+
+        if removed > 0:
+            self._save_indices()
+            logger.info(f"Cleaned up {removed} orphaned global cache entries")
+
+        return removed
+
+    def count_orphaned_entries(self) -> int:
+        """Count entries for videos that no longer exist on disk"""
+        self._load_indices()
+        orphaned = 0
+
+        for video_hash in self._registry_index.keys():
+            entry = self.get_video_entry(video_hash)
+            if entry and not self._check_file_exists(entry):
+                orphaned += 1
+
+        return orphaned
+
+    def evict_videos(
+        self,
+        target_size_mb: float,
+        strategy: str = "lru"
+    ) -> dict:
+        """
+        Evict videos to reach target size.
+
+        Args:
+            target_size_mb: Target cache size in MB
+            strategy: 'lru' (least recently used) or 'oldest'
+
+        Returns:
+            Dict with eviction results
+        """
+        self._load_indices()
+        current_size = self._get_cache_size_mb()
+
+        if current_size <= target_size_mb:
+            return {
+                "entries_removed": 0,
+                "bytes_freed": 0,
+                "final_size_mb": current_size,
+                "evicted_hashes": []
+            }
+
+        # Get all entries with timestamps
+        entries_with_time = []
+        for video_hash in self._registry_index.keys():
+            entry = self.get_video_entry(video_hash)
+            if entry:
+                # Parse ISO timestamp to float
+                try:
+                    if strategy == "lru":
+                        ts = datetime.fromisoformat(entry.last_used).timestamp() if entry.last_used else 0
+                    else:
+                        ts = datetime.fromisoformat(entry.first_seen).timestamp() if entry.first_seen else 0
+                except:
+                    ts = 0
+                entries_with_time.append((video_hash, entry, ts))
+
+        # Sort by timestamp (oldest/least-recently-used first)
+        entries_with_time.sort(key=lambda x: x[2])
+
+        evicted_hashes = []
+        bytes_freed = 0
+        entries_removed = 0
+
+        for video_hash, entry, _ in entries_with_time:
+            if self._get_cache_size_mb() <= target_size_mb:
+                break
+
+            # Calculate entry size
+            entry_size = entry.file_size
+
+            # Remove entry file
+            entry_path = self.video_registry_dir / f"{video_hash}.json"
+            if entry_path.exists():
+                entry_size += entry_path.stat().st_size
+                entry_path.unlink()
+
+            # Remove associated files (transcripts, scenes, etc.)
+            for subdir in [self.transcripts_dir, self.scenes_dir, self.embeddings_dir]:
+                for ext in ['.json', '.npy']:
+                    file_path = subdir / f"{video_hash}{ext}"
+                    if file_path.exists():
+                        entry_size += file_path.stat().st_size
+                        file_path.unlink()
+
+            # Remove from index
+            if video_hash in self._registry_index:
+                del self._registry_index[video_hash]
+
+            evicted_hashes.append(video_hash)
+            bytes_freed += entry_size
+            entries_removed += 1
+
+        if entries_removed > 0:
+            self._save_indices()
+
+        return {
+            "entries_removed": entries_removed,
+            "bytes_freed": bytes_freed,
+            "final_size_mb": self._get_cache_size_mb(),
+            "evicted_hashes": evicted_hashes
+        }
+
+    def check_size_limit(self, max_size_mb: float = None, threshold: float = 0.9) -> bool:
+        """
+        Check if cache size exceeds threshold of max size.
+
+        Args:
+            max_size_mb: Maximum size in MB (uses config if not provided)
+            threshold: Fraction of max_size to trigger (default 0.9)
+
+        Returns:
+            True if size exceeds threshold
+        """
+        if max_size_mb is None:
+            max_size_mb = getattr(self.config, 'max_size_mb', 0) if self.config else 0
+
+        if max_size_mb <= 0:
+            return False
+
+        current_size = self._get_cache_size_mb()
+        return current_size >= (max_size_mb * threshold)
+
 
 def prompt_global_cache_reuse(
     query_result: GlobalCacheQueryResult,

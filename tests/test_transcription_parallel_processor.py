@@ -526,11 +526,11 @@ class TestTranscribeVoiceoverAudio:
             compute_type="auto"
         )
 
-        # Should transcribe with vad_filter=False
+        # Should transcribe with vad_filter=True (voiceover needs VAD for gap detection)
         mock_whisper.transcribe.assert_called_once_with(
             "/voiceover.mp3",
             language=None,
-            vad_filter=False
+            vad_filter=True
         )
 
     @patch('src.transcription.parallel_processor.WhisperClient')
@@ -599,7 +599,7 @@ class TestTranscribeVoiceoverMedia:
         # Should transcribe with word_timestamps=True
         call_kwargs = mock_whisper.transcribe.call_args[1]
         assert call_kwargs['word_timestamps'] is True
-        assert call_kwargs['vad_filter'] is False
+        assert call_kwargs['vad_filter'] is True  # Voiceover needs VAD for gap detection
 
         # Should write SRT
         mock_write_srt.assert_called_once()
