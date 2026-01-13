@@ -1,5 +1,12 @@
 # Claude Code Project Guide
 
+> **LLM Editing Guide:** This file is optimized for token efficiency. When editing:
+> - **Rules 1-8**: Add to the table, not as new verbose sections
+> - **Rules 9+**: Keep to ~10 lines max with table + 1-2 key points
+> - **Session History**: Keep only last 6 entries, archive older to CHANGELOG.md
+> - **Never**: Add verbose code examples (put in code comments instead)
+> - **Format**: Tables > prose, one-liners > paragraphs
+
 This file helps Claude Code sessions understand project conventions and avoid common mistakes.
 
 ## Quick Reference
@@ -90,10 +97,12 @@ When writing new code, prefer using modern abstractions:
 | ENTITY_VIDEOS | EntityVideosStage | Download stock videos for entities |
 | DOWNLOAD | DownloadStage | YouTube video/audio download |
 | STOCK | StockVideoStage | Download generic stock footage (B-roll) |
+| BROLL_DOWNLOAD | BrollDownloadStage | Download B-roll with keyword suffixes |
 | REMIX | RemixStage | Filter videos by keyword relevance |
 | TRANSCRIBE | TranscribeStage | Whisper + embeddings |
 | SCENE_DETECTION | SceneDetectionStage | Scene boundaries + face detection for B-roll |
 | MATCH | MatchStage | Embedding + LLM matching |
+| BROLL_MATCH | BrollMatchStage | Match silent scenes to voiceover (V8) |
 | OUTPUT | OutputStage | OTIO, EDL, XML generation |
 
 ### OTIO Track Layout
@@ -112,12 +121,13 @@ When writing new code, prefer using modern abstractions:
 ### V8-V10 Track Requirements
 
 **V8 - B-roll Only:**
-- Requires: SCENE_DETECTION stage (sets `is_broll=True` on segments with face_score < 0.3)
-- Config: `pipeline.skip_scene_detection: false` (default), `scene_detection.detect_faces_per_scene: true` (default)
-- **Detection**: Samples 3 frames/scene, MediaPipe/OpenCV face detection, face_score = (frames_with_faces / 3)
-- **Threshold**: `broll_face_threshold: 0.3` - scenes with < 30% face presence = B-roll
-- **Data flow**: SceneDetectionStage sets is_broll on transcripts + text_metadata → MatchStage restores flag → broll_only strategy filters by is_broll
-- **Troubleshooting**: If V8 empty, check logs for "B-roll: X/Y scenes" and "Updated X text_metadata entries". If 0 B-roll, lower threshold
+- Two detection methods (both contribute to V8):
+  1. **Face detection** (SceneDetectionStage): `is_broll=True` when face_score < 0.3
+  2. **Silent detection** (BrollMatchStage): word_count < `broll.min_words_threshold` (default: 10)
+- Config: `broll.enabled: true`, `scene_detection.detect_faces_per_scene: true`
+- **BrollMatchStage**: Vision API enrichment (or filename keywords in audio-first mode), multi-strategy scoring
+- **Scoring weights**: embedding (0.4) + keyword (0.35) + entity (0.25) + source_boost
+- **Troubleshooting**: If V8 empty, check logs for "B-roll: X/Y scenes" or "BrollMatchStage: Detected X silent scenes"
 
 **V9 - Entity Images:**
 - Requires: Entity extraction (ANALYZE stage) + EntityImagesStage
@@ -217,6 +227,19 @@ pipeline:
   skip_image_search: true
 ```
 
+**IMPORTANT**: The project_config.yaml is automatically loaded as overrides when using `--project`. Do NOT pass it to `--config`:
+```bash
+# CORRECT - project_config.yaml is auto-loaded as overrides
+python main.py --project "E:\Projects\MyDoc"
+
+# ALSO CORRECT - explicit --config with base config, project overrides auto-applied
+python main.py --project "E:\Projects\MyDoc" --config custom_base.yaml
+
+# HANDLED - system detects this and uses default config as base
+python main.py --project "E:\Projects\MyDoc" --config project_config.yaml
+# Shows: "⚠ --config points to project_config.yaml, using default config as base"
+```
+
 ### Short Path Configuration (E:/v, E:/i)
 
 To avoid Windows path length limits and improve NLE import performance, you can use short root paths:
@@ -262,188 +285,49 @@ image_search:
 
 ## Development Rules
 
-### Rule 1: Config Synchronization
-Always update BOTH `src/config.py` AND `config.yaml` when adding options.
+| Rule | Summary | Key Point |
+|------|---------|-----------|
+| 1 | Config sync | Update BOTH `src/config.py` AND `config.yaml` |
+| 2 | `__post_init__` | Nested dataclass fields load as `dict` - convert in `__post_init__` |
+| 3 | DownloadedVideo | Use `file=`, `duration_tier=` NOT `path=`, `tier=` |
+| 4 | Regex lookbehind | Python needs fixed-width - use capture groups instead |
+| 5 | Live streams | Add `!is_live` to yt-dlp match-filter |
+| 6 | Dict/Object config | Handle both: `vc.get()` if dict, `getattr()` if object |
+| 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy arrays fail bool check |
+| 8 | B-roll propagation | SceneDetectionStage → text_metadata → MatchStage restores is_broll |
 
-### Rule 2: Future Annotations + `__post_init__`
-Files use `from __future__ import annotations`. Nested dataclass fields may load as `dict`. Fix with:
-```python
-def __post_init__(self):
-    if isinstance(self.nested_field, dict):
-        self.nested_field = NestedConfig(**self.nested_field)
-```
-
-### Rule 3: DownloadedVideo Field Names
-Use EXACT field names: `file=`, `duration_tier=`. NOT `path=`, `tier=`, `video_id=`.
-
-### Rule 4: Regex Lookbehind
-Python requires fixed-width lookbehinds. Use capture groups instead:
-```python
-# BAD: r'(?<=[A-Z][a-z]+,\s[A-Z][a-z]+,)\s+'
-# GOOD: re.sub(r'([A-Z][a-z]+,\s+[A-Z][a-z]+,)\s+', r'\1|||SPLIT|||', text)
-```
-
-### Rule 5: Live Stream Filtering
-Add `!is_live` to yt-dlp match-filter to prevent hanging on live streams.
-
-### Rule 6: Dict vs Object Config
-Handle variety config as both dict and object:
-```python
-if isinstance(vc, dict):
-    value = vc.get('require_different_source', True)
-else:
-    value = getattr(vc, 'require_different_source', True)
-```
-
-### Rule 7: Embeddings Truthiness Checks
-Never use `state.embeddings` directly in boolean contexts. Numpy arrays raise "truth value of array is ambiguous" errors.
+### Rule 9: LLM Client
+Use `src/llm_client/` for ALL LLM calls. Never directly initialize provider SDKs.
 
 ```python
-# BAD: Direct truthiness check
-if state.embeddings:           # ValueError!
-if not state.embeddings:       # ValueError!
-
-# GOOD: Use helper function
-from src.utils import is_embeddings_empty
-if is_embeddings_empty(state.embeddings):
-if not is_embeddings_empty(state.embeddings):
-```
-
-### Rule 8: B-roll Face Detection & Propagation
-B-roll detection logic and data flow:
-- **face_score**: Ratio of frames with faces (0.0-1.0), from 3 sampled frames per scene
-- **is_broll**: Set `True` when `face_score < broll_face_threshold` (default 0.3)
-- **Data flow**: SceneDetectionStage MUST update both `state.transcripts` AND `state.text_metadata` with is_broll/face_score/scene_index
-- **MatchStage**: Restores is_broll from text_metadata dict to SRTSegment objects before matching
-- **"no faces" in logs**: Shorthand for "below threshold", not literally zero
-- **Backends**: MediaPipe (primary), OpenCV Haar (fallback)
-- **Threshold tuning**: Lower (0.1) = stricter, Higher (0.5) = more lenient
-
-### Rule 9: LLM Client Usage
-Always use the unified LLM client from `src/llm_client/` for all LLM operations. Never directly initialize provider SDKs.
-
-```python
-# GOOD: Use unified client
 from src.llm_client import create_client, LLMRequest, ResponseFormat
-
 client = create_client("gemini", api_key=api_key, model=model)
-request = LLMRequest(
-    prompt=prompt,
-    response_format=ResponseFormat.JSON,
-    cache_key_prefix="feature_name",
-    timeout=120
-)
-response = client.generate(request)
-data = response.parsed_data  # Automatically parsed JSON
-
-# BAD: Direct provider initialization
-import google.generativeai as genai
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-2.0-flash")
-response = model.generate_content(prompt)
+response = client.generate(LLMRequest(prompt=prompt, response_format=ResponseFormat.JSON))
 ```
 
-**Benefits:**
-- Automatic retry with exponential backoff
-- Unified caching with TTL support
-- JSON parsing with fallback strategies
-- Consistent error handling
-- Easy provider switching (Gemini, Anthropic, Ollama)
+**Benefits:** Retry, caching, JSON parsing, provider switching (Gemini/Anthropic/Ollama)
 
-**Architecture:**
-- `src/llm_client/` - Unified LLM abstraction package (added Jan 6, 2026)
-- `src/llm_client/base.py` - Base client, request/response dataclasses
-- `src/llm_client/providers/` - Provider implementations (Gemini, Anthropic, Ollama)
-- `src/llm_client/factory.py` - `create_client()` factory function
-- `src/llm_client/parsers.py` - JSON parsing with fallback strategies
-- `src/llm_client/retry.py` - Retry logic with exponential backoff
-- `src/llm_client/cache.py` - File-based response caching
-- `src/llm_client/exceptions.py` - Custom exception types
+### Rule 10: Dataclass Imports
+Import dataclasses from canonical locations - never redefine locally.
 
-**Files migrated to use unified client:**
-- `src/matching.py` - LLM-based matching (GeminiMatcher, AnthropicMatcher, OllamaMatcher)
-- `src/keyword_extractor.py` - Keyword extraction
-- `src/topic_extraction.py` - Topic detection
-- `src/location_service.py` - Location disambiguation
-- `src/keyword_remix.py` - Keyword remixing
-- `src/downloader.py` - LLM title filtering
-- `src/vision.py` - Vision API for entity images
+| Type | Location | Examples |
+|------|----------|----------|
+| State | `src/state.py` | VoiceoverSegment, DownloadedVideo, AudioDownload, Match, PipelineState |
+| Config | `src/config.py` | Config, LLMConfig, DownloadConfig |
 
-**Code reduction:** Eliminated ~290 lines of duplicated LLM integration code across 7 files.
+**Never**: Duplicate dataclass definitions (causes field name mismatches at runtime)
 
-### Rule 10: Avoid Dataclass Duplication
-Never define the same dataclass in multiple files. Always import from the canonical location to prevent field name mismatches.
+### Rule 11: VAD Filter (CRITICAL - Recurring Bug)
+Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
 
-**CRITICAL: Dataclass Import Locations**
+| Context | VAD | File | Why |
+|---------|-----|------|-----|
+| Voiceover | ON (config) | analyze.py:256 | Gap detection |
+| Videos | OFF (hardcoded) | parallel_processor.py:64 | Audio quality varies |
 
-Use these canonical locations - do NOT redefine these dataclasses elsewhere:
+**Symptoms:** "VAD filter removed XX:XX of audio" = VAD wrongly enabled for videos
 
-```python
-# State dataclasses (src/state.py)
-from src.state import (
-    VoiceoverSegment,
-    DownloadedVideo,
-    AudioDownload,      # ← Use this, not local definition
-    Match,
-    EntityImage,
-    EntityVideo,
-    PipelineState
-)
-
-# Config dataclasses (src/config.py)
-from src.config import (
-    Config,
-    LLMConfig,
-    DownloadConfig,
-    # ... etc
-)
-```
-
-**Common Pitfall: AudioDownload Duplication (Fixed Jan 6, 2026)**
-
-Previously, `AudioDownload` was defined in BOTH locations with **different field names**:
-
-```python
-# ❌ BAD: Old duplicate in src/downloader.py (removed)
-@dataclass
-class AudioDownload:
-    audio_file: str      # Wrong field name
-    video_url: str       # Wrong field name
-    channel: str         # Extra field
-    duration_tier: str   # Extra field
-    # ...
-
-# ✅ GOOD: Canonical definition in src/state.py
-@dataclass
-class AudioDownload:
-    file: str           # Correct
-    url: str            # Correct
-    video_id: str
-    title: str = ""
-    duration: float = 0.0
-    keyword: str = ""
-```
-
-**Impact:** Created `AudioDownload` objects failed at runtime with:
-```
-AudioDownload.__init__() got an unexpected keyword argument 'file'
-```
-
-**Prevention:**
-1. Search for duplicate dataclass definitions before adding new ones:
-   ```bash
-   grep -r "^class AudioDownload" --include="*.py"
-   grep -r "^@dataclass" --include="*.py" | grep -A1 "AudioDownload"
-   ```
-
-2. Always import from canonical location (typically `src/state.py` for pipeline data)
-
-3. If you find duplicates, consolidate immediately:
-   - Keep the definition in `src/state.py`
-   - Replace local definitions with imports
-   - Update all field references to match canonical version
-
-4. Run tests after consolidation to catch field name mismatches
+**Never**: Read VAD from config for video transcription
 
 ### Testing Checklist
 
@@ -558,34 +442,11 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
-| 2026-01-10 | **AudioDownload Checkpoint Restore Bug FIXED**: Fixed obsolete field error preventing checkpoint resume; Old checkpoints contained fields (`channel`, `duration_tier`, `upload_date`, `license`) no longer in AudioDownload dataclass; Added obsolete field removal in src/stages/download.py:118-121; Created comprehensive backward compatibility tests in tests/test_obsolete_fields_fix.py; Fixed user checkpoint corruption (empty transcript cache, missing embeddings) by resetting checkpoint from SCENE_DETECTION → REMIX; Test results: 96/96 passing (56 download stage + 2 obsolete fields + 38 checkpoint tests); Updated CHANGELOG.md with fix details |
-| 2026-01-09 | **Test Infrastructure Overhaul COMPLETED**: Fixed all pytest warnings (0 collection, 0 return value warnings) - renamed 6 classes to avoid pytest collection (TestResult → CoreTestResult, etc.), converted 26 test functions from return tuples to assertions; Added GitHub Actions CI/CD with matrix testing (Ubuntu/Windows × Python 3.10/3.11/3.12), pytest-cov, Codecov integration; Created 4 performance benchmark suites with 30+ benchmarks (keyword extraction, embeddings, matching, OTIO) - established baselines for regression detection; Expanded matching module test coverage by 125% (20 new unit tests) - comprehensive tests for scoring algorithms, LLM matchers (Gemini/Anthropic/Ollama), location filtering, diversity strategies; Test results: 514 passing, 22 skipped, 0 warnings, 27.17% coverage; Created TESTING_IMPROVEMENTS.md documentation; 4 commits: test warnings fix, CI/CD config, performance benchmarks, matching tests |
-| 2026-01-09 | **OTIO Pipeline Integration Tests COMPLETED**: Created comprehensive test_otio_pipeline_integration.py with 21 end-to-end tests (100% passing) - tests all 10 tracks (V1-V10, A1-A8) with realistic match data; Validates audio-first mode with segment resolution and time adjustment; Tests gap handling (leading, between-segment, trailing); Verifies timewarp and speed calculations for clip duration matching; Tests entity images (V9) and stock videos (V10) track population; Validates DaVinci Resolve compatibility (global_start_time, metadata, track names); Tests OTIO export to file and JSON structure; Edge cases (empty matches, single match, very short segments, different frame rates); Total test count now **517 passing** (up from 496 = +21 tests), 21 skipped; Comprehensive test coverage for complete OTIO timeline generation pipeline |
-| 2026-01-09 | **OTIO Utils Test Suite COMPLETED**: Created comprehensive test_otio_utils.py with 53 unit tests (100% passing) - covers NumpyEncoder JSON serialization (6 tests), path utilities with Windows extended-length paths and URL formatting (10 tests), type conversion for numpy to Python types (9 tests), media utilities including ffprobe duration and segment offset extraction (11 tests), formatting utilities for timecode and confidence colors (11 tests), OTIO clip creation with timewarp and speed changes (7 tests); Total test count now 496 passing (up from 443), 21 skipped; OTIO module coverage significantly improved; All path edge cases tested (extended-length prefixes, backslash conversion, double slash removal); Clip creation tested with speed up/down scenarios, metadata, and unique naming |
-| 2026-01-09 | **OTIO Track Builders COMPLETED (Integration Analysis)**: Implemented complete strategy pattern for OTIO timeline generation - extracted clip creation logic from monolithic timeline.py into 7 focused track builder classes (PrimaryTrackBuilder, AlternativeTrackBuilder, DiversityTrackBuilder, EmbeddingDiversityTrackBuilder, BRollTrackBuilder, EntityImageTrackBuilder, EntityVideoTrackBuilder); Added shared helper methods (_create_clip, _create_gap, _add_gap_if_needed) with audio-first resolution, legacy offset support, confidence-based coloring; Created comprehensive test mocks (MockMatch with 14+ attributes, MockMatchResult with alternatives/secondaries/strategies); 23/23 track builder tests passing (100%); 443/464 total tests passing (95.4%); **Integration Decision**: Analyzed timeline.py for integration - gap handling logic (leading/between-segment/trailing gaps, lines 295-353, 684-710) is complex and timing-sensitive, requires timeline-wide coordination that track builders don't currently handle; Track builders replicate per-segment clip creation but not gap management; Decided to keep timeline.py unchanged for stability - current implementation works reliably; Track builders serve as reference implementation and testbed for future refactoring; Next step would require significant refactoring of gap handling to work with builder pattern |
-| 2026-01-09 | **Testing Documentation COMPLETED**: Created comprehensive TESTING.md (559 lines) - covers test suite overview, running tests, integration test handling, writing tests, coverage analysis, CI/CD integration, common patterns, troubleshooting, and maintenance; Updated .gitignore to allow TESTING.md, CHANGELOG.md, README.md; PR #1 now has 5 commits |
-| 2026-01-09 | **100% Test Pass Rate ACHIEVED**: Fixed all 21 remaining test errors by properly configuring integration tests - created tests/conftest.py with @pytest.mark.integration marker and 15 fixture stubs that skip when external resources unavailable; Marked 21 integration tests across test_core.py (10), test_download.py (2), test_features.py (5), test_matching.py (4); Final stats: 443 passing, 21 skipped = 100% pass rate (464 total tests); Created GitHub repo and PR #1 with 3 commits (production readiness, test improvements, integration test handling) |
-| 2026-01-08 | **Vision API Tests COMPLETED**: Created comprehensive test_vision.py with 19 unit tests (100% passing) - covers TranscriptAnalyzer (sparse scene detection), VisionProcessor (frame extraction, Gemini API integration), cost tracking, error handling, caching; All tests use mocked API responses; Total test count now 426 tests with 92% pass rate (392 passing); Updated TEST_COVERAGE.md with Vision API section |
-| 2026-01-08 | **Test Coverage Report COMPLETED**: Comprehensive test suite with 407 tests across all modules - 91.9% pass rate (374 passing, 12 failing, 21 errors); Created TEST_COVERAGE.md with detailed breakdown by module; Fixed all integration test mock paths; All refactored modules have excellent coverage: keyword_extractor (180 tests, 100%), llm_client (71 tests, 100%), media_sources (18 integration tests, 100%), otio (27 tests, 100%), matching (12 tests), transcription (integration coverage) |
-| 2026-01-08 | **Test Suite 100% PASSING**: Fixed all 36 failing keyword extractor tests - updated 18 mock paths for unified LLM client, fixed entity extraction test (separate topic detection mock), corrected 12 topic detector tests (unified LLM client interface), fixed 3 prompt tests (entity extraction placeholders, JSON instruction verification), fixed TF-IDF test (sys.modules mocking); 180/180 tests passing (up from 144/180 = 80%) |
-| 2026-01-08 | **Documentation Suite COMPLETED**: Created comprehensive documentation with API_REFERENCE.md (6 packages, 70+ code examples), EXAMPLES.md (7 feature guides with working code), and TROUBLESHOOTING.md (10 categories, 50+ solutions); Covers all refactored modules (LLM client, matching, OTIO, media sources, transcription, keyword extractor) with migration guides, best practices, and common pitfalls |
-| 2026-01-08 | **Audio-First Mode OTIO Bug VERIFIED FIXED**: Full end-to-end test confirms DOWNLOAD_SEGMENTS remapping works correctly - all OTIO tracks (V1-V10) now reference .mp4 video segments instead of .mp3 audio files; Remapped 18 match objects across all MatchResult structures (primary + alternatives + secondaries + strategies); Handles both Match class types (state.Match and utils.Match) |
-| 2026-01-07 | **Audio-First Mode OTIO Bug FIXED**: DOWNLOAD_SEGMENTS stage now remaps MatchResult objects (primary + alternatives + strategies) to reference .mp4 video segments instead of .mp3 audio files; Fixed TranscriptCache import typo in transcribe.py (TranscriptionCache → TranscriptCache); Handles V1-V10 track remapping |
-| 2026-01-07 | **Keyword Extractor Module Testing COMPLETED**: Created 10 test modules with 178 tests (80% passing); Fixed validator, entity_extractor, segment_processor tests; Fixed import errors in src/stages/entity_videos.py and src/otio_builder.py (old entity_images → media_sources.models); Fixed main.py keyword saving bug (save_preset → save_keywords) |
-| 2026-01-07 | **Transcription Module Phase 2 COMPLETED**: Extracted parallel_processor.py with 5 orchestration functions (435 lines); Updated __init__.py to import directly from parallel_processor (removed bridge); Moved TranscriptSegment to src/state.py (canonical location); Deprecated original transcription.py → _transcription_legacy_backup.py; Complete transcription package with 6 modules (1,299 lines); 100% backward compatible; All imports verified; Updated REFACTORING.md |
-| 2026-01-07 | **Vision API integration COMPLETED**: Integrated VisionProcessor into SceneDetectionStage for silent videos; Generates semantic descriptions using Gemini Vision API instead of placeholder text; Improves embedding-based matching for B-roll; Auto-detects API availability, falls back to placeholders; Cached in `.cache/vision_cache/`; Added "Vision API for Silent Videos" section to CLAUDE.md |
-| 2026-01-07 | **YouTube search timeout FIXED**: Root cause was Firefox locking cookies database while running - close Firefox before pipeline runs; Added enhanced yt-dlp diagnostics with stderr logging, return code checking, output line counting in title_filter.py |
-| 2026-01-07 | **Config modularization COMPLETED**: Split config.py (1,929 lines) → src/config/ package (13 files, 2,421 total lines); Created organized sections (infrastructure, core, matching, llm, download, keywords, entity, duration, output, media); Backward compatible with 100% import preservation; TODO: Pydantic migration for validation |
-| 2026-01-07 | **TieredMatcher bridge created**: Added src/matching/tiered_matcher.py as temporary re-export from old matching.py (1,178-line class); Fixes "No module named tiered_matcher" error; Documented TODO in REFACTORING.md for full extraction |
-| 2026-01-07 | **Media sources refactoring COMPLETED**: Split entity_images.py (1,818 lines) → src/media_sources/ package (14 modules); Created BaseMediaClient abstract class; Eliminated ~30 LOC duplication; 25/27 unit tests passing; Updated entity_images/entity_videos stages; Backward compatible |
-| 2026-01-06 | **Matching.py refactoring COMPLETED**: Created `src/matching/` package with 7 focused modules (tracking, llm_providers, strategies, scoring, location_matching, main); Extracted 2,872→2,269 lines (21% reduction); All LLM providers use unified client (Rule 9); 6 matching strategies modularized; 100% backward compatible; Average module size ~324 lines |
-| 2026-01-06 | **OTIO builder refactoring COMPLETED**: Created `src/otio/` package with 9 focused modules; Migrated ALL 6 public functions including generate_resolve_xml_with_bins() (~550 lines); Created xml_export.py for FCP7 XML generation; 100% backward compatible; 27 tests passing (16 unit + 11 integration); Average module size ~300 lines (vs 3,175 monolith) |
-| 2026-01-06 | **LLM client abstraction COMPLETED**: Created `src/llm_client/` package, eliminated ~290 LOC duplication; Fixed AudioDownload duplicate class bug (src/downloader.py vs src/state.py); Added Rule 10 (dataclass duplication); Full end-to-end test passed |
-| 2026-01-06 | Created REFACTORING.md with comprehensive refactoring roadmap; Added Rule 9 for LLM client usage |
-| 2026-01-06 | Fixed V8 B-roll track (0→238 clips): SceneDetectionStage now propagates is_broll to text_metadata, MatchStage restores from metadata |
-| 2026-01-05 | Pipeline architecture refactor, entity image caching |
-| 2026-01-04 | Match-only mode |
-| 2026-01-03 | Location-aware matching, project setup fix |
-| 2026-01-01 | Audio-first mode, V4-V6 diversity, tier timeouts |
-| 2025-12-31 | CLAUDE.md expansion |
-| 2025-12-30 | Pause-split, list detection, config fixes |
+| 2026-01-13 | BrollDownloadStage + BrollMatchStage: New stages for better V8 B-roll matching |
+| 2026-01-13 | VAD filter separation (Rule 11): Hardcoded OFF for videos, config only for voiceover |
+| 2026-01-13 | Config loading fix: project_config.yaml now properly overlays defaults |
+| 2026-01-13 | video_source_dir fix: _resolve_paths() now checks pipeline.video_source_dir |
+| 2026-01-13 | gap_mode added: scale/proportional/none for timeline gap distribution |
+| 2026-01-13 | voiceover_offset added: Manual alignment adjustment for SRT drift |
+
+*Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*

@@ -221,3 +221,38 @@ class LLMCache:
             "oldest_entry_hours": round(oldest_entry_hours, 1) if oldest_entry_hours else None,
             "provider": self.provider
         }
+
+    def cleanup_expired(self) -> int:
+        """
+        Remove expired cache entries based on TTL.
+
+        Returns:
+            Number of entries removed
+        """
+        if self.ttl_seconds <= 0:
+            return 0  # TTL disabled, nothing expires
+
+        removed = 0
+        for cache_file in self.cache_dir.glob("*.json"):
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                cached_at = data.get('cached_at', 0)
+                age_seconds = time.time() - cached_at
+
+                if age_seconds > self.ttl_seconds:
+                    cache_file.unlink()
+                    removed += 1
+            except (json.JSONDecodeError, OSError, KeyError):
+                # Remove corrupt files
+                try:
+                    cache_file.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+
+        if removed > 0:
+            logger.info(f"Cleaned up {removed} expired LLM cache entries")
+
+        return removed

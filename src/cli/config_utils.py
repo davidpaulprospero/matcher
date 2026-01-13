@@ -105,7 +105,7 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
     Load configuration with project-specific overrides.
 
     Loading order:
-    1. Base config from config_path
+    1. Base config from config_path (or default config.yaml)
     2. Project-specific overrides from project_config.yaml
 
     Args:
@@ -117,14 +117,32 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
     """
     from ..config import load_config
 
+    # Determine project_config.yaml path first
+    project_config_path = project_dir / 'project_config.yaml'
+
     # Load base config
+    # If config_path points to project_config.yaml, use default config instead
+    # (project_config should be used as overrides, not as base config)
     if config_path and config_path.exists():
-        config = load_config(str(config_path))
+        try:
+            # Check if config_path is the same as project_config.yaml
+            if config_path.resolve() == project_config_path.resolve():
+                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
+                config = load_config()  # Use default config.yaml
+            else:
+                config = load_config(str(config_path))
+        except (OSError, ValueError):
+            # resolve() can fail on some paths, fall back to string comparison
+            if str(config_path).endswith('project_config.yaml'):
+                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
+                config = load_config()
+            else:
+                config = load_config(str(config_path))
     else:
         config = load_config()
 
-    # Look for project-specific config
-    project_config_path = project_dir / 'project_config.yaml'
+    # Look for project-specific config (apply overrides)
+    project_overrides = {}
     if project_config_path.exists():
         import yaml
         print(f"  ✓ Loading project config: {project_config_path}")
@@ -132,13 +150,128 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
             with open(project_config_path, 'r', encoding='utf-8') as f:
                 project_overrides = yaml.safe_load(f) or {}
             config = merge_config(config, project_overrides)
+            # Re-resolve paths after merge to pick up video_source_dir
+            config._resolve_paths()
         except Exception as e:
             print(f"  ⚠ Failed to load project config: {e}")
 
-    # Make paths project-relative
-    config = make_paths_project_relative(config, project_dir)
+    # Set project_dir and resolve all paths relative to it
+    # Reset paths to relative values so _resolve_paths() re-resolves them correctly
+    # (they may have been resolved to wrong base in __post_init__)
+    config.project_dir = str(project_dir)
+
+    # Reset cache_dir if it was resolved to wrong location
+    # Preserve custom values from project_config.yaml
+    if config.cache.cache_dir and not str(config.cache.cache_dir).startswith(str(project_dir)):
+        custom_cache = project_overrides.get('cache', {}).get('cache_dir')
+        config.cache.cache_dir = custom_cache if custom_cache else ".cache"
+
+    # Reset log_dir if it was resolved to wrong location
+    # Preserve custom values from project_config.yaml
+    if config.logging.log_dir and not str(config.logging.log_dir).startswith(str(project_dir)):
+        custom_log = project_overrides.get('logging', {}).get('log_dir')
+        config.logging.log_dir = custom_log if custom_log else "logs"
+
+    config._resolve_paths()
 
     return config
+
+
+def _merge_single_tier(tier_config, overrides: dict):
+    """
+    Merge overrides into a single DurationTierConfig.
+
+    Supports aliases:
+    - 'count' or 'per_keyword' -> 'videos_per_keyword'
+    - 'min' -> 'min_seconds'
+    - 'max' -> 'max_seconds'
+
+    Args:
+        tier_config: DurationTierConfig object to update
+        overrides: Dict of overrides with potentially aliased keys
+
+    Returns:
+        Updated tier_config
+    """
+    key_aliases = {
+        'count': 'videos_per_keyword',
+        'per_keyword': 'videos_per_keyword',
+        'min': 'min_seconds',
+        'max': 'max_seconds',
+    }
+
+    for key, value in overrides.items():
+        actual_key = key_aliases.get(key, key)
+        if hasattr(tier_config, actual_key):
+            setattr(tier_config, actual_key, value)
+
+    return tier_config
+
+
+def _merge_duration_tiers(tiers_or_tier, overrides: dict):
+    """
+    Merge duration tier overrides.
+
+    Can be called with either:
+    - DurationTiersConfig (or any object with tier name attributes) + dict of {tier_name: {key: value}}
+    - DurationTierConfig + dict of {key: value}
+
+    Supports aliases:
+    - 'count' or 'per_keyword' -> 'videos_per_keyword'
+    - 'min' -> 'min_seconds'
+    - 'max' -> 'max_seconds'
+
+    Args:
+        tiers_or_tier: DurationTiersConfig or DurationTierConfig
+        overrides: Dict of overrides
+
+    Returns:
+        Updated object
+    """
+    from ..config.sections.duration import DurationTierConfig
+
+    # Check if overrides contains tier names (short, medium, long, longer)
+    tier_names = ['short', 'medium', 'long', 'longer']
+    has_tier_overrides = any(name in overrides for name in tier_names)
+
+    # If overrides look like tier overrides OR object has any tier attributes
+    if has_tier_overrides or any(hasattr(tiers_or_tier, name) for name in tier_names):
+        # It's a DurationTiersConfig-like object - iterate over tier names
+        for tier_name, tier_overrides in overrides.items():
+            if tier_name not in tier_names:
+                continue
+            if not isinstance(tier_overrides, dict):
+                continue
+
+            tier_config = getattr(tiers_or_tier, tier_name, None)
+
+            # Handle case where tier_config is None - create from scratch
+            if tier_config is None:
+                # Map aliased keys to internal format
+                key_aliases = {
+                    'count': 'videos_per_keyword',
+                    'per_keyword': 'videos_per_keyword',
+                    'min': 'min_seconds',
+                    'max': 'max_seconds',
+                }
+                mapped = {}
+                for k, v in tier_overrides.items():
+                    actual_key = key_aliases.get(k, k)
+                    mapped[actual_key] = v
+                # Create new DurationTierConfig with defaults + overrides
+                new_config = DurationTierConfig(
+                    min_seconds=mapped.get('min_seconds', 0),
+                    max_seconds=mapped.get('max_seconds', 0),
+                    videos_per_keyword=mapped.get('videos_per_keyword', 5),
+                    max_total=mapped.get('max_total', 0)
+                )
+                setattr(tiers_or_tier, tier_name, new_config)
+            else:
+                _merge_single_tier(tier_config, tier_overrides)
+        return tiers_or_tier
+    else:
+        # It's a single DurationTierConfig
+        return _merge_single_tier(tiers_or_tier, overrides)
 
 
 def merge_config(config: 'Config', overrides: dict) -> 'Config':
@@ -146,6 +279,7 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
     Merge override dict into config object.
 
     Handles nested configuration sections like 'keyword', 'download', etc.
+    Special handling for duration_tiers with key aliases.
 
     Args:
         config: Base configuration object
@@ -154,7 +288,41 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
     Returns:
         Updated configuration object
     """
+    # Handle legacy paths: download.tier_config -> duration_tiers
+    if 'download' in overrides and isinstance(overrides['download'], dict):
+        if 'tier_config' in overrides['download']:
+            tier_overrides = overrides['download'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
+    # Handle legacy paths: keywords.tier_config -> duration_tiers
+    if 'keywords' in overrides and isinstance(overrides['keywords'], dict):
+        if 'tier_config' in overrides['keywords']:
+            tier_overrides = overrides['keywords'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
+    # Handle legacy paths: keyword.tier_config (singular) -> duration_tiers
+    if 'keyword' in overrides and isinstance(overrides['keyword'], dict):
+        if 'tier_config' in overrides['keyword']:
+            tier_overrides = overrides['keyword'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
     for section, values in overrides.items():
+        # Special handling for duration_tiers
+        if section == 'duration_tiers' and isinstance(values, dict):
+            if hasattr(config, 'duration_tiers'):
+                tiers_obj = config.duration_tiers
+                for tier_name, tier_overrides in values.items():
+                    if hasattr(tiers_obj, tier_name) and isinstance(tier_overrides, dict):
+                        tier_config = getattr(tiers_obj, tier_name)
+                        _merge_single_tier(tier_config, tier_overrides)
+            continue
+
         if hasattr(config, section):
             section_obj = getattr(config, section)
             if isinstance(values, dict):

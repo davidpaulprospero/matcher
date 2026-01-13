@@ -358,3 +358,42 @@ See [REFACTORING.md](REFACTORING.md) for ongoing refactoring efforts and coding 
 - [Troubleshooting Guide](./TROUBLESHOOTING.md)
 - [API Reference](./API_REFERENCE.md)
 - [Examples](./EXAMPLES.md)
+
+---
+
+## Session History Archive
+
+Archived from CLAUDE.md for token efficiency. See CLAUDE.md for recent entries.
+
+| Date | Summary |
+|------|---------|
+| 2026-01-09 | Test infrastructure overhaul: CI/CD, benchmarks, 514 passing tests |
+| 2026-01-09 | OTIO pipeline integration tests: 21 end-to-end tests |
+| 2026-01-09 | OTIO utils test suite: 53 unit tests |
+| 2026-01-09 | OTIO track builders: 7 builder classes, strategy pattern |
+| 2026-01-09 | Testing documentation: TESTING.md created |
+| 2026-01-09 | 100% test pass rate achieved: 443 passing, 21 skipped |
+| 2026-01-08 | Vision API tests: 19 unit tests |
+| 2026-01-08 | Test coverage report: 407 tests, 91.9% pass rate |
+| 2026-01-08 | Test suite 100% passing: Fixed 36 keyword extractor tests |
+| 2026-01-08 | Documentation suite: API_REFERENCE.md, EXAMPLES.md, TROUBLESHOOTING.md |
+| 2026-01-08 | Audio-first mode OTIO bug verified fixed |
+| 2026-01-07 | Audio-first mode OTIO bug fixed: .mp4 remapping |
+| 2026-01-07 | Keyword extractor testing: 178 tests |
+| 2026-01-07 | Transcription module phase 2: parallel_processor.py extracted |
+| 2026-01-07 | Vision API integration for silent videos |
+| 2026-01-07 | YouTube search timeout fixed (Firefox cookies) |
+| 2026-01-07 | Config modularization: src/config/ package |
+| 2026-01-07 | TieredMatcher bridge created |
+| 2026-01-07 | Media sources refactoring: src/media_sources/ package |
+| 2026-01-06 | Matching.py refactoring: src/matching/ package |
+| 2026-01-06 | OTIO builder refactoring: src/otio/ package |
+| 2026-01-06 | LLM client abstraction: src/llm_client/ package |
+| 2026-01-06 | REFACTORING.md created, Rule 9 added |
+| 2026-01-06 | V8 B-roll track fixed (0→238 clips) |
+| 2026-01-05 | Pipeline architecture refactor, entity caching |
+| 2026-01-04 | Match-only mode |
+| 2026-01-03 | Location-aware matching |
+| 2026-01-01 | Audio-first mode, V4-V6 diversity |
+| 2025-12-31 | CLAUDE.md expansion |
+| 2025-12-30 | Pause-split, list detection |

@@ -145,7 +145,8 @@ class SceneDetectionStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore scene detection stage from checkpoint"""
         try:
@@ -153,18 +154,38 @@ class SceneDetectionStage(Stage):
             if not data or data.get('skipped'):
                 return False
 
-            # Scene data is stored in scene_detection cache, not checkpoint
-            # Just load from SceneDetector's index file
-            from ..scene_detection import SceneDetector
-            from ..config import Config
+            if not config:
+                logger.warning("Cannot restore SCENE_DETECTION without config")
+                return False
 
-            # Need to reconstruct config - this is a limitation
-            # For now, just mark as restorable if checkpoint exists
-            logger.info(f"Restored SCENE_DETECTION metadata from checkpoint")
+            # Load scene data from SceneDetector's cache (scene_index.json)
+            from ..scene_detection import SceneDetector
+
+            scene_detector = SceneDetector(config)
+            scene_data_dict = scene_detector.scene_index
+
+            if not scene_data_dict:
+                logger.warning("No scene data in cache during restore")
+                return False
+
+            # Store in state for use by other stages
+            state.scene_data = scene_data_dict
+
+            # CRITICAL: Merge B-roll flags into text_metadata
+            # This ensures B-roll flags are available for matching stage
+            if state.text_metadata:
+                self._merge_scene_data_to_transcripts(state, scene_data_dict, config)
+                broll_count = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+                logger.info(f"Restored SCENE_DETECTION: {len(scene_data_dict)} videos, {broll_count} B-roll entries in text_metadata")
+            else:
+                logger.info(f"Restored SCENE_DETECTION metadata: {len(scene_data_dict)} videos (text_metadata not yet available)")
+
             return True
 
         except Exception as e:
             logger.warning(f"Failed to restore SCENE_DETECTION: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
 
     def validate_inputs(
@@ -173,7 +194,17 @@ class SceneDetectionStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs before running"""
-        if not state.downloaded_videos and not state.downloaded_audio:
+        # Check multiple sources for videos:
+        # 1. downloaded_videos (normal flow)
+        # 2. transcripts (resume flow - videos discovered during transcript rebuild)
+        # 3. remix_files (resume flow - video paths from REMIX stage)
+        has_videos = (
+            state.downloaded_videos or
+            state.downloaded_audio or
+            state.transcripts or
+            state.remix_files
+        )
+        if not has_videos:
             return "No videos available for scene detection"
         return None
 
@@ -183,10 +214,22 @@ class SceneDetectionStage(Stage):
         """Get list of video files to analyze"""
         video_files = []
 
-        # From downloaded videos
+        # From downloaded videos (normal flow)
         for dv in state.downloaded_videos:
             if hasattr(dv, 'file'):
                 video_files.append(Path(dv.file))
+
+        # If no downloaded_videos, try transcripts (resume flow)
+        if not video_files and state.transcripts:
+            for video_path in state.transcripts.keys():
+                if video_path and Path(video_path).exists():
+                    video_files.append(Path(video_path))
+
+        # If still no videos, try remix_files (resume flow)
+        if not video_files and state.remix_files:
+            for video_path in state.remix_files:
+                if video_path and Path(video_path).exists():
+                    video_files.append(Path(video_path))
 
         return video_files
 

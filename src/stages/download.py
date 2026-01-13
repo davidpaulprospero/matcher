@@ -83,12 +83,17 @@ class DownloadStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore download stage from checkpoint"""
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
+                # Fallback: try to restore from disk if config available
+                if config and self._restore_from_disk(state, config):
+                    logger.info("Restored DOWNLOAD from disk (no checkpoint data)")
+                    return True
                 return False
 
             # Restore downloaded videos
@@ -133,6 +138,73 @@ class DownloadStage(Stage):
 
         except Exception as e:
             logger.warning(f"Failed to restore DOWNLOAD: {e}")
+            return False
+
+    def _restore_from_disk(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> bool:
+        """Fallback: restore download state by scanning disk for existing files"""
+        from ..state import AudioDownload
+        from pathlib import Path
+
+        try:
+            # Get videos root directory from config
+            root_dir = getattr(config.download, 'root_dir', None)
+            if not root_dir:
+                return False
+
+            # Find project subdirectory (must include project name)
+            root_path = Path(root_dir)
+            project_name = getattr(config.project, 'name', '') or ''
+            if project_name:
+                project_path = root_path / project_name[:15]
+            else:
+                project_path = root_path
+            
+            if not project_path.exists():
+                return False
+
+            # Look for audio directories (audio-first mode)
+            audio_files = []
+            for audio_dir in project_path.rglob('*_audio'):
+                for mp3 in audio_dir.glob('*.mp3'):
+                    audio_files.append(AudioDownload(
+                        file=str(mp3),
+                        url="",  # Unknown from disk
+                        video_id=mp3.stem,
+                        title=mp3.stem,
+                        duration=0.0,
+                        keyword=audio_dir.name.replace('_audio', '').replace('_l', '').replace('_m', '')
+                    ))
+
+            if audio_files:
+                state.downloaded_audio = audio_files
+                logger.info(f"Restored DOWNLOAD from disk: {len(audio_files)} audio files")
+                return True
+
+            # Look for video files
+            video_files = list(project_path.rglob('*.mp4')) + list(root_path.rglob('*.webm'))
+            if video_files:
+                from ..state import DownloadedVideo
+                state.downloaded_videos = [
+                    DownloadedVideo(
+                        file=str(v),
+                        duration_tier='m',
+                        keyword=v.parent.name.replace('_segments', '').replace('_l', '').replace('_m', ''),
+                        title=v.stem,
+                        video_id=v.stem
+                    )
+                    for v in video_files
+                ]
+                logger.info(f"Restored DOWNLOAD from disk: {len(state.downloaded_videos)} videos")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to restore DOWNLOAD from disk: {e}")
             return False
 
     def validate_inputs(
@@ -288,15 +360,81 @@ class DownloadStage(Stage):
         audio_config = getattr(config.download, 'audio_first', None)
         return audio_config and getattr(audio_config, 'enabled', False)
 
+    def _init_global_cache(self, config: 'Config'):
+        """Initialize global cache manager if enabled"""
+        global_config = getattr(config, 'global_cache', None)
+        if not global_config:
+            return None
+
+        if not getattr(global_config, 'enabled', False):
+            return None
+
+        if not getattr(global_config, 'check_before_download', True):
+            return None
+
+        try:
+            from ..global_cache import GlobalCacheManager
+            cache_dir = getattr(global_config, 'cache_dir', None)
+            return GlobalCacheManager(cache_dir=cache_dir, config=global_config)
+        except Exception as e:
+            logger.warning(f"Failed to initialize global cache: {e}")
+            return None
+
     def _check_global_cache(
         self,
         keywords: List[str],
-        config: 'Config'
+        config: 'Config',
+        topics: List[str] = None
     ) -> tuple:
         """Check global cache for reusable videos"""
-        # TODO: Implement global cache checking
-        # For now, return all keywords for download
-        return keywords, []
+        global_config = getattr(config, 'global_cache', None)
+
+        # Skip if global cache is disabled
+        if not global_config or not getattr(global_config, 'enabled', False):
+            return keywords, []
+
+        # Skip if check_before_download is False
+        if not getattr(global_config, 'check_before_download', True):
+            return keywords, []
+
+        # Try to initialize cache
+        try:
+            cache = self._init_global_cache(config)
+            if not cache:
+                return keywords, []
+
+            # Query cache for relevant videos
+            result = cache.find_videos_for_keywords(keywords, topics=topics)
+
+            # Return uncovered keywords and reusable videos
+            return result.uncovered_keywords or keywords, []
+        except Exception as e:
+            logger.warning(f"Global cache check failed: {e}")
+            return keywords, []
+
+    def _register_downloaded_videos(
+        self,
+        videos: List[Any],
+        config: 'Config',
+        project_id: str = ""
+    ):
+        """Register downloaded videos in global cache"""
+        if not hasattr(self, 'global_cache') or self.global_cache is None:
+            return
+
+        for video in videos:
+            if isinstance(video, dict):
+                video_path = video.get('file', video.get('path', ''))
+                if video_path and Path(video_path).exists():
+                    try:
+                        self.global_cache.register_video(
+                            video_path=video_path,
+                            download_keyword=video.get('keyword', ''),
+                            topics=video.get('topics', []),
+                            project_id=project_id
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to register video in cache: {e}")
 
     def _store_download_results(
         self,
@@ -553,16 +691,26 @@ class DownloadVideoSegmentsStage(Stage):
 
             if hasattr(match_obj, 'video_file'):
                 # state.Match structure
+                if not match_obj.video_file:
+                    # Skip matches with empty video_file (shouldn't happen, but defensive)
+                    return False
                 audio_file = Path(match_obj.video_file).stem
                 start_time = match_obj.video_start
             elif hasattr(match_obj, 'video_segment'):
                 # utils.Match structure - use the video_segment
                 if not hasattr(match_obj.video_segment, 'source_file'):
                     return False
+                if not match_obj.video_segment.source_file:
+                    # Skip matches with empty source_file
+                    return False
                 audio_file = Path(match_obj.video_segment.source_file).stem
                 start_time = match_obj.video_segment.start_time
             else:
                 logger.warning(f"Unknown Match structure: {type(match_obj)}")
+                return False
+
+            # Skip empty audio files (defensive check)
+            if not audio_file:
                 return False
 
             # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping

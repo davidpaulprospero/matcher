@@ -12,6 +12,7 @@ from typing import List
 __all__ = [
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
+    'ChapterDetectionConfig',
     'MatchingConfig',
 ]
 
@@ -65,6 +66,36 @@ class NegativeMatchingConfig:
         "Don't match static images to dynamic narration",
         "Avoid matching unrelated b-roll to specific statements"
     ])
+
+
+@dataclass
+class ChapterDetectionConfig:
+    """Enhanced chapter detection settings.
+
+    Multi-pass chapter detection with:
+    - Pass 1: Initial topic/location detection
+    - Pass 2: Boundary refinement using embeddings
+    - Pass 3: Cross-validation with LLM
+    - Pass 4: Gap/overlap resolution
+    """
+    enabled: bool = True  # Enable enhanced multi-pass detection
+
+    # Pass controls
+    use_validation_pass: bool = True  # Pass 3: Cross-validate chapters
+    use_boundary_refinement: bool = True  # Pass 2: Refine with embeddings
+
+    # Strategy selection
+    default_strategy: str = 'topic'  # 'topic' or 'location'
+    auto_detect_content_type: bool = True  # Auto-switch strategy based on content
+
+    # Chunking for long transcripts
+    max_chunk_chars: int = 6000  # Max chars per LLM call
+    chunk_overlap_segments: int = 5  # Segments to overlap between chunks
+
+    # Chapter constraints
+    min_chapter_confidence: float = 0.5  # Filter low-confidence chapters
+    min_chapter_segments: int = 3  # Minimum segments per chapter
+    max_chapters: int = 20  # Maximum chapters to detect
 
 
 @dataclass
@@ -166,8 +197,16 @@ class MatchingConfig:
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 
+    # Enhanced chapter detection
+    chapter_detection: ChapterDetectionConfig = None
+
     def __post_init__(self):
         if self.location_matching is None:
             self.location_matching = LocationMatchingConfig()
         elif isinstance(self.location_matching, dict):
             self.location_matching = LocationMatchingConfig(**self.location_matching)
+
+        if self.chapter_detection is None:
+            self.chapter_detection = ChapterDetectionConfig()
+        elif isinstance(self.chapter_detection, dict):
+            self.chapter_detection = ChapterDetectionConfig(**self.chapter_detection)

@@ -78,8 +78,9 @@ transcription:
   # Voice Activity Detection
   # Chain-of-thought: VAD skips silence, improves accuracy FOR VOICEOVER
   # WARNING: VAD can be too aggressive for YouTube videos with varying audio quality
-  # Recommendation: Set to false for YouTube downloads, true only for voiceover
-  vad_filter: false  # Changed from true - YouTube videos have inconsistent audio quality
+  # Note: Videos have VAD hardcoded OFF in parallel_processor.py (not configurable)
+  # This setting only affects voiceover transcription in AnalyzeStage
+  vad_filter: true  # Enable for voiceover - helps gap detection
   min_silence_duration_ms: 200
   speech_pad_ms: 10
   
@@ -890,7 +891,39 @@ output:
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
   xml_parts: 6  # Split XML into multiple files (helps with large projects)
   generate_report: true
-  
+
+  # Voiceover alignment offset (seconds)
+  # Use this to fix alignment when SRT timestamps don't match the actual audio
+  # Positive = shift clips later (audio is ahead of SRT timing)
+  # Negative = shift clips earlier (audio is behind SRT timing)
+  # Example: If audio starts 0.5s before SRT says it does, use -0.5
+  voiceover_offset: 0.0
+
+  # Gap threshold (seconds) - collapse gaps smaller than this value
+  # Whisper often inserts small gaps (~0.5-0.8s) between segments that don't exist in audio
+  # Setting to 1.0 will place clips back-to-back for gaps under 1 second
+  # Set to 0.0 to preserve all gaps from SRT (default)
+  min_gap_threshold: 0.0
+
+  # Time scale factor - stretch SRT timestamps to match actual audio duration
+  # Useful when Whisper compresses timestamps (common issue with long audio)
+  # Values:
+  #   0.0 = AUTO: Calculates actual_audio_duration / srt_last_segment_end
+  #   1.0 = No scaling (default)
+  #   Other = Manual scale (e.g., 1.065 stretches timeline by 6.5%)
+  time_scale_factor: 1.0
+
+  # Gap distribution mode - how to handle gaps/pauses between voiceover segments
+  # Controls how silence is placed between clips in the timeline
+  # Options:
+  #   "scale" (default): Scale SRT gaps by time_scale_factor - trusts SRT gap timing
+  #   "proportional": Recalculate gaps based on actual audio duration
+  #                   Distributes total gap time proportionally based on original SRT gap ratios
+  #                   Use when Whisper's gap timing is inaccurate but segment durations are good
+  #   "none": No gaps between clips, back-to-back placement
+  #           Useful when SRT gaps are completely wrong or you want continuous clips
+  gap_mode: "scale"
+
   # Track structure
   # V1: Primary, V2-V3: Alternatives
   # V4-V6: Secondary (different video files from V1-V3)
@@ -1043,6 +1076,64 @@ pipeline:
   # Parallel processing
   parallel_transcription: true
   parallel_embedding: true
+
+# -----------------------------------------------------------------------------
+# B-ROLL DOWNLOAD AND MATCHING
+# -----------------------------------------------------------------------------
+# Two new stages for improved B-roll handling:
+# 1. BrollDownloadStage: Downloads videos specifically searched as B-roll
+# 2. BrollMatchStage: Matches silent scenes to voiceover for V8 track
+#
+# B-roll detection is scene-level (not video-level):
+# - Scenes with < min_words_threshold are considered B-roll
+# - Both face-detection B-roll and silent B-roll appear in V8
+
+broll:
+  enabled: true                  # Enable B-roll stages
+
+  # === Download stage (BrollDownloadStage) ===
+  download_enabled: true         # Enable dedicated B-roll search
+  downloads_per_term: 3          # Videos per search term
+  max_total_downloads: 30        # Cap on total B-roll downloads
+  duration_tier: "short"         # "short" (<3min) or "medium" (3-10min)
+  include_generic_searches: true # Include "stock footage compilation" etc.
+  search_suffixes:               # Terms appended to keywords
+    - "b-roll"
+    - "footage"
+    - "cinematic"
+
+  # === Detection (scene-level) ===
+  min_words_threshold: 10        # Scenes with fewer words = B-roll
+  ignore_markers:                # Don't count these as words
+    - "[Music]"
+    - "[Applause]"
+    - "[Silence]"
+
+  # === Vision API enrichment ===
+  vision_enabled: true           # Use Vision API (auto-disabled in audio-first)
+  vision_prompt: "detailed"      # "brief", "detailed", "keywords_only"
+  frames_per_scene: 3            # Sample start/mid/end frames
+  cache_descriptions: true       # Cache in .cache/broll_vision/
+  vision_fallback_to_keywords: true  # Use filename keywords if Vision fails
+
+  # === Scoring weights (should sum to 1.0) ===
+  embedding_weight: 0.4          # Vision/filename description similarity
+  keyword_weight: 0.35           # Keyword overlap score
+  entity_weight: 0.25            # Entity name matching
+  source_boost:                  # Priority boost by source
+    youtube: 0.1                 # YouTube B-roll preferred
+    pexels: 0.05                 # Stock footage secondary
+    pixabay: 0.0                 # No boost for Pixabay
+
+  # === Matching behavior ===
+  min_match_score: 0.3           # Threshold for "good" match
+  always_match: true             # Always pick best B-roll (V8 never empty)
+  max_matches_per_segment: 3     # Top N options per voiceover segment
+
+  # === Long video handling ===
+  long_video_threshold: 600      # Videos > 10 min use sampling
+  sample_interval_seconds: 120   # 1 scene per 2 minutes
+  max_scenes_per_video: 15       # Cap on sampled scenes
 
 # -----------------------------------------------------------------------------
 # API KEYS

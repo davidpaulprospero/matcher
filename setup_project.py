@@ -751,11 +751,16 @@ def create_convert_bat(project_dir: Path) -> Path:
     Useful for CapCut exports that use HEVC codec which DaVinci may not handle well.
     """
     bat_content = '''@echo off
+setlocal enabledelayedexpansion
 REM ============================================================
 REM Video Converter for DaVinci Resolve
 REM Converts HEVC/H.265 videos to ProRes 4444 (DaVinci compatible)
 REM Usage: Drag and drop a video file onto this script
 REM ============================================================
+
+REM Project directory (this folder)
+set PROJECT_DIR=%~dp0
+if "%PROJECT_DIR:~-1%"=="\\" set PROJECT_DIR=%PROJECT_DIR:~0,-1%
 
 :: Check if a file was dragged onto the script
 if "%~1"=="" (
@@ -776,51 +781,68 @@ if "%~1"=="" (
     exit /b
 )
 
-:: Set FFmpeg path
-set FFMPEG=C:\\ffmpeg\\bin\\ffmpeg.exe
+:: Set FFmpeg path (check FFMPEG_PATH env var first)
+if defined FFMPEG_PATH (
+    set FFMPEG=%FFMPEG_PATH%
+) else (
+    set FFMPEG=C:\\ffmpeg\\bin\\ffmpeg.exe
+)
 
 :: Check if FFmpeg exists
 if not exist "%FFMPEG%" (
     echo   ERROR: FFmpeg not found at %FFMPEG%
-    echo   Please install FFmpeg or update the path in this script.
+    echo   Please install FFmpeg or set FFMPEG_PATH environment variable.
     pause
     exit /b 1
 )
 
 :: Input file
 set INPUT=%~1
+
+:: Check if input file exists
+if not exist "%INPUT%" (
+    echo   ERROR: Input file not found: %INPUT%
+    pause
+    exit /b 1
+)
+
 set INPUT_DIR=%~dp1
 set INPUT_NAME=%~n1
 set INPUT_EXT=%~x1
 
-:: Output file (same directory, _prores suffix)
-set OUTPUT=%INPUT_DIR%%INPUT_NAME%_prores.mov
+:: Output file (same directory, _DAVINCI suffix)
+set OUTPUT=%INPUT_DIR%%INPUT_NAME%_DAVINCI.mov
 
 echo.
 echo   ============================================================
 echo   VIDEO CONVERTER
 echo   ============================================================
 echo.
-echo   Input:  %INPUT%
-echo   Output: %OUTPUT%
+echo   Input:  "%INPUT%"
+echo   Output: "%OUTPUT%"
 echo.
 echo   Converting to ProRes 4444...
 echo.
 
-:: Convert to ProRes 4444
-"%FFMPEG%" -i "%INPUT%" -c:v prores_ks -profile:v 4 -c:a pcm_s16le -y "%OUTPUT%"
+:: Convert to ProRes 4444 with high quality
+:: -profile:v 4444 = ProRes 4444 profile
+:: -pix_fmt yuva444p10le = 10-bit 4:4:4 with alpha
+:: -q:v 5 = quality setting (lower is better, 0-31)
+:: -c:a pcm_s16le = PCM audio for DaVinci compatibility
+"%FFMPEG%" -y -i "%INPUT%" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le -q:v 5 -c:a pcm_s16le "%OUTPUT%"
 
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo   SUCCESS! Converted file saved to:
-    echo   %OUTPUT%
+    echo   "%OUTPUT%"
 ) else (
     echo.
-    echo   ERROR: Conversion failed.
+    echo   ERROR: Conversion failed with error level %ERRORLEVEL%
 )
 
 echo.
 pause
+endlocal
 '''
     
     bat_path = project_dir / "convert.bat"
@@ -1126,6 +1148,9 @@ def regenerate_run_script(project_path: str, install_dir: str = None):
     if sys.platform == 'win32':
         bat_path = create_run_bat(project_dir, install_path)
         print(f"  + Created: {bat_path}")
+        # Also create/update convert.bat
+        convert_path = create_convert_bat(project_dir)
+        print(f"  + Created: {convert_path}")
     else:
         sh_path = create_run_sh(project_dir, install_path)
         print(f"  + Created: {sh_path}")

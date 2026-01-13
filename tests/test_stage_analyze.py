@@ -261,21 +261,29 @@ class TestAudioTranscription:
             {'start': 0.0, 'end': 2.5, 'text': 'Hello world'},
             {'start': 2.5, 'end': 5.0, 'text': 'This is a test'}
         ])
+        mock_write_srt = MagicMock()
 
-        # The source code imports 'transcribe_voiceover' which doesn't exist
-        # We need to add it to the transcription module temporarily
+        # The source code imports 'transcribe_voiceover_audio' from transcription module
         import src.transcription as transcription_module
-        original_func = getattr(transcription_module, 'transcribe_voiceover', None)
-        transcription_module.transcribe_voiceover = mock_transcribe
+        original_func = getattr(transcription_module, 'transcribe_voiceover_audio', None)
+        original_write = getattr(transcription_module, 'write_srt', None)
+        transcription_module.transcribe_voiceover_audio = mock_transcribe
+        transcription_module.write_srt = mock_write_srt
 
         try:
             segments = stage._transcribe_audio(audio_file, mock_config)
         finally:
             # Restore original state
             if original_func is None:
-                delattr(transcription_module, 'transcribe_voiceover')
+                if hasattr(transcription_module, 'transcribe_voiceover_audio'):
+                    delattr(transcription_module, 'transcribe_voiceover_audio')
             else:
-                transcription_module.transcribe_voiceover = original_func
+                transcription_module.transcribe_voiceover_audio = original_func
+            if original_write is None:
+                if hasattr(transcription_module, 'write_srt'):
+                    delattr(transcription_module, 'write_srt')
+            else:
+                transcription_module.write_srt = original_write
 
         assert len(segments) == 2
         assert segments[0].text == 'Hello world'
@@ -294,17 +302,18 @@ class TestAudioTranscription:
 
         # Add the mock function to transcription module temporarily
         import src.transcription as transcription_module
-        original_func = getattr(transcription_module, 'transcribe_voiceover', None)
-        transcription_module.transcribe_voiceover = mock_transcribe
+        original_func = getattr(transcription_module, 'transcribe_voiceover_audio', None)
+        transcription_module.transcribe_voiceover_audio = mock_transcribe
 
         try:
             segments = stage._transcribe_audio(audio_file, mock_config)
         finally:
             # Restore original state
             if original_func is None:
-                delattr(transcription_module, 'transcribe_voiceover')
+                if hasattr(transcription_module, 'transcribe_voiceover_audio'):
+                    delattr(transcription_module, 'transcribe_voiceover_audio')
             else:
-                transcription_module.transcribe_voiceover = original_func
+                transcription_module.transcribe_voiceover_audio = original_func
 
         assert len(segments) == 0
         mock_logger.error.assert_called_once()
@@ -557,16 +566,19 @@ class TestLocationChapterDetection:
 
         mock_config.matching.location_matching.enabled = True
 
-        mock_detector = Mock()
-        mock_detector.detect_location_chapters.return_value = [
-            {'location': 'Paris', 'start_index': 0}
+        # Mock the enhanced chapter detector (used by default)
+        mock_enhanced_detector = Mock()
+        mock_enhanced_detector.detect_chapters.return_value = [
+            {'location': 'Paris', 'start_index': 0, 'title': 'Paris', 'confidence': 0.9}
         ]
 
         mock_location_service = Mock()
 
-        with patch('src.topic_extraction.ChapterDetector', return_value=mock_detector):
+        with patch('src.stages.analyze.EnhancedChapterDetector', return_value=mock_enhanced_detector, create=True):
             with patch('src.location_service.create_location_service', return_value=mock_location_service):
-                location_chapters = stage._detect_location_chapters(segments, "Travel", mock_config)
+                # Patch the import inside the method
+                with patch.dict('sys.modules', {'src.chapter_detection': Mock(EnhancedChapterDetector=lambda *args, **kwargs: mock_enhanced_detector)}):
+                    location_chapters = stage._detect_location_chapters(segments, "Travel", mock_config)
 
         assert len(location_chapters) == 1
         assert location_chapters[0]['location'] == 'Paris'
