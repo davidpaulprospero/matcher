@@ -228,3 +228,78 @@ class TranscriptCache:
 
         except Exception as e:
             logger.debug(f"Could not cache transcript: {e}")
+
+    def cleanup_orphaned(self) -> int:
+        """
+        Remove cache entries for videos that no longer exist.
+
+        Returns:
+            Number of entries removed
+        """
+        removed = 0
+
+        for folder in [self.cache_dir, self.alt_cache_dir]:
+            if not folder or not folder.exists():
+                continue
+
+            for cache_file in list(folder.glob("*.json")):
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+
+                    # Get source file from cache data
+                    source_file = None
+                    if isinstance(data, list) and len(data) > 0:
+                        source_file = data[0].get('source_file', '')
+                    elif isinstance(data, dict):
+                        source_file = data.get('source_file', '')
+                        if not source_file and 'segments' in data:
+                            segs = data['segments']
+                            if segs and len(segs) > 0:
+                                source_file = segs[0].get('source_file', '')
+
+                    # Check if source file exists
+                    if source_file and not Path(source_file).exists():
+                        cache_file.unlink()
+                        removed += 1
+
+                except Exception:
+                    continue
+
+        if removed > 0:
+            logger.info(f"Cleaned up {removed} orphaned transcript cache entries")
+            # Rebuild source map after cleanup
+            self._source_map.clear()
+            self._video_id_map.clear()
+            self._build_source_map()
+
+        return removed
+
+    def get_stats(self) -> Dict[str, any]:
+        """
+        Get cache statistics.
+
+        Returns:
+            Dict with total_entries, total_size_mb, cache_dir
+        """
+        total_entries = 0
+        total_size = 0
+
+        for folder in [self.cache_dir, self.alt_cache_dir]:
+            if not folder or not folder.exists():
+                continue
+
+            for cache_file in folder.glob("*.json"):
+                total_entries += 1
+                try:
+                    total_size += cache_file.stat().st_size
+                except OSError:
+                    pass
+
+        return {
+            "total_entries": total_entries,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "cache_dir": str(self.cache_dir),
+            "source_map_size": len(self._source_map),
+            "video_id_map_size": len(self._video_id_map)
+        }

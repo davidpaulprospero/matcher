@@ -128,7 +128,8 @@ class AnalyzeStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore analyze stage from checkpoint"""
         try:
@@ -249,12 +250,17 @@ class AnalyzeStage(Stage):
         from ..state import VoiceoverSegment
 
         try:
-            from ..transcription import transcribe_voiceover
+            from ..transcription import transcribe_voiceover_audio, write_srt
 
-            result = transcribe_voiceover(
+            # Get VAD setting from config - default True for voiceover
+            # VAD filters silence accurately, improving gap detection
+            vad_filter = getattr(config.transcription, 'vad_filter', True)
+
+            result = transcribe_voiceover_audio(
                 str(path),
-                model=config.transcription.model,
+                model_name=config.transcription.model,
                 compute_type=config.transcription.compute_type,
+                vad_filter=vad_filter,
             )
 
             segments = []
@@ -265,6 +271,11 @@ class AnalyzeStage(Stage):
                     end=seg.get('end', 0.0),
                     text=seg.get('text', ''),
                 ))
+
+            # Write SRT file alongside the audio file
+            srt_path = path.with_suffix('.srt')
+            write_srt(result, str(srt_path))
+            logger.info(f"Wrote voiceover SRT: {srt_path}")
 
             return segments
 
@@ -384,7 +395,7 @@ class AnalyzeStage(Stage):
         topic: str,
         config: 'Config'
     ) -> List[Any]:
-        """Detect location-focused chapters"""
+        """Detect location-focused chapters using enhanced multi-pass detection"""
         # Check if location matching is enabled
         location_config = getattr(config.matching, 'location_matching', None)
         if not location_config:
@@ -398,33 +409,100 @@ class AnalyzeStage(Stage):
         if not enabled:
             return []
 
-        try:
-            from ..topic_extraction import ChapterDetector
-            from ..location_service import create_location_service
+        # Convert segments to dicts
+        segment_dicts = [
+            {'index': s.index, 'start': s.start, 'end': s.end, 'text': s.text}
+            for s in segments
+        ]
 
-            detector = ChapterDetector(config)
+        # Check if enhanced chapter detection is enabled
+        chapter_config = getattr(config.matching, 'chapter_detection', None)
+        use_enhanced = True  # Default to enhanced
+        if chapter_config:
+            if isinstance(chapter_config, dict):
+                use_enhanced = chapter_config.get('enabled', True)
+            else:
+                use_enhanced = getattr(chapter_config, 'enabled', True)
+
+        try:
+            from ..location_service import create_location_service
             location_service = create_location_service(config)
 
-            segment_dicts = [
-                {'index': s.index, 'start': s.start, 'end': s.end, 'text': s.text}
-                for s in segments
-            ]
+            if use_enhanced:
+                # Use new multi-pass EnhancedChapterDetector
+                return self._detect_chapters_enhanced(
+                    segment_dicts, topic, config, location_service
+                )
+            else:
+                # Fall back to legacy ChapterDetector
+                return self._detect_chapters_legacy(
+                    segment_dicts, topic, config, location_service
+                )
 
-            print(f"\n  Detecting location-focused chapters...")
-            location_chapters = detector.detect_location_chapters(
-                segment_dicts,
+        except Exception as e:
+            logger.warning(f"Location chapter detection failed: {e}")
+            return []
+
+    def _detect_chapters_enhanced(
+        self,
+        segment_dicts: List[Dict[str, Any]],
+        topic: str,
+        config: 'Config',
+        location_service: Any
+    ) -> List[Any]:
+        """Use enhanced multi-pass chapter detection"""
+        try:
+            from ..chapter_detection import EnhancedChapterDetector
+
+            print(f"\n  Detecting chapters (enhanced multi-pass)...")
+
+            detector = EnhancedChapterDetector(config)
+            location_chapters = detector.detect_chapters(
+                segments=segment_dicts,
+                content_type='auto',
                 location_service=location_service,
                 overall_topic=topic
             )
 
             if location_chapters:
-                print(f"  ✓ Found {len(location_chapters)} location chapters")
+                print(f"  ✓ Found {len(location_chapters)} chapters")
+                # Log confidence info
+                for ch in location_chapters:
+                    conf = ch.get('confidence', 0.8)
+                    title = ch.get('title', 'Untitled')
+                    strategy = ch.get('detection_strategy', 'unknown')
+                    logger.debug(f"  Chapter '{title}': confidence={conf:.2f}, strategy={strategy}")
 
             return location_chapters
 
-        except Exception as e:
-            logger.warning(f"Location chapter detection failed: {e}")
-            return []
+        except ImportError as e:
+            logger.warning(f"Enhanced chapter detection not available: {e}")
+            # Fall back to legacy
+            return self._detect_chapters_legacy(segment_dicts, topic, config, location_service)
+
+    def _detect_chapters_legacy(
+        self,
+        segment_dicts: List[Dict[str, Any]],
+        topic: str,
+        config: 'Config',
+        location_service: Any
+    ) -> List[Any]:
+        """Use legacy single-pass chapter detection"""
+        from ..topic_extraction import ChapterDetector
+
+        print(f"\n  Detecting location-focused chapters (legacy)...")
+
+        detector = ChapterDetector(config)
+        location_chapters = detector.detect_location_chapters(
+            segment_dicts,
+            location_service=location_service,
+            overall_topic=topic
+        )
+
+        if location_chapters:
+            print(f"  ✓ Found {len(location_chapters)} location chapters")
+
+        return location_chapters
 
     def _segment_to_dict(self, segment: 'VoiceoverSegment') -> Dict[str, Any]:
         """Convert segment to dict for checkpointing"""

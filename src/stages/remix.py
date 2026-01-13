@@ -180,7 +180,8 @@ class RemixStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """
         Restore from checkpoint.

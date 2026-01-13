@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 EntityType = Literal["images", "videos"]
 
 
+def _get_attr(obj, name: str, default=None):
+    """Get attribute from either dict or object."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
 def _find_best_entity_match(
     vo_text: str,
     entity_dict: Dict,
@@ -61,7 +68,7 @@ def _find_best_entity_match(
     # 1. Try exact match first
     for entity_name, entity_result in entity_dict.items():
         if entity_name.lower() in vo_text:
-            assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+            assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
             if assets:
                 return entity_name, 'exact'
 
@@ -75,16 +82,16 @@ def _find_best_entity_match(
         vo_words = set(vo_text.split())
 
         for entity_name, entity_result in entity_dict.items():
-            assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+            assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
             if not assets:
                 continue
 
             # Get query text for matching
-            query = getattr(entity_result, 'query', entity_name)
+            query = _get_attr(entity_result, 'query', entity_name)
             query_words = set(query.lower().split())
 
             # Also include entity type in matching
-            entity_type = getattr(entity_result, 'entity_type', '')
+            entity_type = _get_attr(entity_result, 'entity_type', '')
             if entity_type:
                 query_words.update(entity_type.lower().split())
 
@@ -106,7 +113,7 @@ def _find_best_entity_match(
     # 3. Fall back to sticky entity (if enabled)
     if enable_sticky and last_matched_entity and last_matched_entity in entity_dict:
         entity_result = entity_dict[last_matched_entity]
-        assets = getattr(entity_result, 'images', None) or getattr(entity_result, 'videos', None)
+        assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
         if assets:
             return last_matched_entity, 'sticky'
 
@@ -149,7 +156,8 @@ def add_entity_media_to_track(
     matches: List['MatchResult'],
     frame_rate: float,
     config: 'Config',
-    entity_type: EntityType
+    entity_type: EntityType,
+    time_scale_factor: float = 1.0
 ):
     """
     Add entity media (images or videos) to track at segment positions.
@@ -185,18 +193,34 @@ def add_entity_media_to_track(
     is_image = (entity_type == "images")
     track_name = "V9" if is_image else "V10"
 
-    # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec)
+    # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec, gap_before_frames)
+    # Apply time_scale_factor to match V1-V8 track timing
+    # IMPORTANT: Include gaps between segments to match voiceover timing (sync with V1-V8)
     segment_timing = {}
-    current_frame = 0
+    timeline_frame = 0
+
+    # Get first segment start time for reference (scaled)
+    first_segment_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor if matches else 0.0
 
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+
+        # Scale segment timing to match V1-V8 tracks
+        scaled_start = vo_seg.start_time * time_scale_factor
+        target_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
         duration_frames = round(target_duration * frame_rate)
 
-        segment_timing[i] = (current_frame, duration_frames, target_duration)
-        current_frame += duration_frames
+        # Calculate expected position (where this segment should start)
+        expected_start_frames = round((scaled_start - first_segment_start) * frame_rate)
+
+        # Calculate gap before this segment (silence in voiceover)
+        gap_before_frames = max(0, expected_start_frames - timeline_frame)
+
+        segment_timing[i] = (timeline_frame, duration_frames, target_duration, gap_before_frames)
+
+        # Update timeline position (including gap + segment duration)
+        timeline_frame = expected_start_frames + duration_frames
 
     # Track sticky entity across segments
     last_matched_entity = None
@@ -210,9 +234,20 @@ def add_entity_media_to_track(
     semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
 
     # Process each segment
-    for seg_idx, (start_frame, duration_frames, duration_sec) in segment_timing.items():
+    for seg_idx, (start_frame, duration_frames, duration_sec, gap_before_frames) in segment_timing.items():
         match = matches[seg_idx].primary_match
         vo_text = match.voiceover_segment.text.lower()
+
+        # Insert gap before this segment if there's a pause in voiceover
+        # This keeps V9/V10 tracks in sync with V1-V8 tracks
+        if gap_before_frames > 0:
+            gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(gap_before_frames, rate)
+                )
+            )
+            track.append(gap)
 
         # Find best matching entity (exact -> semantic -> sticky)
         entity_name, match_type = _find_best_entity_match(
@@ -230,7 +265,11 @@ def add_entity_media_to_track(
             last_matched_entity = entity_name
 
             # Get all media for this entity (polymorphic)
-            all_media = entity_result.images if is_image else entity_result.videos
+            # Handle both dict (from checkpoint) and object formats
+            if isinstance(entity_result, dict):
+                all_media = entity_result.get('images' if is_image else 'videos', [])
+            else:
+                all_media = entity_result.images if is_image else entity_result.videos
             num_media = len(all_media)
 
             # Debug: Log which media are being used for this segment
@@ -371,10 +410,11 @@ def _add_entity_images_to_track(
     entity_images: Dict,
     matches: List['MatchResult'],
     frame_rate: float,
-    config: 'Config'
+    config: 'Config',
+    time_scale_factor: float = 1.0
 ):
     """Add entity images to V9 track (backward compatible wrapper)."""
-    add_entity_media_to_track(image_track, entity_images, matches, frame_rate, config, "images")
+    add_entity_media_to_track(image_track, entity_images, matches, frame_rate, config, "images", time_scale_factor)
 
 
 def _add_entity_videos_to_track(
@@ -382,7 +422,8 @@ def _add_entity_videos_to_track(
     entity_videos: Dict,
     matches: List['MatchResult'],
     frame_rate: float,
-    config: 'Config'
+    config: 'Config',
+    time_scale_factor: float = 1.0
 ):
     """Add stock videos to V10 track (backward compatible wrapper)."""
-    add_entity_media_to_track(video_track, entity_videos, matches, frame_rate, config, "videos")
+    add_entity_media_to_track(video_track, entity_videos, matches, frame_rate, config, "videos", time_scale_factor)

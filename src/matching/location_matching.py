@@ -44,7 +44,14 @@ class LocationMatcher:
         """
         self.location_chapters = {}
         for lc in location_chapters:
-            for idx in range(lc.start_segment_idx, lc.end_segment_idx + 1):
+            # Handle both dict (from checkpoint) and object forms
+            if isinstance(lc, dict):
+                start_idx = lc.get('start_segment_idx', 0)
+                end_idx = lc.get('end_segment_idx', 0)
+            else:
+                start_idx = lc.start_segment_idx
+                end_idx = lc.end_segment_idx
+            for idx in range(start_idx, end_idx + 1):
                 self.location_chapters[idx] = lc
         logger.info(f"Set {len(location_chapters)} location chapters covering {len(self.location_chapters)} segments")
 
@@ -111,11 +118,26 @@ class LocationMatcher:
 
         # Get location chapter for this segment
         location_chapter = self._get_location_chapter(segment_idx)
-        if not location_chapter or not location_chapter.location_data:
+        if not location_chapter:
             return candidates, False, ""
 
+        # Handle both dict (from checkpoint) and object forms
+        if isinstance(location_chapter, dict):
+            location_data = location_chapter.get('location_data')
+        else:
+            location_data = location_chapter.location_data
+
+        if not location_data:
+            return candidates, False, ""
+
+        # Get location_name for logging
+        if isinstance(location_chapter, dict):
+            location_name = location_chapter.get('location_name', 'Unknown')
+        else:
+            location_name = getattr(location_chapter, 'location_name', 'Unknown')
+
         # Get the chapter's resolved location
-        chapter_location = GeoLocation.from_dict(location_chapter.location_data)
+        chapter_location = GeoLocation.from_dict(location_data)
 
         # Get config values
         lm_config = location_matching_config
@@ -162,13 +184,13 @@ class LocationMatcher:
         if filtered_candidates:
             # Sort by similarity
             filtered_candidates.sort(key=lambda x: -x[1])
-            reason = f"location filter: {location_chapter.location_name} ({chapter_location.country_code})"
-            logger.info(f"Location filter: kept {len(filtered_candidates)}/{len(candidates)} candidates for '{location_chapter.location_name}' ({chapter_location.country_name})")
+            reason = f"location filter: {location_name} ({chapter_location.country_code})"
+            logger.info(f"Location filter: kept {len(filtered_candidates)}/{len(candidates)} candidates for '{location_name}' ({chapter_location.country_name})")
             return filtered_candidates, True, reason
 
         # Step 3: Fallback to soft penalty mode
         logger.warning(
-            f"Location filter removed all candidates for '{location_chapter.location_name}', "
+            f"Location filter removed all candidates for '{location_name}', "
             f"falling back to soft penalty mode"
         )
 
@@ -191,5 +213,5 @@ class LocationMatcher:
             penalized_candidates.append((seg, adjusted_sim))
 
         penalized_candidates.sort(key=lambda x: -x[1])
-        reason = f"location soft penalty: {location_chapter.location_name} (fallback)"
+        reason = f"location soft penalty: {location_name} (fallback)"
         return penalized_candidates, True, reason

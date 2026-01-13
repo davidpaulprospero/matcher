@@ -24,6 +24,7 @@ Usage:
 import os
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from datetime import datetime
@@ -77,6 +78,38 @@ def estimate_tokens(text: str) -> int:
     """Estimate token count (rough: 4 chars ≈ 1 token)"""
     return len(text) // 4
 
+
+def _sanitize_run_id(run_id):
+    """
+    Sanitize a run ID for use in filenames.
+
+    Replaces special characters with underscores and collapses multiple underscores.
+
+    Args:
+        run_id: Run ID to sanitize
+
+    Returns:
+        Sanitized run ID, or None/empty if input was None/empty
+    """
+    if run_id is None:
+        return None
+    if run_id == '':
+        return ''
+
+    # Replace special characters with underscores
+    result = re.sub(r'[/\:*?"<>|\n\t\r]', '_', run_id)
+
+    # Collapse multiple underscores into single
+    result = re.sub(r'_+', '_', result)
+
+    # Strip leading/trailing underscores
+    result = result.strip('_')
+
+    # If result is empty or only underscores, return default
+    if not result or result == '_':
+        return 'unnamed_run'
+
+    return result
 
 def get_api_cost(model: str, input_tokens: int, output_tokens: int = 0) -> float:
     """Calculate estimated API cost"""
@@ -522,11 +555,12 @@ class RunLogger:
             
             self.run_log.match_decisions.append(log_entry)
             self.run_log.total_matches += 1
-            
-            # File log
+
+            # File log (handle None selected_clip)
+            clip_name = Path(selected_clip).name if selected_clip else "NO_CLIP"
             self.file_logger.info(
                 f"Match [{segment_index}] | {tier} ({confidence:.2f}) | "
-                f"{Path(selected_clip).name} | "
+                f"{clip_name} | "
                 f"emb={embedding_similarity:.2f} | "
                 f"reuse={clip_reuse_count}"
             )

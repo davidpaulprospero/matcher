@@ -134,7 +134,8 @@ class MatchStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore match stage from checkpoint"""
         try:

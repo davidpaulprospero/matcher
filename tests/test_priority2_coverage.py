@@ -181,6 +181,9 @@ class TestSceneDetectionStageWarnings:
 
         state = Mock()
         state.downloaded_videos = []
+        state.downloaded_audio = []
+        state.remix_files = []
+        state.transcripts = {}  # Empty dict so keys() works
 
         config = Mock()
         config.pipeline = Mock()
