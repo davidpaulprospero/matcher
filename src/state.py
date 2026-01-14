@@ -132,6 +132,7 @@ class PipelineState:
     downloaded_audio: List[AudioDownload] = field(default_factory=list)
     failed_keywords: List[str] = field(default_factory=list)
     global_cache_videos: List[Dict[str, Any]] = field(default_factory=list)
+    remix_files: List[str] = field(default_factory=list)  # Video paths from REMIX stage
 
     # === ENTITY MEDIA STATE ===
     entity_images: Dict[str, EntityImage] = field(default_factory=dict)
@@ -149,6 +150,10 @@ class PipelineState:
     # === MATCHING STATE ===
     matches: List[Match] = field(default_factory=list)
     alternatives: Dict[int, List[Match]] = field(default_factory=dict)  # segment_idx -> alt matches
+
+    # === B-ROLL STATE ===
+    broll_downloads: List[Dict[str, Any]] = field(default_factory=list)  # B-roll specific downloads
+    broll_matches: List[Dict[str, Any]] = field(default_factory=list)  # Silent scene matches
 
     # === OUTPUT STATE ===
     output_files: List[Path] = field(default_factory=list)

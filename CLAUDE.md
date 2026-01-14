@@ -97,10 +97,12 @@ When writing new code, prefer using modern abstractions:
 | ENTITY_VIDEOS | EntityVideosStage | Download stock videos for entities |
 | DOWNLOAD | DownloadStage | YouTube video/audio download |
 | STOCK | StockVideoStage | Download generic stock footage (B-roll) |
+| BROLL_DOWNLOAD | BrollDownloadStage | Download B-roll with keyword suffixes |
 | REMIX | RemixStage | Filter videos by keyword relevance |
 | TRANSCRIBE | TranscribeStage | Whisper + embeddings |
 | SCENE_DETECTION | SceneDetectionStage | Scene boundaries + face detection for B-roll |
 | MATCH | MatchStage | Embedding + LLM matching |
+| BROLL_MATCH | BrollMatchStage | Match silent scenes to voiceover (V8) |
 | OUTPUT | OutputStage | OTIO, EDL, XML generation |
 
 ### OTIO Track Layout
@@ -119,12 +121,13 @@ When writing new code, prefer using modern abstractions:
 ### V8-V10 Track Requirements
 
 **V8 - B-roll Only:**
-- Requires: SCENE_DETECTION stage (sets `is_broll=True` on segments with face_score < 0.3)
-- Config: `pipeline.skip_scene_detection: false` (default), `scene_detection.detect_faces_per_scene: true` (default)
-- **Detection**: Samples 3 frames/scene, MediaPipe/OpenCV face detection, face_score = (frames_with_faces / 3)
-- **Threshold**: `broll_face_threshold: 0.3` - scenes with < 30% face presence = B-roll
-- **Data flow**: SceneDetectionStage sets is_broll on transcripts + text_metadata → MatchStage restores flag → broll_only strategy filters by is_broll
-- **Troubleshooting**: If V8 empty, check logs for "B-roll: X/Y scenes" and "Updated X text_metadata entries". If 0 B-roll, lower threshold
+- Two detection methods (both contribute to V8):
+  1. **Face detection** (SceneDetectionStage): `is_broll=True` when face_score < 0.3
+  2. **Silent detection** (BrollMatchStage): word_count < `broll.min_words_threshold` (default: 10)
+- Config: `broll.enabled: true`, `scene_detection.detect_faces_per_scene: true`
+- **BrollMatchStage**: Vision API enrichment (or filename keywords in audio-first mode), multi-strategy scoring
+- **Scoring weights**: embedding (0.4) + keyword (0.35) + entity (0.25) + source_boost
+- **Troubleshooting**: If V8 empty, check logs for "B-roll: X/Y scenes" or "BrollMatchStage: Detected X silent scenes"
 
 **V9 - Entity Images:**
 - Requires: Entity extraction (ANALYZE stage) + EntityImagesStage
@@ -439,11 +442,11 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
+| 2026-01-13 | BrollDownloadStage + BrollMatchStage: New stages for better V8 B-roll matching |
 | 2026-01-13 | VAD filter separation (Rule 11): Hardcoded OFF for videos, config only for voiceover |
 | 2026-01-13 | Config loading fix: project_config.yaml now properly overlays defaults |
 | 2026-01-13 | video_source_dir fix: _resolve_paths() now checks pipeline.video_source_dir |
 | 2026-01-13 | gap_mode added: scale/proportional/none for timeline gap distribution |
 | 2026-01-13 | voiceover_offset added: Manual alignment adjustment for SRT drift |
-| 2026-01-10 | AudioDownload checkpoint fix: Obsolete field removal for backward compat |
 
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*

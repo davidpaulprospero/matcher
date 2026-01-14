@@ -58,9 +58,6 @@ venv.bak/
 *.swp
 *.swo
 
-# --- Project Settings ---
-.project_settings.json
-
 # --- OS Generated Files ---
 .DS_Store
 .DS_Store?
@@ -104,5 +101,5 @@ src/__pycache__/__init__.cpython-310.pyc
 src/__pycache__/__init__.cpython-310.pyc
 tests/fixtures/*.npz
 
-# --- Claude Code temp files ---
-tmpclaude-*
+
+*-cwd

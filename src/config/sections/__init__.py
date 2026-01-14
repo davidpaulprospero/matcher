@@ -37,6 +37,7 @@ from .core import (
 from .matching import (
     LocationMatchingConfig,
     NegativeMatchingConfig,
+    ChapterDetectionConfig,
     MatchingConfig,
 )
 
@@ -96,6 +97,12 @@ from .media import (
     AudioAnalysisConfig,
 )
 
+# B-roll
+from .broll import (
+    BrollSourceBoostConfig,
+    BrollConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -112,6 +119,7 @@ __all__ = [
     # Matching
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
+    'ChapterDetectionConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',
@@ -148,4 +156,7 @@ __all__ = [
     'VisionConfig',
     'SceneDetectionConfig',
     'AudioAnalysisConfig',
+    # B-roll
+    'BrollSourceBoostConfig',
+    'BrollConfig',
 ]

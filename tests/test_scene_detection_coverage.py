@@ -480,7 +480,14 @@ class TestSceneDetectionRestore:
             'broll_count': 8
         }
 
-        result = stage.restore(state, checkpoint)
+        # Mock config and SceneDetector
+        mock_config = Mock()
+        with patch('src.scene_detection.SceneDetector') as mock_detector:
+            mock_instance = Mock()
+            mock_instance.scene_index = {'video1.mp4': Mock(scenes=[])}
+            mock_detector.return_value = mock_instance
+
+            result = stage.restore(state, checkpoint, config=mock_config)
 
         assert result is True
 

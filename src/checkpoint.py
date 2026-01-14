@@ -27,10 +27,13 @@ STAGE_ORDER = [
     "ENTITY_VIDEOS",
     "DOWNLOAD",
     "STOCK",
+    "BROLL_DOWNLOAD",
     "REMIX",
     "TRANSCRIBE",
     "SCENE_DETECTION",
     "MATCH",
+    "BROLL_MATCH",
+    "DOWNLOAD_SEGMENTS",
     "OUTPUT"
 ]
 
@@ -71,10 +74,13 @@ class CheckpointData:
     entity_videos: Dict[str, Any] = field(default_factory=dict)
     download: Dict[str, Any] = field(default_factory=dict)
     stock: Dict[str, Any] = field(default_factory=dict)
+    broll_download: Dict[str, Any] = field(default_factory=dict)
     remix: Dict[str, Any] = field(default_factory=dict)
     transcribe: Dict[str, Any] = field(default_factory=dict)
     scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
+    broll_match: Dict[str, Any] = field(default_factory=dict)
+    download_segments: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -321,7 +327,36 @@ class CheckpointManager:
         
         # Atomic save: write to temp, then rename
         self._atomic_save()
-        
+
+    def save_intermediate(self, stage: str, stage_data: Dict[str, Any] = None):
+        """
+        Save intermediate checkpoint during a long-running stage.
+
+        Unlike save(), this does NOT update last_completed_stage.
+        Used for periodic progress saves during stages like DOWNLOAD_SEGMENTS
+        that can take a long time and benefit from being able to resume partway.
+
+        Args:
+            stage: The stage currently running (for logging)
+            stage_data: Data to save for the stage
+        """
+        if self.data is None:
+            self.data = CheckpointData(
+                created_at=datetime.now().isoformat(),
+                config_hash=self.config_hash
+            )
+
+        self.data.updated_at = datetime.now().isoformat()
+
+        # Store stage-specific data without changing last_completed_stage
+        if stage_data:
+            stage_key = stage.lower()
+            if hasattr(self.data, stage_key):
+                setattr(self.data, stage_key, stage_data)
+
+        logger.debug(f"Saving intermediate checkpoint for {stage}")
+        self._atomic_save()
+
     def _atomic_save(self):
         """Atomically save checkpoint (write temp, then rename)"""
         temp_path = self.checkpoint_path.with_suffix('.tmp')

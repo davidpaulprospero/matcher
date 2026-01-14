@@ -392,10 +392,10 @@ class TestTranscribeVoiceoverAudio:
 
             assert len(result) == 1
             assert result[0]['text'] == 'Hello world'
-            # Verify vad_filter=False for voiceover
+            # Verify vad_filter=True for voiceover (Rule 11: voiceover needs VAD ON)
             instance.transcribe.assert_called_once()
             call_kwargs = instance.transcribe.call_args[1]
-            assert call_kwargs.get('vad_filter') is False
+            assert call_kwargs.get('vad_filter') is True
 
 
 if __name__ == "__main__":

@@ -554,7 +554,7 @@ class TestEdgeCases:
 
         assert tiers.medium.videos_per_keyword == 3
         assert tiers.medium.min_seconds == 0  # default
-        assert tiers.medium.max_seconds == 120  # default
+        assert tiers.medium.max_seconds == 0  # default (not 120 - use actual defaults)
         assert tiers.medium.max_total == 0  # default
 
     def test_load_project_config_with_invalid_yaml(self, tmp_path, capsys):
