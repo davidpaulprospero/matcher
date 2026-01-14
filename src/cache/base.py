@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional, TypeVar, Generic
+from typing import Dict, Any, Optional, TypeVar, Generic, List, Tuple
 import json
 import time
 import logging
@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
+@dataclass
+class EvictionResult:
+    """Result from cache eviction operation"""
+    entries_removed: int
+    bytes_freed: int
+    final_size_mb: float
+    evicted_keys: List[str]
+    dry_run: bool = False
 
 @dataclass
 class CacheEntry(Generic[T]):
@@ -307,6 +315,95 @@ class BaseCache(ABC, Generic[T]):
             logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
 
         return len(expired_keys)
+
+
+    # ==================== Eviction Operations ====================
+
+    def get_size_mb(self) -> float:
+        """Get total cache size in MB."""
+        total_size = 0
+        if self.cache_dir.exists():
+            for file in self.cache_dir.rglob('*'):
+                if file.is_file():
+                    try:
+                        total_size += file.stat().st_size
+                    except OSError:
+                        pass
+        return total_size / (1024 * 1024)
+
+    def get_entries_sorted(
+        self,
+        sort_key: str = "cached_at",
+        reverse: bool = False
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """Get entries sorted by a key."""
+        entries = []
+        for key, entry_data in self.index.items():
+            sort_value = entry_data.get(sort_key, entry_data.get('cached_at', 0))
+            entries.append((key, entry_data, sort_value))
+        entries.sort(key=lambda x: x[2], reverse=reverse)
+        return [(key, data) for key, data, _ in entries]
+
+    def evict_to_size(
+        self,
+        target_size_mb: float,
+        strategy: str = "lru",
+        dry_run: bool = False
+    ) -> EvictionResult:
+        """Evict entries to reach target size."""
+        current_size = self.get_size_mb()
+        if current_size <= target_size_mb:
+            return EvictionResult(
+                entries_removed=0,
+                bytes_freed=0,
+                final_size_mb=current_size,
+                evicted_keys=[],
+                dry_run=dry_run
+            )
+
+        sort_key = "last_used" if strategy == "lru" else "cached_at"
+        sorted_entries = self.get_entries_sorted(sort_key, reverse=False)
+
+        evicted_keys = []
+        bytes_freed = 0
+        entries_removed = 0
+
+        for key, entry_data in sorted_entries:
+            if self.get_size_mb() <= target_size_mb:
+                break
+            entry_size = len(json.dumps(entry_data))
+            for file in self.cache_dir.glob(f"{key}*"):
+                if file.is_file():
+                    try:
+                        entry_size += file.stat().st_size
+                        if not dry_run:
+                            file.unlink()
+                    except OSError:
+                        pass
+            evicted_keys.append(key)
+            bytes_freed += entry_size
+            entries_removed += 1
+            if not dry_run:
+                if key in self.index:
+                    del self.index[key]
+
+        if not dry_run and entries_removed > 0:
+            self._save_index()
+
+        return EvictionResult(
+            entries_removed=entries_removed,
+            bytes_freed=bytes_freed,
+            final_size_mb=self.get_size_mb(),
+            evicted_keys=evicted_keys,
+            dry_run=dry_run
+        )
+
+    def check_size_limit(self, max_size_mb: float, threshold: float = 0.9) -> bool:
+        """Check if cache size exceeds threshold of max size."""
+        if max_size_mb <= 0:
+            return False
+        current_size = self.get_size_mb()
+        return current_size >= (max_size_mb * threshold)
 
     # ==================== Statistics ====================
 

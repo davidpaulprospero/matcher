@@ -177,11 +177,109 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
     return config
 
 
+def _merge_single_tier(tier_config, overrides: dict):
+    """
+    Merge overrides into a single DurationTierConfig.
+
+    Supports aliases:
+    - 'count' or 'per_keyword' -> 'videos_per_keyword'
+    - 'min' -> 'min_seconds'
+    - 'max' -> 'max_seconds'
+
+    Args:
+        tier_config: DurationTierConfig object to update
+        overrides: Dict of overrides with potentially aliased keys
+
+    Returns:
+        Updated tier_config
+    """
+    key_aliases = {
+        'count': 'videos_per_keyword',
+        'per_keyword': 'videos_per_keyword',
+        'min': 'min_seconds',
+        'max': 'max_seconds',
+    }
+
+    for key, value in overrides.items():
+        actual_key = key_aliases.get(key, key)
+        if hasattr(tier_config, actual_key):
+            setattr(tier_config, actual_key, value)
+
+    return tier_config
+
+
+def _merge_duration_tiers(tiers_or_tier, overrides: dict):
+    """
+    Merge duration tier overrides.
+
+    Can be called with either:
+    - DurationTiersConfig (or any object with tier name attributes) + dict of {tier_name: {key: value}}
+    - DurationTierConfig + dict of {key: value}
+
+    Supports aliases:
+    - 'count' or 'per_keyword' -> 'videos_per_keyword'
+    - 'min' -> 'min_seconds'
+    - 'max' -> 'max_seconds'
+
+    Args:
+        tiers_or_tier: DurationTiersConfig or DurationTierConfig
+        overrides: Dict of overrides
+
+    Returns:
+        Updated object
+    """
+    from ..config.sections.duration import DurationTierConfig
+
+    # Check if overrides contains tier names (short, medium, long, longer)
+    tier_names = ['short', 'medium', 'long', 'longer']
+    has_tier_overrides = any(name in overrides for name in tier_names)
+
+    # If overrides look like tier overrides OR object has any tier attributes
+    if has_tier_overrides or any(hasattr(tiers_or_tier, name) for name in tier_names):
+        # It's a DurationTiersConfig-like object - iterate over tier names
+        for tier_name, tier_overrides in overrides.items():
+            if tier_name not in tier_names:
+                continue
+            if not isinstance(tier_overrides, dict):
+                continue
+
+            tier_config = getattr(tiers_or_tier, tier_name, None)
+
+            # Handle case where tier_config is None - create from scratch
+            if tier_config is None:
+                # Map aliased keys to internal format
+                key_aliases = {
+                    'count': 'videos_per_keyword',
+                    'per_keyword': 'videos_per_keyword',
+                    'min': 'min_seconds',
+                    'max': 'max_seconds',
+                }
+                mapped = {}
+                for k, v in tier_overrides.items():
+                    actual_key = key_aliases.get(k, k)
+                    mapped[actual_key] = v
+                # Create new DurationTierConfig with defaults + overrides
+                new_config = DurationTierConfig(
+                    min_seconds=mapped.get('min_seconds', 0),
+                    max_seconds=mapped.get('max_seconds', 0),
+                    videos_per_keyword=mapped.get('videos_per_keyword', 5),
+                    max_total=mapped.get('max_total', 0)
+                )
+                setattr(tiers_or_tier, tier_name, new_config)
+            else:
+                _merge_single_tier(tier_config, tier_overrides)
+        return tiers_or_tier
+    else:
+        # It's a single DurationTierConfig
+        return _merge_single_tier(tiers_or_tier, overrides)
+
+
 def merge_config(config: 'Config', overrides: dict) -> 'Config':
     """
     Merge override dict into config object.
 
     Handles nested configuration sections like 'keyword', 'download', etc.
+    Special handling for duration_tiers with key aliases.
 
     Args:
         config: Base configuration object
@@ -190,7 +288,41 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
     Returns:
         Updated configuration object
     """
+    # Handle legacy paths: download.tier_config -> duration_tiers
+    if 'download' in overrides and isinstance(overrides['download'], dict):
+        if 'tier_config' in overrides['download']:
+            tier_overrides = overrides['download'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
+    # Handle legacy paths: keywords.tier_config -> duration_tiers
+    if 'keywords' in overrides and isinstance(overrides['keywords'], dict):
+        if 'tier_config' in overrides['keywords']:
+            tier_overrides = overrides['keywords'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
+    # Handle legacy paths: keyword.tier_config (singular) -> duration_tiers
+    if 'keyword' in overrides and isinstance(overrides['keyword'], dict):
+        if 'tier_config' in overrides['keyword']:
+            tier_overrides = overrides['keyword'].pop('tier_config')
+            if 'duration_tiers' not in overrides:
+                overrides['duration_tiers'] = {}
+            overrides['duration_tiers'].update(tier_overrides)
+
     for section, values in overrides.items():
+        # Special handling for duration_tiers
+        if section == 'duration_tiers' and isinstance(values, dict):
+            if hasattr(config, 'duration_tiers'):
+                tiers_obj = config.duration_tiers
+                for tier_name, tier_overrides in values.items():
+                    if hasattr(tiers_obj, tier_name) and isinstance(tier_overrides, dict):
+                        tier_config = getattr(tiers_obj, tier_name)
+                        _merge_single_tier(tier_config, tier_overrides)
+            continue
+
         if hasattr(config, section):
             section_obj = getattr(config, section)
             if isinstance(values, dict):

@@ -105,6 +105,9 @@ from .sections import (
     VisionConfig,
     SceneDetectionConfig,
     AudioAnalysisConfig,
+    # B-roll
+    BrollSourceBoostConfig,
+    BrollConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +182,7 @@ class Config:
     global_cache: GlobalCacheConfig = field(default_factory=GlobalCacheConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
+    broll: BrollConfig = field(default_factory=BrollConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
