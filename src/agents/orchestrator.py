@@ -1,0 +1,634 @@
+"""
+Healing Orchestrator - Coordinates self-healing pipeline execution.
+
+The orchestrator manages:
+- Preflight checks before pipeline runs
+- Healer selection and prioritization
+- Config snapshots and rollback
+- User escalation for complex issues
+- Metrics collection and reporting
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type
+
+from .base import Healer, HealerResult, HealerAction
+from .strategy import (
+    HealingStrategy,
+    HealingMode,
+    HealingMetrics,
+    ConfigSnapshot,
+)
+from .healers import HEALER_REGISTRY
+
+if TYPE_CHECKING:
+    from ..config import Config
+    from ..state import PipelineState
+    from ..stages import Stage, StageResult
+    from ..checkpoint import CheckpointManager
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreflightIssue:
+    """Issue detected during preflight checks."""
+    category: str
+    severity: str  # "critical", "warning", "info"
+    message: str
+    auto_fixable: bool = False
+    healer: Optional[str] = None
+
+
+@dataclass
+class EscalationRequest:
+    """Request for user intervention."""
+    stage_name: str
+    error: str
+    options: List[str]
+    recommendation: Optional[str] = None
+
+
+class HealingOrchestrator:
+    """
+    Coordinates self-healing across the pipeline.
+
+    Features:
+    - Preflight checks before running
+    - Smart healer selection based on error type
+    - Config rollback on failure
+    - Cross-healer coordination
+    - User escalation for complex issues
+    - Comprehensive metrics
+    """
+
+    def __init__(
+        self,
+        config: 'Config',
+        project_dir: Path,
+        strategy: HealingStrategy = None,
+        healers: List[Type[Healer]] = None,
+    ):
+        """
+        Initialize the orchestrator.
+
+        Args:
+            config: Pipeline configuration
+            project_dir: Project directory
+            strategy: Healing strategy (defaults to conservative)
+            healers: Optional list of healer classes
+        """
+        self.config = config
+        self.project_dir = Path(project_dir)
+        self.strategy = strategy or HealingStrategy.conservative()
+
+        # Initialize healers
+        healer_classes = healers or HEALER_REGISTRY
+        self._healer_instances: Dict[str, Healer] = {}
+        for cls in healer_classes:
+            healer = cls(config, project_dir)
+            if healer.name not in self.strategy.skip_healers:
+                self._healer_instances[healer.name] = healer
+
+        # Reorder by priority
+        self.healers = self._prioritize_healers()
+
+        # State tracking
+        self.metrics = HealingMetrics()
+        self.config_snapshots: List[ConfigSnapshot] = []
+        self.current_stage: Optional[str] = None
+        self.escalation_callback: Optional[Callable[[EscalationRequest], str]] = None
+
+        # Cross-healer state
+        self._healer_state: Dict[str, Any] = {}
+
+    def _prioritize_healers(self) -> List[Healer]:
+        """Order healers by strategy priority."""
+        ordered = []
+        seen = set()
+
+        # Add in priority order
+        for name in self.strategy.healer_priority:
+            if name in self._healer_instances and name not in seen:
+                ordered.append(self._healer_instances[name])
+                seen.add(name)
+
+        # Add remaining healers
+        for name, healer in self._healer_instances.items():
+            if name not in seen:
+                ordered.append(healer)
+
+        return ordered
+
+    # =========================================================================
+    # PREFLIGHT CHECKS
+    # =========================================================================
+
+    def run_preflight(self, state: 'PipelineState') -> List[PreflightIssue]:
+        """
+        Run preflight checks before pipeline execution.
+
+        Returns list of issues found.
+        """
+        if not self.strategy.run_preflight:
+            return []
+
+        logger.info("Running preflight checks...")
+        issues: List[PreflightIssue] = []
+
+        # Check disk space
+        disk_issues = self._check_disk_space()
+        issues.extend(disk_issues)
+
+        # Check API keys
+        api_issues = self._check_api_keys()
+        issues.extend(api_issues)
+
+        # Check paths
+        path_issues = self._check_paths()
+        issues.extend(path_issues)
+
+        # Check state/matches (for mid-pipeline runs)
+        if hasattr(state, 'matches') and state.matches:
+            match_issues = self._check_matches(state)
+            issues.extend(match_issues)
+
+        # Run healer-specific preflight checks
+        for healer in self.healers:
+            if hasattr(healer, 'preflight_check'):
+                healer_issues = healer.preflight_check(state)
+                for issue_msg in healer_issues:
+                    issues.append(PreflightIssue(
+                        category=healer.name,
+                        severity="warning",
+                        message=issue_msg,
+                        auto_fixable=True,
+                        healer=healer.name,
+                    ))
+
+        self.metrics.preflight_issues_found = len(issues)
+
+        # Log issues
+        for issue in issues:
+            if issue.severity == "critical":
+                logger.error(f"Preflight CRITICAL: {issue.message}")
+            elif issue.severity == "warning":
+                logger.warning(f"Preflight warning: {issue.message}")
+            else:
+                logger.info(f"Preflight info: {issue.message}")
+
+        return issues
+
+    def fix_preflight_issues(
+        self,
+        issues: List[PreflightIssue],
+        state: 'PipelineState'
+    ) -> Tuple[int, int]:
+        """
+        Attempt to fix preflight issues.
+
+        Returns (fixed_count, remaining_count).
+        """
+        if not self.strategy.auto_fix_preflight:
+            return 0, len(issues)
+
+        fixed = 0
+        for issue in issues:
+            if not issue.auto_fixable:
+                continue
+
+            if issue.healer and issue.healer in self._healer_instances:
+                healer = self._healer_instances[issue.healer]
+                try:
+                    # Create a synthetic error for the healer
+                    error = Exception(issue.message)
+                    result = healer.fix(error, state, "PREFLIGHT")
+                    if result.success:
+                        fixed += 1
+                        logger.info(f"Fixed preflight issue: {issue.message}")
+                except Exception as e:
+                    logger.warning(f"Could not fix preflight issue: {e}")
+
+        self.metrics.preflight_issues_fixed = fixed
+        return fixed, len(issues) - fixed
+
+    def _check_disk_space(self) -> List[PreflightIssue]:
+        """Check available disk space."""
+        issues = []
+        try:
+            import shutil
+            usage = shutil.disk_usage(self.project_dir)
+            free_gb = usage.free / (1024 ** 3)
+
+            if free_gb < 1.0:
+                issues.append(PreflightIssue(
+                    category="disk",
+                    severity="critical",
+                    message=f"Low disk space: {free_gb:.1f} GB free",
+                    auto_fixable=True,
+                    healer="disk-healer",
+                ))
+            elif free_gb < 5.0:
+                issues.append(PreflightIssue(
+                    category="disk",
+                    severity="warning",
+                    message=f"Disk space warning: {free_gb:.1f} GB free",
+                    auto_fixable=False,
+                ))
+        except Exception:
+            pass
+        return issues
+
+    def _check_api_keys(self) -> List[PreflightIssue]:
+        """Check required API keys are set."""
+        import os
+        issues = []
+
+        # Check for common API keys
+        key_checks = [
+            ("GEMINI_API_KEY", "Gemini LLM", "warning"),
+            ("ANTHROPIC_API_KEY", "Anthropic LLM", "info"),
+            ("PEXELS_API_KEY", "Pexels stock media", "info"),
+            ("PIXABAY_API_KEY", "Pixabay stock media", "info"),
+        ]
+
+        for env_var, service, severity in key_checks:
+            if not os.environ.get(env_var):
+                issues.append(PreflightIssue(
+                    category="api",
+                    severity=severity,
+                    message=f"{env_var} not set ({service} unavailable)",
+                    auto_fixable=False,
+                ))
+
+        return issues
+
+    def _check_paths(self) -> List[PreflightIssue]:
+        """Check path configuration."""
+        issues = []
+
+        # Check project dir exists
+        if not self.project_dir.exists():
+            issues.append(PreflightIssue(
+                category="path",
+                severity="critical",
+                message=f"Project directory does not exist: {self.project_dir}",
+                auto_fixable=False,
+            ))
+
+        # Check for long paths on Windows
+        project_str = str(self.project_dir)
+        if len(project_str) > 200:
+            issues.append(PreflightIssue(
+                category="path",
+                severity="warning",
+                message=f"Project path is long ({len(project_str)} chars), may hit Windows limit",
+                auto_fixable=True,
+                healer="path-healer",
+            ))
+
+        return issues
+
+    def _check_matches(self, state: 'PipelineState') -> List[PreflightIssue]:
+        """Check match state for issues."""
+        issues = []
+
+        if not state.matches:
+            return issues
+
+        missing_media = 0
+        for match in state.matches:
+            video_path = None
+            for attr in ['video_path', 'source_file', 'file_path', 'path', 'file']:
+                if hasattr(match, attr):
+                    video_path = getattr(match, attr)
+                    break
+
+            if video_path and not Path(video_path).exists():
+                missing_media += 1
+
+        if missing_media > 0:
+            issues.append(PreflightIssue(
+                category="media",
+                severity="warning",
+                message=f"{missing_media} media files not found",
+                auto_fixable=True,
+                healer="otio-healer",
+            ))
+
+        return issues
+
+    # =========================================================================
+    # CONFIG SNAPSHOT / ROLLBACK
+    # =========================================================================
+
+    def snapshot_config(self, stage_name: str) -> ConfigSnapshot:
+        """Create a snapshot of current config for rollback."""
+        snapshot = ConfigSnapshot(
+            stage_name=stage_name,
+            timestamp=time.time(),
+            config_values={},
+        )
+
+        # Snapshot key config sections
+        sections_to_snapshot = ['output', 'download', 'llm', 'matching']
+
+        for section_name in sections_to_snapshot:
+            section = getattr(self.config, section_name, None)
+            if section is None:
+                continue
+
+            # Get all non-private attributes
+            for attr in dir(section):
+                if attr.startswith('_'):
+                    continue
+                try:
+                    value = getattr(section, attr)
+                    # Only snapshot simple types
+                    if isinstance(value, (str, int, float, bool, type(None))):
+                        key = f"{section_name}.{attr}"
+                        if not any(p in key.lower() for p in self.strategy.protected_config_keys):
+                            snapshot.config_values[key] = value
+                except Exception:
+                    pass
+
+        self.config_snapshots.append(snapshot)
+        return snapshot
+
+    def rollback_config(self, to_stage: str = None) -> bool:
+        """
+        Rollback config to a previous snapshot.
+
+        Args:
+            to_stage: Stage name to rollback to (defaults to most recent)
+
+        Returns:
+            True if rollback was successful
+        """
+        if not self.strategy.enable_rollback:
+            logger.warning("Rollback disabled in strategy")
+            return False
+
+        if not self.config_snapshots:
+            logger.warning("No config snapshots available for rollback")
+            return False
+
+        # Find snapshot
+        snapshot = None
+        if to_stage:
+            for s in reversed(self.config_snapshots):
+                if s.stage_name == to_stage:
+                    snapshot = s
+                    break
+        else:
+            snapshot = self.config_snapshots[-1]
+
+        if not snapshot:
+            logger.warning(f"No snapshot found for stage: {to_stage}")
+            return False
+
+        # Restore
+        success = snapshot.restore(self.config)
+        if success:
+            self.metrics.rollbacks_performed += 1
+            logger.info(f"Rolled back config to stage: {snapshot.stage_name}")
+
+        return success
+
+    # =========================================================================
+    # HEALER COORDINATION
+    # =========================================================================
+
+    def select_healers(
+        self,
+        error: Exception,
+        stage_name: str
+    ) -> List[Healer]:
+        """
+        Select appropriate healers for an error.
+
+        Returns healers in priority order.
+        """
+        applicable = []
+
+        for healer in self.healers:
+            if healer.can_handle(error, stage_name):
+                applicable.append(healer)
+
+        # In aggressive mode, return all applicable healers
+        if self.strategy.mode == HealingMode.AGGRESSIVE:
+            return applicable
+
+        # In minimal mode, return only the first match
+        if self.strategy.mode == HealingMode.MINIMAL:
+            return applicable[:1]
+
+        # Conservative/Interactive: return top 3
+        return applicable[:3]
+
+    def coordinate_heal(
+        self,
+        error: Exception,
+        state: 'PipelineState',
+        stage_name: str
+    ) -> HealerResult:
+        """
+        Coordinate healing attempt across multiple healers.
+
+        Tries healers in priority order, handles cross-healer effects.
+        """
+        start_time = time.time()
+        self.current_stage = stage_name
+
+        # Check if we should escalate immediately
+        error_str = str(error).lower()
+        if any(p in error_str for p in self.strategy.always_escalate):
+            return self._escalate_to_user(error, stage_name)
+
+        # Select applicable healers
+        healers = self.select_healers(error, stage_name)
+        if not healers:
+            logger.warning(f"No healers available for: {error}")
+            return HealerResult.failed("No applicable healers found")
+
+        # Try healers in order
+        for healer in healers:
+            logger.info(f"Trying healer: {healer.name}")
+
+            try:
+                result = healer.fix(error, state, stage_name)
+
+                # Record metrics
+                self.metrics.record_heal(healer.name, stage_name, result.success)
+
+                if result.success:
+                    # Notify other healers of changes
+                    self._notify_healers(healer.name, result)
+
+                    # Update timing
+                    self.metrics.time_spent_healing += time.time() - start_time
+
+                    return result
+
+            except Exception as heal_error:
+                logger.error(f"Healer {healer.name} raised exception: {heal_error}")
+                self.metrics.errors_encountered.append(str(heal_error))
+
+        # All healers failed
+        self.metrics.time_spent_healing += time.time() - start_time
+
+        # Escalate in interactive mode
+        if self.strategy.mode == HealingMode.INTERACTIVE:
+            return self._escalate_to_user(error, stage_name)
+
+        return HealerResult.failed(f"All healers failed for: {type(error).__name__}")
+
+    def _notify_healers(self, source_healer: str, result: HealerResult):
+        """
+        Notify healers of changes made by another healer.
+
+        Enables cross-healer coordination.
+        """
+        # Store in shared state
+        self._healer_state[f"{source_healer}_last_result"] = result
+
+        # Specific notifications
+        if result.modified_config:
+            # If config was modified, reset backoff states
+            for healer in self.healers:
+                if hasattr(healer, 'reset_backoff'):
+                    healer.reset_backoff()
+
+        # If disk healer cleaned cache, checkpoint healer needs to know
+        if source_healer == "disk-healer":
+            if "checkpoint-healer" in self._healer_instances:
+                ch = self._healer_instances["checkpoint-healer"]
+                if hasattr(ch, 'cache_was_cleaned'):
+                    ch.cache_was_cleaned = True
+
+    def _escalate_to_user(
+        self,
+        error: Exception,
+        stage_name: str
+    ) -> HealerResult:
+        """Escalate issue to user for decision."""
+        self.metrics.user_escalations += 1
+
+        request = EscalationRequest(
+            stage_name=stage_name,
+            error=str(error),
+            options=[
+                "retry",      # Retry the stage
+                "skip",       # Skip to next stage
+                "abort",      # Stop pipeline
+                "rollback",   # Rollback config and retry
+            ],
+            recommendation="retry" if "rate limit" in str(error).lower() else "abort",
+        )
+
+        # If callback is set, use it
+        if self.escalation_callback:
+            try:
+                decision = self.escalation_callback(request)
+                return self._handle_user_decision(decision, error, stage_name)
+            except Exception:
+                pass
+
+        # Default: log and return failed
+        logger.error(f"User escalation required for {stage_name}: {error}")
+        print(f"\n{'='*60}")
+        print(f"ESCALATION REQUIRED: {stage_name}")
+        print(f"Error: {error}")
+        print(f"Options: {request.options}")
+        print(f"Recommendation: {request.recommendation}")
+        print(f"{'='*60}\n")
+
+        return HealerResult.failed(f"User escalation required: {error}")
+
+    def _handle_user_decision(
+        self,
+        decision: str,
+        error: Exception,
+        stage_name: str
+    ) -> HealerResult:
+        """Handle user's decision from escalation."""
+        if decision == "retry":
+            return HealerResult.fixed("User requested retry", action=HealerAction.RETRY)
+        elif decision == "skip":
+            return HealerResult.fixed("User requested skip", action=HealerAction.SKIP)
+        elif decision == "rollback":
+            if self.rollback_config():
+                return HealerResult.fixed("Config rolled back", action=HealerAction.RETRY)
+            return HealerResult.failed("Rollback failed")
+        else:  # abort
+            return HealerResult.failed("User requested abort")
+
+    # =========================================================================
+    # METRICS AND REPORTING
+    # =========================================================================
+
+    def get_metrics(self) -> HealingMetrics:
+        """Get current healing metrics."""
+        return self.metrics
+
+    def print_report(self):
+        """Print healing summary report."""
+        print("\n" + "=" * 60)
+        print("HEALING ORCHESTRATOR REPORT")
+        print("=" * 60)
+
+        print(f"\nStrategy: {self.strategy.mode.value}")
+        print(f"Healers active: {len(self.healers)}")
+
+        print(f"\n{self.metrics.summary()}")
+
+        if self.metrics.errors_encountered:
+            print(f"\nErrors encountered: {len(self.metrics.errors_encountered)}")
+            for err in self.metrics.errors_encountered[:5]:
+                print(f"  - {err[:80]}...")
+
+        print("=" * 60 + "\n")
+
+    def reset(self):
+        """Reset orchestrator state for new run."""
+        self.metrics = HealingMetrics()
+        self.config_snapshots = []
+        self.current_stage = None
+        self._healer_state = {}
+
+        # Reset healers
+        for healer in self.healers:
+            if hasattr(healer, 'reset_backoff'):
+                healer.reset_backoff()
+
+
+def create_orchestrated_pipeline(
+    config: 'Config',
+    project_dir: Path,
+    strategy: HealingStrategy = None,
+    audio_first_mode: bool = False
+) -> Tuple['PipelineOrchestrator', 'HealingOrchestrator', 'ResilientRunner']:
+    """
+    Create a fully orchestrated pipeline with healing.
+
+    Returns:
+        Tuple of (pipeline, healing_orchestrator, runner)
+    """
+    from ..pipeline import create_default_pipeline
+    from .runner import ResilientRunner
+
+    # Create components
+    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+    orchestrator = HealingOrchestrator(config, project_dir, strategy)
+    runner = ResilientRunner(config, project_dir)
+
+    # Connect runner to orchestrator
+    runner.orchestrator = orchestrator
+
+    return pipeline, orchestrator, runner

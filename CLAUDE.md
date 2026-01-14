@@ -86,6 +86,7 @@ When writing new code, prefer using modern abstractions:
 | `src/otio_builder.py` | Timeline generation |
 | `src/pipeline.py` | PipelineOrchestrator |
 | `src/stages/` | Modular stage classes |
+| `src/agents/` | **Self-healing pipeline agents** (ResilientRunner, Healers) |
 | `setup_project.py` | Creates project folders with run scripts |
 
 ### Pipeline Stages
@@ -397,6 +398,122 @@ vision:
 
 **Cost Estimate**: ~$0.001 per scene (configurable via `estimated_cost_per_call`)
 
+## Self-Healing Agents
+
+Location: `src/agents/` - Auto-recovery for pipeline errors.
+
+### Quick Start (Simple)
+
+```python
+from src.agents import create_resilient_pipeline
+
+pipeline, runner = create_resilient_pipeline(config, project_dir)
+success = runner.run_pipeline(pipeline)
+runner.print_summary()
+```
+
+### Quick Start (With Orchestrator - Recommended)
+
+```python
+from src.agents import create_orchestrated_pipeline, HealingStrategy
+
+pipeline, orchestrator, runner = create_orchestrated_pipeline(
+    config, project_dir,
+    strategy=HealingStrategy.aggressive()
+)
+success = runner.run_pipeline(pipeline)
+orchestrator.print_report()
+```
+
+### Healing Strategies
+
+| Strategy | Attempts | Behavior |
+|----------|----------|----------|
+| `HealingStrategy.aggressive()` | 5/stage, 50 total | Try everything, minimal user interaction |
+| `HealingStrategy.conservative()` | 3/stage, 20 total | Safe fixes only, preserve config |
+| `HealingStrategy.interactive()` | 3/stage, 30 total | Ask user before major changes |
+| `HealingStrategy.minimal()` | 1/stage, 5 total | Fail fast, critical fixes only |
+
+### Healer Registry
+
+| Healer | Detects | Auto-Fix |
+|--------|---------|----------|
+| `CheckpointHealer` | JSON parse errors, corrupt checkpoint | Restore from backup, rebuild from cache |
+| `APIHealer` | Rate limits (429), auth errors, quota | Backoff + retry, switch provider |
+| `DownloadHealer` | YouTube 429, unavailable videos | Backoff, skip video, try alt format |
+| `DiskHealer` | Disk full, permission denied | Clean caches, suggest short paths |
+| `PathHealer` | Windows 260 char limit, unicode | Switch to E:/v, sanitize filenames |
+| `OTIOHealer` | Timeline generation failures | Fix gaps, resolve paths, simplify |
+
+### OTIOHealer Details
+
+**Clip Timing Fixes:**
+
+| Issue | Detection | Fix |
+|-------|-----------|-----|
+| Zero/negative duration | `end <= start` | Clamp to MIN_DURATION (0.04s) |
+| Excessive duration | `duration > 24h` | Clamp to MAX_DURATION |
+| Clip overlaps | `clip[i].end > clip[i+1].start` | Trim earlier clip with 20ms buffer |
+| Invalid speed | `time_scalar < 0.1 or > 10` | Clamp to 10%-1000% range |
+| Negative start_time | `start < 0` | Set to 0 |
+| Gap overflow | Total gaps > available time | Switch gap_mode progressively |
+
+**Media Reference Fixes:**
+
+| Issue | Detection | Fix |
+|-------|-----------|-----|
+| Missing file | `not Path(video_path).exists()` | Search caches by filename, video_id |
+| Path encoding | Unicode chars in path | Sanitize to ASCII, rename file |
+| Invalid URL | Backslash/extended path issues | Convert to forward slashes |
+| Broken reference | File moved/deleted | Search project/.cache, global cache, E:/v |
+
+**Preflight Check:** Call `healer.preflight_check(state)` before timeline generation to detect issues early.
+
+**Safe Mode:** Last resort applies minimal settings (V1 only, no EDL/XML, gap_mode=none, 30fps).
+
+### HealingOrchestrator
+
+Coordinates all healers with:
+
+| Feature | Description |
+|---------|-------------|
+| **Preflight checks** | Disk space, API keys, paths, media files before run |
+| **Smart healer selection** | Priority ordering, picks best healer for error |
+| **Config rollback** | Snapshot before each stage, restore on failure |
+| **Cross-healer coordination** | Notifies healers when others make changes |
+| **User escalation** | Asks user for critical decisions (interactive mode) |
+| **Metrics tracking** | Success rates, time spent, issues found/fixed |
+
+```python
+# Manual preflight check
+issues = orchestrator.run_preflight(pipeline.state)
+for issue in issues:
+    print(f"[{issue.severity}] {issue.message}")
+
+# Fix preflight issues
+fixed, remaining = orchestrator.fix_preflight_issues(issues, pipeline.state)
+
+# Get metrics after run
+metrics = orchestrator.get_metrics()
+print(metrics.summary())
+```
+
+### Adding New Healers
+
+1. Create `src/agents/healers/my_healer.py`
+2. Extend `Healer` base class
+3. Set `error_patterns` and/or `exception_types`
+4. Implement `fix()` returning `HealerResult`
+5. Add to `HEALER_REGISTRY` in `src/agents/healers/__init__.py`
+
+### Healer Development Rules
+
+| Rule | Key Point |
+|------|-----------|
+| 12 | Healers update config via `getattr`/`setattr` - never replace config object |
+| 13 | Return `HealerResult.fixed()` for retry, `.failed()` to abort |
+| 14 | Log attempts with `self.log_attempt()`, success with `self.log_success()` |
+
 ## Git Conventions
 
 ### Branch Strategy
@@ -442,11 +559,12 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
+| 2026-01-14 | HealingOrchestrator: Preflight checks, config rollback, cross-healer coordination, metrics |
+| 2026-01-14 | Self-healing agents: ResilientRunner + 6 healers (OTIO, API, Checkpoint, Download, Disk, Path) |
 | 2026-01-13 | BrollDownloadStage + BrollMatchStage: New stages for better V8 B-roll matching |
 | 2026-01-13 | VAD filter separation (Rule 11): Hardcoded OFF for videos, config only for voiceover |
 | 2026-01-13 | Config loading fix: project_config.yaml now properly overlays defaults |
 | 2026-01-13 | video_source_dir fix: _resolve_paths() now checks pipeline.video_source_dir |
 | 2026-01-13 | gap_mode added: scale/proportional/none for timeline gap distribution |
-| 2026-01-13 | voiceover_offset added: Manual alignment adjustment for SRT drift |
 
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
