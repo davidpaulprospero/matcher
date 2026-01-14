@@ -188,9 +188,28 @@ def _get_media_duration(media_path: str) -> Optional[float]:
 
     Returns duration in seconds, or None if ffprobe fails.
     Used to determine actual voiceover file length for timeline alignment.
+
+    If an SRT file is provided, automatically looks for an accompanying audio file
+    (MP3, WAV, M4A, MP4, AAC) with the same base name.
     """
     if not media_path:
         return None
+
+    path = Path(media_path)
+
+    # If SRT file, look for accompanying audio file
+    if path.suffix.lower() == '.srt':
+        audio_extensions = ['.mp3', '.wav', '.m4a', '.mp4', '.aac', '.flac', '.ogg']
+        for ext in audio_extensions:
+            audio_path = path.with_suffix(ext)
+            if audio_path.exists():
+                logger.info(f"SRT file provided, using accompanying audio: {audio_path.name}")
+                media_path = str(audio_path)
+                break
+        else:
+            # No accompanying audio found - return None so fallback is used
+            logger.warning(f"SRT file provided but no accompanying audio found ({path.stem}.[mp3|wav|m4a|...])")
+            return None
 
     try:
         result = subprocess.run(

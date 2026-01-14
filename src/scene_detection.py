@@ -340,6 +340,43 @@ class SceneDetector:
             logger.warning(f"Could not import face_detection module: {e}")
             self.face_detector = None
 
+        # Re-compute is_broll for cached entries using current threshold
+        # This fixes stale cache where is_broll was computed with different threshold
+        self._recompute_broll_flags()
+
+    def _recompute_broll_flags(self):
+        """
+        Re-compute is_broll flags for all cached scenes based on current threshold.
+
+        This ensures cached entries with stale is_broll values are updated when:
+        - The broll_face_threshold config changed
+        - Cached entries were created before is_broll logic was added
+        - Cache is shared across projects with different thresholds
+        """
+        if not self.scene_index:
+            return
+
+        updated_count = 0
+        broll_count = 0
+
+        for video_name, scene_data in self.scene_index.items():
+            for scene in scene_data.scenes:
+                old_broll = scene.is_broll
+                new_broll = scene.face_score < self.broll_threshold
+                if old_broll != new_broll:
+                    scene.is_broll = new_broll
+                    updated_count += 1
+                if scene.is_broll:
+                    broll_count += 1
+
+        if updated_count > 0:
+            logger.info(f"Re-computed is_broll for {updated_count} scenes (threshold={self.broll_threshold})")
+            # Save updated cache
+            self._save_scene_index()
+
+        total_scenes = sum(len(sd.scenes) for sd in self.scene_index.values())
+        logger.info(f"B-roll scenes: {broll_count}/{total_scenes} (threshold < {self.broll_threshold})")
+
     def _save_scene_index(self):
         """Save scene index to disk using SceneCache"""
         for video_name, scene_data in self.scene_index.items():

@@ -88,6 +88,106 @@ def get_pipeline_config() -> Config:
     return _config
 
 
+def _preload_cached_data_for_match_only(pipeline, config):
+    """
+    Preload cached data for match-only mode when checkpoint data is incomplete.
+
+    This handles the case where the pipeline completed but the checkpoint wasn't
+    updated properly. It loads embeddings and text_metadata from disk cache.
+    """
+    import logging
+    import numpy as np
+    logger = logging.getLogger(__name__)
+
+    state = pipeline.state
+    cache_dir = Path(config.cache.cache_dir)
+
+    # 1. Load audio files from disk if not in state
+    if not state.downloaded_audio and not state.downloaded_videos:
+        from src.state import AudioDownload
+        root_dir = getattr(config.download, 'root_dir', None)
+        if root_dir:
+            root_path = Path(root_dir)
+            # Find project-specific subdirectory
+            for subdir in root_path.iterdir():
+                if subdir.is_dir():
+                    audio_files = []
+                    for audio_dir in subdir.rglob('*_audio'):
+                        for mp3 in audio_dir.glob('*.mp3'):
+                            audio_files.append(AudioDownload(
+                                file=str(mp3),
+                                url="",
+                                video_id=mp3.stem,
+                                title=mp3.stem,
+                                duration=0.0,
+                                keyword=audio_dir.name.replace('_audio', '').replace('_l', '').replace('_m', '')
+                            ))
+                    if audio_files:
+                        state.downloaded_audio = audio_files
+                        logger.info(f"Preloaded {len(audio_files)} audio files from disk")
+                        break
+
+    # 2. Load transcripts from cache
+    transcripts_dir = cache_dir / 'transcriptions'
+    if transcripts_dir.exists() and not state.transcripts:
+        import json
+        transcripts = {}
+        for json_file in transcripts_dir.glob('*.json'):
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        transcripts[json_file.stem] = data
+                    elif isinstance(data, dict) and 'segments' in data:
+                        transcripts[json_file.stem] = data['segments']
+            except Exception:
+                pass
+        if transcripts:
+            state.transcripts = transcripts
+            logger.info(f"Preloaded {len(transcripts)} transcripts from cache")
+
+    # 3. Load embeddings from cache
+    embeddings_dir = cache_dir / 'embeddings'
+    if embeddings_dir.exists():
+        import json
+
+        # Load text_metadata and embeddings from video_segments files
+        # Each file contains: {"text_preview": "...", "embedding": [...], "cached_at": ...}
+        text_metadata = []
+        embeddings_list = []
+        for json_file in sorted(embeddings_dir.glob('video_segments_*.json')):
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if 'text_preview' in data and 'embedding' in data:
+                        # Build text_metadata entry
+                        text_metadata.append({
+                            'text': data['text_preview'],
+                            'video_path': json_file.stem,  # Use filename as identifier
+                            'start': 0.0,
+                            'end': 0.0,
+                        })
+                        embeddings_list.append(data['embedding'])
+            except Exception:
+                pass
+
+        if text_metadata:
+            state.text_metadata = text_metadata
+            logger.info(f"Preloaded {len(text_metadata)} text_metadata entries from cache")
+
+        if embeddings_list:
+            state.embeddings = np.array(embeddings_list, dtype=np.float32)
+            logger.info(f"Preloaded embeddings: shape {state.embeddings.shape}")
+
+            # Build FAISS index
+            try:
+                from src.embeddings import build_embedding_index
+                state.embedding_index = build_embedding_index(state.embeddings, config=config)
+                logger.info("Built FAISS index from preloaded embeddings")
+            except Exception as e:
+                logger.warning(f"Failed to build FAISS index: {e}")
+
+
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
@@ -206,6 +306,47 @@ def main():
 
     if args.match_only:
         pipeline = create_match_only_pipeline(config, PROJECT_DIR)
+        # Match-only requires checkpoint data - force resume mode
+        if not args.resume:
+            args.resume = True
+
+        # Validate checkpoint exists
+        if not pipeline.checkpoint.exists():
+            print("\n  Error: --match-only requires existing checkpoint data.")
+            print("  Run the full pipeline first to download and transcribe videos.")
+            sys.exit(1)
+
+        # Check checkpoint has sufficient data (at least SCENE_DETECTION completed)
+        checkpoint_data = pipeline.checkpoint.load()
+        if checkpoint_data:
+            last_stage = checkpoint_data.last_completed_stage
+            if last_stage:
+                from src.checkpoint import STAGE_ORDER
+                try:
+                    last_idx = STAGE_ORDER.index(last_stage)
+                    scene_idx = STAGE_ORDER.index('SCENE_DETECTION')
+                    if last_idx < scene_idx:
+                        print(f"\n  Error: Checkpoint incomplete for match-only mode.")
+                        print(f"  Last completed: {last_stage}")
+                        print(f"  Required: SCENE_DETECTION (run full pipeline first)")
+                        sys.exit(1)
+
+                    # If pipeline completed (OUTPUT), reset to SCENE_DETECTION
+                    # so MATCH and OUTPUT can re-run
+                    if last_stage in ('MATCH', 'OUTPUT'):
+                        pipeline.checkpoint.data.last_completed_stage = 'SCENE_DETECTION'
+                        pipeline.checkpoint._atomic_save()  # Save without stage update
+                        print(f"  Reset checkpoint from {last_stage} to SCENE_DETECTION for re-matching")
+                except ValueError:
+                    pass  # Unknown stage, let it proceed
+
+        # Print confirmation
+        print(f"\n  Match-only mode: Using checkpoint data from previous run")
+        print(f"  Will skip: ANALYZE through SCENE_DETECTION")
+        print(f"  Will run: MATCH, OUTPUT")
+
+        # Preload cached data for match-only mode (fallback when checkpoint is incomplete)
+        _preload_cached_data_for_match_only(pipeline, config)
     else:
         pipeline = create_default_pipeline(config, PROJECT_DIR, audio_first_mode=audio_first)
 
@@ -258,7 +399,7 @@ def main():
             name=save_keywords,
             keywords=pipeline.state.keywords,
             topic_context=pipeline.state.topic_context or "",
-            entities=pipeline.state.entities or []
+            entities=pipeline.state.extracted_entities or []
         )
         print(f"\n  ✓ Saved keyword preset: {save_keywords}")
 

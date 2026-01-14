@@ -214,9 +214,25 @@ class Config:
         """Resolve relative paths to absolute"""
         base = Path(self.project_dir).resolve()
 
+        # Determine video directory with priority:
+        # 1. pipeline.video_source_dir (explicit override)
+        # 2. download.root_dir (short path mode like E:/v)
+        # 3. downloading.output_dir (legacy fallback)
+        video_source = getattr(self.pipeline, 'video_source_dir', '') or ''
+        if video_source:
+            video_dir = video_source
+        elif getattr(self.download, 'root_dir', ''):
+            root_dir = Path(self.download.root_dir)
+            # Use project name, truncated to 15 chars for short paths
+            project_name = getattr(self.project, 'name', base.name) or base.name
+            project_name = project_name[:15]
+            video_dir = str(root_dir / project_name)
+        else:
+            video_dir = self.downloading.output_dir
+
         # Resolve all path attributes
         path_attrs = [
-            ('downloaded_videos_dir', self.downloading.output_dir),
+            ('downloaded_videos_dir', video_dir),
             ('otio_output_dir', self.output.output_dir),
         ]
 

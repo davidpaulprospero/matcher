@@ -112,7 +112,8 @@ class Stage(ABC):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """
         Restore stage output from checkpoint.

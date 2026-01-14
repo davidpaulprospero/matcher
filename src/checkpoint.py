@@ -73,6 +73,7 @@ class CheckpointData:
     stock: Dict[str, Any] = field(default_factory=dict)
     remix: Dict[str, Any] = field(default_factory=dict)
     transcribe: Dict[str, Any] = field(default_factory=dict)
+    scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:

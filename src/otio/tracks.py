@@ -601,8 +601,9 @@ class EntityImageTrackBuilder(TrackBuilder):
 
         # Get entity images from kwargs
         entity_images = self.kwargs.get('entity_images')
+        time_scale_factor = self.kwargs.get('time_scale_factor', 1.0)
         if entity_images:
-            _add_entity_images_to_track(video_track, entity_images, self.matches, self.frame_rate, self.config)
+            _add_entity_images_to_track(video_track, entity_images, self.matches, self.frame_rate, self.config, time_scale_factor)
 
         return video_track, audio_track
 
@@ -621,7 +622,8 @@ class EntityVideoTrackBuilder(TrackBuilder):
 
         # Get entity videos from kwargs
         entity_videos = self.kwargs.get('entity_videos')
+        time_scale_factor = self.kwargs.get('time_scale_factor', 1.0)
         if entity_videos:
-            _add_entity_videos_to_track(video_track, entity_videos, self.matches, self.frame_rate, self.config)
+            _add_entity_videos_to_track(video_track, entity_videos, self.matches, self.frame_rate, self.config, time_scale_factor)
 
         return video_track, audio_track
