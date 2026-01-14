@@ -1,0 +1,30 @@
+# Optimized Project Config for Faster Matching
+# Copy this to your project folder (e.g., E:\Projects\MyDoc__2026-01-10\project_config.yaml)
+# These settings override config.yaml for this specific project
+
+matching:
+  # Speed optimization: Reduce LLM rerank candidates (3 vs default 8)
+  llm_rerank_candidates: 3
+
+  # Allow more clip reuse to reduce "no candidates" warnings
+  # With 612 segments and 414 videos, max_clip_reuse: 1 depletes clips fast
+  max_clip_reuse: 2
+  clip_hard_block: false  # Allow same clip on different tracks
+
+  # Disable expensive topic extraction (saves LLM calls)
+  extract_video_topics: false
+  chapter_matching_enabled: false
+
+  # Disable location matching (saves geocoding API calls)
+  location_matching:
+    enabled: false
+
+# Alternative: For maximum speed, uncomment below to skip LLM entirely
+# matching:
+#   primary_provider: embedding_only  # Pure embedding similarity, no LLM
+#   llm_rerank_candidates: 0
+
+# Voiceover alignment offset (test different values to fix SRT/audio mismatch)
+# Positive = shift clips later, Negative = shift clips earlier
+output:
+  voiceover_offset: 0.0  # Adjust as needed: try -0.5, -1.0, +0.5, etc.
