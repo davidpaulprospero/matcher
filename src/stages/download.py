@@ -360,15 +360,81 @@ class DownloadStage(Stage):
         audio_config = getattr(config.download, 'audio_first', None)
         return audio_config and getattr(audio_config, 'enabled', False)
 
+    def _init_global_cache(self, config: 'Config'):
+        """Initialize global cache manager if enabled"""
+        global_config = getattr(config, 'global_cache', None)
+        if not global_config:
+            return None
+
+        if not getattr(global_config, 'enabled', False):
+            return None
+
+        if not getattr(global_config, 'check_before_download', True):
+            return None
+
+        try:
+            from ..global_cache import GlobalCacheManager
+            cache_dir = getattr(global_config, 'cache_dir', None)
+            return GlobalCacheManager(cache_dir=cache_dir, config=global_config)
+        except Exception as e:
+            logger.warning(f"Failed to initialize global cache: {e}")
+            return None
+
     def _check_global_cache(
         self,
         keywords: List[str],
-        config: 'Config'
+        config: 'Config',
+        topics: List[str] = None
     ) -> tuple:
         """Check global cache for reusable videos"""
-        # TODO: Implement global cache checking
-        # For now, return all keywords for download
-        return keywords, []
+        global_config = getattr(config, 'global_cache', None)
+
+        # Skip if global cache is disabled
+        if not global_config or not getattr(global_config, 'enabled', False):
+            return keywords, []
+
+        # Skip if check_before_download is False
+        if not getattr(global_config, 'check_before_download', True):
+            return keywords, []
+
+        # Try to initialize cache
+        try:
+            cache = self._init_global_cache(config)
+            if not cache:
+                return keywords, []
+
+            # Query cache for relevant videos
+            result = cache.find_videos_for_keywords(keywords, topics=topics)
+
+            # Return uncovered keywords and reusable videos
+            return result.uncovered_keywords or keywords, []
+        except Exception as e:
+            logger.warning(f"Global cache check failed: {e}")
+            return keywords, []
+
+    def _register_downloaded_videos(
+        self,
+        videos: List[Any],
+        config: 'Config',
+        project_id: str = ""
+    ):
+        """Register downloaded videos in global cache"""
+        if not hasattr(self, 'global_cache') or self.global_cache is None:
+            return
+
+        for video in videos:
+            if isinstance(video, dict):
+                video_path = video.get('file', video.get('path', ''))
+                if video_path and Path(video_path).exists():
+                    try:
+                        self.global_cache.register_video(
+                            video_path=video_path,
+                            download_keyword=video.get('keyword', ''),
+                            topics=video.get('topics', []),
+                            project_id=project_id
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to register video in cache: {e}")
 
     def _store_download_results(
         self,
@@ -566,9 +632,23 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
 
+            # Create checkpoint callback for periodic saves during long downloads
+            def checkpoint_progress(current: int, total: int, segments: list):
+                """Save progress checkpoint during download"""
+                checkpoint_data = {
+                    'segment_count': len(segments),
+                    'total_matches': total_matches,
+                    'videos_completed': current,
+                    'videos_total': total,
+                    'in_progress': current < total,
+                }
+                # Save intermediate checkpoint (doesn't update last_completed_stage)
+                checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
+
             downloaded_segments = self.downloader.audio_first.download_video_segments(
                 merged_segments,
-                output_dir
+                output_dir,
+                progress_callback=checkpoint_progress
             )
 
             print(f"\n  + Downloaded {len(downloaded_segments)} video segments")

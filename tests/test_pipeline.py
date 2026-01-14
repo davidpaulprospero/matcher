@@ -46,7 +46,7 @@ class MockStage(Stage):
         """Default: can skip if checkpoint has data for this stage"""
         return checkpoint.get(self.name) is not None
 
-    def restore(self, state: PipelineState, checkpoint) -> bool:
+    def restore(self, state: PipelineState, checkpoint, config=None) -> bool:
         """Restore from checkpoint"""
         self._restore_called = True
         data = checkpoint.get(self.name)

@@ -1078,6 +1078,64 @@ pipeline:
   parallel_embedding: true
 
 # -----------------------------------------------------------------------------
+# B-ROLL DOWNLOAD AND MATCHING
+# -----------------------------------------------------------------------------
+# Two new stages for improved B-roll handling:
+# 1. BrollDownloadStage: Downloads videos specifically searched as B-roll
+# 2. BrollMatchStage: Matches silent scenes to voiceover for V8 track
+#
+# B-roll detection is scene-level (not video-level):
+# - Scenes with < min_words_threshold are considered B-roll
+# - Both face-detection B-roll and silent B-roll appear in V8
+
+broll:
+  enabled: true                  # Enable B-roll stages
+
+  # === Download stage (BrollDownloadStage) ===
+  download_enabled: true         # Enable dedicated B-roll search
+  downloads_per_term: 3          # Videos per search term
+  max_total_downloads: 30        # Cap on total B-roll downloads
+  duration_tier: "short"         # "short" (<3min) or "medium" (3-10min)
+  include_generic_searches: true # Include "stock footage compilation" etc.
+  search_suffixes:               # Terms appended to keywords
+    - "b-roll"
+    - "footage"
+    - "cinematic"
+
+  # === Detection (scene-level) ===
+  min_words_threshold: 10        # Scenes with fewer words = B-roll
+  ignore_markers:                # Don't count these as words
+    - "[Music]"
+    - "[Applause]"
+    - "[Silence]"
+
+  # === Vision API enrichment ===
+  vision_enabled: true           # Use Vision API (auto-disabled in audio-first)
+  vision_prompt: "detailed"      # "brief", "detailed", "keywords_only"
+  frames_per_scene: 3            # Sample start/mid/end frames
+  cache_descriptions: true       # Cache in .cache/broll_vision/
+  vision_fallback_to_keywords: true  # Use filename keywords if Vision fails
+
+  # === Scoring weights (should sum to 1.0) ===
+  embedding_weight: 0.4          # Vision/filename description similarity
+  keyword_weight: 0.35           # Keyword overlap score
+  entity_weight: 0.25            # Entity name matching
+  source_boost:                  # Priority boost by source
+    youtube: 0.1                 # YouTube B-roll preferred
+    pexels: 0.05                 # Stock footage secondary
+    pixabay: 0.0                 # No boost for Pixabay
+
+  # === Matching behavior ===
+  min_match_score: 0.3           # Threshold for "good" match
+  always_match: true             # Always pick best B-roll (V8 never empty)
+  max_matches_per_segment: 3     # Top N options per voiceover segment
+
+  # === Long video handling ===
+  long_video_threshold: 600      # Videos > 10 min use sampling
+  sample_interval_seconds: 120   # 1 scene per 2 minutes
+  max_scenes_per_video: 15       # Cap on sampled scenes
+
+# -----------------------------------------------------------------------------
 # API KEYS
 # -----------------------------------------------------------------------------
 # Chain-of-thought: API keys should be in environment variables

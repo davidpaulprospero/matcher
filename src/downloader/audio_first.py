@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import subprocess
 import logging
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from ..state import AudioDownload
 from .types import MergedSegment, DownloadedSegment
@@ -23,6 +24,11 @@ if TYPE_CHECKING:
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+# Default retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 5  # seconds
+DEFAULT_SEGMENT_TIMEOUT = 300  # 5 minutes per video segment download
 
 
 class AudioFirstPipeline:
@@ -259,7 +265,8 @@ class AudioFirstPipeline:
     def download_video_segments(
         self,
         merged_segments: List[MergedSegment],
-        output_dir: Path
+        output_dir: Path,
+        progress_callback: Optional[Callable[[int, int, List['DownloadedSegment']], None]] = None
     ) -> List[DownloadedSegment]:
         """
         Download video segments using --download-sections.
@@ -272,12 +279,16 @@ class AudioFirstPipeline:
         Args:
             merged_segments: List of merged segments with buffer applied
             output_dir: Base output directory
+            progress_callback: Optional callback(current, total, segments) for progress/checkpointing
 
         Returns:
             List of DownloadedSegment records with timing info
         """
         audio_config = getattr(self.download_config, 'audio_first', None)
         fallback_full = getattr(audio_config, 'fallback_full_video', True) if audio_config else True
+
+        # Checkpoint save interval (save after every N videos)
+        checkpoint_interval = getattr(self.download_config, 'checkpoint_interval', 10)
 
         downloaded_segments = []
 
@@ -314,11 +325,13 @@ class AudioFirstPipeline:
 
             # Check if segments already exist (skip re-download)
             existing_segments = self._check_existing_segments(video_dir, video_id, segments)
-            if existing_segments:
-                logger.debug(f"Found {len(existing_segments)} existing segments for {video_id}")
-                all_exist = len(existing_segments) == len(segments)
+            # Count actual existing files (non-None entries)
+            existing_count = sum(1 for p in existing_segments if p is not None)
+            if existing_count > 0:
+                logger.debug(f"Found {existing_count}/{len(segments)} existing segments for {video_id}")
+                all_exist = existing_count == len(segments)
                 if all_exist:
-                    print(f"      ✓ Already downloaded ({len(existing_segments)} segments)")
+                    print(f"      ✓ Already downloaded ({existing_count} segments)")
                     # Add existing segments to results
                     for seg, file_path in zip(segments, existing_segments):
                         if file_path and Path(file_path).exists():
@@ -361,51 +374,85 @@ class AudioFirstPipeline:
             # Add cookies
             cmd.extend(utils.get_cookies_args(self.config))
 
-            # Get timeout
+            # Get timeout - use segment-specific timeout (shorter than full video)
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
-            timeout = tier_timeouts.get('long', 600)
+            base_timeout = tier_timeouts.get('long', 600)
+            # Scale timeout based on total segment duration, with minimum of DEFAULT_SEGMENT_TIMEOUT
+            timeout = max(DEFAULT_SEGMENT_TIMEOUT, int(total_seg_duration * 3))
+            timeout = min(timeout, base_timeout)  # Cap at configured max
+
+            # Retry configuration
+            max_retries = getattr(self.download_config, 'max_retries', DEFAULT_MAX_RETRIES)
+            retry_delay = getattr(self.download_config, 'retry_delay', DEFAULT_RETRY_DELAY)
 
             segment_success = False
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout
-                )
+            last_error = None
 
-                if result.returncode != 0:
-                    print(f"      ✗ Failed: {result.stderr[-200:] if result.stderr else 'Unknown error'}")
-                    logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
-                else:
-                    segment_success = True
-                    # Rename files from autonumber to timestamp-based names
-                    downloaded = segment_utils.rename_segments_with_timing(video_dir, video_id, segments)
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    print(f"      ↻ Retry {attempt}/{max_retries-1} after {retry_delay}s...")
+                    logger.info(f"Retrying {video_id} (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    # Exponential backoff for subsequent retries
+                    retry_delay = min(retry_delay * 2, 60)
 
-                    success_count = 0
-                    for seg, file_path in zip(segments, downloaded):
-                        if file_path and Path(file_path).exists():
-                            success_count += 1
-                            file_duration = seg.end_time - seg.start_time
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout
+                    )
 
-                            downloaded_segments.append(DownloadedSegment(
-                                file=str(file_path),
-                                video_id=video_id,
-                                original_start=seg.start_time,
-                                original_end=seg.end_time,
-                                file_duration=file_duration,
-                                matches=seg.original_matches,
-                                keyword=keyword
-                            ))
+                    if result.returncode != 0:
+                        last_error = result.stderr[-200:] if result.stderr else 'Unknown error'
+                        # Check if error is retryable (network issues, rate limiting)
+                        if self._is_retryable_error(result.stderr):
+                            logger.warning(f"Retryable error for {video_id}: {last_error}")
+                            continue
+                        else:
+                            print(f"      ✗ Failed: {last_error}")
+                            logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
+                            break
+                    else:
+                        segment_success = True
+                        # Rename files from autonumber to timestamp-based names
+                        downloaded = segment_utils.rename_segments_with_timing(video_dir, video_id, segments)
 
-                    print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
+                        success_count = 0
+                        for seg, file_path in zip(segments, downloaded):
+                            if file_path and Path(file_path).exists():
+                                success_count += 1
+                                file_duration = seg.end_time - seg.start_time
 
-            except subprocess.TimeoutExpired:
-                print(f"      ✗ Timeout after {timeout}s")
-                logger.warning(f"Segment download timeout for {video_id}")
-            except Exception as e:
-                print(f"      ✗ Error: {e}")
-                logger.error(f"Segment download error for {video_id}: {e}")
+                                downloaded_segments.append(DownloadedSegment(
+                                    file=str(file_path),
+                                    video_id=video_id,
+                                    original_start=seg.start_time,
+                                    original_end=seg.end_time,
+                                    file_duration=file_duration,
+                                    matches=seg.original_matches,
+                                    keyword=keyword
+                                ))
+
+                        print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
+                        break  # Success, exit retry loop
+
+                except subprocess.TimeoutExpired:
+                    last_error = f"Timeout after {timeout}s"
+                    print(f"      ✗ {last_error} (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(f"Segment download timeout for {video_id}")
+                    # Timeout is retryable
+                    continue
+                except Exception as e:
+                    last_error = str(e)
+                    print(f"      ✗ Error: {e}")
+                    logger.error(f"Segment download error for {video_id}: {e}")
+                    break  # Non-retryable error
+
+            # Log final failure if all retries exhausted
+            if not segment_success and last_error:
+                logger.error(f"All {max_retries} attempts failed for {video_id}: {last_error}")
 
             # Fallback to full video if segment download failed
             if not segment_success and fallback_full:
@@ -419,6 +466,21 @@ class AudioFirstPipeline:
                     timeout=timeout
                 )
                 downloaded_segments.extend(fallback_segments)
+
+            # Periodic checkpoint save to allow resume if interrupted
+            if progress_callback and current_video % checkpoint_interval == 0:
+                logger.info(f"Checkpoint save at video {current_video}/{total_videos}")
+                try:
+                    progress_callback(current_video, total_videos, downloaded_segments)
+                except Exception as e:
+                    logger.warning(f"Checkpoint callback failed: {e}")
+
+        # Final progress callback
+        if progress_callback:
+            try:
+                progress_callback(total_videos, total_videos, downloaded_segments)
+            except Exception as e:
+                logger.warning(f"Final checkpoint callback failed: {e}")
 
         logger.info(f"Downloaded {len(downloaded_segments)} video segments")
         return downloaded_segments
@@ -576,3 +638,87 @@ class AudioFirstPipeline:
         except Exception:
             pass
         return None
+
+    def _is_retryable_error(self, error_text: str) -> bool:
+        """
+        Check if an error is retryable (transient network/rate limiting issues).
+
+        Args:
+            error_text: Error message from yt-dlp stderr
+
+        Returns:
+            True if the error is likely transient and worth retrying
+        """
+        if not error_text:
+            return False
+
+        error_lower = error_text.lower()
+
+        # Network-related errors (retryable)
+        network_errors = [
+            'connection reset',
+            'connection refused',
+            'connection timed out',
+            'timeout',
+            'network unreachable',
+            'temporary failure',
+            'name resolution',
+            'dns',
+            'ssl',
+            'certificate',
+            'read timed out',
+            'socket',
+            'broken pipe',
+            'connection aborted',
+            'incomplete read',
+        ]
+
+        # Rate limiting errors (retryable with delay)
+        rate_limit_errors = [
+            'rate limit',
+            'too many requests',
+            '429',
+            'quota exceeded',
+            'throttl',
+            'please try again',
+            'temporary',
+        ]
+
+        # Server-side errors (potentially retryable)
+        server_errors = [
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'bad gateway',
+            'service unavailable',
+            'gateway timeout',
+        ]
+
+        # Check for retryable patterns
+        for pattern in network_errors + rate_limit_errors + server_errors:
+            if pattern in error_lower:
+                return True
+
+        # Non-retryable errors (video unavailable, geo-blocked, etc.)
+        non_retryable = [
+            'video unavailable',
+            'private video',
+            'removed',
+            'deleted',
+            'copyright',
+            'blocked',
+            'not available',
+            'age-restricted',
+            'sign in',
+            'members only',
+            'premiere',
+        ]
+
+        for pattern in non_retryable:
+            if pattern in error_lower:
+                return False
+
+        # Default: retry unknown errors once
+        return True

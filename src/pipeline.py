@@ -217,10 +217,12 @@ def create_default_pipeline(
     from .stages.entity_videos import EntityVideosStage
     from .stages.download import DownloadStage, DownloadVideoSegmentsStage
     from .stages.stock import StockVideoStage
+    from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
+    from .stages.broll_match import BrollMatchStage
     from .stages.output import OutputStage
 
     # Add stages in STAGE_ORDER
@@ -229,10 +231,12 @@ def create_default_pipeline(
     pipeline.add_stage(EntityVideosStage())
     pipeline.add_stage(DownloadStage())
     pipeline.add_stage(StockVideoStage())
+    pipeline.add_stage(BrollDownloadStage())  # B-roll specific downloads
     pipeline.add_stage(RemixStage())
     pipeline.add_stage(TranscribeStage())
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
+    pipeline.add_stage(BrollMatchStage())  # Match silent scenes for V8 track
 
     # Audio-first mode adds video segment download after matching
     if audio_first_mode:
@@ -267,10 +271,12 @@ def create_match_only_pipeline(
     from .stages.entity_videos import EntityVideosStage
     from .stages.download import DownloadStage
     from .stages.stock import StockVideoStage
+    from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
+    from .stages.broll_match import BrollMatchStage
     from .stages.output import OutputStage
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
@@ -279,12 +285,14 @@ def create_match_only_pipeline(
     pipeline.add_stage(EntityVideosStage())  # For V10 track
     pipeline.add_stage(DownloadStage())
     pipeline.add_stage(StockVideoStage())    # For general B-roll
+    pipeline.add_stage(BrollDownloadStage()) # B-roll specific downloads
     pipeline.add_stage(RemixStage())         # Filter videos by relevance
     pipeline.add_stage(TranscribeStage())
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
 
     # Add stages to actually run
     pipeline.add_stage(MatchStage())
+    pipeline.add_stage(BrollMatchStage())    # Match silent scenes for V8 track
     pipeline.add_stage(OutputStage())
 
     return pipeline
