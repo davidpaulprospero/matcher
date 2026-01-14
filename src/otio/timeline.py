@@ -35,22 +35,47 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
     Validate entity images and filter out invalid entries.
 
     Returns a dict with only valid entities that have downloadable images.
+    Handles both:
+    - EntityImage objects with .file attribute
+    - Plain string file paths (from checkpoint restoration)
     """
     validated = {}
     for entity_name, entity_result in entity_images.items():
-        # Check if entity_result has images attribute and it's not empty
-        if hasattr(entity_result, 'images') and entity_result.images:
-            # Filter out invalid image paths
-            valid_images = [
-                img for img in entity_result.images
-                if hasattr(img, 'file') and img.file and Path(img.file).exists()
-            ]
-            if valid_images:
-                # Create a copy of entity_result with only valid images
-                import copy
+        # Handle dict (from checkpoint) vs object
+        if isinstance(entity_result, dict):
+            images = entity_result.get('images', [])
+        elif hasattr(entity_result, 'images'):
+            images = entity_result.images
+        else:
+            continue
+
+        if not images:
+            continue
+
+        # Filter out invalid image paths - handle both strings and objects
+        valid_images = []
+        for img in images:
+            # Get file path - could be string or object with .file attr
+            if isinstance(img, str):
+                file_path = img
+            elif hasattr(img, 'file'):
+                file_path = img.file
+            else:
+                continue
+
+            if file_path and Path(file_path).exists():
+                valid_images.append(img)
+
+        if valid_images:
+            # Create validated result
+            import copy
+            if isinstance(entity_result, dict):
+                validated_result = entity_result.copy()
+                validated_result['images'] = valid_images
+            else:
                 validated_result = copy.copy(entity_result)
                 validated_result.images = valid_images
-                validated[entity_name] = validated_result
+            validated[entity_name] = validated_result
 
     return validated
 
@@ -292,10 +317,118 @@ def create_timeline(
     # Get the first segment's start time as timeline reference
     first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
 
+    # Apply voiceover offset to fix alignment when SRT timestamps don't match audio
+    # Positive offset = shift clips later (audio is ahead of SRT)
+    # Negative offset = shift clips earlier (audio is behind SRT)
+    voiceover_offset = getattr(config.output, 'voiceover_offset', 0.0)
+    if voiceover_offset != 0.0:
+        logger.info(f"Applying voiceover offset: {voiceover_offset:+.2f}s")
+        print(f"  ✓ Voiceover offset: {voiceover_offset:+.2f}s")
+
+    # Gap threshold - collapse gaps smaller than this value
+    # Whisper often inserts small gaps (~0.5-0.8s) between segments
+    min_gap_threshold = getattr(config.output, 'min_gap_threshold', 0.0)
+    if min_gap_threshold > 0.0:
+        logger.info(f"Gap threshold: {min_gap_threshold:.2f}s (gaps below this will be collapsed)")
+        print(f"  ✓ Gap threshold: {min_gap_threshold:.2f}s")
+
+    # Time scale factor - stretch SRT timestamps to match actual audio duration
+    # Useful when Whisper compresses timestamps (common issue)
+    # Special value 0.0 = auto-calculate from actual audio duration / SRT end time
+    time_scale_factor = getattr(config.output, 'time_scale_factor', 1.0)
+
+    if time_scale_factor == 0.0 and actual_vo_duration and matches:
+        # Auto-calculate: actual audio duration / last SRT segment end time
+        last_srt_end = matches[-1].primary_match.voiceover_segment.end_time
+        if last_srt_end > 0:
+            time_scale_factor = actual_vo_duration / last_srt_end
+            logger.info(f"Auto-calculated time scale: {time_scale_factor:.4f} (audio {actual_vo_duration:.1f}s / SRT {last_srt_end:.1f}s)")
+            print(f"  ✓ Auto time scale: {time_scale_factor:.4f}x ({actual_vo_duration:.1f}s / {last_srt_end:.1f}s)")
+        else:
+            time_scale_factor = 1.0
+            logger.warning("Cannot auto-calculate time scale: SRT end time is 0")
+    elif time_scale_factor != 1.0:
+        logger.info(f"Time scale factor: {time_scale_factor:.4f} (stretching SRT timestamps)")
+        print(f"  ✓ Time scale: {time_scale_factor:.4f}x")
+
+    # Gap distribution mode - how to handle gaps between segments
+    # - "scale": Scale SRT gaps by time_scale_factor (default)
+    # - "proportional": Recalculate gaps to distribute content evenly
+    # - "none": No gaps between clips
+    gap_mode = getattr(config.output, 'gap_mode', 'scale')
+    if gap_mode not in ('scale', 'proportional', 'none'):
+        logger.warning(f"Invalid gap_mode '{gap_mode}', using 'scale'")
+        gap_mode = 'scale'
+
+    # Pre-calculate gap timing for proportional mode
+    # This distributes gaps based on total available gap time, not SRT gaps
+    proportional_gap_timing = {}
+    if gap_mode == 'proportional' and actual_vo_duration and matches:
+        # Calculate total segment content duration (scaled)
+        total_content_duration = sum(
+            (m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time) * time_scale_factor
+            for m in matches
+        )
+
+        # Calculate total gap time available
+        # Subtract leading silence and content from audio duration
+        first_seg_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor
+        total_gap_time = actual_vo_duration - first_seg_start - total_content_duration
+
+        if total_gap_time > 0:
+            # Calculate original SRT gaps for proportional distribution
+            original_gaps = []
+            for i in range(1, len(matches)):
+                prev_end = matches[i-1].primary_match.voiceover_segment.end_time
+                curr_start = matches[i].primary_match.voiceover_segment.start_time
+                original_gap = max(0, curr_start - prev_end)
+                original_gaps.append(original_gap)
+
+            total_original_gaps = sum(original_gaps)
+
+            # Distribute available gap time proportionally
+            if total_original_gaps > 0:
+                accumulated_time = first_seg_start + voiceover_offset  # Start after leading gap
+
+                for i, match_result in enumerate(matches):
+                    vo_seg = match_result.primary_match.voiceover_segment
+                    segment_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
+
+                    proportional_gap_timing[i] = accumulated_time
+
+                    # Add segment duration
+                    accumulated_time += segment_duration
+
+                    # Add proportional gap (except after last segment)
+                    if i < len(original_gaps):
+                        proportional_gap = (original_gaps[i] / total_original_gaps) * total_gap_time
+                        accumulated_time += proportional_gap
+
+                logger.info(f"Proportional gap distribution: {total_gap_time:.1f}s total gaps across {len(matches)} segments")
+                print(f"  ✓ Gap mode: proportional ({total_gap_time:.1f}s distributed across {len(matches)-1} gaps)")
+            else:
+                # No original gaps - fall back to scale mode
+                logger.warning("No gaps in SRT to distribute, falling back to scale mode")
+                gap_mode = 'scale'
+        else:
+            # Content fills or exceeds audio - no room for gaps
+            logger.warning(f"Content ({total_content_duration:.1f}s) fills audio ({actual_vo_duration:.1f}s), falling back to none mode")
+            gap_mode = 'none'
+    elif gap_mode == 'proportional':
+        logger.warning("Cannot use proportional gap mode without audio duration, falling back to scale")
+        gap_mode = 'scale'
+
+    if gap_mode == 'none':
+        logger.info("Gap mode: none - clips will be placed back-to-back")
+        print(f"  ✓ Gap mode: none (back-to-back clips)")
+
+    # Adjusted first segment start includes the offset and scaling
+    adjusted_first_segment_start = max(0.0, (first_segment_start * time_scale_factor) + voiceover_offset)
+
     # Add leading gap if first segment doesn't start at 0
     # This aligns video clips with the actual voiceover playback timing
-    if matches and first_segment_start > 0.1:  # More than 100ms of leading silence
-        leading_frames = round(first_segment_start * rate)
+    if matches and adjusted_first_segment_start > 0.1:  # More than 100ms of leading silence
+        leading_frames = round(adjusted_first_segment_start * rate)
         logger.info(f"Adding {first_segment_start:.1f}s leading gap to align with voiceover start")
 
         leading_gap = otio.schema.Gap(
@@ -322,38 +455,60 @@ def create_timeline(
         vid_seg = match.video_segment
 
         # Check for gap before this segment (silence in voiceover)
-        # Expected position = where this segment should start relative to first segment
-        expected_start_frames = round((vo_seg.start_time - first_segment_start) * frame_rate)
+        # The gap calculation depends on gap_mode:
+        # - "scale": Use SRT gaps scaled by time_scale_factor
+        # - "proportional": Use pre-calculated proportional gap positions
+        # - "none": No gaps (back-to-back clips)
+
+        if gap_mode == 'none':
+            # No gaps mode - clips are placed back-to-back
+            expected_start_frames = timeline_frames
+        elif gap_mode == 'proportional' and match_idx in proportional_gap_timing:
+            # Proportional mode - use pre-calculated positions
+            expected_start_seconds = proportional_gap_timing[match_idx]
+            expected_start_frames = max(0, round(expected_start_seconds * frame_rate))
+        else:
+            # Scale mode (default) - use SRT gaps scaled by time_scale_factor
+            scaled_segment_start = vo_seg.start_time * time_scale_factor
+            adjusted_segment_start = scaled_segment_start + voiceover_offset
+            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
 
         if expected_start_frames > timeline_frames:
-            # There's a gap - insert silence/gap clips on all tracks
+            # There's a gap - check if it's above the threshold
             gap_frames = expected_start_frames - timeline_frames
-            gap_duration = otio.opentime.RationalTime(gap_frames, rate)
+            gap_seconds = gap_frames / rate
 
-            logger.debug(f"Segment {match_idx}: Inserting {gap_frames/rate:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
+            if gap_seconds >= min_gap_threshold:
+                # Gap is significant - insert silence/gap clips on all tracks
+                gap_duration = otio.opentime.RationalTime(gap_frames, rate)
 
-            # Add gap to all video tracks
-            for track in video_tracks:
-                track.append(otio.schema.Gap(
-                    source_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=gap_duration
-                    )
-                ))
+                logger.debug(f"Segment {match_idx}: Inserting {gap_seconds:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
 
-            # Add gap to all audio tracks
-            for track in audio_tracks:
-                track.append(otio.schema.Gap(
-                    source_range=otio.opentime.TimeRange(
-                        start_time=otio.opentime.RationalTime(0, rate),
-                        duration=gap_duration
-                    )
-                ))
+                # Add gap to all video tracks
+                for track in video_tracks:
+                    track.append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
 
-            timeline_frames = expected_start_frames
+                # Add gap to all audio tracks
+                for track in audio_tracks:
+                    track.append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
 
-        # Target duration = voiceover segment duration
-        target_duration = vo_seg.end_time - vo_seg.start_time
+                timeline_frames = expected_start_frames
+            else:
+                # Gap is below threshold - collapse it (don't insert gap, clips will be back-to-back)
+                logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
+
+        # Target duration = voiceover segment duration (scaled if time_scale_factor applied)
+        target_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
         duration_frames = round(target_duration * frame_rate)
 
         # Source duration = video segment duration
@@ -780,7 +935,8 @@ def create_timeline(
                 entity_images=validated_entity_images,
                 matches=matches,
                 frame_rate=rate,
-                config=config
+                config=config,
+                time_scale_factor=time_scale_factor
             )
         else:
             logger.warning("No valid entity images after validation")
@@ -801,7 +957,8 @@ def create_timeline(
             entity_videos=entity_videos,
             matches=matches,
             frame_rate=rate,
-            config=config
+            config=config,
+            time_scale_factor=time_scale_factor
         )
 
     # Always add V10 Stock Videos track (even if empty, for manual use)

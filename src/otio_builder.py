@@ -681,6 +681,9 @@ def create_timeline(
     # Get the first segment's start time as timeline reference
     first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
 
+    # Initialize leading_frames (may be set below if there's leading silence)
+    leading_frames = 0
+
     # Add leading gap if first segment doesn't start at 0
     # This aligns video clips with the actual voiceover playback timing
     if matches and first_segment_start > 0.1:  # More than 100ms of leading silence
@@ -743,7 +746,10 @@ def create_timeline(
 
         # Target duration = voiceover segment duration
         target_duration = vo_seg.end_time - vo_seg.start_time
-        duration_frames = round(target_duration * frame_rate)
+        # Calculate duration using ABSOLUTE end position to prevent drift from accumulating
+        # This ensures each segment ends at the correct absolute frame position
+        expected_end_frames = leading_frames + round((vo_seg.end_time - first_segment_start) * frame_rate)
+        duration_frames = max(1, expected_end_frames - timeline_frames)
         
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
@@ -1069,8 +1075,9 @@ def create_timeline(
                 )
                 audio_tracks[track_idx].append(a_gap)
         
-        # Update timeline position using integer frames to avoid drift
-        timeline_frames += duration_frames
+        # Update timeline position to ABSOLUTE expected end frame to prevent drift
+        # This corrects any accumulated rounding errors by anchoring to voiceover timing
+        timeline_frames = expected_end_frames
 
     # Add trailing gap to match actual voiceover duration
     # This ensures video tracks extend to cover trailing audio (music, silence, outro)
@@ -2021,18 +2028,17 @@ def generate_segment_map(
         return f"{hours:02d}:{mins:02d}:{secs:02d}:{frame_in_sec:02d}"
 
     segments = []
-    current_frame = 0
 
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
 
-        # Calculate segment duration
+        # Calculate segment position using ABSOLUTE voiceover timestamps
+        # This prevents drift from accumulating rounding errors
+        start_frame = round(vo_seg.start_time * frame_rate)
+        end_frame = round(vo_seg.end_time * frame_rate)
         target_duration = vo_seg.end_time - vo_seg.start_time
-        duration_frames = int(target_duration * frame_rate)
-
-        end_frame = current_frame + duration_frames
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name
@@ -2040,9 +2046,9 @@ def generate_segment_map(
         # Build segment entry
         segment_entry = {
             "id": f"S{match_idx:03d}",
-            "start_frame": current_frame,
+            "start_frame": start_frame,
             "end_frame": end_frame,
-            "start_tc": frames_to_tc(current_frame),
+            "start_tc": frames_to_tc(start_frame),
             "end_tc": frames_to_tc(end_frame),
             "voiceover_text": vo_seg.text,
             "duration_sec": round(target_duration, 3),
@@ -2077,7 +2083,9 @@ def generate_segment_map(
                 })
 
         segments.append(segment_entry)
-        current_frame = end_frame
+
+    # Calculate total frames from the last segment's end frame
+    total_frames = segments[-1]["end_frame"] if segments else 0
 
     # Build output structure
     segment_map = {
@@ -2086,8 +2094,8 @@ def generate_segment_map(
         "frame_rate": frame_rate,
         "timeline_start_tc": timeline_start_tc,
         "total_segments": len(segments),
-        "total_frames": current_frame,
-        "total_duration_sec": round(current_frame / frame_rate, 3),
+        "total_frames": total_frames,
+        "total_duration_sec": round(total_frames / frame_rate, 3),
         "segments": segments
     }
 

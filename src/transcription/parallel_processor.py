@@ -61,7 +61,9 @@ def transcribe_videos_parallel(
         model_name = getattr(config.transcription, 'model', 'base')
         compute_type = getattr(config.transcription, 'compute_type', 'auto')
         language = getattr(config.transcription, 'language', None)
-        vad_filter = getattr(config.transcription, 'vad_filter', False)  # Default False for YouTube
+        # VAD is ALWAYS disabled for video transcription - config setting is for voiceover only
+        # YouTube video audio quality varies, VAD is too aggressive and removes speech
+        vad_filter = False
         min_silence_duration_ms = getattr(config.transcription, 'min_silence_duration_ms', 200)
         speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
     else:
@@ -309,17 +311,23 @@ def transcribe_voiceover_audio(
     audio_path: str,
     model_name: str = "base",
     compute_type: str = "auto",
-    language: str = None
+    language: str = None,
+    vad_filter: bool = True  # Enable VAD by default for voiceover - better gap detection
 ) -> List[dict]:
     """
     Transcribe a voiceover audio file.
     Backward-compatible function for voiceover transcription.
+
+    Args:
+        vad_filter: Whether to apply Voice Activity Detection. Default True for voiceover
+                   as it produces cleaner segment boundaries with accurate gap timing.
     """
     whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
     return whisper_client.transcribe(
         audio_path,
         language=language,
-        vad_filter=False  # Don't filter voiceover
+        vad_filter=vad_filter
     )
 
 
@@ -330,7 +338,8 @@ def transcribe_voiceover_media(
     language: str = None,
     compute_type: str = "auto",
     cache_dir: str = None,
-    word_timestamps: bool = True
+    word_timestamps: bool = True,
+    vad_filter: bool = True  # Enable VAD by default for voiceover - better gap detection
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
@@ -343,6 +352,8 @@ def transcribe_voiceover_media(
         compute_type: Compute type (auto, float16, int8)
         cache_dir: Optional cache directory for extracted audio
         word_timestamps: Whether to generate word-level timestamps (default True)
+        vad_filter: Whether to apply Voice Activity Detection. Default True for voiceover
+                   as it produces cleaner segment boundaries with accurate gap timing.
 
     Returns:
         Path to the generated SRT file (also generates .words.json if word_timestamps=True)
@@ -377,10 +388,11 @@ def transcribe_voiceover_media(
             raise RuntimeError(f"Could not extract audio from {media_path}")
 
         # Transcribe the extracted audio with word timestamps
+        logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
         segments = whisper_client.transcribe(
             audio_path,
             language=language,
-            vad_filter=False,  # Don't filter voiceover
+            vad_filter=vad_filter,
             word_timestamps=word_timestamps
         )
 
@@ -392,10 +404,11 @@ def transcribe_voiceover_media(
 
     elif media_path.suffix.lower() in audio_extensions:
         # It's already an audio file
+        logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
         segments = whisper_client.transcribe(
             str(media_path),
             language=language,
-            vad_filter=False,
+            vad_filter=vad_filter,
             word_timestamps=word_timestamps
         )
     else:

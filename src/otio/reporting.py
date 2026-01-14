@@ -70,18 +70,17 @@ def generate_segment_map(
         return f"{hours:02d}:{mins:02d}:{secs:02d}:{frame_in_sec:02d}"
 
     segments = []
-    current_frame = 0
 
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
 
-        # Calculate segment duration
+        # Calculate segment position using ABSOLUTE voiceover timestamps
+        # This prevents drift from accumulating rounding errors
+        start_frame = round(vo_seg.start_time * frame_rate)
+        end_frame = round(vo_seg.end_time * frame_rate)
         target_duration = vo_seg.end_time - vo_seg.start_time
-        duration_frames = int(target_duration * frame_rate)
-
-        end_frame = current_frame + duration_frames
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name
@@ -89,9 +88,9 @@ def generate_segment_map(
         # Build segment entry
         segment_entry = {
             "id": f"S{match_idx:03d}",
-            "start_frame": current_frame,
+            "start_frame": start_frame,
             "end_frame": end_frame,
-            "start_tc": frames_to_tc(current_frame),
+            "start_tc": frames_to_tc(start_frame),
             "end_tc": frames_to_tc(end_frame),
             "voiceover_text": vo_seg.text,
             "duration_sec": round(target_duration, 3),
@@ -126,7 +125,9 @@ def generate_segment_map(
                 })
 
         segments.append(segment_entry)
-        current_frame = end_frame
+
+    # Calculate total frames from the last segment's end frame
+    total_frames = segments[-1]["end_frame"] if segments else 0
 
     # Build output structure
     segment_map = {
@@ -135,8 +136,8 @@ def generate_segment_map(
         "frame_rate": frame_rate,
         "timeline_start_tc": timeline_start_tc,
         "total_segments": len(segments),
-        "total_frames": current_frame,
-        "total_duration_sec": round(current_frame / frame_rate, 3),
+        "total_frames": total_frames,
+        "total_duration_sec": round(total_frames / frame_rate, 3),
         "segments": segments
     }
 

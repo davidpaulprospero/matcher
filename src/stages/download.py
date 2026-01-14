@@ -83,12 +83,17 @@ class DownloadStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore download stage from checkpoint"""
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
+                # Fallback: try to restore from disk if config available
+                if config and self._restore_from_disk(state, config):
+                    logger.info("Restored DOWNLOAD from disk (no checkpoint data)")
+                    return True
                 return False
 
             # Restore downloaded videos
@@ -133,6 +138,73 @@ class DownloadStage(Stage):
 
         except Exception as e:
             logger.warning(f"Failed to restore DOWNLOAD: {e}")
+            return False
+
+    def _restore_from_disk(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> bool:
+        """Fallback: restore download state by scanning disk for existing files"""
+        from ..state import AudioDownload
+        from pathlib import Path
+
+        try:
+            # Get videos root directory from config
+            root_dir = getattr(config.download, 'root_dir', None)
+            if not root_dir:
+                return False
+
+            # Find project subdirectory (must include project name)
+            root_path = Path(root_dir)
+            project_name = getattr(config.project, 'name', '') or ''
+            if project_name:
+                project_path = root_path / project_name[:15]
+            else:
+                project_path = root_path
+            
+            if not project_path.exists():
+                return False
+
+            # Look for audio directories (audio-first mode)
+            audio_files = []
+            for audio_dir in project_path.rglob('*_audio'):
+                for mp3 in audio_dir.glob('*.mp3'):
+                    audio_files.append(AudioDownload(
+                        file=str(mp3),
+                        url="",  # Unknown from disk
+                        video_id=mp3.stem,
+                        title=mp3.stem,
+                        duration=0.0,
+                        keyword=audio_dir.name.replace('_audio', '').replace('_l', '').replace('_m', '')
+                    ))
+
+            if audio_files:
+                state.downloaded_audio = audio_files
+                logger.info(f"Restored DOWNLOAD from disk: {len(audio_files)} audio files")
+                return True
+
+            # Look for video files
+            video_files = list(project_path.rglob('*.mp4')) + list(root_path.rglob('*.webm'))
+            if video_files:
+                from ..state import DownloadedVideo
+                state.downloaded_videos = [
+                    DownloadedVideo(
+                        file=str(v),
+                        duration_tier='m',
+                        keyword=v.parent.name.replace('_segments', '').replace('_l', '').replace('_m', ''),
+                        title=v.stem,
+                        video_id=v.stem
+                    )
+                    for v in video_files
+                ]
+                logger.info(f"Restored DOWNLOAD from disk: {len(state.downloaded_videos)} videos")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to restore DOWNLOAD from disk: {e}")
             return False
 
     def validate_inputs(
@@ -553,16 +625,26 @@ class DownloadVideoSegmentsStage(Stage):
 
             if hasattr(match_obj, 'video_file'):
                 # state.Match structure
+                if not match_obj.video_file:
+                    # Skip matches with empty video_file (shouldn't happen, but defensive)
+                    return False
                 audio_file = Path(match_obj.video_file).stem
                 start_time = match_obj.video_start
             elif hasattr(match_obj, 'video_segment'):
                 # utils.Match structure - use the video_segment
                 if not hasattr(match_obj.video_segment, 'source_file'):
                     return False
+                if not match_obj.video_segment.source_file:
+                    # Skip matches with empty source_file
+                    return False
                 audio_file = Path(match_obj.video_segment.source_file).stem
                 start_time = match_obj.video_segment.start_time
             else:
                 logger.warning(f"Unknown Match structure: {type(match_obj)}")
+                return False
+
+            # Skip empty audio files (defensive check)
+            if not audio_file:
                 return False
 
             # Skip stock videos (pexels_, pixabay_) and entity videos - they don't need remapping

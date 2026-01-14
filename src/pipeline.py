@@ -134,7 +134,7 @@ class PipelineOrchestrator:
             # Check if stage can be skipped (checkpoint)
             if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
-                if not stage.restore(self.state, self.checkpoint):
+                if not stage.restore(self.state, self.checkpoint, self.config):
                     logger.warning(f"Failed to restore {stage_name} from checkpoint")
                 continue
 

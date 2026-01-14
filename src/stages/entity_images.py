@@ -69,9 +69,39 @@ class EntityImagesStage(Stage):
         if config.pipeline.skip_image_search:
             print("  >> Skipping image search (config: skip_image_search=true)")
             logger.info("Skipping ENTITY_IMAGES stage (config: skip_image_search=true)")
+
+            # Try to restore existing entity images from checkpoint for V9 track
+            # Checkpoint stores: {entity_count, total_images, entities: {name: {images, segment_indices, ...}}}
+            checkpoint_data = checkpoint.get_stage_data('entity_images')
+            if checkpoint_data and 'entities' in checkpoint_data:
+                from types import SimpleNamespace
+
+                restored_images = {}
+                raw_entities = checkpoint_data['entities']
+                for entity_name, entity_data in raw_entities.items():
+                    if isinstance(entity_data, dict):
+                        images = entity_data.get('images', [])
+                        segment_indices = entity_data.get('segment_indices', [])
+                        # Create EntityImageResult-like structure
+                        restored_images[entity_name] = SimpleNamespace(
+                            images=images,
+                            segment_indices=segment_indices,
+                            entity_name=entity_name,
+                            entity_type=entity_data.get('entity_type', 'unknown'),
+                            context=entity_data.get('context', ''),
+                            query=entity_data.get('query', entity_name)
+                        )
+
+                if restored_images:
+                    state.entity_images = restored_images
+                    total_images = sum(len(getattr(e, 'images', [])) for e in restored_images.values())
+                    print(f"  >> Restored {len(restored_images)} entities with {total_images} images from checkpoint")
+                    logger.info(f"Restored {len(restored_images)} entity images from checkpoint")
+
             return StageResult.ok({
                 'skipped': True,
-                'reason': 'skip_pipeline_config'
+                'reason': 'skip_pipeline_config',
+                'restored_from_checkpoint': bool(state.entity_images)
             })
 
         # Check if enabled
@@ -207,7 +237,8 @@ class EntityImagesStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore entity images from disk using .entity.json metadata files"""
         try:

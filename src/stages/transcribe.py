@@ -60,7 +60,17 @@ class TranscribeStage(Stage):
                 logger.info("Skipping TRANSCRIBE stage (config: skip_transcription=true)")
                 cached = self._load_transcripts_from_cache(config)
                 state.transcripts = cached
-                return StageResult.ok({'transcripts': {}}, warnings)
+                print(f"  + Loaded {len(cached)} video transcripts from cache")
+
+                # Also load embeddings from cache (required for matching)
+                if cached:
+                    embeddings_result = self._compute_embeddings(cached, state, config)
+                    if embeddings_result:
+                        print(f"  + Loaded embedding index ({len(state.embeddings)} vectors)")
+                    else:
+                        warnings.append("Could not load embeddings from cache")
+
+                return StageResult.ok({'transcripts': {}, 'from_cache': True}, warnings)
 
             print(f"\n  --- Stage 3: TRANSCRIBE & INDEX ---")
 
@@ -119,7 +129,8 @@ class TranscribeStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore transcribe stage from checkpoint"""
         try:
@@ -129,6 +140,17 @@ class TranscribeStage(Stage):
 
             # Transcripts need to be loaded from cache, not checkpoint
             # (they're too large to store in checkpoint JSON)
+            # Note: text_metadata is rebuilt in can_skip() via _rebuild_text_metadata()
+
+            # Load embeddings from cache (critical for MATCH stage)
+            if config and state.transcripts:
+                embeddings_result = self._compute_embeddings(state.transcripts, state, config)
+                if embeddings_result:
+                    logger.info(f"Restored embeddings: {len(state.embeddings)} vectors")
+                else:
+                    logger.warning("Could not restore embeddings from cache")
+                    return False
+
             logger.info(f"Restored TRANSCRIBE metadata from checkpoint")
             return True
 
@@ -421,8 +443,14 @@ class TranscribeStage(Stage):
             # This is needed for --match-only mode to have B-roll flags
             logger.info("===== TRANSCRIBE can_skip: TRUE, rebuilding text_metadata =====")
             logger.info(f"  Before rebuild: text_metadata has {len(state.text_metadata)} entries")
-            self._rebuild_text_metadata(state, checkpoint)
-            logger.info(f"  After rebuild: text_metadata has {len(state.text_metadata)} entries")
+
+            # Skip rebuild if text_metadata was preloaded (match-only mode)
+            if len(state.text_metadata) > 0:
+                logger.info("  Skipping rebuild - text_metadata already preloaded")
+            else:
+                self._rebuild_text_metadata(state, checkpoint)
+                logger.info(f"  After rebuild: text_metadata has {len(state.text_metadata)} entries")
+
             broll_before = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
             logger.info(f"  B-roll entries after rebuild: {broll_before}")
             return True
@@ -484,11 +512,13 @@ class TranscribeStage(Stage):
                         data = json.load(f)
                         if isinstance(data, list) and data:
                             # Find video path (stored in first segment usually)
+                            # Note: field is 'source_file' in cache, not 'video_path'
                             video_path = None
                             for seg in data:
-                                if isinstance(seg, dict) and seg.get('video_path'):
-                                    video_path = seg['video_path']
-                                    break
+                                if isinstance(seg, dict):
+                                    video_path = seg.get('source_file') or seg.get('video_path')
+                                    if video_path:
+                                        break
 
                             if video_path:
                                 state.transcripts[video_path] = data
