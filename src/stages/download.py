@@ -632,9 +632,23 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
 
+            # Create checkpoint callback for periodic saves during long downloads
+            def checkpoint_progress(current: int, total: int, segments: list):
+                """Save progress checkpoint during download"""
+                checkpoint_data = {
+                    'segment_count': len(segments),
+                    'total_matches': total_matches,
+                    'videos_completed': current,
+                    'videos_total': total,
+                    'in_progress': current < total,
+                }
+                # Save intermediate checkpoint (doesn't update last_completed_stage)
+                checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
+
             downloaded_segments = self.downloader.audio_first.download_video_segments(
                 merged_segments,
-                output_dir
+                output_dir,
+                progress_callback=checkpoint_progress
             )
 
             print(f"\n  + Downloaded {len(downloaded_segments)} video segments")

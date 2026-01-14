@@ -112,9 +112,49 @@ class MatchStage(Stage):
                     total_matches=len(matches)
                 )
 
+            # Serialize essential match data for checkpoint
+            # This enables DOWNLOAD_SEGMENTS to validate it has matches available
+            serialized_matches = []
+            for i, m in enumerate(matches):
+                try:
+                    # Handle MatchResult structure (has primary_match)
+                    if hasattr(m, 'primary_match') and m.primary_match:
+                        pm = m.primary_match
+                        source_file = ''
+                        start_time = 0.0
+                        conf = 0.0
+
+                        if hasattr(pm, 'video_segment') and pm.video_segment:
+                            source_file = getattr(pm.video_segment, 'source_file', '')
+                            start_time = getattr(pm.video_segment, 'start_time', 0.0)
+
+                        conf = getattr(pm, 'confidence', 0.0)
+
+                        serialized_matches.append({
+                            'segment_index': i,
+                            'source_file': source_file,
+                            'start_time': float(start_time),
+                            'confidence': float(conf)
+                        })
+                    # Handle direct Match structure
+                    elif hasattr(m, 'video_segment'):
+                        source_file = getattr(m.video_segment, 'source_file', '')
+                        start_time = getattr(m.video_segment, 'start_time', 0.0)
+                        conf = getattr(m, 'confidence', 0.0)
+
+                        serialized_matches.append({
+                            'segment_index': i,
+                            'source_file': source_file,
+                            'start_time': float(start_time),
+                            'confidence': float(conf)
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to serialize match {i}: {e}")
+
             checkpoint_data = {
                 'match_count': len(matches),
                 'avg_confidence': avg_conf,
+                'matches': serialized_matches,  # Essential match data for validation
             }
 
             return StageResult.ok(checkpoint_data, warnings)
