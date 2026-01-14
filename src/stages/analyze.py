@@ -128,7 +128,8 @@ class AnalyzeStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore analyze stage from checkpoint"""
         try:
@@ -249,12 +250,17 @@ class AnalyzeStage(Stage):
         from ..state import VoiceoverSegment
 
         try:
-            from ..transcription import transcribe_voiceover
+            from ..transcription import transcribe_voiceover_audio
 
-            result = transcribe_voiceover(
+            # Get VAD setting from config - default True for voiceover
+            # VAD filters silence accurately, improving gap detection
+            vad_filter = getattr(config.transcription, 'vad_filter', True)
+
+            result = transcribe_voiceover_audio(
                 str(path),
-                model=config.transcription.model,
+                model_name=config.transcription.model,
                 compute_type=config.transcription.compute_type,
+                vad_filter=vad_filter,
             )
 
             segments = []

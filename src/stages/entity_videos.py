@@ -64,9 +64,38 @@ class EntityVideosStage(Stage):
         # Check if skipped via pipeline config
         if config.pipeline.skip_image_search:
             logger.info("Skipping ENTITY_VIDEOS stage (config: skip_image_search=true)")
+
+            # Try to restore existing entity videos from checkpoint for V10 track
+            # Checkpoint stores: {video_count, total_videos, entities: {name: {videos, segment_indices, ...}}}
+            checkpoint_data = checkpoint.get_stage_data('entity_videos')
+            if checkpoint_data and 'entities' in checkpoint_data:
+                from types import SimpleNamespace
+
+                restored_videos = {}
+                raw_entities = checkpoint_data['entities']
+                for entity_name, entity_data in raw_entities.items():
+                    if isinstance(entity_data, dict):
+                        videos = entity_data.get('videos', [])
+                        segment_indices = entity_data.get('segment_indices', [])
+                        restored_videos[entity_name] = SimpleNamespace(
+                            videos=videos,
+                            segment_indices=segment_indices,
+                            entity_name=entity_name,
+                            entity_type=entity_data.get('entity_type', 'unknown'),
+                            context=entity_data.get('context', ''),
+                            query=entity_data.get('query', entity_name)
+                        )
+
+                if restored_videos:
+                    state.entity_videos = restored_videos
+                    total_videos = sum(len(getattr(e, 'videos', [])) for e in restored_videos.values())
+                    print(f"  >> Restored {len(restored_videos)} entities with {total_videos} videos from checkpoint")
+                    logger.info(f"Restored {len(restored_videos)} entity videos from checkpoint")
+
             return StageResult.ok({
                 'skipped': True,
-                'reason': 'skip_pipeline_config'
+                'reason': 'skip_pipeline_config',
+                'restored_from_checkpoint': bool(state.entity_videos)
             })
 
         # Check if enabled
@@ -200,7 +229,8 @@ class EntityVideosStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore entity videos from checkpoint data"""
         try:

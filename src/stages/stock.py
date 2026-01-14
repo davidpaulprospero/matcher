@@ -181,7 +181,8 @@ class StockVideoStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore stock videos from checkpoint data"""
         try:

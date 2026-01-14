@@ -65,6 +65,33 @@ class OutputConfig:
     frame_rate: float = 30.0
     timeline_start_tc: str = "01:00:00:00"  # Standard broadcast start
 
+    # Voiceover alignment offset (seconds)
+    # Use this to fix alignment when SRT timestamps don't match the actual audio
+    # Positive = shift clips later (audio is ahead of SRT)
+    # Negative = shift clips earlier (audio is behind SRT)
+    voiceover_offset: float = 0.0
+
+    # Gap threshold (seconds) - collapse gaps smaller than this value
+    # Whisper often inserts small gaps (~0.5-0.8s) between segments
+    # Setting this to 1.0 will place clips back-to-back for gaps under 1 second
+    # Set to 0.0 to preserve all gaps from SRT (default behavior)
+    min_gap_threshold: float = 0.0
+
+    # Time scale factor for SRT timestamps
+    # Use when actual audio duration differs from SRT end time
+    # Values: 0.0 = auto-calculate, 1.0 = no scaling (default), other = manual scale
+    # Example: 1596.9 / 1499.6 = 1.065 stretches timeline by 6.5%
+    time_scale_factor: float = 1.0
+
+    # Gap distribution mode - how to handle gaps between voiceover segments
+    # Controls how silence/pauses are placed in the timeline
+    # Options:
+    #   - "scale": (default) Scale SRT gaps by time_scale_factor
+    #   - "proportional": Recalculate gaps to distribute content evenly across audio
+    #   - "none": No gaps between clips, only leading/trailing gaps
+    # Use "proportional" when Whisper's gap timing is inaccurate but segment durations are good
+    gap_mode: str = "scale"
+
     # Track structure
     # V1: Primary, V2-V3: Alternatives
     # V4-V6: Secondary (different video files from V1-V3)
