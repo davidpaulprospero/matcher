@@ -180,7 +180,9 @@ def match_all_segments(
         # Stage 1: Get more candidates from embedding search for variety
         num_embedding_candidates = max(mc.embedding_candidates, 20)
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
-        all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
+        # Filter out-of-bounds indices (can occur if videos were filtered after embedding)
+        valid_indices = [j for j, idx in enumerate(indices) if idx < len(video_segments)]
+        all_candidates = [(video_segments[indices[j]], distances[j]) for j in valid_indices]
 
         # Add ALL B-roll segments to candidates (they may not be in top embedding matches)
         # B-roll segments use placeholder text, so their embeddings don't match voiceover semantically
