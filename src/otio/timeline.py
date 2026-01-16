@@ -20,8 +20,89 @@ from .utils import (
     get_segment_file_offset,
     get_confidence_color,
     create_clip_with_timewarp,
+    optimize_timeline_gaps,
+    MediaPathNormalizer,
 )
 from .entities import _add_entity_images_to_track, _add_entity_videos_to_track
+
+# Audio-only extensions that cause DaVinci to hang
+AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+
+# Non-media extensions that can't be imported (subtitles, text, etc.)
+NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
+
+
+def _is_audio_only(file_path: str) -> bool:
+    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
+    ext = Path(file_path).suffix.lower()
+    return ext in AUDIO_ONLY_EXTS
+
+
+def _is_non_media(file_path: str) -> bool:
+    """Check if file is non-media (subtitles, text files that can't be imported)."""
+    ext = Path(file_path).suffix.lower()
+    return ext in NON_MEDIA_EXTS
+
+
+def _find_audio_for_voiceover(vo_path: str) -> Optional[str]:
+    """
+    Find audio file for voiceover when given an SRT or other non-media file.
+
+    Searches for matching audio files in the same directory:
+    - Same name with audio extension (.mp3, .wav)
+    - combined_output.mp3/wav (common pattern)
+    - voiceover.mp3/wav (common pattern)
+
+    Returns:
+        Path to audio file if found, None otherwise.
+    """
+    vo_path_obj = Path(vo_path)
+    vo_dir = vo_path_obj.parent
+    vo_stem = vo_path_obj.stem
+
+    # Try same name with audio extensions
+    for ext in ['.mp3', '.wav', '.m4a', '.aac']:
+        candidate = vo_dir / f"{vo_stem}{ext}"
+        if candidate.exists():
+            return str(candidate)
+
+    # Try common voiceover file patterns
+    for pattern in ['combined_output', 'voiceover', 'audio', 'vo']:
+        for ext in ['.mp3', '.wav', '.m4a', '.aac']:
+            candidate = vo_dir / f"{pattern}{ext}"
+            if candidate.exists():
+                return str(candidate)
+
+    return None
+
+
+def _has_problematic_path(file_path: str) -> bool:
+    """
+    Check if file path has characters that cause DaVinci OTIO import to hang.
+
+    Problematic patterns:
+    - Corrupted unicode (replacement char U+FFFD shown as �)
+    - Non-ASCII characters in paths (accents, special chars)
+    - Extended unicode that Windows/DaVinci can't handle
+    """
+    try:
+        # Check for replacement character (corrupted unicode)
+        if '\ufffd' in file_path or '�' in file_path:
+            return True
+
+        # Check if path is pure ASCII - non-ASCII can cause issues
+        for char in file_path:
+            code = ord(char)
+            # Allow ASCII printable (32-126), forward/back slash, colon
+            if code > 127:
+                # Non-ASCII character found
+                return True
+
+        return False
+    except Exception:
+        # If we can't even check the path, it's problematic
+        return True
+
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -134,9 +215,50 @@ def create_timeline(
                 'end': seg.original_end
             })
 
+    # =========================================================================
+    # MEDIA PATH NORMALIZATION
+    # =========================================================================
+    # DaVinci Resolve hangs when the same video file is referenced from multiple
+    # paths (e.g., stock/video.mp4 and broll/video.mp4). We normalize all paths
+    # to use a single canonical location per unique file.
+    #
+    # First pass: collect all media paths from all matches
+    path_normalizer = MediaPathNormalizer()
+
+    for match_result in matches:
+        # Primary match
+        path_normalizer.register(match_result.primary_match.video_segment.source_file)
+
+        # Alternatives
+        for alt in match_result.alternatives:
+            path_normalizer.register(alt.video_segment.source_file)
+
+        # Secondary matches
+        for sec in match_result.secondary_matches:
+            path_normalizer.register(sec.video_segment.source_file)
+
+        # Strategy matches
+        if match_result.strategy_matches:
+            for sm in match_result.strategy_matches:
+                path_normalizer.register(sm.video_segment.source_file)
+
+    # Also register segment files from audio-first mode
+    if downloaded_segments:
+        for seg in downloaded_segments:
+            path_normalizer.register(seg.file)
+
+    # Build canonical map
+    path_normalizer.build_map()
+
+    if path_normalizer.duplicates_found > 0:
+        print(f"  ✓ Normalized {path_normalizer.duplicates_found} duplicate media paths")
+
     def resolve_video_segment(source_file: str, source_start: float) -> Tuple[str, float]:
         """
         Resolve audio file path to video segment path for audio-first mode.
+
+        Also applies path normalization to prevent DaVinci Resolve hangs
+        when the same file is referenced from multiple paths.
 
         Args:
             source_file: Original source file (may be audio .mp3)
@@ -147,37 +269,41 @@ def create_timeline(
             - If video segment found: (segment_file, time_relative_to_segment)
             - Otherwise: (original_source_file, original_source_start)
         """
-        if not segment_lookup:
-            return source_file, source_start
+        resolved_file = source_file
+        adjusted_start = source_start
 
-        # Extract video_id from the source file path
-        # Audio files are like: /path/to/video_id.mp3 or /path/to/folder/video_id.mp3
-        stem = Path(source_file).stem
-        video_id = stem
+        if segment_lookup:
+            # Extract video_id from the source file path
+            # Audio files are like: /path/to/video_id.mp3 or /path/to/folder/video_id.mp3
+            stem = Path(source_file).stem
+            video_id = stem
 
-        # Check if we have segment(s) for this video
-        if video_id not in segment_lookup:
-            return source_file, source_start
+            # Check if we have segment(s) for this video
+            if video_id in segment_lookup:
+                # Find the segment that contains this time
+                segments = segment_lookup[video_id]
+                for seg_info in segments:
+                    # Check if source_start falls within this segment's range
+                    if seg_info['start'] <= source_start <= seg_info['end']:
+                        # Calculate the offset within the segment file
+                        adjusted_start = source_start - seg_info['start']
+                        resolved_file = seg_info['file']
+                        break
+                else:
+                    # If no segment contains this exact time, use the first segment
+                    # and let the clip reference the original time (fallback)
+                    if segments:
+                        seg_info = segments[0]
+                        # Check if it's reasonably close
+                        if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
+                            adjusted_start = max(0, source_start - seg_info['start'])
+                            resolved_file = seg_info['file']
 
-        # Find the segment that contains this time
-        segments = segment_lookup[video_id]
-        for seg_info in segments:
-            # Check if source_start falls within this segment's range
-            if seg_info['start'] <= source_start <= seg_info['end']:
-                # Calculate the offset within the segment file
-                adjusted_start = source_start - seg_info['start']
-                return seg_info['file'], adjusted_start
+        # Apply path normalization to prevent duplicate file references
+        # which cause DaVinci Resolve to hang during OTIO import
+        normalized_file = path_normalizer.get_canonical(resolved_file)
 
-        # If no segment contains this exact time, use the first segment
-        # and let the clip reference the original time (fallback)
-        if segments:
-            seg_info = segments[0]
-            # Check if it's reasonably close
-            if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
-                adjusted_start = max(0, source_start - seg_info['start'])
-                return seg_info['file'], adjusted_start
-
-        return source_file, source_start
+        return normalized_file, adjusted_start
 
     timeline = otio.schema.Timeline(name="Matched Footage")
 
@@ -530,6 +656,30 @@ def create_timeline(
         source_file_for_clip = resolved_source
         source_start = adjusted_start
 
+        # Skip audio-only files - they cause DaVinci to hang during OTIO import
+        # This happens when video segments weren't downloaded for some audio files
+        # Also skip files with problematic unicode in path
+        if _is_audio_only(source_file_for_clip) or _has_problematic_path(source_file_for_clip):
+            logger.debug(f"Segment {match_idx}: Skipping problematic file {source_file_for_clip}")
+            # Add gap instead of clip
+            gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+            for track in video_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            for track in audio_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            timeline_frames += duration_frames
+            continue
+
         # Determine clip color based on confidence
         clip_color = get_confidence_color(match.confidence)
 
@@ -599,6 +749,23 @@ def create_timeline(
 
                 alt_source_file = alt_resolved_source
                 alt_source_start = alt_adjusted_start
+
+                # Skip audio-only files and problematic paths
+                if _is_audio_only(alt_source_file) or _has_problematic_path(alt_source_file):
+                    gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+                    video_tracks[alt_idx + 1].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    audio_tracks[alt_idx + 1].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    continue
 
                 alt_metadata = {
                     'confidence': alt.confidence,
@@ -678,6 +845,23 @@ def create_timeline(
 
                 sec_source_file = sec_resolved_source
                 sec_source_start = sec_adjusted_start
+
+                # Skip audio-only files and problematic paths
+                if _is_audio_only(sec_source_file) or _has_problematic_path(sec_source_file):
+                    gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+                    video_tracks[track_idx].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    audio_tracks[track_idx].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    continue
 
                 sec_metadata = {
                     'segment_index': match_idx,
@@ -769,6 +953,23 @@ def create_timeline(
 
                 strat_source_file = strat_resolved_source
                 strat_source_start = strat_adjusted_start
+
+                # Skip audio-only files and problematic paths
+                if _is_audio_only(strat_source_file) or _has_problematic_path(strat_source_file):
+                    gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+                    video_tracks[track_idx].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    audio_tracks[track_idx].append(otio.schema.Gap(
+                        source_range=otio.opentime.TimeRange(
+                            start_time=otio.opentime.RationalTime(0, rate),
+                            duration=gap_duration
+                        )
+                    ))
+                    continue
 
                 strat_metadata = {
                     'segment_index': match_idx,
@@ -866,44 +1067,56 @@ def create_timeline(
 
     # Add voiceover track
     if voiceover_path and matches:
-        # Create absolute path for voiceover (Windows format for DaVinci)
-        abs_vo_path = _to_windows_path(voiceover_path)
-        vo_folder = Path(voiceover_path).parent.name
-        vo_filename = Path(voiceover_path).name
-        vo_unique_name = f"{vo_folder}_{vo_filename}"
+        # Check if voiceover is a non-media file (SRT, VTT, etc.) and find audio alternative
+        actual_vo_path = voiceover_path
+        if _is_non_media(voiceover_path):
+            audio_path = _find_audio_for_voiceover(voiceover_path)
+            if audio_path:
+                logger.info(f"Voiceover is subtitle file, using audio file: {audio_path}")
+                actual_vo_path = audio_path
+            else:
+                logger.warning(f"Voiceover is subtitle file with no audio found, skipping voiceover track: {voiceover_path}")
+                actual_vo_path = None
 
-        # Use actual voiceover file duration if available, otherwise use accumulated frames
-        if actual_vo_duration:
-            vo_total_frames = round(actual_vo_duration * rate)
-            logger.info(f"Voiceover clip: using actual duration {actual_vo_duration:.2f}s ({vo_total_frames} frames)")
-        else:
-            vo_total_frames = timeline_frames
-            logger.warning("Could not determine voiceover duration, using accumulated segment total")
+        if actual_vo_path:
+            # Create absolute path for voiceover (forward slashes for DaVinci)
+            abs_vo_path = _to_windows_path(actual_vo_path)
+            vo_folder = Path(actual_vo_path).parent.name
+            vo_filename = Path(actual_vo_path).name
+            vo_unique_name = f"{vo_folder}_{vo_filename}"
 
-        # Create proper ExternalReference with available_range
-        vo_available_range = otio.opentime.TimeRange(
-            start_time=otio.opentime.RationalTime(0, rate),
-            duration=otio.opentime.RationalTime(vo_total_frames, rate)
-        )
+            # Use actual voiceover file duration if available, otherwise use accumulated frames
+            if actual_vo_duration:
+                vo_total_frames = round(actual_vo_duration * rate)
+                logger.info(f"Voiceover clip: using actual duration {actual_vo_duration:.2f}s ({vo_total_frames} frames)")
+            else:
+                vo_total_frames = timeline_frames
+                logger.warning("Could not determine voiceover duration, using accumulated segment total")
 
-        vo_ref = otio.schema.ExternalReference(
-            target_url=abs_vo_path,
-            available_range=vo_available_range
-        )
-        vo_ref.name = vo_unique_name  # Unique name includes folder
-
-        # Voiceover clip starts at 0 and uses actual file duration
-        # Video/audio tracks have leading gap added to align with VO playback
-        vo_clip = otio.schema.Clip(
-            name="Voiceover",
-            media_reference=vo_ref,
-            source_range=otio.opentime.TimeRange(
+            # Create proper ExternalReference with available_range
+            vo_available_range = otio.opentime.TimeRange(
                 start_time=otio.opentime.RationalTime(0, rate),
                 duration=otio.opentime.RationalTime(vo_total_frames, rate)
             )
-        )
-        vo_clip.metadata['Resolve_OTIO'] = {}  # Required for DaVinci import
-        voiceover_track.append(vo_clip)
+
+            vo_ref = otio.schema.ExternalReference(
+                target_url=abs_vo_path,
+                available_range=vo_available_range
+            )
+            vo_ref.name = vo_unique_name  # Unique name includes folder
+
+            # Voiceover clip starts at 0 and uses actual file duration
+            # Video/audio tracks have leading gap added to align with VO playback
+            vo_clip = otio.schema.Clip(
+                name="Voiceover",
+                media_reference=vo_ref,
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(vo_total_frames, rate)
+                )
+            )
+            vo_clip.metadata['Resolve_OTIO'] = {}  # Required for DaVinci import
+            voiceover_track.append(vo_clip)
 
     # Add all tracks to timeline
     for track in video_tracks:
@@ -963,5 +1176,9 @@ def create_timeline(
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
     timeline.tracks.append(stock_video_track)
+
+    # Optimize gaps in all tracks (merge consecutive, remove trailing)
+    # This improves DaVinci Resolve import performance
+    optimize_timeline_gaps(timeline)
 
     return timeline

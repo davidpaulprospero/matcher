@@ -178,14 +178,42 @@ class MatchStage(Stage):
         config: 'Config' = None
     ) -> bool:
         """Restore match stage from checkpoint"""
+        from ..state import Match
+
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
                 return False
 
-            # Matches need to be loaded from cache, not checkpoint
-            # (delta matching handles this)
-            logger.info(f"Restored MATCH metadata from checkpoint")
+            # Load matches from checkpoint
+            matches_data = data.get('matches', [])
+            if matches_data:
+                restored_matches = []
+                for m in matches_data:
+                    # Handle both old format (source_file) and new format (video_file)
+                    video_file = m.get('video_file') or m.get('source_file', '')
+
+                    # Estimate video_end if not provided (old checkpoints)
+                    video_start = m.get('video_start', m.get('start_time', 0.0))
+                    video_end = m.get('video_end', video_start + 10.0)  # Default 10s clip
+
+                    match = Match(
+                        segment_index=m.get('segment_index', 0),
+                        video_file=video_file,
+                        video_start=video_start,
+                        video_end=video_end,
+                        confidence=m.get('confidence', 0.0),
+                        strategy=m.get('strategy', 'restored'),
+                        reason=m.get('reason', ''),
+                        face_score=m.get('face_score', 0.5)
+                    )
+                    restored_matches.append(match)
+
+                state.matches = restored_matches
+                logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")
+            else:
+                logger.info(f"Restored MATCH metadata from checkpoint (no matches data)")
+
             return True
 
         except Exception as e:

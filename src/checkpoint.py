@@ -357,6 +357,40 @@ class CheckpointManager:
         logger.debug(f"Saving intermediate checkpoint for {stage}")
         self._atomic_save()
 
+    def mark_stage_incomplete(self, stage: str):
+        """
+        Mark a stage as incomplete so it will be re-run.
+
+        Used by --force-rematch to force re-running MATCH stage even when
+        checkpoint shows it as complete.
+
+        Args:
+            stage: The stage to mark as incomplete
+        """
+        if self.data is None:
+            return
+
+        try:
+            stage_idx = STAGE_ORDER.index(stage)
+        except ValueError:
+            logger.warning(f"Unknown stage: {stage}")
+            return
+
+        # Set last_completed_stage to the stage before this one
+        if stage_idx > 0:
+            self.data.last_completed_stage = STAGE_ORDER[stage_idx - 1]
+        else:
+            # If it's the first stage, clear last_completed_stage
+            self.data.last_completed_stage = None
+
+        # Clear any stage-specific data for this stage
+        stage_key = stage.lower()
+        if hasattr(self.data, stage_key):
+            setattr(self.data, stage_key, {})
+
+        self._atomic_save()
+        logger.info(f"Marked {stage} as incomplete - will be re-run")
+
     def _atomic_save(self):
         """Atomically save checkpoint (write temp, then rename)"""
         temp_path = self.checkpoint_path.with_suffix('.tmp')

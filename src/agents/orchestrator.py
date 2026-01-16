@@ -7,12 +7,14 @@ The orchestrator manages:
 - Config snapshots and rollback
 - User escalation for complex issues
 - Metrics collection and reporting
+- Two-tier LLM delegation (watcher + LLM healer)
 """
 
 from __future__ import annotations
 
 import copy
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,12 +28,16 @@ from .strategy import (
     ConfigSnapshot,
 )
 from .healers import HEALER_REGISTRY
+from .fallback import FallbackChain, pattern_route, PatternClassification
 
 if TYPE_CHECKING:
     from ..config import Config
     from ..state import PipelineState
     from ..stages import Stage, StageResult
     from ..checkpoint import CheckpointManager
+    from .watcher import WatcherAgent, ErrorClassification
+    from .healing_logger import HealingLogger
+    from .healers.llm_healer import LLMHealer
 
 logger = logging.getLogger(__name__)
 
@@ -108,20 +114,102 @@ class HealingOrchestrator:
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
 
+        # Thread safety for recent errors tracking
+        self._errors_lock = threading.Lock()
+        self.recent_errors: Dict[str, int] = {}
+        self._current_error_stack: Optional[str] = None  # Pre-captured stack trace for LLM healer
+
+        # Two-tier LLM delegation components
+        self.healing_logger: Optional['HealingLogger'] = None
+        self.fallback_chain: Optional[FallbackChain] = None
+        self.watcher: Optional['WatcherAgent'] = None
+        self.llm_healer: Optional['LLMHealer'] = None
+
+        # Initialize two-tier LLM system if enabled
+        self._init_llm_delegation()
+
+    def _init_llm_delegation(self):
+        """Initialize two-tier LLM delegation system (watcher + LLM healer)."""
+        healing_config = getattr(self.config, 'healing', None)
+        if not healing_config:
+            return
+
+        # Check if watcher/LLM healer are configured
+        watcher_config = getattr(healing_config, 'watcher', None)
+        llm_healer_config = getattr(healing_config, 'llm_healer', None)
+        logging_config = getattr(healing_config, 'logging', None)
+
+        # Initialize healing logger
+        if logging_config and getattr(logging_config, 'enabled', True):
+            try:
+                from .healing_logger import HealingLogger
+                log_dir = self.project_dir / getattr(logging_config, 'log_dir', 'logs')
+                self.healing_logger = HealingLogger(
+                    log_dir,
+                    json_log=getattr(logging_config, 'json_log', True),
+                    console_format=getattr(logging_config, 'console_format', 'box')
+                )
+                logger.info("[orchestrator] Healing logger initialized")
+            except Exception as e:
+                logger.warning(f"[orchestrator] Could not initialize healing logger: {e}")
+
+        # Initialize fallback chain
+        self.fallback_chain = FallbackChain(healing_config, self.healing_logger)
+
+        # Initialize watcher
+        if watcher_config and getattr(watcher_config, 'enabled', True):
+            try:
+                from .watcher import WatcherAgent
+                self.watcher = WatcherAgent(
+                    watcher_config,
+                    self.project_dir,
+                    self.healing_logger,
+                    self.fallback_chain
+                )
+                logger.info("[orchestrator] Watcher agent initialized")
+            except Exception as e:
+                logger.warning(f"[orchestrator] Could not initialize watcher: {e}")
+
+        # Initialize LLM healer
+        if llm_healer_config and getattr(llm_healer_config, 'enabled', True):
+            try:
+                from .healers.llm_healer import LLMHealer
+                self.llm_healer = LLMHealer(
+                    llm_healer_config,
+                    self.project_dir,
+                    self.healing_logger,
+                    self.fallback_chain
+                )
+                # Add to healer instances so it can be selected
+                self._healer_instances['llm-healer'] = self.llm_healer
+                logger.info("[orchestrator] LLM healer initialized")
+            except Exception as e:
+                logger.warning(f"[orchestrator] Could not initialize LLM healer: {e}")
+
     def _prioritize_healers(self) -> List[Healer]:
-        """Order healers by strategy priority."""
+        """Order healers by strategy priority.
+
+        Logs warning if a healer specified in priority list is not found,
+        which helps catch configuration typos.
+        """
         ordered = []
         seen = set()
 
-        # Add in priority order
+        # Add in priority order, warn about missing healers
         for name in self.strategy.healer_priority:
-            if name in self._healer_instances and name not in seen:
-                ordered.append(self._healer_instances[name])
-                seen.add(name)
+            if name in self._healer_instances:
+                if name not in seen:
+                    ordered.append(self._healer_instances[name])
+                    seen.add(name)
+            else:
+                logger.warning(
+                    f"[orchestrator] Healer '{name}' in priority list not found. "
+                    f"Available: {list(self._healer_instances.keys())}"
+                )
 
-        # Add remaining healers
+        # Add remaining healers (except LLM healer - it's tried last)
         for name, healer in self._healer_instances.items():
-            if name not in seen:
+            if name not in seen and name != 'llm-healer':
                 ordered.append(healer)
 
         return ordered
@@ -142,6 +230,19 @@ class HealingOrchestrator:
         logger.info("Running preflight checks...")
         issues: List[PreflightIssue] = []
 
+        # Warm up watcher (local LLM) if enabled
+        if self.watcher:
+            watcher_config = getattr(getattr(self.config, 'healing', None), 'watcher', None)
+            if watcher_config and getattr(watcher_config, 'warmup_on_preflight', True):
+                logger.info("[preflight] Warming up watcher model...")
+                if not self.watcher.warmup():
+                    issues.append(PreflightIssue(
+                        category="watcher",
+                        severity="warning",
+                        message="Watcher model warmup failed, will use pattern routing as fallback",
+                        auto_fixable=False,
+                    ))
+
         # Check disk space
         disk_issues = self._check_disk_space()
         issues.extend(disk_issues)
@@ -149,6 +250,10 @@ class HealingOrchestrator:
         # Check API keys
         api_issues = self._check_api_keys()
         issues.extend(api_issues)
+
+        # Check Ollama availability for watcher
+        ollama_issues = self._check_ollama()
+        issues.extend(ollama_issues)
 
         # Check paths
         path_issues = self._check_paths()
@@ -266,6 +371,67 @@ class HealingOrchestrator:
                     message=f"{env_var} not set ({service} unavailable)",
                     auto_fixable=False,
                 ))
+
+        return issues
+
+    def _check_ollama(self) -> List[PreflightIssue]:
+        """Check if Ollama is available for watcher agent."""
+        issues = []
+
+        # Check if watcher is enabled
+        healing_config = getattr(self.config, 'healing', None)
+        if not healing_config:
+            return issues
+
+        watcher_config = getattr(healing_config, 'watcher', None)
+        if not watcher_config or not getattr(watcher_config, 'enabled', True):
+            return issues
+
+        # Get Ollama settings
+        host = getattr(watcher_config, 'host', 'http://localhost:11434')
+        model = getattr(watcher_config, 'model', 'llama3.2')
+        fallback_model = getattr(watcher_config, 'fallback_model', 'llama3.1')
+
+        try:
+            from src.llm_client.providers.ollama import check_ollama_available, check_ollama_model_available
+
+            # Check if Ollama is running
+            available, error, models = check_ollama_available(host, timeout=5)
+
+            if not available:
+                issues.append(PreflightIssue(
+                    category="watcher",
+                    severity="warning",
+                    message=f"Ollama not available: {error}. Error classification will use pattern routing.",
+                    auto_fixable=False,
+                ))
+                return issues
+
+            # Check if required model is installed
+            model_ok, model_error = check_ollama_model_available(model, host, timeout=5)
+            if not model_ok:
+                # Try fallback model
+                fallback_ok, _ = check_ollama_model_available(fallback_model, host, timeout=5)
+                if fallback_ok:
+                    issues.append(PreflightIssue(
+                        category="watcher",
+                        severity="info",
+                        message=f"Primary model '{model}' not found, will use fallback '{fallback_model}'",
+                        auto_fixable=False,
+                    ))
+                else:
+                    issues.append(PreflightIssue(
+                        category="watcher",
+                        severity="warning",
+                        message=f"{model_error}",
+                        auto_fixable=False,
+                    ))
+
+        except ImportError:
+            # llm_client not available
+            pass
+        except Exception as e:
+            logger.debug(f"[preflight] Could not check Ollama: {e}")
 
         return issues
 
@@ -436,49 +602,54 @@ class HealingOrchestrator:
         self,
         error: Exception,
         state: 'PipelineState',
-        stage_name: str
+        stage_name: str,
+        error_stack: Optional[str] = None
     ) -> HealerResult:
         """
         Coordinate healing attempt across multiple healers.
 
-        Tries healers in priority order, handles cross-healer effects.
+        Uses two-tier LLM delegation:
+        1. Watcher (local Ollama) classifies error
+        2. Standard healers try to fix based on classification
+        3. LLM healer (Claude) handles complex issues
+
+        Args:
+            error: The exception that occurred
+            state: Pipeline state
+            stage_name: Name of the stage that failed
+            error_stack: Pre-captured stack trace for LLM healer context
         """
         start_time = time.time()
         self.current_stage = stage_name
+        self._current_error_stack = error_stack  # Store for LLM healer
+
+        # Check for circular healing
+        if not self._should_attempt_heal(error, stage_name):
+            return HealerResult.failed("Healing loop detected, aborting")
 
         # Check if we should escalate immediately
         error_str = str(error).lower()
         if any(p in error_str for p in self.strategy.always_escalate):
             return self._escalate_to_user(error, stage_name)
 
-        # Select applicable healers
-        healers = self.select_healers(error, stage_name)
-        if not healers:
-            logger.warning(f"No healers available for: {error}")
-            return HealerResult.failed("No applicable healers found")
+        # Step 1: Get classification from watcher or pattern routing
+        classification = self._classify_error(error, stage_name)
 
-        # Try healers in order
-        for healer in healers:
-            logger.info(f"Trying healer: {healer.name}")
+        # Step 2: Select and try healers based on classification
+        result = self._try_healers_with_classification(
+            error, state, stage_name, classification
+        )
 
-            try:
-                result = healer.fix(error, state, stage_name)
+        if result.success:
+            self.metrics.time_spent_healing += time.time() - start_time
+            return result
 
-                # Record metrics
-                self.metrics.record_heal(healer.name, stage_name, result.success)
-
-                if result.success:
-                    # Notify other healers of changes
-                    self._notify_healers(healer.name, result)
-
-                    # Update timing
-                    self.metrics.time_spent_healing += time.time() - start_time
-
-                    return result
-
-            except Exception as heal_error:
-                logger.error(f"Healer {healer.name} raised exception: {heal_error}")
-                self.metrics.errors_encountered.append(str(heal_error))
+        # Step 3: Escalate to LLM healer if needed
+        if self._should_escalate_to_llm(classification, result):
+            llm_result = self._try_llm_healer(error, state, stage_name)
+            if llm_result:
+                self.metrics.time_spent_healing += time.time() - start_time
+                return llm_result
 
         # All healers failed
         self.metrics.time_spent_healing += time.time() - start_time
@@ -488,6 +659,207 @@ class HealingOrchestrator:
             return self._escalate_to_user(error, stage_name)
 
         return HealerResult.failed(f"All healers failed for: {type(error).__name__}")
+
+    def _classify_error(self, error: Exception, stage_name: str) -> Optional[Any]:
+        """Classify error using watcher or pattern routing.
+
+        Returns ErrorClassification or PatternClassification.
+        """
+        context = {'stage': stage_name, 'stage_name': stage_name}
+
+        # Try watcher first
+        if self.watcher and self.fallback_chain and self.fallback_chain.check_watcher_available():
+            classification = self.watcher.classify_error(error, context)
+            if classification:
+                return classification
+
+        # Fallback to pattern routing
+        return pattern_route(str(error))
+
+    def _try_healers_with_classification(
+        self,
+        error: Exception,
+        state: 'PipelineState',
+        stage_name: str,
+        classification: Optional[Any]
+    ) -> HealerResult:
+        """Try healers based on classification confidence."""
+        failed_healers: List[str] = []
+
+        # Get suggested healer from classification
+        suggested_healer = None
+        confidence = 0.5
+
+        if classification:
+            suggested_healer = getattr(classification, 'suggested_healer', None)
+            confidence = getattr(classification, 'confidence', 0.5)
+
+        # High confidence: try suggested healer first
+        if confidence >= 0.8 and suggested_healer:
+            healer = self._healer_instances.get(suggested_healer)
+            if healer:
+                result = self._try_healer(healer, error, state, stage_name)
+                if result.success:
+                    return result
+                failed_healers.append(healer.name)
+
+        # Medium confidence: try suggested, then others
+        elif confidence >= 0.5 and suggested_healer:
+            healer = self._healer_instances.get(suggested_healer)
+            if healer:
+                result = self._try_healer(healer, error, state, stage_name)
+                if result.success:
+                    return result
+                failed_healers.append(healer.name)
+
+        # Try all applicable healers
+        healers = self.select_healers(error, stage_name)
+        for healer in healers:
+            if healer.name in failed_healers:
+                continue
+
+            result = self._try_healer(healer, error, state, stage_name)
+            if result.success:
+                return result
+            failed_healers.append(healer.name)
+
+        # Record failed healers for LLM healer context
+        if self.llm_healer:
+            for name in failed_healers:
+                self.llm_healer.add_failed_healer(name)
+
+        return HealerResult.failed("Standard healers exhausted")
+
+    def _try_healer(
+        self,
+        healer: Healer,
+        error: Exception,
+        state: 'PipelineState',
+        stage_name: str
+    ) -> HealerResult:
+        """Try a single healer and record metrics."""
+        logger.info(f"Trying healer: {healer.name}")
+        start_time = time.time()
+
+        try:
+            result = healer.fix(error, state, stage_name)
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            # Record metrics
+            self.metrics.record_heal(healer.name, stage_name, result.success)
+
+            # Log to healing logger
+            if self.healing_logger:
+                self.healing_logger.log_healer_attempt(
+                    stage_name, healer.name, error, result, elapsed_ms
+                )
+
+            if result.success:
+                # Notify other healers of changes
+                self._notify_healers(healer.name, result)
+
+            return result
+
+        except Exception as heal_error:
+            logger.error(f"Healer {healer.name} raised exception: {heal_error}")
+            self.metrics.errors_encountered.append(str(heal_error))
+            return HealerResult.failed(f"Healer exception: {heal_error}")
+
+    def _should_escalate_to_llm(
+        self,
+        classification: Optional[Any],
+        healer_result: HealerResult
+    ) -> bool:
+        """Determine if should escalate to LLM healer."""
+        if not self.llm_healer:
+            return False
+
+        if not self.fallback_chain or not self.fallback_chain.check_llm_healer_available():
+            return False
+
+        # Classification explicitly requested LLM healer
+        if classification and getattr(classification, 'needs_llm_healer', False):
+            return True
+
+        # Low confidence classification
+        if classification and getattr(classification, 'confidence', 1.0) < 0.5:
+            return True
+
+        # Standard healers failed
+        if not healer_result.success:
+            return True
+
+        return False
+
+    def _try_llm_healer(
+        self,
+        error: Exception,
+        state: 'PipelineState',
+        stage_name: str
+    ) -> Optional[HealerResult]:
+        """Try LLM healer for complex issues."""
+        if not self.llm_healer:
+            return None
+
+        if self.healing_logger:
+            self.healing_logger.log_escalation(
+                stage_name, error, "Standard healers failed, escalating to LLM healer"
+            )
+
+        logger.info("[orchestrator] Escalating to LLM healer")
+
+        try:
+            # Pass the pre-captured stack trace for accurate context
+            result = self.llm_healer.fix(
+                error, state, stage_name,
+                error_stack_trace=getattr(self, '_current_error_stack', None)
+            )
+
+            self.metrics.record_heal("llm-healer", stage_name, result.success)
+
+            if result.success:
+                self._notify_healers("llm-healer", result)
+
+            # Clear failed healers for next error
+            self.llm_healer.clear_failed_healers()
+
+            return result
+
+        except Exception as e:
+            logger.error(f"LLM healer raised exception: {e}")
+            self.metrics.errors_encountered.append(str(e))
+            return None
+
+    # Maximum number of unique errors to track (prevents memory growth)
+    MAX_RECENT_ERRORS = 100
+
+    def _should_attempt_heal(self, error: Exception, stage_name: str) -> bool:
+        """Check for circular healing (same error repeating)."""
+        error_key = f"{stage_name}:{type(error).__name__}:{str(error)[:50]}"
+
+        with self._errors_lock:
+            # Prevent unbounded memory growth - clear oldest entries when limit reached
+            if len(self.recent_errors) >= self.MAX_RECENT_ERRORS:
+                # Clear half the entries (oldest by insertion order in Python 3.7+)
+                keys_to_remove = list(self.recent_errors.keys())[:self.MAX_RECENT_ERRORS // 2]
+                for key in keys_to_remove:
+                    del self.recent_errors[key]
+                logger.debug(f"[orchestrator] Pruned recent_errors to {len(self.recent_errors)} entries")
+
+            if error_key in self.recent_errors:
+                count = self.recent_errors[error_key]
+                if count >= 2:
+                    if self.healing_logger:
+                        self.healing_logger.log_fallback(
+                            stage_name, "heal_loop", "abort",
+                            f"Same error repeated {count} times, aborting"
+                        )
+                    return False
+                self.recent_errors[error_key] = count + 1
+            else:
+                self.recent_errors[error_key] = 1
+
+        return True
 
     def _notify_healers(self, source_healer: str, result: HealerResult):
         """

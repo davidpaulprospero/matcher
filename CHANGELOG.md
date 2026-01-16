@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **OTIO Gap Optimization** (`src/otio/utils.py`)
+  - `optimize_track_gaps()`: Merges consecutive gaps, removes trailing gaps
+  - `optimize_timeline_gaps()`: Applies optimization to all tracks in timeline
+  - Auto-applied at end of `create_timeline()` for DaVinci Resolve compatibility
+
+### Fixed
+- **DaVinci OTIO Import Hangs** (Rule 13-14 in CLAUDE.md)
+  - Unicode characters in file paths (ñ, ü, etc.) cause DaVinci to hang
+  - Added `_has_problematic_path()` filter in timeline.py, tracks.py, entities.py
+  - Audio-only files (.mp3, .wav) now skipped with gap placeholder
+  - DaVinci caches corrupted import state by filename - renaming files bypasses cache
+- **XML Media Bin Import** (Rule 12 in CLAUDE.md)
+  - `<bin>` must be directly under `<xmeml>` (no `<project>` wrapper)
+  - `<file>` must be inside `<clipitem>`, not at clip level
+  - Empty `<sequence>` required as sibling to trigger import
+  - Audio-only files skipped (DaVinci XML import fails on .mp3/.wav)
+
+## Session History Archive
+
+| Date | Changes |
+|------|---------|
+| 2026-01-14 | Self-healing enabled by default: `config.healing` section, `create_healing_pipeline()` in pipeline.py |
+| 2026-01-14 | HealingOrchestrator: Preflight checks, config rollback, cross-healer coordination, metrics |
+
+---
+
+### Added
 - GitHub Actions CI/CD workflows for automated testing
   - `.github/workflows/tests.yml`: Full matrix testing across Python 3.9-3.11 on Ubuntu/Windows
   - `.github/workflows/quick-check.yml`: Fast checks for all branches (< 10 minutes)

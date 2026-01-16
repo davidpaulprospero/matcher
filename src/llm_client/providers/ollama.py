@@ -3,10 +3,74 @@ Ollama local LLM client implementation.
 """
 
 import logging
+from typing import List, Optional, Tuple
 from ..base import LLMClient, LLMRequest
 from ..exceptions import LLMProviderError, LLMTimeoutError
 
 logger = logging.getLogger(__name__)
+
+
+def check_ollama_available(host: str = "http://localhost:11434", timeout: int = 5) -> Tuple[bool, Optional[str], List[str]]:
+    """Check if Ollama is running and return available models.
+
+    Args:
+        host: Ollama server URL
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple of (is_available, error_message, list_of_models)
+        - is_available: True if Ollama is responding
+        - error_message: None if available, else reason for failure
+        - list_of_models: List of installed model names (empty if unavailable)
+    """
+    try:
+        import requests
+    except ImportError:
+        return False, "requests package not installed", []
+
+    try:
+        response = requests.get(f"{host.rstrip('/')}/api/tags", timeout=timeout)
+        if response.status_code != 200:
+            return False, f"Ollama returned status {response.status_code}", []
+
+        data = response.json()
+        models = data.get("models", [])
+        model_names = [m.get("name", "").split(":")[0] for m in models]
+
+        return True, None, model_names
+
+    except Exception as e:
+        if "ConnectionRefusedError" in str(type(e).__name__) or "Connection refused" in str(e):
+            return False, "Ollama not running (connection refused)", []
+        elif "ConnectTimeout" in str(type(e).__name__) or "timed out" in str(e).lower():
+            return False, "Ollama not responding (timeout)", []
+        else:
+            return False, f"Error checking Ollama: {e}", []
+
+
+def check_ollama_model_available(model: str, host: str = "http://localhost:11434", timeout: int = 5) -> Tuple[bool, Optional[str]]:
+    """Check if a specific model is available in Ollama.
+
+    Args:
+        model: Model name to check (e.g., "llama3.2")
+        host: Ollama server URL
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple of (is_available, error_message)
+    """
+    available, error, models = check_ollama_available(host, timeout)
+
+    if not available:
+        return False, error
+
+    # Check if model is in list (handle both "llama3.2" and "llama3.2:latest" formats)
+    model_base = model.split(":")[0]
+    for m in models:
+        if m == model or m.startswith(model_base):
+            return True, None
+
+    return False, f"Model '{model}' not found. Available: {models}. Run: ollama pull {model}"
 
 
 class OllamaClient(LLMClient):

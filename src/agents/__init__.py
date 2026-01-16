@@ -59,8 +59,12 @@ from .healers import (
     DownloadHealer,
     DiskHealer,
     PathHealer,
+    LLMHealer,
     HEALER_REGISTRY,
 )
+from .watcher import WatcherAgent, ErrorClassification
+from .healing_logger import HealingLogger, HealingLogEntry
+from .fallback import FallbackChain, pattern_route, PATTERN_ROUTING
 
 __all__ = [
     # Base classes
@@ -93,5 +97,15 @@ __all__ = [
     'DownloadHealer',
     'DiskHealer',
     'PathHealer',
+    'LLMHealer',
     'HEALER_REGISTRY',
+
+    # Two-tier LLM delegation
+    'WatcherAgent',
+    'ErrorClassification',
+    'HealingLogger',
+    'HealingLogEntry',
+    'FallbackChain',
+    'pattern_route',
+    'PATTERN_ROUTING',
 ]

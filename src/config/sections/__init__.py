@@ -22,6 +22,10 @@ from .infrastructure import (
     GlobalCacheConfig,
     PipelineConfig,
     APIKeysConfig,
+    HealingConfig,
+    HealingLoggingConfig,
+    WatcherConfig,
+    LLMHealerConfig,
 )
 
 # Core
@@ -110,6 +114,10 @@ __all__ = [
     'GlobalCacheConfig',
     'PipelineConfig',
     'APIKeysConfig',
+    'HealingConfig',
+    'HealingLoggingConfig',
+    'WatcherConfig',
+    'LLMHealerConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',

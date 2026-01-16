@@ -482,7 +482,7 @@ class TestWriteMediaXMLPart:
         assert root.tag == 'xmeml'
 
     def test_includes_bin_with_clips(self, tmp_path):
-        """Test that media part has bin with clips"""
+        """Test that media part has bin with clips inside project wrapper"""
         files_subset = {
             '/videos/test.mp4': {
                 'file_id': 'file-1',
@@ -506,8 +506,9 @@ class TestWriteMediaXMLPart:
         tree = ET.parse(output_path)
         root = tree.getroot()
 
+        # Bin must be directly under xmeml (NO project wrapper) for DaVinci Resolve import
         bin_node = root.find('bin')
-        assert bin_node is not None
+        assert bin_node is not None, "Media XML must have <bin> directly under <xmeml>"
         clips = bin_node.findall('.//clip')
         assert len(clips) == 1
 
@@ -537,5 +538,39 @@ class TestWriteMediaXMLPart:
         tree = ET.parse(output_path)
         root = tree.getroot()
 
-        bin_name = root.find('.//bin/name')
+        # Bin name directly under xmeml/bin
+        bin_name = root.find('bin/name')
+        assert bin_name is not None, "Missing bin/name element"
         assert bin_name.text == "Custom Bin Name"
+
+    def test_media_xml_has_bin_and_sequence(self, tmp_path):
+        """Test that media XML has bin + sequence siblings for DaVinci Resolve"""
+        files_subset = {
+            '/videos/test.mp4': {
+                'file_id': 'file-1',
+                'uuid': 'uuid-1234',
+                'duration_frames': 900
+            }
+        }
+
+        output_path = str(tmp_path / "media_part.xml")
+        generated_paths = []
+
+        _write_media_xml_part(
+            files_subset,
+            part_idx=1,
+            output_path=output_path,
+            fps_int=30,
+            generated_paths=generated_paths,
+            logger=Mock()
+        )
+
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        # Structure must be: xmeml > bin + sequence (siblings)
+        assert root.tag == 'xmeml'
+        bin_node = root.find('bin')
+        assert bin_node is not None, "Missing <bin> under xmeml"
+        sequence_node = root.find('sequence')
+        assert sequence_node is not None, "Missing <sequence> sibling (required for DaVinci import)"

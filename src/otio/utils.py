@@ -10,7 +10,7 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import opentimelineio as otio
@@ -36,20 +36,21 @@ class NumpyEncoder(json.JSONEncoder):
 
 def _to_windows_path(path: str) -> str:
     """
-    Convert path to Windows format with backslashes.
+    Convert path to absolute path with forward slashes.
 
-    DaVinci Resolve requires Windows-style paths: E:\\folder\\file.mp4
-    Forward slashes cause import issues.
+    DaVinci Resolve imports better with forward slashes: E:/folder/file.mp4
+    Backslashes can cause hangs during OTIO import.
     """
     abs_path = str(Path(path).resolve())
-    # Ensure backslashes (Windows format)
-    return abs_path.replace('/', '\\')
+    # Use forward slashes (works better with DaVinci)
+    return abs_path.replace('\\', '/')
 
 
 def format_path_url(file_path: str) -> str:
-    """Format file path for DaVinci Resolve XML - use standard path with forward slashes."""
+    """Format file path for DaVinci Resolve XML - plain Windows path with forward slashes."""
     path = str(Path(file_path).resolve()).replace('\\', '/')
-    # Return plain path - DaVinci prefers standard paths over file:// URLs
+    # DaVinci Resolve on Windows expects plain paths, not file:// URLs
+    # E:\path\file.mp4 -> E:/path/file.mp4
     return path
 
 
@@ -311,6 +312,247 @@ def get_confidence_color(confidence: float) -> str:
 
 
 # ============================================================
+# OTIO Track Optimization
+# ============================================================
+
+def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
+    """
+    Optimize gaps in an OTIO track for better DaVinci Resolve compatibility.
+
+    Performs two optimizations:
+    1. Merges consecutive gaps into single gaps
+    2. Removes trailing gaps (they serve no purpose)
+
+    This prevents potential performance issues with DaVinci Resolve
+    when importing tracks with many small gaps.
+
+    Args:
+        track: OTIO Track to optimize
+
+    Returns:
+        The same track with optimized gap structure
+    """
+    try:
+        # Use list() to safely get items - avoids OTIO internal iteration issues
+        items = list(track)
+        if not items:
+            return track
+    except (AttributeError, RuntimeError) as e:
+        # Track may be in inconsistent state - skip optimization
+        import logging
+        logging.getLogger(__name__).warning(f"Skipping track optimization due to error: {e}")
+        return track
+
+    frame_rate = 30.0  # Default, will be detected from first item
+
+    # Detect frame rate from first item with a source_range
+    for item in items:
+        if hasattr(item, 'source_range') and item.source_range:
+            frame_rate = item.source_range.duration.rate
+            break
+
+    # Merge consecutive gaps
+    merged_children = []
+    current_gap_frames = 0.0
+
+    for item in items:
+        is_gap = isinstance(item, otio.schema.Gap)
+
+        if is_gap:
+            # Accumulate gap duration
+            if item.source_range:
+                current_gap_frames += item.source_range.duration.value
+        else:
+            # Flush accumulated gap as single gap
+            if current_gap_frames > 0:
+                gap = otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, frame_rate),
+                        duration=otio.opentime.RationalTime(current_gap_frames, frame_rate)
+                    )
+                )
+                merged_children.append(gap)
+                current_gap_frames = 0
+            merged_children.append(item)
+
+    # Don't add trailing gap - they serve no purpose
+    # (If current_gap_frames > 0 at this point, it's a trailing gap)
+
+    # Update track children
+    # Clear existing children and add merged ones
+    try:
+        track.clear()  # Use clear() instead of while loop
+    except (AttributeError, RuntimeError):
+        # Fallback: remove items one by one
+        while True:
+            try:
+                if not list(track):
+                    break
+                del track[0]
+            except (IndexError, RuntimeError):
+                break
+
+    for child in merged_children:
+        track.append(child)
+
+    return track
+
+
+def optimize_timeline_gaps(timeline: otio.schema.Timeline) -> otio.schema.Timeline:
+    """
+    Optimize gaps in all tracks of a timeline.
+
+    Args:
+        timeline: OTIO Timeline to optimize
+
+    Returns:
+        The same timeline with optimized gap structure in all tracks
+    """
+    for track in timeline.tracks:
+        if isinstance(track, otio.schema.Track):
+            optimize_track_gaps(track)
+
+    return timeline
+
+
+# ============================================================
+# Media Path Normalization
+# ============================================================
+
+def build_canonical_media_map(media_paths: List[str]) -> Dict[str, str]:
+    """
+    Build a map of media paths to their canonical (deduplicated) versions.
+
+    DaVinci Resolve hangs when importing OTIO files that reference the same
+    video file from multiple different paths (e.g., stock/ and broll/ copies).
+    This function identifies duplicate files and maps them to a single canonical path.
+
+    Identification is based on filename + file size (fast, reliable for video files).
+    When duplicates exist, preference order is:
+    1. stock/ folder (original downloads)
+    2. Shorter path (simpler reference)
+
+    Args:
+        media_paths: List of all media file paths in the timeline
+
+    Returns:
+        Dict mapping each input path to its canonical path.
+        Paths without duplicates map to themselves.
+
+    Example:
+        Input: ['E:/v/proj/stock/video.mp4', 'E:/v/proj/broll/pexels/video.mp4']
+        Output: {
+            'E:/v/proj/stock/video.mp4': 'E:/v/proj/stock/video.mp4',
+            'E:/v/proj/broll/pexels/video.mp4': 'E:/v/proj/stock/video.mp4'
+        }
+    """
+    import os
+
+    # Build map: (filename, size) -> list of paths
+    file_key_to_paths: Dict[tuple, List[str]] = {}
+
+    for path in media_paths:
+        if not path or not os.path.exists(path):
+            continue
+
+        try:
+            filename = os.path.basename(path)
+            size = os.path.getsize(path)
+            key = (filename, size)
+
+            if key not in file_key_to_paths:
+                file_key_to_paths[key] = []
+            file_key_to_paths[key].append(path)
+        except (OSError, IOError):
+            # Skip files we can't access
+            continue
+
+    # Build canonical map
+    canonical_map: Dict[str, str] = {}
+
+    for key, paths in file_key_to_paths.items():
+        if len(paths) == 1:
+            # No duplicates - maps to itself
+            canonical_map[paths[0]] = paths[0]
+        else:
+            # Multiple paths for same file - pick canonical
+            # Preference: stock/ > shorter path
+            canonical = None
+
+            for p in paths:
+                if '/stock/' in p:
+                    canonical = p
+                    break
+
+            if not canonical:
+                # No stock/ path - use shortest
+                canonical = min(paths, key=len)
+
+            # Map all paths to canonical
+            for p in paths:
+                canonical_map[p] = canonical
+
+            if len(paths) > 1:
+                logger.debug(f"Normalized {len(paths)} duplicate paths to: {canonical}")
+
+    return canonical_map
+
+
+class MediaPathNormalizer:
+    """
+    Context manager for normalizing media paths in OTIO generation.
+
+    Collects all media paths during timeline creation, then normalizes
+    them to canonical paths to prevent DaVinci Resolve import hangs.
+
+    Usage:
+        normalizer = MediaPathNormalizer()
+
+        # During clip creation, register paths:
+        normalizer.register(path1)
+        normalizer.register(path2)
+
+        # After all paths collected, build map:
+        normalizer.build_map()
+
+        # Get canonical path for any registered path:
+        canonical = normalizer.get_canonical(path1)
+    """
+
+    def __init__(self):
+        self._paths: List[str] = []
+        self._canonical_map: Optional[Dict[str, str]] = None
+        self._duplicates_found = 0
+
+    def register(self, path: str) -> None:
+        """Register a media path for normalization."""
+        if path:
+            self._paths.append(path)
+
+    def build_map(self) -> None:
+        """Build the canonical path map from all registered paths."""
+        self._canonical_map = build_canonical_media_map(self._paths)
+
+        # Count duplicates for logging
+        unique_canonicals = set(self._canonical_map.values())
+        self._duplicates_found = len(self._paths) - len(unique_canonicals)
+
+        if self._duplicates_found > 0:
+            logger.info(f"Media path normalization: {self._duplicates_found} duplicate paths normalized")
+
+    def get_canonical(self, path: str) -> str:
+        """Get the canonical path for a registered path."""
+        if not self._canonical_map:
+            return path
+        return self._canonical_map.get(path, path)
+
+    @property
+    def duplicates_found(self) -> int:
+        """Number of duplicate paths that were normalized."""
+        return self._duplicates_found
+
+
+# ============================================================
 # OTIO Clip Creation
 # ============================================================
 
@@ -345,7 +587,7 @@ def create_clip_with_timewarp(
     """
     rate = frame_rate
 
-    # Create absolute Windows path with backslashes for DaVinci Resolve
+    # Create absolute path with forward slashes for DaVinci Resolve
     abs_path = _to_windows_path(source_path)
 
     # Make media reference name unique by including parent folder
@@ -400,33 +642,36 @@ def create_clip_with_timewarp(
         source_range=source_range
     )
 
-    # Apply LinearTimeWarp to match target duration
-    # time_scalar = source_duration / target_duration
-    # - time_scalar < 1: slow down (stretch footage to fill longer duration)
-    # - time_scalar > 1: speed up (compress footage to fit shorter duration)
-    # - time_scalar = 1: no change (source and target match)
-    if target_duration > 0 and source_duration > 0:
-        time_scalar = source_duration / target_duration
-
-        # Only apply time warp if there's a meaningful speed change (>1% difference)
-        if abs(time_scalar - 1.0) > 0.01:
-            time_warp = otio.schema.LinearTimeWarp(time_scalar=time_scalar)
-            clip.effects.append(time_warp)
+    # OTIO TIMING MODEL:
+    # - source_range.duration determines timeline duration (how long clip plays)
+    # - LinearTimeWarp.time_scalar affects playback speed of those frames
+    #
+    # Since source_range.duration is already set to target_duration (line 393),
+    # the clip will play for exactly target_duration on the timeline.
+    # NO LinearTimeWarp is needed - the trim alone achieves correct timing.
+    #
+    # Adding LinearTimeWarp would COMPOUND with the trim:
+    #   timeline_duration = source_range.duration / time_scalar
+    #                     = target_duration / (source_duration / target_duration)
+    #                     = target_duration² / source_duration  <-- WRONG!
+    #
+    # We intentionally do NOT apply LinearTimeWarp here.
 
     # Add Resolve_OTIO metadata (required for DaVinci import)
     clip.metadata['Resolve_OTIO'] = {}
 
-    # Calculate and store speed info in metadata for reference
+    # Store timing info in metadata for reference
+    # Note: time_scalar is always 1.0 since we use trim approach (no speed change)
     if metadata is None:
         metadata = {}
 
     if target_duration > 0 and source_duration > 0:
-        time_scalar = source_duration / target_duration
-        metadata['time_scalar'] = time_scalar
-        metadata['speed_percent'] = time_scalar * 100
+        metadata['time_scalar'] = 1.0  # Always normal speed (trim approach)
+        metadata['speed_percent'] = 100.0
         metadata['target_duration'] = target_duration
         metadata['source_duration'] = source_duration
-        metadata['suggested_speed'] = f"{time_scalar * 100:.0f}%"
+        metadata['original_duration'] = source_duration  # For reference
+        metadata['suggested_speed'] = "100%"
 
     # Add metadata (convert numpy types to Python native types)
     metadata = _sanitize_metadata(metadata)

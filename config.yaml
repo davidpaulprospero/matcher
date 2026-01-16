@@ -1078,6 +1078,77 @@ pipeline:
   parallel_embedding: true
 
 # -----------------------------------------------------------------------------
+# SELF-HEALING PIPELINE
+# -----------------------------------------------------------------------------
+# Automatic error recovery during pipeline execution.
+# Healers detect specific error categories and attempt automatic fixes.
+#
+# Available strategies:
+#   - aggressive: Try all fixes, modify config freely (max 5 attempts/stage)
+#   - conservative: Safe fixes only, preserve config (default, 3 attempts)
+#   - interactive: Ask user before major changes
+#   - minimal: Only critical fixes, fail fast (1 attempt)
+#
+# Healers:
+#   - CheckpointHealer: Corrupt checkpoint recovery
+#   - APIHealer: Rate limits, auth errors, provider fallback
+#   - DownloadHealer: YouTube errors, unavailable videos
+#   - DiskHealer: Disk space, permission issues
+#   - PathHealer: Windows path length, unicode issues
+#   - OTIOHealer: Timeline generation, gaps, duration, exports
+
+healing:
+  enabled: true              # Enable self-healing pipeline
+  strategy: "conservative"   # aggressive, conservative, interactive, minimal
+  max_attempts_per_stage: 3  # Max heal attempts per stage
+  max_total_heals: 20        # Max total heals before giving up
+  heal_delay: 2.0            # Seconds between heal attempts
+  run_preflight: true        # Run preflight checks before pipeline
+  auto_fix_preflight: true   # Auto-fix issues found in preflight
+  enable_rollback: true      # Enable config rollback on failure
+  print_report: true         # Print healing report after pipeline
+
+  # Healing-specific logging
+  logging:
+    enabled: true
+    log_dir: "logs"          # Relative to project dir
+    json_log: true           # Machine-parseable JSON logs
+    console_format: "box"    # "box", "simple", "minimal"
+    include_prompts: false   # Include full LLM prompts (verbose)
+    include_responses: false # Include full LLM responses (verbose)
+
+  # Watcher LLM (local Ollama for fast error classification)
+  # The watcher classifies errors and routes to appropriate healers
+  watcher:
+    enabled: true
+    provider: "ollama"           # ollama, anthropic, gemini
+    model: "llama3.2"            # Local model for fast triage
+    fallback_model: "llama3.1"   # Try if primary unavailable
+    host: "http://localhost:11434"
+    timeout: 30.0                # Max time for classification (seconds)
+    escalate_threshold: 0.7      # Confidence below this escalates to LLM healer
+    max_failures: 3              # Disable after N consecutive failures
+    recheck_interval_seconds: 300.0  # Re-check availability every 5 min
+    warmup_on_preflight: false   # Pre-warm model during preflight (disable if Ollama not running)
+
+  # LLM Healer (Claude for complex error analysis)
+  # Used when standard healers fail and watcher recommends escalation
+  llm_healer:
+    enabled: true
+    provider: "anthropic"        # anthropic, gemini, ollama
+    model: "claude-sonnet-4-20250514"  # Cost-effective for debugging
+    max_tokens: 4096
+    timeout: 60.0
+    max_retries: 3               # Self-heal retries before giving up
+    include_stack_trace: true    # Include stack trace in context
+    include_config_context: true # Include relevant config in context
+    include_file_snippets: true  # Include code snippets in context
+    max_snippet_lines: 50        # Max lines of code per snippet
+    max_context_chars: 12000     # Max chars for LLM context (~3000 tokens)
+    recheck_interval_seconds: 300.0
+    max_failures: 3
+
+# -----------------------------------------------------------------------------
 # B-ROLL DOWNLOAD AND MATCHING
 # -----------------------------------------------------------------------------
 # Two new stages for improved B-roll handling:

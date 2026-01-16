@@ -8,6 +8,7 @@ from .checkpoint import CheckpointHealer
 from .download import DownloadHealer
 from .disk import DiskHealer
 from .path import PathHealer
+from .llm_healer import LLMHealer
 
 __all__ = [
     'OTIOHealer',
@@ -16,9 +17,12 @@ __all__ = [
     'DownloadHealer',
     'DiskHealer',
     'PathHealer',
+    'LLMHealer',
 ]
 
 # Registry of all available healers (order matters - first match wins)
+# Note: LLMHealer is NOT in the registry - it's invoked by the orchestrator
+# only when standard healers fail and watcher recommends escalation
 HEALER_REGISTRY = [
     CheckpointHealer,  # Try checkpoint recovery first
     APIHealer,         # API rate limits
