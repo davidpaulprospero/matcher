@@ -12,11 +12,73 @@ Stage 5 of the video matching pipeline:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import json
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, NamedTuple
 
 from . import Stage, StageResult, register_stage
+
+
+class SegmentInfo(NamedTuple):
+    """Info about a downloaded video segment for path resolution."""
+    video_id: str
+    file: str
+    original_start: float
+    original_end: float
+
+
+class HashToFileMapping:
+    """Maps hash IDs to actual source file paths from transcription cache."""
+
+    def __init__(self, cache_dir: Path):
+        self._mapping: Dict[str, str] = {}
+        self._build_mapping(cache_dir)
+
+    def _build_mapping(self, cache_dir: Path):
+        """Build hash-to-file mapping by reading transcription cache files."""
+        transcriptions_dir = cache_dir / "transcriptions"
+        if not transcriptions_dir.exists():
+            logger.warning(f"Transcriptions cache not found: {transcriptions_dir}")
+            return
+
+        for cache_file in transcriptions_dir.glob("*.json"):
+            hash_id = cache_file.stem  # filename without extension is the hash
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                # Extract source_file from cache data
+                source_file = None
+                if isinstance(data, list) and len(data) > 0:
+                    source_file = data[0].get('source_file', '')
+                elif isinstance(data, dict):
+                    source_file = data.get('source_file', '')
+                    if not source_file and 'segments' in data:
+                        segs = data.get('segments', [])
+                        if segs:
+                            source_file = segs[0].get('source_file', '')
+
+                if source_file and Path(source_file).exists():
+                    self._mapping[hash_id] = source_file
+            except Exception as e:
+                logger.debug(f"Could not read cache file {cache_file.name}: {e}")
+
+        logger.info(f"Built hash-to-file mapping with {len(self._mapping)} entries")
+
+    def resolve(self, hash_or_path: str) -> str:
+        """Resolve a hash ID to file path, or return original if not a hash."""
+        # If it's already a valid file path, return as-is
+        if Path(hash_or_path).exists():
+            return hash_or_path
+
+        # If it looks like a path (has path separators), return as-is
+        if '/' in hash_or_path or '\\' in hash_or_path:
+            return hash_or_path
+
+        # Try to resolve as hash ID
+        return self._mapping.get(hash_or_path, hash_or_path)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -44,6 +106,166 @@ class OutputStage(Stage):
 
     name = "OUTPUT"
     description = "Generate timeline and output files"
+
+    def _scan_video_segments(self, config: 'Config') -> List[SegmentInfo]:
+        """
+        Scan disk for downloaded video segment files and build segment info list.
+
+        Video segments are stored in *_segments directories with filenames like:
+        {video_id}_{start_seconds}.mp4
+
+        This allows create_timeline to resolve audio files to video segment paths.
+        """
+        segments = []
+
+        # Try to get videos root from config
+        videos_root = None
+
+        # 1. Try config.download.root_dir (short path mode like E:/v)
+        if hasattr(config, 'download') and hasattr(config.download, 'root_dir'):
+            root_dir = getattr(config.download, 'root_dir', '')
+            if root_dir:
+                videos_root = Path(root_dir)
+
+        # 2. Try downloaded_videos_dir (computed path)
+        if not videos_root or not videos_root.exists():
+            if hasattr(config, 'downloaded_videos_dir'):
+                videos_root = Path(config.downloaded_videos_dir).parent  # Go to parent (E:/v) not project folder
+
+        # 3. Fall back to project directory
+        if not videos_root or not videos_root.exists():
+            if hasattr(config, 'otio_output_dir'):
+                project_root = Path(config.otio_output_dir).parent
+                videos_root = project_root / "videos"
+
+        if not videos_root or not videos_root.exists():
+            logger.debug(f"Videos root not found, skipping segment scan")
+            return segments
+
+        logger.info(f"Scanning for video segments in: {videos_root}")
+
+        # Find all *_segments directories
+        segment_dirs = list(videos_root.glob("*_segments"))
+
+        # Also check date-prefixed subdirectories (e.g., E:/v/24__2026-01-13/*_segments)
+        for subdir in videos_root.iterdir():
+            if subdir.is_dir():
+                segment_dirs.extend(subdir.glob("*_segments"))
+
+        # Pattern to parse segment filenames: {video_id}_{start_seconds}.mp4
+        # video_id can contain letters, numbers, hyphens, underscores
+        # start_seconds is always 4 digits (e.g., 0000, 0123)
+        segment_pattern = re.compile(r'^(.+)_(\d{4})\.mp4$')
+
+        for seg_dir in segment_dirs:
+            if not seg_dir.is_dir():
+                continue
+
+            for mp4_file in seg_dir.glob("*.mp4"):
+                match = segment_pattern.match(mp4_file.name)
+                if match:
+                    video_id = match.group(1)
+                    start_seconds = int(match.group(2))
+
+                    # Estimate segment duration (assume 60s segments, will be overridden if actual duration known)
+                    # The exact end time isn't critical - it's used for range matching
+                    end_seconds = start_seconds + 120  # Conservative estimate
+
+                    segments.append(SegmentInfo(
+                        video_id=video_id,
+                        file=str(mp4_file),
+                        original_start=float(start_seconds),
+                        original_end=float(end_seconds)
+                    ))
+
+        if segments:
+            logger.info(f"Found {len(segments)} video segments on disk for path resolution")
+
+        return segments
+
+    def _resolve_match_paths(self, state: 'PipelineState', config: 'Config') -> int:
+        """
+        Resolve hash IDs to actual file paths in match data.
+
+        Returns the number of paths resolved.
+        """
+        # Try multiple locations for cache directory
+        cache_dir = None
+
+        # 1. Try config.cache.cache_dir (most common)
+        if hasattr(config, 'cache') and hasattr(config.cache, 'cache_dir'):
+            cache_dir = Path(config.cache.cache_dir)
+
+        # 2. Try relative .cache from output directory
+        if not cache_dir or not cache_dir.exists():
+            project_root = Path(config.otio_output_dir).parent if hasattr(config, 'otio_output_dir') else Path(".")
+            cache_dir = project_root / ".cache"
+
+        # 3. Try current working directory
+        if not cache_dir.exists():
+            cache_dir = Path(".cache")
+
+        if not cache_dir.exists():
+            logger.warning(f"Cache directory not found: {cache_dir}")
+            return 0
+
+        # Build hash-to-file mapping
+        hash_mapping = HashToFileMapping(cache_dir)
+
+        resolved_count = 0
+        unresolved = []
+
+        for match_result in state.matches:
+            if not match_result:
+                continue
+
+            # Resolve primary match
+            if hasattr(match_result, 'primary_match') and match_result.primary_match:
+                pm = match_result.primary_match
+                if hasattr(pm, 'video_segment') and pm.video_segment:
+                    old_path = pm.video_segment.source_file
+                    new_path = hash_mapping.resolve(old_path)
+                    if new_path != old_path:
+                        pm.video_segment.source_file = new_path
+                        resolved_count += 1
+                    elif not Path(old_path).exists() and '/' not in old_path and '\\' not in old_path:
+                        unresolved.append(old_path[:16] + '...')
+
+            # Resolve alternatives
+            if hasattr(match_result, 'alternatives'):
+                for alt in match_result.alternatives or []:
+                    if hasattr(alt, 'video_segment') and alt.video_segment:
+                        old_path = alt.video_segment.source_file
+                        new_path = hash_mapping.resolve(old_path)
+                        if new_path != old_path:
+                            alt.video_segment.source_file = new_path
+                            resolved_count += 1
+
+            # Resolve secondary matches
+            if hasattr(match_result, 'secondary_matches'):
+                for sec in match_result.secondary_matches or []:
+                    if hasattr(sec, 'video_segment') and sec.video_segment:
+                        old_path = sec.video_segment.source_file
+                        new_path = hash_mapping.resolve(old_path)
+                        if new_path != old_path:
+                            sec.video_segment.source_file = new_path
+                            resolved_count += 1
+
+            # Resolve strategy alternatives
+            if hasattr(match_result, 'strategy_alternatives'):
+                for strat in match_result.strategy_alternatives or []:
+                    if hasattr(strat, 'video_segment') and strat.video_segment:
+                        old_path = strat.video_segment.source_file
+                        new_path = hash_mapping.resolve(old_path)
+                        if new_path != old_path:
+                            strat.video_segment.source_file = new_path
+                            resolved_count += 1
+
+        if unresolved:
+            unique_unresolved = list(set(unresolved))[:5]
+            logger.warning(f"Could not resolve {len(unresolved)} hash IDs: {unique_unresolved}")
+
+        return resolved_count
 
     def run(
         self,
@@ -84,6 +306,7 @@ class OutputStage(Stage):
                     generate_segment_map,
                     generate_resolve_xml_with_bins
                 )
+                from ..otio.xml_export import generate_davinci_sequence_xml
             except ImportError as e:
                 return StageResult.fail(f"Could not import OTIO modules: {e}", warnings)
 
@@ -100,7 +323,7 @@ class OutputStage(Stage):
                 if len(state.entity_images) > 3:
                     print(f"    ... and {len(state.entity_images) - 3} more entities")
             else:
-                print(f"  [V9] ⚠ No entity images available for V9 track")
+                print(f"  [V9] [WARN] No entity images available for V9 track")
 
             if state.entity_videos:
                 total_videos = sum(len(getattr(r, 'videos', [])) for r in state.entity_videos.values())
@@ -111,7 +334,16 @@ class OutputStage(Stage):
                 if len(state.entity_videos) > 3:
                     print(f"    ... and {len(state.entity_videos) - 3} more entities")
             else:
-                print(f"  [V10] ⚠ No stock videos available for V10 track")
+                print(f"  [V10] [WARN] No stock videos available for V10 track")
+
+            # Resolve hash IDs to actual file paths in match data
+            print(f"  Resolving video paths...")
+            resolved_count = self._resolve_match_paths(state, config)
+            if resolved_count > 0:
+                print(f"  [OK] Resolved {resolved_count} hash IDs to file paths")
+
+            # Scan for downloaded video segments (for audio-first mode resolution)
+            downloaded_segments = self._scan_video_segments(config)
 
             timeline = create_timeline(
                 matches=state.matches,
@@ -120,7 +352,7 @@ class OutputStage(Stage):
                 frame_rate=getattr(config.output, 'frame_rate', 30.0),
                 entity_images=state.entity_images or None,
                 entity_videos=state.entity_videos or None,
-                downloaded_segments=None  # Will be added when DownloadStage extracts
+                downloaded_segments=downloaded_segments
             )
 
             # Generate OTIO
@@ -151,9 +383,23 @@ class OutputStage(Stage):
             # Generate DaVinci Resolve XML
             if getattr(config.output, 'generate_xml', True):
                 xml_paths = self._generate_xml(
-                    state, output_dir, config, generate_resolve_xml_with_bins
+                    state, output_dir, config, generate_resolve_xml_with_bins,
+                    downloaded_segments=downloaded_segments
                 )
                 outputs['xml'] = xml_paths
+
+                # Also generate DaVinci-native sequence XML format
+                try:
+                    sequence_xml_path = generate_davinci_sequence_xml(
+                        matches=state.matches,
+                        output_path=str(output_dir / "timeline"),
+                        frame_rate=getattr(config.output, 'frame_rate', 30.0),
+                        downloaded_segments=downloaded_segments
+                    )
+                    outputs['sequence_xml'] = sequence_xml_path
+                    print(f"  + XML (DaVinci): {Path(sequence_xml_path).name}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate DaVinci sequence XML: {e}")
 
             # Generate report
             if config.output.generate_report:
@@ -305,7 +551,8 @@ class OutputStage(Stage):
         state: 'PipelineState',
         output_dir: Path,
         config: 'Config',
-        generate_xml_func: callable
+        generate_xml_func: callable,
+        downloaded_segments: List = None
     ) -> List[str]:
         """Generate DaVinci Resolve XML"""
         xml_base_path = output_dir / "timeline"
@@ -319,7 +566,8 @@ class OutputStage(Stage):
             entity_images=state.entity_images or None,
             entity_videos=state.entity_videos or None,
             config=config,
-            num_parts=num_parts
+            num_parts=num_parts,
+            downloaded_segments=downloaded_segments
         )
         print(f"  + XML (fallback): {Path(xml_paths[0]).name}")
         return xml_paths

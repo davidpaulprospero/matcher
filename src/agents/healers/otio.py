@@ -181,7 +181,8 @@ class OTIOHealer(Healer):
     def _is_media_error(self, error_str: str) -> bool:
         patterns = ["file not found", "filenotfound", "no such file",
                    "media reference", "target_url", "external reference",
-                   "media_reference", "available_range", "cannot open"]
+                   "media_reference", "available_range", "cannot open",
+                   "missing media"]  # From preflight_check messages
         return any(p in error_str for p in patterns)
 
     def _is_duration_error(self, error_str: str) -> bool:
@@ -763,7 +764,7 @@ class OTIOHealer(Healer):
                 segment.end = start + self.MAX_CLIP_DURATION
                 fixed += 1
 
-        if hasattr(segment, 'duration'):
+        if hasattr(segment, 'duration') and segment.duration is not None:
             if segment.duration <= 0:
                 segment.duration = self.MIN_CLIP_DURATION
                 fixed += 1
@@ -894,9 +895,9 @@ class OTIOHealer(Healer):
         """
         issues = []
 
+        # If no matches yet, nothing to check (not an error, just early in pipeline)
         if not hasattr(state, 'matches') or not state.matches:
-            issues.append("No matches available for timeline generation")
-            return issues
+            return issues  # Empty list - nothing to fix
 
         missing_media = 0
         invalid_duration = 0

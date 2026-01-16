@@ -136,56 +136,38 @@ def _preload_cached_data_for_match_only(pipeline, config):
             try:
                 with open(json_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    segments = None
                     if isinstance(data, list):
-                        transcripts[json_file.stem] = data
+                        segments = data
                     elif isinstance(data, dict) and 'segments' in data:
-                        transcripts[json_file.stem] = data['segments']
+                        segments = data['segments']
+
+                    if segments:
+                        # Extract actual video/audio path from segment data
+                        # (cache files are named by hash, but contain source_file)
+                        video_path = None
+                        for seg in segments:
+                            if isinstance(seg, dict):
+                                video_path = seg.get('source_file') or seg.get('video_path')
+                                if video_path:
+                                    break
+
+                        # Use actual path as key (fall back to filename if not found)
+                        key = video_path if video_path else json_file.stem
+                        transcripts[key] = segments
             except Exception:
                 pass
         if transcripts:
             state.transcripts = transcripts
             logger.info(f"Preloaded {len(transcripts)} transcripts from cache")
 
-    # 3. Load embeddings from cache
-    embeddings_dir = cache_dir / 'embeddings'
-    if embeddings_dir.exists():
-        import json
-
-        # Load text_metadata and embeddings from video_segments files
-        # Each file contains: {"text_preview": "...", "embedding": [...], "cached_at": ...}
-        text_metadata = []
-        embeddings_list = []
-        for json_file in sorted(embeddings_dir.glob('video_segments_*.json')):
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if 'text_preview' in data and 'embedding' in data:
-                        # Build text_metadata entry
-                        text_metadata.append({
-                            'text': data['text_preview'],
-                            'video_path': json_file.stem,  # Use filename as identifier
-                            'start': 0.0,
-                            'end': 0.0,
-                        })
-                        embeddings_list.append(data['embedding'])
-            except Exception:
-                pass
-
-        if text_metadata:
-            state.text_metadata = text_metadata
-            logger.info(f"Preloaded {len(text_metadata)} text_metadata entries from cache")
-
-        if embeddings_list:
-            state.embeddings = np.array(embeddings_list, dtype=np.float32)
-            logger.info(f"Preloaded embeddings: shape {state.embeddings.shape}")
-
-            # Build FAISS index
-            try:
-                from src.embeddings import build_embedding_index
-                state.embedding_index = build_embedding_index(state.embeddings, config=config)
-                logger.info("Built FAISS index from preloaded embeddings")
-            except Exception as e:
-                logger.warning(f"Failed to build FAISS index: {e}")
+    # 3. Embeddings are loaded during TranscribeStage.restore() via _compute_embeddings
+    # NOTE: We intentionally do NOT preload text_metadata or embeddings from the embedding cache
+    # here because the embedding cache files don't contain actual video paths - they only
+    # have hash-based filenames. Loading them here would set incorrect video_path values
+    # and prevent proper B-roll flag propagation. The TranscribeStage._rebuild_text_metadata()
+    # method correctly extracts video paths from transcript cache files.
+    # See: https://github.com/project/issues/XXX - B-roll propagation fix
 
 
 # =============================================================================
@@ -295,6 +277,7 @@ def main():
 
     # Run pipeline using modular architecture
     from src.pipeline import create_default_pipeline, create_match_only_pipeline
+    from src.agents import ResilientRunner, HealingOrchestrator, HealingStrategy
 
     # Handle keyword presets/selection
     keyword_manager = KeywordManager(PROJECT_DIR)
@@ -331,9 +314,9 @@ def main():
                         print(f"  Required: SCENE_DETECTION (run full pipeline first)")
                         sys.exit(1)
 
-                    # If pipeline completed (OUTPUT), reset to SCENE_DETECTION
-                    # so MATCH and OUTPUT can re-run
-                    if last_stage in ('MATCH', 'OUTPUT'):
+                    # If pipeline completed past SCENE_DETECTION, reset so
+                    # MATCH, BROLL_MATCH, and OUTPUT can re-run
+                    if last_stage in ('MATCH', 'BROLL_MATCH', 'DOWNLOAD_SEGMENTS', 'OUTPUT'):
                         pipeline.checkpoint.data.last_completed_stage = 'SCENE_DETECTION'
                         pipeline.checkpoint._atomic_save()  # Save without stage update
                         print(f"  Reset checkpoint from {last_stage} to SCENE_DETECTION for re-matching")
@@ -390,8 +373,60 @@ def main():
     if getattr(args, 'save_matching_fixtures', None):
         pipeline.state.save_matching_fixtures = args.save_matching_fixtures
 
+    # Setup self-healing if enabled
+    healing_config = getattr(config, 'healing', None)
+    healing_enabled = healing_config and getattr(healing_config, 'enabled', True)
+    orchestrator = None
+    runner = None
+
+    if healing_enabled:
+        # Build strategy from config
+        strategy_name = getattr(healing_config, 'strategy', 'conservative')
+        strategy_map = {
+            'aggressive': HealingStrategy.aggressive,
+            'conservative': HealingStrategy.conservative,
+            'interactive': HealingStrategy.interactive,
+            'minimal': HealingStrategy.minimal,
+        }
+        strategy = strategy_map.get(strategy_name, HealingStrategy.conservative)()
+
+        # Override strategy settings from config
+        if hasattr(healing_config, 'max_attempts_per_stage'):
+            strategy.max_attempts_per_stage = healing_config.max_attempts_per_stage
+        if hasattr(healing_config, 'max_total_heals'):
+            strategy.max_total_heals = healing_config.max_total_heals
+        if hasattr(healing_config, 'heal_delay'):
+            strategy.heal_delay = healing_config.heal_delay
+
+        orchestrator = HealingOrchestrator(config, PROJECT_DIR, strategy)
+        runner = ResilientRunner(config, PROJECT_DIR, orchestrator=orchestrator)
+
+        print(f"\n  🛡️  Self-healing enabled: strategy={strategy_name}, max_attempts={strategy.max_attempts_per_stage}")
+
+        # Run preflight checks if configured
+        if getattr(healing_config, 'run_preflight', True):
+            print(f"  Running preflight checks...")
+            issues = orchestrator.run_preflight(pipeline.state)
+            if issues:
+                print(f"  Found {len(issues)} preflight issue(s)")
+                if getattr(healing_config, 'auto_fix_preflight', True):
+                    fixed_count, remaining_count = orchestrator.fix_preflight_issues(issues, pipeline.state)
+                    if fixed_count:
+                        print(f"  ✓ Auto-fixed {fixed_count} issue(s)")
+                    if remaining_count:
+                        print(f"  ⚠ {remaining_count} issue(s) could not be auto-fixed")
+            else:
+                print(f"  ✓ All preflight checks passed")
+
     # Run the pipeline
-    success = pipeline.run(resume=args.resume)
+    if runner:
+        success = runner.run_pipeline(pipeline, resume=args.resume)
+    else:
+        success = pipeline.run(resume=args.resume)
+
+    # Print healing report if enabled
+    if orchestrator and getattr(healing_config, 'print_report', True):
+        orchestrator.print_report()
 
     # Save keywords if requested
     if save_keywords and pipeline.state.keywords:

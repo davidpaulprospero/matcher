@@ -47,6 +47,40 @@ python main.py --match-only
 python main.py --use-keywords mypreset
 ```
 
+### Skill Commands
+
+| Command | Description |
+|---------|-------------|
+| `/logcheck <project>` | Check project log for errors/warnings and fix them immediately |
+| `/match-only <project>` | Re-run matching and output generation (skips download/transcribe) |
+| `/newproject <name> <client> <doc_url>` | Create project, download voiceover from Google Doc links, start pipeline |
+| `/validate-output [path]` | Validate output **structure** (OTIO/XML/EDL format, track layout) |
+
+```bash
+# Check project log and auto-fix issues
+/logcheck E:/Edit Job/Stu/January/6__2026-01-15
+
+# Re-run matching after config tweaks
+/match-only E:/Edit Job/Project/MyDoc__2026-01-15
+
+# Create new project with Google Doc voiceover links
+/newproject 67 Stu https://docs.google.com/document/d/1abc123/edit
+
+# Validate baseline itself
+/validate-output
+
+# Validate specific output folder
+/validate-output E:/Edit Job/Project/output/20260115_123456
+
+# Validate project (auto-finds latest output)
+/validate-output E:/Edit Job/Project/MyDoc__2026-01-15
+```
+
+`/logcheck` reads latest run log, detects errors (downloads, API, OTIO), and applies fixes automatically.
+`/newproject` creates `E:\Edit Job\{client}\{month}\{name}__{date}`, downloads+combines Drive audio, starts pipeline.
+`/match-only` uses cached transcriptions/embeddings - fast iteration on matching settings.
+`/validate-output` accepts output paths OR project paths (auto-resolves to latest output).
+
 ## Refactoring Roadmap
 
 **IMPORTANT:** This codebase has a documented refactoring roadmap. Before starting new work:
@@ -241,6 +275,42 @@ python main.py --project "E:\Projects\MyDoc" --config project_config.yaml
 # Shows: "⚠ --config points to project_config.yaml, using default config as base"
 ```
 
+### Self-Healing Configuration
+
+Self-healing is **enabled by default**. The pipeline automatically recovers from common errors.
+
+```yaml
+# config.yaml
+healing:
+  enabled: true              # Disable to use standard pipeline
+  strategy: "conservative"   # aggressive, conservative, interactive, minimal
+  max_attempts_per_stage: 3  # Heal attempts before failing stage
+  max_total_heals: 20        # Total heals before aborting pipeline
+  print_report: true         # Print healing summary after run
+```
+
+**Strategies:**
+
+| Strategy | Attempts | Behavior |
+|----------|----------|----------|
+| `aggressive` | 5/stage | Try everything, auto-fix, minimal interaction |
+| `conservative` | 3/stage | Safe fixes only, preserve user config (default) |
+| `interactive` | 3/stage | Ask user before major changes |
+| `minimal` | 1/stage | Fail fast, critical fixes only |
+
+**Usage in code:**
+```python
+from src.pipeline import create_healing_pipeline, run_pipeline_with_healing
+
+# Option 1: Get components for manual control
+pipeline, orchestrator, runner = create_healing_pipeline(config, project_dir)
+success = runner.run_pipeline(pipeline)
+orchestrator.print_report()
+
+# Option 2: One-liner convenience function
+success = run_pipeline_with_healing(config, project_dir)
+```
+
 ### Short Path Configuration (E:/v, E:/i)
 
 To avoid Windows path length limits and improve NLE import performance, you can use short root paths:
@@ -330,6 +400,81 @@ Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
 
 **Never**: Read VAD from config for video transcription
 
+### Rule 12: XML Media Bin Import (DaVinci Resolve)
+DaVinci Resolve media bin XML requires specific structure:
+
+| Requirement | Detail |
+|-------------|--------|
+| `<bin>` placement | Directly under `<xmeml>` (NO `<project>` wrapper) |
+| `<file>` placement | Inside `<clipitem>`, not at clip level |
+| Empty `<sequence>` | Required sibling to trigger import |
+| Path format | Plain `E:/path/file.mp4` (no `file://` prefix) |
+| Audio-only files | Skip them - DaVinci XML import fails on .mp3/.wav |
+
+**File:** `src/otio/xml_export.py:_write_media_xml_part()`
+
+### Rule 13: OTIO Path Compatibility (DaVinci Resolve)
+DaVinci Resolve OTIO import hangs on certain path issues:
+
+| Issue | Solution | Files |
+|-------|----------|-------|
+| Backslashes in paths | Use forward slashes: `E:/v/file.mp4` | `utils.py:_to_windows_path()` |
+| Audio-only files (.mp3, .wav) | Skip them, add gap instead | `timeline.py`, `tracks.py` |
+| Unicode in paths (ñ, ü, etc.) | Skip clips with non-ASCII chars | `timeline.py`, `tracks.py`, `entities.py` |
+| Corrupted unicode (�) | Skip clips with replacement char | All OTIO generation files |
+
+**Helper function:** `_has_problematic_path()` in timeline.py, tracks.py, entities.py
+
+### Rule 14: DaVinci OTIO Caching & Gap Optimization
+DaVinci Resolve caches OTIO import state by filename. Failed imports can corrupt this cache.
+
+| Issue | Solution |
+|-------|----------|
+| Import hangs after fixing issues | Rename OTIO file or use new DaVinci project |
+| Many consecutive gaps in track | `optimize_timeline_gaps()` merges them automatically |
+| Trailing gaps after last clip | `optimize_track_gaps()` removes them automatically |
+
+**Gap optimization** is applied automatically at end of `create_timeline()`. Manual use:
+```python
+from src.otio.utils import optimize_timeline_gaps
+timeline = create_timeline(...)  # Already optimized
+# Or manually: optimize_timeline_gaps(timeline)
+```
+
+**Files:** `src/otio/utils.py` (optimize functions), `src/otio/timeline.py` (auto-applies)
+
+### Rule 15: DaVinci OTIO Clip Count Limit
+DaVinci Resolve OTIO import hangs when total clips exceed **3130**.
+
+| Metric | Limit | Notes |
+|--------|-------|-------|
+| Total clips | 3130 | Across ALL tracks (video + audio) |
+| Clips per segment | ~200 | With 10 tracks × 2 (V+A) = 20 clips/segment |
+
+**Workarounds when over limit:**
+1. Generate `timeline_LITE.otio` with fewer tracks (V1-V3 only)
+2. Split into multiple OTIO files (Part 1, Part 2)
+3. Reduce alternatives per segment
+
+**Detection:** `create_timeline()` logs warning when approaching limit.
+
+### Rule 16: DaVinci OTIO Duplicate Media Paths
+DaVinci Resolve hangs when the same video file is referenced from **multiple different paths**.
+
+| Scenario | Example | Result |
+|----------|---------|--------|
+| Same file, two paths | `stock/video.mp4` + `broll/video.mp4` | ❌ Hang |
+| Same file, one path | `stock/video.mp4` (used 5x) | ✅ OK |
+
+**Root cause:** "Automatically import source clips into media pool" tries to import both paths, causing infinite loop.
+
+**Fix:** `MediaPathNormalizer` in `src/otio/utils.py` deduplicates paths automatically:
+- Identifies duplicates by filename + file size
+- Prefers `stock/` over `broll/` paths
+- Applied in `create_timeline()` before clip creation
+
+**Files:** `src/otio/utils.py` (MediaPathNormalizer), `src/otio/timeline.py` (integration)
+
 ### Testing Checklist
 
 - [ ] `python -m py_compile main.py`
@@ -338,6 +483,46 @@ Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
 - [ ] `python -m py_compile src/matching.py`
 - [ ] Config in both `config.py` AND `config.yaml`
 - [ ] Nested configs have `__post_init__`
+
+### Output Structure Validation
+
+Validates output **structure, integrity, and NLE importability**, NOT content/matches.
+
+```bash
+# Validate any output directory
+python tests/test_output_comparison.py "E:/path/to/output" -v
+
+# JSON output for CI
+python tests/test_output_comparison.py "E:/path/to/output" --json
+```
+
+**What It Validates:**
+
+| Category | Checks |
+|----------|--------|
+| **File Structure** | Required files exist, minimum file counts |
+| **Format Integrity** | OTIO parses, XML well-formed, JSON valid |
+| **Track Structure** | Required tracks present, naming convention (V#/A#) |
+| **Coverage Thresholds** | V1 >= 90%, V2 >= 50%, V3 >= 40%, V8 >= 20% |
+| **Clip Integrity** | No zero-duration/overlapping clips, valid speed effects |
+| **EDL (CMX3600)** | Valid timecodes, event numbers, edit types, reel names |
+| **XML (XMEML)** | DaVinci bin structure, pathurl format, frame rate consistency |
+| **Media Paths** | Reserved names, NLE-problematic chars, path length, UNC paths |
+| **Cross-File** | Frame rate consistency across OTIO/XML/EDL |
+| **Export Capability** | Tests OTIO → EDL/FCPXML export |
+
+**Extending for New Features:**
+
+Edit `STRUCTURE_SPEC` in `tests/test_output_comparison.py`:
+
+```python
+STRUCTURE_SPEC = {
+    "required_files": [...],           # Add new required files
+    "required_tracks": [...],          # Add new required tracks
+    "coverage_thresholds": {...},      # Add new track thresholds
+    "segment_entry_keys": [...],       # Add new segment keys
+}
+```
 
 ## Key Features
 
@@ -559,12 +744,11 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
-| 2026-01-14 | HealingOrchestrator: Preflight checks, config rollback, cross-healer coordination, metrics |
-| 2026-01-14 | Self-healing agents: ResilientRunner + 6 healers (OTIO, API, Checkpoint, Download, Disk, Path) |
-| 2026-01-13 | BrollDownloadStage + BrollMatchStage: New stages for better V8 B-roll matching |
-| 2026-01-13 | VAD filter separation (Rule 11): Hardcoded OFF for videos, config only for voiceover |
-| 2026-01-13 | Config loading fix: project_config.yaml now properly overlays defaults |
-| 2026-01-13 | video_source_dir fix: _resolve_paths() now checks pipeline.video_source_dir |
-| 2026-01-13 | gap_mode added: scale/proportional/none for timeline gap distribution |
+| 2026-01-16 | Duplicate media paths fix (Rule 16): `MediaPathNormalizer` deduplicates same files in different folders |
+| 2026-01-16 | DaVinci caching fix (Rule 14): Rename OTIO files after fixing issues to bypass corrupted cache |
+| 2026-01-16 | Gap optimization: `optimize_timeline_gaps()` merges consecutive gaps, removes trailing gaps |
+| 2026-01-15 | OTIO unicode filter (Rule 13): Skip clips with non-ASCII paths causing DaVinci hang |
+| 2026-01-15 | `/validate-output` NLE importability: EDL CMX3600, XML XMEML, path compatibility, cross-file consistency |
+| 2026-01-15 | XML media bin fix (Rule 12): No `<project>` wrapper, `<file>` inside `<clipitem>`, skip audio-only |
 
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*

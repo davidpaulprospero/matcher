@@ -5,6 +5,9 @@ Lightweight orchestrator that runs pipeline stages in order,
 handling checkpointing and resume functionality.
 
 This replaces the run() method and stage orchestration logic in main.py.
+
+Self-Healing: By default, pipelines use ResilientRunner with HealingOrchestrator
+for automatic error recovery. Controlled via config.healing settings.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .state import PipelineState
@@ -20,6 +23,8 @@ from .stages import Stage, StageResult
 
 if TYPE_CHECKING:
     from .config import Config
+    from .agents.runner import ResilientRunner
+    from .agents.orchestrator import HealingOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -296,3 +301,116 @@ def create_match_only_pipeline(
     pipeline.add_stage(OutputStage())
 
     return pipeline
+
+
+def create_healing_pipeline(
+    config: 'Config',
+    project_dir: Path,
+    audio_first_mode: bool = False
+) -> Tuple['PipelineOrchestrator', Optional['HealingOrchestrator'], Optional['ResilientRunner']]:
+    """
+    Create a pipeline with self-healing enabled (default behavior).
+
+    Uses config.healing settings to control healing behavior.
+    If healing is disabled, returns (pipeline, None, None) for standard execution.
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+        audio_first_mode: If True, uses audio-first download pipeline
+
+    Returns:
+        Tuple of (PipelineOrchestrator, HealingOrchestrator or None, ResilientRunner or None)
+
+    Usage:
+        pipeline, orchestrator, runner = create_healing_pipeline(config, project_dir)
+        if runner:
+            success = runner.run_pipeline(pipeline)
+            if orchestrator:
+                orchestrator.print_report()
+        else:
+            success = pipeline.run()
+    """
+    # Create base pipeline
+    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+
+    # Check if healing is enabled
+    healing_config = getattr(config, 'healing', None)
+    if not healing_config or not getattr(healing_config, 'enabled', True):
+        logger.info("Self-healing disabled, using standard pipeline")
+        return pipeline, None, None
+
+    # Import agents (lazy to avoid circular imports)
+    from .agents.orchestrator import HealingOrchestrator
+    from .agents.runner import ResilientRunner
+    from .agents.strategy import HealingStrategy, HealingMode
+
+    # Build strategy from config
+    strategy_name = getattr(healing_config, 'strategy', 'conservative')
+    strategy_map = {
+        'aggressive': HealingStrategy.aggressive,
+        'conservative': HealingStrategy.conservative,
+        'interactive': HealingStrategy.interactive,
+        'minimal': HealingStrategy.minimal,
+    }
+    strategy_factory = strategy_map.get(strategy_name, HealingStrategy.conservative)
+    strategy = strategy_factory()
+
+    # Override strategy settings from config
+    if hasattr(healing_config, 'max_attempts_per_stage'):
+        strategy.max_attempts_per_stage = healing_config.max_attempts_per_stage
+    if hasattr(healing_config, 'max_total_heals'):
+        strategy.max_total_heals = healing_config.max_total_heals
+    if hasattr(healing_config, 'heal_delay'):
+        strategy.heal_delay = healing_config.heal_delay
+    if hasattr(healing_config, 'run_preflight'):
+        strategy.run_preflight = healing_config.run_preflight
+    if hasattr(healing_config, 'auto_fix_preflight'):
+        strategy.auto_fix_preflight = healing_config.auto_fix_preflight
+    if hasattr(healing_config, 'enable_rollback'):
+        strategy.enable_rollback = healing_config.enable_rollback
+
+    # Create orchestrator and runner
+    orchestrator = HealingOrchestrator(config, project_dir, strategy)
+    runner = ResilientRunner(config, project_dir, orchestrator=orchestrator)
+
+    logger.info(f"Self-healing enabled: strategy={strategy_name}, max_attempts={strategy.max_attempts_per_stage}")
+
+    return pipeline, orchestrator, runner
+
+
+def run_pipeline_with_healing(
+    config: 'Config',
+    project_dir: Path,
+    audio_first_mode: bool = False,
+    resume: bool = True
+) -> bool:
+    """
+    Convenience function to create and run a self-healing pipeline.
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+        audio_first_mode: If True, uses audio-first download pipeline
+        resume: Whether to resume from checkpoint
+
+    Returns:
+        True if pipeline completed successfully
+    """
+    pipeline, orchestrator, runner = create_healing_pipeline(
+        config, project_dir, audio_first_mode
+    )
+
+    if runner:
+        # Run with healing
+        success = runner.run_pipeline(pipeline, resume=resume)
+
+        # Print report if configured
+        healing_config = getattr(config, 'healing', None)
+        if orchestrator and getattr(healing_config, 'print_report', True):
+            orchestrator.print_report()
+
+        return success
+    else:
+        # Fallback to standard execution
+        return pipeline.run(resume=resume)

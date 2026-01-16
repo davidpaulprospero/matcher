@@ -112,11 +112,27 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
 def _to_windows_path(path: str) -> str:
     """
     Convert path to Windows format with backslashes.
-    
+
     DaVinci Resolve requires Windows-style paths: E:\\folder\\file.mp4
     Forward slashes cause import issues.
+
+    Raises:
+        ValueError: If path is empty or doesn't exist (prevents DaVinci hang)
     """
-    abs_path = str(Path(path).resolve())
+    if not path:
+        raise ValueError("Empty media path provided - this would cause DaVinci Resolve to hang")
+
+    path_obj = Path(path)
+
+    # Check if path exists (warn but don't block - file might be created later)
+    if not path_obj.exists():
+        logger.warning(f"Media file not found (may cause DaVinci hang): {path}")
+
+    # Check if accidentally pointing to a directory instead of file
+    if path_obj.exists() and path_obj.is_dir():
+        raise ValueError(f"Path is a directory, not a file (would cause DaVinci hang): {path}")
+
+    abs_path = str(path_obj.resolve())
     # Ensure backslashes (Windows format)
     return abs_path.replace('/', '\\')
 
@@ -669,13 +685,13 @@ def create_timeline(
     actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None
     if actual_vo_duration:
         logger.info(f"Voiceover file duration: {actual_vo_duration:.2f}s")
-        print(f"  ✓ Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
+        print(f"  [OK] Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
     elif matches:
         # Fallback: use last segment end time + buffer for trailing content
         last_segment = matches[-1].primary_match.voiceover_segment
         fallback_duration = last_segment.end_time + 30.0  # Add 30s buffer for trailing
         logger.warning(f"ffprobe unavailable, using fallback duration: {fallback_duration:.2f}s (last segment + 30s buffer)")
-        print(f"  ⚠ Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
+        print(f"  [WARN] Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
@@ -904,7 +920,7 @@ def create_timeline(
         for sec_idx in range(num_secondary):
             track_idx = secondary_base_idx + sec_idx
 
-            if sec_idx < len(match_result.secondary_matches):
+            if match_result.secondary_matches and sec_idx < len(match_result.secondary_matches):
                 sec_match = match_result.secondary_matches[sec_idx]
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
@@ -1088,7 +1104,7 @@ def create_timeline(
             trailing_seconds = actual_vo_duration - accumulated_duration
             trailing_frames = round(trailing_seconds * rate)
             logger.info(f"Adding {trailing_seconds:.1f}s trailing gap to match voiceover end")
-            print(f"  ✓ Adding {trailing_seconds:.1f}s trailing gap (VO: {actual_vo_duration:.1f}s, timeline: {accumulated_duration:.1f}s)")
+            print(f"  [OK] Adding {trailing_seconds:.1f}s trailing gap (VO: {actual_vo_duration:.1f}s, timeline: {accumulated_duration:.1f}s)")
 
             trailing_gap = otio.schema.Gap(
                 source_range=otio.opentime.TimeRange(
@@ -1778,7 +1794,7 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
         coverage = (clip_duration / track_total * 100) if track_total > 0 else 0
 
         track_name = track.name[:25] if track.name else "Unnamed"
-        status = "✓" if coverage > 0 else "○"
+        status = "+" if coverage > 0 else "o"
         print(f"  {status} {track_name:<23} {clips:>8} {gaps:>8} {coverage:>9.1f}%")
 
     # Entity matching statistics (V9/V10)
@@ -1806,9 +1822,9 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
 
     if entity_clips > 0:
         print(f"  Total entity clips: {entity_clips}")
-        print(f"    ✓ Exact matches:    {match_types['exact']:>4} ({match_types['exact']/entity_clips*100:.1f}%)")
+        print(f"    [+] Exact matches:    {match_types['exact']:>4} ({match_types['exact']/entity_clips*100:.1f}%)")
         print(f"    ~ Semantic matches: {match_types['semantic']:>4} ({match_types['semantic']/entity_clips*100:.1f}%)")
-        print(f"    → Sticky (carried): {match_types['sticky']:>4} ({match_types['sticky']/entity_clips*100:.1f}%)")
+        print(f"    [>] Sticky (carried): {match_types['sticky']:>4} ({match_types['sticky']/entity_clips*100:.1f}%)")
         if match_types['unknown'] > 0:
             print(f"    ? Unknown:          {match_types['unknown']:>4}")
     else:
@@ -1869,7 +1885,7 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
     checks.append(("V10 Stock Videos track", has_v10))
 
     for check_name, passed in checks:
-        status = "✓" if passed else "✗"
+        status = "+" if passed else "x"
         print(f"  [{status}] {check_name}")
 
     print("\n" + "=" * 60 + "\n")

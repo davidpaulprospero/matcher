@@ -19,6 +19,45 @@ import opentimelineio as otio
 
 from .utils import create_clip_with_timewarp, get_confidence_color, get_segment_file_offset
 
+# Audio-only extensions that cause DaVinci to hang
+AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+
+
+def _is_audio_only(file_path: str) -> bool:
+    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
+    ext = Path(file_path).suffix.lower()
+    return ext in AUDIO_ONLY_EXTS
+
+
+def _has_problematic_path(file_path: str) -> bool:
+    """
+    Check if file path has characters that cause DaVinci OTIO import to hang.
+
+    Problematic patterns:
+    - Corrupted unicode (replacement char U+FFFD shown as �)
+    - Non-ASCII characters in paths (accents, special chars)
+    - Extended unicode that Windows/DaVinci can't handle
+    """
+    try:
+        # Check for replacement character (corrupted unicode)
+        if '\ufffd' in file_path or '�' in file_path:
+            return True
+
+        # Check if path is pure ASCII - non-ASCII can cause issues
+        # Allow common safe chars but flag exotic unicode
+        for char in file_path:
+            code = ord(char)
+            # Allow ASCII printable (32-126), forward/back slash, colon
+            if code > 127:
+                # Non-ASCII character found
+                return True
+
+        return False
+    except Exception:
+        # If we can't even check the path, it's problematic
+        return True
+
+
 if TYPE_CHECKING:
     from ..config import Config
     from ..utils import MatchResult
@@ -116,6 +155,15 @@ class TrackBuilder(ABC):
 
         source_file = resolved_source
         source_start = adjusted_start
+
+        # Skip audio-only files - they cause DaVinci to hang
+        if _is_audio_only(source_file):
+            return None
+
+        # Skip files with problematic unicode in path - they cause DaVinci to hang
+        if _has_problematic_path(source_file):
+            logger.warning(f"Skipping clip with problematic path (unicode issues): {source_file}")
+            return None
 
         # Build clip name
         clip_folder = Path(source_file).parent.name
@@ -360,6 +408,12 @@ class AlternativeTrackBuilder(TrackBuilder):
                     target_duration,
                     metadata
                 )
+                # Handle audio-only files (returns None)
+                if alt_v_clip is None:
+                    video_track.append(self._create_gap(duration_frames))
+                    audio_track.append(self._create_gap(duration_frames))
+                    continue
+
                 alt_v_clip.metadata['clip_color'] = get_confidence_color(alt.confidence)
                 video_track.append(alt_v_clip)
 
@@ -371,7 +425,10 @@ class AlternativeTrackBuilder(TrackBuilder):
                     target_duration,
                     {'from_track': f'V{track_idx+1}'}
                 )
-                audio_track.append(alt_a_clip)
+                if alt_a_clip:
+                    audio_track.append(alt_a_clip)
+                else:
+                    audio_track.append(self._create_gap(duration_frames))
             else:
                 # No alternative available - add gap
                 video_track.append(self._create_gap(duration_frames))
@@ -428,6 +485,12 @@ class DiversityTrackBuilder(TrackBuilder):
                     target_duration,
                     metadata
                 )
+                # Handle audio-only files (returns None)
+                if sec_v_clip is None:
+                    video_track.append(self._create_gap(duration_frames))
+                    audio_track.append(self._create_gap(duration_frames))
+                    continue
+
                 sec_v_clip.metadata['clip_color'] = secondary_colors[sec_idx] if sec_idx < len(secondary_colors) else "GRAY"
                 video_track.append(sec_v_clip)
 
@@ -439,7 +502,10 @@ class DiversityTrackBuilder(TrackBuilder):
                     target_duration,
                     {'from_track': f'V{track_idx+1}'}
                 )
-                audio_track.append(sec_a_clip)
+                if sec_a_clip:
+                    audio_track.append(sec_a_clip)
+                else:
+                    audio_track.append(self._create_gap(duration_frames))
             else:
                 # No secondary match available - add gap
                 video_track.append(self._create_gap(duration_frames))
@@ -502,6 +568,12 @@ class EmbeddingDiversityTrackBuilder(TrackBuilder):
                     target_duration,
                     metadata
                 )
+                # Handle audio-only files (returns None)
+                if strat_v_clip is None:
+                    video_track.append(self._create_gap(duration_frames))
+                    audio_track.append(self._create_gap(duration_frames))
+                    continue
+
                 strat_v_clip.metadata['clip_color'] = strategy_colors.get(strategy, "GRAY")
                 video_track.append(strat_v_clip)
 
@@ -513,7 +585,10 @@ class EmbeddingDiversityTrackBuilder(TrackBuilder):
                     target_duration,
                     {'from_track': f'V{track_idx+1}', 'strategy': strategy}
                 )
-                audio_track.append(strat_a_clip)
+                if strat_a_clip:
+                    audio_track.append(strat_a_clip)
+                else:
+                    audio_track.append(self._create_gap(duration_frames))
             else:
                 # No strategy match available - add gap
                 video_track.append(self._create_gap(duration_frames))
@@ -567,6 +642,12 @@ class BRollTrackBuilder(TrackBuilder):
                     target_duration,
                     metadata
                 )
+                # Handle audio-only files (returns None)
+                if broll_v_clip is None:
+                    video_track.append(self._create_gap(duration_frames))
+                    audio_track.append(self._create_gap(duration_frames))
+                    continue
+
                 broll_v_clip.metadata['clip_color'] = "TEAL"
                 video_track.append(broll_v_clip)
 
@@ -578,7 +659,10 @@ class BRollTrackBuilder(TrackBuilder):
                     target_duration,
                     {'from_track': f'V{track_idx+1}', 'strategy': 'broll_only'}
                 )
-                audio_track.append(broll_a_clip)
+                if broll_a_clip:
+                    audio_track.append(broll_a_clip)
+                else:
+                    audio_track.append(self._create_gap(duration_frames))
             else:
                 # No B-roll match available - add gap
                 video_track.append(self._create_gap(duration_frames))

@@ -33,6 +33,25 @@ logger = logging.getLogger(__name__)
 EntityType = Literal["images", "videos"]
 
 
+def _has_problematic_path(file_path: str) -> bool:
+    """
+    Check if file path has characters that cause DaVinci OTIO import to hang.
+
+    Problematic patterns:
+    - Corrupted unicode (replacement char U+FFFD shown as �)
+    - Non-ASCII characters in paths (accents, special chars)
+    """
+    try:
+        if '\ufffd' in file_path or '�' in file_path:
+            return True
+        for char in file_path:
+            if ord(char) > 127:
+                return True
+        return False
+    except Exception:
+        return True
+
+
 def _get_attr(obj, name: str, default=None):
     """Get attribute from either dict or object."""
     if isinstance(obj, dict):
@@ -313,6 +332,11 @@ def add_entity_media_to_track(
                         logger.warning(f"Image file not found, skipping: {media_path}")
                         continue
 
+                    # Skip files with problematic unicode in path - they cause DaVinci to hang
+                    if _has_problematic_path(str(media_path)):
+                        logger.warning(f"Skipping media with problematic path (unicode issues): {media_path}")
+                        continue
+
                     media_folder = media_path_obj.parent.name
                     media_filename = media_path_obj.name
 
@@ -325,9 +349,11 @@ def add_entity_media_to_track(
 
                     # Create external reference (polymorphic: images vs videos)
                     if is_image:
-                        # CRITICAL: available_range = 1 frame signals to Resolve this is a still image
-                        # Resolve then auto-holds (repeats) this single frame for the full source_range
-                        available_frames = 1
+                        # OTIO TIMING MODEL: source_range MUST fit within available_range
+                        # For still images, the single frame IS available for any duration
+                        # (it's a freeze frame). Set available_range = clip duration so
+                        # source_range <= available_range is satisfied.
+                        available_frames = clip_frames
                     else:
                         # Videos have actual duration - get from ffprobe
                         available_frames = _get_video_duration_frames(media_path, rate)
