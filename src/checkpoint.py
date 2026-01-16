@@ -21,15 +21,18 @@ logger = logging.getLogger(__name__)
 
 
 # Stage order for resume logic
+# Caption-first flow: VIDEO_METADATA -> CAPTION -> DOWNLOAD (only uncaptioned)
 STAGE_ORDER = [
     "ANALYZE",
     "ENTITY_IMAGES",
     "ENTITY_VIDEOS",
-    "DOWNLOAD",
+    "VIDEO_METADATA",  # Caption-first: fetch video URLs/metadata before download
+    "CAPTION",         # Caption-first: fetch YouTube captions before any media download
+    "DOWNLOAD",        # In caption-first mode: only downloads for videos without captions
     "STOCK",
     "BROLL_DOWNLOAD",
     "REMIX",
-    "TRANSCRIBE",
+    "TRANSCRIBE",      # In caption-first mode: only Whisper for uncaptioned videos
     "SCENE_DETECTION",
     "MATCH",
     "BROLL_MATCH",
@@ -72,6 +75,8 @@ class CheckpointData:
     analyze: Dict[str, Any] = field(default_factory=dict)
     entity_images: Dict[str, Any] = field(default_factory=dict)
     entity_videos: Dict[str, Any] = field(default_factory=dict)
+    video_metadata: Dict[str, Any] = field(default_factory=dict)  # Caption-first: video URLs before download
+    caption: Dict[str, Any] = field(default_factory=dict)  # Caption-first: YouTube captions
     download: Dict[str, Any] = field(default_factory=dict)
     stock: Dict[str, Any] = field(default_factory=dict)
     broll_download: Dict[str, Any] = field(default_factory=dict)
@@ -237,11 +242,17 @@ class CheckpointManager:
                 'ANALYZE': 'analyze',
                 'ENTITY_IMAGES': 'entity_images',
                 'ENTITY_VIDEOS': 'entity_videos',
+                'VIDEO_METADATA': 'video_metadata',
+                'CAPTION': 'caption',
                 'DOWNLOAD': 'download',
                 'STOCK': 'stock',
+                'BROLL_DOWNLOAD': 'broll_download',
                 'REMIX': 'remix',
                 'TRANSCRIBE': 'transcribe',
+                'SCENE_DETECTION': 'scene_detection',
                 'MATCH': 'match',
+                'BROLL_MATCH': 'broll_match',
+                'DOWNLOAD_SEGMENTS': 'download_segments',
                 'OUTPUT': 'output'
             }
 
@@ -545,7 +556,12 @@ class CheckpointManager:
         if self.data.download:
             vid_count = len(self.data.download.get('video_paths', []))
             lines.append(f"  • DOWNLOAD: {vid_count} videos")
-        
+
+        if self.data.caption:
+            caption_count = self.data.caption.get('caption_count', 0)
+            fallback_count = self.data.caption.get('fallback_count', 0)
+            lines.append(f"  • CAPTION: {caption_count} captions, {fallback_count} need audio fallback")
+
         if self.data.transcribe:
             trans_count = self.data.transcribe.get('transcribed_count', 0)
             embed_count = self.data.transcribe.get('embedding_count', 0)

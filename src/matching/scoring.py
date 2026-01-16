@@ -190,6 +190,51 @@ def apply_current_project_boost(
     return penalized, reason
 
 
+def apply_caption_boost(
+    confidence: float,
+    video_segment: SRTSegment,
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost for manual caption transcripts.
+
+    Manual captions (human-created) are typically higher quality than:
+    - Auto-generated captions (YouTube's ASR)
+    - Whisper transcriptions
+
+    This boost rewards videos with verified human transcriptions.
+
+    Args:
+        confidence: Original confidence score
+        video_segment: Video segment being considered
+        config: Config with download.caption_first.confidence_boost_manual setting
+
+    Returns:
+        Tuple of (boosted_confidence, boost_reason)
+    """
+    # Check transcript source
+    transcript_source = getattr(video_segment, 'transcript_source', '')
+
+    # Only boost manual captions
+    if transcript_source != 'manual_caption':
+        return confidence, ""
+
+    # Get boost amount from config
+    download_config = getattr(config, 'download', None)
+    caption_config = getattr(download_config, 'caption_first', None) if download_config else None
+    caption_boost = getattr(caption_config, 'confidence_boost_manual', 0.1) if caption_config else 0.1
+
+    if caption_boost <= 0:
+        return confidence, ""
+
+    boosted = min(1.0, confidence + caption_boost)
+    reason = f"manual caption boost: +{caption_boost:.2f}"
+
+    logger.debug(f"Manual caption boost applied: {confidence:.2f} -> {boosted:.2f}")
+
+    return boosted, reason
+
+
 def compute_duration_penalty(vo_segment: SRTSegment, video_segment: SRTSegment, config) -> float:
     """
     Compute confidence penalty based on speed change required.

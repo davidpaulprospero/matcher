@@ -74,6 +74,9 @@ class TitleFilter:
             '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
         ]
 
+        # Add base args (JS runtime for challenge solving) and cookies
+        from . import utils
+        cmd.extend(utils.get_ytdlp_base_args())
         cmd.extend(self.cookies_args)
 
         logger.debug(f"Searching YouTube: {keyword} (max_results={max_results}, tier={tier}, {min_dur}-{max_dur}s)")

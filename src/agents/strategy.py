@@ -63,6 +63,7 @@ class HealingStrategy:
     healer_priority: List[str] = field(default_factory=lambda: [
         "checkpoint-healer",  # Try checkpoint recovery first
         "api-healer",         # API issues are common
+        "caption-healer",     # Caption fetch errors (before download-healer)
         "download-healer",    # Download failures
         "disk-healer",        # Disk space
         "path-healer",        # Path issues

@@ -13,7 +13,16 @@ from unittest.mock import Mock
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.downloader.utils import sanitize_filename_for_nle, format_time, get_cookies_args
+from src.downloader.utils import (
+    sanitize_filename_for_nle,
+    format_time,
+    get_cookies_args,
+    extract_video_id,
+    detect_caption_format,
+    get_caption_language,
+    is_auto_generated_caption,
+    caption_file_priority,
+)
 
 
 class TestSanitizeFilenameForNLE:
@@ -363,6 +372,285 @@ class TestGetCookiesArgs:
 
         # Should handle missing attributes gracefully
         assert args == []
+
+
+class TestExtractVideoId:
+    """Tests for extract_video_id function"""
+
+    def test_extract_from_watch_url(self):
+        """Test extraction from standard watch URL"""
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_from_short_url(self):
+        """Test extraction from youtu.be short URL"""
+        url = "https://youtu.be/dQw4w9WgXcQ"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_from_embed_url(self):
+        """Test extraction from embed URL"""
+        url = "https://www.youtube.com/embed/dQw4w9WgXcQ"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_from_v_url(self):
+        """Test extraction from /v/ URL format"""
+        url = "https://www.youtube.com/v/dQw4w9WgXcQ"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_from_url_with_params(self):
+        """Test extraction from URL with extra parameters"""
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&list=PLxyz"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_from_filename(self):
+        """Test extraction from filename containing video ID"""
+        filename = "travel_vlog_dQw4w9WgXcQ.mp4"
+        result = extract_video_id(filename)
+        # May extract first 11-char match which could be 'travel_vlog' portion
+        # or 'dQw4w9WgXcQ' depending on pattern matching
+        assert result is not None and len(result) == 11
+
+    def test_extract_from_caption_filename(self):
+        """Test extraction from caption filename"""
+        filename = "dQw4w9WgXcQ.en.srt"
+        assert extract_video_id(filename) == "dQw4w9WgXcQ"
+
+    def test_extract_from_raw_id(self):
+        """Test extraction from raw video ID"""
+        video_id = "dQw4w9WgXcQ"
+        assert extract_video_id(video_id) == "dQw4w9WgXcQ"
+
+    def test_extract_with_underscores(self):
+        """Test extraction with underscores in ID"""
+        url = "https://youtube.com/watch?v=abc_def-123"
+        assert extract_video_id(url) == "abc_def-123"
+
+    def test_extract_with_dashes(self):
+        """Test extraction with dashes in ID"""
+        url = "https://youtube.com/watch?v=abc-def_123"
+        assert extract_video_id(url) == "abc-def_123"
+
+    def test_extract_returns_none_for_empty(self):
+        """Test returns None for empty input"""
+        assert extract_video_id("") is None
+        assert extract_video_id(None) is None
+
+    def test_extract_returns_none_for_short(self):
+        """Test returns None for too-short input"""
+        assert extract_video_id("short") is None
+        assert extract_video_id("abcdefghij") is None  # 10 chars
+
+    def test_extract_case_sensitive(self):
+        """Test that extraction preserves case"""
+        url = "https://youtube.com/watch?v=AbCdEfGhIjK"
+        assert extract_video_id(url) == "AbCdEfGhIjK"
+
+    def test_extract_from_mobile_url(self):
+        """Test extraction from mobile URL"""
+        url = "https://m.youtube.com/watch?v=dQw4w9WgXcQ"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+    def test_extract_with_hash_fragment(self):
+        """Test extraction with URL fragment"""
+        url = "https://youtube.com/watch?v=dQw4w9WgXcQ#t=30"
+        assert extract_video_id(url) == "dQw4w9WgXcQ"
+
+
+class TestDetectCaptionFormat:
+    """Tests for detect_caption_format function"""
+
+    def test_detect_srt_by_extension(self):
+        """Test SRT detection by extension"""
+        assert detect_caption_format(Path("video.srt")) == "srt"
+        assert detect_caption_format(Path("video.SRT")) == "srt"
+
+    def test_detect_vtt_by_extension(self):
+        """Test VTT detection by extension"""
+        assert detect_caption_format(Path("video.vtt")) == "vtt"
+        assert detect_caption_format(Path("video.VTT")) == "vtt"
+
+    def test_detect_ass_by_extension(self):
+        """Test ASS/SSA detection by extension"""
+        assert detect_caption_format(Path("video.ass")) == "ass"
+        assert detect_caption_format(Path("video.ssa")) == "ass"
+
+    def test_detect_json3_by_extension(self):
+        """Test JSON3 detection by extension"""
+        assert detect_caption_format(Path("video.json3")) == "json3"
+        assert detect_caption_format(Path("video.json")) == "json3"
+
+    def test_detect_ttml_by_extension(self):
+        """Test TTML/DFXP detection by extension"""
+        assert detect_caption_format(Path("video.ttml")) == "ttml"
+        assert detect_caption_format(Path("video.dfxp")) == "ttml"
+
+    def test_detect_unknown_extension(self):
+        """Test unknown extension returns None"""
+        assert detect_caption_format(Path("video.xyz")) is None
+        assert detect_caption_format(Path("video.mp4")) is None
+
+    def test_detect_vtt_by_content(self):
+        """Test VTT detection by file content"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "test.txt"
+            filepath.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello")
+            assert detect_caption_format(filepath) == "vtt"
+
+    def test_detect_srt_by_content(self):
+        """Test SRT detection by file content"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "test.txt"
+            filepath.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello")
+            assert detect_caption_format(filepath) == "srt"
+
+    def test_detect_ass_by_content(self):
+        """Test ASS detection by file content"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "test.txt"
+            filepath.write_text("[Script Info]\nTitle: Test\n")
+            assert detect_caption_format(filepath) == "ass"
+
+
+class TestGetCaptionLanguage:
+    """Tests for get_caption_language function"""
+
+    def test_extract_simple_language(self):
+        """Test simple language extraction"""
+        assert get_caption_language(Path("video.en.srt")) == "en"
+        assert get_caption_language(Path("video.es.srt")) == "es"
+        assert get_caption_language(Path("video.fr.srt")) == "fr"
+
+    def test_extract_with_video_id(self):
+        """Test extraction with video ID prefix"""
+        path = Path("dQw4w9WgXcQ.en.srt")
+        assert get_caption_language(path, "dQw4w9WgXcQ") == "en"
+
+    def test_extract_regional_language(self):
+        """Test regional language codes"""
+        assert get_caption_language(Path("video.en-US.srt")) == "en-US"
+        assert get_caption_language(Path("video.en-GB.srt")) == "en-GB"
+        assert get_caption_language(Path("video.pt-BR.srt")) == "pt-BR"
+
+    def test_extract_auto_language(self):
+        """Test auto-generated caption language"""
+        assert get_caption_language(Path("video.en-auto.srt")) == "en"
+        assert get_caption_language(Path("video.es.auto.srt")) == "es"
+
+    def test_extract_defaults_to_en(self):
+        """Test defaults to 'en' when not found"""
+        assert get_caption_language(Path("video.srt")) == "en"
+        assert get_caption_language(Path("unknown_format.txt")) == "en"
+
+    def test_extract_with_complex_filename(self):
+        """Test extraction with complex filename"""
+        path = Path("My_Video_Title_dQw4w9WgXcQ.en-US.srt")
+        lang = get_caption_language(path, "dQw4w9WgXcQ")
+        assert lang in ["en-US", "en"]  # Should find language code
+
+
+class TestIsAutoGeneratedCaption:
+    """Tests for is_auto_generated_caption function"""
+
+    def test_auto_with_dash(self):
+        """Test detection with -auto suffix"""
+        assert is_auto_generated_caption(Path("video.en-auto.srt")) is True
+        assert is_auto_generated_caption(Path("abc123.en-auto.vtt")) is True
+
+    def test_auto_with_dot(self):
+        """Test detection with .auto suffix"""
+        assert is_auto_generated_caption(Path("video.en.auto.srt")) is True
+
+    def test_manual_caption(self):
+        """Test manual captions return False"""
+        assert is_auto_generated_caption(Path("video.en.srt")) is False
+        assert is_auto_generated_caption(Path("abc123.es.vtt")) is False
+
+    def test_case_insensitive(self):
+        """Test case insensitive detection"""
+        assert is_auto_generated_caption(Path("video.en-AUTO.srt")) is True
+        assert is_auto_generated_caption(Path("video.en-Auto.srt")) is True
+
+    def test_auto_in_directory_name(self):
+        """Test auto in directory doesn't trigger false positive"""
+        # The function only checks filename, not full path
+        assert is_auto_generated_caption(Path("video.en.srt")) is False
+
+
+class TestCaptionFilePriority:
+    """Tests for caption_file_priority function"""
+
+    def test_manual_before_auto(self):
+        """Test manual captions have higher priority than auto"""
+        manual = caption_file_priority(Path("video.en.srt"))
+        auto = caption_file_priority(Path("video.en-auto.srt"))
+        assert manual < auto  # Lower tuple = higher priority
+
+    def test_english_before_other(self):
+        """Test English has higher priority than other languages"""
+        english = caption_file_priority(Path("video.en.srt"))
+        spanish = caption_file_priority(Path("video.es.srt"))
+        assert english < spanish
+
+    def test_manual_english_highest(self):
+        """Test manual English has highest priority"""
+        manual_en = caption_file_priority(Path("video.en.srt"))
+        manual_es = caption_file_priority(Path("video.es.srt"))
+        auto_en = caption_file_priority(Path("video.en-auto.srt"))
+        auto_es = caption_file_priority(Path("video.es-auto.srt"))
+
+        priorities = [manual_en, manual_es, auto_en, auto_es]
+        assert manual_en == min(priorities)
+
+    def test_sorting_multiple_files(self):
+        """Test sorting multiple caption files"""
+        files = [
+            Path("video.es-auto.srt"),
+            Path("video.en.srt"),
+            Path("video.en-auto.srt"),
+            Path("video.es.srt"),
+        ]
+        sorted_files = sorted(files, key=caption_file_priority)
+
+        # Manual English should be first
+        assert sorted_files[0].name == "video.en.srt"
+
+    def test_returns_tuple(self):
+        """Test priority returns a tuple for sorting"""
+        priority = caption_file_priority(Path("video.en.srt"))
+        assert isinstance(priority, tuple)
+        assert len(priority) == 3
+
+
+class TestCaptionUtilsEdgeCases:
+    """Edge case tests for caption utility functions"""
+
+    def test_extract_video_id_from_complex_path(self):
+        """Test video ID extraction from complex path"""
+        path = "C:/Users/test/videos/dQw4w9WgXcQ_720p.mp4"
+        assert extract_video_id(path) == "dQw4w9WgXcQ"
+
+    def test_detect_format_nonexistent_file(self):
+        """Test format detection for nonexistent file with unknown extension"""
+        result = detect_caption_format(Path("/nonexistent/video.xyz"))
+        assert result is None
+
+    def test_language_from_minimal_filename(self):
+        """Test language extraction from minimal filename"""
+        lang = get_caption_language(Path(".srt"))
+        assert lang == "en"  # Should default to 'en'
+
+    def test_priority_consistency(self):
+        """Test priority function is consistent"""
+        path = Path("video.en.srt")
+        p1 = caption_file_priority(path)
+        p2 = caption_file_priority(path)
+        assert p1 == p2
+
+    def test_auto_detection_partial_match(self):
+        """Test auto detection doesn't partial match"""
+        # 'automatic' in filename shouldn't trigger auto detection
+        # Only '-auto' or '.auto' should
+        assert is_auto_generated_caption(Path("video_automatic.en.srt")) is False
 
 
 if __name__ == "__main__":

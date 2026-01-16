@@ -67,11 +67,15 @@ class Healer(ABC):
     name: str = "base"
     description: str = "Base healer"
 
-    # Error patterns this healer can handle (regex or exact match)
+    # Error patterns this healer can handle (substring match, case-insensitive)
     error_patterns: List[str] = []
 
     # Exception types this healer can handle
     exception_types: List[Type[Exception]] = []
+
+    # Stages this healer handles (empty = all stages, based on patterns only)
+    # Override in subclass for stage-aware filtering (e.g., CaptionHealer)
+    handled_stages: List[str] = []
 
     def __init__(self, config: 'Config', project_dir: Any):
         """
@@ -95,6 +99,12 @@ class Healer(ABC):
         Returns:
             True if this healer can attempt to fix the error
         """
+        # Check stage filtering first (if healer specifies handled_stages)
+        if self.handled_stages:
+            # Stage-specific healer - only handle listed stages
+            if stage_name.upper() not in [s.upper() for s in self.handled_stages]:
+                return False
+
         # Check exception type
         for exc_type in self.exception_types:
             if isinstance(error, exc_type):

@@ -394,6 +394,7 @@ Archived from CLAUDE.md for token efficiency. See CLAUDE.md for recent entries.
 
 | Date | Summary |
 |------|---------|
+| 2026-01-15 | XML media bin fix (Rule 12): No `<project>` wrapper, `<file>` inside `<clipitem>`, skip audio-only |
 | 2026-01-09 | Test infrastructure overhaul: CI/CD, benchmarks, 514 passing tests |
 | 2026-01-09 | OTIO pipeline integration tests: 21 end-to-end tests |
 | 2026-01-09 | OTIO utils test suite: 53 unit tests |

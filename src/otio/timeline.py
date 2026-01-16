@@ -38,6 +38,102 @@ def _is_audio_only(file_path: str) -> bool:
     return ext in AUDIO_ONLY_EXTS
 
 
+def _get_video_path_from_match(match_item) -> Optional[str]:
+    """
+    Extract video path from either a MatchResult or Match object.
+
+    Handles:
+    - MatchResult (full) with primary_match.video_segment.source_file
+    - Match (utils.py) with video_segment.source_file
+    - Match (state.py) with video_file
+    """
+    # MatchResult wrapper
+    if hasattr(match_item, 'primary_match') and match_item.primary_match:
+        match = match_item.primary_match
+    else:
+        match = match_item
+
+    # Full Match with video_segment
+    if hasattr(match, 'video_segment') and match.video_segment:
+        return match.video_segment.source_file
+
+    # Simple Match with video_file
+    if hasattr(match, 'video_file'):
+        return match.video_file
+
+    return None
+
+
+def _iter_all_match_paths(match_item):
+    """
+    Iterate all video paths from a match item (MatchResult or Match).
+
+    Yields paths from primary match, alternatives, secondary, and strategy matches.
+    """
+    # MatchResult wrapper with full structure
+    if hasattr(match_item, 'primary_match'):
+        if match_item.primary_match:
+            path = _get_video_path_from_match(match_item.primary_match)
+            if path:
+                yield path
+
+        for alt in getattr(match_item, 'alternatives', []) or []:
+            path = _get_video_path_from_match(alt)
+            if path:
+                yield path
+
+        for sec in getattr(match_item, 'secondary_matches', []) or []:
+            path = _get_video_path_from_match(sec)
+            if path:
+                yield path
+
+        for sm in getattr(match_item, 'strategy_matches', []) or []:
+            path = _get_video_path_from_match(sm)
+            if path:
+                yield path
+    else:
+        # Plain Match object
+        path = _get_video_path_from_match(match_item)
+        if path:
+            yield path
+
+
+def _get_primary_match(match_item):
+    """
+    Get the primary Match object from either MatchResult or plain Match.
+
+    Returns the primary Match object, or the match_item itself if it's already a Match.
+    """
+    if hasattr(match_item, 'primary_match') and match_item.primary_match:
+        return match_item.primary_match
+    return match_item
+
+
+def _get_voiceover_segment(match_item):
+    """
+    Extract voiceover segment info from either MatchResult or Match.
+
+    Returns a dict-like object with start_time and end_time attributes.
+    """
+    match = _get_primary_match(match_item)
+
+    # Full Match with voiceover_segment
+    if hasattr(match, 'voiceover_segment') and match.voiceover_segment:
+        return match.voiceover_segment
+
+    # Simple Match from state.py - create a fake segment-like object
+    class FakeSegment:
+        def __init__(self, start, end):
+            self.start_time = start
+            self.end_time = end
+
+    # For simple matches, we don't have the original voiceover timing
+    # but we can estimate based on video timing
+    video_start = getattr(match, 'video_start', 0.0)
+    video_end = getattr(match, 'video_end', video_start + 5.0)
+    return FakeSegment(video_start, video_end)
+
+
 def _is_non_media(file_path: str) -> bool:
     """Check if file is non-media (subtitles, text files that can't be imported)."""
     ext = Path(file_path).suffix.lower()
@@ -225,22 +321,10 @@ def create_timeline(
     # First pass: collect all media paths from all matches
     path_normalizer = MediaPathNormalizer()
 
-    for match_result in matches:
-        # Primary match
-        path_normalizer.register(match_result.primary_match.video_segment.source_file)
-
-        # Alternatives
-        for alt in match_result.alternatives:
-            path_normalizer.register(alt.video_segment.source_file)
-
-        # Secondary matches
-        for sec in match_result.secondary_matches:
-            path_normalizer.register(sec.video_segment.source_file)
-
-        # Strategy matches
-        if match_result.strategy_matches:
-            for sm in match_result.strategy_matches:
-                path_normalizer.register(sm.video_segment.source_file)
+    for match_item in matches:
+        # Use helper to extract all video paths from Match or MatchResult
+        for path in _iter_all_match_paths(match_item):
+            path_normalizer.register(path)
 
     # Also register segment files from audio-first mode
     if downloaded_segments:
@@ -434,14 +518,14 @@ def create_timeline(
         print(f"  ✓ Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
     elif matches:
         # Fallback: use last segment end time + buffer for trailing content
-        last_segment = matches[-1].primary_match.voiceover_segment
+        last_segment = _get_voiceover_segment(matches[-1])
         fallback_duration = last_segment.end_time + 30.0  # Add 30s buffer for trailing
         logger.warning(f"ffprobe unavailable, using fallback duration: {fallback_duration:.2f}s (last segment + 30s buffer)")
         print(f"  ⚠ Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+    first_segment_start = _get_voiceover_segment(matches[0]).start_time if matches else 0.0
 
     # Apply voiceover offset to fix alignment when SRT timestamps don't match audio
     # Positive offset = shift clips later (audio is ahead of SRT)
@@ -465,7 +549,7 @@ def create_timeline(
 
     if time_scale_factor == 0.0 and actual_vo_duration and matches:
         # Auto-calculate: actual audio duration / last SRT segment end time
-        last_srt_end = matches[-1].primary_match.voiceover_segment.end_time
+        last_srt_end = _get_voiceover_segment(matches[-1]).end_time
         if last_srt_end > 0:
             time_scale_factor = actual_vo_duration / last_srt_end
             logger.info(f"Auto-calculated time scale: {time_scale_factor:.4f} (audio {actual_vo_duration:.1f}s / SRT {last_srt_end:.1f}s)")
@@ -492,21 +576,21 @@ def create_timeline(
     if gap_mode == 'proportional' and actual_vo_duration and matches:
         # Calculate total segment content duration (scaled)
         total_content_duration = sum(
-            (m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time) * time_scale_factor
+            (_get_voiceover_segment(m).end_time - _get_voiceover_segment(m).start_time) * time_scale_factor
             for m in matches
         )
 
         # Calculate total gap time available
         # Subtract leading silence and content from audio duration
-        first_seg_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor
+        first_seg_start = _get_voiceover_segment(matches[0]).start_time * time_scale_factor
         total_gap_time = actual_vo_duration - first_seg_start - total_content_duration
 
         if total_gap_time > 0:
             # Calculate original SRT gaps for proportional distribution
             original_gaps = []
             for i in range(1, len(matches)):
-                prev_end = matches[i-1].primary_match.voiceover_segment.end_time
-                curr_start = matches[i].primary_match.voiceover_segment.start_time
+                prev_end = _get_voiceover_segment(matches[i-1]).end_time
+                curr_start = _get_voiceover_segment(matches[i]).start_time
                 original_gap = max(0, curr_start - prev_end)
                 original_gaps.append(original_gap)
 
@@ -517,7 +601,7 @@ def create_timeline(
                 accumulated_time = first_seg_start + voiceover_offset  # Start after leading gap
 
                 for i, match_result in enumerate(matches):
-                    vo_seg = match_result.primary_match.voiceover_segment
+                    vo_seg = _get_voiceover_segment(match_result)
                     segment_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
 
                     proportional_gap_timing[i] = accumulated_time
@@ -576,9 +660,20 @@ def create_timeline(
 
     # Process each match
     for match_idx, match_result in enumerate(matches):
-        match = match_result.primary_match
-        vo_seg = match.voiceover_segment
-        vid_seg = match.video_segment
+        match = _get_primary_match(match_result)
+        vo_seg = _get_voiceover_segment(match_result)
+
+        # Get video segment - handle both full Match and simple Match
+        if hasattr(match, 'video_segment') and match.video_segment:
+            vid_seg = match.video_segment
+        else:
+            # Create fake video segment for simple Match (from state.py)
+            class FakeVideoSegment:
+                def __init__(self, m):
+                    self.source_file = getattr(m, 'video_file', '')
+                    self.start_time = getattr(m, 'video_start', 0.0)
+                    self.end_time = getattr(m, 'video_end', 0.0)
+            vid_seg = FakeVideoSegment(match)
 
         # Check for gap before this segment (silence in voiceover)
         # The gap calculation depends on gap_mode:
@@ -681,21 +776,22 @@ def create_timeline(
             continue
 
         # Determine clip color based on confidence
-        clip_color = get_confidence_color(match.confidence)
+        clip_color = get_confidence_color(getattr(match, 'confidence', 0.5))
 
         # Build metadata - include segment_index for post-edit analysis tracing
         segment_id = f"S{match_idx:03d}"  # S000, S001, S002, ...
+        # Use getattr for fields that may not exist on simple Match objects
         metadata = {
             'segment_index': match_idx,
             'segment_id': segment_id,
-            'confidence': match.confidence,
-            'reasoning': match.reasoning,
-            'voiceover_text': vo_seg.text,
-            'video_text': vid_seg.text,
-            'is_keyword_match': match.is_keyword_match,
-            'is_visual_match': match.is_visual_match,
-            'embedding_similarity': match.embedding_similarity,
-            'reuse_count': match.clip_reuse_count,
+            'confidence': getattr(match, 'confidence', 0.5),
+            'reasoning': getattr(match, 'reasoning', getattr(match, 'reason', '')),
+            'voiceover_text': getattr(vo_seg, 'text', ''),
+            'video_text': getattr(vid_seg, 'text', ''),
+            'is_keyword_match': getattr(match, 'is_keyword_match', False),
+            'is_visual_match': getattr(match, 'is_visual_match', False),
+            'embedding_similarity': getattr(match, 'embedding_similarity', 0.0),
+            'reuse_count': getattr(match, 'clip_reuse_count', 0),
             'original_duration': source_duration,
             'target_duration': target_duration
         }
@@ -731,9 +827,10 @@ def create_timeline(
         audio_tracks[0].append(a1_clip)
 
         # Process alternatives (V2-V3, A2-A3)
+        alternatives = getattr(match_result, 'alternatives', []) or []
         for alt_idx in range(num_alternatives):
-            if alt_idx < len(match_result.alternatives):
-                alt = match_result.alternatives[alt_idx]
+            if alt_idx < len(alternatives):
+                alt = alternatives[alt_idx]
                 alt_seg = alt.video_segment
 
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
@@ -825,12 +922,13 @@ def create_timeline(
 
         # Process secondary tracks (V4-V6) - different video files from V1-V3
         secondary_base_idx = 1 + num_alternatives  # Index where secondary tracks start
+        secondary_matches = getattr(match_result, 'secondary_matches', []) or []
 
         for sec_idx in range(num_secondary):
             track_idx = secondary_base_idx + sec_idx
 
-            if sec_idx < len(match_result.secondary_matches):
-                sec_match = match_result.secondary_matches[sec_idx]
+            if sec_idx < len(secondary_matches):
+                sec_match = secondary_matches[sec_idx]
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
                 sec_source_start = sec_seg.start_time
@@ -866,8 +964,8 @@ def create_timeline(
                 sec_metadata = {
                     'segment_index': match_idx,
                     'segment_id': segment_id,
-                    'confidence': sec_match.confidence,
-                    'reasoning': sec_match.reasoning,
+                    'confidence': getattr(sec_match, 'confidence', 0.5),
+                    'reasoning': getattr(sec_match, 'reasoning', ''),
                     'original_duration': sec_source_duration,
                     'target_duration': target_duration,
                     'is_secondary': True
@@ -932,9 +1030,10 @@ def create_timeline(
 
             # Find strategy match for this strategy
             strat_match = None
-            if match_result.strategy_matches:
-                for sm in match_result.strategy_matches:
-                    if sm.strategy == strategy:
+            strategy_matches = getattr(match_result, 'strategy_matches', []) or []
+            if strategy_matches:
+                for sm in strategy_matches:
+                    if getattr(sm, 'strategy', '') == strategy:
                         strat_match = sm
                         break
 
@@ -974,9 +1073,9 @@ def create_timeline(
                 strat_metadata = {
                     'segment_index': match_idx,
                     'segment_id': segment_id,
-                    'confidence': strat_match.confidence,
-                    'reasoning': strat_match.reasoning,
-                    'strategy': strat_match.strategy,
+                    'confidence': getattr(strat_match, 'confidence', 0.5),
+                    'reasoning': getattr(strat_match, 'reasoning', ''),
+                    'strategy': getattr(strat_match, 'strategy', ''),
                     'original_duration': strat_source_duration,
                     'target_duration': target_duration
                 }

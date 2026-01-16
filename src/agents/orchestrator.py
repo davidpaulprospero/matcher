@@ -251,6 +251,10 @@ class HealingOrchestrator:
         api_issues = self._check_api_keys()
         issues.extend(api_issues)
 
+        # Check yt-dlp for caption-first mode
+        ytdlp_issues = self._check_ytdlp()
+        issues.extend(ytdlp_issues)
+
         # Check Ollama availability for watcher
         ollama_issues = self._check_ollama()
         issues.extend(ollama_issues)
@@ -369,6 +373,69 @@ class HealingOrchestrator:
                     category="api",
                     severity=severity,
                     message=f"{env_var} not set ({service} unavailable)",
+                    auto_fixable=False,
+                ))
+
+        return issues
+
+    def _check_ytdlp(self) -> List[PreflightIssue]:
+        """Check if yt-dlp is available for caption fetching."""
+        issues = []
+
+        # Check if caption-first mode is enabled
+        download_config = getattr(self.config, 'download', None)
+        if not download_config:
+            return issues
+
+        caption_first = getattr(download_config, 'caption_first', None)
+        # Handle both dict and object config patterns (Rule 6)
+        if isinstance(caption_first, dict):
+            is_enabled = caption_first.get('enabled', False)
+        else:
+            is_enabled = getattr(caption_first, 'enabled', False) if caption_first else False
+        if not is_enabled:
+            return issues
+
+        # Caption-first mode is enabled, check yt-dlp
+        import shutil
+        ytdlp_path = shutil.which('yt-dlp')
+
+        if not ytdlp_path:
+            issues.append(PreflightIssue(
+                category="caption",
+                severity="critical",
+                message="yt-dlp not found in PATH. Caption-first mode requires yt-dlp for subtitle fetching.",
+                auto_fixable=False,
+            ))
+        else:
+            # Verify yt-dlp can run
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['yt-dlp', '--version'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode != 0:
+                    issues.append(PreflightIssue(
+                        category="caption",
+                        severity="warning",
+                        message=f"yt-dlp found but returned error: {result.stderr[:100]}",
+                        auto_fixable=False,
+                    ))
+            except subprocess.TimeoutExpired:
+                issues.append(PreflightIssue(
+                    category="caption",
+                    severity="warning",
+                    message="yt-dlp version check timed out",
+                    auto_fixable=False,
+                ))
+            except Exception as e:
+                issues.append(PreflightIssue(
+                    category="caption",
+                    severity="warning",
+                    message=f"Could not verify yt-dlp: {e}",
                     auto_fixable=False,
                 ))
 
@@ -521,6 +588,19 @@ class HealingOrchestrator:
                         key = f"{section_name}.{attr}"
                         if not any(p in key.lower() for p in self.strategy.protected_config_keys):
                             snapshot.config_values[key] = value
+                    # Also snapshot nested config objects (like caption_first, audio_first)
+                    elif hasattr(value, '__dict__') and not callable(value):
+                        for nested_attr in dir(value):
+                            if nested_attr.startswith('_'):
+                                continue
+                            try:
+                                nested_value = getattr(value, nested_attr)
+                                if isinstance(nested_value, (str, int, float, bool, type(None))):
+                                    key = f"{section_name}.{attr}.{nested_attr}"
+                                    if not any(p in key.lower() for p in self.strategy.protected_config_keys):
+                                        snapshot.config_values[key] = nested_value
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 

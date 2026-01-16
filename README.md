@@ -9,12 +9,14 @@ An intelligent video matching pipeline that automatically synchronizes stock foo
 ## Features
 
 - **AI-Powered Matching**: Uses LLM and embedding-based semantic matching to find the best video clips for each voiceover segment
+- **Caption-First Mode**: Fetches YouTube captions instead of audio+Whisper transcription (faster, lower bandwidth)
 - **Audio-First Mode**: Downloads only audio first, then fetches matched video segments (~95% bandwidth savings)
 - **Multi-Track Output**: Generates OTIO timelines with 10 video tracks (primary, alternatives, diversity tracks, B-roll, entity images/videos)
 - **Location-Aware Matching**: Filters candidates by geographic proximity for travel content
 - **Entity Detection**: Automatically finds and downloads relevant images/videos for detected entities
 - **Vision API**: Generates semantic descriptions of silent footage for better matching
-- **Modular Architecture**: Clean separation of concerns with 10 pipeline stages
+- **Self-Healing Pipeline**: Automatic error recovery with configurable healing strategies
+- **Modular Architecture**: Clean separation of concerns with 11 pipeline stages
 
 ## Quick Start
 
@@ -41,10 +43,13 @@ python main.py --match-only
 | ENTITY_VIDEOS | Download stock videos for entities |
 | DOWNLOAD | YouTube video/audio download |
 | STOCK | Download generic stock footage (B-roll) |
+| BROLL_DOWNLOAD | Download B-roll with keyword suffixes |
 | REMIX | Filter videos by keyword relevance |
-| TRANSCRIBE | Whisper transcription + embeddings |
+| CAPTION | Fetch YouTube captions (skip Whisper if available) |
+| TRANSCRIBE | Whisper transcription + embeddings (fallback) |
 | SCENE_DETECTION | Scene boundaries + face detection for B-roll |
 | MATCH | Embedding + LLM matching |
+| BROLL_MATCH | Match silent scenes to voiceover (V8 track) |
 | OUTPUT | OTIO, EDL, XML generation |
 
 ## OTIO Track Layout
@@ -68,8 +73,19 @@ Configuration is managed via `config.yaml`. See [config.yaml](config.yaml) for a
 Key settings:
 - **LLM Provider**: Gemini, Anthropic, or Ollama
 - **Matching Strategy**: Embedding, LLM, or hybrid
-- **Download Options**: Audio-first mode, tier timeouts, live stream filtering
+- **Download Options**: Caption-first mode, audio-first mode, tier timeouts
+- **Self-Healing**: Strategy (aggressive/conservative/minimal), max attempts
 - **Output Options**: Number of alternatives, strategy tracks, format
+
+### Caption-First vs Audio-First
+
+| Mode | How It Works | Best For |
+|------|--------------|----------|
+| Caption-First | Fetch YouTube captions, skip Whisper | Professional videos with captions |
+| Audio-First | Download audio only, Whisper transcribe | Videos without captions |
+| Standard | Download full video + audio | Maximum quality |
+
+Both modes can be enabled simultaneously - caption-first is tried first, falls back to audio/Whisper.
 
 ## Development
 

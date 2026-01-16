@@ -29,6 +29,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ===========================================================================
+# Match object helpers - handle both MatchResult and simple Match from state.py
+# ===========================================================================
+
+def _get_primary_match(match_item):
+    """Get the primary Match from MatchResult or return match_item if already a Match."""
+    if hasattr(match_item, 'primary_match') and match_item.primary_match:
+        return match_item.primary_match
+    return match_item
+
+
+def _get_voiceover_segment(match_item):
+    """Extract voiceover segment from MatchResult or Match."""
+    match = _get_primary_match(match_item)
+    if hasattr(match, 'voiceover_segment') and match.voiceover_segment:
+        return match.voiceover_segment
+    # Fake segment for simple Match from state.py
+    class FakeSegment:
+        def __init__(self, start, end):
+            self.start_time = start
+            self.end_time = end
+            self.text = ''
+    return FakeSegment(
+        getattr(match, 'video_start', 0.0),
+        getattr(match, 'video_end', 0.0)
+    )
+
 # Type alias for entity type
 EntityType = Literal["images", "videos"]
 
@@ -219,11 +247,11 @@ def add_entity_media_to_track(
     timeline_frame = 0
 
     # Get first segment start time for reference (scaled)
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor if matches else 0.0
+    first_segment_start = _get_voiceover_segment(matches[0]).start_time * time_scale_factor if matches else 0.0
 
     for i, match_result in enumerate(matches):
-        match = match_result.primary_match
-        vo_seg = match.voiceover_segment
+        match = _get_primary_match(match_result)
+        vo_seg = _get_voiceover_segment(match_result)
 
         # Scale segment timing to match V1-V8 tracks
         scaled_start = vo_seg.start_time * time_scale_factor
@@ -254,8 +282,9 @@ def add_entity_media_to_track(
 
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec, gap_before_frames) in segment_timing.items():
-        match = matches[seg_idx].primary_match
-        vo_text = match.voiceover_segment.text.lower()
+        match = _get_primary_match(matches[seg_idx])
+        vo_seg = _get_voiceover_segment(matches[seg_idx])
+        vo_text = getattr(vo_seg, 'text', '').lower()
 
         # Insert gap before this segment if there's a pause in voiceover
         # This keeps V9/V10 tracks in sync with V1-V8 tracks

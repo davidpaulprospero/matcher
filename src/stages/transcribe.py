@@ -34,12 +34,18 @@ class TranscribeStage(Stage):
     Inputs:
         - state.downloaded_videos: List of DownloadedVideo
         - state.downloaded_audio: List of AudioDownload (audio-first mode)
+        - state.transcripts: Dict[video_id, List[segments]] (from CAPTION stage)
+        - state.videos_need_audio: List of video IDs needing Whisper (caption-first mode)
 
     Outputs:
-        - state.transcripts: Dict[video_path, List[segments]]
+        - state.transcripts: Dict[video_path, List[segments]] (updated with Whisper transcripts)
         - state.embeddings: List of embedding vectors
         - state.text_metadata: List of text metadata dicts
         - state.embedding_index: FAISS index
+
+    In caption-first mode, only transcribes videos in state.videos_need_audio
+    (those without captions). Caption transcripts already exist in state.transcripts.
+    Embeddings are computed for ALL transcripts (caption + Whisper).
     """
 
     name = "TRANSCRIBE"
@@ -59,12 +65,15 @@ class TranscribeStage(Stage):
                 print("  >> Skipping transcription - loading from cache...")
                 logger.info("Skipping TRANSCRIBE stage (config: skip_transcription=true)")
                 cached = self._load_transcripts_from_cache(config)
-                state.transcripts = cached
-                print(f"  + Loaded {len(cached)} video transcripts from cache")
 
-                # Also load embeddings from cache (required for matching)
-                if cached:
-                    embeddings_result = self._compute_embeddings(cached, state, config)
+                # Merge cached transcripts with existing caption transcripts (don't overwrite!)
+                caption_count = len(state.transcripts)
+                state.transcripts.update(cached)
+                print(f"  + Loaded {len(cached)} video transcripts from cache (+ {caption_count} from captions)")
+
+                # Compute embeddings for ALL transcripts (including caption-sourced)
+                if state.transcripts:
+                    embeddings_result = self._compute_embeddings(state.transcripts, state, config)
                     if embeddings_result:
                         print(f"  + Loaded embedding index ({len(state.embeddings)} vectors)")
                     else:
@@ -77,23 +86,35 @@ class TranscribeStage(Stage):
             # Determine video files to transcribe
             video_files = self._get_video_files(state, config)
 
+            # Caption-first mode: if no files need transcription but we have caption transcripts,
+            # proceed directly to embedding computation
+            caption_count = len(state.transcripts)
             if not video_files:
-                print("  ! No video files found")
-                warnings.append("No video files to transcribe")
-                return StageResult.ok({'transcripts': {}}, warnings)
+                if caption_count > 0:
+                    # All videos have captions - skip Whisper, just compute embeddings
+                    print(f"  All {caption_count} videos have captions - skipping Whisper transcription")
+                    logger.info(f"Caption-first: all {caption_count} videos have caption transcripts")
+                    transcripts = {}
+                else:
+                    print("  ! No video files found")
+                    warnings.append("No video files to transcribe")
+                    return StageResult.ok({'transcripts': {}}, warnings)
+            else:
+                print(f"  Found {len(video_files)} files to process")
 
-            print(f"  Found {len(video_files)} files to process")
+                # Transcription
+                transcripts = self._transcribe_videos(video_files, config)
 
-            # Transcription
-            transcripts = self._transcribe_videos(video_files, config)
-            state.transcripts = transcripts
-            print(f"  + Transcribed {len(transcripts)} videos")
+                # Merge Whisper transcripts with existing caption transcripts (don't overwrite!)
+                # Caption transcripts are added by CaptionStage before this stage runs
+                state.transcripts.update(transcripts)
+                print(f"  + Transcribed {len(transcripts)} videos (+ {caption_count} from captions)")
 
             # Handle silent videos
             self._handle_silent_videos(video_files, transcripts, config)
 
-            # Compute embeddings
-            embeddings_result = self._compute_embeddings(transcripts, state, config)
+            # Compute embeddings for ALL transcripts (both caption and Whisper)
+            embeddings_result = self._compute_embeddings(state.transcripts, state, config)
             if embeddings_result:
                 print(f"  + Built embedding index ({len(state.embeddings)} vectors)")
 
@@ -164,12 +185,15 @@ class TranscribeStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs before running"""
-        # Need either downloaded videos or audio files
+        # Need either downloaded videos, audio files, OR existing transcripts from captions
         has_videos = len(state.downloaded_videos) > 0
         has_audio = len(state.downloaded_audio) > 0
+        has_caption_transcripts = len(state.transcripts) > 0
 
-        if not has_videos and not has_audio:
-            return "No videos or audio files available for transcription"
+        # In caption-first mode, we might have transcripts without downloads
+        # (when all videos have captions)
+        if not has_videos and not has_audio and not has_caption_transcripts:
+            return "No videos, audio files, or caption transcripts available"
         return None
 
     # === Helper Methods ===
@@ -180,22 +204,77 @@ class TranscribeStage(Stage):
         config: 'Config'
     ) -> List[Path]:
         """Determine which files to transcribe"""
+        video_files = []
+
         # Check if audio-first mode with audio files
         if state.downloaded_audio:
-            return [Path(ad.file) for ad in state.downloaded_audio]
-
+            video_files = [Path(ad.file) for ad in state.downloaded_audio]
         # Use downloaded videos
-        if state.downloaded_videos:
-            return [Path(dv.file) for dv in state.downloaded_videos]
+        elif state.downloaded_videos:
+            video_files = [Path(dv.file) for dv in state.downloaded_videos]
+        else:
+            # Fallback: scan directory
+            videos_dir = Path(config.downloaded_videos_dir)
+            video_files = (
+                list(videos_dir.rglob('*.mp4')) +
+                list(videos_dir.rglob('*.webm')) +
+                list(videos_dir.rglob('*.mp3'))
+            )
 
-        # Fallback: scan directory
-        videos_dir = Path(config.downloaded_videos_dir)
-        video_files = (
-            list(videos_dir.rglob('*.mp4')) +
-            list(videos_dir.rglob('*.webm')) +
-            list(videos_dir.rglob('*.mp3'))
-        )
+        # Caption-first mode: filter out videos that already have transcripts from captions
+        if state.videos_need_audio or state.caption_downloads:
+            video_files = self._filter_captioned_videos(video_files, state, config)
+
         return video_files
+
+    def _filter_captioned_videos(
+        self,
+        video_files: List[Path],
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> List[Path]:
+        """Filter out videos that already have transcripts from captions"""
+        # Build set of video IDs that need Whisper (no captions available)
+        videos_need_whisper = set(state.videos_need_audio)
+
+        # If caption-first mode is active, only transcribe videos that need audio fallback
+        caption_config = getattr(config.download, 'caption_first', None)
+        # Handle both dict and object config patterns (Rule 6)
+        if isinstance(caption_config, dict):
+            is_enabled = caption_config.get('enabled', False)
+        else:
+            is_enabled = getattr(caption_config, 'enabled', False) if caption_config else False
+        if is_enabled:
+            if state.videos_need_audio:
+                # Only transcribe videos explicitly marked as needing audio
+                filtered = []
+                for vf in video_files:
+                    video_id = self._extract_video_id(str(vf))
+                    if video_id and video_id in videos_need_whisper:
+                        filtered.append(vf)
+                        logger.debug(f"  Including {vf.name} for Whisper (no caption)")
+                    elif video_id:
+                        logger.debug(f"  Skipping {vf.name} (has caption)")
+
+                skipped = len(video_files) - len(filtered)
+                if skipped > 0:
+                    print(f"  Skipping {skipped} videos with captions (using cached transcripts)")
+                return filtered
+
+        return video_files
+
+    def _extract_video_id(self, path_or_url: str) -> Optional[str]:
+        """Extract YouTube video ID from path or URL"""
+        import re
+        patterns = [
+            r'(?:v=|/v/|youtu\.be/)([a-zA-Z0-9_-]{11})',
+            r'([a-zA-Z0-9_-]{11})(?:\.mp[34]|\.webm|\.mkv|\.m4a)?$',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, path_or_url)
+            if match:
+                return match.group(1)
+        return None
 
     def _transcribe_videos(
         self,
@@ -312,18 +391,23 @@ class TranscribeStage(Stage):
             for video_path, segments in transcripts.items():
                 for seg in segments:
                     if hasattr(seg, 'text'):
+                        # TranscriptSegment object (from Whisper)
                         texts.append({
                             'text': seg.text,
                             'video_path': video_path,
                             'start_time': seg.start_time,
-                            'end_time': seg.end_time
+                            'end_time': seg.end_time,
+                            'transcript_source': getattr(seg, 'transcript_source', 'whisper'),
                         })
                     else:
+                        # Dict segment (from captions or cache)
+                        # Handle both 'start'/'end' (captions) and 'start_time'/'end_time' (cache) keys
                         texts.append({
                             'text': seg.get('text', ''),
                             'video_path': video_path,
-                            'start_time': seg.get('start_time', 0),
-                            'end_time': seg.get('end_time', 0)
+                            'start_time': seg.get('start_time', seg.get('start', 0)),
+                            'end_time': seg.get('end_time', seg.get('end', 0)),
+                            'transcript_source': seg.get('transcript_source', 'whisper'),
                         })
 
             state.text_metadata = texts
@@ -521,16 +605,19 @@ class TranscribeStage(Stage):
                                         break
 
                             if video_path:
+                                # Store transcript with the key from cache
                                 state.transcripts[video_path] = data
 
                                 # Rebuild text_metadata
+                                # Handle both 'start'/'end' (captions) and 'start_time'/'end_time' (cache)
                                 for seg in data:
                                     if isinstance(seg, dict):
                                         texts.append({
                                             'text': seg.get('text', ''),
                                             'video_path': video_path,
-                                            'start_time': seg.get('start_time', 0),
-                                            'end_time': seg.get('end_time', 0)
+                                            'start_time': seg.get('start_time', seg.get('start', 0)),
+                                            'end_time': seg.get('end_time', seg.get('end', 0)),
+                                            'transcript_source': seg.get('transcript_source', 'whisper'),
                                         })
                 except Exception as e:
                     logger.debug(f"Could not load transcript {tf}: {e}")

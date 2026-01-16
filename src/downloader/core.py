@@ -313,7 +313,10 @@ class VideoDownloader:
         return None
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
-        """Add cookie authentication to yt-dlp command."""
+        """Add base args (JS runtime) and cookie authentication to yt-dlp command."""
+        # Add JS runtime for YouTube challenge solving
+        cmd.extend(['--js-runtimes', 'node'])
+        # Add cookies
         if self._cookies_from_browser:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:

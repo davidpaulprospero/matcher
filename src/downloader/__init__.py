@@ -41,20 +41,30 @@ from .speech_screening import SpeechScreener
 from .title_filter import TitleFilter
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
+from .caption_fetcher import CaptionFetcher, CaptionInfo, CaptionResult
 
 # Segment utilities (public helpers)
 from . import segment_utils
 from .segment_utils import (
     collect_matched_segments,
+    collect_matched_segments_caption_first,
     merge_segments_with_buffer,
     prepare_merged_segments,
+    prepare_merged_segments_caption_first,
     get_segment_filename,
     _extract_video_id
 )
 
 # Utilities
 from . import utils
-from .utils import sanitize_filename_for_nle
+from .utils import (
+    sanitize_filename_for_nle,
+    extract_video_id,
+    detect_caption_format,
+    get_caption_language,
+    is_auto_generated_caption,
+    caption_file_priority,
+)
 
 # Import AudioDownload from state (for backward compatibility with old tests)
 from ..state import AudioDownload
@@ -76,16 +86,26 @@ __all__ = [
     'TitleFilter',
     'SearchOptimizer',
     'AudioFirstPipeline',
+    'CaptionFetcher',
+    'CaptionInfo',
+    'CaptionResult',
 
     # Segment utilities
     'collect_matched_segments',
+    'collect_matched_segments_caption_first',
     'merge_segments_with_buffer',
     'prepare_merged_segments',
+    'prepare_merged_segments_caption_first',
     'get_segment_filename',
     '_extract_video_id',
 
     # Utilities
     'sanitize_filename_for_nle',
+    'extract_video_id',
+    'detect_caption_format',
+    'get_caption_language',
+    'is_auto_generated_caption',
+    'caption_file_priority',
 
     # Backward compatibility
     'AudioDownload',

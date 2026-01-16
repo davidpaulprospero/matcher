@@ -25,6 +25,7 @@ from .scoring import (
     apply_topic_penalty,
     apply_broll_boost,
     apply_current_project_boost,
+    apply_caption_boost,
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
@@ -377,6 +378,10 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            adjusted_confidence, caption_reason = apply_caption_boost(
+                adjusted_confidence, best_seg, self.config
+            )
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
@@ -384,6 +389,8 @@ class TieredMatcher:
                 reasoning += f" [{broll_reason}]"
             if project_reason:
                 reasoning += f" [{project_reason}]"
+            if caption_reason:
+                reasoning += f" [{caption_reason}]"
 
             match = Match(
                 voiceover_segment=vo_segment,
@@ -439,6 +446,10 @@ class TieredMatcher:
                     adjusted_confidence, cached_seg, self.config
                 )
 
+                adjusted_confidence, caption_reason = apply_caption_boost(
+                    adjusted_confidence, cached_seg, self.config
+                )
+
                 final_reasoning = f"(cached) {reasoning}"
                 if topic_penalty_reason:
                     final_reasoning += f" [{topic_penalty_reason}]"
@@ -446,6 +457,8 @@ class TieredMatcher:
                     final_reasoning += f" [{broll_reason}]"
                 if project_reason:
                     final_reasoning += f" [{project_reason}]"
+                if caption_reason:
+                    final_reasoning += f" [{caption_reason}]"
 
                 match = Match(
                     voiceover_segment=vo_segment,
@@ -552,6 +565,10 @@ class TieredMatcher:
             adjusted_confidence, best_seg, self.config
         )
 
+        adjusted_confidence, caption_reason = apply_caption_boost(
+            adjusted_confidence, best_seg, self.config
+        )
+
         final_reasoning = reasoning
         if topic_penalty_reason:
             final_reasoning += f" [{topic_penalty_reason}]"
@@ -559,6 +576,8 @@ class TieredMatcher:
             final_reasoning += f" [{broll_reason}]"
         if project_reason:
             final_reasoning += f" [{project_reason}]"
+        if caption_reason:
+            final_reasoning += f" [{caption_reason}]"
 
         match = Match(
             voiceover_segment=vo_segment,

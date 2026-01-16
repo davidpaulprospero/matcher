@@ -105,20 +105,28 @@ def encode_path_for_xml_url(path: str) -> str:
     """
     Format a file path for use in XML pathurl elements.
 
-    DaVinci Resolve expects standard Windows paths (E:/folder/file.mp4),
-    NOT file:// URL format (file://localhost/E:/...) which causes hangs.
+    DaVinci Resolve on Windows requires file:/// prefix for absolute paths
+    (e.g., file:///E:/folder/file.mp4). Without this prefix, DaVinci reports
+    "files not found" when importing XML.
 
     Args:
         path: File path (can be Windows or Unix style)
 
     Returns:
-        Clean file path for DaVinci Resolve (forward slashes)
+        File URL with file:/// prefix for DaVinci Resolve compatibility
     """
     # First sanitize the path (remove extended-length prefix, convert slashes)
     path = sanitize_path_for_url(path)
 
-    # Return plain path with forward slashes - no file:// prefix
-    # DaVinci Resolve handles this format natively
+    # Add file:/// prefix for DaVinci Resolve compatibility on Windows
+    # Absolute paths need this prefix for DaVinci to locate files
+    if path and len(path) > 1 and path[1] == ':':
+        # Windows absolute path (e.g., E:/folder/file.mp4)
+        return f'file:///{path}'
+    elif path and path.startswith('/'):
+        # Unix absolute path
+        return f'file://{path}'
+
     return path
 
 

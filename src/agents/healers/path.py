@@ -125,9 +125,10 @@ class PathHealer(Healer):
         """Handle unicode encoding errors in paths."""
         self.log_attempt("Unicode error in path, sanitizing...")
 
-        # If we have video paths in state, sanitize them
+        fixed_count = 0
+
+        # Sanitize video/audio download paths
         if hasattr(state, 'downloads') and state.downloads:
-            fixed_count = 0
             for download in state.downloads:
                 if hasattr(download, 'file'):
                     original = download.file
@@ -136,13 +137,33 @@ class PathHealer(Healer):
                         download.file = sanitized
                         fixed_count += 1
 
-            if fixed_count > 0:
-                self.log_success(f"Sanitized {fixed_count} file paths")
-                return HealerResult.fixed(
-                    f"Sanitized {fixed_count} paths with unicode issues",
-                    action=HealerAction.RETRY,
-                    fixed_count=fixed_count
-                )
+        # Sanitize caption download paths (caption-first mode)
+        if hasattr(state, 'caption_downloads') and state.caption_downloads:
+            for caption in state.caption_downloads:
+                if hasattr(caption, 'file'):
+                    original = caption.file
+                    sanitized = self._sanitize_unicode(original)
+                    if sanitized != original:
+                        caption.file = sanitized
+                        fixed_count += 1
+
+        # Sanitize audio download paths
+        if hasattr(state, 'downloaded_audio') and state.downloaded_audio:
+            for audio in state.downloaded_audio:
+                if hasattr(audio, 'file'):
+                    original = audio.file
+                    sanitized = self._sanitize_unicode(original)
+                    if sanitized != original:
+                        audio.file = sanitized
+                        fixed_count += 1
+
+        if fixed_count > 0:
+            self.log_success(f"Sanitized {fixed_count} file paths")
+            return HealerResult.fixed(
+                f"Sanitized {fixed_count} paths with unicode issues",
+                action=HealerAction.RETRY,
+                fixed_count=fixed_count
+            )
 
         return HealerResult.failed("Could not find paths to sanitize")
 

@@ -145,6 +145,11 @@ class CheckpointHealer(Healer):
         if scene_cache.exists() and any(scene_cache.iterdir()):
             rebuilt_stages.append("SCENE_DETECTION")
 
+        # Check for captions (caption-first mode)
+        caption_cache = cache_dir / "captions"
+        if caption_cache.exists() and any(caption_cache.iterdir()):
+            rebuilt_stages.append("CAPTION")
+
         if rebuilt_stages:
             self.log_success(f"Found cached data for stages: {rebuilt_stages}")
             # Note: actual rebuild would need the pipeline to re-load caches

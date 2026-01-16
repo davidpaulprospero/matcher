@@ -273,6 +273,7 @@ class SRTSegment:
     topic_id: Optional[int] = None
     topics: List[str] = field(default_factory=list)  # Topic keywords for this segment/video
     is_broll: bool = False  # True if silent/B-roll video (no speech, face_score < threshold)
+    transcript_source: str = ""  # Source: 'whisper', 'manual_caption', 'auto_caption', 'metadata'
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict (handles numpy types)"""
@@ -286,7 +287,8 @@ class SRTSegment:
             'entities': list(self.entities) if self.entities else [],
             'topic_id': int(self.topic_id) if self.topic_id is not None else None,
             'topics': list(self.topics) if self.topics else [],
-            'is_broll': bool(self.is_broll)
+            'is_broll': bool(self.is_broll),
+            'transcript_source': self.transcript_source or ''
         }
 
     @classmethod
@@ -307,6 +309,7 @@ class SRTSegment:
         filtered_data.setdefault('topic_id', None)
         filtered_data.setdefault('topics', [])
         filtered_data.setdefault('is_broll', False)
+        filtered_data.setdefault('transcript_source', '')
 
         return cls(**filtered_data)
 

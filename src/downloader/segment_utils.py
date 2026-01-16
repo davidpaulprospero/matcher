@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from .types import MatchedSegment, MergedSegment, DownloadedSegment
 
 if TYPE_CHECKING:
-    from ..state import AudioDownload
+    from ..state import AudioDownload, VideoCandidate, Match
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +331,150 @@ def _extract_video_id(file_path: str) -> Optional[str]:
 
     # Simple format: abc123
     return filename
+
+
+def collect_matched_segments_caption_first(
+    matches: List,  # List[Match or MatchResult] from state.matches
+    video_candidates: Dict[str, 'VideoCandidate']
+) -> Dict[str, List[MatchedSegment]]:
+    """
+    Collect matched segments for caption-first mode.
+
+    In caption-first mode, we have video_candidates (metadata + captions)
+    instead of audio_downloads. The match.video_file contains a video_id
+    (not a file path) since no files were downloaded yet.
+
+    Args:
+        matches: List of Match or MatchResult objects from state.matches
+        video_candidates: Map of video_id -> VideoCandidate
+
+    Returns:
+        Dict of video_id -> List[MatchedSegment]
+    """
+    segments_by_video: Dict[str, List[MatchedSegment]] = {}
+
+    for item in matches:
+        # Handle both MatchResult (wrapper) and plain Match objects
+        if hasattr(item, 'primary_match'):
+            # MatchResult object - extract the primary match
+            match = item.primary_match
+            if not match:
+                continue
+        else:
+            # Plain Match object
+            match = item
+
+        # Check if match has video_segment (from VideoSegment-based matching)
+        if hasattr(match, 'video_segment') and match.video_segment:
+            video_file = match.video_segment.source_file
+        elif hasattr(match, 'video_file'):
+            video_file = match.video_file
+        else:
+            logger.warning(f"Match has no video_file or video_segment attribute")
+            continue
+
+        # In caption-first mode, video_file is actually video_id or a path containing it
+        video_id = _extract_video_id(video_file)
+
+        if not video_id:
+            logger.warning(f"Could not extract video_id from {video_file}")
+            continue
+
+        candidate = video_candidates.get(video_id)
+        if not candidate:
+            logger.debug(f"Video {video_id} not in video_candidates (may be B-roll/stock)")
+            continue
+
+        # Extract timing info - handle both video_segment and direct attributes
+        if hasattr(match, 'video_segment') and match.video_segment:
+            start_time = match.video_segment.start_time
+            end_time = match.video_segment.end_time
+        else:
+            start_time = getattr(match, 'video_start', 0.0)
+            end_time = getattr(match, 'video_end', 0.0)
+
+        # Extract segment index
+        segment_idx = getattr(match, 'segment_index', 0)
+        if hasattr(match, 'voiceover_segment') and match.voiceover_segment:
+            segment_idx = getattr(match.voiceover_segment, 'index', segment_idx)
+
+        matched = MatchedSegment(
+            video_id=video_id,
+            video_url=candidate.url,
+            start_time=start_time,
+            end_time=end_time,
+            track="V1",  # Primary match track
+            voiceover_segment_idx=segment_idx,
+            keyword=candidate.keyword
+        )
+
+        if video_id not in segments_by_video:
+            segments_by_video[video_id] = []
+        segments_by_video[video_id].append(matched)
+
+    return segments_by_video
+
+
+def prepare_merged_segments_caption_first(
+    segments_by_video: Dict[str, List[MatchedSegment]],
+    video_candidates: Dict[str, 'VideoCandidate'],
+    buffer_seconds: float = 5.0,
+    merge_gap_seconds: float = 10.0
+) -> List[MergedSegment]:
+    """
+    Prepare merged segments for caption-first download.
+
+    Similar to prepare_merged_segments but uses video_candidates
+    instead of audio_downloads for duration info.
+
+    Args:
+        segments_by_video: Dict of video_id -> List[MatchedSegment]
+        video_candidates: Map of video_id -> VideoCandidate
+        buffer_seconds: Padding around each match (default 5s for caption-first)
+        merge_gap_seconds: Merge if gap is smaller (default 10s)
+
+    Returns:
+        List of MergedSegment ready for download
+    """
+    all_merged = []
+
+    for video_id, matches in segments_by_video.items():
+        if not matches:
+            continue
+
+        # Get video duration for clamping
+        candidate = video_candidates.get(video_id)
+        video_duration = candidate.duration if candidate else None
+
+        # Extract time ranges
+        time_ranges = [(m.start_time, m.end_time) for m in matches]
+
+        # Merge with buffer
+        merged_ranges = merge_segments_with_buffer(
+            time_ranges,
+            buffer_seconds=buffer_seconds,
+            merge_gap_seconds=merge_gap_seconds,
+            video_duration=video_duration
+        )
+
+        # Create MergedSegment for each merged range
+        for start, end in merged_ranges:
+            # Find which original matches fall within this range
+            contained_matches = [
+                m for m in matches
+                if start <= m.start_time and m.end_time <= end
+            ]
+
+            all_merged.append(MergedSegment(
+                video_id=video_id,
+                video_url=matches[0].video_url,
+                start_time=start,
+                end_time=end,
+                original_matches=contained_matches,
+                keyword=matches[0].keyword
+            ))
+
+    return all_merged
 
 
 def prepare_merged_segments(

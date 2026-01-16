@@ -43,6 +43,7 @@ def mock_config():
     config.download.audio_first.enabled = False
     config.download.audio_first.buffer_seconds = 30.0
     config.download.audio_first.merge_gap_seconds = 15.0
+    config.download.caption_first.enabled = False  # Disable caption-first by default
     return config
 
 

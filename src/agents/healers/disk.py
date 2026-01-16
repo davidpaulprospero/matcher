@@ -53,9 +53,11 @@ class DiskHealer(Healer):
     MIN_FREE_SPACE_GB = 1.0
 
     # Cache directories to clean (relative to project)
+    # Order: least critical first, most critical last (so we clean less important first)
     CACHE_DIRS = [
         ".cache/llm_responses",
         ".cache/vision_cache",
+        ".cache/captions",      # Caption-first mode cache (SRT/VTT files)
         ".cache/embeddings",
     ]
 

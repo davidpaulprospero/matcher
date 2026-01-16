@@ -55,6 +55,12 @@ PATTERN_ROUTING: Dict[str, Tuple[str, str]] = {
     r"\bvideo[_\s-]?(unavailable|not[_\s-]?found|removed|deleted|private)\b": ("download", "download-healer"),
     r"\bage[_\s-]?restrict|\bsign[_\s-]?in[_\s-]?required\b": ("download", "download-healer"),
 
+    # Caption errors - YouTube caption/subtitle specific (before download to take precedence)
+    r"\b(caption|subtitle)s?[_\s-]?(fetch|download|error|fail|unavailable|not[_\s-]?found)\b": ("caption", "caption-healer"),
+    r"\bno[_\s-]?(caption|subtitle)s?\b|\bcaption[_\s-]?not[_\s-]?available\b": ("caption", "caption-healer"),
+    r"\b(srt|vtt|ass)[_\s-]?(parse|error|invalid|malformed)\b": ("caption", "caption-healer"),
+    r"\bwrite[_\s-]?(sub|auto[_\s-]?sub)\b|\bsub[_\s-]?lang\b": ("caption", "caption-healer"),
+
     # OTIO errors - timeline specific, NOT generic words
     r"\bopentimelineio\b|\botio\b.*\b(error|exception|invalid)\b": ("otio", "otio-healer"),
     r"\b(timeline|track|clip)[_\s-]?(generation|creation)?[_\s-]?(error|failed|invalid)\b": ("otio", "otio-healer"),

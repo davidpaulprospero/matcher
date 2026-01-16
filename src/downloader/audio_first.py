@@ -205,7 +205,8 @@ class AudioFirstPipeline:
             if ffmpeg_loc:
                 cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
-            # Add cookies
+            # Add base args (JS runtime for challenge solving) and cookies
+            cmd.extend(utils.get_ytdlp_base_args())
             cmd.extend(utils.get_cookies_args(self.config))
 
             try:
@@ -371,7 +372,8 @@ class AudioFirstPipeline:
             if ffmpeg_loc:
                 cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
-            # Add cookies
+            # Add base args (JS runtime for challenge solving) and cookies
+            cmd.extend(utils.get_ytdlp_base_args())
             cmd.extend(utils.get_cookies_args(self.config))
 
             # Get timeout - use segment-specific timeout (shorter than full video)
@@ -529,6 +531,8 @@ class AudioFirstPipeline:
         if ffmpeg_loc:
             cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
+        # Add base args (JS runtime for challenge solving) and cookies
+        cmd.extend(utils.get_ytdlp_base_args())
         cmd.extend(utils.get_cookies_args(self.config))
 
         try:

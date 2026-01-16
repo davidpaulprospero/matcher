@@ -81,7 +81,8 @@ class SpeechScreener:
         if ffmpeg_loc:
             cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
-        # Add cookies
+        # Add base args (JS runtime for challenge solving) and cookies
+        cmd.extend(['--js-runtimes', 'node'])
         cmd.extend(self.cookies_args)
 
         try:

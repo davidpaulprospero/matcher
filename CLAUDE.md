@@ -1,8 +1,8 @@
 # Claude Code Project Guide
 
 > **LLM Editing Guide:** This file is optimized for token efficiency. When editing:
-> - **Rules 1-8**: Add to the table, not as new verbose sections
-> - **Rules 9+**: Keep to ~10 lines max with table + 1-2 key points
+> - **Rules 1-9**: Add to the table, not as new verbose sections
+> - **Rules 10+**: Keep to ~10 lines max with table + 1-2 key points
 > - **Session History**: Keep only last 6 entries, archive older to CHANGELOG.md
 > - **Never**: Add verbose code examples (put in code comments instead)
 > - **Format**: Tables > prose, one-liners > paragraphs
@@ -110,6 +110,7 @@ When writing new code, prefer using modern abstractions:
 | `src/state.py` | PipelineState + dataclasses (CANONICAL location) |
 | `src/llm_client/` | **Unified LLM abstraction** (Gemini, Anthropic, Ollama) |
 | `src/downloader.py` | Video/audio download logic |
+| `src/downloader/caption_fetcher.py` | YouTube caption fetching (yt-dlp) |
 | `src/matching.py` | Video-to-voiceover matching |
 | `src/transcription.py` | Whisper transcription |
 | `src/checkpoint.py` | Resume/checkpoint management |
@@ -134,7 +135,8 @@ When writing new code, prefer using modern abstractions:
 | STOCK | StockVideoStage | Download generic stock footage (B-roll) |
 | BROLL_DOWNLOAD | BrollDownloadStage | Download B-roll with keyword suffixes |
 | REMIX | RemixStage | Filter videos by keyword relevance |
-| TRANSCRIBE | TranscribeStage | Whisper + embeddings |
+| CAPTION | CaptionStage | Fetch YouTube captions (skip Whisper if available) |
+| TRANSCRIBE | TranscribeStage | Whisper + embeddings (fallback for uncaptioned) |
 | SCENE_DETECTION | SceneDetectionStage | Scene boundaries + face detection for B-roll |
 | MATCH | MatchStage | Embedding + LLM matching |
 | BROLL_MATCH | BrollMatchStage | Match silent scenes to voiceover (V8) |
@@ -198,6 +200,7 @@ ProjectName__2026-01-03/
 | Checkpoint | `checkpoint.json` | Resume state |
 | Checkpoint backup | `checkpoint.backup.json` | Corruption recovery |
 | Transcriptions | `.cache/transcriptions/` | Whisper output |
+| Captions | `.cache/captions/` | YouTube caption files (SRT) |
 | Embeddings | `.cache/embeddings/` | Vector embeddings |
 | LLM responses | `.cache/llm_responses/` | Cached LLM calls |
 | Locations | `.cache/locations/` | GeoNames geocoding |
@@ -366,8 +369,9 @@ image_search:
 | 6 | Dict/Object config | Handle both: `vc.get()` if dict, `getattr()` if object |
 | 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy arrays fail bool check |
 | 8 | B-roll propagation | SceneDetectionStage → text_metadata → MatchStage restores is_broll |
+| 9 | Test non-interactive | Tests invoking main.py MUST use `--non-interactive` to avoid prompt hangs |
 
-### Rule 9: LLM Client
+### Rule 10: LLM Client
 Use `src/llm_client/` for ALL LLM calls. Never directly initialize provider SDKs.
 
 ```python
@@ -378,17 +382,17 @@ response = client.generate(LLMRequest(prompt=prompt, response_format=ResponseFor
 
 **Benefits:** Retry, caching, JSON parsing, provider switching (Gemini/Anthropic/Ollama)
 
-### Rule 10: Dataclass Imports
+### Rule 11: Dataclass Imports
 Import dataclasses from canonical locations - never redefine locally.
 
 | Type | Location | Examples |
 |------|----------|----------|
-| State | `src/state.py` | VoiceoverSegment, DownloadedVideo, AudioDownload, Match, PipelineState |
+| State | `src/state.py` | VoiceoverSegment, DownloadedVideo, AudioDownload, CaptionDownload, Match, PipelineState |
 | Config | `src/config.py` | Config, LLMConfig, DownloadConfig |
 
 **Never**: Duplicate dataclass definitions (causes field name mismatches at runtime)
 
-### Rule 11: VAD Filter (CRITICAL - Recurring Bug)
+### Rule 12: VAD Filter (CRITICAL - Recurring Bug)
 Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
 
 | Context | VAD | File | Why |
@@ -400,7 +404,7 @@ Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
 
 **Never**: Read VAD from config for video transcription
 
-### Rule 12: XML Media Bin Import (DaVinci Resolve)
+### Rule 13: XML Media Bin Import (DaVinci Resolve)
 DaVinci Resolve media bin XML requires specific structure:
 
 | Requirement | Detail |
@@ -408,12 +412,12 @@ DaVinci Resolve media bin XML requires specific structure:
 | `<bin>` placement | Directly under `<xmeml>` (NO `<project>` wrapper) |
 | `<file>` placement | Inside `<clipitem>`, not at clip level |
 | Empty `<sequence>` | Required sibling to trigger import |
-| Path format | Plain `E:/path/file.mp4` (no `file://` prefix) |
+| Path format | `file:///E:/path/file.mp4` (file:/// prefix required) |
 | Audio-only files | Skip them - DaVinci XML import fails on .mp3/.wav |
 
 **File:** `src/otio/xml_export.py:_write_media_xml_part()`
 
-### Rule 13: OTIO Path Compatibility (DaVinci Resolve)
+### Rule 14: OTIO Path Compatibility (DaVinci Resolve)
 DaVinci Resolve OTIO import hangs on certain path issues:
 
 | Issue | Solution | Files |
@@ -425,7 +429,7 @@ DaVinci Resolve OTIO import hangs on certain path issues:
 
 **Helper function:** `_has_problematic_path()` in timeline.py, tracks.py, entities.py
 
-### Rule 14: DaVinci OTIO Caching & Gap Optimization
+### Rule 15: DaVinci OTIO Caching & Gap Optimization
 DaVinci Resolve caches OTIO import state by filename. Failed imports can corrupt this cache.
 
 | Issue | Solution |
@@ -443,7 +447,7 @@ timeline = create_timeline(...)  # Already optimized
 
 **Files:** `src/otio/utils.py` (optimize functions), `src/otio/timeline.py` (auto-applies)
 
-### Rule 15: DaVinci OTIO Clip Count Limit
+### Rule 16: DaVinci OTIO Clip Count Limit
 DaVinci Resolve OTIO import hangs when total clips exceed **3130**.
 
 | Metric | Limit | Notes |
@@ -458,7 +462,7 @@ DaVinci Resolve OTIO import hangs when total clips exceed **3130**.
 
 **Detection:** `create_timeline()` logs warning when approaching limit.
 
-### Rule 16: DaVinci OTIO Duplicate Media Paths
+### Rule 17: DaVinci OTIO Duplicate Media Paths
 DaVinci Resolve hangs when the same video file is referenced from **multiple different paths**.
 
 | Scenario | Example | Result |
@@ -535,6 +539,26 @@ download:
     buffer_seconds: 30.0
     merge_gap_seconds: 15.0
 ```
+
+### Caption-First Mode
+Fetches YouTube captions instead of downloading audio + Whisper transcription. Falls back to Whisper for uncaptioned videos.
+```yaml
+download:
+  caption_first:
+    enabled: true
+    prefer_manual_captions: true  # Manual > auto-generated
+    languages: ["en", "en-US", "en-GB"]
+    fallback_to_audio: true       # Whisper for uncaptioned
+    confidence_boost_manual: 0.1  # Boost for manual captions
+```
+**Benefits:**
+- ✅ Faster (no Whisper transcription for captioned videos)
+- ✅ Lower bandwidth (skip audio download)
+- ✅ Better accuracy for professional videos with manual captions
+
+**Transcript sources tracked:** `manual_caption`, `auto_caption`, `whisper`, `metadata`
+
+**Note:** Can coexist with audio-first mode (separate configs).
 
 ### Location-Aware Matching
 Filters video candidates by geographic proximity for travel content.
@@ -625,6 +649,7 @@ orchestrator.print_report()
 |--------|---------|----------|
 | `CheckpointHealer` | JSON parse errors, corrupt checkpoint | Restore from backup, rebuild from cache |
 | `APIHealer` | Rate limits (429), auth errors, quota | Backoff + retry, switch provider |
+| `CaptionHealer` | Caption fetch failures, no captions, parse errors | Fallback to audio, try alt languages |
 | `DownloadHealer` | YouTube 429, unavailable videos | Backoff, skip video, try alt format |
 | `DiskHealer` | Disk full, permission denied | Clean caches, suggest short paths |
 | `PathHealer` | Windows 260 char limit, unicode | Switch to E:/v, sanitize filenames |
@@ -695,9 +720,9 @@ print(metrics.summary())
 
 | Rule | Key Point |
 |------|-----------|
-| 12 | Healers update config via `getattr`/`setattr` - never replace config object |
-| 13 | Return `HealerResult.fixed()` for retry, `.failed()` to abort |
-| 14 | Log attempts with `self.log_attempt()`, success with `self.log_success()` |
+| 18 | Healers update config via `getattr`/`setattr` - never replace config object |
+| 19 | Return `HealerResult.fixed()` for retry, `.failed()` to abort |
+| 20 | Log attempts with `self.log_attempt()`, success with `self.log_success()` |
 
 ## Git Conventions
 
@@ -744,11 +769,11 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
+| 2026-01-16 | Caption-first mode: `CaptionStage` fetches YouTube captions via yt-dlp, skips Whisper for captioned videos |
 | 2026-01-16 | Duplicate media paths fix (Rule 16): `MediaPathNormalizer` deduplicates same files in different folders |
 | 2026-01-16 | DaVinci caching fix (Rule 14): Rename OTIO files after fixing issues to bypass corrupted cache |
 | 2026-01-16 | Gap optimization: `optimize_timeline_gaps()` merges consecutive gaps, removes trailing gaps |
 | 2026-01-15 | OTIO unicode filter (Rule 13): Skip clips with non-ASCII paths causing DaVinci hang |
 | 2026-01-15 | `/validate-output` NLE importability: EDL CMX3600, XML XMEML, path compatibility, cross-file consistency |
-| 2026-01-15 | XML media bin fix (Rule 12): No `<project>` wrapper, `<file>` inside `<clipitem>`, skip audio-only |
 
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*

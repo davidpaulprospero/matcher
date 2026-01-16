@@ -130,11 +130,26 @@ def generate_resolve_xml_with_bins(
     # Track original path -> resolved path mapping for timeline references
     path_resolution_map = {}
 
+    # Valid file extensions for media
+    video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+    image_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+    audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+    valid_exts = video_exts | image_exts | audio_exts
+
     def add_file(path: str, duration_seconds: float = 0, source_start: float = 0) -> dict:
         nonlocal file_counter
         # Resolve audio to video segment if in audio-first mode
         resolved_path, _ = _resolve_video_segment(path, source_start, segment_lookup)
         path_resolution_map[path] = resolved_path
+
+        # Skip files without valid extensions (likely video ID placeholders)
+        path_obj = Path(resolved_path)
+        if path_obj.suffix.lower() not in valid_exts:
+            return None
+
+        # Skip files that don't exist on disk
+        if not path_obj.exists():
+            return None
 
         if resolved_path not in all_files:
             dur_frames = int(duration_seconds * frame_rate) if duration_seconds > 0 else int(60 * frame_rate)
@@ -526,6 +541,29 @@ def _write_media_xml_part(
     """
     bin_name = bin_name_override or f"Media Part {part_idx}"
 
+    # Filter to only include files that exist on disk
+    valid_files = {}
+    video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mxf', '.m4v'}
+    image_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+    audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+    valid_exts = video_exts | image_exts | audio_exts
+
+    for file_path, file_info in files_subset.items():
+        path_obj = Path(file_path)
+        # Skip if no valid extension (likely a video ID placeholder)
+        if path_obj.suffix.lower() not in valid_exts:
+            logger.debug(f"Skipping invalid path (no extension): {file_path}")
+            continue
+        # Skip if file doesn't exist
+        if not path_obj.exists():
+            logger.debug(f"Skipping non-existent file: {file_path}")
+            continue
+        valid_files[file_path] = file_info
+
+    if not valid_files:
+        logger.warning(f"No valid files for media part {part_idx}, skipping XML generation")
+        return
+
     part_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<!DOCTYPE xmeml>',
@@ -535,7 +573,7 @@ def _write_media_xml_part(
         '        <children>',
     ]
 
-    for file_path, file_info in files_subset.items():
+    for file_path, file_info in valid_files.items():
         # Make clip name unique by including parent folder
         folder_name = Path(file_path).parent.name
         base_name = Path(file_path).name
@@ -686,7 +724,7 @@ def _write_media_xml_part(
         f.write('\n'.join(part_lines))
 
     generated_paths.append(str(output_path))
-    logger.info(f"Saved media XML: {output_path} ({len(files_subset)} files)")
+    logger.info(f"Saved media XML: {output_path} ({len(valid_files)} files)")
 
 
 def generate_davinci_sequence_xml(

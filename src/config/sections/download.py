@@ -14,6 +14,7 @@ __all__ = [
     'EnhancedFeaturesConfig',
     'LLMTitleFilterConfig',
     'AudioFirstConfig',
+    'CaptionFirstConfig',
     'SpeechScreeningConfig',
     'DownloadConfig',
     'DownloadingConfig',
@@ -155,6 +156,50 @@ class AudioFirstConfig:
 
 
 @dataclass
+class CaptionFirstConfig:
+    """Caption-first download pipeline configuration.
+
+    When enabled, fetches YouTube captions/subtitles first before any media download.
+    Videos with captions skip audio download and Whisper transcription entirely.
+    Only matched video segments are downloaded after matching.
+
+    This is even faster than audio-first mode since no audio download or
+    transcription is needed for videos that have captions.
+
+    Enable per-project in project_config.yaml:
+        download:
+          caption_first:
+            enabled: true
+    """
+    # Enable/disable caption-first mode
+    enabled: bool = False  # Disabled by default, enable per-project
+
+    # Prefer manual captions over auto-generated
+    # Manual captions are typically higher quality
+    prefer_manual_captions: bool = True
+
+    # Languages to try for captions (in order of preference)
+    languages: List[str] = field(default_factory=lambda: ["en", "en-US", "en-GB"])
+
+    # Fall back to audio download + Whisper if no captions available
+    fallback_to_audio: bool = True
+
+    # Minimum caption coverage (fraction of video duration)
+    # Videos with sparse captions may need Whisper fallback
+    min_caption_coverage: float = 0.3
+
+    # Confidence boost for manual captions (vs auto-captions and Whisper)
+    # Auto-captions get no boost (neutral vs Whisper)
+    confidence_boost_manual: float = 0.1
+
+    # Cache downloaded captions for reuse
+    cache_captions: bool = True
+
+    # Timeout for caption fetch per video (seconds)
+    fetch_timeout: int = 30
+
+
+@dataclass
 class SpeechScreeningConfig:
     """Pre-screen videos by transcribing first N seconds to detect speech.
 
@@ -264,6 +309,9 @@ class DownloadConfig:
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
 
+    # Caption-first download pipeline (even faster - uses YouTube captions instead of Whisper)
+    caption_first: CaptionFirstConfig = field(default_factory=CaptionFirstConfig)
+
     # Zero-download remix: auto-retry with alternative keywords when 0 results
     zero_download_remix: ZeroDownloadRemixConfig = field(default_factory=ZeroDownloadRemixConfig)
 
@@ -281,6 +329,8 @@ class DownloadConfig:
             self.llm_title_filter = LLMTitleFilterConfig(**self.llm_title_filter)
         if isinstance(self.audio_first, dict):
             self.audio_first = AudioFirstConfig(**self.audio_first)
+        if isinstance(self.caption_first, dict):
+            self.caption_first = CaptionFirstConfig(**self.caption_first)
         if isinstance(self.zero_download_remix, dict):
             self.zero_download_remix = ZeroDownloadRemixConfig(**self.zero_download_remix)
         if isinstance(self.speech_screening, dict):

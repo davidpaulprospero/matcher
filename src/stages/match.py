@@ -26,6 +26,119 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class MatchResultWrapper:
+    """
+    Wrapper to make a simple Match object from state.py behave like a MatchResult.
+
+    This allows restored matches to be compatible with code that expects MatchResult
+    objects with primary_match, alternatives, secondary_matches, strategy_matches.
+    """
+
+    def __init__(self, simple_match: 'Match'):
+        self._simple_match = simple_match
+        # Create a fake SRTSegment-like object for voiceover_segment
+        self._voiceover_segment = self._FakeSegment(
+            getattr(simple_match, 'video_start', 0.0),
+            getattr(simple_match, 'video_end', 10.0),
+            ''  # No text available from simple match
+        )
+        # Create a fake video segment
+        self._video_segment = self._FakeVideoSegment(simple_match)
+
+    class _FakeSegment:
+        """Fake SRTSegment for compatibility."""
+        def __init__(self, start: float, end: float, text: str):
+            self.start_time = start
+            self.end_time = end
+            self.text = text
+            self.index = 0
+
+    class _FakeVideoSegment:
+        """Fake video segment for compatibility."""
+        def __init__(self, m):
+            self.source_file = getattr(m, 'video_file', '')
+            self.start_time = getattr(m, 'video_start', 0.0)
+            self.end_time = getattr(m, 'video_end', 0.0)
+            self.text = ''
+
+    class _FakePrimaryMatch:
+        """Fake primary match object that wraps the simple match."""
+        def __init__(self, wrapper):
+            self._wrapper = wrapper
+            self._simple = wrapper._simple_match
+
+        @property
+        def voiceover_segment(self):
+            return self._wrapper._voiceover_segment
+
+        @property
+        def video_segment(self):
+            return self._wrapper._video_segment
+
+        @property
+        def video_scene(self):
+            return None
+
+        @property
+        def confidence(self):
+            return getattr(self._simple, 'confidence', 0.5)
+
+        @property
+        def reasoning(self):
+            return getattr(self._simple, 'reason', '')
+
+        @property
+        def is_keyword_match(self):
+            return False
+
+        @property
+        def is_visual_match(self):
+            return False
+
+        @property
+        def embedding_similarity(self):
+            return 0.0
+
+        @property
+        def clip_reuse_count(self):
+            return 0
+
+    @property
+    def primary_match(self):
+        return self._FakePrimaryMatch(self)
+
+    @property
+    def alternatives(self):
+        return []
+
+    @property
+    def secondary_matches(self):
+        return []
+
+    @property
+    def strategy_matches(self):
+        return []
+
+    @property
+    def has_gap(self):
+        return False
+
+    @property
+    def gap_reason(self):
+        return ''
+
+
+def wrap_simple_match(match) -> 'MatchResultWrapper':
+    """
+    Wrap a simple Match object in a MatchResult-compatible wrapper.
+
+    If the match is already a MatchResult, returns it unchanged.
+    """
+    if hasattr(match, 'primary_match'):
+        return match  # Already a MatchResult
+    return MatchResultWrapper(match)
+
+
 @register_stage
 class MatchStage(Stage):
     """
@@ -197,7 +310,7 @@ class MatchStage(Stage):
                     video_start = m.get('video_start', m.get('start_time', 0.0))
                     video_end = m.get('video_end', video_start + 10.0)  # Default 10s clip
 
-                    match = Match(
+                    simple_match = Match(
                         segment_index=m.get('segment_index', 0),
                         video_file=video_file,
                         video_start=video_start,
@@ -207,7 +320,8 @@ class MatchStage(Stage):
                         reason=m.get('reason', ''),
                         face_score=m.get('face_score', 0.5)
                     )
-                    restored_matches.append(match)
+                    # Wrap in MatchResult-compatible wrapper for downstream code
+                    restored_matches.append(wrap_simple_match(simple_match))
 
                 state.matches = restored_matches
                 logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")
@@ -290,14 +404,26 @@ class MatchStage(Stage):
         logger.info(f"text_metadata has {broll_count}/{len(state.text_metadata)} entries with is_broll=True")
 
         broll_segments_created = 0
+        skipped_caption_only = 0
         for i, meta in enumerate(state.text_metadata):
             if isinstance(meta, dict):
+                source_file = meta.get('video_path', '')
+
+                # FILTER: Skip caption-only videos (no actual file downloaded)
+                # Caption-first mode may have video_id-only entries without real files
+                if source_file and not Path(source_file).exists():
+                    # Check if this is a caption-only video (looks like a video ID)
+                    if len(source_file) == 11 and source_file.replace('_', '').isalnum():
+                        logger.debug(f"Skipping caption-only video (no file): {source_file}")
+                        skipped_caption_only += 1
+                        continue
+
                 vid_segment = SRTSegment(
                     index=i,
                     start_time=meta.get('start_time', 0),
                     end_time=meta.get('end_time', 0),
                     text=meta.get('text', ''),
-                    source_file=meta.get('video_path', ''),
+                    source_file=source_file,
                 )
                 if meta.get('source'):
                     vid_segment.source = meta['source']
@@ -309,12 +435,17 @@ class MatchStage(Stage):
                         broll_segments_created += 1
                 if meta.get('scene_index') is not None:
                     vid_segment.scene_index = meta['scene_index']
-                video_paths_set.add(meta.get('video_path', ''))
+                if meta.get('transcript_source'):
+                    vid_segment.transcript_source = meta['transcript_source']
+                video_paths_set.add(source_file)
             else:
                 vid_segment = meta
                 video_paths_set.add(getattr(meta, 'source_file', ''))
 
             video_segments.append(vid_segment)
+
+        if skipped_caption_only > 0:
+            logger.info(f"Skipped {skipped_caption_only} caption-only videos (no downloaded files)")
 
         logger.info(f"Created {broll_segments_created} video_segments with is_broll=True")
 

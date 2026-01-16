@@ -696,3 +696,128 @@ class TestScoringEdgeCases:
 
         result, _ = scoring.apply_broll_boost(0.7, video_seg, config_obj)
         assert result == 0.85  # 0.7 + 0.15
+
+
+# ============================================================================
+# Test apply_caption_boost()
+# ============================================================================
+
+class TestApplyCaptionBoost:
+    """Test manual caption confidence boosts"""
+
+    def test_not_manual_caption_no_boost(self, mock_config, sample_video_segment):
+        """Test no boost for non-caption segments"""
+        confidence = 0.7
+
+        # Segment without transcript_source (defaults to empty)
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_whisper_no_boost(self, mock_config, sample_video_segment):
+        """Test no boost for whisper transcripts"""
+        confidence = 0.7
+        sample_video_segment.transcript_source = "whisper"
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_auto_caption_no_boost(self, mock_config, sample_video_segment):
+        """Test no boost for auto-generated captions"""
+        confidence = 0.7
+        sample_video_segment.transcript_source = "auto_caption"
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_manual_caption_boost_applied(self, mock_config, sample_video_segment):
+        """Test boost applied for manual captions"""
+        confidence = 0.7
+        sample_video_segment.transcript_source = "manual_caption"
+
+        # Set up caption_first config
+        mock_config.download = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.confidence_boost_manual = 0.1
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert abs(result_conf - 0.8) < 0.001  # 0.7 + 0.1
+        assert "manual caption boost" in reason
+        assert "+0.10" in reason
+
+    def test_manual_caption_boost_capped_at_1(self, mock_config, sample_video_segment):
+        """Test boost doesn't exceed 1.0"""
+        confidence = 0.95
+        sample_video_segment.transcript_source = "manual_caption"
+
+        mock_config.download = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.confidence_boost_manual = 0.1
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert result_conf == 1.0  # Capped at 1.0
+        assert "manual caption boost" in reason
+
+    def test_manual_caption_boost_zero_config(self, mock_config, sample_video_segment):
+        """Test no boost when configured to 0"""
+        confidence = 0.7
+        sample_video_segment.transcript_source = "manual_caption"
+
+        mock_config.download = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.confidence_boost_manual = 0.0
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_manual_caption_boost_missing_config(self, sample_video_segment):
+        """Test default boost when caption config is missing"""
+        confidence = 0.7
+        sample_video_segment.transcript_source = "manual_caption"
+
+        # Config without download.caption_first
+        config = Mock()
+        config.download = None
+
+        result_conf, reason = scoring.apply_caption_boost(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # Default boost should be 0.1
+        assert abs(result_conf - 0.8) < 0.001
+        assert "manual caption boost" in reason

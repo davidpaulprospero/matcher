@@ -4,8 +4,15 @@ Download Stage - Video and Audio Download
 Stage 2 of the video matching pipeline:
 - Downloads videos from YouTube based on keywords
 - Supports audio-first mode for efficient matching
+- Supports caption-first mode (only downloads uncaptioned videos)
 - Handles global cache reuse
 - Downloads video segments after matching (audio-first)
+
+In caption-first mode, this stage runs AFTER VIDEO_METADATA and CAPTION stages:
+  VIDEO_METADATA -> CAPTION -> DOWNLOAD (only uncaptioned) -> TRANSCRIBE (only uncaptioned)
+
+Videos that have captions (has_captions=True in video_candidates) are skipped,
+as they already have transcripts from the CAPTION stage.
 """
 
 from __future__ import annotations
@@ -32,11 +39,16 @@ class DownloadStage(Stage):
     Inputs:
         - state.keywords: List of keywords to search for
         - state.topic_context: Topic for search refinement
+        - state.videos_need_audio: List of video IDs needing Whisper fallback (caption-first mode)
+        - state.video_candidates: List of VideoCandidate (caption-first mode)
 
     Outputs:
         - state.downloaded_videos: List of DownloadedVideo
         - state.downloaded_audio: List of AudioDownload (audio-first mode)
         - state.failed_keywords: List of failed keywords
+
+    In caption-first mode, only downloads audio for videos in state.videos_need_audio
+    (those without captions that need Whisper transcription).
     """
 
     name = "DOWNLOAD"
@@ -61,6 +73,10 @@ class DownloadStage(Stage):
                 logger.info("Skipping DOWNLOAD stage (config: skip_download=true)")
                 self._load_existing_videos(state, config)
                 return StageResult.ok({'skipped': True}, warnings)
+
+            # Check if caption-first mode
+            if self._is_caption_first_enabled(config):
+                return self._run_caption_first_download(state, config, checkpoint, warnings)
 
             # Check if audio-first mode
             if self._is_audio_first_enabled(config):
@@ -284,6 +300,201 @@ class DownloadStage(Stage):
         except ImportError as e:
             return StageResult.fail(f"Could not import downloader: {e}", warnings)
 
+    def _run_caption_first_download(
+        self,
+        state: 'PipelineState',
+        config: 'Config',
+        checkpoint: 'CheckpointManager',
+        warnings: List[str]
+    ) -> StageResult:
+        """
+        Run caption-first download mode.
+
+        Only downloads audio for videos that don't have captions
+        (those in state.videos_need_audio).
+        """
+        print(f"\n  --- Stage 2: DOWNLOAD (Caption-First Mode) ---")
+
+        # Check if there are any videos needing audio download
+        if not state.videos_need_audio:
+            captioned_count = len([vc for vc in state.video_candidates if vc.has_captions])
+            print(f"  >> All {captioned_count} videos have captions - no download needed!")
+            logger.info(f"Caption-first: All {captioned_count} videos have captions, skipping download")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'all_videos_have_captions',
+                'captioned_count': captioned_count,
+            }, warnings)
+
+        print(f"  >> {len(state.videos_need_audio)} videos need audio download (no captions)")
+        logger.info(f"Caption-first: {len(state.videos_need_audio)} videos need audio fallback")
+
+        try:
+            from ..downloader import VideoDownloader
+            from ..state import AudioDownload
+
+            self.downloader = VideoDownloader(config=config)
+            output_dir = Path(config.downloaded_videos_dir)
+
+            # Build lookup of video candidates by video_id
+            candidate_lookup = {vc.video_id: vc for vc in state.video_candidates}
+
+            all_audio_downloads = []
+            total_videos = len(state.videos_need_audio)
+            failed_videos = []
+
+            for idx, video_id in enumerate(state.videos_need_audio, 1):
+                candidate = candidate_lookup.get(video_id)
+                if not candidate:
+                    logger.warning(f"Video candidate not found for {video_id}")
+                    continue
+
+                print(f"\n  [{idx}/{total_videos}] {video_id}: {candidate.title[:50]}...")
+
+                try:
+                    # Download audio for this specific video
+                    audio_download = self._download_audio_for_video(
+                        video_id=video_id,
+                        url=candidate.url,
+                        title=candidate.title,
+                        keyword=candidate.keyword,
+                        output_dir=output_dir,
+                        config=config
+                    )
+
+                    if audio_download:
+                        all_audio_downloads.append(audio_download)
+                        print(f"    ✓ Downloaded audio")
+                    else:
+                        failed_videos.append(video_id)
+                        print(f"    ✗ Failed to download")
+
+                except Exception as e:
+                    logger.error(f"Audio download failed for '{video_id}': {e}")
+                    failed_videos.append(video_id)
+
+            # Store results
+            state.downloaded_audio = all_audio_downloads
+
+            if failed_videos:
+                warnings.append(f"{len(failed_videos)} videos failed to download audio")
+                print(f"\n  ! {len(failed_videos)} videos failed")
+
+            print(f"\n  + Downloaded {len(all_audio_downloads)} audio files (caption fallback)")
+
+            checkpoint_data = {
+                'audio_downloads': [
+                    self._audio_to_dict(ad) for ad in all_audio_downloads
+                ],
+                'failed_videos': failed_videos,
+                'audio_count': len(all_audio_downloads),
+                'mode': 'caption_first_fallback',
+            }
+
+            return StageResult.ok(checkpoint_data, warnings)
+
+        except ImportError as e:
+            return StageResult.fail(f"Could not import downloader: {e}", warnings)
+
+    def _download_audio_for_video(
+        self,
+        video_id: str,
+        url: str,
+        title: str,
+        keyword: str,
+        output_dir: Path,
+        config: 'Config'
+    ) -> Optional['AudioDownload']:
+        """Download audio for a specific video by URL."""
+        from ..state import AudioDownload
+        import subprocess
+        import os
+
+        # Create output directory for this keyword
+        keyword_dir = output_dir / f"{keyword.replace(' ', '_')}_audio"
+        keyword_dir.mkdir(parents=True, exist_ok=True)
+
+        # Output filename
+        output_file = keyword_dir / f"{video_id}.mp3"
+
+        # Skip if already downloaded
+        if output_file.exists():
+            logger.info(f"Audio already exists: {output_file}")
+            return AudioDownload(
+                file=str(output_file),
+                url=url,
+                video_id=video_id,
+                title=title,
+                duration=0.0,
+                keyword=keyword
+            )
+
+        # Build yt-dlp command for audio extraction
+        cmd = [
+            'yt-dlp',
+            url,
+            '-x',  # Extract audio
+            '--audio-format', 'mp3',
+            '--audio-quality', '192K',
+            '-o', str(output_file),
+            '--no-playlist',
+            '--no-warnings',
+        ]
+
+        # Add base args (JS runtime for challenge solving) and cookies
+        from ..downloader.utils import get_cookies_args, get_ytdlp_base_args
+        cmd.extend(get_ytdlp_base_args())
+        cmd.extend(get_cookies_args(config))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                encoding='utf-8',
+                errors='ignore',
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+
+            if result.returncode == 0 and output_file.exists():
+                # Get duration from file
+                duration = self._get_audio_duration(output_file)
+
+                return AudioDownload(
+                    file=str(output_file),
+                    url=url,
+                    video_id=video_id,
+                    title=title,
+                    duration=duration,
+                    keyword=keyword
+                )
+            else:
+                logger.warning(f"yt-dlp failed for {video_id}: {result.stderr[:200] if result.stderr else 'unknown'}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout downloading audio for {video_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error downloading audio for {video_id}: {e}")
+            return None
+
+    def _get_audio_duration(self, audio_file: Path) -> float:
+        """Get duration of audio file using ffprobe."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', str(audio_file)],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            return float(result.stdout.strip()) if result.stdout.strip() else 0.0
+        except Exception:
+            return 0.0
+
     def _run_audio_first(
         self,
         state: 'PipelineState',
@@ -359,6 +570,14 @@ class DownloadStage(Stage):
         """Check if audio-first mode is enabled"""
         audio_config = getattr(config.download, 'audio_first', None)
         return audio_config and getattr(audio_config, 'enabled', False)
+
+    def _is_caption_first_enabled(self, config: 'Config') -> bool:
+        """Check if caption-first mode is enabled"""
+        caption_config = getattr(config.download, 'caption_first', None)
+        # Handle both dict and object config patterns (Rule 6)
+        if isinstance(caption_config, dict):
+            return caption_config.get('enabled', False)
+        return caption_config and getattr(caption_config, 'enabled', False)
 
     def _init_global_cache(self, config: 'Config'):
         """Initialize global cache manager if enabled"""
@@ -561,8 +780,14 @@ class DownloadVideoSegmentsStage(Stage):
         warnings = []
 
         try:
-            # Check if we have audio downloads (audio-first mode indicator)
+            # Check which mode we're in
             has_audio = state.downloaded_audio and len(state.downloaded_audio) > 0
+            has_video_candidates = state.video_candidates and len(state.video_candidates) > 0
+            is_caption_first = self._is_caption_first_enabled(config) and has_video_candidates
+
+            # Caption-first mode: download segments for YouTube videos matched via captions
+            if is_caption_first:
+                return self._run_caption_first_segments(state, config, checkpoint, warnings)
 
             # Edge case: skip_download=true BUT we have audio files
             # This means user interrupted audio-first pipeline before video download
@@ -854,7 +1079,8 @@ class DownloadVideoSegmentsStage(Stage):
     def restore(
         self,
         state: 'PipelineState',
-        checkpoint: 'CheckpointManager'
+        checkpoint: 'CheckpointManager',
+        config: 'Config' = None
     ) -> bool:
         """Restore from checkpoint"""
         # Segment files are on disk, no state to restore
@@ -866,11 +1092,247 @@ class DownloadVideoSegmentsStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs"""
-        # Skip validation if not in audio-first mode
+        # Skip validation if not in audio-first or caption-first mode
         # (stage will skip itself in run())
-        if config.pipeline.skip_download or not state.downloaded_audio:
+        has_audio = state.downloaded_audio and len(state.downloaded_audio) > 0
+        has_video_candidates = state.video_candidates and len(state.video_candidates) > 0
+        is_caption_first = self._is_caption_first_enabled(config) and has_video_candidates
+
+        if config.pipeline.skip_download or (not has_audio and not is_caption_first):
             return None
 
         if not state.matches:
             return "No matches available for segment download"
         return None
+
+    def _is_caption_first_enabled(self, config: 'Config') -> bool:
+        """Check if caption-first mode is enabled"""
+        caption_config = getattr(config.download, 'caption_first', None)
+        # Handle both dict and object config patterns (Rule 6)
+        if isinstance(caption_config, dict):
+            return caption_config.get('enabled', False)
+        return caption_config and getattr(caption_config, 'enabled', False)
+
+    def _run_caption_first_segments(
+        self,
+        state: 'PipelineState',
+        config: 'Config',
+        checkpoint: 'CheckpointManager',
+        warnings: List[str]
+    ) -> StageResult:
+        """
+        Download video segments for caption-first mode.
+
+        In caption-first mode, videos were never fully downloaded. Matching was done
+        against caption transcripts. Now we download only the matched segments.
+        """
+        if not state.matches:
+            return StageResult.fail("No matches - run matching first", warnings)
+
+        print(f"\n  --- Stage: DOWNLOAD VIDEO SEGMENTS (Caption-First) ---")
+
+        from ..downloader import (
+            VideoDownloader,
+            collect_matched_segments_caption_first,
+            prepare_merged_segments_caption_first,
+        )
+
+        # Get caption-first config
+        caption_config = getattr(config.download, 'caption_first', None)
+        buffer_seconds = getattr(caption_config, 'segment_buffer_seconds', 5.0)
+        merge_gap = getattr(caption_config, 'merge_gap_seconds', 10.0)
+
+        print(f"  Downloading matched video segments")
+        print(f"    Buffer: {buffer_seconds}s, Merge gap: {merge_gap}s")
+
+        # Build video candidates lookup by ID
+        video_candidates_by_id = {
+            vc.video_id: vc for vc in state.video_candidates
+        }
+
+        # Collect matched segments from caption-first matches
+        segments_by_video = collect_matched_segments_caption_first(
+            state.matches,
+            video_candidates_by_id
+        )
+
+        total_matches = sum(len(segs) for segs in segments_by_video.values())
+        print(f"    Matched segments: {total_matches} across {len(segments_by_video)} videos")
+
+        if not segments_by_video:
+            print("  ! No YouTube video segments to download (may be all B-roll/stock)")
+            logger.info("Caption-first: No YouTube segments to download")
+            return StageResult.ok({'skipped': True, 'reason': 'no_youtube_segments'}, warnings)
+
+        # Merge segments with buffer
+        merged_segments = prepare_merged_segments_caption_first(
+            segments_by_video,
+            video_candidates_by_id,
+            buffer_seconds=buffer_seconds,
+            merge_gap_seconds=merge_gap
+        )
+
+        print(f"    After merge: {len(merged_segments)} segments to download")
+
+        # Download segments
+        self.downloader = VideoDownloader(config=config)
+        output_dir = Path(config.downloaded_videos_dir)
+
+        downloaded_segments = self.downloader.audio_first.download_video_segments(
+            merged_segments,
+            output_dir,
+            progress_callback=None
+        )
+
+        print(f"\n  + Downloaded {len(downloaded_segments)} video segments")
+
+        # Update Match objects to reference downloaded video segments
+        self._remap_matches_caption_first(state, downloaded_segments, video_candidates_by_id)
+
+        checkpoint_data = {
+            'segment_count': len(downloaded_segments),
+            'total_matches': total_matches,
+            'mode': 'caption_first',
+        }
+
+        return StageResult.ok(checkpoint_data, warnings)
+
+    def _remap_matches_caption_first(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List,
+        video_candidates_by_id: dict
+    ) -> None:
+        """
+        Update Match objects to reference downloaded video segment files.
+
+        In caption-first mode, matches initially reference video_ids (not file paths).
+        After downloading segments, we remap them to actual .mp4 files.
+
+        CRITICAL: Match objects have video_segment.source_file, NOT video_file!
+        """
+        from ..downloader.types import DownloadedSegment
+        from ..downloader.segment_utils import _extract_video_id
+
+        # Build mapping: (video_id, start_time) -> segment_file
+        segment_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            for match in seg.matches:
+                key = (video_id, match.start_time)
+                segment_map[key] = (seg.file, seg.original_start)
+
+        # Update all Match objects and alternatives/secondary matches
+        updated_count = 0
+
+        for match_result in state.matches:
+            # Extract the actual Match object (may be wrapped in MatchResult)
+            if hasattr(match_result, 'primary_match'):
+                # MatchResult wrapper
+                match = match_result.primary_match
+            else:
+                # Direct Match object
+                match = match_result
+
+            # Match objects have video_segment.source_file, not video_file
+            if not hasattr(match, 'video_segment') or not match.video_segment:
+                continue
+
+            # In caption-first mode, source_file is video_id or contains it
+            video_id = _extract_video_id(match.video_segment.source_file)
+            if not video_id:
+                continue
+
+            # Look up segment file
+            key = (video_id, match.video_segment.start_time)
+            if key in segment_map:
+                segment_file, original_start = segment_map[key]
+                old_ref = match.video_segment.source_file
+                match.video_segment.source_file = segment_file
+                # Adjust video timings to be relative to segment file
+                # match.video_segment.start_time -= original_start
+                # match.video_segment.end_time -= original_start
+                logger.debug(f"Remapped: {old_ref} -> {segment_file}")
+                updated_count += 1
+
+            # Also remap alternatives if they exist
+            if hasattr(match_result, 'alternatives'):
+                for alt in match_result.alternatives:
+                    if hasattr(alt, 'video_segment') and alt.video_segment:
+                        video_id = _extract_video_id(alt.video_segment.source_file)
+                        if video_id:
+                            key = (video_id, alt.video_segment.start_time)
+                            if key in segment_map:
+                                segment_file, _ = segment_map[key]
+                                alt.video_segment.source_file = segment_file
+                                updated_count += 1
+
+            # Also remap secondary matches if they exist
+            if hasattr(match_result, 'secondary_matches'):
+                for sec in match_result.secondary_matches:
+                    if hasattr(sec, 'video_segment') and sec.video_segment:
+                        video_id = _extract_video_id(sec.video_segment.source_file)
+                        if video_id:
+                            key = (video_id, sec.video_segment.start_time)
+                            if key in segment_map:
+                                segment_file, _ = segment_map[key]
+                                sec.video_segment.source_file = segment_file
+                                updated_count += 1
+
+        # Also remap transcript keys from video_id to actual file paths
+        self._remap_transcript_keys(state, downloaded_segments)
+
+        logger.info(f"Remapped {updated_count} match video references to segment files")
+        print(f"  + Updated {updated_count} match references to video segments")
+
+    def _remap_transcript_keys(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List
+    ) -> None:
+        """
+        Remap transcript dictionary keys from video_id to actual file paths.
+
+        In caption-first mode, transcripts are initially keyed by video_id.
+        After downloading segments, we need to remap them to actual file paths
+        so OTIO generation can find the transcripts.
+        """
+        from ..downloader.segment_utils import _extract_video_id
+
+        # Build mapping: video_id -> set of file paths
+        video_id_to_files = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            if video_id not in video_id_to_files:
+                video_id_to_files[video_id] = set()
+            video_id_to_files[video_id].add(seg.file)
+
+        # Remap transcript keys
+        new_transcripts = {}
+        remapped_count = 0
+
+        for key, segments in state.transcripts.items():
+            # Check if this key is a video_id
+            video_id = _extract_video_id(key)
+
+            # If we have downloaded files for this video_id, remap to the first file
+            if video_id and video_id in video_id_to_files:
+                # Use the first file as the canonical key
+                file_paths = list(video_id_to_files[video_id])
+                new_key = file_paths[0]
+
+                # Add transcript for all downloaded files from this video
+                for file_path in file_paths:
+                    new_transcripts[file_path] = segments
+
+                # Keep the old video_id key for backward compatibility
+                new_transcripts[video_id] = segments
+
+                logger.debug(f"Remapped transcript key: {key} -> {new_key} (and {len(file_paths)-1} other segments)")
+                remapped_count += 1
+            else:
+                # Not a video_id or no downloaded files, keep as is
+                new_transcripts[key] = segments
+
+        state.transcripts = new_transcripts
+        logger.info(f"Remapped {remapped_count} transcript keys to file paths")

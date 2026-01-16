@@ -220,6 +220,8 @@ def create_default_pipeline(
     from .stages.analyze import AnalyzeStage
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
+    from .stages.video_metadata import VideoMetadataStage
+    from .stages.caption import CaptionStage
     from .stages.download import DownloadStage, DownloadVideoSegmentsStage
     from .stages.stock import StockVideoStage
     from .stages.broll_download import BrollDownloadStage
@@ -230,21 +232,33 @@ def create_default_pipeline(
     from .stages.broll_match import BrollMatchStage
     from .stages.output import OutputStage
 
-    # Add stages in STAGE_ORDER
+    # Add stages in STAGE_ORDER (matches checkpoint.py)
+    # Caption-first flow: VIDEO_METADATA -> CAPTION -> DOWNLOAD (only uncaptioned)
     pipeline.add_stage(AnalyzeStage())
     pipeline.add_stage(EntityImagesStage())
     pipeline.add_stage(EntityVideosStage())
-    pipeline.add_stage(DownloadStage())
+    pipeline.add_stage(VideoMetadataStage())  # Caption-first: fetch video URLs/metadata
+    pipeline.add_stage(CaptionStage())        # Caption-first: fetch YouTube captions
+    pipeline.add_stage(DownloadStage())       # In caption-first: only uncaptioned videos
     pipeline.add_stage(StockVideoStage())
     pipeline.add_stage(BrollDownloadStage())  # B-roll specific downloads
     pipeline.add_stage(RemixStage())
-    pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(TranscribeStage())     # In caption-first: only uncaptioned videos
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())  # Match silent scenes for V8 track
 
-    # Audio-first mode adds video segment download after matching
-    if audio_first_mode:
+    # Caption-first and audio-first modes download video segments after matching
+    # (videos are only fully downloaded once we know which segments are needed)
+    caption_first_enabled = False
+    caption_config = getattr(config.download, 'caption_first', None)
+    # Handle both dict and object config patterns (Rule 6)
+    if isinstance(caption_config, dict):
+        caption_first_enabled = caption_config.get('enabled', False)
+    elif caption_config:
+        caption_first_enabled = getattr(caption_config, 'enabled', False)
+
+    if audio_first_mode or caption_first_enabled:
         pipeline.add_stage(DownloadVideoSegmentsStage())
 
     pipeline.add_stage(OutputStage())
@@ -274,7 +288,9 @@ def create_match_only_pipeline(
     from .stages.analyze import AnalyzeStage
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
-    from .stages.download import DownloadStage
+    from .stages.video_metadata import VideoMetadataStage
+    from .stages.caption import CaptionStage
+    from .stages.download import DownloadStage, DownloadVideoSegmentsStage
     from .stages.stock import StockVideoStage
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
@@ -285,19 +301,35 @@ def create_match_only_pipeline(
     from .stages.output import OutputStage
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
+    # Order matches STAGE_ORDER in checkpoint.py
     pipeline.add_stage(AnalyzeStage())
-    pipeline.add_stage(EntityImagesStage())  # For V9 track
-    pipeline.add_stage(EntityVideosStage())  # For V10 track
+    pipeline.add_stage(EntityImagesStage())    # For V9 track
+    pipeline.add_stage(EntityVideosStage())    # For V10 track
+    pipeline.add_stage(VideoMetadataStage())   # Caption-first: video metadata
+    pipeline.add_stage(CaptionStage())         # Caption-first: fetch YouTube captions
     pipeline.add_stage(DownloadStage())
-    pipeline.add_stage(StockVideoStage())    # For general B-roll
-    pipeline.add_stage(BrollDownloadStage()) # B-roll specific downloads
-    pipeline.add_stage(RemixStage())         # Filter videos by relevance
+    pipeline.add_stage(StockVideoStage())      # For general B-roll
+    pipeline.add_stage(BrollDownloadStage())   # B-roll specific downloads
+    pipeline.add_stage(RemixStage())           # Filter videos by relevance
     pipeline.add_stage(TranscribeStage())
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
 
     # Add stages to actually run
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())    # Match silent scenes for V8 track
+
+    # Caption-first mode: download video segments AFTER matching
+    # (videos were matched against captions, now need actual video files)
+    caption_first_enabled = False
+    caption_config = getattr(config.download, 'caption_first', None)
+    if isinstance(caption_config, dict):
+        caption_first_enabled = caption_config.get('enabled', False)
+    elif caption_config:
+        caption_first_enabled = getattr(caption_config, 'enabled', False)
+
+    if caption_first_enabled:
+        pipeline.add_stage(DownloadVideoSegmentsStage())
+
     pipeline.add_stage(OutputStage())
 
     return pipeline

@@ -45,6 +45,8 @@ class TranscriptSegment:
     # B-roll/silent video attributes
     is_broll: bool = False  # True if this is a silent/B-roll video segment
     description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+    # Transcript source tracking for caption-first mode
+    transcript_source: str = ""  # 'whisper', 'manual_caption', 'auto_caption', 'metadata'
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -77,6 +79,83 @@ class AudioDownload:
     title: str = ""
     duration: float = 0.0
     keyword: str = ""
+
+
+@dataclass
+class CaptionDownload:
+    """Metadata for downloaded caption (caption-first mode)"""
+    file: str  # Path to downloaded .srt file
+    video_id: str
+    url: str = ""
+    title: str = ""
+    duration: float = 0.0
+    keyword: str = ""
+    language: str = "en"
+    is_auto_generated: bool = True  # False for manual captions
+
+
+@dataclass
+class VideoCandidate:
+    """
+    Video metadata before download decision (caption-first mode).
+
+    In caption-first mode, we fetch video metadata and captions BEFORE
+    downloading any media. This allows us to:
+    1. Fetch captions for all candidate videos
+    2. Only download audio for videos without captions (Whisper fallback)
+    3. Match against caption transcripts
+    4. Download only matched video segments
+
+    This dramatically reduces bandwidth and processing time since most
+    YouTube videos have captions available.
+    """
+    video_id: str
+    url: str
+    title: str = ""
+    channel: str = ""
+    duration: float = 0.0
+    duration_tier: str = ""
+    keyword: str = ""
+    upload_date: str = ""
+    # Caption state (populated by CAPTION stage)
+    has_captions: bool = False
+    caption_language: str = ""
+    is_auto_caption: bool = True
+    # Transcript source after processing
+    transcript_source: str = ""  # 'manual_caption', 'auto_caption', 'whisper', ''
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'video_id': self.video_id,
+            'url': self.url,
+            'title': self.title,
+            'channel': self.channel,
+            'duration': self.duration,
+            'duration_tier': self.duration_tier,
+            'keyword': self.keyword,
+            'upload_date': self.upload_date,
+            'has_captions': self.has_captions,
+            'caption_language': self.caption_language,
+            'is_auto_caption': self.is_auto_caption,
+            'transcript_source': self.transcript_source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'VideoCandidate':
+        return cls(
+            video_id=data.get('video_id', ''),
+            url=data.get('url', ''),
+            title=data.get('title', ''),
+            channel=data.get('channel', ''),
+            duration=data.get('duration', 0.0),
+            duration_tier=data.get('duration_tier', ''),
+            keyword=data.get('keyword', ''),
+            upload_date=data.get('upload_date', ''),
+            has_captions=data.get('has_captions', False),
+            caption_language=data.get('caption_language', ''),
+            is_auto_caption=data.get('is_auto_caption', True),
+            transcript_source=data.get('transcript_source', ''),
+        )
 
 
 @dataclass
@@ -127,12 +206,20 @@ class PipelineState:
     topic_context: str = ""
     extracted_entities: List[Dict[str, Any]] = field(default_factory=list)
 
+    # === VIDEO METADATA STATE (caption-first mode) ===
+    # Video candidates discovered before download decision
+    video_candidates: List[VideoCandidate] = field(default_factory=list)
+
     # === DOWNLOAD STATE ===
     downloaded_videos: List[DownloadedVideo] = field(default_factory=list)
     downloaded_audio: List[AudioDownload] = field(default_factory=list)
     failed_keywords: List[str] = field(default_factory=list)
     global_cache_videos: List[Dict[str, Any]] = field(default_factory=list)
     remix_files: List[str] = field(default_factory=list)  # Video paths from REMIX stage
+
+    # === CAPTION STATE (caption-first mode) ===
+    caption_downloads: List[CaptionDownload] = field(default_factory=list)
+    videos_need_audio: List[str] = field(default_factory=list)  # Video IDs needing Whisper fallback
 
     # === ENTITY MEDIA STATE ===
     entity_images: Dict[str, EntityImage] = field(default_factory=dict)

@@ -31,11 +31,16 @@ from .utils import (
     text_hash
 )
 from .types import CacheStats, CacheConfig
+from .caption import CaptionCache, CaptionCacheEntry
 
 __all__ = [
     # Base classes
     'BaseCache',
     'CacheEntry',
+
+    # Specialized caches
+    'CaptionCache',
+    'CaptionCacheEntry',
 
     # Utilities
     'compute_hash',

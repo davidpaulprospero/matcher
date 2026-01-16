@@ -600,12 +600,19 @@ class LLMHealer(Healer):
                 if hasattr(section_config, '__dict__'):
                     for key, value in section_config.__dict__.items():
                         if not key.startswith('_'):
-                            lines.append(f"  {key}: {value}")
+                            # Format nested configs (like caption_first) specially
+                            if hasattr(value, '__dict__'):
+                                lines.append(f"  [{key}]")
+                                for nested_key, nested_val in value.__dict__.items():
+                                    if not nested_key.startswith('_'):
+                                        lines.append(f"    {nested_key}: {nested_val}")
+                            else:
+                                lines.append(f"  {key}: {value}")
                 elif isinstance(section_config, dict):
                     for key, value in section_config.items():
                         lines.append(f"  {key}: {value}")
 
-        return "\n".join(lines[:50])  # Limit lines
+        return "\n".join(lines[:60])  # Limit lines
 
     def _process_response(self, response: Any, error: Exception,
                          state: Optional['PipelineState'],
@@ -707,6 +714,10 @@ class LLMHealer(Healer):
     # Whitelist of config keys that LLM can safely modify
     # Format: "section.field" -> (min_value, max_value) for numeric, or allowed_values for string
     # None means any value is acceptable (for strings without restrictions)
+    #
+    # NOTE: Only 2-level deep paths (section.field) are supported for security.
+    # Nested configs like download.caption_first.* are handled by specialized healers
+    # (CaptionHealer) rather than LLMHealer to prevent prompt injection via deep paths.
     SAFE_CONFIG_KEYS: Dict[str, Any] = {
         # Download timeouts and retries
         "download.timeout": (5.0, 300.0),
