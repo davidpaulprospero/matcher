@@ -412,8 +412,9 @@ class MatchStage(Stage):
                 # FILTER: Skip caption-only videos (no actual file downloaded)
                 # Caption-first mode may have video_id-only entries without real files
                 if source_file and not Path(source_file).exists():
-                    # Check if this is a caption-only video (looks like a video ID)
-                    if len(source_file) == 11 and source_file.replace('_', '').isalnum():
+                    # Check if this is a caption-only video (looks like a YouTube video ID)
+                    # YouTube IDs are 11 characters, alphanumeric with optional hyphens/underscores
+                    if len(source_file) == 11 and source_file.replace('_', '').replace('-', '').isalnum():
                         logger.debug(f"Skipping caption-only video (no file): {source_file}")
                         skipped_caption_only += 1
                         continue
