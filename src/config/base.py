@@ -60,6 +60,7 @@ from .sections import (
     GlobalCacheConfig,
     PipelineConfig,
     APIKeysConfig,
+    HealingConfig,
     # Core
     ProjectConfig,
     PauseSplitConfig,
@@ -183,6 +184,7 @@ class Config:
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
     broll: BrollConfig = field(default_factory=BrollConfig)
+    healing: HealingConfig = field(default_factory=HealingConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -205,8 +207,28 @@ class Config:
     def __post_init__(self):
         """Initialize after dataclass creation"""
         self._loaded_at = datetime.now().isoformat()
+        self._convert_nested_configs()
         self._resolve_paths()
         self._populate_api_keys()
+
+    def _convert_nested_configs(self):
+        """Convert dict configs to dataclass instances (per Rule 2).
+
+        When loading from YAML, nested dataclass fields come in as dicts.
+        This method converts them to their proper dataclass types.
+
+        Also handles the case where a dataclass instance has nested dict
+        fields that need conversion (e.g., after merge_config updates).
+        """
+        # Import here to avoid circular imports
+        from .sections.infrastructure import HealingConfig
+
+        if isinstance(self.healing, dict):
+            self.healing = HealingConfig(**self.healing)
+        elif hasattr(self.healing, '__post_init__'):
+            # Re-run __post_init__ to convert any nested dicts
+            # (e.g., watcher dict -> WatcherConfig after merge)
+            self.healing.__post_init__()
 
     def _populate_api_keys(self):
         """Populate top-level API key aliases from api_keys config"""
@@ -341,6 +363,7 @@ class Config:
             'cache': (CacheConfig, 'cache'),
             'pipeline': (PipelineConfig, 'pipeline'),
             'api_keys': (APIKeysConfig, 'api_keys'),
+            'healing': (HealingConfig, 'healing'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():

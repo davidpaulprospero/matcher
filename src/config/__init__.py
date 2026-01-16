@@ -38,6 +38,7 @@ from .sections import (
     GlobalCacheConfig,
     PipelineConfig,
     APIKeysConfig,
+    HealingConfig,
     # Core
     ProjectConfig,
     PauseSplitConfig,
@@ -102,6 +103,7 @@ __all__ = [
     'GlobalCacheConfig',
     'PipelineConfig',
     'APIKeysConfig',
+    'HealingConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',

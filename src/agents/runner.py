@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
@@ -239,10 +240,12 @@ class ResilientRunner:
                 return result
 
             except Exception as e:
+                # Capture stack trace immediately while exception context is active
+                error_stack = traceback.format_exc()
                 logger.error(f"Stage {stage_name} raised exception: {e}")
 
-                # Try to heal
-                healed = self._try_heal(e, state, stage_name)
+                # Try to heal (pass stack trace for context)
+                healed = self._try_heal(e, state, stage_name, error_stack)
 
                 if not healed:
                     return StageResult.fail(str(e))
@@ -259,19 +262,26 @@ class ResilientRunner:
         self,
         error: Exception,
         state: 'PipelineState',
-        stage_name: str
+        stage_name: str,
+        error_stack: Optional[str] = None
     ) -> bool:
         """
         Attempt to heal an error.
 
         Uses orchestrator if available, otherwise uses direct healer calls.
 
+        Args:
+            error: The exception that occurred
+            state: Pipeline state
+            stage_name: Name of the stage that failed
+            error_stack: Pre-captured stack trace (captured at exception time)
+
         Returns:
             True if error was healed and stage should retry
         """
         # Use orchestrator for coordinated healing
         if self.orchestrator:
-            result = self.orchestrator.coordinate_heal(error, state, stage_name)
+            result = self.orchestrator.coordinate_heal(error, state, stage_name, error_stack)
 
             # Record in local history
             self.heal_history.append({

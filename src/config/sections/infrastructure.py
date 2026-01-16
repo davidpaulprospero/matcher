@@ -6,7 +6,8 @@ Extracted from monolithic config.py during refactoring (Jan 7, 2026).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 __all__ = [
     'LoggingConfig',
@@ -14,6 +15,10 @@ __all__ = [
     'GlobalCacheConfig',
     'PipelineConfig',
     'APIKeysConfig',
+    'HealingConfig',
+    'HealingLoggingConfig',
+    'WatcherConfig',
+    'LLMHealerConfig',
 ]
 
 
@@ -141,3 +146,108 @@ class APIKeysConfig:
         self.pexels_api_key = self.pexels_api_key or os.getenv("PEXELS_API_KEY", "")
         self.pixabay_api_key = self.pixabay_api_key or os.getenv("PIXABAY_API_KEY", "")
         self.unsplash_api_key = self.unsplash_api_key or os.getenv("UNSPLASH_API_KEY", "")
+
+
+@dataclass
+class HealingLoggingConfig:
+    """Logging settings for the healing system."""
+    enabled: bool = True
+    log_dir: str = "logs"
+    json_log: bool = True
+    console_format: str = "box"  # "box", "simple", "minimal"
+    include_prompts: bool = False  # Include full LLM prompts (verbose)
+    include_responses: bool = False  # Include full LLM responses (verbose)
+
+
+@dataclass
+class WatcherConfig:
+    """Configuration for the watcher agent (local LLM for error classification).
+
+    The watcher uses a local Ollama model for fast error triage,
+    deciding which healer to try first and whether to escalate to LLM healer.
+    """
+    enabled: bool = True
+    provider: str = "ollama"  # ollama, anthropic, gemini
+    model: str = "llama3.2"   # Local model for fast triage
+    fallback_model: str = "llama3.1"  # Try if primary unavailable
+    host: str = "http://localhost:11434"  # Ollama server URL
+    timeout: float = 30.0  # Max time for classification
+    escalate_threshold: float = 0.7  # Confidence below this escalates to LLM healer
+    max_failures: int = 3  # Disable after N consecutive failures
+    recheck_interval_seconds: float = 300.0  # Re-check availability every 5 min
+    warmup_on_preflight: bool = True  # Pre-warm model during preflight
+
+
+@dataclass
+class LLMHealerConfig:
+    """Configuration for the LLM healer (Claude for complex error analysis).
+
+    The LLM healer uses Claude (or fallback providers) to analyze errors
+    that standard pattern-based healers cannot handle.
+    """
+    enabled: bool = True
+    provider: str = "anthropic"  # anthropic, gemini, ollama
+    model: str = "claude-sonnet-4-20250514"  # Claude Sonnet for cost-effectiveness
+    max_tokens: int = 4096
+    timeout: float = 60.0
+    max_retries: int = 3  # Self-heal retries before giving up
+    include_stack_trace: bool = True  # Include stack trace in context
+    include_config_context: bool = True  # Include relevant config in context
+    include_file_snippets: bool = True  # Include code snippets in context
+    max_snippet_lines: int = 50  # Max lines of code per snippet
+    max_context_chars: int = 12000  # Max chars for LLM context (~3000 tokens)
+    recheck_interval_seconds: float = 300.0  # Re-check availability every 5 min
+    max_failures: int = 3  # Disable after N consecutive failures
+
+
+@dataclass
+class HealingConfig:
+    """Self-healing pipeline configuration.
+
+    Controls automatic error recovery during pipeline execution.
+    Healers detect specific error categories and attempt automatic fixes.
+
+    The two-tier LLM system consists of:
+    - Watcher (local Ollama): Fast error classification
+    - LLM Healer (Claude): Complex error analysis when standard healers fail
+    """
+    # Enable/disable self-healing
+    enabled: bool = True
+
+    # Healing strategy: aggressive, conservative, interactive, minimal
+    strategy: str = "conservative"
+
+    # Maximum heal attempts per stage
+    max_attempts_per_stage: int = 3
+
+    # Maximum total heals before giving up
+    max_total_heals: int = 20
+
+    # Delay between heal attempts (seconds)
+    heal_delay: float = 2.0
+
+    # Run preflight checks before pipeline
+    run_preflight: bool = True
+
+    # Auto-fix issues found in preflight
+    auto_fix_preflight: bool = True
+
+    # Enable config rollback on failure
+    enable_rollback: bool = True
+
+    # Print healing report after pipeline completes
+    print_report: bool = True
+
+    # Nested configs for two-tier LLM delegation
+    logging: HealingLoggingConfig = field(default_factory=HealingLoggingConfig)
+    watcher: WatcherConfig = field(default_factory=WatcherConfig)
+    llm_healer: LLMHealerConfig = field(default_factory=LLMHealerConfig)
+
+    def __post_init__(self):
+        """Convert dict configs to dataclass instances (per Rule 2)."""
+        if isinstance(self.logging, dict):
+            self.logging = HealingLoggingConfig(**self.logging)
+        if isinstance(self.watcher, dict):
+            self.watcher = WatcherConfig(**self.watcher)
+        if isinstance(self.llm_healer, dict):
+            self.llm_healer = LLMHealerConfig(**self.llm_healer)

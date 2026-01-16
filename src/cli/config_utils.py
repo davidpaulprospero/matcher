@@ -150,6 +150,9 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
             with open(project_config_path, 'r', encoding='utf-8') as f:
                 project_overrides = yaml.safe_load(f) or {}
             config = merge_config(config, project_overrides)
+            # Re-convert nested configs after merge (per Rule 2 - dicts need conversion)
+            if hasattr(config, '_convert_nested_configs'):
+                config._convert_nested_configs()
             # Re-resolve paths after merge to pick up video_source_dir
             config._resolve_paths()
         except Exception as e:

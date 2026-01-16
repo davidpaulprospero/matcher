@@ -256,12 +256,47 @@ class SceneDetectionStage(Stage):
             logger.info("  ! No transcripts to update")
             return
 
+        broll_set_count = 0  # Debug: count how many segments get is_broll=True
+        scene_data_matches = 0  # Debug: count videos with scene data
+
+        # Debug: log sample keys for troubleshooting
+        sample_transcript_keys = [Path(k).stem for k in list(state.transcripts.keys())[:3]]
+        sample_scene_keys = list(scene_data_dict.keys())[:3]
+        logger.info(f"  Sample transcript stems: {sample_transcript_keys}")
+        logger.info(f"  Sample scene_data keys: {sample_scene_keys}")
+
+        # Build a lookup that handles segment suffixes in scene_data keys
+        # Scene data keys may be like "video_id_0123" while transcript stems are just "video_id"
+        # Build mapping: base_video_id -> list of scene_data entries
+        scene_data_by_video_id: Dict[str, Any] = {}
+        for key, data in scene_data_dict.items():
+            # Try to extract base video ID (handle _XXXX segment suffix)
+            # YouTube IDs are 11 chars, but with underscore segment it becomes "ID_XXXX"
+            parts = key.rsplit('_', 1)
+            if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4:
+                base_id = parts[0]
+            else:
+                base_id = key
+            # Store the scene_data (use first if multiple segments)
+            if base_id not in scene_data_by_video_id:
+                scene_data_by_video_id[base_id] = data
+
         for video_path, segments in state.transcripts.items():
             video_name = Path(video_path).stem
-            scene_data = scene_data_dict.get(video_name)
+            # Try exact match first, then base ID match
+            scene_data = scene_data_dict.get(video_name) or scene_data_by_video_id.get(video_name)
+
+            # If still no match, try normalizing the transcript stem too
+            # (transcript may be like "video_id_0504" while scene_data is "video_id_0123")
+            if not scene_data:
+                parts = video_name.rsplit('_', 1)
+                if len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4:
+                    base_name = parts[0]
+                    scene_data = scene_data_dict.get(base_name) or scene_data_by_video_id.get(base_name)
 
             if not scene_data:
                 continue
+            scene_data_matches += 1
 
             # For each segment, find which scene it belongs to
             for segment in segments:
@@ -277,9 +312,13 @@ class SceneDetectionStage(Stage):
                             segment.is_broll = scene.is_broll
                             segment.face_score = scene.face_score
                             segment.scene_index = scene.scene_index
+                            if scene.is_broll:
+                                broll_set_count += 1
                         break
 
         logger.info(f"Merged scene metadata into {len(state.transcripts)} transcript sets")
+        logger.info(f"  Scene data found for {scene_data_matches}/{len(state.transcripts)} videos")
+        logger.info(f"  B-roll set on {broll_set_count} transcript segments")
 
         # Create text_metadata entries for silent videos (stock footage)
         # These videos have scene data but no transcripts, so we need to create
@@ -299,6 +338,23 @@ class SceneDetectionStage(Stage):
             broll_found = 0
             direct_updates = 0  # For videos with no transcripts
 
+            # Build video_name -> segments mapping (handles audio vs video path mismatch)
+            # state.transcripts keys might be audio paths (.mp3) while text_metadata
+            # has video paths (.mp4), so we normalize by video name (stem)
+            transcript_by_name: Dict[str, list] = {}
+            for path, segs in state.transcripts.items():
+                video_name = Path(path).stem
+                transcript_by_name[video_name] = segs
+
+            logger.info(f"  Built transcript lookup: {len(transcript_by_name)} videos")
+            # Debug: check if any transcripts have is_broll set
+            broll_in_transcripts = sum(
+                1 for segs in transcript_by_name.values()
+                for seg in segs
+                if getattr(seg, 'is_broll', False)
+            )
+            logger.info(f"  Transcripts with is_broll=True: {broll_in_transcripts}")
+
             for meta in state.text_metadata:
                 if not isinstance(meta, dict):
                     continue
@@ -307,8 +363,9 @@ class SceneDetectionStage(Stage):
                 if not video_path:
                     continue
 
-                # Try to find matching transcript segment first
-                segments = state.transcripts.get(video_path, [])
+                # Try to find matching transcript segment by video name (not full path)
+                video_name = Path(video_path).stem
+                segments = transcript_by_name.get(video_name, [])
                 matched = False
 
                 for transcript in segments:

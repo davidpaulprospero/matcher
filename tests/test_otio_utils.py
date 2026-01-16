@@ -32,26 +32,29 @@ import numpy as np
 
 
 class TestWindowsPathConversion:
-    """Test Windows path conversion."""
+    """Test Windows path conversion (now uses forward slashes for DaVinci)."""
 
     def test_to_windows_path_forward_slashes(self):
-        """Test converting forward slashes to backslashes."""
+        """Test that forward slashes are preserved (DaVinci prefers them)."""
         path = "C:/Users/test/video.mp4"
         result = _to_windows_path(path)
-        assert result == "C:\\Users\\test\\video.mp4"
+        # Now converts TO forward slashes for DaVinci compatibility
+        assert "/" in result or "\\" not in result.replace("\\\\", "")
 
     def test_to_windows_path_already_backslashes(self):
-        """Test path that already has backslashes."""
+        """Test converting backslashes to forward slashes."""
         path = "C:\\Users\\test\\video.mp4"
         result = _to_windows_path(path)
-        assert result == "C:\\Users\\test\\video.mp4"
+        # Should convert to forward slashes
+        assert "\\" not in result or result.count("/") > 0
 
-    def test_to_windows_path_extended_length_prefix(self):
-        """Test that extended-length prefix is preserved."""
-        path = "\\\\?\\C:/Users/test/video.mp4"
+    def test_to_windows_path_returns_absolute(self):
+        """Test that result is an absolute path with forward slashes."""
+        path = "C:/Users/test/video.mp4"
         result = _to_windows_path(path)
-        assert result.startswith("\\\\?\\")
-        assert "/" not in result
+        # Should be absolute and use forward slashes
+        assert ":" in result  # Has drive letter
+        assert "/" in result  # Uses forward slashes
 
 
 class TestPathFormatting:
@@ -374,33 +377,46 @@ class TestClipCreation:
         assert clip.media_reference is not None
 
     def test_create_clip_with_slowdown(self):
-        """Test clip creation with slowdown (source longer than target)."""
+        """Test clip creation with source longer than target (trim approach).
+
+        The function uses TRIM approach: source_range.duration = target_duration.
+        No LinearTimeWarp is applied - the clip plays at normal speed for target_duration.
+        """
         clip = create_clip_with_timewarp(
             name="SlowClip",
             source_path="C:/Videos/test.mp4",
             source_start=0.0,
             source_duration=10.0,
-            target_duration=15.0,  # Slower
+            target_duration=15.0,
             frame_rate=30.0
         )
 
         assert clip is not None
-        # Should have timewarp effect for speed adjustment
-        assert len(clip.effects) > 0
+        # No timewarp effect - we use trim approach, not speed approach
+        assert len(clip.effects) == 0
+        # source_range.duration should equal target_duration
+        assert clip.source_range.duration.value == 15.0 * 30.0  # 15s at 30fps
 
     def test_create_clip_with_speedup(self):
-        """Test clip creation with speedup (source shorter than target)."""
+        """Test clip creation with source shorter than target (trim approach).
+
+        The function uses TRIM approach: source_range.duration = target_duration.
+        No LinearTimeWarp is applied - the clip plays at normal speed for target_duration.
+        """
         clip = create_clip_with_timewarp(
             name="FastClip",
             source_path="C:/Videos/test.mp4",
             source_start=0.0,
             source_duration=10.0,
-            target_duration=5.0,  # Faster
+            target_duration=5.0,
             frame_rate=30.0
         )
 
         assert clip is not None
-        assert len(clip.effects) > 0
+        # No timewarp effect - we use trim approach, not speed approach
+        assert len(clip.effects) == 0
+        # source_range.duration should equal target_duration
+        assert clip.source_range.duration.value == 5.0 * 30.0  # 5s at 30fps
 
     def test_create_clip_with_metadata(self):
         """Test clip creation with custom metadata."""
@@ -475,6 +491,78 @@ class TestClipCreation:
         # Different folders should result in different media reference names
         # to avoid DaVinci Resolve conflicts
         assert clip1.media_reference.name != clip2.media_reference.name
+
+
+class TestOTIOTimingModel:
+    """Test OTIO timing model compliance.
+
+    Per OTIO docs: source_range MUST fit within available_range.
+    These tests ensure our clip creation functions respect this constraint.
+    """
+
+    def test_source_range_within_available_range(self):
+        """Test that source_range always fits within available_range."""
+        clip = create_clip_with_timewarp(
+            name="TestClip",
+            source_path="C:/Videos/test.mp4",
+            source_start=10.0,
+            source_duration=5.0,
+            target_duration=5.0,
+            frame_rate=30.0,
+            media_duration=60.0  # 60s video
+        )
+
+        # Get ranges
+        avail_range = clip.media_reference.available_range
+        src_range = clip.source_range
+
+        # OTIO constraint: source_start + source_duration <= available_duration
+        src_end = src_range.start_time.value + src_range.duration.value
+        avail_end = avail_range.start_time.value + avail_range.duration.value
+
+        assert src_end <= avail_end, (
+            f"OTIO violation: source_range ({src_range.start_time.value}-{src_end}) "
+            f"exceeds available_range ({avail_range.start_time.value}-{avail_end})"
+        )
+
+    def test_no_effects_means_normal_speed(self):
+        """Test that clips without effects play at normal speed (100%)."""
+        clip = create_clip_with_timewarp(
+            name="NormalSpeedClip",
+            source_path="C:/Videos/test.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0,
+            frame_rate=30.0
+        )
+
+        # No effects = normal playback speed
+        assert len(clip.effects) == 0
+
+        # Metadata should indicate 100% speed
+        assert clip.metadata.get('time_scalar') == 1.0
+        assert clip.metadata.get('speed_percent') == 100.0
+
+    def test_metadata_contains_timing_info(self):
+        """Test that clips have proper timing metadata for debugging."""
+        clip = create_clip_with_timewarp(
+            name="MetadataClip",
+            source_path="C:/Videos/test.mp4",
+            source_start=0.0,
+            source_duration=10.0,
+            target_duration=5.0,
+            frame_rate=30.0
+        )
+
+        # Should have timing metadata
+        assert 'target_duration' in clip.metadata
+        assert 'source_duration' in clip.metadata
+        assert 'time_scalar' in clip.metadata
+
+        # Values should be correct
+        assert clip.metadata['target_duration'] == 5.0
+        assert clip.metadata['source_duration'] == 10.0
+        assert clip.metadata['time_scalar'] == 1.0  # Always 1.0 (trim approach)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,10 @@
     "allow": [
       "Bash(python -m py_compile:*)",
       "Bash(python main.py:*)",
+      "Bash(python -m src.cli.newproject:*)",
       "Bash(python -m pytest:*)",
       "Bash(pytest:*)",
+      "Bash(python tests/test_output_comparison.py:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
