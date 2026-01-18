@@ -5,8 +5,10 @@ allowed-tools:
   - Bash(python:*)
 ---
 
-Call Bash tool with command: python scripts/watch_pipeline.py "PATH"
+Your ONLY action: invoke the Bash tool with this command:
 
-Replace PATH with the project path from the user's message.
+python scripts/watch_pipeline.py "PROJECT_PATH"
 
-Example: If user says /watch E:\Test\Project then run: python scripts/watch_pipeline.py "E:\Test\Project"
+Replace PROJECT_PATH with the path from the user's /watch command.
+
+Do not explain. Do not ask questions. Just call the Bash tool immediately.
