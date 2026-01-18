@@ -52,6 +52,12 @@ venv.bak/
 .env.production.local
 .env.save
 
+# --- Google Drive Authentication (CRITICAL) ---
+# OAuth tokens and credentials - NEVER commit these
+.matcher_drive_auth/
+credentials.json
+token.pickle
+
 # --- IDEs and Editors ---
 .vscode/
 .idea/
@@ -80,6 +86,8 @@ llm_context.txt
 !*SUMMARY.md
 !*SESSION*.md
 !docs/*.md
+!docs/**/*.md
+!.claude/skills/**/*.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
 *.zip

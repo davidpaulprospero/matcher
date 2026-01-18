@@ -54,7 +54,9 @@ python main.py --use-keywords mypreset
 | `/logcheck <project>` | Check project log for errors/warnings and fix them immediately |
 | `/match-only <project>` | Re-run matching and output generation (skips download/transcribe) |
 | `/newproject <name> <client> <doc_url>` | Create project, download voiceover from Google Doc links, start pipeline |
+| `/gdrive-download <url> <output> [--oauth]` | Download file from Google Drive (public or OAuth) |
 | `/validate-output [path]` | Validate output **structure** (OTIO/XML/EDL format, track layout) |
+| `/ollama-check` | Diagnose Ollama setup, check models, start server with correct path. Use for keyword mode script generation issues. |
 
 ```bash
 # Check project log and auto-fix issues
@@ -66,6 +68,12 @@ python main.py --use-keywords mypreset
 # Create new project with Google Doc voiceover links
 /newproject 67 Stu https://docs.google.com/document/d/1abc123/edit
 
+# Download from Google Drive (public file, no auth)
+/gdrive-download 'https://drive.google.com/open?id=1ABC...' voiceover.mp3
+
+# Download with OAuth (any file you have access to)
+/gdrive-download 'my_audio_file.mp3' voiceover.mp3 --oauth
+
 # Validate baseline itself
 /validate-output
 
@@ -74,12 +82,17 @@ python main.py --use-keywords mypreset
 
 # Validate project (auto-finds latest output)
 /validate-output E:/Edit Job/Project/MyDoc__2026-01-15
+
+# Check Ollama setup for keyword mode
+/ollama-check
 ```
 
 `/logcheck` reads latest run log, detects errors (downloads, API, OTIO), and applies fixes automatically.
 `/newproject` creates `E:\Edit Job\{client}\{month}\{name}__{date}`, downloads+combines Drive audio, starts pipeline.
 `/match-only` uses cached transcriptions/embeddings - fast iteration on matching settings.
+`/gdrive-download` supports URLs, file IDs, or file names; use `--oauth` for private files.
 `/validate-output` accepts output paths OR project paths (auto-resolves to latest output).
+`/ollama-check` verifies Ollama installation, starts server with `D:\ollama\models` path, lists available models.
 
 ## Refactoring Roadmap
 
@@ -109,6 +122,7 @@ When writing new code, prefer using modern abstractions:
 | `src/config.py` | Config dataclasses with defaults |
 | `src/state.py` | PipelineState + dataclasses (CANONICAL location) |
 | `src/llm_client/` | **Unified LLM abstraction** (Gemini, Anthropic, Ollama) |
+| `src/gdrive/` | Google Drive download utilities (OAuth + anonymous) |
 | `src/downloader.py` | Video/audio download logic |
 | `src/downloader/caption_fetcher.py` | YouTube caption fetching (yt-dlp) |
 | `src/matching.py` | Video-to-voiceover matching |
@@ -232,6 +246,34 @@ rm -rf .cache/transcriptions
 rm -rf .cache/scene_detection
 ```
 
+## Google Drive Utilities
+
+### Module: `src/gdrive/`
+
+Downloads voiceover and media files from Google Drive with two strategies:
+
+| Method | Module | Auth | Best For |
+|--------|--------|------|----------|
+| **Anonymous (gdown)** | `fallback_downloader.py` | None | Public Drive links |
+| **OAuth** | `oauth_downloader.py` | Browser | Private files, owned content |
+| **Unified** | `skill.py` | Auto-detect | CLI integration |
+
+**Usage in code:**
+```python
+from src.gdrive import gdown_download, oauth_download, get_drive_service
+
+# Anonymous download
+success = gdown_download('https://drive.google.com/open?id=1ABC...', 'output.mp3')
+
+# OAuth download (auto-detects file by ID, URL, or name)
+service = get_drive_service()  # Opens browser first time only
+success = oauth_download(service, 'my_file.mp3', 'output.mp3')
+```
+
+**Skill usage:** `/gdrive-download <url_or_id> <output> [--oauth]`
+
+**Credentials:** OAuth creds stored in `~/.matcher_drive_auth/` (never committed to repo)
+
 ## Configuration
 
 ### Config Access Pattern
@@ -292,27 +334,9 @@ healing:
   print_report: true         # Print healing summary after run
 ```
 
-**Strategies:**
+**Strategies:** `aggressive` (5/stage), `conservative` (3/stage, default), `interactive` (3/stage, asks user), `minimal` (1/stage, fail fast)
 
-| Strategy | Attempts | Behavior |
-|----------|----------|----------|
-| `aggressive` | 5/stage | Try everything, auto-fix, minimal interaction |
-| `conservative` | 3/stage | Safe fixes only, preserve user config (default) |
-| `interactive` | 3/stage | Ask user before major changes |
-| `minimal` | 1/stage | Fail fast, critical fixes only |
-
-**Usage in code:**
-```python
-from src.pipeline import create_healing_pipeline, run_pipeline_with_healing
-
-# Option 1: Get components for manual control
-pipeline, orchestrator, runner = create_healing_pipeline(config, project_dir)
-success = runner.run_pipeline(pipeline)
-orchestrator.print_report()
-
-# Option 2: One-liner convenience function
-success = run_pipeline_with_healing(config, project_dir)
-```
+**Usage:** `run_pipeline_with_healing(config, project_dir)` or see Self-Healing Agents section for manual control.
 
 ### Short Path Configuration (E:/v, E:/i)
 
@@ -370,6 +394,9 @@ image_search:
 | 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy arrays fail bool check |
 | 8 | B-roll propagation | SceneDetectionStage → text_metadata → MatchStage restores is_broll |
 | 9 | Test non-interactive | Tests invoking main.py MUST use `--non-interactive` to avoid prompt hangs |
+| 18 | Healer config updates | Use `getattr`/`setattr` - never replace config object |
+| 19 | HealerResult returns | `.fixed()` for retry, `.failed()` to abort |
+| 20 | Healer logging | Use `self.log_attempt()` and `self.log_success()` |
 
 ### Rule 10: LLM Client
 Use `src/llm_client/` for ALL LLM calls. Never directly initialize provider SDKs.
@@ -438,31 +465,9 @@ DaVinci Resolve caches OTIO import state by filename. Failed imports can corrupt
 | Many consecutive gaps in track | `optimize_timeline_gaps()` merges them automatically |
 | Trailing gaps after last clip | `optimize_track_gaps()` removes them automatically |
 
-**Gap optimization** is applied automatically at end of `create_timeline()`. Manual use:
-```python
-from src.otio.utils import optimize_timeline_gaps
-timeline = create_timeline(...)  # Already optimized
-# Or manually: optimize_timeline_gaps(timeline)
-```
+**Gap optimization** is applied automatically in `create_timeline()`. Manual: `optimize_timeline_gaps(timeline)` from `src/otio/utils`.
 
-**Files:** `src/otio/utils.py` (optimize functions), `src/otio/timeline.py` (auto-applies)
-
-### Rule 16: DaVinci OTIO Clip Count Limit
-DaVinci Resolve OTIO import hangs when total clips exceed **3130**.
-
-| Metric | Limit | Notes |
-|--------|-------|-------|
-| Total clips | 3130 | Across ALL tracks (video + audio) |
-| Clips per segment | ~200 | With 10 tracks × 2 (V+A) = 20 clips/segment |
-
-**Workarounds when over limit:**
-1. Generate `timeline_LITE.otio` with fewer tracks (V1-V3 only)
-2. Split into multiple OTIO files (Part 1, Part 2)
-3. Reduce alternatives per segment
-
-**Detection:** `create_timeline()` logs warning when approaching limit.
-
-### Rule 17: DaVinci OTIO Duplicate Media Paths
+### Rule 16: DaVinci OTIO Duplicate Media Paths
 DaVinci Resolve hangs when the same video file is referenced from **multiple different paths**.
 
 | Scenario | Example | Result |
@@ -479,14 +484,32 @@ DaVinci Resolve hangs when the same video file is referenced from **multiple dif
 
 **Files:** `src/otio/utils.py` (MediaPathNormalizer), `src/otio/timeline.py` (integration)
 
+### Rule 17: DaVinci OTIO Scale Limit & Auto-Splitting
+DaVinci Resolve crashes/hangs when importing OTIO timelines with 10k+ items. Auto-splitting solves this.
+
+| Item Count | Result | Solution |
+|------------|--------|----------|
+| < 3,000 | ✅ OK | No splitting needed |
+| 3,000-10,000 | ⚠️ Slow | Auto-split into 4 parts |
+| > 10,000 | ❌ Crash | Must use split parts |
+
+**Config:** `output.auto_split_threshold: 3000`, `output.split_parts: 4`, `output.always_generate_full: true`
+
+**Output:** Generates `timeline_PART1.otio` through `timeline_PART4.otio` (each has ALL tracks, subset of time range).
+
+**OTIO vs XML path handling:**
+- OTIO: DaVinci extracts filename only, searches configured directories (media often offline)
+- XML `<bin>`: Full `<pathurl>` paths, media links correctly
+
+**Workaround for offline media:** Import XML media bins first → populate Media Pool → then import OTIO timeline (auto-links).
+
+**Files:** `src/otio/export.py` (split_timeline_by_time_ranges), `src/config/sections/output.py`
+
 ### Testing Checklist
 
-- [ ] `python -m py_compile main.py`
-- [ ] `python -m py_compile src/config.py`
-- [ ] `python -m py_compile src/downloader.py`
-- [ ] `python -m py_compile src/matching.py`
-- [ ] Config in both `config.py` AND `config.yaml`
-- [ ] Nested configs have `__post_init__`
+Compile check: `python -m py_compile main.py src/config.py src/downloader.py src/matching.py`
+
+Also verify: Config in both `config.py` AND `config.yaml`, nested configs have `__post_init__`
 
 ### Output Structure Validation
 
@@ -611,27 +634,13 @@ vision:
 
 Location: `src/agents/` - Auto-recovery for pipeline errors.
 
-### Quick Start (Simple)
+### Quick Start
 
 ```python
-from src.agents import create_resilient_pipeline
-
-pipeline, runner = create_resilient_pipeline(config, project_dir)
-success = runner.run_pipeline(pipeline)
-runner.print_summary()
-```
-
-### Quick Start (With Orchestrator - Recommended)
-
-```python
-from src.agents import create_orchestrated_pipeline, HealingStrategy
-
-pipeline, orchestrator, runner = create_orchestrated_pipeline(
-    config, project_dir,
-    strategy=HealingStrategy.aggressive()
-)
-success = runner.run_pipeline(pipeline)
-orchestrator.print_report()
+# Simple: create_resilient_pipeline(config, project_dir) -> (pipeline, runner)
+# With orchestrator (recommended): create_orchestrated_pipeline(config, project_dir, strategy=HealingStrategy.aggressive())
+#   -> (pipeline, orchestrator, runner)
+# Then: runner.run_pipeline(pipeline); orchestrator.print_report()
 ```
 
 ### Healing Strategies
@@ -694,35 +703,11 @@ Coordinates all healers with:
 | **User escalation** | Asks user for critical decisions (interactive mode) |
 | **Metrics tracking** | Success rates, time spent, issues found/fixed |
 
-```python
-# Manual preflight check
-issues = orchestrator.run_preflight(pipeline.state)
-for issue in issues:
-    print(f"[{issue.severity}] {issue.message}")
-
-# Fix preflight issues
-fixed, remaining = orchestrator.fix_preflight_issues(issues, pipeline.state)
-
-# Get metrics after run
-metrics = orchestrator.get_metrics()
-print(metrics.summary())
-```
+**Manual preflight:** `orchestrator.run_preflight(state)` → list of issues, `orchestrator.fix_preflight_issues(issues, state)` → (fixed, remaining)
 
 ### Adding New Healers
 
-1. Create `src/agents/healers/my_healer.py`
-2. Extend `Healer` base class
-3. Set `error_patterns` and/or `exception_types`
-4. Implement `fix()` returning `HealerResult`
-5. Add to `HEALER_REGISTRY` in `src/agents/healers/__init__.py`
-
-### Healer Development Rules
-
-| Rule | Key Point |
-|------|-----------|
-| 18 | Healers update config via `getattr`/`setattr` - never replace config object |
-| 19 | Return `HealerResult.fixed()` for retry, `.failed()` to abort |
-| 20 | Log attempts with `self.log_attempt()`, success with `self.log_success()` |
+Create `src/agents/healers/my_healer.py`, extend `Healer`, set `error_patterns`/`exception_types`, implement `fix()` → `HealerResult`, add to `HEALER_REGISTRY`.
 
 ## Git Conventions
 
@@ -739,23 +724,7 @@ print(metrics.summary())
 - Refactors: `refactor/component-name`
 - Claude Code branches: `claude/auto-generated-name`
 
-**Workflow for major changes:**
-```bash
-# Create feature branch
-git checkout -b feature/pipeline-stages
-
-# Work and commit incrementally
-git add -A
-git commit -m "feat: Add AnalyzeStage class"
-
-# Push to remote
-git push -u origin feature/pipeline-stages
-
-# Create PR when ready
-gh pr create --title "Feature: Modular pipeline stages" --base main
-
-# After review and testing, merge to main via PR
-```
+**Workflow:** `git checkout -b feature/name` → commit incrementally → `git push -u origin feature/name` → `gh pr create --base main`
 
 **Commit prefixes:**
 - `feat:` - New features
@@ -769,11 +738,10 @@ gh pr create --title "Feature: Modular pipeline stages" --base main
 
 | Date | Changes |
 |------|---------|
+| 2026-01-19 | Keyword mode planning: `docs/plans/PLAN_KEYWORD_MODE.md` - pipeline without voiceover using Ollama for script synthesis |
+| 2026-01-19 | `/ollama-check` skill: Diagnose Ollama setup, verify models path `D:\ollama\models`, start server |
+| 2026-01-18 | OTIO auto-splitting (Rule 17): Split large timelines into 4 parts when items > 3000 to prevent DaVinci crash |
 | 2026-01-16 | Caption-first mode: `CaptionStage` fetches YouTube captions via yt-dlp, skips Whisper for captioned videos |
 | 2026-01-16 | Duplicate media paths fix (Rule 16): `MediaPathNormalizer` deduplicates same files in different folders |
 | 2026-01-16 | DaVinci caching fix (Rule 14): Rename OTIO files after fixing issues to bypass corrupted cache |
-| 2026-01-16 | Gap optimization: `optimize_timeline_gaps()` merges consecutive gaps, removes trailing gaps |
-| 2026-01-15 | OTIO unicode filter (Rule 13): Skip clips with non-ASCII paths causing DaVinci hang |
-| 2026-01-15 | `/validate-output` NLE importability: EDL CMX3600, XML XMEML, path compatibility, cross-file consistency |
-
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
