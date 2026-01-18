@@ -1,14 +1,12 @@
 ---
 name: watch
-description: Monitor pipeline progress. Auto-starts if not running.
+description: Monitor pipeline progress
 allowed-tools:
   - Bash(python:*)
 ---
 
-EXECUTE this Bash command NOW. Do not explain. Do not ask questions. Just run it:
+Call Bash tool with command: python scripts/watch_pipeline.py "PATH"
 
-```bash
-python scripts/watch_pipeline.py "{{PROJECT_PATH}}"
-```
+Replace PATH with the project path from the user's message.
 
-Replace `{{PROJECT_PATH}}` with the path the user provided.
+Example: If user says /watch E:\Test\Project then run: python scripts/watch_pipeline.py "E:\Test\Project"
