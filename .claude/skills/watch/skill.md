@@ -5,13 +5,12 @@ allowed-tools:
   - Bash(python:*)
 ---
 
-Your ONLY action: invoke the Bash tool with this command:
+Use the Bash tool. Do NOT use any MCP tools or IDE tools.
 
-python scripts/watch_pipeline.py "PROJECT_PATH"
+Command to run:
 
-Replace PROJECT_PATH with the path from the user's /watch command.
+python scripts/watch_pipeline.py "E:/Edit Job/Stu/January/16__2026-01-14"
 
-IMPORTANT: Convert backslashes to forward slashes in the path.
-Example: E:\Edit Job\Test becomes E:/Edit Job/Test
+Replace the path with the one from the user's /watch command. Use forward slashes.
 
-Do not explain. Do not ask questions. Just call the Bash tool immediately.
+Call Bash now. No explanations.
