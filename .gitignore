@@ -111,3 +111,16 @@ tests/fixtures/*.npz
 
 
 *-cwd
+
+# --- Test Output Directories ---
+# Local test runs that accumulate cache/logs
+test_*/
+*_test/
+
+# --- Client/Project-Specific Files ---
+# Client project directories (format: ClientCode_ProjectName)
+FE[0-9]*_*/
+# Employer/client instructions
+employer_instructions.txt
+client_notes.txt
+project_brief.txt

@@ -1,0 +1,200 @@
+# =============================================================================
+# COMPILATION VIDEO CONFIG
+# =============================================================================
+# For long-form compilation videos (9+ minutes) without voiceover
+# Voiceover/narration added later in NLE
+#
+# Usage:
+#   python main.py --keyword-list "topic1,topic2,topic3" --keyword-mode montage \
+#     --duration 600 --config config_compilation.yaml --project "path/to/project"
+#
+# Or copy to project folder as project_config.yaml for automatic loading
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# KEYWORD MODE - Montage for Compilations
+# -----------------------------------------------------------------------------
+keyword_mode:
+  enabled: true
+  mode: montage
+
+  montage:
+    # Duration settings
+    # total_duration is typically set via --duration CLI flag
+    # If not set, uses segment_duration × number of keywords
+    segment_duration: 120.0     # 2 minutes per keyword (default)
+    total_duration: null        # Set via CLI: --duration 600 (10 min)
+    transition_gap: 0.5         # Half-second gaps for visual breathing room
+
+# -----------------------------------------------------------------------------
+# DOWNLOAD SETTINGS - More videos for compilation variety
+# -----------------------------------------------------------------------------
+downloading:
+  output_dir: videos
+  max_results: 20               # More search results
+  target_per_keyword: 12        # More videos per keyword for variety
+
+# Duration tiers - balanced for compilations
+duration_tiers:
+  short:
+    min: 0
+    max: 60
+    count: 5                    # Quick cuts
+  medium:
+    min: 60
+    max: 180
+    count: 5                    # Standard clips
+  long:
+    min: 180
+    max: 600
+    count: 3                    # Longer segments for pacing
+  longer:
+    min: 600
+    max: 1200
+    count: 2                    # Extended footage if available
+
+# Caption-first mode - MUCH faster (skips Whisper transcription)
+# Falls back to audio+Whisper only for uncaptioned videos
+download:
+  caption_first:
+    enabled: true
+    prefer_manual_captions: true  # Manual captions > auto-generated
+    languages: ["en", "en-US", "en-GB"]
+    fallback_to_audio: true       # Whisper fallback for uncaptioned
+    confidence_boost_manual: 0.1  # Boost for manual caption videos
+
+  # Audio-first as fallback for uncaptioned videos
+  audio_first:
+    enabled: true
+    audio_quality: 5
+    buffer_seconds: 30.0
+    merge_gap_seconds: 15.0
+
+  # Search settings
+  search_pool_multiplier: 4
+  min_search_pool: 30
+  max_search_pool: 80
+
+  # Timeouts
+  per_video_timeout: 60
+  first_byte_timeout: 30
+
+# -----------------------------------------------------------------------------
+# MATCHING - Quality settings for compilations
+# -----------------------------------------------------------------------------
+matching:
+  # More candidates for better selection
+  embedding_candidates: 60
+  llm_rerank_top_n: 25
+
+  # Confidence thresholds
+  min_confidence: 0.5           # Slightly lower for more variety
+  high_confidence_threshold: 0.8
+
+  # Reuse settings - allow some reuse for compilations
+  max_clip_reuse: 2             # Same clip can appear twice
+
+  # Disable location matching (not needed for compilations)
+  location_matching:
+    enabled: false
+
+  # Disable chapter matching
+  chapter_matching_enabled: false
+
+# -----------------------------------------------------------------------------
+# OUTPUT - Multiple alternatives for editor choice
+# -----------------------------------------------------------------------------
+output:
+  # Multiple tracks for variety
+  num_alternatives: 3           # V1 (best), V2, V3
+  include_alternatives: true
+  include_strategy_tracks: true # V4-V7 diversity tracks
+
+  # Format options
+  generate_otio: true
+  generate_edl: true
+  generate_xml: true            # For media bin linking
+
+  # Deduplication
+  deduplicate_clips: true
+  min_clip_gap_seconds: 30.0    # Avoid same clip too close together
+
+# Variety settings
+variety:
+  source_diversity_weight: 0.3  # Prefer different YouTube channels
+  visual_diversity_weight: 0.2  # Prefer visually different clips
+
+# -----------------------------------------------------------------------------
+# TRANSCRIPTION - For matching quality
+# -----------------------------------------------------------------------------
+transcription:
+  model: base                   # Balance of speed and accuracy
+  use_gpu: true
+  max_workers: 4
+  vad_filter: false             # Disabled for video transcription
+
+# -----------------------------------------------------------------------------
+# FEATURES TO ENABLE
+# -----------------------------------------------------------------------------
+# Scene detection for better clip boundaries
+scene_detection:
+  enabled: true
+  detect_faces_per_scene: true  # Useful for people-focused compilations
+  min_scene_duration: 2.0
+  threshold: 27.0
+
+# B-roll for variety
+broll:
+  enabled: true
+  min_words_threshold: 5
+
+# Remix for filtering irrelevant results
+remix:
+  enabled: true
+  min_relevance_score: 0.4
+
+# -----------------------------------------------------------------------------
+# FEATURES TO DISABLE (not needed for compilations)
+# -----------------------------------------------------------------------------
+# No entity images needed
+pipeline:
+  skip_image_search: true
+
+# No stock footage (using YouTube only)
+stock_footage:
+  pexels_enabled: false
+  pixabay_enabled: false
+
+# No vision API needed
+vision:
+  enabled: false
+
+# Minimal keyword extraction (keywords provided via CLI)
+keyword:
+  extract_entities: false
+  max_keywords: 20
+
+# -----------------------------------------------------------------------------
+# LLM SETTINGS
+# -----------------------------------------------------------------------------
+llm:
+  provider: gemini
+  model: gemini-2.0-flash
+  temperature: 0.3              # More consistent results
+
+# Title filter for relevance
+download:
+  llm_title_filter:
+    enabled: true
+    provider: gemini
+    model: gemini-2.0-flash
+    batch_size: 25
+    min_relevance: 0.4          # Lower threshold for more variety
+
+# -----------------------------------------------------------------------------
+# HEALING (keep enabled for reliability)
+# -----------------------------------------------------------------------------
+healing:
+  enabled: true
+  strategy: conservative
+  max_attempts_per_stage: 3
