@@ -28,6 +28,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _safe_print(*args, **kwargs):
+    """Print with flush, but handle Windows OSError when stdout is redirected."""
+    try:
+        print(*args, **kwargs)
+    except OSError:
+        pass
+
+
 @register_stage
 class CaptionStage(Stage):
     """
@@ -303,7 +311,7 @@ class CaptionStage(Stage):
         videos_need_audio = []
 
         for i, video_id in enumerate(video_ids):
-            print(f"    [{i+1}/{len(video_ids)}] {video_id}...", end=" ", flush=True)
+            _safe_print(f"    [{i+1}/{len(video_ids)}] {video_id}...", end=" ", flush=True)
 
             result = self.caption_fetcher.fetch_captions(
                 video_id,

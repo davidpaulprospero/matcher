@@ -94,5 +94,6 @@
       "Skill(newproject)",
       "Skill(newproject:*)"
     ]
-  }
+  },
+  "outputStyle": "default"
 }

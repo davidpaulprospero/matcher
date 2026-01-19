@@ -489,19 +489,24 @@ class OutputStage(Stage):
         outputs: Dict[str, Any]
     ) -> List[str]:
         """Generate OTIO timeline files"""
-        from ..otio_builder import save_timeline, save_timeline_split
+        from ..otio.export import save_timeline_split_with_config, save_timeline
 
         otio_base_path = output_dir / "timeline"
         split_otio = getattr(config.output, 'split_otio', True)
 
         if split_otio:
-            otio_paths = save_timeline_split(timeline, str(otio_base_path))
+            # Use new config-aware splitting that auto-splits large timelines
+            result_paths = save_timeline_split_with_config(
+                timeline, str(otio_base_path), config.output
+            )
+            otio_paths = list(result_paths.values())
             outputs['otio'] = otio_paths
 
             # Categorize for display
             full = [p for p in otio_paths if '_FULL' in p]
             tracks = [p for p in otio_paths if '_V' in Path(p).name and '_FULL' not in p]
             audio = [p for p in otio_paths if '_A8_' in p]
+            parts = [p for p in otio_paths if '_PART' in p]
 
             print(f"  + OTIO files generated ({len(otio_paths)} total):")
 
@@ -517,6 +522,11 @@ class OutputStage(Stage):
             if full:
                 print(f"    Full timeline:")
                 for p in full:
+                    print(f"      - {Path(p).name}")
+
+            if parts:
+                print(f"    Split parts (for large timeline import):")
+                for p in sorted(parts):
                     print(f"      - {Path(p).name}")
 
             return otio_paths

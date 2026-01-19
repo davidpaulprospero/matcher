@@ -881,6 +881,9 @@ class DownloadVideoSegmentsStage(Stage):
             # Update Match objects to reference downloaded video segments (.mp4) instead of audio files (.mp3)
             self._remap_matches_to_video_segments(state, downloaded_segments, audio_downloads_by_id)
 
+            # Update text_metadata to reference video files instead of audio files
+            self._remap_text_metadata_to_video_files(state, downloaded_segments, audio_downloads_by_id)
+
             checkpoint_data = {
                 'segment_count': len(downloaded_segments),
                 'total_matches': total_matches,
@@ -1068,6 +1071,62 @@ class DownloadVideoSegmentsStage(Stage):
         logger.info(f"Remapped {updated_count} match objects to video segment files")
         print(f"  ✓ Updated {updated_count} matches to reference video segments")
 
+    def _remap_text_metadata_to_video_files(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List,
+        audio_downloads_by_id: dict
+    ) -> None:
+        """
+        Update text_metadata to reference video files instead of audio files.
+
+        In audio-first mode, text_metadata initially references .mp3 audio files.
+        After downloading video segments, we need to remap them to .mp4 files.
+
+        Args:
+            state: Pipeline state containing text_metadata
+            downloaded_segments: List of DownloadedSegment objects
+            audio_downloads_by_id: Dict mapping video_id to AudioDownload
+        """
+        from ..downloader.types import DownloadedSegment
+        from ..downloader.segment_utils import _extract_video_id
+
+        if not state.text_metadata:
+            return
+
+        # Build mapping: audio_file -> set of video_segment_files
+        audio_to_video_map = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            if video_id in audio_downloads_by_id:
+                audio_file = audio_downloads_by_id[video_id].file
+                if audio_file not in audio_to_video_map:
+                    audio_to_video_map[audio_file] = set()
+                audio_to_video_map[audio_file].add(seg.file)
+
+        # Remap text_metadata entries
+        updated_count = 0
+        for meta in state.text_metadata:
+            if not isinstance(meta, dict):
+                continue
+
+            video_path = meta.get('video_path', '')
+            if not video_path:
+                continue
+
+            # Check if this is an audio file that has video segments
+            if video_path in audio_to_video_map:
+                # Prefer the first video segment file
+                video_files = list(audio_to_video_map[video_path])
+                new_path = video_files[0]
+                meta['video_path'] = new_path
+                logger.debug(f"Remapped text_metadata: {video_path} -> {new_path}")
+                updated_count += 1
+
+        if updated_count > 0:
+            logger.info(f"Remapped {updated_count} text_metadata entries to video files")
+            print(f"  ✓ Updated {updated_count} text_metadata entries to reference video files")
+
     def can_skip(
         self,
         state: 'PipelineState',
@@ -1188,6 +1247,9 @@ class DownloadVideoSegmentsStage(Stage):
 
         # Update Match objects to reference downloaded video segments
         self._remap_matches_caption_first(state, downloaded_segments, video_candidates_by_id)
+
+        # Update text_metadata to reference video files instead of video IDs
+        self._remap_text_metadata_caption_first(state, downloaded_segments)
 
         checkpoint_data = {
             'segment_count': len(downloaded_segments),
@@ -1336,3 +1398,55 @@ class DownloadVideoSegmentsStage(Stage):
 
         state.transcripts = new_transcripts
         logger.info(f"Remapped {remapped_count} transcript keys to file paths")
+
+    def _remap_text_metadata_caption_first(
+        self,
+        state: 'PipelineState',
+        downloaded_segments: List
+    ) -> None:
+        """
+        Update text_metadata to reference video files instead of video IDs.
+
+        In caption-first mode, text_metadata initially references video_ids (11-char strings).
+        After downloading segments, we need to remap them to actual .mp4 files.
+
+        Args:
+            state: Pipeline state containing text_metadata
+            downloaded_segments: List of DownloadedSegment objects
+        """
+        from ..downloader.segment_utils import _extract_video_id
+
+        if not state.text_metadata:
+            return
+
+        # Build mapping: video_id -> set of video_segment_files
+        video_id_to_files = {}
+        for seg in downloaded_segments:
+            video_id = seg.video_id
+            if video_id not in video_id_to_files:
+                video_id_to_files[video_id] = set()
+            video_id_to_files[video_id].add(seg.file)
+
+        # Remap text_metadata entries
+        updated_count = 0
+        for meta in state.text_metadata:
+            if not isinstance(meta, dict):
+                continue
+
+            video_path = meta.get('video_path', '')
+            if not video_path:
+                continue
+
+            # Check if this is a video_id that has downloaded segments
+            video_id = _extract_video_id(video_path)
+            if video_id and video_id in video_id_to_files:
+                # Prefer the first video segment file
+                video_files = list(video_id_to_files[video_id])
+                new_path = video_files[0]
+                meta['video_path'] = new_path
+                logger.debug(f"Remapped text_metadata: {video_path} -> {new_path}")
+                updated_count += 1
+
+        if updated_count > 0:
+            logger.info(f"Remapped {updated_count} text_metadata entries from video IDs to video files")
+            print(f"  ✓ Updated {updated_count} text_metadata entries to reference video files")

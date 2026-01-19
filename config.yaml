@@ -572,6 +572,76 @@ llm:
   # See CLAUDE.md Rule 9 for usage examples
 
 # -----------------------------------------------------------------------------
+# CONTENT FILTER PRESETS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Different projects need different content filtering
+# Reasoning: Compilations need trainers/animated filtered; tutorials may want them
+# Decision: Named presets that can be selected per-project
+#
+# Usage in project_config.yaml:
+#   download:
+#     content_filter_preset: "documentary"
+#
+# YouTube API for metadata (optional but recommended for better filtering):
+#   - Batches 50 videos per request (vs 1 per yt-dlp call)
+#   - Free: 10,000 units/day = 500,000 video lookups
+#   - Set YOUTUBE_API_KEY env var or youtube_api_key in download config
+
+content_filter_presets:
+  # Default: No additional filtering beyond title blacklist
+  raw:
+    description: "No additional content filtering"
+    rejection_prompt: ""
+    acceptance_prompt: ""
+
+  # Documentary/compilation preset: Filter trainers, animated, vlogs
+  documentary:
+    description: "Filter trainers, animated, vlogs for documentary footage"
+    rejection_prompt: |
+      - Professional dog training content (trainers like Cesar Millan, Zac George,
+        Victoria Stilwell, Kikopup, McCann, or any channel focused on dog training)
+      - Training tutorials, obedience lessons, behavior modification guides
+      - Animated, cartoon, CGI, or 3D animated content
+      - Personal vlogs, reaction videos, commentary without useful footage
+      - Long videos (>10 minutes) - likely contain intros, outros, filler content
+    acceptance_prompt: |
+      PREFER (in order):
+      1. YouTube Shorts (<60 seconds) - quick emotional moments, viral clips
+      2. Medium videos (1-5 minutes) - focused content, specific moments
+      3. Documentary footage, news coverage, adoption events, shelter footage
+      AVOID: Long videos (>10 min) unless exceptionally relevant
+
+  # Stock footage preset: Silent/B-roll only
+  stock_footage:
+    description: "Silent/B-roll footage only"
+    rejection_prompt: |
+      - Any video with significant talking/narration/voiceover
+      - Vlogs, commentary, reactions, podcasts
+      - Animated or cartoon content
+      - Music videos, lyric videos
+    acceptance_prompt: |
+      PREFER: Silent footage, nature shots, B-roll, aerial, time-lapse
+
+  # Theresa preset: Dog content without trainers/animated
+  theresa:
+    description: "Theresa client - real dog footage, no trainers or animated"
+    rejection_prompt: |
+      - Professional dog trainers and training channels (Cesar Millan, Zac George, Victoria Stilwell, Kikopup, McCann, etc.)
+      - How-to training videos, obedience tutorials, behavior modification guides
+      - Animated, cartoon, CGI, or 3D animated dog content
+      - Long videos over 10 minutes (compilations, full episodes, documentaries)
+      - Personal vlogs, reaction videos, commentary without useful footage
+    acceptance_prompt: |
+      PREFER videos showing:
+      - YouTube Shorts (<60s) - quick emotional dog moments
+      - Medium clips (1-5 min) - focused real footage
+      - Dogs in shelters, adoption events, emotional reunions
+      - Documentary-style coverage of dogs and their owners
+      - News reports about dogs
+      - Real footage, not staged training demonstrations
+      AVOID: Videos longer than 10 minutes, professional trainer content
+
+# -----------------------------------------------------------------------------
 # ENHANCED FEATURES
 # -----------------------------------------------------------------------------
 # Chain-of-thought: 90% confidence ensures quality output
@@ -729,6 +799,23 @@ download:
     model: gemini-2.0-flash  # or claude-3-haiku-20240307
     batch_size: 20  # Check 20 titles at once
     min_relevance: 0.5  # 0-1, reject if below this (lower = more permissive)
+
+  # Content filter preset - select from content_filter_presets section
+  # Options: "raw" (default), "documentary", "stock_footage"
+  content_filter_preset: "raw"
+
+  # Custom prompts that EXTEND the selected preset (not replace)
+  # Use for project-specific filtering requirements
+  custom_rejection_prompt: ""  # Additional rejection criteria
+  custom_acceptance_prompt: ""  # Additional acceptance criteria
+
+  # YouTube Data API key for fetching video metadata (title, channel, description)
+  # Highly recommended: 50 videos per API call vs 1 per yt-dlp subprocess
+  # Get API key: https://console.cloud.google.com/apis/credentials
+  # Enable: YouTube Data API v3
+  # Free quota: 10,000 units/day (1 unit per request, batches 50 videos)
+  # Or set YOUTUBE_API_KEY environment variable
+  youtube_api_key: ""
   
   # YouTube authentication - REQUIRED!
   # YouTube blocks yt-dlp without authentication.
@@ -736,12 +823,12 @@ download:
   # Option 1 (RECOMMENDED): Extract cookies directly from browser
   # Set to: chrome, firefox, edge, brave, opera, vivaldi, safari
   # Note: Browser must be closed for Chrome/Edge. Firefox works while open.
-  cookies_from_browser: firefox
+  # cookies_from_browser: firefox
   
   # Option 2: Use exported cookies.txt file
   # Export using browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
   # Leave empty to auto-detect cookies.txt in install/project directory
-  cookies_path: ""
+  # cookies_path: "./cookies.txt"
   
   # Search pool settings - IMPORTANT for finding matching videos!
   # YouTube search returns limited results, so we search more than we download
@@ -761,6 +848,86 @@ download:
     medium: 300    # 5 min timeout for videos 2-10 min
     long: 600      # 10 min timeout for videos 10-25 min
     longer: 900    # 15 min timeout for videos 25-50 min
+
+  # Per-video timeout for individual downloads (prevents batch hangs)
+  # Used when downloading by specific video IDs (LLM filter mode)
+  # Shorter than tier timeouts for faster failure on bad videos
+  per_video_timeout: 60      # 1 min timeout per video
+
+  # First-byte timeout for detecting connection hangs (faster than per_video_timeout)
+  # If yt-dlp produces zero output within this time, assume connection hang and escalate tier
+  # Critical for detecting --impersonate TLS hangs before full timeout
+  first_byte_timeout: 30     # 30 sec for first output (detects hangs early)
+
+  # Validation timeout for checking video accessibility before download
+  # Quick check to filter out dead/private/geoblocked videos from cache
+  validation_timeout: 30     # 30 sec timeout per validation check
+
+  # Rate limit bypass strategies (yt-dlp impersonation/auth)
+  # Tier 1: Fast, no auth (Chrome impersonation via curl_cffi)
+  # Tier 2: Browser cookies (for age-gated/bot-walled videos)
+  # Tier 3: Standard yt-dlp (fallback, may be slower)
+  rate_limit_bypass:
+    # Multi-tier bypass system - escalates through techniques on failure
+    # Run: yt-dlp --list-impersonate-targets (to see available targets)
+
+    # Tier 1: Chrome impersonation (fastest, no auth needed)
+    tier1_enabled: true
+    tier1_target: "Chrome-131:Android-14"
+
+    # Tier 2: Safari impersonation (different TLS fingerprint)
+    tier2_enabled: true
+    tier2_target: "Safari-18.2:macOS-15"
+
+    # Tier 3: tv_embedded player (best for subtitles - no PO Token needed)
+    tier3_enabled: true
+    tier3_player: "tv_embedded"
+
+    # Tier 4: Browser cookies + web player (for age-gated content)
+    tier4_enabled: true
+    tier4_browser: "firefox"       # firefox, chrome, edge, brave
+    tier4_player: "web"
+
+    # Tier 5: ios_creator player (alternative API endpoint)
+    tier5_enabled: true
+    tier5_player: "ios_creator"
+
+    # Tier 6: android_vr player (alternative mobile endpoint)
+    tier6_enabled: true
+    tier6_player: "android_vr"
+
+    # Tier 7: Standard yt-dlp (always available as fallback)
+
+    # Escalation triggers
+    escalate_on_403: true          # 403 Forbidden
+    escalate_on_429: true          # 429 Too Many Requests (rate limit)
+    escalate_on_bot_check: true    # "Sign in to confirm you're not a bot"
+    escalate_on_po_token: true     # "PO Token required" for subtitles
+    escalate_on_geo_block: true    # Geographic restrictions
+    escalate_on_timeout: true      # Connection timeouts / TLS hangs
+
+    max_tier: 7                    # Maximum tier (7 = standard yt-dlp)
+
+    # Subtitle-specific: always use tv_embedded for caption fetching
+    subtitle_always_tv_embedded: true
+
+    # Impersonation target rotation (cycles on repeated tier 1/2 failures)
+    impersonate_targets:
+      - "Chrome-131:Android-14"
+      - "Chrome-131:Windows-10"
+      - "Chrome-130:macOS-14"
+      - "Safari-18.2:macOS-15"
+      - "Safari-18.1:iOS-18"
+      - "Edge-131:Windows-10"
+
+    # Player client rotation (cycles through for non-impersonation tiers)
+    player_clients:
+      - "tv_embedded"      # Best for subtitles, no PO Token
+      - "web"              # Standard web player
+      - "mweb"             # Mobile web (may need PO Token for subs)
+      - "ios_creator"      # iOS creator app
+      - "android_vr"       # Android VR app
+      - "mediaconnect"     # Smart TV
 
   # Audio-First Mode - Dramatically reduces download time
   # How it works:
@@ -910,6 +1077,12 @@ output:
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
   xml_parts: 6  # Split XML into multiple files (helps with large projects)
   generate_report: true
+
+  # OTIO splitting for large timelines (DaVinci Resolve crashes with 10k+ items)
+  # Auto-split when total items (clips + gaps) exceed threshold
+  auto_split_threshold: 3000  # Split when items exceed this (0 = disabled)
+  split_parts: 4  # Number of parts to split into
+  always_generate_full: true  # Also generate FULL.otio (for reference)
 
   # Voiceover alignment offset (seconds)
   # Use this to fix alignment when SRT timestamps don't match the actual audio
@@ -1224,6 +1397,79 @@ broll:
   long_video_threshold: 600      # Videos > 10 min use sampling
   sample_interval_seconds: 120   # 1 scene per 2 minutes
   max_scenes_per_video: 15       # Cap on sampled scenes
+
+# -----------------------------------------------------------------------------
+# KEYWORD MODE (No Voiceover Required)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Enable pipeline without voiceover input
+# Reasoning: Generate video compilations from keywords only
+# Decision: Three modes - montage (equal segments), script (LLM narration), collection (organize)
+#
+# Usage:
+#   python main.py --keyword-list "sunset,ocean,beach" --keyword-mode montage
+#   python main.py --keyword-list "coral reef,marine life" --keyword-mode script --style documentary
+
+keyword_mode:
+  # Master enable - must be true to use keyword mode
+  enabled: false
+
+  # Mode selection: montage | script | collection
+  # - montage: Equal-duration segments from keywords (simplest)
+  # - script: LLM generates narration script -> SRT -> matching (primary)
+  # - collection: Download and organize videos by keyword (no timeline)
+  mode: script
+
+  # Keywords (can be overridden by --keyword-list CLI arg)
+  keywords: []
+
+  # === Montage Mode ===
+  # Each keyword becomes a segment with configurable duration
+  montage:
+    segment_duration: 10.0      # Seconds per keyword (if no total_duration)
+    total_duration: null        # If set, divides evenly among keywords
+    transition_gap: 0.0         # Gap between segments in seconds
+
+  # === Script Mode ===
+  # LLM generates narration from keywords -> timed SRT -> normal matching
+  script:
+    # Script generation style
+    style: documentary          # documentary | promotional | narrative | listicle | poetic | minimal
+    tone: inspiring             # inspiring | serious | playful | urgent | contemplative
+
+    # Timing
+    target_duration: 120        # Target video duration in seconds
+    words_per_minute: 150       # 120=slow, 150=normal, 180=fast
+    min_segment_duration: 2.0   # Minimum segment duration in seconds
+    segment_gap: 0.3            # Gap between SRT segments in seconds
+
+    # Output
+    save_script_txt: true       # Save raw script as .txt (for editing/TTS)
+    save_srt: true              # Save generated .srt (drives matching)
+
+    # LLM settings for script generation
+    llm:
+      provider: ollama          # ollama (local) | gemini | anthropic
+      model: mistral:7b         # Default Ollama model
+      fallback_models:          # Try these if primary model fails
+        - qwen2.5:7b
+        - llama3.2:3b
+      temperature: 0.7
+      max_tokens: 1000
+      ollama_host: "http://localhost:11434"
+      timeout: 60               # Seconds
+
+    # Validation
+    require_all_keywords: true  # Ensure all keywords appear in script
+
+    # Segment splitting strategy
+    split_mode: paragraph       # paragraph | sentence | hybrid
+
+  # === Collection Mode ===
+  # Download and organize videos without timeline generation
+  collection:
+    clips_per_keyword: 10
+    output_format: folders      # folders | flat_with_manifest
+    include_metadata: true      # Save transcripts, scores in manifest
 
 # -----------------------------------------------------------------------------
 # API KEYS

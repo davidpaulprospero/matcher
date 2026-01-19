@@ -38,9 +38,20 @@ from .title_filter import TitleFilter
 from .speech_screening import SpeechScreener
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
+from .search_cache import YouTubeSearchCache
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_print(*args, **kwargs):
+    """Print with flush, but handle Windows OSError when stdout is redirected."""
+    try:
+        print(*args, **kwargs)
+    except OSError:
+        # Windows can throw OSError: [Errno 22] Invalid argument
+        # when stdout is redirected and flush=True is used
+        pass
 
 
 class VideoDownloader:
@@ -103,6 +114,9 @@ class VideoDownloader:
             llm_call_anthropic_func=self.title_filter._call_anthropic
         )
 
+        # Initialize search cache for YouTube search result persistence
+        self.search_cache = YouTubeSearchCache(cache_dir=self.config.cache_dir)
+
         # Initialize audio-first pipeline
         self._lock = threading.RLock()
         self.tier_download_counts: Dict[str, int] = {
@@ -124,6 +138,9 @@ class VideoDownloader:
         self.checkpoint: Optional[DownloadCheckpoint] = None
         self.DURATION_TIERS = self.checkpoint_mgr.duration_tiers
         self._last_download_timed_out = False
+
+        # Healer integration (set via set_healer())
+        self._download_healer = None
 
         # Cookie authentication
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
@@ -213,6 +230,19 @@ class VideoDownloader:
     def _get_ffmpeg_transcode_cmd(self, input_path, output_path):
         """Delegate to TranscodingManager."""
         return self.transcoding_mgr.get_ffmpeg_transcode_cmd(input_path, output_path)
+
+    # =========================================================================
+    # HEALER INTEGRATION
+    # =========================================================================
+
+    def set_healer(self, healer):
+        """Set healer reference for success callbacks and tier management.
+
+        Args:
+            healer: DownloadHealer instance from self-healing system
+        """
+        self._download_healer = healer
+        logger.debug(f"Download healer attached: {healer.name if healer else None}")
 
     # =========================================================================
     # CORE ORCHESTRATION METHODS (Keep in core - complex coordination logic)
@@ -313,14 +343,249 @@ class VideoDownloader:
         return None
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
-        """Add base args (JS runtime) and cookie authentication to yt-dlp command."""
+        """Add base args (JS runtime), bypass args, and cookie authentication to yt-dlp command."""
         # Add JS runtime for YouTube challenge solving
         cmd.extend(['--js-runtimes', 'node'])
-        # Add cookies
+
+        # Add bypass args (handles tier-specific authentication)
+        bypass_args = self._build_bypass_args()
+        cmd.extend(bypass_args)
+
+        # Skip cookies if using impersonation (Tier 1) or browser auth (Tier 2)
+        # Bypass args already handle authentication for those tiers
+        if '--no-cookies' in bypass_args or '--cookies-from-browser' in bypass_args:
+            return
+
+        # Tier 3 or bypass disabled: use legacy cookie auth
         if self._cookies_from_browser:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
+
+    def _build_bypass_args(self, for_subtitles: bool = False) -> List[str]:
+        """Build yt-dlp arguments for current bypass tier.
+
+        Args:
+            for_subtitles: If True, use subtitle-optimized settings (tv_embedded)
+
+        Returns list of arguments to add to yt-dlp command.
+        Tier state is managed by RateLimitBypassConfig (set by healer).
+
+        Tier order:
+        1. Impersonate Chrome (fastest, no auth)
+        2. Impersonate Safari (different fingerprint)
+        3. tv_embedded player (best for subtitles)
+        4. Browser cookies + web player
+        5. ios_creator player
+        6. android_vr player
+        7. Standard yt-dlp (fallback)
+        """
+        args = []
+
+        bypass_config = getattr(self.download_config, 'rate_limit_bypass', None)
+        if not bypass_config:
+            logger.debug("[BYPASS] No bypass config, using standard yt-dlp")
+            return args
+
+        # Handle both dataclass and dict (for backwards compatibility)
+        if isinstance(bypass_config, dict):
+            current_tier = bypass_config.get('_current_tier', 1)
+            tier1_enabled = bypass_config.get('tier1_enabled', True)
+            tier1_target = bypass_config.get('tier1_target', 'Chrome-131:Android-14')
+            tier2_enabled = bypass_config.get('tier2_enabled', True)
+            tier2_target = bypass_config.get('tier2_target', 'Safari-18.2:macOS-15')
+            tier3_enabled = bypass_config.get('tier3_enabled', True)
+            tier3_player = bypass_config.get('tier3_player', 'tv_embedded')
+            tier4_enabled = bypass_config.get('tier4_enabled', True)
+            tier4_browser = bypass_config.get('tier4_browser', 'firefox')
+            tier4_player = bypass_config.get('tier4_player', 'web')
+            tier5_enabled = bypass_config.get('tier5_enabled', True)
+            tier5_player = bypass_config.get('tier5_player', 'ios_creator')
+            tier6_enabled = bypass_config.get('tier6_enabled', True)
+            tier6_player = bypass_config.get('tier6_player', 'android_vr')
+            subtitle_tv_embedded = bypass_config.get('subtitle_always_tv_embedded', True)
+        else:
+            current_tier = bypass_config._current_tier
+            tier1_enabled = bypass_config.tier1_enabled
+            tier1_target = bypass_config.tier1_target
+            tier2_enabled = bypass_config.tier2_enabled
+            tier2_target = bypass_config.tier2_target
+            tier3_enabled = bypass_config.tier3_enabled
+            tier3_player = bypass_config.tier3_player
+            tier4_enabled = bypass_config.tier4_enabled
+            tier4_browser = bypass_config.tier4_browser
+            tier4_player = bypass_config.tier4_player
+            tier5_enabled = bypass_config.tier5_enabled
+            tier5_player = bypass_config.tier5_player
+            tier6_enabled = bypass_config.tier6_enabled
+            tier6_player = bypass_config.tier6_player
+            subtitle_tv_embedded = bypass_config.subtitle_always_tv_embedded
+
+        # For subtitles, always prefer tv_embedded (no PO Token needed)
+        if for_subtitles and subtitle_tv_embedded:
+            logger.debug("[BYPASS] Subtitle mode: using tv_embedded player")
+            args.extend(['--extractor-args', 'youtube:player_client=tv_embedded'])
+            return args
+
+        # Tier 1: Chrome impersonation
+        if current_tier == 1 and tier1_enabled:
+            logger.debug(f"[BYPASS] Tier 1: --impersonate {tier1_target}")
+            args.extend(['--impersonate', tier1_target])
+            args.append('--no-cookies')
+
+        # Tier 2: Safari impersonation
+        elif current_tier == 2 and tier2_enabled:
+            logger.debug(f"[BYPASS] Tier 2: --impersonate {tier2_target}")
+            args.extend(['--impersonate', tier2_target])
+            args.append('--no-cookies')
+
+        # Tier 3: tv_embedded player (no auth, works for subtitles)
+        elif current_tier == 3 and tier3_enabled:
+            logger.debug(f"[BYPASS] Tier 3: player_client={tier3_player}")
+            args.extend(['--extractor-args', f'youtube:player_client={tier3_player}'])
+
+        # Tier 4: Browser cookies + web player
+        elif current_tier == 4 and tier4_enabled:
+            logger.debug(f"[BYPASS] Tier 4: cookies from {tier4_browser}, player={tier4_player}")
+            args.extend(['--cookies-from-browser', tier4_browser])
+            args.extend(['--extractor-args', f'youtube:player_client={tier4_player}'])
+
+        # Tier 5: ios_creator player
+        elif current_tier == 5 and tier5_enabled:
+            logger.debug(f"[BYPASS] Tier 5: player_client={tier5_player}")
+            args.extend(['--extractor-args', f'youtube:player_client={tier5_player}'])
+
+        # Tier 6: android_vr player
+        elif current_tier == 6 and tier6_enabled:
+            logger.debug(f"[BYPASS] Tier 6: player_client={tier6_player}")
+            args.extend(['--extractor-args', f'youtube:player_client={tier6_player}'])
+
+        # Tier 7: Standard yt-dlp
+        else:
+            logger.debug("[BYPASS] Tier 7: Standard yt-dlp (no impersonation or special player)")
+
+        return args
+
+    def _escalate_bypass_tier(self, reason: str = "unknown") -> bool:
+        """Escalate to next bypass tier after connection hang or auth failure.
+
+        Args:
+            reason: Why escalation is happening (for logging)
+
+        Returns:
+            True if escalated, False if already at max tier
+        """
+        bypass_config = getattr(self.download_config, 'rate_limit_bypass', None)
+        if not bypass_config:
+            logger.debug("[BYPASS] No bypass config, cannot escalate")
+            return False
+
+        # Get current tier and max tier
+        if isinstance(bypass_config, dict):
+            current_tier = bypass_config.get('_current_tier', 1)
+            max_tier = bypass_config.get('max_tier', 3)
+        else:
+            current_tier = bypass_config._current_tier
+            max_tier = getattr(bypass_config, 'max_tier', 3)
+
+        if current_tier >= max_tier:
+            logger.warning(f"[BYPASS] Already at max tier {max_tier}, cannot escalate further")
+            return False
+
+        # Escalate
+        new_tier = current_tier + 1
+        if isinstance(bypass_config, dict):
+            bypass_config['_current_tier'] = new_tier
+        else:
+            bypass_config._current_tier = new_tier
+
+        tier_names = {
+            1: "Chrome Impersonate",
+            2: "Safari Impersonate",
+            3: "tv_embedded",
+            4: "Browser Cookies",
+            5: "ios_creator",
+            6: "android_vr",
+            7: "Standard"
+        }
+        logger.warning(
+            f"[BYPASS] Tier escalation: {current_tier} ({tier_names.get(current_tier, '?')}) → "
+            f"{new_tier} ({tier_names.get(new_tier, '?')}) [reason: {reason}]"
+        )
+
+        # Notify healer if attached (for statistics tracking)
+        if self._download_healer:
+            self._download_healer.escalation_history.append({
+                'from_tier': current_tier,
+                'to_tier': new_tier,
+                'reason': reason,
+                'source': 'downloader_direct'
+            })
+
+        return True
+
+    def _retry_with_full_timeout(
+        self,
+        cmd: List[str],
+        keyword_dir: Path,
+        output_dir: Path,
+        keyword: str,
+        tier: str,
+        existing_before: set,
+        full_timeout: int
+    ) -> List[DownloadedVideo]:
+        """Retry a slow download with the full timeout instead of first-byte timeout.
+
+        Called when first-byte timeout expired but output was being produced,
+        indicating a slow but working download rather than a connection hang.
+        """
+        logger.debug(f"    Retrying '{keyword}' with full {full_timeout}s timeout...")
+
+        process = None
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            try:
+                stdout, stderr = process.communicate(timeout=full_timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    stdout, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    stdout, stderr = "", ""
+
+                logger.warning(f"Download timeout for '{keyword}' even with full {full_timeout}s timeout")
+                self._last_download_timed_out = True
+                return []
+            finally:
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+
+            # Process completed - continue with normal post-download handling
+            # (This duplicates some code from _run_download_cmd, but keeps the logic clear)
+            if stderr:
+                for line in stderr.strip().split('\n'):
+                    if line and 'WARNING' not in line and 'ERROR' in line:
+                        logger.warning(f"    yt-dlp: {line}")
+
+            # Find new files and process them
+            return self._process_downloaded_files(
+                keyword_dir, output_dir, keyword, tier, existing_before
+            )
+
+        except Exception as e:
+            logger.error(f"Error in retry download for '{keyword}': {e}")
+            return []
 
     def download_all(
         self,
@@ -395,7 +660,7 @@ class VideoDownloader:
         for i, keyword in enumerate(keywords, 1):
             # Compact progress line
             progress_pct = (i - 1) / len(keywords) * 100
-            print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
+            _safe_print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
 
             logger.info(f"[{i}/{len(keywords)}] Processing: {keyword}")
 
@@ -597,6 +862,17 @@ class VideoDownloader:
 
         if use_llm_filter:
             # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
+
+            # Check search cache for previously approved video IDs
+            cached_ids = self.search_cache.get(keyword, tier, max_age_days=30)
+
+            if cached_ids:
+                # Cache HIT: Use cached video IDs (skip search + LLM filter)
+                logger.info(f"    Using {len(cached_ids)} cached video IDs for '{keyword}' (tier: {tier})")
+                video_ids = cached_ids[:max_downloads]
+                return self._download_by_ids(video_ids, keyword_dir, output_dir, keyword, tier)
+
+            # Cache MISS: Do full search + filter pipeline
             logger.debug(f"    Searching {search_pool} videos for LLM filtering...")
 
             videos = self._search_video_metadata(keyword, tier, search_pool)
@@ -643,8 +919,11 @@ class VideoDownloader:
                     logger.debug(f"    No videos passed speech screening for '{keyword}'")
                     return []
 
-            # Download only approved videos (by ID)
+            # Cache approved video IDs for future runs
             video_ids = [v['id'] for v in approved_videos[:max_downloads]]
+            self.search_cache.set(keyword, tier, video_ids, search_pool=search_pool)
+
+            # Download only approved videos (by ID)
             logger.debug(f"    Downloading {len(video_ids)} approved videos...")
 
             return self._download_by_ids(video_ids, keyword_dir, output_dir, keyword, tier)
@@ -654,6 +933,7 @@ class VideoDownloader:
             cmd = [
                 'yt-dlp',
                 f'ytsearch{search_pool}:{keyword}',
+                '--sleep-interval', '5',
                 '-f', self._build_format_string(),
                 '--match-filter', self._build_filter_string(tier),
                 '--max-downloads', str(max_downloads),
@@ -675,6 +955,80 @@ class VideoDownloader:
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
 
             return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+
+    def _validate_video_ids(self, video_ids: List[str]) -> List[str]:
+        """
+        Validate video IDs before download by checking accessibility.
+
+        Uses yt-dlp's --skip-download + info extraction to quickly verify
+        each video is accessible without downloading. Removes invalid IDs
+        (deleted, private, geoblocked, age-gated, etc.) from cache.
+
+        Args:
+            video_ids: List of YouTube video IDs to validate
+
+        Returns:
+            List of valid video IDs (accessible and downloadable)
+        """
+        if not video_ids:
+            return []
+
+        valid_ids = []
+        validation_timeout = getattr(self.download_config, 'validation_timeout', 30)
+
+        logger.debug(f"    Validating {len(video_ids)} cached video IDs...")
+
+        for vid_id in video_ids:
+            url = f"https://www.youtube.com/watch?v={vid_id}"
+
+            cmd = [
+                'yt-dlp',
+                '--skip-download',
+                '--dump-json',
+                '--quiet',
+                '--no-warnings',
+                url
+            ]
+
+            self._add_cookies_to_cmd(cmd)
+
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                try:
+                    stdout, stderr = process.communicate(timeout=validation_timeout)
+
+                    # If we got JSON output, video is accessible
+                    if stdout and process.returncode == 0:
+                        try:
+                            json.loads(stdout)
+                            valid_ids.append(vid_id)
+                            logger.debug(f"      ✓ {vid_id} - valid")
+                        except json.JSONDecodeError:
+                            logger.debug(f"      ✗ {vid_id} - invalid JSON response")
+                    else:
+                        logger.debug(f"      ✗ {vid_id} - unavailable ({stderr[:50] if stderr else 'unknown error'})")
+
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                    logger.debug(f"      ✗ {vid_id} - validation timeout")
+
+            except Exception as e:
+                logger.debug(f"      ✗ {vid_id} - validation error: {e}")
+
+        if len(valid_ids) < len(video_ids):
+            logger.info(f"    Validation: {len(valid_ids)}/{len(video_ids)} videos accessible (removed {len(video_ids) - len(valid_ids)} dead IDs)")
+        else:
+            logger.debug(f"    Validation: All {len(valid_ids)} videos accessible")
+
+        return valid_ids
 
     def _download_by_ids(
         self,
@@ -737,33 +1091,225 @@ class VideoDownloader:
             # All videos already exist
             return already_downloaded
 
+        # VALIDATION PHASE: Check which IDs are actually accessible before attempting download
+        # This prevents timeouts on dead/private/geoblocked videos
+        valid_ids = self._validate_video_ids(missing_ids)
+
+        if not valid_ids:
+            logger.warning(f"    No valid videos found after validation (all {len(missing_ids)} IDs are inaccessible)")
+            return already_downloaded
+
+        if len(valid_ids) < len(missing_ids):
+            # Update search cache to remove invalid IDs (actually do it, not just log!)
+            removed_ids = list(set(missing_ids) - set(valid_ids))
+            self.search_cache.remove_ids(keyword, tier, removed_ids)
+            logger.debug(f"    Pruned {len(removed_ids)} invalid IDs from search cache")
+
+        # Build URLs from IDs
+        # URLs are now processed individually to ensure timeouts apply per-video, not per-batch
+
+        newly_downloaded = []
+
         # Get filename length from config
         max_fn_len = getattr(self.download_config, 'max_filename_len', 10)
 
-        # Build URLs from IDs
-        urls = [f"https://www.youtube.com/watch?v={vid}" for vid in missing_ids]
+        # Get per-video timeout (shorter than batch timeout for faster failure on bad videos)
+        per_video_timeout = getattr(self.download_config, 'per_video_timeout', 60)
 
-        cmd = [
-            'yt-dlp',
-            '-f', self._build_format_string(),
-            '--merge-output-format', 'mp4',
-            '--no-playlist',
-            '--write-info-json',
-            '--restrict-filenames',
-            '--no-overwrites',
-            '--no-continue',
-            '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
-            '--quiet',
-            '--no-warnings',
-            '--progress',
-        ] + urls
+        # Download videos one by one (only valid IDs)
+        for i, vid_id in enumerate(valid_ids, 1):
+            url = f"https://www.youtube.com/watch?v={vid_id}"
 
-        self._add_cookies_to_cmd(cmd)
+            logger.debug(f"    Downloading {i}/{len(valid_ids)}: {vid_id}")
+            
+            cmd = [
+                'yt-dlp',
+                '--sleep-interval', '5',
+                '-f', self._build_format_string(),
+                '--merge-output-format', 'mp4',
+                '--no-playlist',
+                '--write-info-json',
+                '--restrict-filenames',
+                '--no-overwrites',
+                '--no-continue',
+                '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
+                '--quiet',
+                '--no-warnings',
+                '--progress',
+                url
+            ]
 
-        newly_downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+            self._add_cookies_to_cmd(cmd)
+
+            # Pass just this video's download to the runner with per-video timeout
+            # existing_before is updated implicitly by the runner detecting new files
+            # but for safety in the loop, we should refresh it or rely on the runner's return
+
+            # Note: _run_download_cmd calculates "new files" by looking at the directory
+            # We need to be careful if running in parallel, but here it is sequential.
+
+            batch_result = self._run_download_cmd(
+                cmd, keyword_dir, output_dir, keyword, tier, existing_before,
+                timeout_override=per_video_timeout
+            )
+            
+            if batch_result:
+                newly_downloaded.extend(batch_result)
+                # Update existing_before so next iteration doesn't think this file is "new" again
+                # (though _run_download_cmd logic handles new files by diffing, updating the set 
+                # prevents potential double-counting if logic changes)
+                for video in batch_result:
+                    filename = Path(video.file).name
+                    existing_before.add(filename)
+
+            # Small delay between individual downloads to be nice to YouTube
+            if i < len(valid_ids):
+                time.sleep(5)
 
         # Combine already downloaded + newly downloaded
         return already_downloaded + newly_downloaded
+
+    def _process_downloaded_files(
+        self,
+        keyword_dir: Path,
+        output_dir: Path,
+        keyword: str,
+        tier: str,
+        existing_before: set
+    ) -> List[DownloadedVideo]:
+        """Process newly downloaded files: transcode, sanitize, create records.
+
+        Extracted from _run_download_cmd to allow reuse in retry logic.
+
+        Args:
+            keyword_dir: Keyword-specific directory
+            output_dir: Base output directory
+            keyword: Search keyword
+            tier: Duration tier
+            existing_before: Set of files that existed before download
+
+        Returns:
+            List of DownloadedVideo objects for new files
+        """
+        # Find new files
+        existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
+        new_files = existing_after - existing_before
+
+        # Filter to video files
+        video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
+        new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
+
+        if new_videos:
+            logger.debug(f"    Downloaded {len(new_videos)} video(s)")
+
+        downloaded = []
+
+        # Get download_timeout for transcoding
+        tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
+        download_timeout = tier_timeouts.get(tier, getattr(self.download_config, 'download_timeout', 120))
+
+        for idx, video_file in enumerate(new_videos, 1):
+            video_path = keyword_dir / video_file
+
+            # Try to get metadata from info.json
+            info_file = video_path.with_suffix('.info.json')
+            metadata = {}
+            if info_file.exists():
+                try:
+                    with open(info_file, 'r') as f:
+                        metadata = json.load(f)
+                except:
+                    pass
+
+            # Transcode for DaVinci if enabled AND necessary
+            final_path = video_path
+            if self.download_config.davinci_mode:
+                needs_transcode, reason = self._needs_transcoding(str(video_path))
+
+                if not needs_transcode:
+                    logger.debug(f"    No transcode needed: {reason}")
+                    final_path = video_path
+                else:
+                    logger.debug(f"    Transcoding {video_file[:40]}...")
+                    transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
+                        str(video_path), str(video_path)
+                    )
+                    temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
+                    transcode_cmd[-1] = str(temp_output)
+
+                    transcode_process = None
+                    try:
+                        transcode_process = subprocess.Popen(
+                            transcode_cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+
+                        try:
+                            _, stderr = transcode_process.communicate(timeout=download_timeout)
+                            if transcode_process.returncode != 0:
+                                logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
+                        except subprocess.TimeoutExpired:
+                            transcode_process.kill()
+                            transcode_process.communicate()
+                            logger.warning(f"Transcode timeout for {video_file}")
+                        finally:
+                            if transcode_process is not None and transcode_process.poll() is None:
+                                transcode_process.kill()
+                                try:
+                                    transcode_process.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    pass
+
+                        if temp_output.exists() and temp_output.stat().st_size > 0:
+                            if self.download_config.delete_original:
+                                video_path.unlink()
+                            final_path = temp_output.rename(temp_output.with_stem(
+                                temp_output.stem.replace('_davinci', '')
+                            ))
+                            logger.info(f"    ↳ ✓ Transcode complete")
+                        else:
+                            logger.warning(f"    ↳ Transcode produced no output, using original")
+                            final_path = video_path
+                    except Exception as e:
+                        logger.warning(f"Transcode failed for {video_file}: {e}")
+                        final_path = video_path
+
+            # Sanitize filename for NLE compatibility
+            final_path = utils.sanitize_filename_for_nle(final_path)
+
+            # Create source record
+            source = DownloadedVideo(
+                file=str(final_path.relative_to(output_dir)),
+                url=metadata.get('webpage_url', metadata.get('url', 'Unknown')),
+                title=metadata.get('title', video_file),
+                channel=metadata.get('uploader', metadata.get('channel', 'Unknown')),
+                upload_date=metadata.get('upload_date', 'Unknown'),
+                duration=metadata.get('duration', 0),
+                duration_tier=tier,
+                keyword=keyword,
+                download_date=datetime.now().strftime('%Y-%m-%d'),
+                license=metadata.get('license', 'Unknown')
+            )
+
+            downloaded.append(source)
+
+            # Track source for inter-keyword diversity analysis
+            video_id = metadata.get('id', '')
+            if video_id:
+                self._record_source_for_keyword(keyword, video_id)
+
+            # Clean up info.json
+            if info_file.exists():
+                info_file.unlink()
+
+        # Notify healer of successful download batch (if healer is attached)
+        if downloaded and self._download_healer:
+            self._download_healer.mark_success()
+
+        return downloaded
 
     def _run_download_cmd(
         self,
@@ -824,8 +1370,13 @@ class VideoDownloader:
             else:
                 download_timeout = getattr(self.download_config, 'download_timeout', 120)
 
+        # First-byte timeout for detecting connection hangs early (before full timeout)
+        # This is critical for Tier 1 --impersonate which hangs on TLS handshake
+        first_byte_timeout = getattr(self.download_config, 'first_byte_timeout', 30)
+
         # Track timeout for retry logic
         self._last_download_timed_out = False
+        self._last_download_was_hang = False  # Distinguishes hang vs slow download
         process = None
 
         try:
@@ -838,21 +1389,52 @@ class VideoDownloader:
             )
 
             try:
-                stdout, stderr = process.communicate(timeout=download_timeout)
+                # Phase 1: Use first-byte timeout to detect connection hangs quickly
+                # This prevents waiting full 60s+ when --impersonate hangs on TLS
+                stdout, stderr = process.communicate(timeout=first_byte_timeout)
+                # If we get here, download completed within first_byte_timeout - success!
+
             except subprocess.TimeoutExpired:
+                # First-byte timeout expired - check if this is a connection hang or slow download
                 process.kill()
-                process.communicate()
-                logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s")
+                try:
+                    # CRITICAL: Must have timeout here too - process.kill() may not
+                    # immediately terminate yt-dlp with curl_cffi impersonation on Windows
+                    stdout, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Process refused to die cleanly after kill()
+                    # This happens with --impersonate on Windows where curl_cffi
+                    # holds connections open even after SIGTERM
+                    stdout, stderr = "", ""
+                    logger.debug("Process cleanup timed out after kill(), forcing termination")
+
+                # Detect connection hang vs slow download
+                # If no output at all after first_byte_timeout, this is a connection hang
+                # If some output, download was progressing (should retry with longer timeout)
+                is_connection_hang = not stdout and not stderr
+
+                if is_connection_hang:
+                    logger.warning(
+                        f"Connection hang downloading '{keyword}' ({tier}) after {first_byte_timeout}s "
+                        f"(no output produced - likely tier issue)"
+                    )
+                    # ACTUALLY escalate the tier (not just log it!)
+                    self._escalate_bypass_tier(reason="connection_hang")
+                    self._last_download_was_hang = True
+                else:
+                    # Slow download - had output but didn't finish in first_byte_timeout
+                    # This is NOT a connection hang - retry with full timeout
+                    logger.info(
+                        f"Slow download for '{keyword}' ({tier}) - retrying with full timeout "
+                        f"(had output: {len(stdout or '')} stdout, {len(stderr or '')} stderr bytes)"
+                    )
+                    # Retry with full download_timeout instead of first_byte_timeout
+                    return self._retry_with_full_timeout(
+                        cmd, keyword_dir, output_dir, keyword, tier, existing_before, download_timeout
+                    )
+
                 self._last_download_timed_out = True
                 return []
-            finally:
-                # Ensure process is cleaned up
-                if process is not None and process.poll() is None:
-                    process.kill()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
 
             # Only log actual errors
             if stderr:
@@ -860,117 +1442,10 @@ class VideoDownloader:
                     if line and 'WARNING' not in line and 'ERROR' in line:
                         logger.warning(f"    yt-dlp: {line}")
 
-            # Find new files
-            existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
-            new_files = existing_after - existing_before
-
-            # Filter to video files
-            video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
-            new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
-
-            if new_videos:
-                logger.debug(f"    Downloaded {len(new_videos)} video(s)")
-
-            downloaded = []
-
-            for idx, video_file in enumerate(new_videos, 1):
-                video_path = keyword_dir / video_file
-
-                # Try to get metadata from info.json
-                info_file = video_path.with_suffix('.info.json')
-                metadata = {}
-                if info_file.exists():
-                    try:
-                        with open(info_file, 'r') as f:
-                            metadata = json.load(f)
-                    except:
-                        pass
-
-                # Transcode for DaVinci if enabled AND necessary
-                final_path = video_path
-                if self.download_config.davinci_mode:
-                    needs_transcode, reason = self._needs_transcoding(str(video_path))
-
-                    if not needs_transcode:
-                        logger.debug(f"    No transcode needed: {reason}")
-                        final_path = video_path
-                    else:
-                        logger.debug(f"    Transcoding {video_file[:40]}...")
-                        transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
-                            str(video_path), str(video_path)
-                        )
-                        temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
-                        transcode_cmd[-1] = str(temp_output)
-
-                        transcode_process = None
-                        try:
-                            transcode_process = subprocess.Popen(
-                                transcode_cmd,
-                                stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE,
-                                text=True
-                            )
-
-                            try:
-                                _, stderr = transcode_process.communicate(timeout=download_timeout)
-                                if transcode_process.returncode != 0:
-                                    logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
-                            except subprocess.TimeoutExpired:
-                                transcode_process.kill()
-                                transcode_process.communicate()
-                                logger.warning(f"Transcode timeout for {video_file}")
-                            finally:
-                                if transcode_process is not None and transcode_process.poll() is None:
-                                    transcode_process.kill()
-                                    try:
-                                        transcode_process.wait(timeout=5)
-                                    except subprocess.TimeoutExpired:
-                                        pass
-
-                            if temp_output.exists() and temp_output.stat().st_size > 0:
-                                if self.download_config.delete_original:
-                                    video_path.unlink()
-                                final_path = temp_output.rename(temp_output.with_stem(
-                                    temp_output.stem.replace('_davinci', '')
-                                ))
-                                logger.info(f"    ↳ ✓ Transcode complete")
-                            else:
-                                logger.warning(f"    ↳ Transcode produced no output, using original")
-                                final_path = video_path
-                        except Exception as e:
-                            logger.warning(f"Transcode failed for {video_file}: {e}")
-                            final_path = video_path
-
-                # Sanitize filename for NLE compatibility
-                final_path = utils.sanitize_filename_for_nle(final_path)
-
-                # Create source record
-                source = DownloadedVideo(
-                    file=str(final_path.relative_to(output_dir)),
-                    url=metadata.get('webpage_url', metadata.get('url', 'Unknown')),
-                    title=metadata.get('title', video_file),
-                    channel=metadata.get('uploader', metadata.get('channel', 'Unknown')),
-                    upload_date=metadata.get('upload_date', 'Unknown'),
-                    duration=metadata.get('duration', 0),
-                    duration_tier=tier,
-                    keyword=keyword,
-                    download_date=datetime.now().strftime('%Y-%m-%d'),
-                    license=metadata.get('license', 'Unknown')
-                )
-
-                downloaded.append(source)
-
-                # Track source for inter-keyword diversity analysis
-                video_id = metadata.get('id', '')
-                if video_id:
-                    self._record_source_for_keyword(keyword, video_id)
-
-                # Clean up info.json
-                if info_file.exists():
-                    info_file.unlink()
-
-            return downloaded
+            # Process downloaded files (transcode, sanitize, create records)
+            return self._process_downloaded_files(
+                keyword_dir, output_dir, keyword, tier, existing_before
+            )
 
         except Exception as e:
             logger.error(f"Error downloading '{keyword}' ({tier}): {e}")

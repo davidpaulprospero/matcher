@@ -1,7 +1,8 @@
 # Keyword Mode: Pipeline Without Voiceover
 
-> **Status:** Planning
+> **Status:** Implemented (Phase 1-2 complete)
 > **Created:** 2026-01-19
+> **Implemented:** 2026-01-19
 > **Goal:** Run pipeline with keywords only, no voiceover/SRT required
 
 ## Overview
@@ -492,31 +493,31 @@ python main.py --voiceover project/voiceover/edited.srt --match-only
 
 ## Implementation Phases
 
-### Phase 1: Montage Mode
-- [ ] Add `KeywordSegment` dataclass
-- [ ] Create `MontageSegmentStage`
-- [ ] Add `--keywords` CLI argument
-- [ ] Add `keyword_mode.montage` config section
-- [ ] Modify pipeline builder
+### Phase 1: Montage Mode ✅
+- [x] Add `KeywordSegment` dataclass (`src/state.py`)
+- [x] Create `MontageSegmentStage` (`src/stages/keyword_mode.py`)
+- [x] Add `--keyword-list` CLI argument (`src/cli/args.py`)
+- [x] Add `keyword_mode.montage` config section (`src/config/sections/keyword_mode.py`)
+- [x] Modify pipeline builder (`src/pipeline.py:create_keyword_mode_pipeline`)
 
-### Phase 2: Script Mode
-- [ ] Create `ScriptSynthesisStage`
-- [ ] LLM prompt templates for each style
-- [ ] SRT timing algorithm
-- [ ] Ollama model auto-detection
-- [ ] Add `keyword_mode.script` config section
-- [ ] Output script.txt alongside SRT
+### Phase 2: Script Mode ✅
+- [x] Create `ScriptSynthesisStage` (`src/stages/keyword_mode.py`)
+- [x] LLM prompt templates for each style (STYLE_PROMPTS dict)
+- [x] SRT timing algorithm (`_script_to_srt()`)
+- [x] Ollama model auto-detection (`get_best_ollama_model()`)
+- [x] Add `keyword_mode.script` config section (`config.yaml`)
+- [x] Output script.txt alongside SRT
 
-### Phase 3: Collection Mode
+### Phase 3: Collection Mode 🔄
 - [ ] Create `CollectionDownloadStage`
 - [ ] Create `CollectionOrganizeStage`
 - [ ] Folder structure with manifests
 - [ ] Skip timeline generation path
 
-### Phase 4: Polish
-- [ ] Validation and error messages
-- [ ] Ollama setup instructions
-- [ ] Documentation
+### Phase 4: Polish 🔄
+- [x] Validation and error messages
+- [x] Ollama setup instructions (CLAUDE.md, `/ollama-check` skill)
+- [x] Documentation (CLAUDE.md, config.yaml comments)
 - [ ] Tests
 
 ---

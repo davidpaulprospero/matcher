@@ -24,6 +24,16 @@ from src.state import TranscriptSegment
 logger = logging.getLogger(__name__)
 
 
+def _safe_print(*args, **kwargs):
+    """Print with flush, but handle Windows OSError when stdout is redirected."""
+    try:
+        print(*args, **kwargs)
+    except OSError:
+        # Windows can throw OSError: [Errno 22] Invalid argument
+        # when stdout is redirected and flush=True is used
+        pass
+
+
 def transcribe_videos_parallel(
     video_paths: List[str],
     cache: Any,
@@ -107,7 +117,7 @@ def transcribe_videos_parallel(
         ]
 
     if show_progress:
-        print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
+        _safe_print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
 
     if not uncached_videos:
         return results
@@ -120,7 +130,7 @@ def transcribe_videos_parallel(
     # PHASE 1: Parallel audio extraction (CPU-bound)
     # =========================================================================
     if show_progress:
-        print(f"  Phase 1: Extracting audio ({max_workers} workers)...", flush=True)
+        _safe_print(f"  Phase 1: Extracting audio ({max_workers} workers)...", flush=True)
 
     audio_files = {}  # video_path -> audio_path
     phase1_start = time.time()
@@ -144,20 +154,20 @@ def transcribe_videos_parallel(
                 if audio_path:
                     audio_files[video_path] = audio_path
                 if show_progress and completed % 10 == 0:
-                    print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
+                    _safe_print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
             except Exception as e:
                 completed += 1
                 logger.error(f"  Audio extraction error: {e}")
 
     phase1_time = time.time() - phase1_start
     if show_progress:
-        print(f"  ✓ Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)", flush=True)
+        _safe_print(f"  ✓ Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)", flush=True)
 
     # =========================================================================
     # PHASE 2: Sequential GPU transcription (mutex protected)
     # =========================================================================
     if show_progress:
-        print(f"  Phase 2: Transcribing with shared model (sequential GPU)...", flush=True)
+        _safe_print(f"  Phase 2: Transcribing with shared model (sequential GPU)...", flush=True)
 
     phase2_start = time.time()
     total = len(audio_files)
@@ -169,7 +179,7 @@ def transcribe_videos_parallel(
             pct = ((i + 1) / total) * 100
             elapsed = time.time() - phase2_start
             eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
-            print(f"\r  [{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s    ", end='', flush=True)
+            _safe_print(f"\r  [{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s    ", end='', flush=True)
 
         try:
             # Transcribe with WhisperClient (GPU-locked)
@@ -211,7 +221,7 @@ def transcribe_videos_parallel(
 
     phase2_time = time.time() - phase2_start
     if show_progress:
-        print(f"  ✓ Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)", flush=True)
+        _safe_print(f"  ✓ Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)", flush=True)
 
     # Clean up temp directory
     try:

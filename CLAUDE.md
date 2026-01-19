@@ -30,6 +30,11 @@ This file helps Claude Code sessions understand project conventions and avoid co
 | `--refresh-entities` | Re-download entity images (ignore local cache) |
 | `--non-interactive` | Skip prompts, use defaults |
 | `--save-matching-fixtures` | Save matching inputs for testing |
+| `--keyword-list "a,b,c"` | **Keyword mode:** comma-separated keywords (no voiceover) |
+| `--keyword-mode MODE` | Keyword mode type: montage, script, collection |
+| `--duration SECS` | Target duration for keyword mode |
+| `--style STYLE` | Script style: documentary, promotional, narrative, etc. |
+| `--tone TONE` | Script tone: inspiring, serious, playful, urgent, etc. |
 
 ### Common Commands
 
@@ -45,6 +50,14 @@ python main.py --match-only
 
 # Use saved keywords
 python main.py --use-keywords mypreset
+
+# Keyword mode (no voiceover required)
+python main.py --keyword-list "sunset,ocean,beach" --keyword-mode montage --duration 60
+python main.py --keyword-list "coral reef,marine life" --keyword-mode script --style documentary
+
+# Compilation video (9+ minutes, no voiceover)
+python main.py --keyword-list "lion hunt,shark attack,bear charge" --keyword-mode montage \
+  --duration 600 --config config_compilation.yaml --project "E:\Compilations\Animals"
 ```
 
 ### Skill Commands
@@ -57,6 +70,7 @@ python main.py --use-keywords mypreset
 | `/gdrive-download <url> <output> [--oauth]` | Download file from Google Drive (public or OAuth) |
 | `/validate-output [path]` | Validate output **structure** (OTIO/XML/EDL format, track layout) |
 | `/ollama-check` | Diagnose Ollama setup, check models, start server with correct path. Use for keyword mode script generation issues. |
+| `/watch <project>` | Start pipeline (if idle) and monitor progress with periodic status updates. Uses sleep timers to check automatically. |
 
 ```bash
 # Check project log and auto-fix issues
@@ -85,6 +99,9 @@ python main.py --use-keywords mypreset
 
 # Check Ollama setup for keyword mode
 /ollama-check
+
+# Monitor a running pipeline
+/watch E:/Edit Job/Stu/January/6__2026-01-15
 ```
 
 `/logcheck` reads latest run log, detects errors (downloads, API, OTIO), and applies fixes automatically.
@@ -93,6 +110,7 @@ python main.py --use-keywords mypreset
 `/gdrive-download` supports URLs, file IDs, or file names; use `--oauth` for private files.
 `/validate-output` accepts output paths OR project paths (auto-resolves to latest output).
 `/ollama-check` verifies Ollama installation, starts server with `D:\ollama\models` path, lists available models.
+`/watch` starts pipeline if idle, then monitors with sleep-based polling. Reports stage progress and completion.
 
 ## Refactoring Roadmap
 
@@ -582,6 +600,57 @@ download:
 **Transcript sources tracked:** `manual_caption`, `auto_caption`, `whisper`, `metadata`
 
 **Note:** Can coexist with audio-first mode (separate configs).
+
+### Keyword Mode (No Voiceover)
+Run pipeline with just keywords - no voiceover/SRT required. Three modes:
+
+| Mode | Purpose | Output |
+|------|---------|--------|
+| `montage` | Quick assembly | Equal-time segments, silent timeline |
+| `script` | LLM narration | Generated SRT + matched timeline |
+| `collection` | Research | Organized folders, no timeline |
+
+```bash
+# Montage mode - equal duration per keyword
+python main.py --keyword-list "sunset,ocean,beach" --keyword-mode montage --duration 60
+
+# Script mode - LLM generates narration -> SRT -> matching
+python main.py --keyword-list "coral reef,marine life" --keyword-mode script --style documentary
+```
+
+```yaml
+keyword_mode:
+  enabled: true
+  mode: script  # montage | script | collection
+  script:
+    style: documentary  # documentary | promotional | narrative | listicle | poetic | minimal
+    target_duration: 120
+    llm:
+      provider: ollama  # ollama | gemini | anthropic
+      model: mistral:7b
+```
+
+**Script mode outputs:** `voiceover/synthetic.srt` (drives matching), `voiceover/synthetic_script.txt` (for TTS)
+
+**Ollama setup:** `ollama pull mistral:7b` - use `/ollama-check` to diagnose issues
+
+### Compilation Videos
+Long-form compilations (9+ minutes) without voiceover. Use `config_compilation.yaml`:
+
+```bash
+python main.py --keyword-list "lion hunt,shark attack,crocodile ambush,hippo charge,elephant charge" \
+  --keyword-mode montage --duration 600 --config config_compilation.yaml \
+  --project "E:\Compilations\AnimalEncounters"
+```
+
+**Config highlights:**
+- 12+ videos per keyword for variety
+- Multiple alternative tracks (V1-V3)
+- Audio-first download (faster)
+- Scene detection enabled
+- No voiceover processing
+
+**Output:** Silent OTIO timeline ready for voiceover in NLE.
 
 ### Location-Aware Matching
 Filters video candidates by geographic proximity for travel content.

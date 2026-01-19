@@ -32,6 +32,11 @@ Examples:
     # Other options
     python main.py --match-only                # Skip download, match existing
     python main.py --config custom_config.yaml # Use custom config
+
+    # Keyword Mode (no voiceover required)
+    python main.py --keyword-list "sunset,ocean,beach" --duration 60
+    python main.py --keyword-list "coral reef,marine life" --keyword-mode script --style documentary
+    python main.py --keyword-list "sunset" --keyword-mode montage --duration 30
         """
     )
 
@@ -133,6 +138,44 @@ Examples:
         '--refresh-entities',
         action='store_true',
         help='Force re-download entity images (ignore local cache)'
+    )
+
+    # Keyword Mode arguments (pipeline without voiceover)
+    parser.add_argument(
+        '--keyword-list',
+        type=str,
+        help='Comma-separated keywords for keyword mode (no voiceover required)'
+    )
+
+    parser.add_argument(
+        '--keyword-mode',
+        type=str,
+        choices=['montage', 'script', 'collection'],
+        default=None,
+        help='Keyword mode type: montage (equal segments), script (LLM narration), collection (organize only)'
+    )
+
+    parser.add_argument(
+        '--duration',
+        type=float,
+        default=None,
+        help='Target duration in seconds (keyword mode)'
+    )
+
+    parser.add_argument(
+        '--style',
+        type=str,
+        choices=['documentary', 'promotional', 'narrative', 'listicle', 'poetic', 'minimal'],
+        default=None,
+        help='Script style for keyword mode script generation'
+    )
+
+    parser.add_argument(
+        '--tone',
+        type=str,
+        choices=['inspiring', 'serious', 'playful', 'urgent', 'contemplative'],
+        default=None,
+        help='Script tone for keyword mode script generation'
     )
 
     return parser.parse_args()

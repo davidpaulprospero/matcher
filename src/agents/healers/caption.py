@@ -59,6 +59,10 @@ class CaptionHealer(Healer):
         "caption parse",
         "captionfetcher",
         "caption_fetcher",
+        "po token",           # PO Token required for subtitles
+        "po_token",
+        "subtitles require",  # "subtitles require a PO Token"
+        "missing subtitles",  # "missing subtitles languages"
     ]
 
     # Stages this healer handles (stage-aware filtering)
@@ -118,6 +122,10 @@ class CaptionHealer(Healer):
         """Attempt to fix caption-related errors."""
         error_str = str(error).lower()
 
+        # PO Token required (YouTube restriction as of late 2024)
+        if any(p in error_str for p in ["po token", "po_token", "subtitles require"]):
+            return self._handle_po_token_error(error, state)
+
         # No captions available
         if any(p in error_str for p in ["no captions", "no subtitles", "caption not found"]):
             return self._handle_no_captions(error, state)
@@ -140,6 +148,47 @@ class CaptionHealer(Healer):
 
         # Generic caption error - enable fallback
         return self._handle_generic_error(error, state)
+
+    def _handle_po_token_error(self, error: Exception, state: 'PipelineState') -> HealerResult:
+        """Handle PO Token requirement by switching to tv_embedded player.
+
+        YouTube (as of late 2024) requires a PO Token for subtitle access on
+        some player clients (web, mweb). The tv_embedded client bypasses this.
+        """
+        self.log_attempt("PO Token required for subtitles, switching to tv_embedded player...")
+
+        # Get bypass config and ensure tv_embedded is enabled
+        download_config = getattr(self.config, 'download', None)
+        if download_config:
+            bypass_config = getattr(download_config, 'rate_limit_bypass', None)
+            if bypass_config:
+                # Enable tv_embedded for subtitles
+                if hasattr(bypass_config, 'subtitle_always_tv_embedded'):
+                    bypass_config.subtitle_always_tv_embedded = True
+                elif isinstance(bypass_config, dict):
+                    bypass_config['subtitle_always_tv_embedded'] = True
+
+                # Also escalate to tier 3 (tv_embedded) if not already there
+                current_tier = getattr(bypass_config, '_current_tier', 1)
+                if isinstance(bypass_config, dict):
+                    current_tier = bypass_config.get('_current_tier', 1)
+
+                if current_tier < 3:
+                    if hasattr(bypass_config, '_current_tier'):
+                        bypass_config._current_tier = 3
+                    elif isinstance(bypass_config, dict):
+                        bypass_config['_current_tier'] = 3
+
+                self.log_success("Switched to tv_embedded player (bypasses PO Token requirement)")
+                return HealerResult.config_changed(
+                    "Enabled tv_embedded player for subtitles (bypasses PO Token)",
+                    player_client="tv_embedded",
+                    po_token_bypass=True
+                )
+
+        # Fallback: just enable audio fallback
+        self.log_attempt("Could not configure tv_embedded, enabling audio fallback")
+        return self._handle_no_captions(error, state)
 
     def _handle_no_captions(self, error: Exception, state: 'PipelineState') -> HealerResult:
         """Handle videos with no captions by enabling fallback."""

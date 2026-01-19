@@ -22,7 +22,13 @@ logger = logging.getLogger(__name__)
 
 # Stage order for resume logic
 # Caption-first flow: VIDEO_METADATA -> CAPTION -> DOWNLOAD (only uncaptioned)
+# Keyword mode: KEYWORD_INPUT -> MONTAGE_SEGMENT or SCRIPT_SYNTHESIS -> (rest of pipeline)
 STAGE_ORDER = [
+    # Keyword mode stages (alternatives to ANALYZE)
+    "KEYWORD_INPUT",      # Keyword mode: set up keywords from CLI/config
+    "MONTAGE_SEGMENT",    # Keyword mode (montage): create equal-duration segments
+    "SCRIPT_SYNTHESIS",   # Keyword mode (script): LLM generates narration -> SRT
+    # Standard pipeline stages
     "ANALYZE",
     "ENTITY_IMAGES",
     "ENTITY_VIDEOS",

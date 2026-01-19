@@ -3,6 +3,11 @@ LLM-based title filtering and metadata search.
 
 Migrated from VideoDownloader search and filter methods (lines 582-842).
 Already uses unified src.llm_client (Rule 9 compliant).
+
+Enhanced with:
+- YouTube Data API v3 for fast metadata fetching (50 videos/request)
+- Content filter presets (documentary, stock_footage, raw)
+- Duration-aware filtering
 """
 
 from __future__ import annotations
@@ -12,12 +17,43 @@ import os
 import re
 import subprocess
 import logging
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 if TYPE_CHECKING:
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+# Default presets (loaded from config.yaml at runtime)
+DEFAULT_PRESETS = {
+    "raw": {
+        "description": "No additional content filtering",
+        "rejection_prompt": "",
+        "acceptance_prompt": "",
+    },
+    "documentary": {
+        "description": "Filter trainers, animated, vlogs for documentary footage",
+        "rejection_prompt": """- Professional dog training content (trainers like Cesar Millan, Zac George,
+  Victoria Stilwell, Kikopup, McCann, or any channel focused on dog training)
+- Training tutorials, obedience lessons, behavior modification guides
+- Animated, cartoon, CGI, or 3D animated content
+- Personal vlogs, reaction videos, commentary without useful footage
+- Long videos (>10 minutes) - likely contain intros, outros, filler content""",
+        "acceptance_prompt": """PREFER (in order):
+1. YouTube Shorts (<60 seconds) - quick emotional moments, viral clips
+2. Medium videos (1-5 minutes) - focused content, specific moments
+3. Documentary footage, news coverage, adoption events, shelter footage
+AVOID: Long videos (>10 min) unless exceptionally relevant""",
+    },
+    "stock_footage": {
+        "description": "Silent/B-roll footage only",
+        "rejection_prompt": """- Any video with significant talking/narration/voiceover
+- Vlogs, commentary, reactions, podcasts
+- Animated or cartoon content
+- Music videos, lyric videos""",
+        "acceptance_prompt": "PREFER: Silent footage, nature shots, B-roll, aerial, time-lapse",
+    },
+}
 
 
 class TitleFilter:
@@ -25,6 +61,11 @@ class TitleFilter:
 
     Migrated from VideoDownloader LLM filter methods.
     Already uses unified LLM client (Rule 9 compliant).
+
+    Enhanced with:
+    - YouTube Data API v3 for fast metadata fetching
+    - Content filter presets support
+    - Duration-aware filtering
     """
 
     def __init__(self, config: 'Config', cookies_args: List[str], get_tier_value_func):
@@ -40,6 +81,49 @@ class TitleFilter:
         self.download_config = config.download
         self.cookies_args = cookies_args
         self._get_tier_value = get_tier_value_func
+
+        # Initialize YouTube Data API client (optional - for faster metadata)
+        self.youtube = None
+        self._init_youtube_api()
+
+        # Load content filter presets from config
+        self.presets = self._load_presets()
+
+    def _init_youtube_api(self):
+        """Initialize YouTube Data API v3 client if API key is available."""
+        api_key = (
+            os.environ.get('YOUTUBE_API_KEY') or
+            getattr(self.download_config, 'youtube_api_key', '')
+        )
+        if not api_key:
+            logger.debug("No YouTube API key found, will use yt-dlp for metadata")
+            return
+
+        try:
+            from googleapiclient.discovery import build
+            self.youtube = build('youtube', 'v3', developerKey=api_key)
+            logger.info("YouTube Data API v3 initialized (fast metadata fetching enabled)")
+        except ImportError:
+            logger.warning("google-api-python-client not installed, using yt-dlp for metadata")
+        except Exception as e:
+            logger.warning(f"Failed to initialize YouTube API: {e}")
+
+    def _load_presets(self) -> Dict[str, Dict[str, str]]:
+        """Load content filter presets from config or use defaults."""
+        presets = DEFAULT_PRESETS.copy()
+
+        # Try to load from config
+        if hasattr(self.config, 'content_filter_presets'):
+            config_presets = self.config.content_filter_presets
+            if isinstance(config_presets, dict):
+                for name, preset in config_presets.items():
+                    if isinstance(preset, dict):
+                        presets[name] = {
+                            'description': preset.get('description', ''),
+                            'rejection_prompt': preset.get('rejection_prompt', ''),
+                            'acceptance_prompt': preset.get('acceptance_prompt', ''),
+                        }
+        return presets
 
     def search_video_metadata(
         self,
@@ -141,6 +225,192 @@ class TitleFilter:
             logger.warning(f"Error searching metadata: {e}")
             return []
 
+    def fetch_full_metadata(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch full metadata (including description) for specific video IDs.
+
+        Uses YouTube Data API v3 if available (fast, batches 50 videos per request).
+        Falls back to yt-dlp if no API key (slower, 1 request per video).
+
+        Called AFTER title blacklist filter to minimize API calls.
+
+        Args:
+            video_ids: List of YouTube video IDs
+
+        Returns:
+            Dict mapping video_id to metadata dict with:
+            - title, channel, description (first 200 chars), tags, category_id
+        """
+        if not video_ids:
+            return {}
+
+        if self.youtube:
+            return self._fetch_with_youtube_api(video_ids)
+        else:
+            return self._fetch_with_ytdlp(video_ids)
+
+    def _fetch_with_youtube_api(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch metadata using YouTube Data API v3 (fast, batches 50 videos)."""
+        metadata = {}
+
+        # Batch in groups of 50 (API limit)
+        for i in range(0, len(video_ids), 50):
+            batch = video_ids[i:i + 50]
+            try:
+                request = self.youtube.videos().list(
+                    part='snippet',
+                    id=','.join(batch)
+                )
+                response = request.execute()
+
+                for item in response.get('items', []):
+                    vid_id = item['id']
+                    snippet = item.get('snippet', {})
+                    metadata[vid_id] = {
+                        'title': snippet.get('title', ''),
+                        'channel': snippet.get('channelTitle', ''),
+                        'description': snippet.get('description', '')[:200],
+                        'tags': snippet.get('tags', []),
+                        'category_id': snippet.get('categoryId', ''),
+                    }
+
+                logger.debug(f"YouTube API: Fetched metadata for {len(response.get('items', []))}/{len(batch)} videos")
+
+            except Exception as e:
+                logger.warning(f"YouTube API error for batch: {e}")
+                # Fall back to yt-dlp for this batch
+                metadata.update(self._fetch_with_ytdlp(batch))
+
+        return metadata
+
+    def _fetch_with_ytdlp(self, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fallback: fetch metadata with yt-dlp (slower, no API key needed)."""
+        metadata = {}
+
+        for vid_id in video_ids:
+            try:
+                cmd = [
+                    'yt-dlp',
+                    f'https://www.youtube.com/watch?v={vid_id}',
+                    '--dump-json',
+                    '--skip-download',
+                    '--no-warnings',
+                    '--no-playlist',
+                ]
+                cmd.extend(self.cookies_args)
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    encoding='utf-8',
+                    errors='ignore',
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+
+                if result.returncode == 0 and result.stdout:
+                    data = json.loads(result.stdout)
+                    metadata[vid_id] = {
+                        'title': data.get('title', ''),
+                        'channel': data.get('channel', data.get('uploader', '')),
+                        'description': data.get('description', '')[:200],
+                        'tags': data.get('tags', []),
+                        'category_id': '',  # yt-dlp uses different field
+                    }
+            except subprocess.TimeoutExpired:
+                logger.debug(f"yt-dlp timeout for video {vid_id}")
+            except Exception as e:
+                logger.debug(f"yt-dlp error for video {vid_id}: {e}")
+
+        logger.debug(f"yt-dlp: Fetched metadata for {len(metadata)}/{len(video_ids)} videos")
+        return metadata
+
+    def _format_duration(self, seconds: int) -> str:
+        """Format duration with category hint for LLM context."""
+        if seconds <= 0:
+            return "unknown"
+        elif seconds < 60:
+            return f"{seconds}s (YouTube Short)"
+        elif seconds < 300:
+            mins = seconds // 60
+            secs = seconds % 60
+            return f"{mins}m {secs}s (Short clip)"
+        elif seconds < 600:
+            return f"{seconds // 60}m (Medium)"
+        else:
+            return f"{seconds // 60}m (Long - likely contains filler)"
+
+    def _apply_title_blacklist(self, videos: List[Dict]) -> List[Dict]:
+        """Apply title blacklist filter (fast, free, no API calls)."""
+        blacklist = getattr(self.download_config, 'title_blacklist', [])
+        if not blacklist:
+            return videos
+
+        filtered = []
+        for video in videos:
+            title_lower = video.get('title', '').lower()
+            channel_lower = video.get('channel', '').lower()
+
+            # Check if any blacklist term is in title or channel
+            blocked = False
+            for term in blacklist:
+                term_lower = term.lower()
+                if term_lower in title_lower or term_lower in channel_lower:
+                    logger.debug(f"    Blacklist: {video['title'][:50]}... (matched: {term})")
+                    blocked = True
+                    break
+
+            if not blocked:
+                filtered.append(video)
+
+        if len(filtered) < len(videos):
+            logger.info(f"    Title blacklist: {len(videos) - len(filtered)} videos filtered out")
+
+        return filtered
+
+    def _get_preset_prompts(self) -> tuple:
+        """Get rejection and acceptance prompts from preset + custom config."""
+        # Get preset name from config
+        preset_name = getattr(self.download_config, 'content_filter_preset', 'raw')
+        preset = self.presets.get(preset_name, self.presets.get('raw', {}))
+
+        # Start with preset prompts
+        rejection_prompt = preset.get('rejection_prompt', '')
+        acceptance_prompt = preset.get('acceptance_prompt', '')
+
+        # Extend with custom prompts from project config
+        custom_rejection = getattr(self.download_config, 'custom_rejection_prompt', '')
+        custom_acceptance = getattr(self.download_config, 'custom_acceptance_prompt', '')
+
+        if custom_rejection:
+            rejection_prompt = f"{rejection_prompt}\n{custom_rejection}" if rejection_prompt else custom_rejection
+        if custom_acceptance:
+            acceptance_prompt = f"{acceptance_prompt}\n{custom_acceptance}" if acceptance_prompt else custom_acceptance
+
+        if preset_name != 'raw':
+            logger.debug(f"Using content filter preset: {preset_name}")
+
+        return rejection_prompt, acceptance_prompt
+
+    def _build_video_data_string(self, videos: List[Dict]) -> str:
+        """Build formatted video data string for LLM prompt with full metadata."""
+        lines = []
+        for i, v in enumerate(videos, 1):
+            duration_str = self._format_duration(v.get('duration', 0))
+            description = v.get('description', '')[:200]
+            if description:
+                description = description.replace('\n', ' ')
+                if len(description) >= 200:
+                    description += '...'
+
+            lines.append(f"""{i}. Title: {v['title']}
+   Channel: {v.get('channel', 'Unknown')}
+   Duration: {duration_str}
+   Description: {description if description else 'N/A'}""")
+
+        return "\n\n".join(lines)
+
     def filter_titles_with_llm(
         self,
         videos: List[Dict],
@@ -150,7 +420,12 @@ class TitleFilter:
         """
         Filter and RANK video titles using LLM to check relevance.
 
-        Migrated from downloader.py lines 642-786.
+        Enhanced flow:
+        1. Apply title blacklist (fast, free)
+        2. Fetch full metadata for remaining videos (YouTube API or yt-dlp)
+        3. Build prompt with title + channel + duration + description
+        4. Apply content filter preset + custom prompts
+        5. Send to LLM for filtering and ranking
 
         Args:
             videos: List of video metadata dicts
@@ -167,6 +442,29 @@ class TitleFilter:
         if not videos:
             return []
 
+        # Step 1: Apply title blacklist first (fast, no API cost)
+        videos = self._apply_title_blacklist(videos)
+        if not videos:
+            logger.info("    All videos filtered by title blacklist")
+            return []
+
+        # Step 2: Fetch full metadata for remaining videos (description, tags)
+        video_ids = [v['id'] for v in videos if v.get('id')]
+        if video_ids:
+            full_metadata = self.fetch_full_metadata(video_ids)
+
+            # Enrich videos with description from full metadata
+            for v in videos:
+                if v.get('id') in full_metadata:
+                    meta = full_metadata[v['id']]
+                    v['description'] = meta.get('description', '')
+                    # Update channel if we got better info
+                    if meta.get('channel') and not v.get('channel'):
+                        v['channel'] = meta['channel']
+
+        # Get preset prompts
+        rejection_prompt, acceptance_prompt = self._get_preset_prompts()
+
         provider = getattr(llm_config, 'provider', 'gemini')
         model = getattr(llm_config, 'model', 'gemini-2.0-flash')
         min_relevance = getattr(llm_config, 'min_relevance', 0.7)
@@ -178,42 +476,42 @@ class TitleFilter:
         for i in range(0, len(videos), batch_size):
             batch = videos[i:i + batch_size]
 
-            # Build prompt - now includes relevance scoring
-            titles_list = "\n".join([f"{j+1}. {v['title']}" for j, v in enumerate(batch)])
+            # Build video data with full metadata
+            video_data = self._build_video_data_string(batch)
 
-            prompt = f"""You are filtering and ranking YouTube video titles for a video editing project.
+            # Build prompt with preset criteria
+            prompt = f"""You are filtering and ranking YouTube videos for a video editing project.
 
 SEARCH KEYWORD: "{keyword}"
 {f'TOPIC CONTEXT: {topic}' if topic else ''}
 
-VIDEO TITLES:
-{titles_list}
+VIDEO DATA:
+{video_data}
 
-For each title, determine if it would provide relevant B-roll footage for the keyword/topic.
-Also rate its relevance from 0.0 to 1.0 (higher = more relevant/useful footage).
+For each video, determine if it would provide relevant B-roll footage for the keyword/topic.
+Rate relevance from 0.0 to 1.0 (higher = more relevant/useful footage).
 
 REJECT (relevance=0) videos that are:
 - Live streams, webcams, 24/7 streams, live cams
 - Sports highlights, game recaps, match footage
 - Music videos, lyric videos, karaoke
 - Gaming content, Let's Play, walkthroughs
-- Personal vlogs unrelated to the topic
-- News commentary/opinion pieces (unless specifically needed)
 - Reaction videos
 - Compilations of memes/fails
+{rejection_prompt}
 
-APPROVE and RATE videos that are:
+APPROVE and RATE videos based on:
 - Documentary or educational content (0.8-1.0)
 - Stock footage, travel footage, city views (0.7-0.9)
 - Nature, landscapes, aerial shots (0.6-0.8)
 - Professional productions about the topic (0.8-1.0)
 - News reports with actual footage (0.6-0.8)
-- Explainer videos with relevant visuals (0.5-0.7)
+{acceptance_prompt}
 
 Respond with a JSON array of objects, one per video:
 [
   {{"index": 1, "approve": true, "relevance": 0.9, "reason": "Documentary about topic"}},
-  {{"index": 2, "approve": false, "relevance": 0.0, "reason": "Sports highlights"}}
+  {{"index": 2, "approve": false, "relevance": 0.0, "reason": "Professional trainer content"}}
 ]
 
 Only output the JSON array, no other text."""
@@ -225,60 +523,25 @@ Only output the JSON array, no other text."""
                     response = self._call_anthropic(prompt, model)
 
                 # Parse response - extract JSON array
-                # Strip markdown code blocks if present
-                clean_response = response.strip()
-                if clean_response.startswith('```'):
-                    # Remove ```json or ``` prefix and trailing ```
-                    lines = clean_response.split('\n')
-                    if lines[0].startswith('```'):
-                        lines = lines[1:]  # Remove opening ```json
-                    if lines and lines[-1].strip() == '```':
-                        lines = lines[:-1]  # Remove closing ```
-                    clean_response = '\n'.join(lines)
-
-                json_match = re.search(r'\[[\s\S]*\]', clean_response)
-                if not json_match:
-                    logger.warning(f"No JSON array found in LLM response (len={len(response)})")
-                    raise ValueError("No JSON array in response")
-
-                json_str = json_match.group()
-                try:
-                    results = json.loads(json_str)
-                except json.JSONDecodeError:
-                    # Try to fix truncated JSON by closing brackets
-                    json_str = json_str.rstrip()
-                    if not json_str.endswith(']'):
-                        # Find last complete object
-                        last_brace = json_str.rfind('}')
-                        if last_brace > 0:
-                            json_str = json_str[:last_brace + 1] + ']'
-                            try:
-                                results = json.loads(json_str)
-                                logger.debug("Fixed truncated JSON response")
-                            except json.JSONDecodeError:
-                                raise
-                        else:
-                            raise
-                    else:
-                        raise
+                results = self._parse_llm_response(response)
 
                 for result in results:
                     idx = result.get('index', 0) - 1
                     if 0 <= idx < len(batch) and result.get('approve', False):
                         video = batch[idx]
                         video['llm_reason'] = result.get('reason', 'Approved')
-                        # Store relevance score for ranking (default 0.7 for backwards compat)
                         video['llm_relevance'] = float(result.get('relevance', 0.7))
                         approved.append(video)
                         logger.debug(f"    ✓ Approved ({video['llm_relevance']:.1f}): {video['title'][:50]}...")
                     elif 0 <= idx < len(batch):
-                        logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({result.get('reason', 'No reason')})")
+                        reason = result.get('reason', 'No reason')
+                        logger.debug(f"    ✗ Rejected: {batch[idx]['title'][:50]}... ({reason})")
 
             except Exception as e:
                 logger.warning(f"LLM title filter error: {e}")
                 # On error, approve all in batch with default relevance (fail open)
                 for v in batch:
-                    v['llm_relevance'] = 0.5  # Lower default for error case
+                    v['llm_relevance'] = 0.5
                 approved.extend(batch)
 
         # SORT by relevance score (highest first) before returning
@@ -286,6 +549,41 @@ Only output the JSON array, no other text."""
 
         logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved (sorted by relevance)")
         return approved
+
+    def _parse_llm_response(self, response: str) -> List[Dict]:
+        """Parse JSON array from LLM response, handling markdown and truncation."""
+        # Strip markdown code blocks if present
+        clean_response = response.strip()
+        if clean_response.startswith('```'):
+            lines = clean_response.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            clean_response = '\n'.join(lines)
+
+        json_match = re.search(r'\[[\s\S]*\]', clean_response)
+        if not json_match:
+            logger.warning(f"No JSON array found in LLM response (len={len(response)})")
+            raise ValueError("No JSON array in response")
+
+        json_str = json_match.group()
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            # Try to fix truncated JSON
+            json_str = json_str.rstrip()
+            if not json_str.endswith(']'):
+                last_brace = json_str.rfind('}')
+                if last_brace > 0:
+                    json_str = json_str[:last_brace + 1] + ']'
+                    try:
+                        results = json.loads(json_str)
+                        logger.debug("Fixed truncated JSON response")
+                        return results
+                    except json.JSONDecodeError:
+                        raise
+            raise
 
     def _call_gemini(self, prompt: str, model: str) -> str:
         """

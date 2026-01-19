@@ -423,6 +423,26 @@ def optimize_timeline_gaps(timeline: otio.schema.Timeline) -> otio.schema.Timeli
     return timeline
 
 
+def count_timeline_items(timeline: otio.schema.Timeline) -> int:
+    """
+    Count total items (clips + gaps) in a timeline.
+
+    DaVinci Resolve processes each item when importing OTIO.
+    Large item counts (10k+) cause crashes/hangs.
+
+    Args:
+        timeline: OTIO Timeline to count
+
+    Returns:
+        Total number of clips and gaps across all tracks
+    """
+    total = 0
+    for track in timeline.tracks:
+        if isinstance(track, otio.schema.Track):
+            total += len(list(track))  # Use list() to safely iterate
+    return total
+
+
 # ============================================================
 # Media Path Normalization
 # ============================================================
@@ -595,6 +615,45 @@ def create_clip_with_timewarp(
     """
     rate = frame_rate
 
+    # =========================================================================
+    # SEGMENT FILE TIMESTAMP ADJUSTMENT
+    # =========================================================================
+    # Segment files (from audio-first mode) have filenames like: video_id_NNNN.mp4
+    # where NNNN is the start second in the original video. The segment's local
+    # timeline starts at 0, so we need to adjust source_start to segment-local time.
+    #
+    # Example: file "NOD5Kt49s4E_0006.mp4" is a segment starting at 6s in the original.
+    # If source_start=117s (original video time), we need to convert to segment-local:
+    #   adjusted_start = 117 - 6 = 111s
+    #
+    # This handles cases where segment_lookup is empty (e.g., cross-project file reuse)
+    # and the timestamp adjustment wasn't done earlier in the pipeline.
+    #
+    # Heuristic: Only adjust if source_start looks like it's still in original video
+    # coordinates (> 60s). This avoids double-adjusting timestamps that were already
+    # converted to segment-local time by resolve_video_segment().
+    segment_offset = get_segment_file_offset(source_path)
+    if segment_offset > 0 or is_segment_file(source_path):
+        # This is a segment file - check if source_start needs adjustment
+        # Only adjust if:
+        # 1. source_start is >= segment_offset (sanity check)
+        # 2. source_start is > 60s (heuristic: likely still in original video coordinates)
+        #    OR source_start > segment_offset + 30 (clearly beyond expected segment-local range)
+        needs_adjustment = (
+            source_start >= segment_offset and
+            (source_start > 60 or source_start > segment_offset + 30)
+        )
+
+        if needs_adjustment:
+            original_source_start = source_start
+            source_start = source_start - segment_offset
+
+            # Log adjustment for debugging
+            logger.debug(
+                f"Adjusted source_start for segment file: {original_source_start:.1f}s -> {source_start:.1f}s "
+                f"(offset: {segment_offset}s, file: {Path(source_path).name})"
+            )
+
     # Create absolute path with forward slashes for DaVinci Resolve
     abs_path = _to_windows_path(source_path)
 
@@ -672,6 +731,20 @@ def create_clip_with_timewarp(
     # Note: time_scalar is always 1.0 since we use trim approach (no speed change)
     if metadata is None:
         metadata = {}
+
+    # Detect if this is an audio-only clip (from audio track)
+    # Audio tracks have 'from_track' metadata set by track builders
+    is_audio_clip = metadata.get('from_track') is not None
+
+    # For audio clips, add explicit stream mapping to tell DaVinci to use audio stream
+    if is_audio_clip:
+        # DaVinci Resolve audio stream metadata
+        # This tells DaVinci which audio channels to use from the video file
+        clip.metadata['Resolve_OTIO']['Audio Channels'] = {
+            'ChannelCount': 2,  # Stereo
+            'ChannelFormat': 'Stereo',
+            'StreamIndex': 0  # Use first audio stream from video file
+        }
 
     if target_duration > 0 and source_duration > 0:
         metadata['time_scalar'] = 1.0  # Always normal speed (trim approach)

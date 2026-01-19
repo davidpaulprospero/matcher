@@ -108,6 +108,15 @@ from .broll import (
     BrollConfig,
 )
 
+# Keyword mode (no voiceover)
+from .keyword_mode import (
+    MontageConfig,
+    ScriptLLMConfig,
+    ScriptConfig,
+    CollectionConfig,
+    KeywordModeConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -169,4 +178,10 @@ __all__ = [
     # B-roll
     'BrollSourceBoostConfig',
     'BrollConfig',
+    # Keyword mode
+    'MontageConfig',
+    'ScriptLLMConfig',
+    'ScriptConfig',
+    'CollectionConfig',
+    'KeywordModeConfig',
 ]

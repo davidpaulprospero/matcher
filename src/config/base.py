@@ -109,6 +109,8 @@ from .sections import (
     # B-roll
     BrollSourceBoostConfig,
     BrollConfig,
+    # Keyword mode
+    KeywordModeConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,6 +187,11 @@ class Config:
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
     broll: BrollConfig = field(default_factory=BrollConfig)
     healing: HealingConfig = field(default_factory=HealingConfig)
+    keyword_mode: KeywordModeConfig = field(default_factory=KeywordModeConfig)
+
+    # Content filter presets (raw, documentary, stock_footage)
+    # Loaded from config.yaml content_filter_presets section
+    content_filter_presets: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -364,6 +371,7 @@ class Config:
             'pipeline': (PipelineConfig, 'pipeline'),
             'api_keys': (APIKeysConfig, 'api_keys'),
             'healing': (HealingConfig, 'healing'),
+            'keyword_mode': (KeywordModeConfig, 'keyword_mode'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():
@@ -375,6 +383,10 @@ class Config:
         # Handle duration_tiers specially (nested structure)
         if 'duration_tiers' in data:
             config.duration_tiers = cls._build_duration_tiers(data['duration_tiers'])
+
+        # Handle content_filter_presets (dict of dicts)
+        if 'content_filter_presets' in data:
+            config.content_filter_presets = data['content_filter_presets']
 
         return config
 

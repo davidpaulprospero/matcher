@@ -114,6 +114,12 @@ class OutputConfig:
     markers_for_gaps: bool = True
     markers_for_speed: bool = True
 
+    # OTIO splitting for large timelines (DaVinci Resolve crashes with 10k+ items)
+    # Auto-split when total items (clips + gaps) exceed threshold
+    auto_split_threshold: int = 3000  # Split when total items exceed this (0 = disabled)
+    split_parts: int = 4  # Number of parts to split into
+    always_generate_full: bool = True  # Also generate FULL.otio (for reference)
+
     def __post_init__(self):
         """Convert variety dict to VarietyConfig if needed"""
         if isinstance(self.variety, dict):

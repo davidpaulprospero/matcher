@@ -335,6 +335,92 @@ def create_match_only_pipeline(
     return pipeline
 
 
+def create_keyword_mode_pipeline(
+    config: 'Config',
+    project_dir: Path,
+    mode: str = None
+) -> PipelineOrchestrator:
+    """
+    Create a pipeline for keyword mode (no voiceover input required).
+
+    This pipeline generates segments from keywords instead of parsing voiceover:
+    - montage: Equal-duration segments from keywords
+    - script: LLM generates narration script -> SRT -> segments
+    - collection: Download and organize videos by keyword (no timeline)
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+        mode: Override mode (montage | script | collection), uses config if None
+
+    Returns:
+        Configured PipelineOrchestrator for keyword mode
+    """
+    pipeline = PipelineOrchestrator(config, project_dir)
+
+    # Import keyword mode stages
+    from .stages.keyword_mode import (
+        KeywordInputStage,
+        MontageSegmentStage,
+        ScriptSynthesisStage,
+    )
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.video_metadata import VideoMetadataStage
+    from .stages.caption import CaptionStage
+    from .stages.download import DownloadStage
+    from .stages.stock import StockVideoStage
+    from .stages.broll_download import BrollDownloadStage
+    from .stages.remix import RemixStage
+    from .stages.transcribe import TranscribeStage
+    from .stages.scene_detection import SceneDetectionStage
+    from .stages.match import MatchStage
+    from .stages.broll_match import BrollMatchStage
+    from .stages.output import OutputStage
+
+    # Determine mode from config or override
+    kw_config = config.keyword_mode
+    current_mode = mode or kw_config.mode
+
+    logger.info(f"Creating keyword mode pipeline: mode={current_mode}")
+
+    # Stage 1: Set up keywords
+    pipeline.add_stage(KeywordInputStage())
+
+    # Stage 2: Generate segments based on mode
+    if current_mode == "montage":
+        # Simple equal-duration segments
+        pipeline.add_stage(MontageSegmentStage())
+    elif current_mode == "script":
+        # LLM generates narration -> SRT
+        pipeline.add_stage(ScriptSynthesisStage())
+    elif current_mode == "collection":
+        # Collection mode: just download and organize
+        # Skip segment generation, go straight to download
+        pipeline.add_stage(MontageSegmentStage())  # Use montage for simple structure
+
+    # Entity stages (for V9/V10 tracks)
+    pipeline.add_stage(EntityImagesStage())
+    pipeline.add_stage(EntityVideosStage())
+
+    # Standard download pipeline
+    pipeline.add_stage(VideoMetadataStage())
+    pipeline.add_stage(CaptionStage())
+    pipeline.add_stage(DownloadStage())
+    pipeline.add_stage(StockVideoStage())
+    pipeline.add_stage(BrollDownloadStage())
+    pipeline.add_stage(RemixStage())
+    pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(SceneDetectionStage())
+
+    # Matching and output
+    pipeline.add_stage(MatchStage())
+    pipeline.add_stage(BrollMatchStage())
+    pipeline.add_stage(OutputStage())
+
+    return pipeline
+
+
 def create_healing_pipeline(
     config: 'Config',
     project_dir: Path,

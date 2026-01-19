@@ -206,12 +206,23 @@ class TranscribeStage(Stage):
         """Determine which files to transcribe"""
         video_files = []
 
+        # Get base video directory for resolving relative paths
+        videos_dir = Path(config.downloaded_videos_dir)
+
         # Check if audio-first mode with audio files
         if state.downloaded_audio:
-            video_files = [Path(ad.file) for ad in state.downloaded_audio]
+            # Resolve relative paths against videos_dir
+            video_files = []
+            for ad in state.downloaded_audio:
+                p = Path(ad.file)
+                video_files.append(p if p.is_absolute() else videos_dir / p)
         # Use downloaded videos
         elif state.downloaded_videos:
-            video_files = [Path(dv.file) for dv in state.downloaded_videos]
+            # Resolve relative paths against videos_dir
+            video_files = []
+            for dv in state.downloaded_videos:
+                p = Path(dv.file)
+                video_files.append(p if p.is_absolute() else videos_dir / p)
         else:
             # Fallback: scan directory
             videos_dir = Path(config.downloaded_videos_dir)
@@ -389,6 +400,15 @@ class TranscribeStage(Stage):
             # Collect texts
             texts = []
             for video_path, segments in transcripts.items():
+                # Check if this is a caption-only video (no actual file downloaded)
+                # Video IDs are 11 characters, alphanumeric with optional hyphens
+                is_caption_only = False
+                if len(video_path) == 11 and video_path.replace('_', '').replace('-', '').isalnum():
+                    is_caption_only = True
+                elif not Path(video_path).exists():
+                    # Also check if path doesn't exist (may be video_id only)
+                    is_caption_only = True
+
                 for seg in segments:
                     if hasattr(seg, 'text'):
                         # TranscriptSegment object (from Whisper)
@@ -398,6 +418,7 @@ class TranscribeStage(Stage):
                             'start_time': seg.start_time,
                             'end_time': seg.end_time,
                             'transcript_source': getattr(seg, 'transcript_source', 'whisper'),
+                            'caption_only': is_caption_only,
                         })
                     else:
                         # Dict segment (from captions or cache)
@@ -408,6 +429,7 @@ class TranscribeStage(Stage):
                             'start_time': seg.get('start_time', seg.get('start', 0)),
                             'end_time': seg.get('end_time', seg.get('end', 0)),
                             'transcript_source': seg.get('transcript_source', 'whisper'),
+                            'caption_only': is_caption_only,
                         })
 
             state.text_metadata = texts

@@ -404,21 +404,13 @@ class MatchStage(Stage):
         logger.info(f"text_metadata has {broll_count}/{len(state.text_metadata)} entries with is_broll=True")
 
         broll_segments_created = 0
-        skipped_caption_only = 0
+        caption_only_count = 0
         for i, meta in enumerate(state.text_metadata):
             if isinstance(meta, dict):
                 source_file = meta.get('video_path', '')
 
-                # FILTER: Skip caption-only videos (no actual file downloaded)
-                # Caption-first mode may have video_id-only entries without real files
-                if source_file and not Path(source_file).exists():
-                    # Check if this is a caption-only video (looks like a YouTube video ID)
-                    # YouTube IDs are 11 characters, alphanumeric with optional hyphens/underscores
-                    if len(source_file) == 11 and source_file.replace('_', '').replace('-', '').isalnum():
-                        logger.debug(f"Skipping caption-only video (no file): {source_file}")
-                        skipped_caption_only += 1
-                        continue
-
+                # Create video segment for ALL entries (including caption-only)
+                # Caption-only entries will be used for embedding search but filtered before LLM
                 vid_segment = SRTSegment(
                     index=i,
                     start_time=meta.get('start_time', 0),
@@ -438,6 +430,12 @@ class MatchStage(Stage):
                     vid_segment.scene_index = meta['scene_index']
                 if meta.get('transcript_source'):
                     vid_segment.transcript_source = meta['transcript_source']
+
+                # Mark caption-only segments (for filtering later)
+                if meta.get('caption_only'):
+                    vid_segment.caption_only = True
+                    caption_only_count += 1
+
                 video_paths_set.add(source_file)
             else:
                 vid_segment = meta
@@ -445,8 +443,8 @@ class MatchStage(Stage):
 
             video_segments.append(vid_segment)
 
-        if skipped_caption_only > 0:
-            logger.info(f"Skipped {skipped_caption_only} caption-only videos (no downloaded files)")
+        if caption_only_count > 0:
+            logger.info(f"Preserved {caption_only_count} caption-only segments for embedding search (will filter before LLM)")
 
         logger.info(f"Created {broll_segments_created} video_segments with is_broll=True")
 

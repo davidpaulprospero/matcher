@@ -260,23 +260,85 @@ def main():
             print(f"  Use --save-keywords to save keywords after extraction.")
         sys.exit(0)
 
-    # Check for voiceover file
-    if not args.voiceover:
-        args.voiceover = find_voiceover_interactive(PROJECT_DIR)
+    # ==========================================================================
+    # KEYWORD MODE DETECTION
+    # ==========================================================================
+    # Keyword mode allows running without voiceover - keywords generate segments
+    keyword_mode_active = False
+    keyword_list = []
+
+    # Check for --keyword-list CLI arg
+    if hasattr(args, 'keyword_list') and args.keyword_list:
+        keyword_list = [k.strip() for k in args.keyword_list.split(',') if k.strip()]
+        if keyword_list:
+            keyword_mode_active = True
+            # Enable keyword mode in config
+            config.keyword_mode.enabled = True
+            # Override mode from CLI if specified
+            if hasattr(args, 'keyword_mode') and args.keyword_mode:
+                config.keyword_mode.mode = args.keyword_mode
+            # Override duration if specified (handle dict/object config - Rule 6)
+            if hasattr(args, 'duration') and args.duration:
+                montage_cfg = config.keyword_mode.montage
+                script_cfg = config.keyword_mode.script
+                if isinstance(montage_cfg, dict):
+                    montage_cfg['total_duration'] = args.duration
+                else:
+                    montage_cfg.total_duration = args.duration
+                if isinstance(script_cfg, dict):
+                    script_cfg['target_duration'] = args.duration
+                else:
+                    script_cfg.target_duration = args.duration
+            # Override style/tone if specified (handle dict/object config - Rule 6)
+            if hasattr(args, 'style') and args.style:
+                script_cfg = config.keyword_mode.script
+                if isinstance(script_cfg, dict):
+                    script_cfg['style'] = args.style
+                else:
+                    script_cfg.style = args.style
+            if hasattr(args, 'tone') and args.tone:
+                script_cfg = config.keyword_mode.script
+                if isinstance(script_cfg, dict):
+                    script_cfg['tone'] = args.tone
+                else:
+                    script_cfg.tone = args.tone
+
+            print(f"\n  🔑 Keyword Mode: {config.keyword_mode.mode}")
+            print(f"    Keywords: {', '.join(keyword_list[:5])}")
+            if len(keyword_list) > 5:
+                print(f"    ... and {len(keyword_list) - 5} more")
+
+    # Check if keyword mode is enabled in config (without CLI keywords)
+    elif config.keyword_mode.enabled and config.keyword_mode.keywords:
+        keyword_list = config.keyword_mode.keywords
+        keyword_mode_active = True
+        print(f"\n  🔑 Keyword Mode (from config): {config.keyword_mode.mode}")
+        print(f"    Keywords: {', '.join(keyword_list[:5])}")
+        if len(keyword_list) > 5:
+            print(f"    ... and {len(keyword_list) - 5} more")
+
+    # ==========================================================================
+    # VOICEOVER FILE CHECK (only if not in keyword mode)
+    # ==========================================================================
+    vo_path = None
+    if not keyword_mode_active:
+        # Check for voiceover file
         if not args.voiceover:
+            args.voiceover = find_voiceover_interactive(PROJECT_DIR)
+            if not args.voiceover:
+                sys.exit(1)
+
+        # Resolve voiceover path
+        vo_path = Path(args.voiceover)
+        if not vo_path.is_absolute():
+            vo_path = PROJECT_DIR / vo_path
+
+        if not vo_path.exists():
+            print(f"\n  Error: Voiceover file not found: {vo_path}")
             sys.exit(1)
 
-    # Resolve voiceover path
-    vo_path = Path(args.voiceover)
-    if not vo_path.is_absolute():
-        vo_path = PROJECT_DIR / vo_path
-
-    if not vo_path.exists():
-        print(f"\n  Error: Voiceover file not found: {vo_path}")
-        sys.exit(1)
-
     # Run pipeline using modular architecture
-    from src.pipeline import create_default_pipeline, create_match_only_pipeline
+    from src.pipeline import create_default_pipeline, create_match_only_pipeline, create_keyword_mode_pipeline
     from src.agents import ResilientRunner, HealingOrchestrator, HealingStrategy
 
     # Handle keyword presets/selection
@@ -287,7 +349,14 @@ def main():
     # Create pipeline
     audio_first = getattr(config.download.audio_first, 'enabled', False) if hasattr(config.download, 'audio_first') else False
 
-    if args.match_only:
+    if keyword_mode_active:
+        # Keyword mode pipeline - no voiceover required
+        pipeline = create_keyword_mode_pipeline(config, PROJECT_DIR, mode=config.keyword_mode.mode)
+        # Set keywords in state
+        pipeline.state.keywords = keyword_list
+        pipeline.state.project_dir = str(PROJECT_DIR)
+        print(f"\n  Using keyword mode pipeline (mode={config.keyword_mode.mode})")
+    elif args.match_only:
         pipeline = create_match_only_pipeline(config, PROJECT_DIR)
         # Match-only requires checkpoint data - force resume mode
         if not args.resume:
@@ -334,7 +403,9 @@ def main():
         pipeline = create_default_pipeline(config, PROJECT_DIR, audio_first_mode=audio_first)
 
     # Initialize state
-    pipeline.state.voiceover_path = str(vo_path)
+    if not keyword_mode_active:
+        pipeline.state.voiceover_path = str(vo_path)
+    pipeline.state.project_dir = str(PROJECT_DIR)
     pipeline.state.num_keywords = args.keywords
     pipeline.state.topic_context = ""
 

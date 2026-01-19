@@ -199,6 +199,17 @@ def match_all_segments(
             if broll_segments:
                 logger.info(f"  Added {len(broll_segments)} B-roll segments to candidates")
 
+        # Filter out caption-only segments BEFORE LLM reranking
+        # Caption-only segments help with embedding search but shouldn't be final candidates
+        pre_filter_caption_count = len(all_candidates)
+        all_candidates = [
+            (seg, dist) for seg, dist in all_candidates
+            if not getattr(seg, 'caption_only', False)
+        ]
+        caption_filtered = pre_filter_caption_count - len(all_candidates)
+        if i == 0 and caption_filtered > 0:
+            logger.info(f"First segment: filtered {caption_filtered} caption-only segments after embedding search")
+
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
             pre_filter_count = len(all_candidates)

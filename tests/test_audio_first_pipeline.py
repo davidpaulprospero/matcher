@@ -51,6 +51,8 @@ def mock_config():
     download.audio_first = audio_first
     download.download_timeouts = {'short': 60, 'medium': 120, 'long': 300}
     download.max_keyword_len = 50  # MUST be int, not Mock
+    download.max_retries = 3       # MUST be int
+    download.retry_delay = 1       # MUST be int
 
     config.download = download
     return config

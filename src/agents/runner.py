@@ -137,9 +137,11 @@ class ResilientRunner:
             # Check if stage can be skipped
             if pipeline.resume_mode and stage.can_skip(pipeline.state, pipeline.checkpoint):
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
-                if not stage.restore(pipeline.state, pipeline.checkpoint, pipeline.config):
-                    logger.warning(f"Failed to restore {stage_name} from checkpoint")
-                continue
+                if stage.restore(pipeline.state, pipeline.checkpoint, pipeline.config):
+                    continue  # Only skip if restore succeeds
+                else:
+                    # Restore failed - re-run the stage instead of skipping
+                    logger.warning(f"Failed to restore {stage_name} from checkpoint, re-running stage")
 
             # Validate inputs
             validation_error = stage.validate_inputs(pipeline.state, pipeline.config)

@@ -562,12 +562,20 @@ class ProgressBar:
         except UnicodeEncodeError:
             # Fallback: replace non-ASCII characters
             safe_line = line.encode('ascii', 'replace').decode('ascii')
-            sys.stdout.write(safe_line + " " * 10)
-            sys.stdout.flush()
-        
+            try:
+                sys.stdout.write(safe_line + " " * 10)
+                sys.stdout.flush()
+            except OSError:
+                pass  # Windows can throw OSError when stdout is redirected
+        except OSError:
+            pass  # Windows can throw OSError: [Errno 22] Invalid argument when stdout is redirected
+
         if self.current >= self.total:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            try:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            except OSError:
+                pass
     
     def _format_time(self, seconds: float) -> str:
         """Format seconds as MM:SS or HH:MM:SS"""

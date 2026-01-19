@@ -60,7 +60,7 @@ class SceneDetectionStage(Stage):
             print(f"\n  --- Stage 3.5: SCENE DETECTION ---")
 
             # Get video files from downloaded videos
-            video_files = self._get_video_files(state)
+            video_files = self._get_video_files(state, config)
 
             if not video_files:
                 print("  ! No video files found for scene detection")
@@ -210,14 +210,19 @@ class SceneDetectionStage(Stage):
 
     # === Helper Methods ===
 
-    def _get_video_files(self, state: 'PipelineState') -> List[Path]:
+    def _get_video_files(self, state: 'PipelineState', config: 'Config') -> List[Path]:
         """Get list of video files to analyze"""
         video_files = []
+
+        # Get base video directory for resolving relative paths
+        videos_dir = Path(config.downloaded_videos_dir)
 
         # From downloaded videos (normal flow)
         for dv in state.downloaded_videos:
             if hasattr(dv, 'file'):
-                video_files.append(Path(dv.file))
+                p = Path(dv.file)
+                # Resolve relative paths against videos_dir
+                video_files.append(p if p.is_absolute() else videos_dir / p)
 
         # If no downloaded_videos, try transcripts (resume flow)
         if not video_files and state.transcripts:

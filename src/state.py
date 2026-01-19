@@ -35,6 +35,35 @@ class VoiceoverSegment:
 
 
 @dataclass
+class KeywordSegment:
+    """A segment generated from a keyword (for keyword mode without voiceover).
+
+    Used in montage mode where each keyword becomes a fixed-duration segment,
+    or as intermediate representation before SRT generation in script mode.
+    """
+    index: int
+    keyword: str
+    start_time: float
+    end_time: float
+    description: str = ""  # Optional expanded description from LLM
+    source: str = "keyword_montage"  # keyword_montage | keyword_script
+
+    @property
+    def duration(self) -> float:
+        return self.end_time - self.start_time
+
+    def to_voiceover_segment(self) -> VoiceoverSegment:
+        """Convert to VoiceoverSegment for pipeline compatibility."""
+        return VoiceoverSegment(
+            index=self.index,
+            start=self.start_time,
+            end=self.end_time,
+            text=self.description or self.keyword,
+            duration=self.duration,
+        )
+
+
+@dataclass
 class TranscriptSegment:
     """A single transcript segment from video transcription"""
     index: int
@@ -200,7 +229,9 @@ class PipelineState:
     """
 
     # === INPUT STATE ===
+    project_dir: str = ""  # Project directory path
     voiceover_path: str = ""
+    num_keywords: int = None  # Number of keywords to extract (CLI override)
     voiceover_segments: List[VoiceoverSegment] = field(default_factory=list)
     keywords: List[str] = field(default_factory=list)
     topic_context: str = ""
@@ -252,6 +283,10 @@ class PipelineState:
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     stage_timings: Dict[str, float] = field(default_factory=dict)
+
+    # === METADATA ===
+    # General purpose metadata storage for stages
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def get_video_count(self) -> int:
         """Get total number of downloaded videos"""

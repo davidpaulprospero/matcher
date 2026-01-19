@@ -189,6 +189,7 @@ class AudioFirstPipeline:
             # Build yt-dlp command for audio only
             cmd = [
                 'yt-dlp',
+                '--sleep-interval', '5',
                 video_url,
                 '-f', 'bestaudio/best',
                 '-x',  # Extract/convert audio
@@ -358,6 +359,7 @@ class AudioFirstPipeline:
             # Build yt-dlp command
             cmd = [
                 'yt-dlp',
+                '--sleep-interval', '5',
                 video_url,
                 *section_args,
                 '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
@@ -518,6 +520,7 @@ class AudioFirstPipeline:
 
         cmd = [
             'yt-dlp',
+            '--sleep-interval', '5',
             video_url,
             '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
             '--merge-output-format', 'mp4',

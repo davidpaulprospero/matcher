@@ -129,13 +129,16 @@ class CaptionFetcher:
         for video_id in video_ids:
             url = f"https://www.youtube.com/watch?v={video_id}"
 
+            # Use tv_embedded client to bypass PO Token requirement for subtitles
             cmd = [
                 'yt-dlp',
                 url,
+                '--sleep-interval', '5',
                 '--dump-json',
                 '--skip-download',
                 '--no-warnings',
                 '--no-playlist',
+                '--extractor-args', 'youtube:player_client=tv_embedded',
             ]
 
             # Add base args (JS runtime for challenge solving) and cookies
@@ -219,12 +222,16 @@ class CaptionFetcher:
         lang_str = ",".join(languages)
 
         # Build yt-dlp command
+        # Use tv_embedded client to bypass PO Token requirement for subtitles
+        # (YouTube requires PO Token for web/mweb clients as of late 2024)
         cmd = [
             'yt-dlp',
             url,
+            '--sleep-interval', '5',
             '--skip-download',
             '--no-playlist',
             '--no-warnings',
+            '--extractor-args', 'youtube:player_client=tv_embedded',
         ]
 
         # Add subtitle options based on preference
