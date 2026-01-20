@@ -12,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 import logging
 
-from .tracking import TimelineVarietyTracker, GlobalClipTracker
+from .tracking import TimelineVarietyTracker, GlobalClipTracker, extract_video_id
 from .strategies import StrategyMatcher
 from ..utils import SRTSegment, MatchResult, ProgressBar
 from ..embeddings import find_top_k_similar
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ..utils import CacheManager, SceneInfo, VideoTopics
     from ..topic_extraction import LocationChapter
     from ..location_service import GeoLocation
+    from ..state import DetectedChapter
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,9 @@ def match_all_segments(
     face_preference: str = "neutral",
     video_topics: Optional[Dict[str, 'VideoTopics']] = None,
     location_chapters: Optional[List['LocationChapter']] = None,
-    video_locations: Optional[Dict[str, 'GeoLocation']] = None
+    video_locations: Optional[Dict[str, 'GeoLocation']] = None,
+    known_entities: Optional[List[str]] = None,
+    listicle_chapters: Optional[List['DetectedChapter']] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -91,6 +94,12 @@ def match_all_segments(
         matcher.set_location_chapters(location_chapters)
     if video_locations:
         matcher.set_video_locations(video_locations)
+    # Set up listicle chapters for chapter-aware matching
+    if listicle_chapters:
+        matcher.set_listicle_chapters(listicle_chapters)
+    # Set up voiceover keyword boost with known entities
+    if known_entities:
+        matcher.set_known_entities(known_entities)
     strategy_matcher = StrategyMatcher(config, scenes)
 
     # Store face preference for use during matching
@@ -135,11 +144,21 @@ def match_all_segments(
     global_clip_tracker = None
     clip_hard_block = getattr(mc, 'clip_hard_block', True)
     if clip_hard_block:
-        global_clip_tracker = GlobalClipTracker()
-        logger.info(f"  Global clip deduplication: ENABLED (no clip reuse across timeline)")
+        # Pass max_clip_reuse to enable video-level or clip-level deduplication
+        global_clip_tracker = GlobalClipTracker(max_clip_reuse=mc.max_clip_reuse)
+        if mc.max_clip_reuse == 1:
+            logger.info(f"  Global video deduplication: ENABLED (each video used at most ONCE)")
+        else:
+            logger.info(f"  Global clip deduplication: ENABLED (max {mc.max_clip_reuse} uses per video)")
+
+    # Track video IDs used by strategy tracks (V4-V9) for within-track deduplication
+    # When max_clip_reuse == 1, we prevent any video from appearing twice on strategy tracks
+    strategy_track_video_ids: set = set() if mc.max_clip_reuse == 1 else None
 
     if oc.include_strategy_tracks:
         logger.info(f"  Strategy tracks: {', '.join(oc.strategy_tracks)}")
+        if strategy_track_video_ids is not None:
+            logger.info(f"  Strategy track deduplication: ENABLED (no video reuse across V4-V9)")
         # Handle vc as either object or dict
         if isinstance(vc, dict):
             req_diff = vc.get('require_different_source', True)
@@ -210,6 +229,17 @@ def match_all_segments(
         if i == 0 and caption_filtered > 0:
             logger.info(f"First segment: filtered {caption_filtered} caption-only segments after embedding search")
 
+        # Filter out stock footage from primary matching (V1-V3)
+        # Stock footage should only appear on V10 (entity stock videos track)
+        pre_filter_stock_count = len(all_candidates)
+        all_candidates = [
+            (seg, dist) for seg, dist in all_candidates
+            if not getattr(seg, 'is_stock', False)
+        ]
+        stock_filtered = pre_filter_stock_count - len(all_candidates)
+        if i == 0 and stock_filtered > 0:
+            logger.info(f"First segment: filtered {stock_filtered} stock footage segments (V10 only)")
+
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
             pre_filter_count = len(all_candidates)
@@ -225,8 +255,9 @@ def match_all_segments(
             excluded_v1 = variety_tracker.get_excluded_sources("V1", current_timeline_pos)
             if excluded_v1:
                 # Filter out excluded sources, but keep at least some candidates
+                # excluded_v1 contains video IDs, so extract from source_file
                 filtered_candidates = [(seg, dist) for seg, dist in all_candidates
-                                       if seg.source_file not in excluded_v1]
+                                       if extract_video_id(seg.source_file) not in excluded_v1]
                 if len(filtered_candidates) >= mc.llm_rerank_candidates:
                     all_candidates = filtered_candidates
                 else:
@@ -290,14 +321,14 @@ def match_all_segments(
                 # Use a combined track "V_strategy" for variety tracking
                 excluded_strategy = variety_tracker.get_excluded_sources("V_strategy", current_timeline_pos)
                 if excluded_strategy:
+                    # excluded_strategy contains video IDs, so extract from source_file
                     filtered_strategy = [(seg, dist) for seg, dist in all_candidates
-                                        if seg.source_file not in excluded_strategy]
+                                        if extract_video_id(seg.source_file) not in excluded_strategy]
                     if len(filtered_strategy) >= 5:  # Need at least some candidates
                         strategy_candidates = filtered_strategy
 
             # Compute strategy matches with variety enforcement
-            # V7-V10 don't use global clip tracker - they can reuse clips from V1-V3
-            # This gives more options for strategy tracks without exhausting the candidate pool
+            # When max_clip_reuse == 1, use strategy_track_video_ids to prevent reuse
             strategy_matches = strategy_matcher.get_strategy_matches(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,  # Use filtered candidates
@@ -306,13 +337,13 @@ def match_all_segments(
                 vo_embedding=vo_emb,
                 candidate_embeddings=candidate_embeddings,
                 segment_index=i,
-                global_used_clips=None  # V7+ can reuse clips
+                global_used_clips=None,
+                global_used_video_ids=strategy_track_video_ids
             )
 
             result.strategy_matches = strategy_matches
 
-            # Record strategy track usage (variety tracker only - NOT global clip tracker)
-            # V7+ can reuse clips from V1-V3, so we don't add them to global tracker
+            # Record strategy track usage
             if variety_tracker:
                 for sm in strategy_matches:
                     variety_tracker.record_usage(
@@ -320,12 +351,15 @@ def match_all_segments(
                         sm.video_segment.source_file,
                         current_timeline_pos
                     )
-            # NOTE: Intentionally NOT recording V7+ in global_clip_tracker
-            # This allows strategy tracks to reuse clips without exhausting the pool
+            # Track video IDs for strategy track deduplication
+            if strategy_track_video_ids is not None:
+                for sm in strategy_matches:
+                    vid = extract_video_id(sm.video_segment.source_file)
+                    strategy_track_video_ids.add(vid)
 
             # Compute secondary matches (V4-V6) using diversity scoring
             # This overrides the secondary_matches from match_segment with strict source enforcement
-            # V4-V6 don't use global clip tracker - they can reuse clips from V1-V3
+            # When max_clip_reuse == 1, use strategy_track_video_ids to prevent reuse
             secondary_matches = strategy_matcher.get_secondary_matches_diversity(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,
@@ -333,12 +367,12 @@ def match_all_segments(
                 alternatives=alt_segments,
                 vo_embedding=vo_emb,
                 candidate_embeddings=candidate_embeddings,
-                global_used_clips=None  # V4-V6 can reuse clips
+                global_used_clips=None,
+                global_used_video_ids=strategy_track_video_ids
             )
             result.secondary_matches = secondary_matches
 
-            # Record V4-V6 usage for timeline variety only (NOT global clip tracker)
-            # This allows secondary tracks to reuse clips without exhausting the pool
+            # Record V4-V6 usage for timeline variety
             if secondary_matches:
                 for sec_idx, sec_match in enumerate(secondary_matches, start=4):
                     if variety_tracker:
@@ -347,7 +381,10 @@ def match_all_segments(
                             sec_match.video_segment.source_file,
                             current_timeline_pos
                         )
-                    # NOTE: Intentionally NOT recording V4-V6 in global_clip_tracker
+                    # Track video IDs for strategy track deduplication
+                    if strategy_track_video_ids is not None:
+                        vid = extract_video_id(sec_match.video_segment.source_file)
+                        strategy_track_video_ids.add(vid)
 
         results.append(result)
 

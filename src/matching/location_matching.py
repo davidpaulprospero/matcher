@@ -215,3 +215,57 @@ class LocationMatcher:
         penalized_candidates.sort(key=lambda x: -x[1])
         reason = f"location soft penalty: {location_name} (fallback)"
         return penalized_candidates, True, reason
+
+    def get_chapter_keywords(self, segment_idx: int) -> List[str]:
+        """
+        Get combined keywords for the chapter containing this segment.
+
+        Returns visual_keywords + context_keywords + topics + title as a flat list.
+        Used for chapter keyword boosting in matching.
+
+        Args:
+            segment_idx: Index of the voiceover segment
+
+        Returns:
+            List of keywords from the chapter, or empty list if no chapter
+        """
+        chapter = self._get_location_chapter(segment_idx)
+        if not chapter:
+            return []
+
+        # Handle both dict (from checkpoint) and object forms
+        if isinstance(chapter, dict):
+            keywords = []
+            # Add title
+            title = chapter.get('title', '')
+            if title:
+                keywords.append(title)
+            # Add location name
+            loc_name = chapter.get('location_name', '')
+            if loc_name:
+                keywords.append(loc_name)
+            # Add visual keywords (landmarks, features)
+            keywords.extend(chapter.get('visual_keywords', []))
+            # Add context keywords (themes)
+            keywords.extend(chapter.get('context_keywords', []))
+            # Add topics
+            keywords.extend(chapter.get('topics', []))
+        else:
+            keywords = []
+            if chapter.title:
+                keywords.append(chapter.title)
+            if chapter.location_name:
+                keywords.append(chapter.location_name)
+            keywords.extend(chapter.visual_keywords or [])
+            keywords.extend(chapter.context_keywords or [])
+            keywords.extend(chapter.topics or [])
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_keywords = []
+        for kw in keywords:
+            if kw and kw.lower() not in seen:
+                seen.add(kw.lower())
+                unique_keywords.append(kw)
+
+        return unique_keywords

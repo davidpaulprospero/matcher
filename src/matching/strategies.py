@@ -23,6 +23,7 @@ from ..config import Config
 from ..utils import SRTSegment, SceneInfo, StrategyMatch, AlternativeMatch
 from ..embeddings import cosine_similarity
 from ..keyword_extractor import find_keyword_matches
+from .tracking import extract_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +500,8 @@ class StrategyMatcher:
         alternatives: List[SRTSegment],
         vo_embedding: List[float],
         candidate_embeddings: Dict[str, List[float]],
-        global_used_clips: Set[str] = None
+        global_used_clips: Set[str] = None,
+        global_used_video_ids: Set[str] = None
     ) -> List[AlternativeMatch]:
         """
         Get secondary matches (V4-V6) using diversity scoring.
@@ -515,6 +517,7 @@ class StrategyMatcher:
             vo_embedding: Voiceover embedding
             candidate_embeddings: Dict of clip_id -> embedding
             global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
+            global_used_video_ids: Set of video IDs already used globally (video-level dedup)
 
         Returns:
             List of up to 3 AlternativeMatch objects for V4, V5, V6
@@ -565,6 +568,12 @@ class StrategyMatcher:
                 if global_used_clips and cand_id in global_used_clips:
                     continue
 
+                # Video-level deduplication: skip videos already used
+                if global_used_video_ids:
+                    video_id = extract_video_id(seg.source_file)
+                    if video_id in global_used_video_ids:
+                        continue
+
                 cand_emb = candidate_embeddings.get(cand_id)
 
                 if not _has_emb(cand_emb):
@@ -611,6 +620,12 @@ class StrategyMatcher:
                     cand_id = self.get_clip_id(seg)
                     if global_used_clips and cand_id in global_used_clips:
                         continue
+
+                    # Video-level deduplication: skip videos already used
+                    if global_used_video_ids:
+                        video_id = extract_video_id(seg.source_file)
+                        if video_id in global_used_video_ids:
+                            continue
 
                     cand_emb = candidate_embeddings.get(cand_id)
                     if not _has_emb(cand_emb):
@@ -762,7 +777,8 @@ class StrategyMatcher:
         vo_embedding: List[float],
         candidate_embeddings: Dict[str, List[float]],
         segment_index: int = 0,
-        global_used_clips: Set[str] = None
+        global_used_clips: Set[str] = None,
+        global_used_video_ids: Set[str] = None
     ) -> List[StrategyMatch]:
         """
         Get all strategy matches for a voiceover segment.
@@ -770,12 +786,19 @@ class StrategyMatcher:
 
         Args:
             global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
+            global_used_video_ids: Set of video IDs already used globally (video-level dedup)
         """
         # Pre-filter candidates by global used clips
         if global_used_clips:
             all_candidates = [
                 (seg, dist) for seg, dist in all_candidates
                 if self.get_clip_id(seg) not in global_used_clips
+            ]
+        # Pre-filter by video ID for video-level deduplication
+        if global_used_video_ids:
+            all_candidates = [
+                (seg, dist) for seg, dist in all_candidates
+                if extract_video_id(seg.source_file) not in global_used_video_ids
             ]
         strategies = self.config.output.strategy_tracks
 

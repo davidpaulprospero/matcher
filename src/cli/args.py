@@ -140,6 +140,56 @@ Examples:
         help='Force re-download entity images (ignore local cache)'
     )
 
+    # Feedback / Rejection system arguments
+    parser.add_argument(
+        '--import-rejections',
+        type=str,
+        metavar='CSV_PATH',
+        help='Import rejections from DaVinci Resolve marker export CSV'
+    )
+
+    parser.add_argument(
+        '--rejection-stats',
+        action='store_true',
+        help='Show rejection database statistics and exit'
+    )
+
+    # Cross-project learning arguments
+    parser.add_argument(
+        '--client',
+        type=str,
+        metavar='CLIENT_ID',
+        help='Client ID for cross-project learning (e.g., "theresa", "stu")'
+    )
+
+    parser.add_argument(
+        '--evolve-preset',
+        action='store_true',
+        help='Generate evolved preset from project history and exit'
+    )
+
+    parser.add_argument(
+        '--apply-learnings',
+        type=str,
+        metavar='PROJECT_PATH',
+        help='Apply learnings from another project to this run'
+    )
+
+    parser.add_argument(
+        '--list-clients',
+        action='store_true',
+        help='List all client profiles and exit'
+    )
+
+    parser.add_argument(
+        '--client-stats',
+        type=str,
+        nargs='?',
+        const='all',
+        metavar='CLIENT_ID',
+        help='Show client statistics (specific client or "all")'
+    )
+
     # Keyword Mode arguments (pipeline without voiceover)
     parser.add_argument(
         '--keyword-list',

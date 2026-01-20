@@ -117,6 +117,14 @@ from .keyword_mode import (
     KeywordModeConfig,
 )
 
+# Feedback system (rejection learning, channel scoring)
+from .feedback import (
+    ChannelCategoriesConfig,
+    ChannelScoringConfig,
+    CrossProjectConfig,
+    FeedbackConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -184,4 +192,9 @@ __all__ = [
     'ScriptConfig',
     'CollectionConfig',
     'KeywordModeConfig',
+    # Feedback system
+    'ChannelCategoriesConfig',
+    'ChannelScoringConfig',
+    'CrossProjectConfig',
+    'FeedbackConfig',
 ]

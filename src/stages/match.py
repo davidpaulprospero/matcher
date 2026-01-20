@@ -405,6 +405,7 @@ class MatchStage(Stage):
 
         broll_segments_created = 0
         caption_only_count = 0
+        stock_count = 0
         for i, meta in enumerate(state.text_metadata):
             if isinstance(meta, dict):
                 source_file = meta.get('video_path', '')
@@ -436,6 +437,20 @@ class MatchStage(Stage):
                     vid_segment.caption_only = True
                     caption_only_count += 1
 
+                # Mark stock footage (for filtering from primary matching)
+                # Detect by source field, is_stock_footage flag, or path patterns
+                is_stock = (
+                    meta.get('is_stock_footage', False) or
+                    meta.get('source') in ('pexels', 'pixabay', 'stock') or
+                    '/stock/' in source_file.lower() or
+                    '\\stock\\' in source_file.lower() or
+                    source_file.lower().startswith('pexels_') or
+                    source_file.lower().startswith('pixabay_')
+                )
+                if is_stock:
+                    vid_segment.is_stock = True
+                    stock_count += 1
+
                 video_paths_set.add(source_file)
             else:
                 vid_segment = meta
@@ -447,6 +462,9 @@ class MatchStage(Stage):
             logger.info(f"Preserved {caption_only_count} caption-only segments for embedding search (will filter before LLM)")
 
         logger.info(f"Created {broll_segments_created} video_segments with is_broll=True")
+        if stock_count > 0:
+            logger.info(f"Marked {stock_count} video_segments as stock footage (will be filtered from V1-V3)")
+            print(f"  [Stock filter] {stock_count} stock footage segments excluded from V1-V3 matching")
 
         return vo_segments, video_segments, list(video_paths_set)
 
@@ -487,6 +505,18 @@ class MatchStage(Stage):
         # Run matching
         print(f"  Running two-stage matching...")
 
+        # Extract entity names for voiceover keyword boost
+        entity_names = []
+        entities = getattr(state, 'extracted_entities', []) or []
+        if entities:
+            for e in entities:
+                if isinstance(e, dict):
+                    name = e.get('text', '')
+                else:
+                    name = getattr(e, 'text', '')
+                if name:
+                    entity_names.append(name)
+
         matches = match_all_segments(
             voiceover_segments=vo_segments,
             video_segments=video_segments,
@@ -499,7 +529,9 @@ class MatchStage(Stage):
             face_preference=state.face_preference,
             video_topics=None,
             location_chapters=state.location_chapters or None,
-            video_locations=None
+            video_locations=None,
+            known_entities=entity_names if entity_names else None,
+            listicle_chapters=state.chapters or None
         )
 
         return matches

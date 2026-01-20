@@ -26,8 +26,12 @@ from .scoring import (
     apply_broll_boost,
     apply_current_project_boost,
     apply_caption_boost,
+    apply_chapter_keyword_boost,
+    apply_voiceover_keyword_boost,
+    apply_entity_mismatch_penalty,
 )
 from .location_matching import LocationMatcher
+from .tracking import extract_video_id
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
 
 # Utils and data structures
@@ -44,6 +48,7 @@ from ..config import get_config
 
 if TYPE_CHECKING:
     from ..config import Config
+    from ..state import DetectedChapter
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +122,9 @@ class TieredMatcher:
         # Face preference (for face detection filtering)
         self.face_preference = getattr(mc, 'face_preference', 'neutral')
 
+        # Listicle chapters (new chapter detection system)
+        self.listicle_chapters: List['DetectedChapter'] = []
+
         # Initialize LLM providers
         self.primary_provider = None
         self.secondary_provider = None
@@ -165,6 +173,55 @@ class TieredMatcher:
             except:
                 logger.info("Local LLM: Not available (Ollama not running)")
                 self.local_provider = None
+
+    # Entity storage for voiceover keyword boost
+    known_entities: List[str] = []
+
+    def set_known_entities(self, entities: List[str]):
+        """Set known entities for voiceover keyword boost.
+
+        These are entity names extracted from the full voiceover (e.g., "Denny's", "Wahlburgers").
+        When a voiceover segment mentions an entity, videos containing that entity get boosted.
+        """
+        self.known_entities = entities or []
+        if self.known_entities:
+            logger.info(f"Set {len(self.known_entities)} known entities for voiceover keyword boost")
+
+    # Listicle chapter methods (new chapter detection system)
+    def set_listicle_chapters(self, chapters: List['DetectedChapter']):
+        """Set listicle chapters for chapter-aware matching.
+
+        These chapters come from the new LLM-based chapter detection that
+        handles listicle content (e.g., "15 Fast Food Chains Dying").
+
+        Args:
+            chapters: List of DetectedChapter objects with keywords
+        """
+        self.listicle_chapters = chapters
+        if chapters:
+            logger.info(f"Set {len(chapters)} listicle chapters for chapter-aware matching")
+            for ch in chapters[:3]:
+                logger.debug(f"  Chapter: {ch.corrected_name} (segs {ch.start_segment}-{ch.end_segment})")
+
+    def get_listicle_chapter_keywords(self, segment_idx: int) -> List[str]:
+        """Get chapter keywords for a segment from listicle chapters.
+
+        Args:
+            segment_idx: Index of the voiceover segment
+
+        Returns:
+            List of keywords for the chapter containing this segment
+        """
+        if not hasattr(self, 'listicle_chapters') or not self.listicle_chapters:
+            return []
+
+        for ch in self.listicle_chapters:
+            if ch.contains_segment(segment_idx):
+                # Return chapter keywords plus the corrected name
+                keywords = [ch.corrected_name] + ch.keywords
+                return keywords
+
+        return []
 
     # Location methods - delegate to LocationMatcher
     def set_location_chapters(self, location_chapters: List[LocationChapter]):
@@ -352,6 +409,25 @@ class TieredMatcher:
             )
             return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="All candidates filtered")
 
+        # Apply voiceover keyword boost AND entity mismatch penalty to candidates BEFORE LLM selection
+        # Boost: prioritize videos matching entities mentioned in this VO segment
+        # Penalty: discourage entity-specific videos when entity NOT mentioned
+        if self.known_entities and valid_candidates:
+            boosted_candidates = []
+            for seg, sim in valid_candidates:
+                # Apply boost for matching entities
+                adjusted_sim, boost_reason = apply_voiceover_keyword_boost(
+                    sim, vo_segment, seg, self.known_entities, self.config
+                )
+                # Apply penalty for mismatched entities
+                adjusted_sim, penalty_reason = apply_entity_mismatch_penalty(
+                    adjusted_sim, vo_segment, seg, self.known_entities, self.config
+                )
+                boosted_candidates.append((seg, adjusted_sim))
+            # Re-sort by adjusted scores
+            boosted_candidates.sort(key=lambda x: x[1], reverse=True)
+            valid_candidates = boosted_candidates
+
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
         logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={mc.skip_llm_threshold}")
@@ -382,6 +458,20 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            # Apply chapter keyword boost from location chapters or listicle chapters
+            chapter_keyword_reason = ""
+            chapter_keywords = []
+            # Try location matcher first
+            if self.location_matcher:
+                chapter_keywords = self.location_matcher.get_chapter_keywords(segment_idx)
+            # Fall back to listicle chapters if no location chapter keywords
+            if not chapter_keywords:
+                chapter_keywords = self.get_listicle_chapter_keywords(segment_idx)
+            if chapter_keywords:
+                adjusted_confidence, chapter_keyword_reason = apply_chapter_keyword_boost(
+                    adjusted_confidence, best_seg, chapter_keywords, self.config
+                )
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
@@ -391,6 +481,24 @@ class TieredMatcher:
                 reasoning += f" [{project_reason}]"
             if caption_reason:
                 reasoning += f" [{caption_reason}]"
+            if chapter_keyword_reason:
+                reasoning += f" [{chapter_keyword_reason}]"
+
+            # Apply voiceover keyword boost (boosts videos matching entities in current VO text)
+            vo_keyword_reason = ""
+            entity_penalty_reason = ""
+            if self.known_entities:
+                adjusted_confidence, vo_keyword_reason = apply_voiceover_keyword_boost(
+                    adjusted_confidence, vo_segment, best_seg, self.known_entities, self.config
+                )
+                # Also apply entity mismatch penalty
+                adjusted_confidence, entity_penalty_reason = apply_entity_mismatch_penalty(
+                    adjusted_confidence, vo_segment, best_seg, self.known_entities, self.config
+                )
+            if vo_keyword_reason:
+                reasoning += f" [{vo_keyword_reason}]"
+            if entity_penalty_reason:
+                reasoning += f" [{entity_penalty_reason}]"
 
             match = Match(
                 voiceover_segment=vo_segment,
@@ -450,6 +558,18 @@ class TieredMatcher:
                     adjusted_confidence, cached_seg, self.config
                 )
 
+                # Apply chapter keyword boost from location chapters or listicle chapters
+                chapter_keyword_reason = ""
+                chapter_keywords = []
+                if self.location_matcher:
+                    chapter_keywords = self.location_matcher.get_chapter_keywords(segment_idx)
+                if not chapter_keywords:
+                    chapter_keywords = self.get_listicle_chapter_keywords(segment_idx)
+                if chapter_keywords:
+                    adjusted_confidence, chapter_keyword_reason = apply_chapter_keyword_boost(
+                        adjusted_confidence, cached_seg, chapter_keywords, self.config
+                    )
+
                 final_reasoning = f"(cached) {reasoning}"
                 if topic_penalty_reason:
                     final_reasoning += f" [{topic_penalty_reason}]"
@@ -459,6 +579,24 @@ class TieredMatcher:
                     final_reasoning += f" [{project_reason}]"
                 if caption_reason:
                     final_reasoning += f" [{caption_reason}]"
+                if chapter_keyword_reason:
+                    final_reasoning += f" [{chapter_keyword_reason}]"
+
+                # Apply voiceover keyword boost and entity mismatch penalty
+                vo_keyword_reason = ""
+                entity_penalty_reason = ""
+                if self.known_entities:
+                    adjusted_confidence, vo_keyword_reason = apply_voiceover_keyword_boost(
+                        adjusted_confidence, vo_segment, cached_seg, self.known_entities, self.config
+                    )
+                    # Also apply entity mismatch penalty
+                    adjusted_confidence, entity_penalty_reason = apply_entity_mismatch_penalty(
+                        adjusted_confidence, vo_segment, cached_seg, self.known_entities, self.config
+                    )
+                if vo_keyword_reason:
+                    final_reasoning += f" [{vo_keyword_reason}]"
+                if entity_penalty_reason:
+                    final_reasoning += f" [{entity_penalty_reason}]"
 
                 match = Match(
                     voiceover_segment=vo_segment,
@@ -569,6 +707,18 @@ class TieredMatcher:
             adjusted_confidence, best_seg, self.config
         )
 
+        # Apply chapter keyword boost from location chapters or listicle chapters
+        chapter_keyword_reason = ""
+        chapter_keywords = []
+        if self.location_matcher:
+            chapter_keywords = self.location_matcher.get_chapter_keywords(segment_idx)
+        if not chapter_keywords:
+            chapter_keywords = self.get_listicle_chapter_keywords(segment_idx)
+        if chapter_keywords:
+            adjusted_confidence, chapter_keyword_reason = apply_chapter_keyword_boost(
+                adjusted_confidence, best_seg, chapter_keywords, self.config
+            )
+
         final_reasoning = reasoning
         if topic_penalty_reason:
             final_reasoning += f" [{topic_penalty_reason}]"
@@ -578,6 +728,24 @@ class TieredMatcher:
             final_reasoning += f" [{project_reason}]"
         if caption_reason:
             final_reasoning += f" [{caption_reason}]"
+        if chapter_keyword_reason:
+            final_reasoning += f" [{chapter_keyword_reason}]"
+
+        # Apply voiceover keyword boost and entity mismatch penalty
+        vo_keyword_reason = ""
+        entity_penalty_reason = ""
+        if self.known_entities:
+            adjusted_confidence, vo_keyword_reason = apply_voiceover_keyword_boost(
+                adjusted_confidence, vo_segment, best_seg, self.known_entities, self.config
+            )
+            # Also apply entity mismatch penalty
+            adjusted_confidence, entity_penalty_reason = apply_entity_mismatch_penalty(
+                adjusted_confidence, vo_segment, best_seg, self.known_entities, self.config
+            )
+        if vo_keyword_reason:
+            final_reasoning += f" [{vo_keyword_reason}]"
+        if entity_penalty_reason:
+            final_reasoning += f" [{entity_penalty_reason}]"
 
         match = Match(
             voiceover_segment=vo_segment,
@@ -654,33 +822,40 @@ class TieredMatcher:
     ) -> List[AlternativeMatch]:
         """Get alternative matches, preferring different sources from primary"""
         alternatives = []
-        used_sources = set()
+        used_video_ids = set()  # Track video IDs, not paths (same video may be in different folders)
 
         if primary_match and primary_match.source_file:
-            used_sources.add(primary_match.source_file)
+            used_video_ids.add(extract_video_id(primary_match.source_file))
 
-        # First pass: prefer different sources
+        # First pass: prefer different sources (by video ID)
         for seg, sim in candidates:
             if len(alternatives) >= self.config.output.num_alternatives:
                 break
 
-            if seg.source_file not in used_sources:
+            video_id = extract_video_id(seg.source_file)
+            if video_id not in used_video_ids:
                 scene = self._get_scene_for_segment(seg, scenes)
                 alternatives.append(AlternativeMatch(
                     video_segment=seg,
                     video_scene=scene,
                     confidence=sim,
-                    reasoning=f"Alternative (different source: {Path(seg.source_file).stem})"
+                    reasoning=f"Alternative (different source: {video_id})"
                 ))
-                used_sources.add(seg.source_file)
+                used_video_ids.add(video_id)
 
-        # Second pass: fill remaining slots
+        # Second pass: fill remaining slots with different time ranges from same videos
+        # Only used if we couldn't find enough different videos
         if len(alternatives) < self.config.output.num_alternatives:
             for seg, sim in candidates:
                 if len(alternatives) >= self.config.output.num_alternatives:
                     break
 
-                if any(alt.video_segment.source_file == seg.source_file and
+                video_id = extract_video_id(seg.source_file)
+                # Still exclude primary video ID - we want real alternatives
+                if video_id in used_video_ids:
+                    continue
+                # Skip if this exact video ID + time range already used
+                if any(extract_video_id(alt.video_segment.source_file) == video_id and
                        alt.video_segment.start_time == seg.start_time for alt in alternatives):
                     continue
 
@@ -691,6 +866,7 @@ class TieredMatcher:
                     confidence=sim * 0.9,
                     reasoning="Alternative (fallback)"
                 ))
+                used_video_ids.add(video_id)
 
         return alternatives
 

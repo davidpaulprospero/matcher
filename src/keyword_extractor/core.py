@@ -178,8 +178,24 @@ class LLMKeywordExtractor:
         """Extract keywords using LLM with entity-aware extraction"""
 
         # Step 1: Extract named entities first (people, places, dates, orgs)
+        # Get manual entities and listicle detection from config
+        image_search_config = getattr(self.config, 'image_search', None)
+        manual_entities = getattr(image_search_config, 'manual_entities', []) if image_search_config else []
+        detect_listicle = getattr(image_search_config, 'detect_listicle_entities', True) if image_search_config else True
+
         logger.info("Extracting named entities with LLM...")
-        entity_keywords, raw_entities = extract_entities(text[:8000], topic, self._call_llm)
+        if manual_entities:
+            logger.info(f"Including {len(manual_entities)} manual entities from config")
+        if detect_listicle:
+            logger.info("Listicle pattern detection enabled")
+
+        entity_keywords, raw_entities = extract_entities(
+            text[:8000],
+            topic,
+            self._call_llm,
+            manual_entities=manual_entities,
+            detect_listicle=detect_listicle
+        )
         logger.info(f"Entity extraction: {len(entity_keywords)} entity-based keywords, {len(raw_entities)} entities")
 
         # Step 2: General keyword extraction

@@ -66,9 +66,16 @@ class TitleFilter:
     - YouTube Data API v3 for fast metadata fetching
     - Content filter presets support
     - Duration-aware filtering
+    - Rejection database learning from editorial feedback
     """
 
-    def __init__(self, config: 'Config', cookies_args: List[str], get_tier_value_func):
+    def __init__(
+        self,
+        config: 'Config',
+        cookies_args: List[str],
+        get_tier_value_func,
+        project_dir: Optional[str] = None,
+    ):
         """
         Initialize TitleFilter.
 
@@ -76,11 +83,13 @@ class TitleFilter:
             config: Config object with download.llm_title_filter settings
             cookies_args: Cookie arguments for yt-dlp
             get_tier_value_func: Function to get tier config values (from CheckpointManager)
+            project_dir: Project directory for loading project-specific rejections
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
         self._get_tier_value = get_tier_value_func
+        self.project_dir = project_dir
 
         # Initialize YouTube Data API client (optional - for faster metadata)
         self.youtube = None
@@ -88,6 +97,40 @@ class TitleFilter:
 
         # Load content filter presets from config
         self.presets = self._load_presets()
+
+        # Load rejection database (global + project-specific)
+        self.rejection_db = None
+        self._init_rejection_database()
+
+        # Initialize channel scorer (for reputation-based filtering)
+        self.channel_scorer = None
+        self._init_channel_scorer()
+
+    def _init_channel_scorer(self):
+        """Initialize channel scorer for reputation-based filtering."""
+        try:
+            from ..feedback import create_channel_scorer
+
+            self.channel_scorer = create_channel_scorer(
+                self.config,
+                rejection_db=self.rejection_db
+            )
+
+            # Check if scoring is enabled
+            feedback_config = getattr(self.config, 'feedback', None)
+            if feedback_config:
+                scoring_config = getattr(feedback_config, 'channel_scoring', None)
+                if scoring_config and getattr(scoring_config, 'enabled', True):
+                    logger.debug("Channel scoring enabled")
+                else:
+                    self.channel_scorer = None
+                    logger.debug("Channel scoring disabled in config")
+        except ImportError as e:
+            logger.debug(f"Channel scorer not available: {e}")
+            self.channel_scorer = None
+        except Exception as e:
+            logger.warning(f"Error initializing channel scorer: {e}")
+            self.channel_scorer = None
 
     def _init_youtube_api(self):
         """Initialize YouTube Data API v3 client if API key is available."""
@@ -107,6 +150,129 @@ class TitleFilter:
             logger.warning("google-api-python-client not installed, using yt-dlp for metadata")
         except Exception as e:
             logger.warning(f"Failed to initialize YouTube API: {e}")
+
+    def _init_rejection_database(self):
+        """Initialize rejection database for filtering previously rejected videos."""
+        try:
+            from ..feedback import load_rejection_database
+            from pathlib import Path
+
+            project_path = Path(self.project_dir) if self.project_dir else None
+            self.rejection_db = load_rejection_database(
+                project_dir=project_path,
+                include_global=True
+            )
+
+            if self.rejection_db:
+                stats = (
+                    f"{self.rejection_db.get_rejection_count()} rejections, "
+                    f"{self.rejection_db.get_blocked_channel_count()} blocked channels"
+                )
+                logger.debug(f"Rejection database loaded: {stats}")
+        except ImportError as e:
+            logger.debug(f"Rejection database not available: {e}")
+            self.rejection_db = None
+        except Exception as e:
+            logger.warning(f"Error loading rejection database: {e}")
+            self.rejection_db = None
+
+    def _apply_rejection_filter(self, videos: List[Dict]) -> List[Dict]:
+        """Filter videos based on rejection database (previously rejected videos/channels)."""
+        if not self.rejection_db:
+            return videos
+
+        filtered = []
+        rejected_count = 0
+
+        for video in videos:
+            video_id = video.get('id', '')
+            channel = video.get('channel', '')
+
+            # Check if video was previously rejected
+            if video_id and self.rejection_db.is_video_rejected(video_id):
+                logger.debug(f"    Rejection DB: {video['title'][:50]}... (video previously rejected)")
+                rejected_count += 1
+                continue
+
+            # Check if channel is blocked
+            if channel and self.rejection_db.is_channel_blocked(channel_name=channel):
+                logger.debug(f"    Rejection DB: {video['title'][:50]}... (channel blocked: {channel})")
+                rejected_count += 1
+                continue
+
+            filtered.append(video)
+
+        if rejected_count > 0:
+            logger.info(f"    Rejection database: {rejected_count} videos filtered out")
+
+        return filtered
+
+    def _apply_channel_score_filter(self, videos: List[Dict]) -> List[Dict]:
+        """Filter videos based on channel reputation scores."""
+        if not self.channel_scorer:
+            return videos
+
+        # Get min_score from config
+        feedback_config = getattr(self.config, 'feedback', None)
+        if not feedback_config:
+            return videos
+
+        scoring_config = getattr(feedback_config, 'channel_scoring', None)
+        if not scoring_config or not getattr(scoring_config, 'enabled', True):
+            return videos
+
+        min_score = getattr(scoring_config, 'min_score', 0.3)
+
+        filtered = []
+        low_score_count = 0
+        trusted_count = 0
+        blocked_count = 0
+
+        for video in videos:
+            channel = video.get('channel', '')
+            channel_id = video.get('channel_id', '')
+
+            if not channel:
+                filtered.append(video)
+                continue
+
+            # Calculate score
+            score = self.channel_scorer.calculate_score(
+                channel_id=channel_id,
+                channel_name=channel,
+            )
+
+            # Store score for later use (e.g., match report)
+            video['channel_score'] = score
+
+            # Check category overrides
+            if self.channel_scorer.categories.is_trusted(channel):
+                filtered.append(video)
+                trusted_count += 1
+                logger.debug(f"    Channel score: {video['title'][:40]}... [TRUSTED] {channel}")
+                continue
+
+            if self.channel_scorer.categories.is_blocked(channel):
+                blocked_count += 1
+                logger.debug(f"    Channel score: {video['title'][:40]}... [BLOCKED] {channel}")
+                continue
+
+            # Apply min_score filter
+            if score >= min_score:
+                filtered.append(video)
+            else:
+                low_score_count += 1
+                logger.debug(f"    Channel score: {video['title'][:40]}... ({score:.2f} < {min_score}) {channel}")
+
+        total_filtered = low_score_count + blocked_count
+        if total_filtered > 0 or trusted_count > 0:
+            logger.info(
+                f"    Channel scoring: {total_filtered} filtered "
+                f"({blocked_count} blocked, {low_score_count} low score), "
+                f"{trusted_count} trusted"
+            )
+
+        return filtered
 
     def _load_presets(self) -> Dict[str, Dict[str, str]]:
         """Load content filter presets from config or use defaults."""
@@ -448,7 +614,19 @@ class TitleFilter:
             logger.info("    All videos filtered by title blacklist")
             return []
 
-        # Step 2: Fetch full metadata for remaining videos (description, tags)
+        # Step 2: Apply rejection database filter (previously rejected videos/channels)
+        videos = self._apply_rejection_filter(videos)
+        if not videos:
+            logger.info("    All videos filtered by rejection database")
+            return []
+
+        # Step 3: Apply channel reputation score filter
+        videos = self._apply_channel_score_filter(videos)
+        if not videos:
+            logger.info("    All videos filtered by channel scoring")
+            return []
+
+        # Step 4: Fetch full metadata for remaining videos (description, tags)
         video_ids = [v['id'] for v in videos if v.get('id')]
         if video_ids:
             full_metadata = self.fetch_full_metadata(video_ids)

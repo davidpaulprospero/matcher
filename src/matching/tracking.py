@@ -15,6 +15,37 @@ from collections import defaultdict
 from ..utils import SRTSegment
 
 
+def extract_video_id(file_path: str) -> str:
+    """
+    Extract YouTube video ID or unique identifier from a video file path.
+
+    Handles multiple filename patterns to properly deduplicate
+    the same video downloaded to different folders.
+
+    Patterns:
+    - Audio-first segments: {video_id}_{offset:04d}.mp4 -> video_id
+    - Regular downloads: {title}_{video_id}.mp4 -> 11-char video_id
+    - Stock footage: pexels_{id}_{author}.mp4 -> full filename
+
+    Returns:
+        Video ID or filename-based unique identifier
+    """
+    filename = Path(file_path).stem
+
+    # Pattern 1: Audio-first segment: {video_id}_{offset:04d}
+    match = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
+    if match:
+        return match.group(1)
+
+    # Pattern 2: Regular YouTube: {title}_{video_id}
+    match = re.search(r'_([a-zA-Z0-9_-]{11})$', filename)
+    if match:
+        return match.group(1)
+
+    # Pattern 3: Stock footage - use full filename
+    return filename
+
+
 class TimelineVarietyTracker:
     """
     Tracks source video usage per track to enforce timeline variety.
@@ -88,6 +119,7 @@ class TimelineVarietyTracker:
         Record that a source file was used on a track at a timeline position.
 
         Maintains sorted order for efficient lookups.
+        Uses video ID (not full path) to properly track same video in different folders.
 
         Args:
             track: Track name (e.g., "V1", "V2", etc.)
@@ -95,9 +127,11 @@ class TimelineVarietyTracker:
             timeline_pos: Position in timeline where this clip starts (seconds)
         """
         usages = self.track_usage[track]
+        # Use video ID instead of full path for proper deduplication
+        video_id = extract_video_id(source_file)
         # Insert in sorted order (typically appending since timeline is sequential)
         # Use bisect for insertion point
-        entry = (timeline_pos, source_file)
+        entry = (timeline_pos, video_id)
         if not usages or usages[-1][0] <= timeline_pos:
             # Fast path: append at end (most common case)
             usages.append(entry)
@@ -117,8 +151,8 @@ class TimelineVarietyTracker:
         stats = {}
         for track, usages in self.track_usage.items():
             source_counts = defaultdict(int)
-            for _, source_file in usages:
-                source_counts[Path(source_file).name] += 1
+            for _, video_id in usages:
+                source_counts[video_id] += 1
 
             stats[track] = {
                 "total_clips": len(usages),
@@ -138,26 +172,42 @@ class GlobalClipTracker:
     For audio-first segment files (e.g., abc12345678_0045.mp4), the clip ID
     is calculated using the original video coordinates to properly detect
     overlapping segments from the same source video.
+
+    When max_clip_reuse=1, enforces VIDEO-level deduplication: each unique
+    video can only appear ONCE regardless of which time range is used.
     """
 
-    def __init__(self):
+    def __init__(self, max_clip_reuse: int = 1):
+        """
+        Args:
+            max_clip_reuse: Maximum times a video can be reused.
+                           When 1, enforces video-level deduplication (each video used once).
+                           When > 1, enforces clip-level deduplication (same clip used once).
+        """
+        self.max_clip_reuse = max_clip_reuse
         self.used_clips: Set[str] = set()
+        self.used_video_ids: Dict[str, int] = {}  # video_id -> usage count
         self.clip_track_map: Dict[str, str] = {}  # clip_id -> "V1@S003"
 
     def get_clip_id(self, segment: SRTSegment) -> str:
         """
-        Generate unique clip ID using ORIGINAL video coordinates.
+        Generate unique clip ID using VIDEO ID and time coordinates.
 
-        For audio-first segment files (e.g., abc12345678_0045.mp4):
-        - Extract video ID from filename
-        - Add file offset to segment times to get original coords
+        Extracts YouTube video ID from filename to properly deduplicate
+        the same video downloaded to different folders (e.g., for different keywords).
 
-        Format: "{video_id}:{original_start:.2f}-{original_end:.2f}"
+        Filename patterns handled:
+        - Audio-first segments: {video_id}_{offset:04d}.mp4 -> uses offset for original coords
+        - Regular downloads: {title}_{video_id}.mp4 -> extracts 11-char video ID
+        - Stock footage: pexels_{id}_{author}.mp4 -> uses full filename as ID
+
+        Format: "{video_id}:{start:.2f}-{end:.2f}"
         """
         file_path = segment.source_file
         filename = Path(file_path).stem
 
-        # Check for audio-first segment file pattern: {video_id}_{offset:04d}
+        # Pattern 1: Audio-first segment files: {video_id}_{offset:04d}
+        # Example: NOD5Kt49s4E_0045.mp4
         match = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
         if match:
             video_id = match.group(1)
@@ -166,12 +216,39 @@ class GlobalClipTracker:
             original_end = file_offset + segment.end_time
             return f"{video_id}:{original_start:.2f}-{original_end:.2f}"
 
-        # Fallback for regular video files
-        path = file_path.replace('\\', '/').lower()
-        return f"{path}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+        # Pattern 2: Regular YouTube downloads: {title}_{video_id}.mp4
+        # Example: Dog_Thri_4GhWgrQYMkc.mp4 -> video_id = 4GhWgrQYMkc
+        # The video ID is the last 11 chars before extension (after final underscore)
+        match = re.search(r'_([a-zA-Z0-9_-]{11})$', filename)
+        if match:
+            video_id = match.group(1)
+            return f"{video_id}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+
+        # Pattern 3: Stock footage (pexels, pixabay) - use full filename as unique ID
+        # Example: pexels_9421547_Alexandr_Shorban_HD.mp4
+        if filename.startswith(('pexels_', 'pixabay_')):
+            return f"{filename}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+
+        # Fallback: Use filename only (not full path) to dedupe across folders
+        return f"{filename}:{segment.start_time:.2f}-{segment.end_time:.2f}"
 
     def is_used(self, segment: SRTSegment) -> bool:
-        """Check if this exact clip has been used anywhere in the timeline."""
+        """
+        Check if this clip should be blocked from reuse.
+
+        When max_clip_reuse=1: Blocks if the VIDEO has been used (any time range).
+        When max_clip_reuse>1: Blocks if the exact CLIP has been used OR
+                               if the video has been used >= max_clip_reuse times.
+        """
+        # Extract video ID for video-level checking
+        video_id = extract_video_id(segment.source_file)
+        current_usage = self.used_video_ids.get(video_id, 0)
+
+        # Check if video has been used too many times
+        if current_usage >= self.max_clip_reuse:
+            return True
+
+        # Also check exact clip (prevents same time range being used twice)
         return self.get_clip_id(segment) in self.used_clips
 
     def record_usage(self, segment: SRTSegment, track: str, segment_idx: int):
@@ -180,13 +257,26 @@ class GlobalClipTracker:
         self.used_clips.add(clip_id)
         self.clip_track_map[clip_id] = f"{track}@S{segment_idx:03d}"
 
+        # Track video-level usage count
+        video_id = extract_video_id(segment.source_file)
+        self.used_video_ids[video_id] = self.used_video_ids.get(video_id, 0) + 1
+
     def get_used_clips(self) -> Set[str]:
         """Get all used clip IDs for filtering."""
         return self.used_clips.copy()
 
+    def get_used_video_ids(self) -> Set[str]:
+        """Get all used video IDs for video-level filtering."""
+        return set(self.used_video_ids.keys())
+
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics for logging."""
+        # Find videos used more than once
+        reused_videos = {vid: count for vid, count in self.used_video_ids.items() if count > 1}
         return {
             "total_clips_used": len(self.used_clips),
+            "unique_videos_used": len(self.used_video_ids),
+            "max_clip_reuse_setting": self.max_clip_reuse,
+            "reused_videos": reused_videos,
             "tracks_used": len(set(v.split('@')[0] for v in self.clip_track_map.values()))
         }

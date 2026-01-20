@@ -235,6 +235,251 @@ def apply_caption_boost(
     return boosted, reason
 
 
+def apply_chapter_keyword_boost(
+    confidence: float,
+    video_segment: SRTSegment,
+    chapter_keywords: List[str],
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost when video matches chapter keywords.
+
+    When a voiceover segment belongs to a chapter (e.g., "Denny's chapter"),
+    videos that contain chapter-related keywords get a confidence boost.
+
+    Checks:
+    1. Video transcript contains chapter keywords
+    2. Video filename contains chapter keywords
+    3. Video source_keyword matches chapter keywords
+
+    Args:
+        confidence: Original confidence score
+        video_segment: Video segment being considered
+        chapter_keywords: Combined keywords from chapter (visual + context + topics + title)
+        config: Config with matching.chapter_keyword_boost setting
+
+    Returns:
+        Tuple of (boosted_confidence, boost_reason)
+    """
+    if not chapter_keywords:
+        return confidence, ""
+
+    # Get boost settings from config
+    mc = getattr(config, 'matching', config)
+    keyword_boost_per_match = getattr(mc, 'chapter_keyword_boost', 0.05)
+    max_keyword_boost = getattr(mc, 'max_chapter_keyword_boost', 0.15)
+
+    if keyword_boost_per_match <= 0:
+        return confidence, ""
+
+    # Get video text content for matching
+    video_text = video_segment.text.lower() if video_segment.text else ""
+    video_file = video_segment.source_file.lower() if video_segment.source_file else ""
+    source_keyword = getattr(video_segment, 'source_keyword', '')
+    source_keyword = source_keyword.lower() if source_keyword else ""
+
+    # Extract just the filename without path
+    from pathlib import Path
+    video_filename = Path(video_file).stem.lower() if video_file else ""
+
+    # Check for keyword matches
+    matches = []
+    for kw in chapter_keywords:
+        if not kw:
+            continue
+        kw_lower = kw.lower().strip()
+        if len(kw_lower) < 2:  # Skip very short keywords
+            continue
+
+        # Check transcript, filename, and source keyword
+        if kw_lower in video_text or kw_lower in video_filename or kw_lower in source_keyword:
+            matches.append(kw)
+
+    if not matches:
+        return confidence, ""
+
+    # Calculate boost (capped at max)
+    boost = min(max_keyword_boost, len(matches) * keyword_boost_per_match)
+    boosted = min(1.0, confidence + boost)
+
+    # Format reason with first few matches
+    match_preview = ', '.join(matches[:3])
+    if len(matches) > 3:
+        match_preview += f" +{len(matches) - 3} more"
+    reason = f"chapter keyword boost: +{boost:.2f} ({match_preview})"
+
+    logger.debug(f"Chapter keyword boost applied: {confidence:.2f} -> {boosted:.2f} [{match_preview}]")
+
+    return boosted, reason
+
+
+def apply_voiceover_keyword_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    known_entities: List[str],
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost when video matches keywords found in voiceover segment.
+
+    This addresses the "chapter matching" problem differently - instead of relying
+    on pre-detected chapters, it extracts key terms (especially proper nouns like
+    "Denny's", "Wahlburgers") from the voiceover text and boosts videos that contain them.
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Voiceover segment being matched
+        video_segment: Video segment being considered
+        known_entities: List of entity names extracted from the full voiceover
+        config: Config with matching settings
+
+    Returns:
+        Tuple of (boosted_confidence, boost_reason)
+    """
+    if not known_entities:
+        return confidence, ""
+
+    # Get boost settings from config
+    mc = getattr(config, 'matching', config)
+    keyword_boost_per_match = getattr(mc, 'voiceover_keyword_boost', 0.08)
+    max_keyword_boost = getattr(mc, 'max_voiceover_keyword_boost', 0.15)
+
+    if keyword_boost_per_match <= 0:
+        return confidence, ""
+
+    # Get voiceover text
+    vo_text = vo_segment.text.lower() if vo_segment.text else ""
+    if not vo_text:
+        return confidence, ""
+
+    # Find which entities appear in this voiceover segment
+    vo_entities = []
+    for entity in known_entities:
+        if entity and entity.lower() in vo_text:
+            vo_entities.append(entity)
+
+    if not vo_entities:
+        return confidence, ""
+
+    # Get video text content for matching
+    video_text = video_segment.text.lower() if video_segment.text else ""
+    video_file = video_segment.source_file.lower() if video_segment.source_file else ""
+    source_keyword = getattr(video_segment, 'source_keyword', '')
+    source_keyword = source_keyword.lower() if source_keyword else ""
+
+    # Extract just the filename without path
+    from pathlib import Path
+    video_filename = Path(video_file).stem.lower() if video_file else ""
+
+    # Check for entity matches in video content
+    # Include full path (video_file) since folder names often contain entity names like "Denny_segments"
+    matches = []
+    for entity in vo_entities:
+        entity_lower = entity.lower()
+        if (entity_lower in video_text or
+            entity_lower in video_file or  # Full path including folder name
+            entity_lower in video_filename or
+            entity_lower in source_keyword):
+            matches.append(entity)
+
+    if not matches:
+        return confidence, ""
+
+    # Calculate boost (capped at max)
+    boost = min(max_keyword_boost, len(matches) * keyword_boost_per_match)
+    boosted = min(1.0, confidence + boost)
+
+    # Format reason with first few matches
+    match_preview = ', '.join(matches[:2])
+    if len(matches) > 2:
+        match_preview += f" +{len(matches) - 2}"
+    reason = f"vo-keyword boost: +{boost:.2f} ({match_preview})"
+
+    logger.debug(f"Voiceover keyword boost applied: {confidence:.2f} -> {boosted:.2f} [{match_preview}]")
+
+    return boosted, reason
+
+
+def apply_entity_mismatch_penalty(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    known_entities: List[str],
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence penalty when video is from entity-specific folder but entity not mentioned.
+
+    This is the INVERSE of voiceover_keyword_boost - it penalizes videos that are clearly
+    associated with a specific entity (e.g., from "Denny_segments" folder) when that entity
+    is NOT mentioned in the current voiceover segment.
+
+    This prevents "Denny's" footage from appearing throughout the timeline - it should
+    only appear during the Denny's chapter.
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Voiceover segment being matched
+        video_segment: Video segment being considered
+        known_entities: List of entity names extracted from the full voiceover
+        config: Config with matching settings
+
+    Returns:
+        Tuple of (adjusted_confidence, penalty_reason)
+    """
+    if not known_entities:
+        return confidence, ""
+
+    # Get penalty settings from config
+    mc = getattr(config, 'matching', config)
+    entity_mismatch_penalty = getattr(mc, 'entity_mismatch_penalty', 0.25)  # Default penalty
+
+    if entity_mismatch_penalty <= 0:
+        return confidence, ""
+
+    # Get voiceover text
+    vo_text = vo_segment.text.lower() if vo_segment.text else ""
+
+    # Get video path components
+    video_file = video_segment.source_file.lower() if video_segment.source_file else ""
+    source_keyword = getattr(video_segment, 'source_keyword', '')
+    source_keyword = source_keyword.lower() if source_keyword else ""
+
+    # Extract folder name from path
+    from pathlib import Path
+    video_path = Path(video_file) if video_file else None
+    folder_name = video_path.parent.name.lower() if video_path else ""
+
+    # Check if video path/folder contains any entity name
+    video_entity = None
+    for entity in known_entities:
+        entity_lower = entity.lower()
+        # Check if entity is in the video path/folder/keyword
+        if (entity_lower in folder_name or
+            entity_lower in video_file or
+            entity_lower in source_keyword):
+            video_entity = entity
+            break
+
+    if not video_entity:
+        # Video is not entity-specific, no penalty
+        return confidence, ""
+
+    # Check if this entity is mentioned in the voiceover segment
+    if video_entity.lower() in vo_text:
+        # Entity IS mentioned, no penalty (let boost handle it)
+        return confidence, ""
+
+    # Entity video being used for non-entity voiceover segment - apply penalty
+    penalized = max(0.0, confidence - entity_mismatch_penalty)
+    reason = f"entity mismatch penalty: -{entity_mismatch_penalty:.2f} ({video_entity} not in VO)"
+
+    logger.debug(f"Entity mismatch penalty applied: {confidence:.2f} -> {penalized:.2f} [{video_entity}]")
+
+    return penalized, reason
+
+
 def compute_duration_penalty(vo_segment: SRTSegment, video_segment: SRTSegment, config) -> float:
     """
     Compute confidence penalty based on speed change required.

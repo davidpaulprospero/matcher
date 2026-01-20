@@ -2562,7 +2562,59 @@ def generate_match_report(matches: List[MatchResult], output_path: str, config=N
     for strat in strategy_names:
         count = sum(1 for m in matches if m.strategy_matches and any(sm.strategy == strat for sm in m.strategy_matches))
         report_lines.append(f"- {strat}: {count}/{len(matches)} segments matched")
-    
+
+    # Channel statistics
+    report_lines.extend([
+        "",
+        "## Channel Statistics",
+    ])
+
+    # Collect channel usage from matches
+    channel_usage = {}
+    for m in matches:
+        if m.primary_match and m.primary_match.video_segment:
+            channel = getattr(m.primary_match.video_segment, 'channel', '')
+            if not channel:
+                # Try to extract from source file metadata
+                source_file = m.primary_match.video_segment.source_file
+                channel = Path(source_file).parent.name if source_file else 'Unknown'
+            if channel:
+                if channel not in channel_usage:
+                    channel_usage[channel] = {'count': 0, 'score': 0.5}
+                channel_usage[channel]['count'] += 1
+
+    # Try to get channel scores from feedback system
+    try:
+        from src.feedback import create_channel_scorer, load_rejection_database
+        if config:
+            rejection_db = load_rejection_database()
+            scorer = create_channel_scorer(config, rejection_db=rejection_db)
+            for channel in channel_usage:
+                score = scorer.calculate_score(channel_name=channel)
+                channel_usage[channel]['score'] = score
+    except Exception:
+        pass  # Scoring not available, use defaults
+
+    if channel_usage:
+        # Sort by usage count descending
+        sorted_channels = sorted(channel_usage.items(), key=lambda x: -x[1]['count'])
+        report_lines.append("")
+        report_lines.append("| Channel | Clips | Score |")
+        report_lines.append("|---------|-------|-------|")
+        for channel, stats in sorted_channels[:15]:  # Top 15 channels
+            score = stats['score']
+            score_indicator = ""
+            if score >= 0.7:
+                score_indicator = " [HIGH]"
+            elif score <= 0.3:
+                score_indicator = " [LOW]"
+            report_lines.append(f"| {channel[:30]} | {stats['count']} | {score:.2f}{score_indicator} |")
+
+        if len(sorted_channels) > 15:
+            report_lines.append(f"| ... and {len(sorted_channels) - 15} more channels | | |")
+    else:
+        report_lines.append("No channel data available.")
+
     report_lines.extend([
         "",
         "## Matches",

@@ -91,8 +91,17 @@ matching:
   min_confidence: 0.5           # Slightly lower for more variety
   high_confidence_threshold: 0.8
 
-  # Reuse settings - allow some reuse for compilations
-  max_clip_reuse: 2             # Same clip can appear twice
+  # IMPORTANT: Clip reuse settings
+  # max_clip_reuse: 1 = Each video used ONCE (best for short compilations <5 min)
+  # max_clip_reuse: 2 = Allow same video twice (for longer compilations 10+ min)
+  #
+  # For short compilations or when you have many keywords,
+  # set to 1 to maximize source diversity:
+  max_clip_reuse: 1             # Each unique video appears at most once
+
+  # Timeline variety settings
+  timeline_window: 600.0        # 10-minute sliding window for variety tracking
+  min_same_source_gap: 120.0    # 2 minutes before same source can reappear
 
   # Disable location matching (not needed for compilations)
   location_matching:
@@ -114,6 +123,12 @@ output:
   generate_otio: true
   generate_edl: true
   generate_xml: true            # For media bin linking
+
+  # OTIO splitting for large timelines (prevents DaVinci crash)
+  split_otio: true              # Generate individual track files + _FULL.otio
+  auto_split_threshold: 3000    # Split timeline into parts if > 3000 items
+  split_parts: 4                # Number of parts for large timelines
+  always_generate_full: true    # Always generate timeline_FULL.otio
 
   # Deduplication
   deduplicate_clips: true

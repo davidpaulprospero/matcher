@@ -64,6 +64,29 @@ class KeywordSegment:
 
 
 @dataclass
+class DetectedChapter:
+    """A detected chapter/list item from voiceover analysis.
+
+    Used to scope keyword extraction and video matching to chapter boundaries.
+    For listicle content, each chapter represents one list item.
+    """
+    name: str  # Original name from ASR
+    corrected_name: str  # ASR-corrected name (e.g., "Keatsahut" -> "Pizza Hut")
+    rank: Optional[int]  # Position in list (15, 14, 13...) or None for non-listicle
+    start_segment: int  # First segment index
+    end_segment: int  # Last segment index (inclusive)
+    keywords: List[str] = field(default_factory=list)  # Per-chapter search keywords
+    description: str = ""  # Brief description of chapter content
+
+    def contains_segment(self, segment_idx: int) -> bool:
+        """Check if segment index is within this chapter."""
+        return self.start_segment <= segment_idx <= self.end_segment
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class TranscriptSegment:
     """A single transcript segment from video transcription"""
     index: int
@@ -236,6 +259,11 @@ class PipelineState:
     keywords: List[str] = field(default_factory=list)
     topic_context: str = ""
     extracted_entities: List[Dict[str, Any]] = field(default_factory=list)
+
+    # === CHAPTER DETECTION STATE ===
+    chapters: List[DetectedChapter] = field(default_factory=list)  # Detected chapters/list items
+    is_listicle: bool = False  # True if listicle/ranking content detected
+    chapter_detection_enabled: bool = True  # Whether chapter detection was attempted
 
     # === VIDEO METADATA STATE (caption-first mode) ===
     # Video candidates discovered before download decision

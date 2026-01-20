@@ -148,10 +148,24 @@ TEXT:
 === IMPORTANT: Generate FILMABLE search keywords ===
 Each search_keyword must describe something a camera can capture on YouTube.
 
+=== LISTICLE/RANKING DETECTION ===
+If this appears to be a LISTICLE or RANKING video (e.g., "15 Restaurants Going Out of Business",
+"Top 10 Fast Food Chains", "Number 15, Denny's"), extract EVERY numbered item as an organization.
+
+Common patterns to detect:
+- "Number 15, Denny's" → Organization: Denny's
+- "Coming in at number 10, Little Caesars" → Organization: Little Caesars
+- "#8 on our list is Jack in the Box" → Organization: Jack in the Box
+
+For listicle content about businesses/chains, extract ALL mentioned brands:
+- Restaurant chains: McDonald's, Denny's, Subway, Taco Bell, KFC, Wendy's, Burger King, etc.
+- Retail: Walmart, Target, Best Buy, etc.
+- Any other companies, chains, or brands mentioned
+
 Extract and categorize:
 1. PEOPLE: Names mentioned → search_keyword should find interviews, speeches, or footage of them
 2. PLACES: Specific locations → search_keyword should find walkthrough, aerial, or tour footage
-3. ORGANIZATIONS: Companies/agencies → search_keyword should find their buildings, events, or operations
+3. ORGANIZATIONS: Companies/agencies/chains/brands → search_keyword should find their buildings, products, or operations
 4. DATES: Years/periods → search_keyword should find archival or news footage from that time
 5. EVENTS: Named events → search_keyword should find coverage or documentary footage
 
@@ -159,6 +173,9 @@ SEARCH KEYWORD EXAMPLES:
 - Person "Steve Wynn" → "Steve Wynn interview" or "Wynn Las Vegas opening"
 - Place "Las Vegas Strip" → "Las Vegas Strip walkthrough 4K" or "Las Vegas Strip aerial night"
 - Organization "MGM Resorts" → "MGM Grand Las Vegas tour" or "MGM casino floor"
+- Organization "Denny's" → "Denny's restaurant review" or "Denny's menu food tour"
+- Organization "Little Caesars" → "Little Caesars pizza making" or "Little Caesars store"
+- Organization "Popeyes" → "Popeyes chicken review" or "Popeyes restaurant footage"
 - Date "1990s" → "Las Vegas 1990s archive footage" or "vintage Las Vegas casino"
 - Event "Fremont Street renovation" → "Fremont Street canopy construction" or "Fremont Experience opening"
 
@@ -181,6 +198,7 @@ OUTPUT FORMAT - JSON object:
   ]
 }}
 
+IMPORTANT: For listicle content, include ALL numbered/mentioned entities in the organizations list.
 Only include entities where you can generate a SEARCHABLE, VISUAL keyword.
 ENTITIES:"""
 

@@ -88,6 +88,103 @@ def get_pipeline_config() -> Config:
     return _config
 
 
+def _auto_import_davinci_markers(config, project_dir: Path):
+    """Auto-import DaVinci Resolve markers if configured.
+
+    Checks for marker CSV files in:
+    1. feedback.auto_import_path (explicit path)
+    2. project_dir/markers.csv (convention)
+    3. project_dir/output/*/markers.csv (exported from DaVinci)
+
+    Args:
+        config: Config object
+        project_dir: Project directory path
+    """
+    feedback_config = getattr(config, 'feedback', None)
+    if not feedback_config or not getattr(feedback_config, 'enabled', True):
+        return
+
+    if not getattr(feedback_config, 'import_davinci_markers', True):
+        return
+
+    # Check for explicit auto-import path
+    auto_path = getattr(feedback_config, 'auto_import_path', '')
+    csv_paths_to_try = []
+
+    if auto_path:
+        csv_paths_to_try.append(Path(auto_path))
+
+    # Check convention locations
+    csv_paths_to_try.extend([
+        project_dir / 'markers.csv',
+        project_dir / 'davinci_markers.csv',
+        project_dir / 'feedback.csv',
+    ])
+
+    # Check output directories for exported markers
+    output_dir = project_dir / 'output'
+    if output_dir.exists():
+        for subdir in sorted(output_dir.glob('*'), key=lambda p: p.stat().st_mtime, reverse=True):
+            if subdir.is_dir():
+                csv_paths_to_try.append(subdir / 'markers.csv')
+
+    # Find first existing CSV
+    csv_path = None
+    for path in csv_paths_to_try:
+        if path.exists():
+            csv_path = path
+            break
+
+    if not csv_path:
+        return  # No marker file found
+
+    print(f"\n  📥 Auto-importing DaVinci markers from: {csv_path.name}")
+
+    try:
+        from src.feedback import (
+            load_rejection_database,
+            import_davinci_markers_full,
+            apply_approvals_to_database,
+            generate_feedback_report,
+        )
+
+        # Load rejection database
+        db = load_rejection_database(project_dir=project_dir, include_global=True)
+
+        # Import markers with full feedback support
+        result = import_davinci_markers_full(csv_path, project_dir)
+
+        # Apply rejections
+        if result.rejections:
+            count = db.add_rejections(result.rejections)
+            print(f"    ✓ Added {count} new rejections")
+
+        # Apply approvals (boost channel scores)
+        if result.approvals:
+            approve_count = apply_approvals_to_database(result.approvals, db)
+            print(f"    ✓ Recorded {approve_count} approvals for channel scoring")
+
+        # Save database
+        db.save()
+
+        # Generate feedback report
+        report_path = project_dir / 'feedback_report.md'
+        generate_feedback_report(result, report_path)
+        print(f"    ✓ Feedback report: {report_path.name}")
+
+        # Print summary
+        print(f"    Summary: {result.summary()}")
+
+        if result.replacements:
+            print(f"    ⚠ {len(result.replacements)} segments marked for replacement")
+
+        if result.warnings:
+            print(f"    ⚠ {len(result.warnings)} warnings to review")
+
+    except Exception as e:
+        print(f"    Error importing markers: {e}")
+
+
 def _preload_cached_data_for_match_only(pipeline, config):
     """
     Preload cached data for match-only mode when checkpoint data is incomplete.
@@ -260,6 +357,161 @@ def main():
             print(f"  Use --save-keywords to save keywords after extraction.")
         sys.exit(0)
 
+    # Handle --rejection-stats
+    if getattr(args, 'rejection_stats', False):
+        from src.feedback import load_rejection_database
+        db = load_rejection_database(project_dir=PROJECT_DIR, include_global=True)
+        print(f"\n  📊 Rejection Database Statistics:")
+        print(f"    Total rejections: {db.get_rejection_count()}")
+        print(f"    Blocked channels: {db.get_blocked_channel_count()}")
+        reasons = db.get_rejections_by_reason()
+        if reasons:
+            print(f"    Rejections by reason:")
+            for reason, count in sorted(reasons.items(), key=lambda x: -x[1]):
+                print(f"      {reason}: {count}")
+        sys.exit(0)
+
+    # Handle --import-rejections
+    if getattr(args, 'import_rejections', None):
+        from src.feedback import load_rejection_database
+        from src.feedback.davinci_import import import_davinci_markers
+
+        csv_path = Path(args.import_rejections)
+        if not csv_path.exists():
+            print(f"\n  Error: CSV file not found: {csv_path}")
+            sys.exit(1)
+
+        print(f"\n  📥 Importing rejections from: {csv_path}")
+        db = load_rejection_database(project_dir=PROJECT_DIR, include_global=True)
+
+        try:
+            rejections = import_davinci_markers(csv_path, PROJECT_DIR)
+            if rejections:
+                count = db.add_rejections(rejections)
+                db.save()
+                print(f"    ✓ Imported {count} new rejections ({len(rejections)} total in CSV)")
+            else:
+                print(f"    No rejection markers found in CSV")
+        except Exception as e:
+            print(f"    Error importing markers: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
+    # Handle --list-clients
+    if getattr(args, 'list_clients', False):
+        from src.feedback.client_profiles import list_client_profiles, ClientProfile
+        clients = list_client_profiles()
+        if clients:
+            print(f"\n  📋 Client Profiles ({len(clients)} total):")
+            for client_id in clients:
+                profile = ClientProfile.load(client_id)
+                if profile:
+                    print(f"    • {client_id}: {len(profile.projects)} projects, "
+                          f"{profile.total_videos_accepted} accepted, "
+                          f"{profile.total_videos_rejected} rejected")
+        else:
+            print("\n  No client profiles found.")
+            print("  Use --client <name> to create a profile for a project.")
+        sys.exit(0)
+
+    # Handle --client-stats
+    if getattr(args, 'client_stats', None):
+        from src.feedback.client_profiles import ClientProfile, list_client_profiles
+        client_id = args.client_stats
+
+        if client_id == 'all':
+            clients = list_client_profiles()
+        else:
+            clients = [client_id]
+
+        for cid in clients:
+            profile = ClientProfile.load(cid)
+            if profile:
+                print(f"\n  📊 Client: {profile.display_name} ({profile.client_id})")
+                print(f"    Created: {profile.created[:10] if profile.created else 'unknown'}")
+                print(f"    Projects: {len(profile.projects)}")
+                print(f"    Videos: {profile.total_videos_accepted} accepted, {profile.total_videos_rejected} rejected")
+                print(f"    Blacklist: {len(profile.blacklist_channels)} channels, {len(profile.blacklist_keywords)} keywords")
+                if profile.evolved_preset:
+                    print(f"    Evolved preset: {profile.evolved_preset.projects_analyzed} projects analyzed")
+                    print(f"      Auto-blacklist: {len(profile.evolved_preset.auto_blacklist_channels)} channels")
+                if profile.preferences:
+                    print(f"    Preferences:")
+                    print(f"      Style: {profile.preferences.content_style}")
+                    print(f"      Duration: {profile.preferences.preferred_duration_min:.0f}-{profile.preferences.preferred_duration_max:.0f}s")
+            else:
+                print(f"\n  Client profile not found: {cid}")
+        sys.exit(0)
+
+    # Handle --evolve-preset
+    if getattr(args, 'evolve_preset', False):
+        from src.feedback.client_profiles import evolve_preset_from_history, ClientProfile
+        client_id = getattr(args, 'client', None)
+        if not client_id:
+            print("\n  Error: --evolve-preset requires --client <name>")
+            sys.exit(1)
+
+        profile = ClientProfile.load(client_id)
+        if not profile:
+            print(f"\n  Error: No profile found for client '{client_id}'")
+            print("  Run at least one project with --client to create a profile.")
+            sys.exit(1)
+
+        print(f"\n  🧬 Evolving preset for client: {client_id}")
+        print(f"    Analyzing {len(profile.projects)} projects...")
+
+        preset = evolve_preset_from_history(client_id)
+        print(f"\n  ✓ Evolved preset generated:")
+        print(f"    Auto-blacklist channels: {len(preset.auto_blacklist_channels)}")
+        print(f"    Auto-blacklist keywords: {len(preset.auto_blacklist_keywords)}")
+        print(f"    Preferred channels: {len(preset.preferred_channels)}")
+        print(f"    Duration range: {preset.preferred_duration_range[0]:.0f}-{preset.preferred_duration_range[1]:.0f}s")
+        if preset.rejection_patterns:
+            print(f"    Rejection patterns:")
+            for reason, count in sorted(preset.rejection_patterns.items(), key=lambda x: -x[1])[:5]:
+                print(f"      {reason}: {count}")
+        sys.exit(0)
+
+    # Handle --apply-learnings
+    if getattr(args, 'apply_learnings', None):
+        from src.feedback.client_profiles import ClientProfile
+        source_project = Path(args.apply_learnings)
+        if not source_project.exists():
+            print(f"\n  Error: Project not found: {source_project}")
+            sys.exit(1)
+
+        # Find client from source project
+        client_id = getattr(args, 'client', None)
+        if not client_id:
+            # Try to infer from project path (e.g., E:/Edit Job/theresa/...)
+            parts = source_project.parts
+            for i, part in enumerate(parts):
+                if part.lower() == 'edit job' and i + 1 < len(parts):
+                    client_id = parts[i + 1].lower()
+                    break
+
+        if client_id:
+            profile = ClientProfile.load(client_id)
+            if profile:
+                print(f"\n  📚 Applying learnings from client: {profile.display_name}")
+                print(f"    Blacklist channels: {len(profile.blacklist_channels)}")
+                print(f"    Blacklist keywords: {len(profile.blacklist_keywords)}")
+                # Don't exit - continue with pipeline using these learnings
+            else:
+                print(f"\n  ⚠ No profile found for client '{client_id}', starting fresh")
+        else:
+            print(f"\n  ⚠ Could not determine client from path, skipping cross-project learning")
+
+    # Store client ID for pipeline use
+    client_id = getattr(args, 'client', None)
+    if client_id:
+        print(f"\n  👤 Client: {client_id}")
+        # Ensure client profile exists
+        from src.feedback.client_profiles import get_or_create_client_profile
+        profile = get_or_create_client_profile(client_id)
+        profile.add_project(str(PROJECT_DIR))
+        profile.save()
+
     # ==========================================================================
     # KEYWORD MODE DETECTION
     # ==========================================================================
@@ -399,6 +651,9 @@ def main():
 
         # Preload cached data for match-only mode (fallback when checkpoint is incomplete)
         _preload_cached_data_for_match_only(pipeline, config)
+
+        # Auto-import DaVinci markers if configured
+        _auto_import_davinci_markers(config, PROJECT_DIR)
     else:
         pipeline = create_default_pipeline(config, PROJECT_DIR, audio_first_mode=audio_first)
 

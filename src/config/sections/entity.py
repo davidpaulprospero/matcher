@@ -110,6 +110,16 @@ class ImageSearchConfig:
         "PERSON", "GPE", "ORG", "DATE", "EVENT"
     ])
 
+    # Manual entity override - for when LLM extraction misses entities
+    # List of entity names that should ALWAYS be extracted
+    # Useful for listicle content: "15 Restaurants Going Out of Business"
+    # Example: ["Denny's", "Subway", "McDonald's", "KFC", "Taco Bell"]
+    manual_entities: List[str] = field(default_factory=list)
+
+    # Auto-detect listicle entities from "Number X, Entity" patterns
+    # E.g., "Number 15, Denny's" -> extracts "Denny's" as ORG entity
+    detect_listicle_entities: bool = True
+
     # OTIO output settings
     image_track: str = "V9"  # Track for image stills
     stock_video_track: str = "V10"  # Track for stock videos

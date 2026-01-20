@@ -111,6 +111,8 @@ from .sections import (
     BrollConfig,
     # Keyword mode
     KeywordModeConfig,
+    # Feedback system
+    FeedbackConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,7 @@ class Config:
     broll: BrollConfig = field(default_factory=BrollConfig)
     healing: HealingConfig = field(default_factory=HealingConfig)
     keyword_mode: KeywordModeConfig = field(default_factory=KeywordModeConfig)
+    feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
 
     # Content filter presets (raw, documentary, stock_footage)
     # Loaded from config.yaml content_filter_presets section
@@ -229,6 +232,7 @@ class Config:
         """
         # Import here to avoid circular imports
         from .sections.infrastructure import HealingConfig
+        from .sections.feedback import FeedbackConfig
 
         if isinstance(self.healing, dict):
             self.healing = HealingConfig(**self.healing)
@@ -236,6 +240,11 @@ class Config:
             # Re-run __post_init__ to convert any nested dicts
             # (e.g., watcher dict -> WatcherConfig after merge)
             self.healing.__post_init__()
+
+        if isinstance(self.feedback, dict):
+            self.feedback = FeedbackConfig(**self.feedback)
+        elif hasattr(self.feedback, '__post_init__'):
+            self.feedback.__post_init__()
 
     def _populate_api_keys(self):
         """Populate top-level API key aliases from api_keys config"""

@@ -157,6 +157,15 @@ class MatchingConfig:
     keyword_boost: float = 0.05
     entity_boost: float = 0.08
 
+    # Voiceover keyword boost - for chapter-aware matching
+    # Boosts videos that contain entities mentioned in the voiceover segment
+    voiceover_keyword_boost: float = 0.20    # Boost per entity match
+    max_voiceover_keyword_boost: float = 0.40  # Max cumulative boost
+
+    # Entity mismatch penalty - INVERSE of voiceover boost
+    # Penalizes videos from entity-specific folders when entity NOT mentioned
+    entity_mismatch_penalty: float = 0.25  # Penalty when entity video used for non-entity segment
+
     # LLM providers (tiered: primary → secondary → local)
     primary_provider: str = "gemini"
     secondary_provider: str = "anthropic"

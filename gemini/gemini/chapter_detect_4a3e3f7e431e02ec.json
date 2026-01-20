@@ -1,0 +1,209 @@
+{
+  "text": "```json\n{\n  \"is_listicle\": true,\n  \"list_type\": \"countdown\",\n  \"total_items\": 15,\n  \"intro_end_segment\": 16,\n  \"items\": [\n    {\n      \"rank\": 15,\n      \"name\": \"Denny's\",\n      \"corrected_name\": \"Denny's\",\n      \"start_segment\": 17,\n      \"keywords\": [\"Denny's\", \"always open\", \"24 hour\", \"breakfast\", \"late night\"]\n    },\n    {\n      \"rank\": 14,\n      \"name\": \"Wallburgers\",\n      \"corrected_name\": \"Wahlburgers\",\n      \"start_segment\": 80,\n      \"keywords\": [\"Wahlburgers\", \"celebrity\", \"burger\", \"Mark Wahlberg\", \"Hollywood\"]\n    },\n    {\n      \"rank\": 13,\n      \"name\": \"salad and go\",\n      \"corrected_name\": \"Salad and Go\",\n      \"start_segment\": 131,\n      \"keywords\": [\"Salad and Go\", \"healthy\", \"affordable\", \"drive-through\", \"salads\"]\n    },\n    {\n      \"rank\": 12,\n      \"name\": \"Boston Market\",\n      \"corrected_name\": \"Boston Market\",\n      \"start_segment\": 189,\n      \"keywords\": [\"Boston Market\", \"rotisserie chicken\", \"home-style\", \"mac and cheese\", \"cornbread\"]\n    },\n    {\n      \"rank\": 11,\n      \"name\": \"little Caesars\",\n      \"corrected_name\": \"Little Caesars\",\n      \"start_segment\": 254,\n      \"keywords\": [\"Little Caesars\", \"$5 pizza\", \"hot and ready\", \"pizza\", \"affordable\"]\n    },\n    {\n      \"rank\": 10,\n      \"name\": \"Taco Bell\",\n      \"corrected_name\": \"Taco Bell\",\n      \"start_segment\": 317,\n      \"keywords\": [\"Taco Bell\", \"menu experiments\", \"drive-thru\", \"Gen Z\", \"$1 cravings\"]\n    },\n    {\n      \"rank\": 9,\n      \"name\": \"Popeyes\",\n      \"corrected_name\": \"Popeyes\",\n      \"start_segment\": 390,\n      \"keywords\": [\"Popeyes\", \"chicken sandwich\", \"fried chicken\", \"inflation\", \"hype marketing\"]\n    },\n    {\n      \"rank\": 8,\n      \"name\": \"Jack in the Box\",\n      \"corrected_name\": \"Jack in the Box\",\n      \"start_segment\": 459,\n      \"keywords\": [\"Jack in the Box\", \"late night\", \"tacos\", \"curly fries\", \"milk shakes\"]\n    },\n    {\n      \"rank\": 7,\n      \"name\": \"dairy queen\",\n      \"corrected_name\": \"Dairy Queen\",\n      \"start_segment\": 521,\n      \"keywords\": [\"Dairy Queen\", \"ice cream\", \"blizzard\", \"soft serve\", \"dessert\"]\n    },\n    {\n      \"rank\": 6,\n      \"name\": \"KFC\",\n      \"corrected_name\": \"KFC\",\n      \"start_segment\": 580,\n      \"keywords\": [\"KFC\", \"fried chicken\", \"Colonel\", \"5-dollar fill-up\", \"Sunday tradition\"]\n    },\n    {\n      \"rank\": 5,\n      \"name\": \"Keatsahut\",\n      \"corrected_name\": \"Pizza Hut\",\n      \"start_segment\": 632,\n      \"keywords\": [\"Pizza Hut\", \"family pizza\", \"salad bar\", \"birthday parties\", \"dining model\"]\n    },\n    {\n      \"rank\": 4,\n      \"name\": \"subway\",\n      \"corrected_name\": \"Subway\",\n      \"start_segment\": 695,\n      \"keywords\": [\"Subway\", \"sandwiches\", \"eat fresh\", \"$5 foot long\", \"healthy alternative\"]\n    },\n    {\n      \"rank\": 3,\n      \"name\": \"Burger King\",\n      \"corrected_name\": \"Burger King\",\n      \"start_segment\": 762,\n      \"keywords\": [\"Burger King\", \"whopper\", \"flame-grilled\", \"rival\", \"customization\"]\n    },\n    {\n      \"rank\": 2,\n      \"name\": \"Wendy's\",\n      \"corrected_name\": \"Wendy's\",\n      \"start_segment\": 822,\n      \"keywords\": [\"Wendy's\", \"fresh beef\", \"square patties\", \"frosty\", \"4 for $4\"]\n    },\n    {\n      \"rank\": 1,\n      \"name\": \"McDonald's\",\n      \"corrected_name\": \"McDonald's\",\n      \"start_segment\": 886,\n      \"keywords\": [\"McDonald's\", \"Big Mac\", \"dollar menu\", \"golden arches\", \"American dream\"]\n    }\n  ]\n}\n```",
+  "parsed_data": {
+    "is_listicle": true,
+    "list_type": "countdown",
+    "total_items": 15,
+    "intro_end_segment": 16,
+    "items": [
+      {
+        "rank": 15,
+        "name": "Denny's",
+        "corrected_name": "Denny's",
+        "start_segment": 17,
+        "keywords": [
+          "Denny's",
+          "always open",
+          "24 hour",
+          "breakfast",
+          "late night"
+        ]
+      },
+      {
+        "rank": 14,
+        "name": "Wallburgers",
+        "corrected_name": "Wahlburgers",
+        "start_segment": 80,
+        "keywords": [
+          "Wahlburgers",
+          "celebrity",
+          "burger",
+          "Mark Wahlberg",
+          "Hollywood"
+        ]
+      },
+      {
+        "rank": 13,
+        "name": "salad and go",
+        "corrected_name": "Salad and Go",
+        "start_segment": 131,
+        "keywords": [
+          "Salad and Go",
+          "healthy",
+          "affordable",
+          "drive-through",
+          "salads"
+        ]
+      },
+      {
+        "rank": 12,
+        "name": "Boston Market",
+        "corrected_name": "Boston Market",
+        "start_segment": 189,
+        "keywords": [
+          "Boston Market",
+          "rotisserie chicken",
+          "home-style",
+          "mac and cheese",
+          "cornbread"
+        ]
+      },
+      {
+        "rank": 11,
+        "name": "little Caesars",
+        "corrected_name": "Little Caesars",
+        "start_segment": 254,
+        "keywords": [
+          "Little Caesars",
+          "$5 pizza",
+          "hot and ready",
+          "pizza",
+          "affordable"
+        ]
+      },
+      {
+        "rank": 10,
+        "name": "Taco Bell",
+        "corrected_name": "Taco Bell",
+        "start_segment": 317,
+        "keywords": [
+          "Taco Bell",
+          "menu experiments",
+          "drive-thru",
+          "Gen Z",
+          "$1 cravings"
+        ]
+      },
+      {
+        "rank": 9,
+        "name": "Popeyes",
+        "corrected_name": "Popeyes",
+        "start_segment": 390,
+        "keywords": [
+          "Popeyes",
+          "chicken sandwich",
+          "fried chicken",
+          "inflation",
+          "hype marketing"
+        ]
+      },
+      {
+        "rank": 8,
+        "name": "Jack in the Box",
+        "corrected_name": "Jack in the Box",
+        "start_segment": 459,
+        "keywords": [
+          "Jack in the Box",
+          "late night",
+          "tacos",
+          "curly fries",
+          "milk shakes"
+        ]
+      },
+      {
+        "rank": 7,
+        "name": "dairy queen",
+        "corrected_name": "Dairy Queen",
+        "start_segment": 521,
+        "keywords": [
+          "Dairy Queen",
+          "ice cream",
+          "blizzard",
+          "soft serve",
+          "dessert"
+        ]
+      },
+      {
+        "rank": 6,
+        "name": "KFC",
+        "corrected_name": "KFC",
+        "start_segment": 580,
+        "keywords": [
+          "KFC",
+          "fried chicken",
+          "Colonel",
+          "5-dollar fill-up",
+          "Sunday tradition"
+        ]
+      },
+      {
+        "rank": 5,
+        "name": "Keatsahut",
+        "corrected_name": "Pizza Hut",
+        "start_segment": 632,
+        "keywords": [
+          "Pizza Hut",
+          "family pizza",
+          "salad bar",
+          "birthday parties",
+          "dining model"
+        ]
+      },
+      {
+        "rank": 4,
+        "name": "subway",
+        "corrected_name": "Subway",
+        "start_segment": 695,
+        "keywords": [
+          "Subway",
+          "sandwiches",
+          "eat fresh",
+          "$5 foot long",
+          "healthy alternative"
+        ]
+      },
+      {
+        "rank": 3,
+        "name": "Burger King",
+        "corrected_name": "Burger King",
+        "start_segment": 762,
+        "keywords": [
+          "Burger King",
+          "whopper",
+          "flame-grilled",
+          "rival",
+          "customization"
+        ]
+      },
+      {
+        "rank": 2,
+        "name": "Wendy's",
+        "corrected_name": "Wendy's",
+        "start_segment": 822,
+        "keywords": [
+          "Wendy's",
+          "fresh beef",
+          "square patties",
+          "frosty",
+          "4 for $4"
+        ]
+      },
+      {
+        "rank": 1,
+        "name": "McDonald's",
+        "corrected_name": "McDonald's",
+        "start_segment": 886,
+        "keywords": [
+          "McDonald's",
+          "Big Mac",
+          "dollar menu",
+          "golden arches",
+          "American dream"
+        ]
+      }
+    ]
+  },
+  "cached_at": 1768927271.3906236,
+  "provider": "gemini",
+  "model": "gemini-2.0-flash"
+}
