@@ -307,6 +307,7 @@ class RateLimitBypassConfig:
     escalate_on_timeout: bool = True       # Connection timeouts / TLS hangs
 
     max_tier: int = 7                      # Maximum tier (7 = standard)
+    start_tier: int = 1                    # Starting tier (1-7, use 4 to force browser cookies)
 
     # Subtitle-specific: always use tv_embedded for captions
     subtitle_always_tv_embedded: bool = True
@@ -335,6 +336,11 @@ class RateLimitBypassConfig:
 
     # Current runtime state (not persisted to YAML)
     _current_tier: int = field(default=1, repr=False)
+
+    def __post_init__(self):
+        """Initialize _current_tier from start_tier config."""
+        if hasattr(self, 'start_tier') and self.start_tier > 1:
+            self._current_tier = min(self.start_tier, self.max_tier)
 
     def get_current_tier(self) -> BypassTier:
         """Get current tier as enum."""
@@ -373,8 +379,8 @@ class RateLimitBypassConfig:
         return self.rotate_player_client()
 
     def reset(self):
-        """Reset to tier 1 and rotation indices."""
-        self._current_tier = 1
+        """Reset to start_tier and rotation indices."""
+        self._current_tier = getattr(self, 'start_tier', 1)
         self._impersonate_index = 0
         self._player_index = 0
 
@@ -413,11 +419,25 @@ class DownloadConfig:
     delay_between_keywords: float = 1.0
 
     # Title blacklist - skip videos containing these terms (case-insensitive)
+    # Applied to BOTH title AND channel name for comprehensive filtering
     title_blacklist: List[str] = field(default_factory=lambda: [
+        # Sports content
         "highlights", "basketball", "football", "soccer", "nba", "nfl",
         "mlb", "nhl", "ufc", "boxing", "wrestling", "vs.", "vs ",
         "match", "game recap", "full game", "full match", "sports",
-        "espn", "goals", "touchdowns"
+        "espn", "goals", "touchdowns",
+        # Live/streaming content
+        "live stream", "livestream", "webcam", "live cam",
+        "24/7", "24 7", "lofi", "lo-fi",
+        # Dog trainers (by name and channel)
+        "cesar millan", "zak george", "zac george", "will atherton",
+        "mccann dog training", "victoria stilwell", "kikopup",
+        "canine training", "dog training tips", "puppy training",
+        # Movie/commercial content
+        "movieclips", "movie clip", "official trailer", "film clip",
+        "marley and me", "marley & me",
+        # Channels to avoid
+        "nat geo wild", "nat geo animals", "netflix",
     ])
 
     # LLM Title Filter - use AI to check if video titles are relevant

@@ -272,6 +272,17 @@ matching:
   # Keyword/entity boosting
   keyword_boost: 0.05
   entity_boost: 0.08
+
+  # Voiceover keyword boost - for chapter-aware matching
+  # Boosts videos that contain entities mentioned in the voiceover segment
+  # E.g., when voiceover says "Denny's", boost videos from Denny_segments folder
+  voiceover_keyword_boost: 0.20    # Boost per entity match (was 0.08, now 0.20)
+  max_voiceover_keyword_boost: 0.40  # Max cumulative boost (was 0.15, now 0.40)
+
+  # Entity mismatch penalty - INVERSE of voiceover boost
+  # Penalizes videos from entity-specific folders when entity NOT mentioned
+  # E.g., Denny's videos get penalized outside Denny's chapter
+  entity_mismatch_penalty: 0.25  # Penalty when entity video used for non-entity segment
   
   # LLM providers (tiered: primary → secondary → local)
   # Chain-of-thought: Fallback chain ensures reliability
@@ -480,7 +491,26 @@ image_search:
     - ORG        # Organizations
     - DATE       # Time periods
     - EVENT      # Named events
-  
+
+  # Manual entity override - for when LLM extraction misses entities
+  # Useful for listicle content: "15 Restaurants Going Out of Business"
+  # Uncomment and add entity names to always extract them:
+  # manual_entities:
+  #   - "Denny's"
+  #   - "Subway"
+  #   - "McDonald's"
+  #   - "Little Caesars"
+  #   - "Popeyes"
+  #   - "Jack in the Box"
+  #   - "Boston Market"
+  #   - "Wendy's"
+  #   - "Burger King"
+  manual_entities: []  # Empty by default - uncomment above to use
+
+  # Auto-detect listicle entities from "Number X, Entity" patterns
+  # E.g., "Number 15, Denny's" -> extracts "Denny's" as ORG entity
+  detect_listicle_entities: true
+
   # OTIO output settings
   image_track: V9           # Track for image stills (Google Images)
   stock_video_track: V10    # Track for stock videos (Pexels/Pixabay)
@@ -760,7 +790,10 @@ download:
   
   # Title blacklist - skip videos containing these terms (case-insensitive)
   # Useful for filtering out sports highlights, music videos, live streams, etc.
+  # Title/Channel blacklist - skip videos containing these terms (case-insensitive)
+  # Applied to BOTH title AND channel name for comprehensive filtering
   title_blacklist:
+    # Sports content
     - "highlights"
     - "basketball"
     - "football"
@@ -782,6 +815,7 @@ download:
     - "espn"
     - "goals"
     - "touchdowns"
+    # Live/streaming content
     - "live stream"
     - "livestream"
     - "webcam"
@@ -790,6 +824,28 @@ download:
     - "24 7"
     - "lofi"
     - "lo-fi"
+    # Dog trainers (by name and channel) - avoid professional training content
+    - "cesar millan"
+    - "zak george"
+    - "zac george"
+    - "will atherton"
+    - "mccann dog training"
+    - "victoria stilwell"
+    - "kikopup"
+    - "canine training"
+    - "dog training tips"
+    - "puppy training"
+    # Movie/commercial content - avoid copyrighted Hollywood content
+    - "movieclips"
+    - "movie clip"
+    - "official trailer"
+    - "film clip"
+    - "marley and me"
+    - "marley & me"
+    # Channels to avoid
+    - "nat geo wild"
+    - "nat geo animals"
+    - "netflix"
   
   # LLM Title Filter - use AI to check if video titles are relevant
   # This runs BEFORE downloading, saving bandwidth and time
@@ -907,6 +963,7 @@ download:
     escalate_on_timeout: true      # Connection timeouts / TLS hangs
 
     max_tier: 7                    # Maximum tier (7 = standard yt-dlp)
+    start_tier: 4                  # Starting tier (4 = browser cookies, more reliable)
 
     # Subtitle-specific: always use tv_embedded for caption fetching
     subtitle_always_tv_embedded: true
@@ -1397,6 +1454,82 @@ broll:
   long_video_threshold: 600      # Videos > 10 min use sampling
   sample_interval_seconds: 120   # 1 scene per 2 minutes
   max_scenes_per_video: 15       # Cap on sampled scenes
+
+# -----------------------------------------------------------------------------
+# FEEDBACK SYSTEM (Rejection Learning, Channel Scoring)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Learn from editorial feedback to improve future downloads
+# Reasoning: Rejected videos/channels should be automatically filtered
+# Decision: Global rejection database + channel reputation scoring
+#
+# Usage:
+#   python main.py --rejection-stats              # Show database statistics
+#   python main.py --import-rejections markers.csv # Import DaVinci markers
+
+feedback:
+  # Master enable for feedback system
+  enabled: true
+
+  # Learn from rejected videos (add to global database)
+  learn_from_rejections: true
+
+  # Weight for rejection penalty (higher = more penalty for rejected channels)
+  rejection_weight: 2.0
+
+  # Channel reputation scoring
+  channel_scoring:
+    enabled: true
+    min_score: 0.3              # Skip channels below this score (0.0-1.0)
+    fetch_youtube_metadata: true  # Fetch subscriber counts via YouTube API
+
+    # Score calculation weights
+    base_score: 0.5             # Starting score for unknown channels
+    acceptance_weight: 0.3      # Bonus from acceptance rate
+    rejection_weight: 0.4       # Penalty from rejection rate (2x weighted)
+
+    # Subscriber bonuses
+    subscriber_bonus_1m: 0.1    # Channels with >1M subscribers
+    subscriber_bonus_100k: 0.05 # Channels with >100K subscribers
+    subscriber_bonus_10k: 0.02  # Channels with >10K subscribers
+
+  # Channel categories (overrides scoring)
+  channel_categories:
+    # Always accept videos from these channels (case-insensitive)
+    trusted:
+      - "BBC"
+      - "National Geographic"
+      - "PBS"
+      - "Discovery"
+      - "Smithsonian Channel"
+
+    # Always reject videos from these channels (case-insensitive)
+    blocked:
+      # Dog trainers
+      - "Cesar Millan"
+      - "Zak George's Dog Training Revolution"
+      - "McCann Dog Training"
+      - "Victoria Stilwell"
+      - "Kikopup"
+      - "Will Atherton Canine Training"
+      # Movie/entertainment
+      - "Movieclips"
+      - "Netflix"
+      - "Warner Bros. Pictures"
+
+  # Cross-project learning
+  cross_project:
+    enabled: true
+    client_id: ""               # Set per-project or use --client CLI flag
+    share_rejections: true      # Share rejections across projects for same client
+    apply_learnings: true       # Apply learnings from other projects by same client
+    auto_evolve_preset: true    # Update evolved preset after each project
+    merge_to_global: true       # Merge client rejections to global database
+    use_evolved_thresholds: true  # Use evolved preset for duration/score thresholds
+
+  # DaVinci Resolve integration
+  import_davinci_markers: true
+  davinci_marker_prefix: "REJECT:"
+  auto_import_path: ""          # Path to auto-import marker CSV on startup
 
 # -----------------------------------------------------------------------------
 # KEYWORD MODE (No Voiceover Required)

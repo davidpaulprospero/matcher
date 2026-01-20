@@ -142,6 +142,11 @@ class VideoDownloader:
         # Healer integration (set via set_healer())
         self._download_healer = None
 
+        # Global video ID deduplication across all keywords
+        # Prevents downloading same video for different keywords (saves disk space + improves variety)
+        self._downloaded_video_ids: Set[str] = set()
+        self._init_downloaded_video_ids()
+
         # Cookie authentication
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
         self._cookies_path = self._find_cookies_file() if not self._cookies_from_browser else None
@@ -151,7 +156,29 @@ class VideoDownloader:
         elif self._cookies_path:
             logger.info(f"Found cookies file: {self._cookies_path}")
         else:
-            logger.warning("No cookies configured - YouTube downloads may fail!")
+            # No legacy cookies - ensure bypass tier uses browser cookies (Tier 4)
+            bypass_config = getattr(self.download_config, 'rate_limit_bypass', None)
+            if bypass_config:
+                start_tier = getattr(bypass_config, 'start_tier', 1)
+                if isinstance(bypass_config, dict):
+                    start_tier = bypass_config.get('start_tier', 1)
+                    current_tier = bypass_config.get('_current_tier', 1)
+                    if current_tier < 4 and start_tier >= 4:
+                        bypass_config['_current_tier'] = start_tier
+                        logger.info(f"Forcing bypass tier {start_tier} (browser cookies)")
+                    elif current_tier < 4:
+                        bypass_config['_current_tier'] = 4
+                        logger.info("No cookies configured - forcing bypass Tier 4 (browser cookies)")
+                else:
+                    current_tier = getattr(bypass_config, '_current_tier', 1)
+                    if current_tier < 4 and start_tier >= 4:
+                        bypass_config._current_tier = start_tier
+                        logger.info(f"Forcing bypass tier {start_tier} (browser cookies)")
+                    elif current_tier < 4:
+                        bypass_config._current_tier = 4
+                        logger.info("No cookies configured - forcing bypass Tier 4 (browser cookies)")
+            else:
+                logger.warning("No cookies configured - YouTube downloads may fail!")
 
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
@@ -206,6 +233,49 @@ class VideoDownloader:
     def _record_search_pass_rate(self, keyword, searched, approved):
         """Delegate to SearchOptimizer."""
         self.search_optimizer.record_search_pass_rate(keyword, searched, approved)
+
+    def _init_downloaded_video_ids(self):
+        """
+        Initialize the set of already-downloaded video IDs by scanning existing files.
+
+        Scans the download directory for video files and extracts YouTube video IDs
+        from filenames (pattern: {title}_{video_id}.mp4).
+
+        This enables cross-keyword deduplication: if a video was downloaded for
+        keyword A, it won't be re-downloaded for keyword B.
+        """
+        import re
+
+        # Get the root video directory
+        video_dir = Path(self.config.downloaded_videos_dir)
+        if not video_dir.exists():
+            return
+
+        # Scan for video files and extract video IDs
+        video_extensions = {'.mp4', '.mkv', '.webm', '.m4v'}
+        count = 0
+
+        for video_file in video_dir.rglob('*'):
+            if video_file.suffix.lower() not in video_extensions:
+                continue
+
+            filename = video_file.stem
+
+            # Pattern 1: Audio-first segment: {video_id}_{offset:04d}
+            match = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
+            if match:
+                self._downloaded_video_ids.add(match.group(1))
+                count += 1
+                continue
+
+            # Pattern 2: Regular YouTube: {title}_{video_id}
+            match = re.search(r'_([a-zA-Z0-9_-]{11})$', filename)
+            if match:
+                self._downloaded_video_ids.add(match.group(1))
+                count += 1
+
+        if count > 0:
+            logger.info(f"Initialized video ID tracker: {len(self._downloaded_video_ids)} unique videos from {count} files")
 
     def _record_source_for_keyword(self, keyword: str, video_id: str):
         """Delegate to SearchOptimizer."""
@@ -1058,9 +1128,22 @@ class VideoDownloader:
         # Check which video IDs are already downloaded (file-based, not checkpoint-based)
         already_downloaded = []
         missing_ids = []
+        skipped_global = 0
 
         for vid_id in video_ids:
-            # Check if any file contains this video ID
+            # GLOBAL DEDUP: Skip if already downloaded for another keyword
+            if vid_id in self._downloaded_video_ids:
+                # Check if file exists in this keyword folder (for local tracking)
+                local_exists = any(
+                    vid_id in f and f.endswith(('.mp4', '.mkv', '.webm'))
+                    for f in existing_before
+                )
+                if not local_exists:
+                    skipped_global += 1
+                    logger.debug(f"    Skipping {vid_id} - already downloaded for another keyword")
+                    continue
+
+            # Check if any file contains this video ID in this folder
             found = False
             for existing_file in existing_before:
                 if vid_id in existing_file and existing_file.endswith(('.mp4', '.mkv', '.webm')):
@@ -1083,6 +1166,9 @@ class VideoDownloader:
                     break
             if not found:
                 missing_ids.append(vid_id)
+
+        if skipped_global > 0:
+            logger.info(f"    Global dedup: skipped {skipped_global} videos (already downloaded for other keywords)")
 
         if already_downloaded:
             logger.debug(f"    {len(already_downloaded)} already downloaded, {len(missing_ids)} to fetch")
@@ -1156,11 +1242,13 @@ class VideoDownloader:
             if batch_result:
                 newly_downloaded.extend(batch_result)
                 # Update existing_before so next iteration doesn't think this file is "new" again
-                # (though _run_download_cmd logic handles new files by diffing, updating the set 
+                # (though _run_download_cmd logic handles new files by diffing, updating the set
                 # prevents potential double-counting if logic changes)
                 for video in batch_result:
                     filename = Path(video.file).name
                     existing_before.add(filename)
+                # Track video ID globally to prevent re-download for other keywords
+                self._downloaded_video_ids.add(vid_id)
 
             # Small delay between individual downloads to be nice to YouTube
             if i < len(valid_ids):
