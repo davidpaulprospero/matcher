@@ -84,6 +84,21 @@ comp.FindTool("TextPlus").SetInput("StyledText", "TEXT")
 
 **DaVinci 19:** Clip color groups, node queries, keyframe control. **Breaking:** UI Manager now Studio-only.
 
+### DaVinci 20 New APIs
+
+| Object | New Method | Purpose |
+|--------|-----------|---------|
+| **Project** | `GetColorGroupsList()`, `AddColorGroup()` | Batch color grading |
+| **Timeline** | `GetVoiceIsolationState()`, `SetVoiceIsolationState()` | Fairlight AI isolation |
+| **TimelineItem** | `SetName()`, `ExportLUT()`, `AssignToColorGroup()` | Clip management |
+| **Graph** | `SetNodeCacheMode()`, `GetNumNodes()`, `SetLUT()` | Node graph control |
+| **Folder** | `TranscribeAudio()`, `ClearTranscription()` | Built-in transcription |
+| **Resolve** | `GetFairlightPresets()` | Audio preset automation |
+
+**New Objects:** `ColorGroup` (batch grading), `Graph` (node manipulation). **Cloud:** `CreateCloudProject()`, `LoadCloudProject()`.
+
+**Still GUI-only:** IntelliScript, AI Multicam SmartSwitch, AI Animated Subtitles, IntelliCut.
+
 ---
 
 ## Phase 1: Foundation & Graphics
@@ -394,6 +409,103 @@ request = youtube.videos().insert(
 
 **Multi-platform:** Use n8n or custom Python with platform SDKs. Stagger uploads (YouTube first, TikTok 24h later).
 
+### YouTube Algorithm & SEO
+
+| Factor | Target | Weight |
+|--------|--------|--------|
+| **Watch Time** | Maximize minutes | #1 Primary |
+| **AVD (30s mark)** | >50% retention | Critical |
+| **CTR** | 5-10% (elite: 10%+) | High |
+| **Engagement velocity** | First 48 hours | High |
+
+**Retention hooks:** Bold claim (0-3s) → Pattern interrupt (8-15s) → Preview payoff (15-30s).
+
+**Optimal posting:** Tue-Fri, 12-4 PM local. **Shorts:** 30-45s sweet spot, loop completion rate.
+
+### YouTube Monetization
+
+| Tier | Subscribers | Watch Hours | Shorts Views |
+|------|-------------|-------------|--------------|
+| **Early Access** | 500 | 3,000 (12 mo) | 3M (90 days) |
+| **Full Monetization** | 1,000 | 4,000 (12 mo) | 10M (90 days) |
+
+**Mid-rolls:** 8+ min required, place at scene changes. **Shorts RPM:** $0.01-0.06/view (45% creator share).
+
+| Niche | RPM Range |
+|-------|-----------|
+| Finance/Legal | $10-25 |
+| Tech/Education | $8-14 |
+| Gaming | $3-7 |
+
+### Copyright & Content ID
+
+| Service | Use Case | Pricing |
+|---------|----------|---------|
+| **YouTube Checks** | Pre-publish scan | Free (upload as Private) |
+| **ACRCloud** | Audio fingerprinting | Free tier available |
+| **Audible Magic** | Enterprise detection | ~$0.08/min |
+| **Songview (ASCAP/BMI)** | Rights lookup | Free |
+
+**Pre-publish:** Upload Private → wait for Checks → fix claims → publish. **Fair use:** No safe duration threshold—courts decide.
+
+### AI Content Detection & Disclosure
+
+| Platform | Required Disclosure | Penalty |
+|----------|---------------------|---------|
+| **YouTube** | Cloned voices, deepfakes, fake events | Strikes, demonetization |
+| **TikTok** | All AI-generated content (Jan 2025) | Immediate strikes |
+| **Instagram** | Realistic altered video/audio | Reach suppression |
+
+**Safe:** AI color correction, scriptwriting, production assistance. **Flagged:** 100% AI without human perspective.
+
+**Watermarking:** C2PA (metadata, easily stripped), SynthID (pixel-level, survives compression).
+
+### AI Dubbing & Localization
+
+| Tool | Languages | Lip Sync | Pricing | API |
+|------|-----------|----------|---------|-----|
+| **ElevenLabs** | 29 | Yes | ~$0.80-1.20/min | Yes |
+| **Rask.ai** | 130+ | Yes (2x cost) | $1.20-1.50/min | Yes |
+| **HeyGen** | 175+ | Yes (Avatar) | ~$0.55/min | Yes |
+| **Deepdub** | 100+ | Yes | Enterprise | Yes |
+
+**Best for:** ElevenLabs (voice cloning), Rask.ai (high-volume), HeyGen (avatars), Deepdub (broadcast).
+
+### Review & Collaboration Tools
+
+| Tool | Pricing | DaVinci Panel | API |
+|------|---------|---------------|-----|
+| **Frame.io** | $15-25/user/mo | Yes | Yes |
+| **Dropbox Replay** | $10-12/user/mo | Yes | No |
+| **ftrack** | $15-30/user/mo | Community | Yes |
+| **Wipster** | $12-40/user/mo | No | Yes |
+
+**DaVinci integration:** Frame.io and Dropbox Replay have direct panels. ftrack via community plugin.
+
+### Proxy Workflows
+
+| Codec | Quality | File Size | Best For |
+|-------|---------|-----------|----------|
+| **ProRes Proxy** | Excellent | Medium | DaVinci/FCPX default |
+| **DNxHR LB** | Very Good | Medium-Large | Avid/broadcast |
+| **H.264** | Good | Smallest | Cross-platform |
+
+**DaVinci:** Right-click → Generate Proxy Media → Playback → Prefer Proxies. Auto-switches to full-res on export.
+
+**Resolution:** 4K source → 1/2 res (2K) for quality; 6K/8K → 1/4 res for speed.
+
+### Competitor Auto-Edit Tools
+
+| Tool | Key Feature | Pricing | API |
+|------|-------------|---------|-----|
+| **Descript** | Edit-by-transcript, Overdub | $15-30/mo | Enterprise |
+| **Gling AI** | Jump cuts, bad take detection | $15/mo | No |
+| **OpusClip** | Long-to-short, virality scoring | $15-29/mo | Business tier |
+| **Runway** | Gen-3/4 AI video | $15/mo+ | Yes |
+| **AutoPod** | Multicam auto-switch | $29/mo | No |
+
+**Our differentiators:** Voiceover-first matching (unique), auto B-roll sourcing, OTIO/EDL/XML output.
+
 ### Auto-Color Matching
 
 **DaVinci:** Color Match (source→target), Auto Color (starting point), Shot Match (manual).
@@ -494,14 +606,24 @@ project.StartRendering(isInteractiveMode=False)  # Headless = 15% faster
 | **Vision** | OpenCV, MediaPipe, CLIP |
 | **ML/AI** | PyTorch, sentence-transformers, Ollama |
 
-### Hardware
+### Hardware (2026)
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| CPU | 8 cores | 16+ cores |
-| RAM | 32 GB | 64+ GB |
-| GPU | RTX 3060 | RTX 4080+ |
-| Storage | SSD 1TB | NVMe 2TB+ |
+| Component | 1080p | 4K | 8K/Heavy AI |
+|-----------|-------|-----|-------------|
+| **CPU** | 8 cores | 12+ cores | 16+ cores |
+| **RAM** | 16-32 GB | 32-64 GB | 64-128 GB |
+| **GPU** | RTX 4060 / Arc B580 | RTX 5080 / M4 Pro | RTX 5090 (32GB) |
+| **Storage** | Gen4 NVMe | Gen4/5 NVMe | Gen5 NVMe RAID |
+
+**GPU Benchmarks (DaVinci):**
+| GPU | Score | Export Speed |
+|-----|-------|--------------|
+| RTX 5090 (32GB) | 13,370 | 60% faster than 4090 |
+| RTX 5080 (16GB) | 11,659 | +23% vs 4080 Super |
+| M4 Max | — | 2x faster than M4 Pro |
+| Arc B580 (12GB) | — | Best AV1 under $300 |
+
+**Storage:** Gen5 NVMe = 14,000+ MB/s (8K RAW, multi-cam 4K).
 
 ### API Keys
 
@@ -574,6 +696,17 @@ project.StartRendering(isInteractiveMode=False)  # Headless = 15% faster
 | **YouTube Data API v3** | ✅ | 1600 units/upload, well-documented |
 | **TikTok Content Posting** | ⚠️ | Audit required for public posting |
 | **Instagram Graph API** | ⚠️ | Business/Creator accounts only |
+| **DaVinci 20 ColorGroup API** | ✅ | Batch grading automation |
+| **DaVinci 20 Voice Isolation** | ✅ | Fairlight AI, scriptable |
+| **ElevenLabs Dubbing API** | ✅ | 29 languages, lip sync |
+| **Rask.ai Dubbing API** | ✅ | 130+ languages, first API-first |
+| **Frame.io API v4** | ✅ | Adobe-integrated, Camera to Cloud |
+| **ACRCloud fingerprinting** | ✅ | Free tier, 150M+ tracks |
+| **C2PA watermarking** | ⚠️ | Easily stripped on upload |
+| **SynthID watermarking** | ✅ | Survives compression |
+| **YouTube Analytics API** | ✅ | Retention curves, CTR tracking |
+| **RTX 5090 NVENC** | ✅ | 9th-gen, AV1 Ultra Quality |
+| **ProRes Proxy workflow** | ✅ | 4-10x playback improvement |
 
 ### When to Use Cloud vs Local
 
@@ -605,12 +738,19 @@ project.StartRendering(isInteractiveMode=False)  # Headless = 15% faster
 | **Stabilization** | [Gyroflow](https://gyroflow.xyz), [FFmpeg vidstab](https://github.com/georgmartius/vid.stab), [DaVinci Stabilizer](https://documents.blackmagicdesign.com) |
 | **Upscaling** | [Topaz Video AI](https://www.topazlabs.com/topaz-video-ai), [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN), [DaVinci Super Scale](https://documents.blackmagicdesign.com) |
 | **Social APIs** | [YouTube Data API](https://developers.google.com/youtube/v3), [TikTok Content Posting](https://developers.tiktok.com), [Instagram Graph API](https://developers.facebook.com/docs/instagram-api) |
+| **AI Dubbing** | [ElevenLabs](https://elevenlabs.io), [Rask.ai](https://rask.ai), [HeyGen](https://heygen.com), [Deepdub](https://deepdub.ai) |
+| **Copyright** | [ACRCloud](https://acrcloud.com), [Audible Magic](https://audiblemagic.com), [Songview](https://ascap.com/songview) |
+| **Review Tools** | [Frame.io](https://frame.io), [ftrack](https://ftrack.com), [Dropbox Replay](https://dropbox.com/replay) |
+| **AI Detection** | [C2PA](https://c2pa.org), [SynthID](https://deepmind.google/models/synthid), [Reality Defender](https://realitydefender.com) |
+| **Competitors** | [Descript](https://descript.com), [Gling](https://gling.ai), [OpusClip](https://opus.pro), [Runway](https://runwayml.com) |
+| **Hardware** | [Puget Systems](https://pugetsystems.com), [Tom's Hardware](https://tomshardware.com) |
 
 ---
 
-*Last updated: January 20, 2026 | Document version: 4.1*
+*Last updated: January 21, 2026 | Document version: 5.0*
 
 **Changelog:**
+- v5.0: Major research update - DaVinci 20 API (ColorGroup, Voice Isolation, Graph), YouTube SEO/Algorithm, YouTube Monetization (YPP, RPM by niche), Copyright Detection (Content ID, ACRCloud, pre-publish), AI Content Detection (C2PA, SynthID, disclosure requirements), AI Dubbing (ElevenLabs, Rask.ai, HeyGen), Review Tools (Frame.io, ftrack, Dropbox Replay), Proxy Workflows, Competitor Analysis (Descript, Gling, OpusClip, Runway), Hardware 2026 (RTX 50, M4, Gen5 NVMe)
 - v4.1: Video Stabilization (Gyroflow, FFmpeg vidstab, DaVinci limitations), Video Upscaling (Topaz, Real-ESRGAN, DaVinci Super Scale), Social Media Auto-Publishing (YouTube, TikTok, Instagram APIs)
 - v4.0: Music Licensing APIs (Epidemic, Jamendo, Artlist), Speed Ramping (RIFE, FILM, OTIO LinearTimeWarp), Auto Chapter Generation (AssemblyAI, LLM+TF-IDF, YouTube API)
 - v3.9: Major compaction (1861→~550 lines, 70% reduction) - consolidated tables, removed verbose code examples, preserved all essential information
