@@ -39,6 +39,7 @@ from .speech_screening import SpeechScreener
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .search_cache import YouTubeSearchCache
+from .rate_limit_handler import RateLimitHandler, get_rate_limit_handler
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,9 @@ class VideoDownloader:
         # Cookie authentication
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
         self._cookies_path = self._find_cookies_file() if not self._cookies_from_browser else None
+
+        # Rate limit handler for proxy support
+        self.rate_limit_handler = get_rate_limit_handler(self.config)
 
         if self._cookies_from_browser:
             logger.info(f"Using cookies from browser: {self._cookies_from_browser}")
@@ -413,13 +417,20 @@ class VideoDownloader:
         return None
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
-        """Add base args (JS runtime), bypass args, and cookie authentication to yt-dlp command."""
+        """Add base args (JS runtime), bypass args, proxy, and cookie authentication to yt-dlp command."""
         # Add JS runtime for YouTube challenge solving
         cmd.extend(['--js-runtimes', 'node'])
 
         # Add bypass args (handles tier-specific authentication)
         bypass_args = self._build_bypass_args()
         cmd.extend(bypass_args)
+
+        # Add proxy if available from rate limit handler
+        if self.rate_limit_handler and self.rate_limit_handler.has_proxy:
+            proxy_url = self.rate_limit_handler.get_proxy()
+            if proxy_url:
+                cmd.extend(['--proxy', proxy_url])
+                logger.debug(f"[PROXY] Added proxy to yt-dlp: {proxy_url[:30]}...")
 
         # Skip cookies if using impersonation (Tier 1) or browser auth (Tier 2)
         # Bypass args already handle authentication for those tiers
@@ -933,12 +944,27 @@ class VideoDownloader:
         if use_llm_filter:
             # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
 
+            # Check if cache should be bypassed (e.g., during recovery iterations)
+            bypass_cache = getattr(self.download_config, 'bypass_search_cache', False)
+
+            logger.info(f"[search_cache] === CACHE CHECK for '{keyword}' (tier: {tier}) ===")
+            logger.info(f"[search_cache]   bypass_cache={bypass_cache}")
+
             # Check search cache for previously approved video IDs
-            cached_ids = self.search_cache.get(keyword, tier, max_age_days=30)
+            cached_ids = None
+            if not bypass_cache:
+                cached_ids = self.search_cache.get(keyword, tier, max_age_days=30)
+                if cached_ids:
+                    logger.info(f"[search_cache]   CACHE HIT: {len(cached_ids)} video IDs")
+                    logger.info(f"[search_cache]   Sample IDs: {cached_ids[:3]}")
+                else:
+                    logger.info(f"[search_cache]   CACHE MISS: No cached results")
+            else:
+                logger.info(f"[search_cache]   CACHE BYPASSED (recovery mode)")
 
             if cached_ids:
                 # Cache HIT: Use cached video IDs (skip search + LLM filter)
-                logger.info(f"    Using {len(cached_ids)} cached video IDs for '{keyword}' (tier: {tier})")
+                logger.info(f"[search_cache]   Using cached IDs, skipping YouTube search")
                 video_ids = cached_ids[:max_downloads]
                 return self._download_by_ids(video_ids, keyword_dir, output_dir, keyword, tier)
 
@@ -991,6 +1017,7 @@ class VideoDownloader:
 
             # Cache approved video IDs for future runs
             video_ids = [v['id'] for v in approved_videos[:max_downloads]]
+            logger.info(f"[search_cache]   CACHE SET: Storing {len(video_ids)} approved IDs for '{keyword}' (tier: {tier})")
             self.search_cache.set(keyword, tier, video_ids, search_pool=search_pool)
 
             # Download only approved videos (by ID)
@@ -1524,6 +1551,13 @@ class VideoDownloader:
                 self._last_download_timed_out = True
                 return []
 
+            # Check for rate limiting in output
+            output_combined = (stdout or '') + (stderr or '')
+            if '429' in output_combined or 'rate limit' in output_combined.lower():
+                logger.warning(f"Rate limit detected in yt-dlp output for '{keyword}'")
+                if self.rate_limit_handler:
+                    self.rate_limit_handler.on_rate_limit(f"ytdlp_{tier}")
+
             # Only log actual errors
             if stderr:
                 for line in stderr.strip().split('\n'):
@@ -1531,9 +1565,15 @@ class VideoDownloader:
                         logger.warning(f"    yt-dlp: {line}")
 
             # Process downloaded files (transcode, sanitize, create records)
-            return self._process_downloaded_files(
+            result = self._process_downloaded_files(
                 keyword_dir, output_dir, keyword, tier, existing_before
             )
+
+            # Report success to rate limit handler if we got results
+            if result and self.rate_limit_handler:
+                self.rate_limit_handler.on_success()
+
+            return result
 
         except Exception as e:
             logger.error(f"Error downloading '{keyword}' ({tier}): {e}")
