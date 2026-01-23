@@ -84,6 +84,13 @@ def analyze_coverage(
         CoverageReport with breakdown and list of weak segments
     """
     logger.info(f"[coverage_analyzer] Starting coverage analysis")
+
+    # Handle None inputs
+    if matches is None:
+        matches = []
+    if voiceover_segments is None:
+        voiceover_segments = []
+
     logger.info(f"[coverage_analyzer] Input: {len(matches)} matches, {len(voiceover_segments)} segments")
     logger.info(f"[coverage_analyzer] Thresholds: high={target_confidence:.0%}, medium={medium_threshold:.0%}")
 

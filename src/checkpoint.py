@@ -39,9 +39,11 @@ STAGE_ORDER = [
     "BROLL_DOWNLOAD",
     "REMIX",
     "TRANSCRIBE",      # In caption-first mode: only Whisper for uncaptioned videos
+    "PREMISE",         # Extract video topic/theme premises for theme-based matching
     "SCENE_DETECTION",
     "MATCH",
     "BROLL_MATCH",
+    "ITERATIVE_MATCH",  # High matches mode: iterates download→match until target coverage
     "DOWNLOAD_SEGMENTS",
     "OUTPUT"
 ]
@@ -88,6 +90,7 @@ class CheckpointData:
     broll_download: Dict[str, Any] = field(default_factory=dict)
     remix: Dict[str, Any] = field(default_factory=dict)
     transcribe: Dict[str, Any] = field(default_factory=dict)
+    premise: Dict[str, Any] = field(default_factory=dict)
     scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
     broll_match: Dict[str, Any] = field(default_factory=dict)

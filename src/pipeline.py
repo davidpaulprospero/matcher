@@ -227,9 +227,11 @@ def create_default_pipeline(
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
+    from .stages.premise import PremiseStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.broll_match import BrollMatchStage
+    from .stages.iterative_match import IterativeMatchStage
     from .stages.output import OutputStage
 
     # Add stages in STAGE_ORDER (matches checkpoint.py)
@@ -244,9 +246,11 @@ def create_default_pipeline(
     pipeline.add_stage(BrollDownloadStage())  # B-roll specific downloads
     pipeline.add_stage(RemixStage())
     pipeline.add_stage(TranscribeStage())     # In caption-first: only uncaptioned videos
+    pipeline.add_stage(PremiseStage())        # Extract video topic/theme premises
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())  # Match silent scenes for V8 track
+    pipeline.add_stage(IterativeMatchStage())  # High matches mode: iterate until target coverage
 
     # Caption-first and audio-first modes download video segments after matching
     # (videos are only fully downloaded once we know which segments are needed)
@@ -295,9 +299,11 @@ def create_match_only_pipeline(
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
+    from .stages.premise import PremiseStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.broll_match import BrollMatchStage
+    from .stages.iterative_match import IterativeMatchStage
     from .stages.output import OutputStage
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
@@ -312,11 +318,13 @@ def create_match_only_pipeline(
     pipeline.add_stage(BrollDownloadStage())   # B-roll specific downloads
     pipeline.add_stage(RemixStage())           # Filter videos by relevance
     pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(PremiseStage())         # Extract video topic/theme premises
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
 
     # Add stages to actually run
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())    # Match silent scenes for V8 track
+    pipeline.add_stage(IterativeMatchStage())  # High matches mode: iterate until target coverage
 
     # Caption-first mode: download video segments AFTER matching
     # (videos were matched against captions, now need actual video files)
@@ -373,9 +381,11 @@ def create_keyword_mode_pipeline(
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
     from .stages.transcribe import TranscribeStage
+    from .stages.premise import PremiseStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.broll_match import BrollMatchStage
+    from .stages.iterative_match import IterativeMatchStage
     from .stages.output import OutputStage
 
     # Determine mode from config or override
@@ -411,11 +421,13 @@ def create_keyword_mode_pipeline(
     pipeline.add_stage(BrollDownloadStage())
     pipeline.add_stage(RemixStage())
     pipeline.add_stage(TranscribeStage())
+    pipeline.add_stage(PremiseStage())         # Extract video topic/theme premises
     pipeline.add_stage(SceneDetectionStage())
 
     # Matching and output
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())
+    pipeline.add_stage(IterativeMatchStage())  # High matches mode
     pipeline.add_stage(OutputStage())
 
     return pipeline

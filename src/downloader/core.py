@@ -1564,6 +1564,23 @@ class VideoDownloader:
                     if line and 'WARNING' not in line and 'ERROR' in line:
                         logger.warning(f"    yt-dlp: {line}")
 
+            # Check for SOCKS proxy error - fall back to direct connection
+            # This handles cases where Mullvad VPN SOCKS proxy is temporarily unavailable
+            if stderr and ('SOCKS' in stderr or 'WinError 10061' in stderr):
+                # Check if proxy was used in command
+                try:
+                    proxy_idx = cmd.index('--proxy')
+                    # Remove --proxy and its value
+                    cmd_without_proxy = cmd[:proxy_idx] + cmd[proxy_idx + 2:]
+                    logger.warning(f"SOCKS proxy failed for '{keyword}', retrying without proxy...")
+                    # Recursive call without proxy (only once - no --proxy means no further recursion)
+                    return self._run_download_cmd(
+                        cmd_without_proxy, keyword_dir, output_dir, keyword, tier, existing_before, timeout_override
+                    )
+                except ValueError:
+                    # --proxy not in command, can't fall back further
+                    pass
+
             # Process downloaded files (transcode, sanitize, create records)
             result = self._process_downloaded_files(
                 keyword_dir, output_dir, keyword, tier, existing_before

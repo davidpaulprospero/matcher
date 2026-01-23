@@ -34,24 +34,28 @@ class MatchResultWrapper:
     objects with primary_match, alternatives, secondary_matches, strategy_matches.
     """
 
-    def __init__(self, simple_match: 'Match'):
+    def __init__(self, simple_match: 'Match', alternatives=None, secondary_matches=None):
         self._simple_match = simple_match
+        self._alternatives = alternatives or []
+        self._secondary_matches = secondary_matches or []
         # Create a fake SRTSegment-like object for voiceover_segment
+        # CRITICAL: Pass segment_index so coverage analyzer can find matches correctly
         self._voiceover_segment = self._FakeSegment(
             getattr(simple_match, 'video_start', 0.0),
             getattr(simple_match, 'video_end', 10.0),
-            ''  # No text available from simple match
+            '',  # No text available from simple match
+            index=getattr(simple_match, 'segment_index', 0)
         )
         # Create a fake video segment
         self._video_segment = self._FakeVideoSegment(simple_match)
 
     class _FakeSegment:
         """Fake SRTSegment for compatibility."""
-        def __init__(self, start: float, end: float, text: str):
+        def __init__(self, start: float, end: float, text: str, index: int = 0):
             self.start_time = start
             self.end_time = end
             self.text = text
-            self.index = 0
+            self.index = index
 
     class _FakeVideoSegment:
         """Fake video segment for compatibility."""
@@ -59,6 +63,24 @@ class MatchResultWrapper:
             self.source_file = getattr(m, 'video_file', '')
             self.start_time = getattr(m, 'video_start', 0.0)
             self.end_time = getattr(m, 'video_end', 0.0)
+            self.text = ''
+
+    class _FakeAlternativeMatch:
+        """Fake alternative match for restored data."""
+        def __init__(self, data: dict):
+            self._data = data
+            self.video_segment = MatchResultWrapper._FakeVideoSegmentFromDict(data)
+            self.video_scene = None
+            self.confidence = data.get('confidence', 0.5)
+            self.reasoning = data.get('strategy', '')
+            self.strategy = data.get('strategy', '')
+
+    class _FakeVideoSegmentFromDict:
+        """Fake video segment from dict data."""
+        def __init__(self, data: dict):
+            self.source_file = data.get('source_file', '')
+            self.start_time = data.get('start_time', 0.0)
+            self.end_time = data.get('end_time', 0.0)
             self.text = ''
 
     class _FakePrimaryMatch:
@@ -109,11 +131,11 @@ class MatchResultWrapper:
 
     @property
     def alternatives(self):
-        return []
+        return [self._FakeAlternativeMatch(a) for a in self._alternatives]
 
     @property
     def secondary_matches(self):
-        return []
+        return [self._FakeAlternativeMatch(s) for s in self._secondary_matches]
 
     @property
     def strategy_matches(self):
@@ -128,14 +150,20 @@ class MatchResultWrapper:
         return ''
 
 
-def wrap_simple_match(match) -> 'MatchResultWrapper':
+def wrap_simple_match(match, alternatives=None, secondary_matches=None) -> 'MatchResultWrapper':
     """
     Wrap a simple Match object in a MatchResult-compatible wrapper.
 
     If the match is already a MatchResult, returns it unchanged.
+
+    Args:
+        match: Simple Match object
+        alternatives: List of alternative match dicts (for V2-V3)
+        secondary_matches: List of secondary match dicts (for V4-V6)
     """
     if hasattr(match, 'primary_match'):
         return match  # Already a MatchResult
+    return MatchResultWrapper(match, alternatives=alternatives, secondary_matches=secondary_matches)
     return MatchResultWrapper(match)
 
 
@@ -227,7 +255,29 @@ class MatchStage(Stage):
 
             # Serialize essential match data for checkpoint
             # This enables DOWNLOAD_SEGMENTS to validate it has matches available
+            # CRITICAL: Include alternatives and secondary_matches for V2-V6 tracks
             serialized_matches = []
+
+            def serialize_match_obj(match_obj):
+                """Serialize a match object (AlternativeMatch or similar)."""
+                if not match_obj:
+                    return None
+                source_file = ''
+                start_time = 0.0
+                end_time = 0.0
+                if hasattr(match_obj, 'video_segment') and match_obj.video_segment:
+                    source_file = getattr(match_obj.video_segment, 'source_file', '')
+                    start_time = getattr(match_obj.video_segment, 'start_time', 0.0)
+                    end_time = getattr(match_obj.video_segment, 'end_time', 0.0)
+                return {
+                    'source_file': source_file,
+                    'start_time': float(start_time),
+                    'end_time': float(end_time),
+                    'confidence': float(getattr(match_obj, 'confidence', 0.0)),
+                    'strategy': getattr(match_obj, 'strategy', ''),
+                }
+
+            empty_source_count = 0
             for i, m in enumerate(matches):
                 try:
                     # Handle MatchResult structure (has primary_match)
@@ -243,11 +293,37 @@ class MatchStage(Stage):
 
                         conf = getattr(pm, 'confidence', 0.0)
 
+                        # CRITICAL: Validate match has actual video source
+                        # If source_file is empty, this is an invalid match
+                        if not source_file:
+                            empty_source_count += 1
+                            # Set confidence to 0 for invalid matches
+                            conf = 0.0
+                            start_time = 0.0
+
+                        # Serialize alternatives (V2, V3)
+                        alternatives = []
+                        if hasattr(m, 'alternatives') and m.alternatives:
+                            for alt in m.alternatives:
+                                alt_data = serialize_match_obj(alt)
+                                if alt_data and alt_data.get('source_file'):
+                                    alternatives.append(alt_data)
+
+                        # Serialize secondary matches (V4, V5, V6)
+                        secondary_matches = []
+                        if hasattr(m, 'secondary_matches') and m.secondary_matches:
+                            for sec in m.secondary_matches:
+                                sec_data = serialize_match_obj(sec)
+                                if sec_data and sec_data.get('source_file'):
+                                    secondary_matches.append(sec_data)
+
                         serialized_matches.append({
                             'segment_index': i,
                             'source_file': source_file,
                             'start_time': float(start_time),
-                            'confidence': float(conf)
+                            'confidence': float(conf),
+                            'alternatives': alternatives,
+                            'secondary_matches': secondary_matches,
                         })
                     # Handle direct Match structure
                     elif hasattr(m, 'video_segment'):
@@ -255,14 +331,25 @@ class MatchStage(Stage):
                         start_time = getattr(m.video_segment, 'start_time', 0.0)
                         conf = getattr(m, 'confidence', 0.0)
 
+                        # CRITICAL: Validate match has actual video source
+                        if not source_file:
+                            empty_source_count += 1
+                            conf = 0.0
+                            start_time = 0.0
+
                         serialized_matches.append({
                             'segment_index': i,
                             'source_file': source_file,
                             'start_time': float(start_time),
-                            'confidence': float(conf)
+                            'confidence': float(conf),
+                            'alternatives': [],
+                            'secondary_matches': [],
                         })
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
+
+            if empty_source_count > 0:
+                logger.warning(f"⚠️ {empty_source_count} matches have empty source_file (marked as 0 confidence)")
 
             checkpoint_data = {
                 'match_count': len(matches),
@@ -302,6 +389,9 @@ class MatchStage(Stage):
             matches_data = data.get('matches', [])
             if matches_data:
                 restored_matches = []
+                total_alts = 0
+                total_secondary = 0
+
                 for m in matches_data:
                     # Handle both old format (source_file) and new format (video_file)
                     video_file = m.get('video_file') or m.get('source_file', '')
@@ -320,11 +410,22 @@ class MatchStage(Stage):
                         reason=m.get('reason', ''),
                         face_score=m.get('face_score', 0.5)
                     )
-                    # Wrap in MatchResult-compatible wrapper for downstream code
-                    restored_matches.append(wrap_simple_match(simple_match))
+
+                    # Load alternatives and secondary_matches if present
+                    alternatives = m.get('alternatives', [])
+                    secondary_matches = m.get('secondary_matches', [])
+                    total_alts += len(alternatives)
+                    total_secondary += len(secondary_matches)
+
+                    # Wrap in MatchResult-compatible wrapper with alternatives
+                    restored_matches.append(wrap_simple_match(
+                        simple_match,
+                        alternatives=alternatives,
+                        secondary_matches=secondary_matches
+                    ))
 
                 state.matches = restored_matches
-                logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")
+                logger.info(f"Restored MATCH: {len(restored_matches)} matches, {total_alts} alternatives, {total_secondary} secondary")
             else:
                 logger.info(f"Restored MATCH metadata from checkpoint (no matches data)")
 
@@ -403,6 +504,17 @@ class MatchStage(Stage):
         broll_count = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
         logger.info(f"text_metadata has {broll_count}/{len(state.text_metadata)} entries with is_broll=True")
 
+        # DEBUG: Count text_metadata entries with empty video_path
+        empty_path_count = sum(1 for m in state.text_metadata
+                              if isinstance(m, dict) and not m.get('video_path', ''))
+        if empty_path_count > 0:
+            logger.warning(f"⚠️ {empty_path_count}/{len(state.text_metadata)} text_metadata entries have EMPTY video_path!")
+            # Sample empty entries
+            empty_samples = [(i, m.get('text', '')[:50]) for i, m in enumerate(state.text_metadata)
+                           if isinstance(m, dict) and not m.get('video_path', '')][:5]
+            for idx, text in empty_samples:
+                logger.warning(f"  Empty video_path at index {idx}: '{text}...'")
+
         broll_segments_created = 0
         caption_only_count = 0
         stock_count = 0
@@ -465,6 +577,18 @@ class MatchStage(Stage):
         if stock_count > 0:
             logger.info(f"Marked {stock_count} video_segments as stock footage (will be filtered from V1-V3)")
             print(f"  [Stock filter] {stock_count} stock footage segments excluded from V1-V3 matching")
+
+        # DEBUG: Count video_segments with empty source_file
+        empty_source_count = sum(1 for seg in video_segments if not getattr(seg, 'source_file', ''))
+        if empty_source_count > 0:
+            logger.warning(f"⚠️ BUG DETECTED: {empty_source_count}/{len(video_segments)} video_segments have EMPTY source_file!")
+            # Log sample of empty entries
+            empty_samples = [(i, getattr(seg, 'text', '')[:50]) for i, seg in enumerate(video_segments)
+                           if not getattr(seg, 'source_file', '')][:5]
+            for idx, text in empty_samples:
+                logger.warning(f"  Empty source_file at index {idx}: '{text}...'")
+        else:
+            logger.info(f"✓ All {len(video_segments)} video_segments have valid source_file")
 
         return vo_segments, video_segments, list(video_paths_set)
 
@@ -531,7 +655,8 @@ class MatchStage(Stage):
             location_chapters=state.location_chapters or None,
             video_locations=None,
             known_entities=entity_names if entity_names else None,
-            listicle_chapters=state.chapters or None
+            listicle_chapters=state.chapters or None,
+            video_premises=state.video_premises or None
         )
 
         return matches

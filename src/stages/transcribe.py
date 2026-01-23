@@ -399,15 +399,38 @@ class TranscribeStage(Stage):
 
             # Collect texts
             texts = []
+
+            # Check if caption-first mode is enabled
+            # In caption-first mode, caption segments ARE the primary candidates
+            # and should NOT be filtered out during matching
+            caption_first_enabled = False
+            try:
+                # Handle both dict and object access (Rule 6)
+                download_cfg = config.download
+                if hasattr(download_cfg, 'caption_first'):
+                    cf_config = download_cfg.caption_first
+                    if hasattr(cf_config, 'enabled'):
+                        caption_first_enabled = cf_config.enabled
+                    elif isinstance(cf_config, dict):
+                        caption_first_enabled = cf_config.get('enabled', False)
+                elif isinstance(download_cfg, dict):
+                    cf_config = download_cfg.get('caption_first', {})
+                    caption_first_enabled = cf_config.get('enabled', False) if cf_config else False
+                logger.info(f"Caption-first mode enabled: {caption_first_enabled}")
+            except Exception as e:
+                logger.warning(f"Could not check caption_first config: {e}")
+
             for video_path, segments in transcripts.items():
                 # Check if this is a caption-only video (no actual file downloaded)
                 # Video IDs are 11 characters, alphanumeric with optional hyphens
+                # BUT: In caption-first mode, don't mark as caption_only - they ARE primary candidates
                 is_caption_only = False
-                if len(video_path) == 11 and video_path.replace('_', '').replace('-', '').isalnum():
-                    is_caption_only = True
-                elif not Path(video_path).exists():
-                    # Also check if path doesn't exist (may be video_id only)
-                    is_caption_only = True
+                if not caption_first_enabled:
+                    if len(video_path) == 11 and video_path.replace('_', '').replace('-', '').isalnum():
+                        is_caption_only = True
+                    elif not Path(video_path).exists():
+                        # Also check if path doesn't exist (may be video_id only)
+                        is_caption_only = True
 
                 for seg in segments:
                     if hasattr(seg, 'text'):
@@ -569,16 +592,17 @@ class TranscribeStage(Stage):
         checkpoint: 'CheckpointManager'
     ):
         """
-        Rebuild state.text_metadata from cached transcripts.
+        Rebuild state.text_metadata from cached transcripts AND captions.
 
         This is critical for --match-only mode: when TRANSCRIBE is skipped,
         state.text_metadata would be empty, losing all B-roll flags added
         by SCENE_DETECTION.
 
         Strategy:
-        1. Load cached transcripts
-        2. Rebuild text_metadata list from transcripts
-        3. Let SCENE_DETECTION update it with is_broll flags
+        1. Load cached transcripts (from .cache/transcriptions/)
+        2. Load cached captions (from .cache/captions/) - CRITICAL for caption-first mode
+        3. Rebuild text_metadata list from both sources
+        4. Let SCENE_DETECTION update it with is_broll flags
         """
         try:
             from ..config import Config
@@ -607,7 +631,7 @@ class TranscribeStage(Stage):
             state.transcripts = {}
             texts = []
 
-            # Get all cached transcript files
+            # Get all cached transcript files (Whisper transcriptions)
             import glob
             import json
             transcript_files = glob.glob(str(cache_dir / "transcriptions" / "*.json"))
@@ -645,8 +669,57 @@ class TranscribeStage(Stage):
                     logger.debug(f"Could not load transcript {tf}: {e}")
                     continue
 
+            whisper_count = len(texts)
+
+            # CRITICAL: Also load caption-based transcripts (caption-first mode)
+            # These are stored as SRT files in .cache/captions/
+            caption_dir = cache_dir / "captions"
+            if caption_dir.exists():
+                from ..downloader.caption_fetcher import CaptionFetcher
+                fetcher = CaptionFetcher(str(cache_dir))
+
+                caption_files = list(caption_dir.glob("*.srt"))
+                logger.info(f"Found {len(caption_files)} caption files in cache")
+
+                for cf in caption_files:
+                    try:
+                        # Extract video_id from filename (format: {video_id}.{lang}.srt)
+                        parts = cf.stem.split('.')
+                        if len(parts) >= 2:
+                            video_id = parts[0]
+                        else:
+                            video_id = cf.stem
+
+                        # Skip if already have this video from transcriptions
+                        if video_id in state.transcripts:
+                            continue
+
+                        # Parse the SRT file
+                        segments = fetcher.parse_caption_file(str(cf))
+                        if segments:
+                            # Store with video_id as key (not file path - we don't have files yet)
+                            state.transcripts[video_id] = segments
+
+                            # Add to text_metadata with video_id as video_path
+                            # This is what MATCH stage needs to create valid matches
+                            # NOTE: Don't mark as caption_only - in caption-first mode these ARE
+                            # the primary candidates and shouldn't be filtered out during matching
+                            for seg in segments:
+                                texts.append({
+                                    'text': seg.get('text', ''),
+                                    'video_path': video_id,  # Use video_id as path in caption-first mode
+                                    'start_time': seg.get('start', seg.get('start_time', 0)),
+                                    'end_time': seg.get('end', seg.get('end_time', 0)),
+                                    'transcript_source': 'caption',
+                                })
+                    except Exception as e:
+                        logger.debug(f"Could not load caption {cf}: {e}")
+                        continue
+
+            caption_count = len(texts) - whisper_count
+
             state.text_metadata = texts
-            logger.info(f"Rebuilt text_metadata: {len(texts)} entries from {len(state.transcripts)} videos")
+            logger.info(f"Rebuilt text_metadata: {len(texts)} entries ({whisper_count} whisper, {caption_count} captions) from {len(state.transcripts)} videos")
 
         except Exception as e:
             logger.warning(f"Failed to rebuild text_metadata: {e}")

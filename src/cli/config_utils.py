@@ -329,12 +329,47 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
         if hasattr(config, section):
             section_obj = getattr(config, section)
             if isinstance(values, dict):
-                for key, value in values.items():
-                    if hasattr(section_obj, key):
-                        setattr(section_obj, key, value)
+                _deep_merge_section(section_obj, values)
             else:
                 setattr(config, section, values)
     return config
+
+
+def _deep_merge_section(section_obj, overrides: dict, depth: int = 0) -> None:
+    """
+    Recursively merge overrides into a config section object.
+
+    This handles nested config sections like download.fallback.caption
+    by merging at each level instead of replacing entire sub-sections.
+
+    Args:
+        section_obj: The config section object to merge into
+        overrides: Dictionary of overrides to apply
+        depth: Current recursion depth (for debugging)
+    """
+    max_depth = 5  # Prevent infinite recursion
+    if depth > max_depth:
+        return
+
+    for key, value in overrides.items():
+        if not hasattr(section_obj, key):
+            continue
+
+        existing = getattr(section_obj, key)
+
+        # If both existing and new value are nested objects/dicts, merge recursively
+        if isinstance(value, dict) and existing is not None:
+            # Check if existing is a dataclass or has attributes to merge into
+            if hasattr(existing, '__dataclass_fields__') or (
+                hasattr(existing, '__dict__') and not isinstance(existing, (str, int, float, bool, list, tuple))
+            ):
+                _deep_merge_section(existing, value, depth + 1)
+            else:
+                # Existing is a simple type or dict, replace it
+                setattr(section_obj, key, value)
+        else:
+            # Simple value or list, replace directly
+            setattr(section_obj, key, value)
 
 
 def validate_config_at_startup(config: 'Config') -> bool:

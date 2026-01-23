@@ -131,6 +131,7 @@ class AudioDownload:
     title: str = ""
     duration: float = 0.0
     keyword: str = ""
+    from_cache: bool = False  # True if file already existed (skip rate-limit delay)
 
 
 @dataclass
@@ -224,6 +225,21 @@ class Match:
 
 
 @dataclass
+class IterativeMatchState:
+    """State tracking for high matches mode iterative matching.
+
+    Tracks progress through multiple download → match cycles when
+    trying to achieve a target confidence coverage.
+    """
+    iteration_count: int = 0
+    coverage_history: List[float] = field(default_factory=list)
+    videos_added_per_iteration: List[int] = field(default_factory=list)
+    final_coverage: float = 0.0
+    target_achieved: bool = False
+    weak_segment_count: int = 0
+
+
+@dataclass
 class EntityImage:
     """Downloaded image for an entity"""
     entity: str
@@ -290,6 +306,11 @@ class PipelineState:
     text_metadata: List[Dict[str, Any]] = field(default_factory=list)
     embedding_index: Any = None  # FAISS index
 
+    # === PREMISE STATE ===
+    # Video premises: brief topic/theme summaries for theme-based matching
+    # Format: {video_id: "Documentary about restaurant closures"}
+    video_premises: Dict[str, str] = field(default_factory=dict)
+
     # === SCENE DETECTION STATE ===
     scene_data: Dict[str, Any] = field(default_factory=dict)  # video_name -> VideoSceneData
 
@@ -311,6 +332,9 @@ class PipelineState:
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     stage_timings: Dict[str, float] = field(default_factory=dict)
+
+    # === ITERATIVE MATCHING STATE ===
+    iterative_match_state: IterativeMatchState = None
 
     # === METADATA ===
     # General purpose metadata storage for stages
@@ -404,13 +428,16 @@ class PipelineState:
         state.embedding_index = getattr(pipeline, 'embedding_index', None)
 
         # Copy matches (convert dicts to Match)
+        # Handle multiple checkpoint formats:
+        # - Old: video_file, video_start, video_end
+        # - New: source_file, start_time (from scene detection)
         for m in getattr(pipeline, 'matches', []):
             if isinstance(m, dict):
                 state.matches.append(Match(
                     segment_index=m.get('segment_index', m.get('vo_index', 0)),
-                    video_file=m.get('video_file', m.get('file', '')),
-                    video_start=m.get('video_start', m.get('start', 0.0)),
-                    video_end=m.get('video_end', m.get('end', 0.0)),
+                    video_file=m.get('video_file', m.get('source_file', m.get('file', ''))),
+                    video_start=m.get('video_start', m.get('start_time', m.get('start', 0.0))),
+                    video_end=m.get('video_end', m.get('end_time', m.get('end', 0.0))),
                     confidence=m.get('confidence', 0.0),
                     strategy=m.get('strategy', ''),
                     reason=m.get('reason', ''),

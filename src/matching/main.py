@@ -41,7 +41,10 @@ def match_all_segments(
     location_chapters: Optional[List['LocationChapter']] = None,
     video_locations: Optional[Dict[str, 'GeoLocation']] = None,
     known_entities: Optional[List[str]] = None,
-    listicle_chapters: Optional[List['DetectedChapter']] = None
+    listicle_chapters: Optional[List['DetectedChapter']] = None,
+    video_premises: Optional[Dict[str, str]] = None,
+    pre_used_video_ids: Optional[set] = None,
+    segment_indices_to_match: Optional[set] = None,
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -80,14 +83,17 @@ def match_all_segments(
         video_topics: Dict of video_path -> VideoTopics for chapter-based matching
         location_chapters: List of LocationChapter for location-aware matching
         video_locations: Dict of video_path -> GeoLocation for location matching
+        video_premises: Dict of video_id -> premise string for theme-based matching
+        pre_used_video_ids: Set of video IDs to mark as already used (for iteration)
+        segment_indices_to_match: If provided, only match these segment indices (for selective re-matching)
 
     Returns:
-        List of MatchResult objects, one per voiceover segment
+        List of MatchResult objects, one per voiceover segment (None for skipped segments)
     """
     # Import TieredMatcher here to avoid circular import
     from .tiered_matcher import TieredMatcher
 
-    matcher = TieredMatcher(config, cache, video_topics=video_topics)
+    matcher = TieredMatcher(config, cache, video_topics=video_topics, video_premises=video_premises)
 
     # Set up location-aware matching if provided
     if location_chapters:
@@ -109,7 +115,11 @@ def match_all_segments(
     oc = config.output
     vc = oc.variety
 
-    logger.info(f"Matching {len(voiceover_segments)} voiceover segments...")
+    # Log selective matching mode
+    if segment_indices_to_match is not None:
+        logger.info(f"Selective matching: {len(segment_indices_to_match)}/{len(voiceover_segments)} segments")
+    else:
+        logger.info(f"Matching {len(voiceover_segments)} voiceover segments...")
     logger.info(f"  Two-stage matching: embedding_candidates={mc.embedding_candidates}, llm_rerank={mc.llm_rerank_candidates}")
     logger.info(f"  Reuse prevention: max_reuse={mc.max_clip_reuse}, penalty={mc.reuse_penalty}")
     if mc.max_clip_reuse == 1:
@@ -151,6 +161,11 @@ def match_all_segments(
         else:
             logger.info(f"  Global clip deduplication: ENABLED (max {mc.max_clip_reuse} uses per video)")
 
+        # Pre-populate with already-used video IDs (for iterative matching)
+        if pre_used_video_ids:
+            global_clip_tracker.pre_populate(pre_used_video_ids)
+            logger.info(f"  Pre-populated {len(pre_used_video_ids)} protected video IDs")
+
     # Track video IDs used by strategy tracks (V4-V9) for within-track deduplication
     # When max_clip_reuse == 1, we prevent any video from appearing twice on strategy tracks
     strategy_track_video_ids: set = set() if mc.max_clip_reuse == 1 else None
@@ -189,6 +204,11 @@ def match_all_segments(
     logger.info(f"Starting matching loop with {len(video_segments)} video candidates...")
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
+        # Skip segments not in the match list (for selective re-matching)
+        if segment_indices_to_match is not None and i not in segment_indices_to_match:
+            results.append(None)  # Placeholder for skipped segment
+            continue
+
         # Log first segment to confirm loop started
         if i == 0:
             logger.info(f"Processing first segment: \"{vo_seg.text[:50]}...\"")
@@ -240,6 +260,21 @@ def match_all_segments(
         if i == 0 and stock_filtered > 0:
             logger.info(f"First segment: filtered {stock_filtered} stock footage segments (V10 only)")
 
+        # CRITICAL: Filter out segments with empty source_file
+        # These are invalid candidates that would produce matches without video source
+        pre_filter_empty_count = len(all_candidates)
+        all_candidates = [
+            (seg, dist) for seg, dist in all_candidates
+            if getattr(seg, 'source_file', '')  # Must have non-empty source_file
+        ]
+        empty_filtered = pre_filter_empty_count - len(all_candidates)
+        if empty_filtered > 0:
+            if i == 0:
+                logger.warning(f"First segment: filtered {empty_filtered} segments with EMPTY source_file (BUG: these shouldn't exist)")
+            # Log warning for every 100th segment with empty candidates
+            if i % 100 == 0 and i > 0:
+                logger.warning(f"Segment {i}: filtered {empty_filtered} empty source_file candidates")
+
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
             pre_filter_count = len(all_candidates)
@@ -280,7 +315,10 @@ def match_all_segments(
             segment_idx=i  # Pass segment index for location chapter lookup
         )
         if i == 0:
-            logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
+            if result.primary_match:
+                logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
+            else:
+                logger.info(f"First segment: LLM match complete, no primary match")
 
         # Record V1 usage for timeline variety and global clip tracker
         if result.primary_match:
@@ -390,7 +428,8 @@ def match_all_segments(
 
         # Progress with strategy count
         strat_count = len(result.strategy_matches) if result.strategy_matches else 0
-        progress.update(1, f"conf: {result.primary_match.confidence:.2f}, strat: {strat_count}")
+        conf = result.primary_match.confidence if result.primary_match else 0.0
+        progress.update(1, f"conf: {conf:.2f}, strat: {strat_count}")
 
     progress.close()
 
@@ -403,7 +442,10 @@ def match_all_segments(
     if gaps:
         logger.warning(f"Found {len(gaps)} footage gaps (low confidence matches)")
         for gap in gaps[:5]:  # Show first 5
-            logger.warning(f"  - \"{gap.primary_match.voiceover_segment.text[:50]}...\" ({gap.gap_reason})")
+            if gap.primary_match and gap.primary_match.voiceover_segment:
+                logger.warning(f"  - \"{gap.primary_match.voiceover_segment.text[:50]}...\" ({gap.gap_reason})")
+            else:
+                logger.warning(f"  - [no match] ({gap.gap_reason})")
 
     # Report strategy match stats
     if oc.include_strategy_tracks:

@@ -239,6 +239,32 @@ class PremiseStage(Stage):
                     'source': 'broll'
                 })
 
+        # Stock videos from stock/ folder
+        stock_dir = Path(state.project_dir) / "stock"
+        if stock_dir.exists():
+            for video_file in stock_dir.glob("*.mp4"):
+                video_id = self._extract_video_id(str(video_file))
+                # Try to load metadata from .meta.json
+                meta_file = video_file.with_suffix('.meta.json')
+                title = ''
+                description = ''
+                if meta_file.exists():
+                    try:
+                        with open(meta_file, 'r', encoding='utf-8') as f:
+                            meta = json.load(f)
+                        title = meta.get('title', meta.get('description', ''))
+                        description = meta.get('description', '')
+                    except Exception:
+                        pass
+                videos.append({
+                    'video_id': video_id,
+                    'path': str(video_file),
+                    'title': title,
+                    'description': description,
+                    'source': 'stock'
+                })
+            logger.info(f"Collected {sum(1 for v in videos if v['source'] == 'stock')} stock videos for premise extraction")
+
         # Deduplicate by video_id
         seen = set()
         unique_videos = []

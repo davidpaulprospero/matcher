@@ -61,6 +61,7 @@ from .sections import (
     PipelineConfig,
     APIKeysConfig,
     HealingConfig,
+    ProxyConfig,
     # Core
     ProjectConfig,
     PauseSplitConfig,
@@ -191,6 +192,7 @@ class Config:
     healing: HealingConfig = field(default_factory=HealingConfig)
     keyword_mode: KeywordModeConfig = field(default_factory=KeywordModeConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
+    proxy: 'ProxyConfig' = field(default_factory=lambda: ProxyConfig())
 
     # Content filter presets (raw, documentary, stock_footage)
     # Loaded from config.yaml content_filter_presets section
@@ -231,7 +233,7 @@ class Config:
         fields that need conversion (e.g., after merge_config updates).
         """
         # Import here to avoid circular imports
-        from .sections.infrastructure import HealingConfig
+        from .sections.infrastructure import HealingConfig, ProxyConfig
         from .sections.feedback import FeedbackConfig
 
         if isinstance(self.healing, dict):
@@ -245,6 +247,11 @@ class Config:
             self.feedback = FeedbackConfig(**self.feedback)
         elif hasattr(self.feedback, '__post_init__'):
             self.feedback.__post_init__()
+
+        if isinstance(self.proxy, dict):
+            self.proxy = ProxyConfig(**self.proxy)
+        elif hasattr(self.proxy, '__post_init__'):
+            self.proxy.__post_init__()
 
     def _populate_api_keys(self):
         """Populate top-level API key aliases from api_keys config"""

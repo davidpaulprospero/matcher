@@ -221,7 +221,8 @@ class TranscodingManager:
         filters = [
             f"duration>{min_dur}",
             f"duration<{max_dur}",
-            "!is_live"  # Skip live streams (they never end)
+            "!is_live",   # Skip current live streams
+            "!was_live"   # Skip completed livestreams (often hours long, poor quality)
         ]
 
         if self.download_config.min_views > 0:

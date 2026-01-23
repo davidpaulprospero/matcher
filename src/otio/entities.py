@@ -373,8 +373,10 @@ def add_entity_media_to_track(
                     segment_id = f"[S{seg_idx:03d}]"
                     media_unique_name = f"{segment_id} {media_folder}_{media_filename}"
 
-                    # Convert to Windows path format with backslashes for Resolve
+                    # Convert to Windows path format with file:/// prefix for Resolve
                     media_path_resolved = _to_windows_path(media_path)
+                    if media_path_resolved and len(media_path_resolved) > 1 and media_path_resolved[1] == ':':
+                        media_path_resolved = f'file:///{media_path_resolved}'
 
                     # Create external reference (polymorphic: images vs videos)
                     if is_image:

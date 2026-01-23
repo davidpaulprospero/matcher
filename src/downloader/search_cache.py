@@ -73,6 +73,7 @@ class YouTubeSearchCache:
         cache_path = self._get_cache_path(keyword, tier)
 
         if not cache_path.exists():
+            logger.debug(f"[search_cache] GET MISS: {keyword}:{tier} (no cache file)")
             return None
 
         try:
@@ -89,11 +90,12 @@ class YouTubeSearchCache:
                 cached_at = datetime.fromisoformat(data.get('cached_at', ''))
                 age_days = (datetime.now() - cached_at).days
                 if age_days > max_age_days:
-                    logger.debug(f"Cache expired for {keyword}:{tier} ({age_days} days old)")
+                    logger.info(f"[search_cache] GET EXPIRED: {keyword}:{tier} ({age_days} days > {max_age_days} max)")
                     return None
 
             video_ids = data['video_ids']
-            logger.info(f"Cache HIT for {keyword}:{tier} ({len(video_ids)} videos)")
+            cached_at = data.get('cached_at', 'unknown')
+            logger.info(f"[search_cache] GET HIT: {keyword}:{tier} → {len(video_ids)} videos (cached: {cached_at})")
             return video_ids
 
         except Exception as e:
@@ -130,7 +132,7 @@ class YouTubeSearchCache:
             with open(cache_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
 
-            logger.info(f"Cached {len(video_ids)} videos for {keyword}:{tier}")
+            logger.info(f"[search_cache] SET: {keyword}:{tier} → {len(video_ids)} videos (pool={search_pool})")
 
         except Exception as e:
             logger.warning(f"Failed to write cache for {keyword}:{tier}: {e}")
@@ -174,7 +176,7 @@ class YouTubeSearchCache:
                 with open(cache_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
 
-                logger.info(f"Removed {removed_count} dead video IDs from {keyword}:{tier} cache")
+                logger.info(f"[search_cache] PRUNE: {keyword}:{tier} → removed {removed_count} dead IDs, {len(new_ids)} remaining")
 
             return removed_count
 

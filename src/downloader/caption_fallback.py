@@ -345,6 +345,7 @@ class InnertubeDirectFetcher:
         self.timeout = timeout
         self.handler = rate_limit_handler
         self._client: httpx.Client | None = None
+        self._proxy_url: str | None = None  # Track current proxy for refresh
         self.log = get_tier_logger("INNERTUBE")
 
     @property
@@ -358,16 +359,37 @@ class InnertubeDirectFetcher:
             )
         return self._client
 
-    def _refresh_client(self) -> None:
+    def _refresh_client(self, proxy: str | None = None) -> None:
         """Refresh client after proxy rotation."""
         if self._client is not None:
             self._client.close()
             self._client = None
 
-    def fetch(self, video_id: str) -> CaptionResult:
-        """Extract captions directly from YouTube page."""
+        # If explicit proxy provided, create client with it
+        if proxy:
+            self._client = create_httpx_client(proxy=proxy, timeout=30.0)
+
+    def fetch(
+        self,
+        video_id: str,
+        proxy: str | None = None,
+        worker_id: int | None = None
+    ) -> CaptionResult:
+        """Extract captions directly from YouTube page.
+
+        Args:
+            video_id: YouTube video ID
+            proxy: Optional proxy URL to use (overrides rate_limit_handler proxy)
+            worker_id: Optional worker ID for logging
+        """
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
         self.log.start_operation("fetch", video_id)
-        self.log.info("Attempting TIER_3_INNERTUBE_DIRECT fetch...")
+        self.log.info(f"{log_prefix} Attempting TIER_3_INNERTUBE_DIRECT fetch (proxy: {proxy or 'default'})...")
+
+        # Use explicit proxy if provided, otherwise use default client
+        if proxy and (self._client is None or self._proxy_url != proxy):
+            self._refresh_client(proxy)
+            self._proxy_url = proxy
 
         try:
             # Fetch video page
@@ -637,14 +659,32 @@ class InvidiousCaptionFetcher:
         self.handler = rate_limit_handler
         self._proxy = get_proxy_for_httpx(rate_limit_handler)
 
-    def _refresh_proxy(self) -> None:
+    def _refresh_proxy(self, proxy: str | None = None) -> None:
         """Refresh proxy after rotation."""
-        self._proxy = get_proxy_for_httpx(self.handler)
+        if proxy:
+            self._proxy = proxy
+        else:
+            self._proxy = get_proxy_for_httpx(self.handler)
 
-    def fetch(self, video_id: str) -> CaptionResult:
-        """Fetch captions via Invidious API with instance rotation."""
+    def fetch(
+        self,
+        video_id: str,
+        proxy: str | None = None,
+        worker_id: int | None = None
+    ) -> CaptionResult:
+        """Fetch captions via Invidious API with instance rotation.
+
+        Args:
+            video_id: YouTube video ID
+            proxy: Optional proxy URL to use (overrides default)
+            worker_id: Optional worker ID for logging
+        """
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
         self.log.start_operation("fetch", video_id)
-        self.log.info("Attempting TIER_4_INVIDIOUS fetch...")
+        self.log.info(f"{log_prefix} Attempting TIER_4_INVIDIOUS fetch (proxy: {proxy or self._proxy or 'direct'})...")
+
+        # Use explicit proxy if provided
+        effective_proxy = proxy if proxy else self._proxy
 
         instances_tried = 0
         instances_skipped = 0
@@ -663,7 +703,7 @@ class InvidiousCaptionFetcher:
             try:
                 url = f"{instance}/api/v1/videos/{video_id}"
                 self.log.request("GET", url)
-                response = httpx.get(url, timeout=self.timeout, proxy=self._proxy)
+                response = httpx.get(url, timeout=self.timeout, proxy=effective_proxy)
                 self.log.response(response.status_code, len(response.text))
 
                 if response.status_code == 429:
@@ -671,9 +711,10 @@ class InvidiousCaptionFetcher:
                     self.log.rate_limited(instance)
                     self.log.instance_status(instance, "rate_limited -> cooldown")
                     last_error = f"Rate limited by {instance}"
-                    if self.handler:
+                    if self.handler and not proxy:  # Don't refresh if using explicit proxy
                         self.handler.on_rate_limit(f"invidious_{instance}")
                         self._refresh_proxy()
+                        effective_proxy = self._proxy
                     continue
 
                 if response.status_code != 200:
@@ -842,14 +883,32 @@ class PipedCaptionFetcher:
         self.handler = rate_limit_handler
         self._proxy = get_proxy_for_httpx(rate_limit_handler)
 
-    def _refresh_proxy(self) -> None:
+    def _refresh_proxy(self, proxy: str | None = None) -> None:
         """Refresh proxy after rotation."""
-        self._proxy = get_proxy_for_httpx(self.handler)
+        if proxy:
+            self._proxy = proxy
+        else:
+            self._proxy = get_proxy_for_httpx(self.handler)
 
-    def fetch(self, video_id: str) -> CaptionResult:
-        """Fetch captions via Piped API."""
+    def fetch(
+        self,
+        video_id: str,
+        proxy: str | None = None,
+        worker_id: int | None = None
+    ) -> CaptionResult:
+        """Fetch captions via Piped API.
+
+        Args:
+            video_id: YouTube video ID
+            proxy: Optional proxy URL to use (overrides default)
+            worker_id: Optional worker ID for logging
+        """
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
         self.log.start_operation("fetch", video_id)
-        self.log.info("Attempting TIER_5_PIPED fetch...")
+        self.log.info(f"{log_prefix} Attempting TIER_5_PIPED fetch (proxy: {proxy or self._proxy or 'direct'})...")
+
+        # Use explicit proxy if provided
+        effective_proxy = proxy if proxy else self._proxy
 
         instances_tried = 0
         last_error = "No instances available"
@@ -862,15 +921,16 @@ class PipedCaptionFetcher:
             try:
                 url = f"{instance}/streams/{video_id}"
                 self.log.request("GET", url)
-                response = httpx.get(url, timeout=self.timeout, proxy=self._proxy)
+                response = httpx.get(url, timeout=self.timeout, proxy=effective_proxy)
                 self.log.response(response.status_code, len(response.text))
 
                 if response.status_code == 429:
                     self.log.rate_limited(instance)
                     last_error = f"Rate limited by {instance}"
-                    if self.handler:
+                    if self.handler and not proxy:  # Don't refresh if using explicit proxy
                         self.handler.on_rate_limit(f"piped_{instance}")
                         self._refresh_proxy()
+                        effective_proxy = self._proxy
                     continue
 
                 if response.status_code != 200:
@@ -1031,30 +1091,63 @@ class CaptionFallbackChain:
             tier: {"success": 0, "failure": 0} for tier in CaptionTier
         }
 
-    def fetch(self, video_id: str, skip_tiers: list[CaptionTier] | None = None) -> CaptionResult:
+    def fetch(
+        self,
+        video_id: str,
+        skip_tiers: list[CaptionTier] | None = None,
+        proxy: str | None = None,
+        worker_id: int | None = None
+    ) -> CaptionResult:
         """
         Fetch captions with automatic fallback through all tiers.
 
         Args:
             video_id: YouTube video ID (11 characters)
             skip_tiers: List of tiers to skip (e.g., [CaptionTier.YTDLP] when rate-limited)
+            proxy: Optional proxy URL to use for HTTP requests (for parallel workers)
+            worker_id: Optional worker ID for logging (for parallel workers)
 
         Returns:
             CaptionResult with segments if successful
         """
         skip_tiers = skip_tiers or []
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
 
         # Log chain start
         log_chain_start(video_id, [t.name for t in skip_tiers] if skip_tiers else None)
         self.log.start_operation("fallback_chain", video_id)
 
         # Define fetcher chain (Tier 1 yt-dlp is handled externally)
+        # Check config for enabled tiers
+        invidious_enabled = True
+        piped_enabled = True
+        if self.config and hasattr(self.config, "download"):
+            fallback_cfg = getattr(self.config.download, "fallback", None)
+            self.log.debug(f"{log_prefix} fallback_cfg type: {type(fallback_cfg)}, has caption: {hasattr(fallback_cfg, 'caption') if fallback_cfg else 'N/A'}")
+            if fallback_cfg and hasattr(fallback_cfg, "caption"):
+                cap_cfg = fallback_cfg.caption
+                self.log.debug(f"{log_prefix} cap_cfg type: {type(cap_cfg)}, has invidious_enabled: {hasattr(cap_cfg, 'invidious_enabled')}")
+                if hasattr(cap_cfg, "invidious_enabled"):
+                    invidious_enabled = cap_cfg.invidious_enabled
+                    self.log.debug(f"{log_prefix} invidious_enabled from config: {invidious_enabled}")
+                if hasattr(cap_cfg, "piped_enabled"):
+                    piped_enabled = cap_cfg.piped_enabled
+                    self.log.debug(f"{log_prefix} piped_enabled from config: {piped_enabled}")
+        else:
+            self.log.debug(f"{log_prefix} No config or download attr - config type: {type(self.config)}")
+
         fetchers: list[tuple[CaptionTier, object]] = [
             (CaptionTier.TRANSCRIPT_API, self.transcript_api),
             (CaptionTier.INNERTUBE_DIRECT, self.innertube_direct),
-            (CaptionTier.INVIDIOUS, self.invidious),
-            (CaptionTier.PIPED, self.piped),
         ]
+        if invidious_enabled:
+            fetchers.append((CaptionTier.INVIDIOUS, self.invidious))
+        else:
+            self.log.debug(f"{log_prefix} INVIDIOUS disabled in config")
+        if piped_enabled:
+            fetchers.append((CaptionTier.PIPED, self.piped))
+        else:
+            self.log.debug(f"{log_prefix} PIPED disabled in config")
 
         last_error = None
         tiers_tried = 0
@@ -1062,14 +1155,19 @@ class CaptionFallbackChain:
 
         for tier, fetcher in fetchers:
             if tier in skip_tiers:
-                self.log.debug(f"Skipping {tier.name} (in skip_tiers)")
+                self.log.debug(f"{log_prefix} Skipping {tier.name} (in skip_tiers)")
                 tiers_skipped += 1
                 continue
 
             tiers_tried += 1
-            self.log.info(f"=== Trying {tier.name} (tier {tiers_tried}) ===")
+            self.log.info(f"{log_prefix} === Trying {tier.name} (tier {tiers_tried}) ===")
 
-            result = fetcher.fetch(video_id)
+            # Pass proxy to HTTP-based fetchers (TranscriptAPI uses internal library)
+            if tier == CaptionTier.TRANSCRIPT_API:
+                result = fetcher.fetch(video_id)
+            else:
+                # HTTP-based fetchers accept proxy parameter
+                result = fetcher.fetch(video_id, proxy=proxy, worker_id=worker_id)
 
             if result.success:
                 self.tier_stats[tier]["success"] += 1

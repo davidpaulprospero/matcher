@@ -48,6 +48,7 @@ from .sections import (
     # Matching
     LocationMatchingConfig,
     NegativeMatchingConfig,
+    HighMatchesModeConfig,
     MatchingConfig,
     # LLM
     LLMRetryConfig,
@@ -113,6 +114,7 @@ __all__ = [
     # Matching
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
+    'HighMatchesModeConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',

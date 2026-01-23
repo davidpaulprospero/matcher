@@ -211,7 +211,7 @@ class SceneDetectionStage(Stage):
     # === Helper Methods ===
 
     def _get_video_files(self, state: 'PipelineState', config: 'Config') -> List[Path]:
-        """Get list of video files to analyze"""
+        """Get list of video files to analyze (excludes stock footage)"""
         video_files = []
 
         # Get base video directory for resolving relative paths
@@ -236,7 +236,25 @@ class SceneDetectionStage(Stage):
                 if video_path and Path(video_path).exists():
                     video_files.append(Path(video_path))
 
-        return video_files
+        # Filter out stock footage - already curated clips, no scene detection needed
+        filtered_files = []
+        skipped_count = 0
+        for p in video_files:
+            # Skip files in stock/ folder or with pexels_/pixabay_ prefix
+            is_stock = (
+                'stock' in p.parts or
+                p.stem.startswith('pexels_') or
+                p.stem.startswith('pixabay_')
+            )
+            if is_stock:
+                skipped_count += 1
+            else:
+                filtered_files.append(p)
+
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} stock footage files (already curated clips)")
+
+        return filtered_files
 
     def _merge_scene_data_to_transcripts(
         self,

@@ -97,6 +97,7 @@ src/CHANGELOG_v2.4_performance.md
 nul
 .global_cache/
 cookies.txt
+cookies/
 .cache/
 downloaded_images/
 downloaded_videos/
@@ -125,3 +126,7 @@ FE[0-9]*_*/
 employer_instructions.txt
 client_notes.txt
 project_brief.txt
+
+# --- Local Config/Cache ---
+.mcp.json
+gemini/

@@ -262,6 +262,46 @@ class CaptionCache(BaseCache[CaptionCacheEntry]):
 
         return None
 
+    def set_no_captions(self, video_id: str, reason: str = "no_captions") -> None:
+        """
+        Mark a video as having no captions available (negative caching).
+
+        Args:
+            video_id: YouTube video ID
+            reason: Reason for no captions (e.g., "no_captions", "disabled", "private")
+        """
+        entry = CaptionCacheEntry(
+            video_id=video_id,
+            file="",  # Empty file = no captions
+            language="none",
+            is_auto_generated=False,
+            format="none",
+            segment_count=0,
+            duration_covered=0.0,
+        )
+        self.set(video_id, entry, metadata={"no_captions": True, "reason": reason})
+        logger.debug(f"Cached no-captions for {video_id}: {reason}")
+
+    def has_no_captions(self, video_id: str) -> bool:
+        """
+        Check if a video is known to have no captions.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            True if video is cached as having no captions
+        """
+        entry = self.get(video_id)
+        if not entry:
+            return False
+        # Check metadata flag or empty file indicator
+        if entry.metadata and entry.metadata.get("no_captions"):
+            return True
+        if entry.data and entry.data.language == "none" and not entry.data.file:
+            return True
+        return False
+
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get cache statistics.

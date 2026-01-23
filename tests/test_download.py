@@ -803,6 +803,8 @@ def test_filter_string_building():
         assert False, "Missing duration max filter"
     if '!is_live' not in filter_str:
         assert False, "Missing live stream filter"
+    if '!was_live' not in filter_str:
+        assert False, "Missing completed livestream filter"
 
 
 def test_format_string_building():

@@ -1,10 +1,17 @@
 """
-Caption fetcher for YouTube videos using yt-dlp.
+Caption fetcher for YouTube videos using yt-dlp with fallback support.
 
 Fetches subtitles/captions without downloading video or audio,
 enabling transcript-first matching pipeline.
 
 Uses CaptionCache for unified caching behavior with index-based tracking.
+
+Fallback chain (when yt-dlp is rate-limited):
+1. yt-dlp (primary)
+2. youtube-transcript-api (different endpoint)
+3. Direct Innertube/timedtext fetch
+4. Invidious API
+5. Piped API
 """
 
 from __future__ import annotations
@@ -18,12 +25,44 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 from . import utils
+from .fallback_logging import FallbackLogger, get_tier_logger
 
 if TYPE_CHECKING:
     from ..config import Config
     from ..cache import CaptionCache
 
 logger = logging.getLogger(__name__)
+
+# Structured logging for yt-dlp operations
+_ytdlp_log = get_tier_logger("YTDLP")
+
+# Track consecutive yt-dlp failures for adaptive fallback
+_ytdlp_consecutive_failures = 0
+_ytdlp_skip_threshold = 3  # Skip yt-dlp after this many consecutive failures
+
+# Tier configuration for yt-dlp caption fetching
+# Each tier is tried in order until one succeeds
+# Order optimized based on PO Token requirements:
+# - tv_embedded: No PO Token needed (best for subtitles)
+# - Browser cookies: JS runtime (node) solves challenges
+# - Impersonation: JS runtime helps with TLS fingerprint
+# - ios_creator/android_vr: May require PO Token (iOSGuard) - try last
+YTDLP_CAPTION_TIERS = [
+    # Tier 1: tv_embedded (NO PO Token needed - best for subtitles!)
+    {"name": "tv_embedded", "player": "tv_embedded"},
+    # Tier 2: Browser cookies + web player (JS runtime solves challenges)
+    {"name": "cookies", "browser": "firefox", "player": "web"},
+    # Tier 3: Chrome impersonation (JS runtime helps)
+    {"name": "chrome", "impersonate": "Chrome-131:Android-14"},
+    # Tier 4: Safari impersonation
+    {"name": "safari", "impersonate": "Safari-18.2:macOS-15"},
+    # Tier 5: Standard yt-dlp (fallback)
+    {"name": "standard"},
+    # Tier 6: ios_creator (MAY NEED PO Token - try late)
+    {"name": "ios_creator", "player": "ios_creator"},
+    # Tier 7: android_vr (MAY NEED PO Token - try last)
+    {"name": "android_vr", "player": "android_vr"},
+]
 
 
 @dataclass
@@ -72,6 +111,7 @@ class CaptionResult:
     language: str
     is_auto_generated: bool
     format: str = "srt"  # srt, vtt, etc.
+    from_cache: bool = False  # True if served from cache (no network request)
 
 
 class CaptionFetcher:
@@ -106,6 +146,173 @@ class CaptionFetcher:
 
         # Migrate any existing caption files to the indexed cache
         self._cache.migrate_from_files()
+
+    def _get_tier_args(self, tier: dict) -> List[str]:
+        """
+        Get yt-dlp arguments for a specific bypass tier.
+
+        Args:
+            tier: Tier configuration dict with keys like 'impersonate', 'player', 'browser'
+
+        Returns:
+            List of yt-dlp arguments for this tier
+        """
+        args = []
+
+        # Browser cookies + player
+        if 'browser' in tier:
+            args.extend(['--cookies-from-browser', tier['browser']])
+            if 'player' in tier:
+                args.extend(['--extractor-args', f"youtube:player_client={tier['player']}"])
+
+        # Impersonation (Chrome/Safari TLS fingerprint)
+        elif 'impersonate' in tier:
+            args.extend(['--impersonate', tier['impersonate']])
+            args.append('--no-cookies')  # Impersonation doesn't use cookies
+
+        # Player client only
+        elif 'player' in tier:
+            args.extend(['--extractor-args', f"youtube:player_client={tier['player']}"])
+
+        # Standard yt-dlp (no special args)
+        # else: args remains empty
+
+        return args
+
+    def _try_ytdlp_with_tiers(
+        self,
+        video_id: str,
+        languages: List[str],
+        prefer_manual: bool,
+        timeout: int,
+        proxy: Optional[str],
+        log_prefix: str
+    ) -> Optional[Tuple[subprocess.CompletedProcess, str]]:
+        """
+        Try fetching captions with yt-dlp, escalating through tiers on failure.
+
+        Args:
+            video_id: YouTube video ID
+            languages: List of preferred languages
+            prefer_manual: Prefer manual captions over auto-generated
+            timeout: Timeout per attempt in seconds
+            proxy: Optional proxy URL
+            log_prefix: Logging prefix for this operation
+
+        Returns:
+            Tuple of (subprocess result, tier name) if any tier succeeds, None if all fail
+        """
+        global _ytdlp_consecutive_failures
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        lang_str = ",".join(languages)
+
+        # Get tiers from config or use defaults
+        # Always start at tier 0 (tv_embedded) for captions - it's the most reliable
+        # The config start_tier is for video downloads, not captions
+        start_tier = 0
+
+        for tier_idx, tier in enumerate(YTDLP_CAPTION_TIERS[start_tier:], start=start_tier):
+            tier_name = tier.get('name', f'tier_{tier_idx}')
+
+            # Build base command
+            cmd = [
+                'yt-dlp',
+                url,
+                '--sleep-interval', '5',
+                '--skip-download',
+                '--no-playlist',
+                '--no-warnings',
+            ]
+
+            # Add tier-specific args
+            tier_args = self._get_tier_args(tier)
+            cmd.extend(tier_args)
+
+            # Add subtitle options
+            if prefer_manual:
+                cmd.extend(['--write-sub', '--write-auto-sub'])
+            else:
+                cmd.extend(['--write-auto-sub', '--write-sub'])
+
+            cmd.extend([
+                '--sub-lang', lang_str,
+                '--sub-format', 'srt/vtt/best',
+                '--convert-subs', 'srt',
+                '-o', str(self.cache_dir / f'{video_id}.%(ext)s'),
+            ])
+
+            # Add base args and cookies (unless tier already handles cookies)
+            cmd.extend(utils.get_ytdlp_base_args())
+            if 'browser' not in tier:  # Don't double-add cookies
+                cmd.extend(utils.get_cookies_args(self.config))
+
+            # Add proxy
+            if proxy:
+                cmd.extend(['--proxy', proxy])
+            else:
+                proxy_args = utils.get_proxy_args(self.config)
+                if proxy_args:
+                    cmd.extend(proxy_args)
+
+            _ytdlp_log.info(f"{log_prefix} Trying tier '{tier_name}' ({tier_idx + 1}/{len(YTDLP_CAPTION_TIERS)})")
+            _ytdlp_log.debug(f"{log_prefix} Tier args: {tier_args}")
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
+
+                if result.returncode == 0:
+                    _ytdlp_log.success(f"Tier '{tier_name}' succeeded")
+                    _ytdlp_consecutive_failures = 0  # Reset on success
+                    # Report success to cookie rotation
+                    try:
+                        from .cookie_manager import CookieManager
+                        cm = CookieManager.get_instance()
+                        if cm and cm.enabled:
+                            cm.report_success()
+                    except Exception:
+                        pass
+                    return (result, tier_name)
+
+                # Check error type
+                stderr_text = result.stderr or ''
+                is_rate_limited = 'rate-limited' in stderr_text.lower() or '429' in stderr_text
+                is_bot_check = 'confirm you' in stderr_text.lower() or 'bot' in stderr_text.lower()
+                is_playback_disabled = 'playback on other websites' in stderr_text.lower()
+
+                if is_rate_limited:
+                    _ytdlp_log.warning(f"Tier '{tier_name}' rate limited, trying next tier...")
+                    # Report rate limit to cookie rotation
+                    try:
+                        from .cookie_manager import CookieManager
+                        cm = CookieManager.get_instance()
+                        if cm and cm.enabled:
+                            cm.report_rate_limit()
+                    except Exception:
+                        pass
+                elif is_bot_check:
+                    _ytdlp_log.warning(f"Tier '{tier_name}' bot check, trying next tier...")
+                elif is_playback_disabled:
+                    _ytdlp_log.warning(f"Tier '{tier_name}' playback disabled (embedded only video)")
+                    # This won't be fixed by changing tiers - video is restricted
+                    break
+                else:
+                    _ytdlp_log.debug(f"Tier '{tier_name}' failed: {stderr_text[:100]}")
+
+            except subprocess.TimeoutExpired:
+                _ytdlp_log.warning(f"Tier '{tier_name}' timed out ({timeout}s)")
+            except Exception as e:
+                _ytdlp_log.warning(f"Tier '{tier_name}' error: {e}")
+
+        # All tiers failed
+        _ytdlp_consecutive_failures += 1
+        _ytdlp_log.failure(f"All {len(YTDLP_CAPTION_TIERS)} yt-dlp tiers failed")
+        return None
 
     def check_caption_availability(
         self,
@@ -195,7 +402,9 @@ class CaptionFetcher:
         video_id: str,
         languages: List[str] = None,
         prefer_manual: bool = True,
-        timeout: int = 60
+        timeout: int = 60,
+        proxy: Optional[str] = None,
+        worker_id: Optional[int] = None
     ) -> Optional[CaptionResult]:
         """
         Fetch captions for a single video.
@@ -205,105 +414,217 @@ class CaptionFetcher:
             languages: Preferred languages (default: ["en", "en-US"])
             prefer_manual: Prefer manual captions over auto-generated
             timeout: Download timeout in seconds
+            proxy: Optional proxy URL to use for this request
+            worker_id: Optional worker ID for logging (parallel mode)
 
         Returns:
             CaptionResult if successful, None otherwise
         """
+        import time as time_module
+        global _ytdlp_consecutive_failures
+
+        start_time = time_module.time()
         languages = languages or ["en", "en-US", "en-GB"]
         url = f"https://www.youtube.com/watch?v={video_id}"
+
+        # Build log prefix for parallel mode
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
+
+        _ytdlp_log.start_operation("fetch_captions", video_id)
+        _ytdlp_log.info(f"{log_prefix} Fetching captions (languages: {','.join(languages[:3])}, prefer_manual: {prefer_manual}, proxy: {proxy or 'direct'})")
 
         # Check for cached caption
         cached = self._check_cache(video_id, languages)
         if cached:
-            logger.debug(f"Using cached caption for {video_id}")
+            _ytdlp_log.success(f"Cache hit - using cached caption ({cached.language})")
             return cached
 
-        # Build language string for yt-dlp
-        lang_str = ",".join(languages)
+        # Check negative cache (video known to have no captions)
+        if self._cache.has_no_captions(video_id):
+            _ytdlp_log.info(f"{log_prefix} NEGATIVE_CACHE_HIT: {video_id} - skipping (known no captions)")
+            _ytdlp_log.debug(f"{log_prefix} Saved ~15s by skipping tier escalation for {video_id}")
+            return None
 
-        # Build yt-dlp command
-        # Use tv_embedded client to bypass PO Token requirement for subtitles
-        # (YouTube requires PO Token for web/mweb clients as of late 2024)
-        cmd = [
-            'yt-dlp',
-            url,
-            '--sleep-interval', '5',
-            '--skip-download',
-            '--no-playlist',
-            '--no-warnings',
-            '--extractor-args', 'youtube:player_client=tv_embedded',
-        ]
+        # Adaptive skip: if yt-dlp has failed too many times, go directly to fallback
+        if _ytdlp_consecutive_failures >= _ytdlp_skip_threshold:
+            _ytdlp_log.warning(
+                f"Skipping yt-dlp (consecutive failures: {_ytdlp_consecutive_failures}) - "
+                f"going directly to fallback chain"
+            )
+            return self._try_fallback(video_id, languages)
 
-        # Add subtitle options based on preference
-        if prefer_manual:
-            # Try manual first, then auto
-            cmd.extend([
-                '--write-sub',
-                '--write-auto-sub',
-            ])
-        else:
-            # Try auto first (faster, usually available)
-            cmd.extend([
-                '--write-auto-sub',
-                '--write-sub',
-            ])
+        # Try yt-dlp with tier escalation (cookies → tv_embedded → impersonation → etc.)
+        tier_result = self._try_ytdlp_with_tiers(
+            video_id=video_id,
+            languages=languages,
+            prefer_manual=prefer_manual,
+            timeout=timeout,
+            proxy=proxy,
+            log_prefix=log_prefix
+        )
 
-        cmd.extend([
-            '--sub-lang', lang_str,
-            '--sub-format', 'srt/vtt/best',
-            '--convert-subs', 'srt',  # Convert to SRT format
-            '-o', str(self.cache_dir / f'{video_id}.%(ext)s'),
-        ])
+        if tier_result is None:
+            # All yt-dlp tiers failed, try fallback chain (transcript_api, innertube)
+            _ytdlp_log.info(f"{log_prefix} All yt-dlp tiers failed, trying fallback chain...")
+            fallback_result = self._try_fallback(video_id, languages, proxy=proxy, worker_id=worker_id)
+            if fallback_result:
+                elapsed = time_module.time() - start_time
+                _ytdlp_log.info(f"{log_prefix} ✓ Fallback succeeded ({elapsed:.2f}s)")
+                return fallback_result
 
-        # Add base args (JS runtime for challenge solving) and cookies
-        cmd.extend(utils.get_ytdlp_base_args())
-        cmd.extend(utils.get_cookies_args(self.config))
+            # Everything failed
+            _ytdlp_log.failure("All caption sources failed", reason="yt-dlp tiers and fallback chain both failed")
+            return None
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout
+        # yt-dlp succeeded - find the downloaded caption file
+        caption_file = self._find_caption_file(video_id, languages)
+        if caption_file:
+            is_auto = '.auto.' in caption_file.name or '-auto' in caption_file.name
+            lang = self._extract_language(caption_file.name, video_id)
+
+            _ytdlp_log.success(
+                f"Caption fetched: {caption_file.name} | "
+                f"{'auto-generated' if is_auto else 'manual'} | "
+                f"language: {lang}"
             )
 
-            if result.returncode != 0:
-                logger.debug(f"yt-dlp caption fetch failed for {video_id}: {result.stderr[:200] if result.stderr else 'unknown error'}")
-                return None
+            # Add to indexed cache
+            self._cache.set_caption(
+                video_id=video_id,
+                file=str(caption_file),
+                language=lang,
+                is_auto_generated=is_auto,
+                format="srt"
+            )
 
-            # Find the downloaded caption file
-            caption_file = self._find_caption_file(video_id, languages)
-            if caption_file:
-                is_auto = '.auto.' in caption_file.name or '-auto' in caption_file.name
-                lang = self._extract_language(caption_file.name, video_id)
+            return CaptionResult(
+                video_id=video_id,
+                file=str(caption_file),
+                language=lang,
+                is_auto_generated=is_auto,
+                format="srt"
+            )
+        else:
+            # yt-dlp reported success but no file found
+            # This means the video genuinely has no captions in requested languages
+            # Skip fallback chain - transcript_api/innertube will also fail
+            elapsed = time_module.time() - start_time
+            _ytdlp_log.warning(f"{log_prefix} EARLY_BAIL: {video_id} - yt-dlp OK but no caption file")
+            _ytdlp_log.info(f"{log_prefix} EARLY_BAIL: Skipping fallback chain (saved ~40s)")
+            _ytdlp_log.debug(f"{log_prefix} Confirmation: video has no captions in requested languages")
+            _ytdlp_log.debug(f"{log_prefix} Searched in: {self.cache_dir}")
+            # Cache this negative result to skip on future runs
+            self._cache.set_no_captions(video_id, reason="no_captions_in_requested_languages")
+            _ytdlp_log.info(f"{log_prefix} NEGATIVE_CACHE_STORE: {video_id} - cached for future skip ({elapsed:.1f}s total)")
+            return None
 
-                logger.debug(f"Fetched {'auto' if is_auto else 'manual'} caption for {video_id}: {caption_file.name}")
+    def _try_fallback(
+        self,
+        video_id: str,
+        languages: List[str],
+        proxy: Optional[str] = None,
+        worker_id: Optional[int] = None
+    ) -> Optional[CaptionResult]:
+        """
+        Try fallback caption extraction methods when yt-dlp fails.
+
+        Uses CaptionFallbackChain which tries:
+        - youtube-transcript-api (Tier 2)
+        - Direct Innertube/timedtext (Tier 3)
+        - Invidious API (Tier 4)
+        - Piped API (Tier 5)
+
+        Args:
+            video_id: YouTube video ID
+            languages: Preferred languages
+            proxy: Optional proxy URL for HTTP requests
+            worker_id: Optional worker ID for logging
+
+        Returns:
+            CaptionResult if fallback succeeds, None otherwise
+        """
+        log_prefix = f"[worker_{worker_id}]" if worker_id is not None else ""
+        _ytdlp_log.info(f"{log_prefix} === Starting fallback chain for {video_id} ===")
+
+        # Check if fallback is enabled in config
+        fallback_enabled = True
+        try:
+            fallback_cfg = getattr(self.config.download, 'fallback', None)
+            if fallback_cfg:
+                if isinstance(fallback_cfg, dict):
+                    fallback_enabled = fallback_cfg.get('enabled', True)
+                else:
+                    fallback_enabled = getattr(fallback_cfg, 'enabled', True)
+        except Exception:
+            pass  # Default to enabled
+
+        if not fallback_enabled:
+            _ytdlp_log.debug("Fallback disabled in config - returning None")
+            return None
+
+        try:
+            from .caption_fallback import CaptionFallbackChain, CaptionTier
+
+            _ytdlp_log.debug(f"{log_prefix} Creating CaptionFallbackChain (languages: {languages}, proxy: {proxy or 'default'})")
+
+            # Create fallback chain with config
+            chain = CaptionFallbackChain(
+                config=self.config,
+                preferred_languages=languages,
+                enable_whisper_fallback=False  # Don't use Whisper in fallback - that's handled elsewhere
+            )
+
+            # Fetch via fallback chain (with optional proxy override)
+            result = chain.fetch(video_id, proxy=proxy, worker_id=worker_id)
+
+            if result.success and result.segments:
+                global _ytdlp_consecutive_failures
+                _ytdlp_consecutive_failures = 0  # Reset on successful fallback
+
+                _ytdlp_log.success(
+                    f"Fallback chain succeeded | Tier: {result.tier_used.name} | "
+                    f"Segments: {len(result.segments)} | Language: {result.language} | "
+                    f"Auto: {result.is_auto_generated}"
+                )
+
+                # Convert to SRT and save to cache
+                srt_content = chain.to_srt(result.segments)
+                caption_file = self.cache_dir / f"{video_id}.{result.language}.srt"
+
+                with open(caption_file, 'w', encoding='utf-8') as f:
+                    f.write(srt_content)
+
+                _ytdlp_log.debug(f"Saved SRT to: {caption_file}")
 
                 # Add to indexed cache
                 self._cache.set_caption(
                     video_id=video_id,
                     file=str(caption_file),
-                    language=lang,
-                    is_auto_generated=is_auto,
+                    language=result.language,
+                    is_auto_generated=result.is_auto_generated,
                     format="srt"
                 )
 
                 return CaptionResult(
                     video_id=video_id,
                     file=str(caption_file),
-                    language=lang,
-                    is_auto_generated=is_auto,
+                    language=result.language,
+                    is_auto_generated=result.is_auto_generated,
                     format="srt"
                 )
             else:
-                logger.debug(f"No caption file found for {video_id}")
+                _ytdlp_log.failure(
+                    f"Fallback chain failed",
+                    reason=result.error[:100] if result.error else "No segments returned"
+                )
                 return None
 
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout fetching captions for {video_id}")
+        except ImportError as e:
+            _ytdlp_log.error("Fallback modules not available", error=e)
+            _ytdlp_log.warning("Install with: pip install youtube-transcript-api httpx")
             return None
         except Exception as e:
-            logger.warning(f"Error fetching captions for {video_id}: {e}")
+            _ytdlp_log.error("Unexpected fallback error", error=e)
             return None
 
     def _check_cache(self, video_id: str, languages: List[str]) -> Optional[CaptionResult]:
@@ -316,7 +637,8 @@ class CaptionFetcher:
                 file=cached_entry.file,
                 language=cached_entry.language,
                 is_auto_generated=cached_entry.is_auto_generated,
-                format=cached_entry.format
+                format=cached_entry.format,
+                from_cache=True
             )
 
         # Fallback: check for files not yet indexed (backward compatibility)
@@ -346,7 +668,8 @@ class CaptionFetcher:
                         file=str(caption_file),
                         language=lang,
                         is_auto_generated=is_auto,
-                        format="srt"
+                        format="srt",
+                        from_cache=True
                     )
 
         return None

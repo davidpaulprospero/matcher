@@ -74,19 +74,39 @@ class DownloadStage(Stage):
                 self._load_existing_videos(state, config)
                 return StageResult.ok({'skipped': True}, warnings)
 
+            # Pre-flight check: verify proxy/YouTube access before starting
+            preflight_warning = self._run_preflight_check(config)
+            if preflight_warning:
+                warnings.append(preflight_warning)
+
             # Check if caption-first mode
             if self._is_caption_first_enabled(config):
-                return self._run_caption_first_download(state, config, checkpoint, warnings)
-
+                result = self._run_caption_first_download(state, config, checkpoint, warnings)
             # Check if audio-first mode
-            if self._is_audio_first_enabled(config):
-                return self._run_audio_first(state, config, checkpoint, warnings)
+            elif self._is_audio_first_enabled(config):
+                result = self._run_audio_first(state, config, checkpoint, warnings)
             else:
-                return self._run_full_download(state, config, checkpoint, warnings)
+                result = self._run_full_download(state, config, checkpoint, warnings)
+
+            # Log cookie rotation summary at end of download stage
+            self._log_cookie_rotation_summary()
+
+            return result
 
         except Exception as e:
             logger.exception(f"Download stage failed: {e}")
+            self._log_cookie_rotation_summary()
             return StageResult.fail(str(e), warnings)
+
+    def _log_cookie_rotation_summary(self):
+        """Log cookie rotation statistics if enabled."""
+        try:
+            from ..downloader.cookie_manager import CookieManager
+            cm = CookieManager.get_instance()
+            if cm and cm.enabled and cm.accounts:
+                cm.log_summary()
+        except Exception:
+            pass
 
     def can_skip(
         self,
@@ -369,6 +389,15 @@ class DownloadStage(Stage):
                         failed_videos.append(video_id)
                         print(f"    ✗ Failed to download")
 
+                    # Rate limit prevention: delay between downloads
+                    # Skip delay for cache hits (file already existed)
+                    from_cache = audio_download and getattr(audio_download, 'from_cache', False)
+                    delay = getattr(config.download, 'delay_between_downloads', 3.0)
+                    if delay > 0 and idx < total_videos and not from_cache:
+                        import time
+                        logger.debug(f"[rate_limit] Sleeping {delay}s between downloads ({idx}/{total_videos})")
+                        time.sleep(delay)
+
                 except Exception as e:
                     logger.error(f"Audio download failed for '{video_id}': {e}")
                     failed_videos.append(video_id)
@@ -417,7 +446,7 @@ class DownloadStage(Stage):
         # Output filename
         output_file = keyword_dir / f"{video_id}.mp3"
 
-        # Skip if already downloaded
+        # Skip if already downloaded (cache hit - no rate limit delay needed)
         if output_file.exists():
             logger.info(f"Audio already exists: {output_file}")
             return AudioDownload(
@@ -426,7 +455,8 @@ class DownloadStage(Stage):
                 video_id=video_id,
                 title=title,
                 duration=0.0,
-                keyword=keyword
+                keyword=keyword,
+                from_cache=True  # Skip rate-limit delay for cache hits
             )
 
         # Build yt-dlp command for audio extraction
@@ -441,10 +471,11 @@ class DownloadStage(Stage):
             '--no-warnings',
         ]
 
-        # Add base args (JS runtime for challenge solving) and cookies
-        from ..downloader.utils import get_cookies_args, get_ytdlp_base_args
+        # Add base args (JS runtime for challenge solving), cookies, and proxy
+        from ..downloader.utils import get_cookies_args, get_ytdlp_base_args, get_proxy_args
         cmd.extend(get_ytdlp_base_args())
         cmd.extend(get_cookies_args(config))
+        cmd.extend(get_proxy_args(config))
 
         try:
             result = subprocess.run(
@@ -461,6 +492,15 @@ class DownloadStage(Stage):
                 # Get duration from file
                 duration = self._get_audio_duration(output_file)
 
+                # Report success to cookie rotation
+                try:
+                    from ..downloader.cookie_manager import CookieManager
+                    cm = CookieManager.get_instance()
+                    if cm and cm.enabled:
+                        cm.report_success()
+                except Exception:
+                    pass
+
                 return AudioDownload(
                     file=str(output_file),
                     url=url,
@@ -471,6 +511,42 @@ class DownloadStage(Stage):
                 )
             else:
                 logger.warning(f"yt-dlp failed for {video_id}: {result.stderr[:200] if result.stderr else 'unknown'}")
+
+                # Rate limit detection: rotate proxy and backoff
+                stderr_lower = str(result.stderr).lower() if result.stderr else ''
+                if 'rate-limited' in stderr_lower or '429' in stderr_lower:
+                    import time
+                    backoff_delay = 30  # 30 seconds for rate limit
+                    logger.warning(f"[rate_limit] ⚠️ RATE LIMIT DETECTED for {video_id}")
+                    logger.warning(f"[rate_limit] YouTube has rate-limited this account")
+
+                    # Report rate limit to cookie rotation
+                    try:
+                        from ..downloader.cookie_manager import CookieManager
+                        cm = CookieManager.get_instance()
+                        if cm and cm.enabled:
+                            cm.report_rate_limit()
+                    except Exception:
+                        pass
+
+                    # Rotate proxy on rate limit
+                    try:
+                        from ..pot_utils.proxy_manager import ProxyManager
+                        pm = ProxyManager.get_instance()
+                        if pm:
+                            old_proxy = pm.get_current_proxy()
+                            pm.report_failure(old_proxy or "direct", is_rate_limit=True)
+                            new_proxy = pm.get_next_proxy()  # Force rotation to next proxy
+                            logger.warning(f"[rate_limit] Rotated proxy: {old_proxy or 'direct'} -> {new_proxy or 'direct'}")
+                            print(f"    Rotated proxy -> {new_proxy or 'direct'}")
+                    except Exception as e:
+                        logger.warning(f"[rate_limit] Proxy rotation failed: {e}")
+
+                    logger.warning(f"[rate_limit] Applying {backoff_delay}s backoff before continuing...")
+                    print(f"    ⚠️ Rate limited! Waiting {backoff_delay}s...")
+                    time.sleep(backoff_delay)
+                    logger.info(f"[rate_limit] Backoff complete, resuming downloads")
+
                 return None
 
         except subprocess.TimeoutExpired:
@@ -565,6 +641,88 @@ class DownloadStage(Stage):
             return StageResult.fail(f"Could not import downloader: {e}", warnings)
 
     # === Helper Methods ===
+
+    def _run_preflight_check(self, config: 'Config') -> Optional[str]:
+        """
+        Run pre-flight check to verify proxy and YouTube access.
+
+        Tests the configured proxy against YouTube before starting downloads.
+        This catches issues early rather than failing mid-download.
+
+        Returns:
+            Warning message if check failed, None if successful
+        """
+        try:
+            fallback_cfg = getattr(config.download, 'fallback', None)
+            if not fallback_cfg:
+                return None
+
+            proxy_cfg = getattr(fallback_cfg, 'proxy', None)
+            if not proxy_cfg:
+                return None
+
+            # Check if proxy is enabled
+            enabled = proxy_cfg.get('enabled', False) if isinstance(proxy_cfg, dict) else getattr(proxy_cfg, 'enabled', False)
+            if not enabled:
+                return None
+
+            # Get rate limit handler (already initialized with proxies)
+            from ..downloader.rate_limit_handler import get_rate_limit_handler
+            handler = get_rate_limit_handler(config)
+
+            if not handler.has_proxy:
+                return None
+
+            # Test YouTube access via proxy
+            print("  >> Pre-flight: Testing YouTube access via proxy...")
+            logger.info("Running pre-flight proxy check against YouTube")
+
+            import httpx
+            test_url = "https://www.youtube.com/robots.txt"
+            proxy = handler.get_proxy()
+
+            try:
+                with httpx.Client(proxy=proxy, timeout=15.0) as client:
+                    response = client.get(test_url)
+
+                    if response.status_code == 200:
+                        print(f"  >> Pre-flight: SUCCESS via {proxy or 'direct'}")
+                        logger.info(f"Pre-flight passed via proxy")
+                        return None
+
+                    elif response.status_code == 429:
+                        print("  >> Pre-flight: Rate limited - rotating proxy...")
+                        logger.warning("Pre-flight hit rate limit, rotating proxy")
+                        handler.on_rate_limit("preflight")
+
+                        # Try again with rotated proxy
+                        new_proxy = handler.get_proxy()
+                        with httpx.Client(proxy=new_proxy, timeout=15.0) as retry_client:
+                            retry_response = retry_client.get(test_url)
+                            if retry_response.status_code == 200:
+                                print(f"  >> Pre-flight: SUCCESS after rotation")
+                                return None
+
+                        return "Pre-flight: Rate limited even after proxy rotation"
+
+                    else:
+                        return f"Pre-flight: Unexpected status {response.status_code}"
+
+            except httpx.ProxyError as e:
+                logger.warning(f"Pre-flight proxy error: {e}")
+                return f"Pre-flight: Proxy connection failed - {e}"
+
+            except httpx.TimeoutException:
+                logger.warning("Pre-flight timeout")
+                return "Pre-flight: Request timed out"
+
+            except Exception as e:
+                logger.warning(f"Pre-flight error: {e}")
+                return f"Pre-flight: {e}"
+
+        except Exception as e:
+            logger.debug(f"Pre-flight check error: {e}")
+            return None  # Don't block on pre-flight errors
 
     def _is_audio_first_enabled(self, config: 'Config') -> bool:
         """Check if audio-first mode is enabled"""

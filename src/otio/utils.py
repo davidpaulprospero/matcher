@@ -655,7 +655,10 @@ def create_clip_with_timewarp(
             )
 
     # Create absolute path with forward slashes for DaVinci Resolve
+    # Use file:/// URL format for better DaVinci compatibility
     abs_path = _to_windows_path(source_path)
+    if abs_path and len(abs_path) > 1 and abs_path[1] == ':':
+        abs_path = f'file:///{abs_path}'
 
     # Make media reference name unique by including parent folder
     # This prevents DaVinci Resolve from confusing clips with same filename in different folders

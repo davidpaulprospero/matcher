@@ -556,39 +556,82 @@ class TestIterativeMatchRematch:
         from src.stages.iterative_match import IterativeMatchStage
         return IterativeMatchStage()
 
-    def test_clears_matches_before_rematch(self, stage):
-        """Test that matches are cleared before re-matching"""
-        from src.stages import StageResult
+    def test_preserves_high_confidence_matches(self, stage):
+        """Test that high-confidence matches are preserved during re-matching.
+
+        The new preserve-based implementation separates matches into:
+        - Protected (high confidence) - these are kept and their videos are blocked
+        - Weak (low confidence) - these are re-matched with new videos
+        """
+        # Create mock matches with varying confidence
+        high_conf_match = Mock()
+        high_conf_match.primary_match = Mock()
+        high_conf_match.primary_match.confidence = 0.95
+        high_conf_match.primary_match.voiceover_segment = Mock()
+        high_conf_match.primary_match.voiceover_segment.index = 0
+        high_conf_match.primary_match.video_segment = Mock()
+        high_conf_match.primary_match.video_segment.source_file = "video_abc123.mp4"
+
+        low_conf_match = Mock()
+        low_conf_match.primary_match = Mock()
+        low_conf_match.primary_match.confidence = 0.70
+        low_conf_match.primary_match.voiceover_segment = Mock()
+        low_conf_match.primary_match.voiceover_segment.index = 1
+        low_conf_match.primary_match.video_segment = Mock()
+        low_conf_match.primary_match.video_segment.source_file = "video_def456.mp4"
 
         state = Mock()
-        state.matches = [Mock() for _ in range(10)]
+        state.matches = [high_conf_match, low_conf_match]
+        state.voiceover_segments = [Mock(index=0, start=0, end=5, text="test1"), Mock(index=1, start=5, end=10, text="test2")]
+        state.text_metadata = [{"video_path": "video1.mp4", "start_time": 0, "end_time": 10, "text": "vid text"}]
+        state.embeddings = [[0.1] * 768]
+        state.embedding_index = None
+        state.face_preference = "neutral"
+        state.location_chapters = None
+        state.chapters = None
+        state.video_premises = None
+        state.extracted_entities = []
+
         config = Mock()
+        config.matching.high_matches_mode.target_confidence = 0.90
+        config.cache.cache_dir = ".cache"
+
         checkpoint = Mock()
 
-        with patch("src.stages.match.MatchStage") as mock_match:
-            mock_match.return_value.run.return_value = StageResult.ok()
+        # Test that separate_matches_by_confidence correctly identifies protected vs weak
+        protected, protected_ids, weak_indices = stage._separate_matches_by_confidence(
+            state.matches, 0.90
+        )
 
-            stage._rematch(state, config, checkpoint)
+        assert len(protected) == 1  # Only high confidence match
+        assert 1 in weak_indices  # Low confidence segment index
+        assert 0 not in weak_indices  # High confidence segment NOT in weak
 
-            # clear_matches should be called
-            state.clear_matches.assert_called_once()
+    def test_merge_keeps_better_confidence(self, stage):
+        """Test that merge logic keeps whichever match has higher confidence"""
+        # Create old match with 0.80 confidence
+        old_match = Mock()
+        old_match.primary_match = Mock()
+        old_match.primary_match.confidence = 0.80
+        old_match.primary_match.voiceover_segment = Mock()
+        old_match.primary_match.voiceover_segment.index = 0
 
-    def test_runs_match_stage(self, stage):
-        """Test that MatchStage is run"""
-        from src.stages import StageResult
+        # Create new match with 0.90 confidence
+        new_match = Mock()
+        new_match.primary_match = Mock()
+        new_match.primary_match.confidence = 0.90
+        new_match.primary_match.voiceover_segment = Mock()
+        new_match.primary_match.voiceover_segment.index = 0
 
-        state = Mock()
-        state.matches = [{"confidence": 0.9}]  # Real list for len()
-        config = Mock()
-        checkpoint = Mock()
+        merged = stage._merge_matches(
+            [old_match],
+            [new_match],
+            protected_indices=set()  # No protected indices
+        )
 
-        with patch("src.stages.match.MatchStage") as mock_match:
-            mock_match.return_value.run.return_value = StageResult.ok()
-
-            result = stage._rematch(state, config, checkpoint)
-
-            assert result is True
-            mock_match.return_value.run.assert_called_once()
+        assert len(merged) == 1
+        # Should keep new match (higher confidence)
+        assert stage._get_match_confidence(merged[0]) == 0.90
 
 
 class TestIterativeMatchConfigConversion:

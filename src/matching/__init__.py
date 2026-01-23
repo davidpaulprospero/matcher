@@ -41,6 +41,11 @@ from .main import match_all_segments
 # Phase 7: TieredMatcher (temporary import from tiered_matcher.py bridge)
 from .tiered_matcher import TieredMatcher
 
+# Phase 8: Coverage analysis and recovery (for high matches mode)
+from .coverage_analyzer import CoverageReport, WeakSegment, analyze_coverage
+from .recovery_keywords import generate_recovery_keywords
+from .high_matches_logger import HighMatchesLogger
+
 __all__ = [
     # Main API
     'match_all_segments',
@@ -60,4 +65,11 @@ __all__ = [
 
     # Location Matching
     'LocationMatcher',
+
+    # Coverage analysis (high matches mode)
+    'CoverageReport',
+    'WeakSegment',
+    'analyze_coverage',
+    'generate_recovery_keywords',
+    'HighMatchesLogger',
 ]

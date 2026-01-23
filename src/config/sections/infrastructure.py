@@ -19,6 +19,8 @@ __all__ = [
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'PreflightConfig',
+    'ProxyConfig',
 ]
 
 
@@ -201,6 +203,26 @@ class LLMHealerConfig:
 
 
 @dataclass
+class PreflightConfig:
+    """Configuration for preflight checks before pipeline execution.
+
+    Preflight checks catch common issues early, before wasting time on
+    stages that will fail. Includes yt-dlp auth verification.
+    """
+    # Enable yt-dlp authentication preflight check
+    check_ytdlp_auth: bool = True
+
+    # Timeout for yt-dlp auth test (seconds)
+    ytdlp_auth_timeout: int = 30
+
+    # Video ID for auth testing (public, stable video)
+    ytdlp_test_video: str = "dQw4w9WgXcQ"
+
+    # Auto-escalate tier on auth failure (full sweep through all tiers)
+    auto_escalate_tier: bool = True
+
+
+@dataclass
 class HealingConfig:
     """Self-healing pipeline configuration.
 
@@ -242,6 +264,7 @@ class HealingConfig:
     logging: HealingLoggingConfig = field(default_factory=HealingLoggingConfig)
     watcher: WatcherConfig = field(default_factory=WatcherConfig)
     llm_healer: LLMHealerConfig = field(default_factory=LLMHealerConfig)
+    preflight: PreflightConfig = field(default_factory=PreflightConfig)
 
     def __post_init__(self):
         """Convert dict configs to dataclass instances (per Rule 2)."""
@@ -251,3 +274,48 @@ class HealingConfig:
             self.watcher = WatcherConfig(**self.watcher)
         if isinstance(self.llm_healer, dict):
             self.llm_healer = LLMHealerConfig(**self.llm_healer)
+        if isinstance(self.preflight, dict):
+            self.preflight = PreflightConfig(**self.preflight)
+
+
+@dataclass
+class ProxyConfig:
+    """Proxy rotation configuration for YouTube access.
+
+    Manages multiple proxies with automatic failover when rate limited.
+    Proxies are rotated based on the selected strategy.
+    """
+    # Enable proxy rotation
+    enabled: bool = False
+
+    # List of proxy URLs (format: http://user:pass@host:port or socks5://host:port)
+    proxies: list = field(default_factory=list)
+
+    # Rotation strategy: round_robin, random, least_used, performance
+    rotation_strategy: str = "round_robin"
+
+    # Cooldown time after rate limit (seconds)
+    cooldown_on_rate_limit: float = 300.0
+
+    # Disable proxy after this many consecutive failures
+    max_failures_before_disable: int = 5
+
+    # Re-enable disabled proxy after this time (seconds)
+    re_enable_after: float = 1800.0
+
+    # Auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY)
+    auto_detect_env_proxy: bool = True
+
+    # Use proxy for caption fetching (in addition to video downloads)
+    use_for_captions: bool = True
+
+    # Use proxy for metadata fetching (YouTube search)
+    use_for_metadata: bool = True
+
+    def __post_init__(self):
+        """Ensure proxies is a list."""
+        if self.proxies is None:
+            self.proxies = []
+        elif isinstance(self.proxies, str):
+            # Handle single proxy as string
+            self.proxies = [self.proxies] if self.proxies else []

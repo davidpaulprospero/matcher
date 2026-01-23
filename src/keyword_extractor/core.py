@@ -201,7 +201,8 @@ class LLMKeywordExtractor:
         # Step 2: General keyword extraction
         prompt = KEYWORD_EXTRACTION_PROMPT.format(
             voiceover_text=text[:8000],  # Limit text length
-            max_keywords=max_keywords
+            max_keywords=max_keywords,
+            topic=topic or "general documentary"
         )
 
         logger.info("Extracting general keywords with LLM...")

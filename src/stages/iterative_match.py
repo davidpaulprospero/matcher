@@ -128,6 +128,12 @@ class IterativeMatchStage(Stage):
         logger.info("[iterative_match] " + "=" * 60)
         logger.info("[iterative_match] ENTERING ITERATION LOOP")
         logger.info("[iterative_match] " + "=" * 60)
+
+        # Backup matches before iteration (for potential rollback)
+        self._backup_matches = list(state.matches) if state.matches else []
+        self._backup_coverage = coverage.coverage_ratio
+        logger.info(f"[iterative_match] Backed up {len(self._backup_matches)} matches (coverage: {self._backup_coverage:.1%})")
+
         loop_iteration = 0
         while not self._should_stop(coverage, iter_state, config):
             loop_iteration += 1
@@ -338,8 +344,30 @@ class IterativeMatchStage(Stage):
                 delta = curr - prev
                 logger.info(f"[iterative_match] IMPROVEMENT CHECK:")
                 logger.info(f"[iterative_match]   previous={prev:.3f}, current={curr:.3f}, delta={delta:.3f}")
-                logger.info(f"[iterative_match]   delta < 0.01? ({delta:.3f} < 0.01 is {delta < 0.01})")
-                if delta < 0.01:  # Less than 1% improvement
+
+                # Check for regression (coverage got worse)
+                if delta < 0:
+                    logger.error(f"[iterative_match] ❌ COVERAGE DECREASED by {abs(delta):.1%}")
+                    logger.error(f"[iterative_match]   This indicates a bug - preserve mode should prevent this")
+
+                    # Rollback to backup if we have one and it's better
+                    if hasattr(self, '_backup_matches') and self._backup_matches:
+                        backup_cov = getattr(self, '_backup_coverage', 0)
+                        if backup_cov > curr:
+                            logger.info(f"[iterative_match]   Rolling back to backup matches (coverage: {backup_cov:.1%})")
+                            state.matches = self._backup_matches
+                            # Update coverage history with rollback
+                            iter_state.coverage_history[-1] = backup_cov
+                            coverage = self._analyze_coverage(state, target_conf)
+
+                    self._hmm_logger.log_iteration_end(
+                        iter_state.iteration_count,
+                        curr,
+                        continue_iteration=False,
+                        reason=f"Coverage decreased ({delta:.1%}) - rolled back"
+                    )
+                    break
+                elif delta < 0.01:  # Less than 1% improvement
                     logger.warning(f"[iterative_match] ❌ MINIMAL IMPROVEMENT - BREAKING LOOP")
                     logger.warning(f"[iterative_match]   Improvement {delta:.1%} is less than 1% threshold")
                     self._hmm_logger.log_iteration_end(
@@ -350,8 +378,11 @@ class IterativeMatchStage(Stage):
                     )
                     break
                 else:
-                    # Log successful iteration - continuing
+                    # Good improvement - update backup for next iteration
+                    self._backup_matches = list(state.matches) if state.matches else []
+                    self._backup_coverage = curr
                     logger.info(f"[iterative_match] ✅ GOOD IMPROVEMENT ({delta:.1%}), CONTINUING TO NEXT ITERATION")
+                    logger.info(f"[iterative_match]   Updated backup to current state")
                     self._hmm_logger.log_iteration_end(
                         iter_state.iteration_count,
                         curr,
@@ -493,6 +524,9 @@ class IterativeMatchStage(Stage):
             logger.info(f"[iterative_match]   Running VideoMetadataStage...")
             metadata_stage = VideoMetadataStage()
             result = metadata_stage.run(state, config, checkpoint)
+            # Save checkpoint so progress isn't lost if interrupted
+            if result.success and result.data:
+                checkpoint.save('VIDEO_METADATA', result.data)
 
             # Restore search config
             config.download.search_pool_multiplier = original_search_multiplier
@@ -539,6 +573,9 @@ class IterativeMatchStage(Stage):
             logger.info(f"[iterative_match]   Caption added {text_metadata_after_caption - text_metadata_before_caption} entries")
             if caption_result.success:
                 logger.info(f"[iterative_match]   CaptionStage completed successfully")
+                # Save checkpoint so progress isn't lost if interrupted
+                if caption_result.data:
+                    checkpoint.save('CAPTION', caption_result.data)
             else:
                 logger.warning(f"[iterative_match]   CaptionStage had issues: {caption_result.error}")
 
@@ -546,6 +583,9 @@ class IterativeMatchStage(Stage):
             logger.info(f"[iterative_match]   Running DownloadStage...")
             download_stage = DownloadStage()
             result = download_stage.run(state, config, checkpoint)
+            # Save checkpoint so progress isn't lost if interrupted
+            if result.success and result.data:
+                checkpoint.save('DOWNLOAD', result.data)
 
             # Restore original keywords + new ones
             state.keywords = list(set(original_keywords + keywords))
@@ -819,12 +859,14 @@ class IterativeMatchStage(Stage):
         state: 'PipelineState',
         config: 'Config',
     ) -> List[str]:
-        """Generate completely fresh keywords from different weak segments.
+        """Generate completely fresh keywords from different weak segments using LLM.
 
         Instead of using the same weak segments, pick a random sample
-        of segments that haven't been targeted yet.
+        of segments that haven't been targeted yet, and use LLM to generate
+        better search-optimized keywords (same as initial recovery keywords).
         """
         import random
+        from ..matching.recovery_keywords import generate_recovery_keywords
 
         if not coverage.weak_segments:
             return []
@@ -839,38 +881,28 @@ class IterativeMatchStage(Stage):
         sample_size = min(10, len(available_segments))
         sample = random.sample(available_segments, sample_size)
 
-        logger.info(f"[iterative_match] Generating fresh keywords from {sample_size} random weak segments")
+        logger.info(f"[iterative_match] Generating fresh keywords from {sample_size} random weak segments using LLM")
 
         try:
-            # Generate keywords with simple text extraction
-            fresh_keywords = []
-            for seg in sample:
-                # Extract key phrases from segment text
-                text = seg.text.lower()
-                # Remove common words
-                stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-                             'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                             'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-                             'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
-                             'from', 'as', 'into', 'through', 'during', 'before', 'after',
-                             'above', 'below', 'between', 'and', 'but', 'or', 'so', 'yet',
-                             'it', 'its', 'this', 'that', 'these', 'those', 'i', 'you',
-                             'he', 'she', 'they', 'we', 'what', 'which', 'who', 'when',
-                             'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few',
-                             'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
-                             'only', 'own', 'same', 'than', 'too', 'very', 'just', 'also'}
+            # Use LLM-based keyword generation (same as initial recovery keywords)
+            # This generates better quality search keywords than simple text extraction
+            fresh_keywords = generate_recovery_keywords(
+                weak_segments=sample,
+                existing_keywords=list(state.keywords) if state.keywords else [],
+                strategy="llm",  # Use LLM for best quality keywords
+                config=config,
+                max_keywords=10,
+            )
 
-                words = [w for w in text.split() if w not in stopwords and len(w) > 2]
-                if words:
-                    # Create a search phrase from key words
-                    key_phrase = " ".join(words[:4])
-                    fresh_keywords.append(f"{key_phrase} footage")
+            if fresh_keywords:
+                logger.info(f"[iterative_match]   LLM generated {len(fresh_keywords)} fresh keywords")
+            else:
+                logger.warning("[iterative_match]   LLM keyword generation returned no results")
 
-            logger.info(f"[iterative_match]   Generated {len(fresh_keywords)} fresh keywords")
             return fresh_keywords
 
         except Exception as e:
-            logger.error(f"[iterative_match] Fresh keyword generation failed: {e}")
+            logger.error(f"[iterative_match] Fresh keyword generation failed: {e}", exc_info=True)
             return []
 
     def _transcribe_new_videos(
@@ -891,6 +923,9 @@ class IterativeMatchStage(Stage):
             if result.success:
                 logger.info(f"[iterative_match] TranscribeStage completed successfully")
                 logger.info(f"[iterative_match]   text_metadata entries: {len(state.text_metadata) if state.text_metadata else 0}")
+                # Save checkpoint so progress isn't lost if interrupted
+                if result.data:
+                    checkpoint.save('TRANSCRIBE', result.data)
             else:
                 logger.warning(f"[iterative_match] TranscribeStage failed: {result.error}")
 
@@ -906,30 +941,189 @@ class IterativeMatchStage(Stage):
         config: 'Config',
         checkpoint: 'CheckpointManager',
     ) -> bool:
-        """Re-run matching with expanded video pool."""
-        logger.info(f"[iterative_match] Starting re-matching with expanded video pool")
+        """Re-run matching with expanded video pool, preserving high-confidence matches.
+
+        Instead of clearing all matches and starting fresh (which can make coverage worse),
+        this method:
+        1. Identifies matches with confidence >= target (protected)
+        2. Identifies matches with confidence < target (weak - need improvement)
+        3. Re-matches ONLY weak segments, with protected video IDs pre-blocked
+        4. Merges results, keeping whichever is better per segment
+        """
+        hmm_config = config.matching.high_matches_mode
+        target_conf = hmm_config.target_confidence
+
+        logger.info(f"[iterative_match] Starting SELECTIVE re-matching (preserve mode)")
         logger.info(f"[iterative_match]   Current matches: {len(state.matches) if state.matches else 0}")
+        logger.info(f"[iterative_match]   Target confidence: {target_conf:.0%}")
 
         try:
+            # Step 1: Separate matches into protected and weak
+            protected_matches, protected_video_ids, weak_indices = self._separate_matches_by_confidence(
+                state.matches or [],
+                target_conf
+            )
+
+            logger.info(f"[iterative_match]   Protected matches (>={target_conf:.0%}): {len(protected_matches)}")
+            logger.info(f"[iterative_match]   Protected video IDs: {len(protected_video_ids)}")
+            logger.info(f"[iterative_match]   Weak segments to re-match: {len(weak_indices)}")
+
+            if not weak_indices:
+                logger.info(f"[iterative_match]   No weak segments to re-match!")
+                return True
+
+            # Step 2: Backup current matches for potential rollback
+            old_matches = list(state.matches) if state.matches else []
+            protected_indices = {self._get_segment_index(m) for m in protected_matches}
+
+            # Step 3: Run selective matching for weak segments only
             from .match import MatchStage
+            from ..matching import match_all_segments
+            from ..utils import CacheManager, SRTSegment
+            from ..embeddings import compute_embeddings, get_embedding_provider
 
-            # Clear existing matches for fresh matching
-            logger.info(f"[iterative_match]   Clearing existing matches...")
-            state.clear_matches()
+            # Prepare segments (same as MatchStage._prepare_segments)
+            vo_segments = []
+            for i, seg in enumerate(state.voiceover_segments):
+                if hasattr(seg, 'text'):
+                    vo_segment = SRTSegment(
+                        index=seg.index,
+                        start_time=seg.start,
+                        end_time=seg.end,
+                        text=seg.text,
+                        source_file='',
+                        keywords=[],
+                        entities=[],
+                        topics=[]
+                    )
+                elif isinstance(seg, dict):
+                    vo_segment = SRTSegment(
+                        index=seg.get('index', i),
+                        start_time=seg.get('start_time', seg.get('start', 0)),
+                        end_time=seg.get('end_time', seg.get('end', 0)),
+                        text=seg.get('text', ''),
+                        source_file='',
+                        keywords=[],
+                        entities=[],
+                        topics=[]
+                    )
+                else:
+                    vo_segment = seg
+                vo_segments.append(vo_segment)
 
-            stage = MatchStage()
-            result = stage.run(state, config, checkpoint)
+            # Prepare video segments
+            video_segments = []
+            for i, meta in enumerate(state.text_metadata):
+                if isinstance(meta, dict):
+                    vid_segment = SRTSegment(
+                        index=i,
+                        start_time=meta.get('start_time', 0),
+                        end_time=meta.get('end_time', 0),
+                        text=meta.get('text', ''),
+                        source_file=meta.get('video_path', ''),
+                    )
+                    if meta.get('is_broll'):
+                        vid_segment.is_broll = True
+                    if meta.get('caption_only'):
+                        vid_segment.caption_only = True
+                    if meta.get('is_stock_footage') or meta.get('source') in ('pexels', 'pixabay', 'stock'):
+                        vid_segment.is_stock = True
+                else:
+                    vid_segment = meta
+                video_segments.append(vid_segment)
 
-            if result.success:
-                logger.info(f"[iterative_match] MatchStage completed successfully")
-                logger.info(f"[iterative_match]   New matches: {len(state.matches) if state.matches else 0}")
-            else:
-                logger.warning(f"[iterative_match] MatchStage failed: {result.error}")
+            # Compute voiceover embeddings
+            cache_dir = config.cache.cache_dir if hasattr(config.cache, 'cache_dir') else ".cache"
+            provider = get_embedding_provider(config)
+            cache = CacheManager(cache_dir)
+            vo_texts = [seg.text for seg in vo_segments]
+            vo_embeddings = compute_embeddings(
+                texts=vo_texts,
+                provider=provider,
+                cache=cache,
+                cache_key="voiceover"
+            )
 
-            return result.success
+            # Extract entity names
+            entity_names = []
+            entities = getattr(state, 'extracted_entities', []) or []
+            for e in entities:
+                name = e.get('text', '') if isinstance(e, dict) else getattr(e, 'text', '')
+                if name:
+                    entity_names.append(name)
+
+            logger.info(f"[iterative_match]   Running selective match for {len(weak_indices)} segments...")
+
+            # Run matching with pre-used video IDs and segment filter
+            new_matches = match_all_segments(
+                voiceover_segments=vo_segments,
+                video_segments=video_segments,
+                voiceover_embeddings=vo_embeddings,
+                video_embeddings=state.embeddings,
+                scenes=None,
+                config=config,
+                cache=cache,
+                embedding_index=state.embedding_index,
+                face_preference=state.face_preference,
+                video_topics=None,
+                location_chapters=state.location_chapters or None,
+                video_locations=None,
+                known_entities=entity_names if entity_names else None,
+                listicle_chapters=state.chapters or None,
+                video_premises=state.video_premises or None,
+                pre_used_video_ids=protected_video_ids,
+                segment_indices_to_match=weak_indices,
+            )
+
+            logger.info(f"[iterative_match]   Selective matching complete")
+            logger.info(f"[iterative_match]   New matches returned: {len([m for m in new_matches if m is not None])}")
+
+            # Step 4: Merge results
+            merged_matches = self._merge_matches(
+                old_matches,
+                new_matches,
+                protected_indices
+            )
+
+            # Update state
+            state.matches = merged_matches
+            logger.info(f"[iterative_match]   Final match count: {len(state.matches)}")
+
+            # Save to checkpoint
+            # Serialize matches for checkpoint (simplified version)
+            serialized = []
+            for m in merged_matches:
+                if m is None:
+                    continue
+                try:
+                    if hasattr(m, 'primary_match') and m.primary_match:
+                        pm = m.primary_match
+                        source_file = ''
+                        start_time = 0.0
+                        if hasattr(pm, 'video_segment') and pm.video_segment:
+                            source_file = getattr(pm.video_segment, 'source_file', '')
+                            start_time = getattr(pm.video_segment, 'start_time', 0.0)
+                        serialized.append({
+                            'segment_index': self._get_segment_index(m),
+                            'source_file': source_file,
+                            'start_time': float(start_time),
+                            'confidence': float(self._get_match_confidence(m)),
+                        })
+                    elif isinstance(m, dict):
+                        serialized.append(m)
+                except Exception as e:
+                    logger.warning(f"Failed to serialize match: {e}")
+
+            checkpoint.save('MATCH', {
+                'match_count': len(merged_matches),
+                'matches': serialized,
+            })
+            logger.info(f"[iterative_match]   Saved {len(serialized)} matches to checkpoint")
+
+            return True
 
         except Exception as e:
-            logger.error(f"[iterative_match] Error matching: {e}", exc_info=True)
+            logger.error(f"[iterative_match] Error in selective matching: {e}", exc_info=True)
             return False
 
     def _print_report(
@@ -980,6 +1174,162 @@ class IterativeMatchStage(Stage):
             'target_achieved': iter_state.target_achieved,
             'weak_segment_count': iter_state.weak_segment_count,
         }
+
+    # === Helper methods for match preservation ===
+
+    def _get_match_confidence(self, match) -> float:
+        """Extract confidence from various match object types."""
+        if match is None:
+            return 0.0
+        if hasattr(match, 'primary_match') and match.primary_match:
+            return getattr(match.primary_match, 'confidence', 0.0)
+        if isinstance(match, dict):
+            return match.get('confidence', 0.0)
+        return getattr(match, 'confidence', 0.0)
+
+    def _get_segment_index(self, match) -> int:
+        """Extract segment index from various match object types."""
+        if match is None:
+            return -1
+        if hasattr(match, 'primary_match') and match.primary_match:
+            pm = match.primary_match
+            if hasattr(pm, 'voiceover_segment') and pm.voiceover_segment:
+                return getattr(pm.voiceover_segment, 'index', -1)
+            # Fallback for MatchResultWrapper
+            simple = getattr(match, '_simple_match', None)
+            if simple:
+                return getattr(simple, 'segment_index', -1)
+        if isinstance(match, dict):
+            return match.get('segment_index', -1)
+        return getattr(match, 'segment_index', -1)
+
+    def _get_video_id_from_match(self, match) -> str:
+        """Extract video ID from a match object."""
+        import re
+        from pathlib import Path
+
+        source_file = ''
+        if match is None:
+            return ''
+        if hasattr(match, 'primary_match') and match.primary_match:
+            pm = match.primary_match
+            if hasattr(pm, 'video_segment') and pm.video_segment:
+                source_file = getattr(pm.video_segment, 'source_file', '')
+        elif isinstance(match, dict):
+            source_file = match.get('source_file', '') or match.get('video_file', '')
+        else:
+            source_file = getattr(match, 'video_file', '') or getattr(match, 'source_file', '')
+
+        if not source_file:
+            return ''
+
+        # Extract video ID from filename
+        filename = Path(source_file).stem
+
+        # Pattern 1: Audio-first segment: {video_id}_{offset:04d}
+        m = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
+        if m:
+            return m.group(1)
+
+        # Pattern 2: Regular YouTube: {title}_{video_id}
+        m = re.search(r'_([a-zA-Z0-9_-]{11})$', filename)
+        if m:
+            return m.group(1)
+
+        # Fallback: use filename as ID
+        return filename
+
+    def _separate_matches_by_confidence(
+        self,
+        matches: List,
+        target_confidence: float,
+    ) -> tuple:
+        """Separate matches into protected (high conf) and weak (low conf).
+
+        Returns:
+            (protected_matches, protected_video_ids, weak_segment_indices)
+        """
+        protected_matches = []
+        protected_video_ids = set()
+        weak_segment_indices = set()
+
+        for m in matches:
+            if m is None:
+                continue
+            conf = self._get_match_confidence(m)
+            idx = self._get_segment_index(m)
+
+            if conf >= target_confidence:
+                protected_matches.append(m)
+                video_id = self._get_video_id_from_match(m)
+                if video_id:
+                    protected_video_ids.add(video_id)
+            else:
+                if idx >= 0:
+                    weak_segment_indices.add(idx)
+
+        return protected_matches, protected_video_ids, weak_segment_indices
+
+    def _merge_matches(
+        self,
+        old_matches: List,
+        new_matches: List,
+        protected_indices: set,
+    ) -> List:
+        """Merge old and new matches, keeping better result per segment.
+
+        Protected indices are always kept from old_matches.
+        For weak segments, keep whichever has higher confidence.
+        """
+        # Build lookup by segment index
+        old_by_idx = {}
+        for m in old_matches:
+            if m is not None:
+                idx = self._get_segment_index(m)
+                if idx >= 0:
+                    old_by_idx[idx] = m
+
+        new_by_idx = {}
+        for m in new_matches:
+            if m is not None:
+                idx = self._get_segment_index(m)
+                if idx >= 0:
+                    new_by_idx[idx] = m
+
+        # Merge
+        all_indices = sorted(set(old_by_idx.keys()) | set(new_by_idx.keys()))
+        merged = []
+        improvements = 0
+        kept_old = 0
+
+        for idx in all_indices:
+            old_m = old_by_idx.get(idx)
+            new_m = new_by_idx.get(idx)
+
+            # Protected indices: always keep old
+            if idx in protected_indices:
+                merged.append(old_m)
+                continue
+
+            old_conf = self._get_match_confidence(old_m) if old_m else 0.0
+            new_conf = self._get_match_confidence(new_m) if new_m else 0.0
+
+            # Take whichever is better
+            if new_conf > old_conf and new_m is not None:
+                merged.append(new_m)
+                improvements += 1
+                logger.debug(f"Segment {idx}: IMPROVED {old_conf:.2f} → {new_conf:.2f}")
+            elif old_m is not None:
+                merged.append(old_m)
+                kept_old += 1
+                if new_m and new_conf < old_conf:
+                    logger.debug(f"Segment {idx}: KEPT {old_conf:.2f} (new was {new_conf:.2f})")
+            elif new_m is not None:
+                # No old match, use new
+                merged.append(new_m)
+
+        logger.info(f"[iterative_match] Merge result: {improvements} improved, {kept_old} kept old")
+        return merged
 
     def can_skip(
         self,

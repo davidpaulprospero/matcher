@@ -4,6 +4,8 @@ LLM prompts for chapter detection.
 
 LISTICLE_DETECTION_PROMPT = '''Analyze this voiceover script and detect if it contains a numbered list or ranking structure.
 
+DOCUMENTARY TOPIC: {topic}
+
 IMPORTANT: This is ASR-transcribed text, so expect spelling errors and case issues.
 
 Common ASR corrections to apply:
@@ -34,7 +36,13 @@ For EACH list item found, extract:
 2. The entity name (original from text)
 3. The corrected entity name (fix ASR errors, proper capitalization)
 4. The segment index where this item STARTS (look for "Number X" pattern)
-5. 3-5 search keywords specific to this item
+5. 3-5 search keywords specific to this item - MUST be visual/filmable content for YouTube search
+
+KEYWORD RULES:
+- Keywords must describe FILMABLE content (things a camera can capture)
+- For entity-based items: Include entity name + visual descriptor (e.g., "Denny's restaurant exterior")
+- For concept-based items: Include the TOPIC SUBJECT (e.g., for dog topic: "dog guilty face footage" not just "guilty look")
+- Generic keywords like "clear signals" or "affection timing" are USELESS - always add the topic subject
 
 Script with segment indices:
 {indexed_text}

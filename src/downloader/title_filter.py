@@ -321,7 +321,7 @@ class TitleFilter:
             '--dump-json',  # Get metadata only, no download
             '--flat-playlist',  # Faster - don't extract full info
             '--no-download',
-            '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
+            '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live & !was_live",
         ]
 
         # Add base args (JS runtime for challenge solving) and cookies

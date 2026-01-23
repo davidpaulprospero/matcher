@@ -32,12 +32,13 @@ class ChapterDetector:
         """
         self.llm_call_fn = llm_call_fn
 
-    def detect(self, segments: List[dict]) -> ChapterDetectionResult:
+    def detect(self, segments: List[dict], topic: str = "") -> ChapterDetectionResult:
         """
         Detect chapters in voiceover segments.
 
         Args:
             segments: List of segment dicts with 'index', 'text', 'start', 'end' keys
+            topic: Documentary topic for keyword context (e.g., "dog emotions")
 
         Returns:
             ChapterDetectionResult with detected chapters
@@ -54,7 +55,10 @@ class ChapterDetector:
         indexed_text = self._build_indexed_text(segments)
 
         # Call LLM for detection
-        prompt = LISTICLE_DETECTION_PROMPT.format(indexed_text=indexed_text)
+        prompt = LISTICLE_DETECTION_PROMPT.format(
+            indexed_text=indexed_text,
+            topic=topic or "general documentary"
+        )
 
         logger.info("Calling LLM for chapter detection...")
         try:
@@ -184,7 +188,8 @@ class ChapterDetector:
 
 def detect_chapters(
     segments: List[dict],
-    llm_call_fn: Callable[[str], str]
+    llm_call_fn: Callable[[str], str],
+    topic: str = ""
 ) -> ChapterDetectionResult:
     """
     Convenience function for chapter detection.
@@ -192,9 +197,10 @@ def detect_chapters(
     Args:
         segments: List of segment dicts
         llm_call_fn: LLM call function
+        topic: Documentary topic for keyword context
 
     Returns:
         ChapterDetectionResult
     """
     detector = ChapterDetector(llm_call_fn)
-    return detector.detect(segments)
+    return detector.detect(segments, topic=topic)

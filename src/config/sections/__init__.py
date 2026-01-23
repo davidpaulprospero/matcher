@@ -26,6 +26,7 @@ from .infrastructure import (
     HealingLoggingConfig,
     WatcherConfig,
     LLMHealerConfig,
+    ProxyConfig,
 )
 
 # Core
@@ -42,6 +43,8 @@ from .matching import (
     LocationMatchingConfig,
     NegativeMatchingConfig,
     ChapterDetectionConfig,
+    PremiseScoringConfig,
+    HighMatchesModeConfig,
     MatchingConfig,
 )
 
@@ -136,6 +139,7 @@ __all__ = [
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'ProxyConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',
@@ -146,6 +150,8 @@ __all__ = [
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
     'ChapterDetectionConfig',
+    'PremiseScoringConfig',
+    'HighMatchesModeConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',

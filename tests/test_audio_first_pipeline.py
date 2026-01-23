@@ -706,11 +706,12 @@ class TestDownloadAudioAdditional:
         }.get(key, default))
 
         audio_pipeline._search_video_metadata = Mock(return_value=[
-            {'id': 'vid1', 'title': 'Normal Video', 'duration': 120, 'is_live': False},
-            {'id': 'vid2', 'title': 'Live Stream', 'duration': 120, 'is_live': True}  # Filtered
+            {'id': 'vid1', 'title': 'Normal Video', 'duration': 120, 'is_live': False, 'was_live': False},
+            {'id': 'vid2', 'title': 'Live Stream', 'duration': 120, 'is_live': True, 'was_live': False},  # Filtered (is_live)
+            {'id': 'vid3', 'title': 'Past Livestream', 'duration': 120, 'is_live': False, 'was_live': True}  # Filtered (was_live)
         ])
 
-        # The filter should remove live streams
+        # The filter should remove both current live streams AND completed livestreams
         # (Testing the filtering logic that happens before download)
 
     def test_download_audio_handles_none_duration(self, audio_pipeline, temp_dir):

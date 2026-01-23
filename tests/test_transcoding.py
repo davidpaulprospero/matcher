@@ -430,6 +430,7 @@ class TestFilterStringBuilding:
         assert 'duration>30' in filter_str
         assert 'duration<90' in filter_str
         assert '!is_live' in filter_str
+        assert '!was_live' in filter_str  # Also filter completed livestreams
 
     def test_build_filter_string_with_min_views(self, transcoder, mock_duration_tiers):
         """Test filter string with minimum views"""

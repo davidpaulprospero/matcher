@@ -523,7 +523,7 @@ class TestBuildFilterString:
         assert "\\'s" in filter_str
 
     def test_filter_includes_is_live_check(self, tmp_path):
-        """Test filter always excludes live streams."""
+        """Test filter always excludes live streams and completed livestreams."""
         config = MockConfig()
 
         with patch('subprocess.run'):
@@ -536,6 +536,7 @@ class TestBuildFilterString:
 
         filter_str = manager.build_filter_string('medium', duration_tiers)
         assert "!is_live" in filter_str
+        assert "!was_live" in filter_str  # Also filter completed livestreams
 
 
 class TestGetVideoCodec:

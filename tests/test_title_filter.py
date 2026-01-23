@@ -156,10 +156,11 @@ class TestVideoMetadataSearch:
 
         title_filter.search_video_metadata('test', 'short', max_results=10)
 
-        # Verify command includes duration constraints
+        # Verify command includes duration constraints and livestream filters
         call_args = mock_run.call_args[0][0]
         assert any('duration>0' in str(arg) and 'duration<60' in str(arg) for arg in call_args)
         assert any('!is_live' in str(arg) for arg in call_args)
+        assert any('!was_live' in str(arg) for arg in call_args)  # Also filter completed livestreams
 
     @patch('subprocess.run')
     def test_search_video_metadata_timeout(self, mock_run, title_filter):

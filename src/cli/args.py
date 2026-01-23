@@ -91,6 +91,29 @@ Examples:
         help='Force rematch all videos, ignoring cached matches (delta matching)'
     )
 
+    # High Matches Mode arguments
+    parser.add_argument(
+        '--high-matches',
+        action='store_true',
+        help='Enable high matches mode: iterate download/match until target confidence achieved'
+    )
+
+    parser.add_argument(
+        '--target-confidence',
+        type=float,
+        default=None,
+        metavar='SCORE',
+        help='Target confidence threshold for high matches mode (default: 0.90)'
+    )
+
+    parser.add_argument(
+        '--coverage-target',
+        type=float,
+        default=None,
+        metavar='RATIO',
+        help='Target coverage ratio for high matches mode (default: 0.85)'
+    )
+
     parser.add_argument(
         '--use-keywords',
         type=str,

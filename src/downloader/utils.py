@@ -99,20 +99,49 @@ def get_ytdlp_base_args() -> List[str]:
 
 def get_cookies_args(config: 'Config') -> List[str]:
     """
-    Get yt-dlp cookie arguments (browser or file).
+    Get yt-dlp cookie arguments (rotation, browser, or file).
 
     Migrated from downloader.py lines 2438-2456.
+    Extended with cookie rotation support.
 
-    Prefers cookies_from_browser, falls back to cookies_path.
-    Returns list of arguments to extend yt-dlp command.
+    Priority order:
+    1. Cookie rotation (if enabled) - rotates between multiple accounts
+    2. Browser cookies (cookies_from_browser)
+    3. Cookies file (cookies_path)
 
     Args:
-        config: Config object with download.cookies_from_browser or download.cookies_path
+        config: Config object with download.cookie_rotation, cookies_from_browser, or cookies_path
 
     Returns:
         List of cookie arguments for yt-dlp (empty if no cookies configured)
     """
     download_config = config.download
+
+    # Check for cookie rotation first
+    cookie_rotation = getattr(download_config, 'cookie_rotation', None)
+    if cookie_rotation and getattr(cookie_rotation, 'enabled', False):
+        try:
+            from .cookie_manager import CookieManager
+
+            # Convert config object to dict if needed
+            if hasattr(cookie_rotation, '__dict__'):
+                rotation_dict = {
+                    'enabled': getattr(cookie_rotation, 'enabled', False),
+                    'cookies_dir': getattr(cookie_rotation, 'cookies_dir', 'cookies'),
+                    'rotate_on_success': getattr(cookie_rotation, 'rotate_on_success', True),
+                    'cooldown_seconds': getattr(cookie_rotation, 'cooldown_seconds', 300),
+                    'accounts': getattr(cookie_rotation, 'accounts', []),
+                }
+            else:
+                rotation_dict = cookie_rotation
+
+            manager = CookieManager.get_instance(rotation_dict)
+            if manager and manager.enabled:
+                args = manager.get_cookies_args()
+                if args:
+                    return args
+        except Exception as e:
+            logger.warning(f"[cookies] Cookie rotation failed: {e}, falling back to single cookie")
 
     # Prefer browser cookies
     cookies_browser = getattr(download_config, 'cookies_from_browser', '')
@@ -127,6 +156,82 @@ def get_cookies_args(config: 'Config') -> List[str]:
         return ['--cookies', cookies_path]
 
     return []
+
+
+def get_proxy_args(config: 'Config') -> List[str]:
+    """
+    Get yt-dlp proxy arguments from proxy manager.
+
+    Uses the proxy manager to get the next available proxy in rotation.
+    Automatically handles rate limiting and proxy failover.
+
+    Args:
+        config: Config object with proxy settings
+
+    Returns:
+        List of proxy arguments for yt-dlp (empty if proxy not enabled)
+    """
+    proxy_config = getattr(config, 'proxy', None)
+    if not proxy_config or not getattr(proxy_config, 'enabled', False):
+        return []
+
+    try:
+        from ..pot_utils.proxy_manager import ProxyManager, ProxyConfig as PMConfig
+
+        # Initialize proxy manager with config
+        pm_config = PMConfig(
+            proxies=getattr(proxy_config, 'proxies', []) or [],
+            rotation_strategy=getattr(proxy_config, 'rotation_strategy', 'round_robin'),
+            cooldown_on_rate_limit=getattr(proxy_config, 'cooldown_on_rate_limit', 300.0),
+            max_failures_before_disable=getattr(proxy_config, 'max_failures_before_disable', 5),
+            re_enable_after=getattr(proxy_config, 're_enable_after', 1800.0),
+            auto_detect_env_proxy=getattr(proxy_config, 'auto_detect_env_proxy', True),
+        )
+
+        manager = ProxyManager.get_instance(pm_config)
+        proxy_url = manager.get_proxy_for_ytdlp()
+
+        if proxy_url:
+            logger.debug(f"[proxy] Using proxy: {proxy_url[:30]}...")
+            return ['--proxy', proxy_url]
+
+    except Exception as e:
+        logger.warning(f"[proxy] Failed to get proxy: {e}")
+
+    return []
+
+
+def report_proxy_result(config: 'Config', success: bool, error_text: str = ''):
+    """
+    Report the result of a download attempt for proxy statistics.
+
+    Args:
+        config: Config object with proxy settings
+        success: Whether the download succeeded
+        error_text: Error text (for rate limit detection)
+    """
+    proxy_config = getattr(config, 'proxy', None)
+    if not proxy_config or not getattr(proxy_config, 'enabled', False):
+        return
+
+    try:
+        from ..pot_utils.proxy_manager import ProxyManager, is_rate_limit_error
+
+        manager = ProxyManager.get_instance()
+        current_proxy = manager.get_current_proxy()
+
+        if current_proxy:
+            if success:
+                manager.report_success(current_proxy)
+            else:
+                is_rate_limit = is_rate_limit_error(error_text)
+                manager.report_failure(current_proxy, is_rate_limit=is_rate_limit)
+
+                if is_rate_limit:
+                    logger.info(f"[proxy] Rate limit detected, rotating to next proxy...")
+
+    except Exception as e:
+        logger.debug(f"[proxy] Failed to report result: {e}")
 
 
 # YouTube video ID regex pattern (11 characters, alphanumeric + _ -)

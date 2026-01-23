@@ -7,15 +7,142 @@ Provides confidence adjustments for:
 - Topic-based penalties for chapter matching
 - B-roll footage boosts
 - Current project vs global cache scoring
+- Premise-based scoring (video theme/topic matching)
 """
 
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict, Any
 import logging
 
 from ..utils import SRTSegment
 from ..topic_extraction import compute_topic_penalty
 
 logger = logging.getLogger(__name__)
+
+
+def apply_premise_scoring(
+    embedding_similarity: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    video_premises: Dict[str, str],
+    premise_config: Any
+) -> Tuple[float, float, str]:
+    """
+    Apply premise-based scoring to blend theme matching with embedding similarity.
+
+    Premise scoring replaces word-for-word transcript matching with theme-based
+    matching. Each video has a premise (e.g., "Documentary about restaurant closures")
+    that is compared to the voiceover content.
+
+    New weights (when premise scoring enabled):
+    - premise_weight: 50% (video theme ↔ voiceover topic)
+    - keyword_weight: 25% (keywords in common)
+    - embedding_weight: 15% (semantic similarity - reduced)
+    - transcript_weight: 10% (word-for-word - heavily reduced)
+
+    Args:
+        embedding_similarity: Original embedding similarity score (0-1)
+        vo_segment: Voiceover segment being matched
+        video_segment: Video segment being considered
+        video_premises: Dict mapping video_id to premise string
+        premise_config: PremiseScoringConfig with weights and settings
+
+    Returns:
+        Tuple of (blended_score, premise_score, reason)
+    """
+    if not premise_config or not getattr(premise_config, 'enabled', True):
+        return embedding_similarity, 0.0, ""
+
+    # Get video premise
+    video_path = video_segment.source_file or ""
+    video_id = _extract_video_id_for_premise(video_path)
+    premise = video_premises.get(video_id, "")
+
+    if not premise:
+        # No premise available - fall back to embedding similarity
+        return embedding_similarity, 0.0, "no premise"
+
+    # Get weights from config
+    premise_weight = getattr(premise_config, 'premise_weight', 0.50)
+    embedding_weight = getattr(premise_config, 'embedding_weight', 0.15)
+    keyword_weight = getattr(premise_config, 'keyword_weight', 0.25)
+    transcript_weight = getattr(premise_config, 'transcript_weight', 0.10)
+
+    # Compute premise match score using keyword overlap
+    vo_text = vo_segment.text.lower() if vo_segment.text else ""
+    premise_lower = premise.lower()
+
+    # Simple keyword-based premise matching
+    # Extract meaningful words from both texts
+    vo_words = set(w for w in vo_text.split() if len(w) > 3)
+    premise_words = set(w for w in premise_lower.split() if len(w) > 3)
+
+    if not vo_words or not premise_words:
+        return embedding_similarity, 0.0, "insufficient text"
+
+    # Calculate overlap-based premise score
+    overlap = vo_words & premise_words
+    overlap_ratio = len(overlap) / max(len(vo_words), len(premise_words))
+
+    # Check for content type mismatch (music video, lyrics, etc.)
+    content_type_penalty = 0.0
+    music_indicators = ['music', 'lyric', 'lyrics', 'song', 'audio', 'karaoke']
+    if any(ind in premise_lower for ind in music_indicators):
+        # Music content - check if voiceover is about music
+        vo_music_related = any(ind in vo_text for ind in music_indicators)
+        if not vo_music_related:
+            # Music video being matched to non-music content - heavy penalty
+            content_type_penalty = 0.5
+            logger.debug(f"Premise penalty: music video for non-music content")
+
+    # Compute premise score (0-1)
+    premise_score = max(0.0, overlap_ratio - content_type_penalty)
+
+    # Blend scores using configured weights
+    # Note: embedding_similarity already includes semantic matching
+    # keyword and transcript components are approximated via the overlap
+    blended_score = (
+        premise_weight * premise_score +
+        embedding_weight * embedding_similarity +
+        keyword_weight * overlap_ratio +  # Keywords approximated by overlap
+        transcript_weight * embedding_similarity  # Transcript approximated by embedding
+    )
+
+    # Normalize to 0-1 range
+    blended_score = max(0.0, min(1.0, blended_score))
+
+    # Build reason string
+    reason = f"premise: {premise_score:.2f}"
+    if content_type_penalty > 0:
+        reason += f" (music penalty: -{content_type_penalty:.2f})"
+
+    logger.debug(f"Premise scoring: embed={embedding_similarity:.2f}, premise={premise_score:.2f}, blended={blended_score:.2f}")
+
+    return blended_score, premise_score, reason
+
+
+def _extract_video_id_for_premise(file_path: str) -> str:
+    """Extract video ID from file path for premise lookup."""
+    import re
+    from pathlib import Path
+
+    filename = Path(file_path).stem if file_path else ""
+
+    # Audio-first segment: {video_id}_{offset:04d}
+    match = re.match(r'^([a-zA-Z0-9_-]{11})_(\d{4})$', filename)
+    if match:
+        return match.group(1)
+
+    # Regular YouTube: {title}_{video_id}
+    match = re.search(r'_([a-zA-Z0-9_-]{11})$', filename)
+    if match:
+        return match.group(1)
+
+    # Stock footage - use filename
+    if filename.startswith(('pexels_', 'pixabay_')):
+        return filename
+
+    # Fallback: use filename as-is
+    return filename
 
 
 def apply_duration_penalty(confidence: float, speed_ratio: float, config) -> float:

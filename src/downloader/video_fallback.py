@@ -577,9 +577,23 @@ class VideoFallbackChain:
             VideoResult with file path if successful
         """
         quality = preferred_quality or self.preferred_quality
-        skip_tiers = skip_tiers or []
+        skip_tiers = list(skip_tiers) if skip_tiers else []
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check config for enabled tiers and add disabled ones to skip_tiers
+        if self.config and hasattr(self.config, "download"):
+            fallback_cfg = getattr(self.config.download, "fallback", None)
+            if fallback_cfg and hasattr(fallback_cfg, "video"):
+                vid_cfg = fallback_cfg.video
+                if hasattr(vid_cfg, "invidious_enabled") and not vid_cfg.invidious_enabled:
+                    if VideoTier.INVIDIOUS not in skip_tiers:
+                        skip_tiers.append(VideoTier.INVIDIOUS)
+                        self.log.debug("INVIDIOUS disabled in config")
+                if hasattr(vid_cfg, "piped_enabled") and not vid_cfg.piped_enabled:
+                    if VideoTier.PIPED not in skip_tiers:
+                        skip_tiers.append(VideoTier.PIPED)
+                        self.log.debug("PIPED disabled in config")
 
         self.log.start_operation("download", video_id)
         self.log.info(f"Starting video fallback chain (quality: {quality}, output: {output_dir})")

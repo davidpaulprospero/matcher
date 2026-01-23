@@ -9,6 +9,10 @@ Usage:
 
 import sys
 import os
+
+# Fix Windows console encoding for unicode output
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import json
 import glob
 import subprocess
@@ -75,8 +79,10 @@ def read_checkpoint(project_path: str) -> dict:
 
 
 def get_latest_log(project_path: str) -> tuple[str | None, float]:
-    """Get latest log file and its age in seconds."""
+    """Get latest log file and its age in seconds (excludes verbose logs)."""
     log_files = glob.glob(os.path.join(project_path, "logs", "run_*.log"))
+    # Filter out verbose logs
+    log_files = [f for f in log_files if '_verbose.log' not in f]
     if log_files:
         latest = max(log_files, key=os.path.getmtime)
         return latest, time.time() - os.path.getmtime(latest)

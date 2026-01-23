@@ -57,6 +57,7 @@ RULES:
 3. If segment mentions a specific place/venue, use that name
 4. If segment is abstract/narrative, derive visual content from the topic
 5. Add "footage", "4K", "tour", "walkthrough" when it helps searchability
+6. ALWAYS include the topic subject in generic keywords (e.g., for dog topic: "clear signals" → "dog clear signals training")
 
 ❌ NEVER output keywords like:
 - "the quiet confession that changed everything footage"
@@ -76,6 +77,8 @@ KEYWORDS:"""
 
 # Prompt 3: General keyword extraction
 KEYWORD_EXTRACTION_PROMPT = """You are an expert stock footage researcher. Your job is to generate YouTube search keywords that will find DOWNLOADABLE B-roll footage.
+
+DOCUMENTARY TOPIC: {topic}
 
 VOICEOVER TEXT:
 {voiceover_text}
@@ -125,6 +128,12 @@ You must TRANSLATE abstract themes into CONCRETE VISUAL CONTENT.
    - "Steve Wynn interview footage" (if mentioned)
    - "Cirque du Soleil Las Vegas show"
    - "MGM Resorts properties tour"
+
+=== INCLUDE TOPIC CONTEXT IN GENERIC KEYWORDS ===
+Generic keywords are useless without the topic subject. ALWAYS include it:
+- For topic "dog emotions": "clear signals" → "dog clear signals training"
+- For topic "Las Vegas casinos": "VIP experience" → "Las Vegas VIP casino high roller"
+- For topic "fast food industry": "franchise" → "fast food franchise restaurant"
 
 === VALIDATION CHECK ===
 Before adding each keyword, ask: "Can a camera film this? Would a videographer understand what to shoot?"
@@ -222,6 +231,19 @@ For keywords that ARE visual/searchable, add variants:
 - Specificity: "casino" → "Bellagio casino floor", "MGM Grand casino"
 - Time of day: "Las Vegas strip" → "Las Vegas strip night", "Las Vegas strip sunset"
 - Activity: "hotel" → "hotel lobby", "hotel pool", "hotel room tour"
+
+=== ADD TOPIC CONTEXT TO GENERIC KEYWORDS ===
+Generic keywords MUST include the documentary topic to be searchable:
+❌ BAD: "clear signals b-roll" (signals about what?)
+✅ GOOD: "clear signals dog training" (specific to topic)
+
+❌ BAD: "affection timing footage" (affection between who?)
+✅ GOOD: "dog affection timing owner" (specific to topic)
+
+❌ BAD: "talking and yelling cinematic"
+✅ GOOD: "owner yelling at dog training"
+
+If a keyword is too generic without context, ADD the topic subject (e.g., "dog", "casino", "factory").
 
 === PRESERVE NAMED ENTITIES ===
 Keep all keywords with specific names:

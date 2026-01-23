@@ -52,6 +52,13 @@ google-api-python-client>=2.0,<3.0  # YouTube Data API v3 for video metadata
 # Ensure ffmpeg is installed on system: apt install ffmpeg / brew install ffmpeg
 
 yt-dlp>=2024.1.0                  # Video downloader (actively maintained)
+
+# =============================================================================
+# DOWNLOAD FALLBACK SYSTEM
+# =============================================================================
+# Alternative caption/video sources when yt-dlp is rate-limited
+youtube-transcript-api>=0.6.0,<1.0  # YouTube captions (different endpoint)
+httpx>=0.25.0,<1.0                  # HTTP client for Invidious/Piped APIs
 scenedetect>=0.6,<1.0             # Scene detection
 opencv-python>=4.8,<5.0           # Video frame processing
 

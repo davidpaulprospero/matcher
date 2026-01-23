@@ -256,9 +256,9 @@ matching:
   # Two-stage matching optimization
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
-  # Note: Need 75+ candidates for V1-V6 (6 unique video files)
-  embedding_candidates: 75  # Retrieve from FAISS
-  llm_rerank_candidates: 8  # Send to LLM
+  # Note: Need 100+ candidates for V1-V6+ tracks with diverse results
+  embedding_candidates: 100  # Retrieve from FAISS (increased for diversity)
+  llm_rerank_candidates: 15  # Send to LLM (increased for better selection)
   
   # Duration scoring
   # Chain-of-thought: Extreme speed changes look unnatural
@@ -295,7 +295,7 @@ matching:
   # Model names
   gemini_model: gemini-2.0-flash
   anthropic_model: claude-3-haiku-20240307
-  ollama_model: llama3.2
+  ollama_model: mistral:7b
   ollama_host: http://localhost:11434
   
   # Caching
@@ -339,14 +339,51 @@ matching:
     use_llm_disambiguation: true  # Use LLM to resolve ambiguous locations (Paris FR vs TX)
     cache_dir: ".cache/locations"  # Cache geocoding results
 
+  # Premise-based scoring - match on video theme/topic instead of literal transcript
+  # Chain-of-thought: Word-for-word matching causes music videos to match "24 hour" content
+  # Reasoning: Extract video premise ("love song music video") vs voiceover topic ("restaurants")
+  # Decision: Premise mismatch → low score → not selected
+  premise_scoring:
+    enabled: true                    # Enable premise-based matching
+    # Scoring weights (sum to 1.0)
+    premise_weight: 0.50             # Video theme ↔ voiceover topic (50%)
+    keyword_weight: 0.25             # Keywords in common (25%)
+    embedding_weight: 0.15           # Semantic similarity (15%)
+    transcript_weight: 0.10          # Word-for-word - heavily reduced (10%)
+    # Two-stage comparison
+    embedding_filter: true           # Fast filtering via premise embeddings
+    llm_rerank: true                 # LLM scoring for top candidates
+    llm_rerank_top_n: 10             # Send top N to LLM for premise scoring
+    # LLM settings
+    provider: "gemini"
+    model: "gemini-2.0-flash"
+    # Threshold
+    min_premise_score: 0.2           # Minimum premise match to consider
+
+  # High Matches Mode - Iterative matching until target confidence achieved
+  # Chain-of-thought: Single-pass matching may leave many segments with low confidence
+  # Reasoning: Iteratively download more videos targeting weak segments
+  # Decision: Continue until 85% of segments hit 90%+ confidence or max iterations
+  #
+  # Usage:
+  #   python main.py --voiceover script.srt --project path --high-matches
+  #   python main.py --target-confidence 0.90 --coverage-target 0.85
+  high_matches_mode:
+    enabled: false                   # Enable iterative matching mode
+    target_confidence: 0.90          # Target score for "good" matches
+    coverage_target: 0.85            # 85% of segments must hit target
+    max_iterations: 3                # Max download/match cycles
+    videos_per_iteration: 10         # New videos to fetch per cycle
+    keyword_strategy: "llm"  # llm (best) | weak_segments | diversify | both
+
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
 # -----------------------------------------------------------------------------
 keyword:
   provider: gemini  # gemini, anthropic, tfidf
-  
+
   # Extraction settings
-  max_keywords: 30
+  max_keywords: 50  # Increased for better video variety
   min_keyword_length: 3
   
   # List-based keyword detection
@@ -557,7 +594,7 @@ llm:
   anthropic_model: claude-3-haiku-20240307
 
   # Ollama specific (used when provider is "ollama")
-  ollama_model: llama3.2
+  ollama_model: mistral:7b
   ollama_host: http://localhost:11434
 
   # Generation settings (legacy compatibility)
@@ -787,6 +824,7 @@ download:
   min_views: 0
   delete_original: true
   delay_between_keywords: 1.0
+  delay_between_downloads: 3.0   # Moderate delay with proxy rotation (prevents rate limiting)
   
   # Title blacklist - skip videos containing these terms (case-insensitive)
   # Useful for filtering out sports highlights, music videos, live streams, etc.
@@ -842,6 +880,23 @@ download:
     - "film clip"
     - "marley and me"
     - "marley & me"
+    # Music content - avoid songs, lyrics, karaoke
+    - "lyrics"
+    - "lyric"
+    - "karaoke"
+    - "official audio"
+    - "official music video"
+    - "music video"
+    - "audio only"
+    - "full album"
+    - "playlist"
+    - "remix"
+    - "cover song"
+    - "acoustic version"
+    - "live performance"
+    - "concert"
+    - "feat."
+    - "ft."
     # Channels to avoid
     - "nat geo wild"
     - "nat geo animals"
@@ -1008,7 +1063,7 @@ download:
   #   3. Falls back to audio + Whisper for videos without captions
   # Typical savings: 95%+ less download time (only matched video segments downloaded)
   caption_first:
-    enabled: false          # Disabled by default - enable per-project
+    enabled: true           # Enabled globally - fast caption fetching
     prefer_manual_captions: true   # Prefer manual captions over auto-generated
     languages:              # Languages to try (in order of preference)
       - "en"
@@ -1019,6 +1074,10 @@ download:
     confidence_boost_manual: 0.1   # Confidence boost for manual captions (+10%)
     cache_captions: true    # Cache downloaded captions for reuse
     fetch_timeout: 30       # Timeout per video for caption fetch (seconds)
+    # Parallel fetching - 4x faster with proxy rotation
+    parallel_enabled: true
+    parallel_workers: 4
+    per_worker_delay: 1.0   # 1s delay per worker
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
@@ -1045,6 +1104,158 @@ download:
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"
+
+  # Cookie rotation for YouTube rate limit bypass
+  # Rotates between multiple YouTube account cookies to distribute load
+  # Each account has separate rate limits, so 3 accounts = 3x capacity
+  cookie_rotation:
+    enabled: true
+    cookies_dir: "cookies"  # Directory containing cookie files (relative to project root)
+    rotate_on_success: true  # DEFAULT: Rotate after EVERY request (recommended)
+    cooldown_seconds: 300  # 5 min cooldown for rate-limited accounts
+
+    # Cookie accounts - each should be from a DIFFERENT YouTube account
+    accounts:
+      - label: "main"
+        cookies_path: "main.txt"
+      - label: "backup1"
+        cookies_path: "backup1.txt"
+      - label: "backup2"
+        cookies_path: "backup2.txt"
+
+  # Fallback configuration for when yt-dlp is rate-limited
+  # Enables automatic fallback to alternative caption and video sources
+  fallback:
+    enabled: true  # Master switch for fallback system
+
+    # Caption extraction fallbacks (when yt-dlp captions fail)
+    caption:
+      # Tier 2: youtube-transcript-api (different endpoint, rarely rate-limited)
+      transcript_api_enabled: true
+      preferred_languages:
+        - "en"
+        - "en-US"
+        - "en-GB"
+        - "en-AU"
+
+      # Tier 3: Direct Innertube/timedtext fetch
+      innertube_enabled: true
+      innertube_timeout: 30
+
+      # Tier 4: Invidious API (10+ instances with rotation)
+      # DISABLED: All instances returning 403/500/502 (2026-01-22)
+      invidious_enabled: false
+      invidious_instances: []  # Empty = use defaults
+      invidious_timeout: 30
+      invidious_cooldown: 300  # Seconds to cooldown failed instances
+
+      # Tier 5: Piped API (6+ instances with rotation)
+      # DISABLED: All instances returning HTTP 502 (2026-01-22)
+      piped_enabled: false
+      piped_instances: []  # Empty = use defaults
+      piped_timeout: 30
+
+      # Tier 6: Whisper ASR fallback (when no captions available)
+      whisper_fallback_enabled: true
+
+    # Video download fallbacks (when yt-dlp downloads fail)
+    video:
+      # Tier 2: Invidious streams (direct URLs)
+      # DISABLED: All instances returning 403/500/502 (2026-01-22)
+      invidious_enabled: false
+      invidious_instances: []
+      invidious_preferred_quality: "720p"
+      invidious_timeout: 30
+      invidious_cooldown: 300
+
+      # Tier 3: Piped streams (direct URLs)
+      # DISABLED: All instances returning HTTP 502 (2026-01-22)
+      piped_enabled: false
+      piped_instances: []
+      piped_timeout: 30
+
+      # Tier 4: Cobalt API (optional, requires self-hosting)
+      cobalt_enabled: false
+      cobalt_url: ""  # e.g., "http://localhost:9000"
+
+    # Behavior settings
+    behavior:
+      skip_ytdlp_after_consecutive_failures: 3  # Skip yt-dlp after N failures
+      ytdlp_cooldown_seconds: 600  # 10 min cooldown before retrying yt-dlp
+      log_tier_stats: true  # Log tier statistics at end of pipeline
+      reset_per_project: true  # Reset failure counters per project
+
+    # Proxy rotation settings (for IP rotation when rate limited)
+    # Setup: Run scripts\start_socks_proxy.ps1 or scripts\start_socks_proxy.bat
+    # Test:  python scripts\test_proxy.py
+    proxy:
+      enabled: true  # Enable proxy rotation for rate limit bypass
+      rotation_on_429: true  # Rotate proxy on rate limit
+      rotation_on_error: true  # Rotate proxy on connection errors
+      cooldown_seconds: 300  # Cooldown for failed proxies (5 min)
+      max_failures: 3  # Mark proxy as dead after N failures
+
+      # === Health check settings ===
+      health_check_on_startup: true  # Test all proxies before pipeline starts
+      health_check_timeout: 10.0  # Seconds to wait for health check response
+      health_check_url: "https://www.youtube.com/robots.txt"  # URL to test
+
+      # === Smart selection settings ===
+      rotation_strategy: "round_robin"  # round_robin, weighted, random, least_used
+      smart_selection: true  # Weight proxies by success rate
+      min_success_rate: 0.3  # Remove proxies below this success rate
+
+      # === Persistence settings ===
+      persist_state: true  # Save proxy stats between runs
+      state_file: ".cache/proxy_state.json"  # Path to state file
+
+      # === IP cooldown tracking ===
+      ip_cooldown_seconds: 300  # Wait before reusing rate-limited IP (5 min)
+      track_ips_globally: true  # Track IPs across different proxies
+
+      # Proxy sources - Multiple layers for maximum uptime
+      sources:
+        - type: socks5
+          url: "socks5://10.64.0.1:1080"  # Layer 1: Mullvad VPN SOCKS5
+        - type: socks5
+          url: "socks5://127.0.0.1:9050"  # Layer 2: Tor backup (start: scripts\start_tor.ps1)
+      # Additional proxy examples:
+      #   - type: http
+      #     url: "http://username:password@proxy.example.com:8080"
+      #   - type: list
+      #     file: "proxies.txt"  # One proxy per line
+      #   - type: env
+      #     env: "HTTP_PROXY"  # Read from environment variable
+
+    # Tor circuit management (automatic IP refresh via control port)
+    # Setup: scripts\start_tor.ps1
+    # Tor provides anonymous IP rotation without VPN subscription
+    tor:
+      enabled: true  # Enable Tor circuit management
+      socks_port: 9050  # Tor SOCKS5 proxy port
+      control_port: 9051  # Tor control port for circuit refresh
+      control_password: ""  # Leave empty for no auth or cookie auth
+      auto_refresh_circuit: true  # Periodically get new exit IP
+      refresh_after_requests: 50  # New circuit after N requests
+      refresh_on_rate_limit: true  # New circuit on 429 error
+      min_refresh_interval: 10.0  # Tor recommends 10s between refreshes
+      use_as_fallback: true  # Use Tor when other proxies exhausted
+
+    # VPN CLI integration (for IP rotation via VPN)
+    vpn:
+      enabled: true  # Enable VPN management for rate limit bypass
+      provider: "mullvad"  # Using Mullvad VPN
+      preferred_countries:  # Countries to rotate through
+        - "US"
+        - "UK"
+        - "CA"
+        - "DE"
+        - "NL"
+      rotation_cooldown: 30  # Minimum seconds between rotations
+      max_rotations_per_hour: 10  # Limit rotations to prevent abuse
+      rotation_on_429: true  # Rotate VPN on rate limit
+      auto_connect: false  # Auto-connect on pipeline start
+      auto_disconnect: false  # Disconnect on pipeline end
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
@@ -1396,6 +1607,33 @@ healing:
     max_context_chars: 12000     # Max chars for LLM context (~3000 tokens)
     recheck_interval_seconds: 300.0
     max_failures: 3
+
+  # Preflight check configuration
+  # Verifies yt-dlp auth before downloads to catch issues early
+  preflight:
+    check_ytdlp_auth: true       # Enable yt-dlp authentication preflight check
+    ytdlp_auth_timeout: 30       # Timeout for auth test (seconds)
+    ytdlp_test_video: "dQw4w9WgXcQ"  # Video ID for testing (public, stable)
+    auto_escalate_tier: true     # Auto-escalate tier on auth failure (full sweep)
+
+# -----------------------------------------------------------------------------
+# PROXY ROTATION (for YouTube rate limit avoidance)
+# -----------------------------------------------------------------------------
+# Manages multiple proxies with automatic failover when rate limited.
+# Supports round-robin, random, least-used, or performance-based rotation.
+
+proxy:
+  enabled: true                  # Enable proxy rotation globally
+  proxies:                       # Active proxy pool
+    - "socks5://10.64.0.1:1080"  # Mullvad VPN SOCKS5 (primary)
+    - "socks5://127.0.0.1:9050"  # Tor SOCKS5 (backup - start with: tor)
+  rotation_strategy: "round_robin"  # round_robin, random, least_used, performance
+  cooldown_on_rate_limit: 300.0     # Cooldown time after 429 (seconds)
+  max_failures_before_disable: 3    # Disable proxy after 3 failures
+  re_enable_after: 600.0            # Re-enable after 10 min
+  auto_detect_env_proxy: false      # Don't auto-detect (use explicit proxies)
+  use_for_captions: true            # Use proxy for caption fetching
+  use_for_metadata: true            # Use proxy for YouTube search
 
 # -----------------------------------------------------------------------------
 # B-ROLL DOWNLOAD AND MATCHING

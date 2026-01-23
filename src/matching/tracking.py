@@ -269,6 +269,20 @@ class GlobalClipTracker:
         """Get all used video IDs for video-level filtering."""
         return set(self.used_video_ids.keys())
 
+    def pre_populate(self, used_video_ids: Set[str], usage_count: int = 1):
+        """Pre-mark video IDs as used (for iteration support).
+
+        Called when re-matching with protected matches - their videos
+        should not be reassigned to other segments.
+
+        Args:
+            used_video_ids: Set of video IDs to mark as already used
+            usage_count: Usage count to assign (default 1)
+        """
+        for vid in used_video_ids:
+            current = self.used_video_ids.get(vid, 0)
+            self.used_video_ids[vid] = max(current, usage_count)
+
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics for logging."""
         # Find videos used more than once

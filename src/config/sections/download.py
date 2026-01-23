@@ -21,6 +21,16 @@ __all__ = [
     'DownloadingConfig',
     'RateLimitBypassConfig',
     'BypassTier',
+    'CaptionFallbackConfig',
+    'VideoFallbackConfig',
+    'FallbackBehaviorConfig',
+    'FallbackConfig',
+    'ProxyConfig',
+    'ProxySourceConfig',
+    'VPNConfig',
+    'TorConfig',
+    'CookieRotationConfig',
+    'CookieAccountConfig',
 ]
 
 
@@ -200,6 +210,73 @@ class CaptionFirstConfig:
 
     # Timeout for caption fetch per video (seconds)
     fetch_timeout: int = 30
+
+    # === Parallel Fetching Configuration ===
+    # When enabled, uses multiple workers with dedicated proxies
+
+    # Enable parallel caption fetching with multiple workers
+    parallel_enabled: bool = False
+
+    # Number of parallel workers (each gets a dedicated proxy)
+    parallel_workers: int = 4
+
+    # Delay between network requests PER WORKER (seconds)
+    # Cache hits skip this delay entirely
+    per_worker_delay: float = 10.0
+
+    # Queue timeout - max time to wait for a work item (seconds)
+    queue_timeout: float = 60.0
+
+    # Worker timeout - max time per caption fetch (seconds)
+    worker_timeout: float = 120.0
+
+    # Enable detailed per-worker logging
+    log_worker_activity: bool = True
+
+    # Minimum batch size to use parallel mode (smaller batches use sequential)
+    parallel_min_batch: int = 10
+
+    # === Segment Download Speed Settings ===
+    # These control the video segment download phase after matching
+    #
+    # TIER LOGIC: Short videos finish fast → rapid requests → rate limit risk
+    # So: short = slower settings, long = faster settings
+
+    # Default settings (used if tier not matched)
+    segment_sleep_interval: float = 1.0
+    segment_concurrent_fragments: int = 4
+
+    # Tier-based speed settings (based on total segment duration per video)
+    # Short (<60s total): Slower - these finish fast, need spacing
+    segment_tier_short_threshold: float = 60.0  # seconds
+    segment_tier_short_sleep: float = 2.0       # more sleep between fragments
+    segment_tier_short_concurrent: int = 2      # fewer parallel fragments
+    segment_tier_short_delay_after: float = 3.0 # delay after completing short video
+
+    # Medium (60-180s): Balanced
+    segment_tier_medium_threshold: float = 180.0
+    segment_tier_medium_sleep: float = 1.0
+    segment_tier_medium_concurrent: int = 4
+    segment_tier_medium_delay_after: float = 1.0
+
+    # Long (>180s): Faster - natural spacing from download time
+    segment_tier_long_sleep: float = 0.5
+    segment_tier_long_concurrent: int = 6
+    segment_tier_long_delay_after: float = 0.0  # no extra delay needed
+
+    # === Parallel Segment Downloads ===
+    # Download multiple videos simultaneously with dedicated cookies per worker
+    # Helps with VPN latency by keeping multiple downloads in flight
+
+    # Enable parallel segment downloads
+    parallel_segment_downloads: bool = True
+
+    # Number of parallel workers (max 3 recommended to avoid rate limits)
+    # Each worker gets a dedicated cookie from rotation pool
+    parallel_segment_workers: int = 3
+
+    # Stagger worker start to avoid burst requests (seconds)
+    parallel_segment_stagger: float = 2.0
 
 
 @dataclass
@@ -386,6 +463,357 @@ class RateLimitBypassConfig:
 
 
 @dataclass
+class CaptionFallbackConfig:
+    """Configuration for caption extraction fallback tiers.
+
+    When yt-dlp is rate-limited, these fallback methods are tried in order:
+    1. youtube-transcript-api (different endpoint)
+    2. Direct Innertube/timedtext fetch
+    3. Invidious API
+    4. Piped API
+    5. Whisper ASR (last resort)
+    """
+    # Tier 2: youtube-transcript-api
+    transcript_api_enabled: bool = True
+    preferred_languages: List[str] = field(default_factory=lambda: ["en", "en-US", "en-GB", "en-AU"])
+
+    # Tier 3: Direct Innertube/timedtext
+    innertube_enabled: bool = True
+    innertube_timeout: int = 30
+
+    # Tier 4: Invidious API
+    invidious_enabled: bool = True
+    invidious_instances: List[str] = field(default_factory=list)  # Empty = use defaults
+    invidious_timeout: int = 30
+    invidious_cooldown: int = 300  # Seconds to cooldown failed instances
+
+    # Tier 5: Piped API
+    piped_enabled: bool = True
+    piped_instances: List[str] = field(default_factory=list)  # Empty = use defaults
+    piped_timeout: int = 30
+
+    # Tier 6: Whisper ASR fallback
+    whisper_fallback_enabled: bool = True
+
+
+@dataclass
+class VideoFallbackConfig:
+    """Configuration for video download fallback tiers.
+
+    When yt-dlp is rate-limited, these fallback methods are tried in order:
+    1. Invidious API (direct stream URLs)
+    2. Piped API (direct stream URLs)
+    3. Cobalt API (self-hosted, optional)
+    """
+    # Tier 2: Invidious streams
+    invidious_enabled: bool = True
+    invidious_instances: List[str] = field(default_factory=list)  # Empty = use defaults
+    invidious_preferred_quality: str = "720p"
+    invidious_timeout: int = 30
+    invidious_cooldown: int = 300
+
+    # Tier 3: Piped streams
+    piped_enabled: bool = True
+    piped_instances: List[str] = field(default_factory=list)  # Empty = use defaults
+    piped_timeout: int = 30
+
+    # Tier 4: Cobalt API (optional, requires self-hosting)
+    cobalt_enabled: bool = False
+    cobalt_url: str = ""  # e.g., "http://localhost:9000"
+
+
+@dataclass
+class FallbackBehaviorConfig:
+    """Configuration for fallback behavior and adaptive switching."""
+    # Skip yt-dlp after N consecutive failures (use fallbacks directly)
+    skip_ytdlp_after_consecutive_failures: int = 3
+
+    # Cooldown before retrying yt-dlp after failures (seconds)
+    ytdlp_cooldown_seconds: int = 600  # 10 minutes
+
+    # Log tier statistics at end of pipeline
+    log_tier_stats: bool = True
+
+    # Reset failure counters at start of each project
+    reset_per_project: bool = True
+
+
+@dataclass
+class ProxySourceConfig:
+    """Configuration for a single proxy source."""
+    # Type: url, socks5, http, https, list, env
+    type: str = "url"
+
+    # For url/socks5/http/https types: the proxy URL
+    url: str = ""
+
+    # For list type: path to file with proxy URLs (one per line)
+    file: str = ""
+
+    # For env type: environment variable name
+    env: str = ""
+
+
+@dataclass
+class ProxyConfig:
+    """Configuration for proxy rotation.
+
+    Proxies are used to rotate IP addresses when encountering rate limits.
+    Supports HTTP, HTTPS, and SOCKS5 proxies including VPN SOCKS5 endpoints.
+
+    Example configuration in config.yaml:
+        download:
+          fallback:
+            proxy:
+              enabled: true
+              rotation_strategy: weighted
+              health_check_on_startup: true
+              sources:
+                - type: socks5
+                  url: "socks5://127.0.0.1:1080"  # NordVPN/Mullvad SOCKS5
+                - type: list
+                  file: "proxies.txt"
+    """
+    # Enable/disable proxy rotation
+    enabled: bool = False
+
+    # Rotate proxy on rate limit (429)
+    rotation_on_429: bool = True
+
+    # Rotate proxy on connection errors
+    rotation_on_error: bool = True
+
+    # Cooldown time for failed proxies (seconds)
+    cooldown_seconds: float = 300.0
+
+    # Maximum consecutive failures before marking proxy as dead
+    max_failures: int = 3
+
+    # Proxy sources (list of ProxySourceConfig)
+    sources: List[dict] = field(default_factory=list)
+
+    # === NEW: Health check settings ===
+    # Run health check on all proxies at startup
+    health_check_on_startup: bool = True
+
+    # Timeout for health check requests (seconds)
+    health_check_timeout: float = 10.0
+
+    # URL to test proxy connectivity (YouTube for our use case)
+    health_check_url: str = "https://www.youtube.com/robots.txt"
+
+    # === NEW: Smart selection settings ===
+    # Rotation strategy: round_robin, weighted, random, least_used
+    rotation_strategy: str = "round_robin"
+
+    # Use smart selection (weight by success rate + latency)
+    smart_selection: bool = True
+
+    # Remove proxies with success rate below this threshold
+    min_success_rate: float = 0.3
+
+    # === NEW: Persistence settings ===
+    # Save proxy statistics between runs
+    persist_state: bool = True
+
+    # Path to state file (relative to project or absolute)
+    state_file: str = ".cache/proxy_state.json"
+
+    # === NEW: IP cooldown tracking ===
+    # Time to wait before reusing a rate-limited IP (seconds)
+    ip_cooldown_seconds: float = 300.0
+
+    # Track IPs across proxy changes (same IP via different proxies)
+    track_ips_globally: bool = True
+
+
+@dataclass
+class VPNConfig:
+    """Configuration for VPN CLI integration.
+
+    Supports NordVPN, Mullvad, ProtonVPN, and other CLI-based VPN tools.
+    Used for IP rotation when proxies aren't sufficient or available.
+
+    Example configuration in config.yaml:
+        download:
+          fallback:
+            vpn:
+              enabled: true
+              provider: nordvpn
+              preferred_countries: ["US", "UK", "CA"]
+    """
+    # Enable/disable VPN management
+    enabled: bool = False
+
+    # VPN provider: nordvpn, mullvad, protonvpn, wireguard, auto
+    # "auto" will detect installed VPN CLI tools
+    provider: str = "auto"
+
+    # Preferred countries for rotation (cycled through)
+    preferred_countries: List[str] = field(default_factory=lambda: ["US", "UK", "CA", "DE", "NL"])
+
+    # Minimum seconds between VPN rotations
+    rotation_cooldown: float = 30.0
+
+    # Maximum VPN rotations per hour
+    max_rotations_per_hour: int = 10
+
+    # Rotate VPN on rate limit (429)
+    rotation_on_429: bool = True
+
+    # Auto-connect on pipeline start
+    auto_connect: bool = False
+
+    # Disconnect on pipeline end
+    auto_disconnect: bool = False
+
+
+@dataclass
+class TorConfig:
+    """Configuration for Tor SOCKS proxy and circuit management.
+
+    Tor provides anonymous IP rotation via the onion network.
+    Unlike VPN, Tor can refresh circuits (get new exit IP) without
+    disconnecting, making it ideal for rate limit bypass.
+
+    Requires Tor to be running with control port enabled:
+        tor --SocksPort 9050 --ControlPort 9051
+
+    Example configuration in config.yaml:
+        download:
+          fallback:
+            tor:
+              enabled: true
+              auto_refresh_circuit: true
+              refresh_after_requests: 50
+    """
+    # Enable/disable Tor integration
+    enabled: bool = False
+
+    # Tor SOCKS5 proxy port
+    socks_port: int = 9050
+
+    # Tor control port for circuit management
+    control_port: int = 9051
+
+    # Control port password (empty = no auth or cookie auth)
+    control_password: str = ""
+
+    # Automatically refresh circuit periodically
+    auto_refresh_circuit: bool = True
+
+    # Refresh circuit after N requests through Tor
+    refresh_after_requests: int = 50
+
+    # Refresh circuit immediately on rate limit (429)
+    refresh_on_rate_limit: bool = True
+
+    # Minimum seconds between circuit refreshes (Tor recommends 10s)
+    min_refresh_interval: float = 10.0
+
+    # Use Tor as fallback when all other proxies exhausted
+    use_as_fallback: bool = True
+
+
+@dataclass
+class CookieAccountConfig:
+    """Configuration for a single cookie account."""
+    # Account label (for logging)
+    label: str = ""
+
+    # Path to cookies.txt file (relative to cookies_dir)
+    cookies_path: str = ""
+
+    # Browser to extract cookies from (alternative to cookies_path)
+    # Options: firefox, chrome, edge, brave
+    browser: str = ""
+
+
+@dataclass
+class CookieRotationConfig:
+    """Configuration for cookie rotation to bypass YouTube rate limits.
+
+    Rotates between multiple YouTube account cookies to distribute rate limit
+    load and avoid account-level blocking. Default behavior rotates after
+    EVERY request (success or failure) to proactively distribute load.
+
+    Example configuration in config.yaml:
+        download:
+          cookie_rotation:
+            enabled: true
+            cookies_dir: "cookies"
+            rotate_on_success: true
+            accounts:
+              - label: "main"
+                cookies_path: "main.txt"
+              - label: "backup"
+                browser: "firefox"
+    """
+    # Enable/disable cookie rotation
+    enabled: bool = False
+
+    # Directory containing cookie files (relative to project root)
+    cookies_dir: str = "cookies"
+
+    # Rotate after EVERY request (default: True)
+    # When True: main -> backup1 -> backup2 -> main -> ... (round-robin)
+    # When False: Stay on same account until rate limit, then rotate
+    rotate_on_success: bool = True
+
+    # Cooldown time for rate-limited accounts (seconds)
+    cooldown_seconds: int = 300
+
+    # Cookie accounts
+    accounts: List[Dict] = field(default_factory=list)
+
+
+@dataclass
+class FallbackConfig:
+    """Configuration for download fallback system.
+
+    Enables automatic fallback to alternative caption and video sources
+    when yt-dlp encounters rate limits (HTTP 429) or other errors.
+
+    Also supports proxy rotation and VPN integration for IP rotation.
+    """
+    # Master enable/disable
+    enabled: bool = True
+
+    # Caption extraction fallbacks
+    caption: CaptionFallbackConfig = field(default_factory=CaptionFallbackConfig)
+
+    # Video download fallbacks
+    video: VideoFallbackConfig = field(default_factory=VideoFallbackConfig)
+
+    # Behavior settings
+    behavior: FallbackBehaviorConfig = field(default_factory=FallbackBehaviorConfig)
+
+    # Proxy rotation settings
+    proxy: ProxyConfig = field(default_factory=ProxyConfig)
+
+    # VPN management settings
+    vpn: VPNConfig = field(default_factory=VPNConfig)
+
+    # Tor circuit management settings
+    tor: TorConfig = field(default_factory=TorConfig)
+
+    def __post_init__(self):
+        """Convert nested dicts to proper dataclass instances."""
+        if isinstance(self.caption, dict):
+            self.caption = CaptionFallbackConfig(**self.caption)
+        if isinstance(self.video, dict):
+            self.video = VideoFallbackConfig(**self.video)
+        if isinstance(self.behavior, dict):
+            self.behavior = FallbackBehaviorConfig(**self.behavior)
+        if isinstance(self.proxy, dict):
+            self.proxy = ProxyConfig(**self.proxy)
+        if isinstance(self.vpn, dict):
+            self.vpn = VPNConfig(**self.vpn)
+        if isinstance(self.tor, dict):
+            self.tor = TorConfig(**self.tor)
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -417,6 +845,7 @@ class DownloadConfig:
     min_views: int = 0
     delete_original: bool = True  # Delete original after transcode
     delay_between_keywords: float = 1.0
+    delay_between_downloads: float = 10.0  # Delay between individual video downloads (prevents YouTube rate limiting)
 
     # Title blacklist - skip videos containing these terms (case-insensitive)
     # Applied to BOTH title AND channel name for comprehensive filtering
@@ -512,6 +941,14 @@ class DownloadConfig:
     # Rate limit bypass configuration
     rate_limit_bypass: RateLimitBypassConfig = field(default_factory=RateLimitBypassConfig)
 
+    # Fallback configuration for when yt-dlp is rate-limited
+    # Enables automatic fallback to alternative caption and video sources
+    fallback: FallbackConfig = field(default_factory=FallbackConfig)
+
+    # Cookie rotation for rate limit bypass
+    # Rotates between multiple YouTube account cookies to distribute load
+    cookie_rotation: CookieRotationConfig = field(default_factory=CookieRotationConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -530,6 +967,10 @@ class DownloadConfig:
             self.speech_screening = SpeechScreeningConfig(**self.speech_screening)
         if isinstance(self.rate_limit_bypass, dict):
             self.rate_limit_bypass = RateLimitBypassConfig(**self.rate_limit_bypass)
+        if isinstance(self.fallback, dict):
+            self.fallback = FallbackConfig(**self.fallback)
+        if isinstance(self.cookie_rotation, dict):
+            self.cookie_rotation = CookieRotationConfig(**self.cookie_rotation)
 
 
 @dataclass

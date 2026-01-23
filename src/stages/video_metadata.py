@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage
+from ..downloader.search_cache import YouTubeSearchCache
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -103,14 +104,34 @@ class VideoMetadataStage(Stage):
             return StageResult.ok({'skipped': True, 'reason': 'no_keywords'}, warnings)
 
         try:
+            # Initialize caption cache for pre-filtering videos with known no-captions
+            from ..cache import CaptionCache
+            cache_dir = Path(config.download.root_dir if hasattr(config.download, 'root_dir') else '.cache') / 'captions'
+            self._caption_cache = CaptionCache(cache_dir=cache_dir)
+            no_caption_count = sum(1 for key in self._caption_cache.index if self._caption_cache.has_no_captions(key))
+            self._total_skipped_no_captions = 0  # Track total skipped for summary
+            if no_caption_count > 0:
+                logger.info(f"[pre-filter] Loaded negative caption cache: {no_caption_count} videos known to have no captions")
+                logger.info(f"[pre-filter] These videos will be automatically skipped during candidate selection")
+            else:
+                logger.debug(f"[pre-filter] No negative caption cache entries found")
+
             # Setup cookie args for yt-dlp
             self._setup_cookies(config)
 
             # Get duration tier config
             tier_config = self._get_tier_config(config)
 
+            # Initialize search cache for skipping already-searched keywords
+            search_cache_dir = Path(config.download.root_dir if hasattr(config.download, 'root_dir') else '.cache')
+            self._search_cache = YouTubeSearchCache(cache_dir=search_cache_dir)
+
+            # Check if bypass_search_cache is set (for iterative recovery mode)
+            bypass_cache = getattr(config.download, 'bypass_search_cache', False)
+
             # Process each keyword
             total_candidates = 0
+            cache_hits = 0
             keywords = state.keywords
             topic = state.topic_context or ""
 
@@ -118,6 +139,20 @@ class VideoMetadataStage(Stage):
             logger.info(f"VIDEO_METADATA: Searching {len(keywords)} keywords for video candidates")
 
             for i, keyword in enumerate(keywords):
+                # Check search cache first (unless bypassed)
+                if not bypass_cache:
+                    cached_ids = self._search_cache.get(keyword, tier='metadata', max_age_days=7)
+                    if cached_ids:
+                        cache_hits += 1
+                        logger.info(f"  [{i+1}/{len(keywords)}] CACHE HIT: {keyword} ({len(cached_ids)} videos)")
+                        # Convert cached IDs to VideoCandidate objects
+                        candidates = self._ids_to_candidates(cached_ids, keyword, config)
+                        if candidates:
+                            self._add_candidates_to_state(candidates, state)
+                            total_candidates += len(candidates)
+                            logger.info(f"    Restored {len(candidates)} candidates from cache")
+                        continue
+
                 print(f"  >> [{i+1}/{len(keywords)}] Searching: {keyword}")
                 logger.info(f"  [{i+1}/{len(keywords)}] Searching: {keyword}")
 
@@ -128,16 +163,41 @@ class VideoMetadataStage(Stage):
                     config=config
                 )
 
+                # Cache the results for future runs
+                if candidates and not bypass_cache:
+                    video_ids = [c.video_id for c in candidates]
+                    self._search_cache.set(keyword, tier='metadata', video_ids=video_ids)
+
                 if candidates:
                     # Add to state, avoiding duplicates by video_id
+                    # Also skip videos known to have no captions (negative cache)
                     new_count = 0
+                    skipped_no_captions = 0
+                    skipped_duplicate = 0
                     for candidate in candidates:
-                        if not any(vc.video_id == candidate.video_id for vc in state.video_candidates):
-                            state.video_candidates.append(candidate)
-                            new_count += 1
+                        # Skip if already in list
+                        if any(vc.video_id == candidate.video_id for vc in state.video_candidates):
+                            skipped_duplicate += 1
+                            continue
+                        # Skip if known to have no captions
+                        if hasattr(self, '_caption_cache') and self._caption_cache.has_no_captions(candidate.video_id):
+                            skipped_no_captions += 1
+                            logger.debug(f"[pre-filter] SKIP {candidate.video_id}: no captions (negative cache)")
+                            continue
+                        state.video_candidates.append(candidate)
+                        new_count += 1
 
                     total_candidates += new_count
-                    logger.info(f"    Found {len(candidates)} candidates (+{new_count} new, {total_candidates} total)")
+                    self._total_skipped_no_captions = getattr(self, '_total_skipped_no_captions', 0) + skipped_no_captions
+
+                    # Detailed logging
+                    parts = [f"+{new_count} new"]
+                    if skipped_duplicate > 0:
+                        parts.append(f"{skipped_duplicate} dup")
+                    if skipped_no_captions > 0:
+                        parts.append(f"{skipped_no_captions} no-caption")
+                    parts.append(f"{total_candidates} total")
+                    logger.info(f"    Found {len(candidates)} candidates ({', '.join(parts)})")
                 else:
                     warnings.append(f"No candidates found for '{keyword}'")
                     logger.warning(f"    No candidates found for '{keyword}'")
@@ -147,8 +207,29 @@ class VideoMetadataStage(Stage):
                 if i < len(keywords) - 1 and delay > 0:
                     time.sleep(delay)
 
+            # === COMPREHENSIVE LOGGING: VIDEO_METADATA Summary ===
+            total_skipped = getattr(self, '_total_skipped_no_captions', 0)
+            logger.info("=" * 60)
+            logger.info("[video_metadata] VIDEO_METADATA STAGE SUMMARY")
+            logger.info("=" * 60)
+            logger.info(f"[video_metadata] Keywords processed: {len(keywords)}")
+            logger.info(f"[video_metadata] Cache hits: {cache_hits}/{len(keywords)} ({100*cache_hits//len(keywords) if keywords else 0}% saved)")
+            logger.info(f"[video_metadata] Unique candidates found: {total_candidates}")
+            if total_skipped > 0:
+                logger.info(f"[video_metadata] Pre-filtered (no captions): {total_skipped}")
+                logger.info(f"[video_metadata]   -> Saved ~{total_skipped * 15}s by skipping known no-caption videos")
+            logger.info("=" * 60)
+
             print(f"  >> Found {total_candidates} unique video candidates")
+            if total_skipped > 0:
+                print(f"  >> Pre-filtered {total_skipped} videos with no captions (from cache)")
             logger.info(f"VIDEO_METADATA complete: {total_candidates} video candidates from {len(keywords)} keywords")
+
+            # Apply LLM title filter if enabled
+            filtered_count = self._apply_llm_filter(state, config, topic)
+            if filtered_count > 0:
+                print(f"  >> LLM filter removed {filtered_count} irrelevant videos, {len(state.video_candidates)} remaining")
+                logger.info(f"LLM title filter: removed {filtered_count}, {len(state.video_candidates)} remaining")
 
             # Return full checkpoint data in StageResult (pipeline saves this)
             checkpoint_data = {
@@ -285,7 +366,7 @@ class VideoMetadataStage(Stage):
             '--dump-json',
             '--flat-playlist',
             '--no-download',
-            '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
+            '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live & !was_live",
         ]
 
         # Add base args (JS runtime for challenge solving) and cookies
@@ -374,6 +455,57 @@ class VideoMetadataStage(Stage):
                 return tier_name
         return 'medium'
 
+    def _ids_to_candidates(
+        self,
+        video_ids: List[str],
+        keyword: str,
+        config: 'Config'
+    ) -> List['VideoCandidate']:
+        """
+        Convert cached video IDs to VideoCandidate objects.
+
+        Creates lightweight candidates from cached IDs. These have minimal
+        metadata but are sufficient for the pipeline to proceed.
+        """
+        from ..state import VideoCandidate
+
+        candidates = []
+        for video_id in video_ids:
+            candidates.append(VideoCandidate(
+                video_id=video_id,
+                url=f"https://www.youtube.com/watch?v={video_id}",
+                title='',  # Will be fetched during caption stage
+                channel='',
+                duration=0,  # Unknown from cache
+                duration_tier='medium',
+                keyword=keyword,
+                upload_date='',
+            ))
+        return candidates
+
+    def _add_candidates_to_state(
+        self,
+        candidates: List['VideoCandidate'],
+        state: 'PipelineState'
+    ) -> int:
+        """
+        Add candidates to state, avoiding duplicates.
+
+        Returns number of new candidates added.
+        """
+        new_count = 0
+        for candidate in candidates:
+            # Skip if already in list
+            if any(vc.video_id == candidate.video_id for vc in state.video_candidates):
+                continue
+            # Skip if known to have no captions
+            if hasattr(self, '_caption_cache') and self._caption_cache.has_no_captions(candidate.video_id):
+                logger.debug(f"[pre-filter] SKIP {candidate.video_id}: no captions (negative cache)")
+                continue
+            state.video_candidates.append(candidate)
+            new_count += 1
+        return new_count
+
     def _get_caption_first_config(self, config: 'Config'):
         """Get caption_first config section."""
         download_config = getattr(config, 'download', None)
@@ -413,3 +545,195 @@ class VideoMetadataStage(Stage):
         """Setup cookie arguments for yt-dlp."""
         from ..downloader.utils import get_cookies_args
         self._cookies_args = get_cookies_args(config)
+
+    def _apply_llm_filter(
+        self,
+        state: 'PipelineState',
+        config: 'Config',
+        topic: str
+    ) -> int:
+        """
+        Apply LLM title filter to video candidates.
+
+        This filters out videos with irrelevant titles using an LLM to assess
+        relevance to the topic context.
+
+        Args:
+            state: Pipeline state with video_candidates
+            config: Config with download.llm_title_filter settings
+            topic: Topic context for relevance checking
+
+        Returns:
+            Number of candidates removed
+        """
+        # Check if LLM filter is enabled
+        download_config = getattr(config, 'download', None)
+        if not download_config:
+            return 0
+
+        llm_config = getattr(download_config, 'llm_title_filter', None)
+        if not llm_config or not getattr(llm_config, 'enabled', False):
+            logger.debug("LLM title filter disabled, skipping")
+            return 0
+
+        if not state.video_candidates:
+            return 0
+
+        original_count = len(state.video_candidates)
+
+        # Convert VideoCandidate objects to dicts for the filter
+        video_dicts = []
+        for vc in state.video_candidates:
+            video_dicts.append({
+                'id': vc.video_id,
+                'title': vc.title or '',
+                'channel': vc.channel or '',
+                'duration': vc.duration or 0,
+                'keyword': vc.keyword or '',
+            })
+
+        # Get filter settings
+        provider = getattr(llm_config, 'provider', 'gemini')
+        model = getattr(llm_config, 'model', 'gemini-2.0-flash')
+        min_relevance = getattr(llm_config, 'min_relevance', 0.5)
+        batch_size = getattr(llm_config, 'batch_size', 20)
+
+        # Process in batches
+        approved_ids = set()
+
+        for i in range(0, len(video_dicts), batch_size):
+            batch = video_dicts[i:i + batch_size]
+            batch_approved = self._filter_batch_with_llm(
+                batch, topic, provider, model, min_relevance
+            )
+            approved_ids.update(batch_approved)
+
+        # Filter state.video_candidates to only approved ones
+        state.video_candidates = [
+            vc for vc in state.video_candidates
+            if vc.video_id in approved_ids
+        ]
+
+        return original_count - len(state.video_candidates)
+
+    def _filter_batch_with_llm(
+        self,
+        videos: List[Dict],
+        topic: str,
+        provider: str,
+        model: str,
+        min_relevance: float
+    ) -> set:
+        """
+        Filter a batch of videos using LLM.
+
+        Args:
+            videos: List of video dicts with id, title, channel, duration
+            topic: Topic context
+            provider: LLM provider (gemini, anthropic)
+            model: Model name
+            min_relevance: Minimum relevance score (0-1)
+
+        Returns:
+            Set of approved video IDs
+        """
+        import json as json_module
+
+        if not videos:
+            return set()
+
+        # Build video data string
+        video_lines = []
+        for v in videos:
+            line = f"- ID: {v['id']} | Title: {v['title']}"
+            if v.get('channel'):
+                line += f" | Channel: {v['channel']}"
+            if v.get('duration'):
+                line += f" | Duration: {v['duration']}s"
+            video_lines.append(line)
+
+        video_data = '\n'.join(video_lines)
+
+        prompt = f"""You are filtering YouTube videos for a documentary/educational video project.
+
+TOPIC: {topic if topic else 'General educational content'}
+
+VIDEO DATA:
+{video_data}
+
+For each video, rate relevance from 0.0 to 1.0 (higher = more relevant footage for the topic).
+
+REJECT (relevance=0) videos that are:
+- Audio tests, frequency tests, white noise, ASMR, sleep sounds
+- Live streams, webcams, 24/7 streams, ambient cameras
+- Music videos, lyric videos, karaoke, song covers
+- Gaming content, Let's Play, walkthroughs, game clips
+- Reaction videos, commentary on other videos
+- Compilation of memes, fails, or unrelated clips
+- Videos completely unrelated to the topic
+
+ACCEPT (relevance>0.5) videos with:
+- Documentary footage, news reports about the topic
+- Educational content, explainers, analysis
+- Relevant B-roll footage (establishments, locations, events)
+- Interviews, discussions related to the topic
+
+Return a JSON array of objects with "id" and "relevance" (0.0-1.0).
+Example: [{{"id": "abc123", "relevance": 0.8}}, {{"id": "xyz789", "relevance": 0.0}}]
+
+ONLY return the JSON array, no other text."""
+
+        try:
+            # Use LLM client
+            from ..llm_client import create_client, LLMRequest, ResponseFormat
+
+            client = create_client(provider=provider, model=model)
+            request = LLMRequest(
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.1,
+                response_format=ResponseFormat.JSON_ARRAY,
+                cache_key_prefix="title_filter",
+                use_cache=True
+            )
+            response = client.generate(request)
+
+            if not response or not response.text:
+                logger.warning("LLM filter returned empty response, approving all")
+                return {v['id'] for v in videos}
+
+            # Parse JSON response
+            # Extract JSON array from response (handle markdown code blocks)
+            response_text = response.text.strip()
+            if response_text.startswith('```'):
+                # Remove markdown code block
+                lines = response_text.split('\n')
+                response_text = '\n'.join(
+                    line for line in lines
+                    if not line.startswith('```')
+                )
+
+            results = json_module.loads(response_text)
+
+            # Extract approved IDs
+            approved = set()
+            for item in results:
+                if isinstance(item, dict):
+                    vid_id = item.get('id', '')
+                    relevance = item.get('relevance', 0)
+                    if relevance >= min_relevance:
+                        approved.add(vid_id)
+                    else:
+                        logger.debug(f"    Filtered: {vid_id} (relevance={relevance:.2f})")
+
+            logger.info(f"    LLM filter: {len(approved)}/{len(videos)} approved (min_relevance={min_relevance})")
+            return approved
+
+        except json_module.JSONDecodeError as e:
+            logger.warning(f"Failed to parse LLM filter response: {e}")
+            # On parse error, approve all to avoid data loss
+            return {v['id'] for v in videos}
+        except Exception as e:
+            logger.warning(f"LLM filter error: {e}")
+            # On error, approve all to avoid data loss
+            return {v['id'] for v in videos}

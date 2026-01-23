@@ -690,6 +690,56 @@ def main():
         pipeline.checkpoint.mark_stage_incomplete('MATCH')
         print(f"\n  🔄 Force rematch: Marked MATCH stage incomplete")
 
+    # Handle high matches mode
+    if getattr(args, 'high_matches', False):
+        import logging
+        hmm_logger = logging.getLogger('high_matches_mode')
+
+        print(f"\n  [VALIDATION] High Matches Mode flag detected")
+        hmm_logger.info("[high_matches] CLI flag --high-matches detected")
+
+        # Enable high matches mode in config (handle dict/object config - Rule 6)
+        hmm_config = config.matching.high_matches_mode
+        hmm_logger.info(f"[high_matches] Config type: {type(hmm_config)}")
+        hmm_logger.info(f"[high_matches] Config before: enabled={getattr(hmm_config, 'enabled', hmm_config.get('enabled', 'N/A') if isinstance(hmm_config, dict) else 'N/A')}")
+
+        if isinstance(hmm_config, dict):
+            hmm_config['enabled'] = True
+        else:
+            hmm_config.enabled = True
+
+        # Override target confidence if specified
+        if getattr(args, 'target_confidence', None):
+            hmm_logger.info(f"[high_matches] Overriding target_confidence: {args.target_confidence}")
+            if isinstance(hmm_config, dict):
+                hmm_config['target_confidence'] = args.target_confidence
+            else:
+                hmm_config.target_confidence = args.target_confidence
+
+        # Override coverage target if specified
+        if getattr(args, 'coverage_target', None):
+            hmm_logger.info(f"[high_matches] Overriding coverage_target: {args.coverage_target}")
+            if isinstance(hmm_config, dict):
+                hmm_config['coverage_target'] = args.coverage_target
+            else:
+                hmm_config.coverage_target = args.coverage_target
+
+        # Print confirmation
+        target = hmm_config.get('target_confidence', 0.90) if isinstance(hmm_config, dict) else hmm_config.target_confidence
+        coverage = hmm_config.get('coverage_target', 0.85) if isinstance(hmm_config, dict) else hmm_config.coverage_target
+        max_iter = hmm_config.get('max_iterations', 3) if isinstance(hmm_config, dict) else hmm_config.max_iterations
+        enabled = hmm_config.get('enabled', False) if isinstance(hmm_config, dict) else hmm_config.enabled
+
+        hmm_logger.info(f"[high_matches] Config after:")
+        hmm_logger.info(f"[high_matches]   enabled: {enabled}")
+        hmm_logger.info(f"[high_matches]   target_confidence: {target}")
+        hmm_logger.info(f"[high_matches]   coverage_target: {coverage}")
+        hmm_logger.info(f"[high_matches]   max_iterations: {max_iter}")
+
+        print(f"\n  🎯 High Matches Mode: target={target:.0%} confidence, {coverage:.0%} coverage")
+        print(f"     Max iterations: {max_iter}")
+        print(f"     Dedicated log: output/logs/high_matches_*.log")
+
     # Handle refresh entities
     if getattr(args, 'refresh_entities', False):
         pipeline.checkpoint.refresh_entities = True
@@ -743,6 +793,31 @@ def main():
                         print(f"  ⚠ {remaining_count} issue(s) could not be auto-fixed")
             else:
                 print(f"  ✓ All preflight checks passed")
+
+    # Ensure PO Token server is running (required for YouTube access)
+    # Check if caption-first mode or audio-first mode is enabled (both need YouTube access)
+    caption_first_enabled = getattr(config.download, 'caption_first', None)
+    if caption_first_enabled:
+        caption_first_enabled = getattr(caption_first_enabled, 'enabled', False)
+    audio_first_enabled = getattr(config.download, 'audio_first', None)
+    if audio_first_enabled:
+        audio_first_enabled = getattr(audio_first_enabled, 'enabled', False)
+
+    if caption_first_enabled or audio_first_enabled or not keyword_mode_active:
+        try:
+            from src.pot_utils.pot_server import ensure_pot_server, get_pot_server_status
+            status = get_pot_server_status()
+            if status['script_exists']:
+                print(f"\n  🔑 Checking PO Token server...")
+                if ensure_pot_server():
+                    print(f"  ✓ PO Token server running on {status['host']}:{status['port']}")
+                else:
+                    print(f"  ⚠ PO Token server not available - YouTube may rate-limit requests")
+                    print(f"    Start manually: node {status['script_path']}")
+            else:
+                logger.debug("PO Token server not installed, skipping check")
+        except Exception as e:
+            logger.debug(f"PO Token server check failed: {e}")
 
     # Run the pipeline
     if runner:

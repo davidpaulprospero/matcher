@@ -13,6 +13,8 @@ __all__ = [
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
     'ChapterDetectionConfig',
+    'PremiseScoringConfig',
+    'HighMatchesModeConfig',
     'MatchingConfig',
 ]
 
@@ -96,6 +98,84 @@ class ChapterDetectionConfig:
     min_chapter_confidence: float = 0.5  # Filter low-confidence chapters
     min_chapter_segments: int = 3  # Minimum segments per chapter
     max_chapters: int = 20  # Maximum chapters to detect
+
+
+@dataclass
+class PremiseScoringConfig:
+    """Premise-based scoring configuration.
+
+    Enables matching based on video theme/topic instead of literal transcript.
+    Each video gets an LLM-generated premise summary that describes its
+    content type and subject matter.
+
+    Example premises:
+    - "Documentary about fast food restaurant closures"
+    - "Music lyric video for a love song"
+    - "Stock footage of urban cityscapes at night"
+
+    New scoring weights (premise-enabled):
+    - premise_weight: 50%
+    - keyword_weight: 25%
+    - embedding_weight: 15%
+    - transcript_weight: 10%
+    """
+    enabled: bool = True
+
+    # Scoring weights (should sum to 1.0)
+    premise_weight: float = 0.50      # Video theme ↔ voiceover topic
+    keyword_weight: float = 0.25      # Keywords in common
+    embedding_weight: float = 0.15    # Semantic similarity
+    transcript_weight: float = 0.10   # Word-for-word (reduced from 40%)
+
+    # Two-stage premise comparison
+    embedding_filter: bool = True     # Fast filtering via premise embeddings
+    llm_rerank: bool = True           # LLM scoring for top candidates
+    llm_rerank_top_n: int = 10        # Send top N to LLM for premise scoring
+
+    # LLM settings for premise extraction
+    provider: str = "gemini"
+    model: str = "gemini-2.0-flash"
+
+    # Minimum premise match score (0-1) to consider a video
+    min_premise_score: float = 0.2
+
+
+@dataclass
+class HighMatchesModeConfig:
+    """High matches mode - iterative matching until target confidence achieved.
+
+    When enabled, the pipeline will:
+    1. Run initial matching
+    2. Analyze coverage (% of segments at target confidence)
+    3. If coverage < target, generate recovery keywords for weak segments
+    4. Download new videos based on recovery keywords
+    5. Re-run matching with expanded video pool
+    6. Repeat until coverage target met or max iterations reached
+
+    Usage:
+        python main.py --voiceover script.srt --project path --high-matches
+        python main.py --target-confidence 0.90 --coverage-target 0.85
+    """
+    enabled: bool = False
+
+    # Target confidence threshold - segments must score this high to be "good"
+    target_confidence: float = 0.90
+
+    # Coverage target - what percentage of segments must hit target_confidence
+    coverage_target: float = 0.85
+
+    # Maximum iterations before giving up
+    max_iterations: int = 3
+
+    # Videos to download per iteration
+    videos_per_iteration: int = 10
+
+    # Keyword strategy for recovery
+    # - llm: Use LLM to generate search-optimized keywords (best quality)
+    # - weak_segments: Extract keywords from weak segment text (simple)
+    # - diversify: Find different angles/topics not yet covered
+    # - both: Combine weak_segments and diversify
+    keyword_strategy: str = "llm"
 
 
 @dataclass
@@ -209,6 +289,12 @@ class MatchingConfig:
     # Enhanced chapter detection
     chapter_detection: ChapterDetectionConfig = None
 
+    # Premise-based scoring (topic/theme matching)
+    premise_scoring: PremiseScoringConfig = None
+
+    # High matches mode - iterative matching until target confidence
+    high_matches_mode: HighMatchesModeConfig = None
+
     def __post_init__(self):
         if self.location_matching is None:
             self.location_matching = LocationMatchingConfig()
@@ -219,3 +305,13 @@ class MatchingConfig:
             self.chapter_detection = ChapterDetectionConfig()
         elif isinstance(self.chapter_detection, dict):
             self.chapter_detection = ChapterDetectionConfig(**self.chapter_detection)
+
+        if self.premise_scoring is None:
+            self.premise_scoring = PremiseScoringConfig()
+        elif isinstance(self.premise_scoring, dict):
+            self.premise_scoring = PremiseScoringConfig(**self.premise_scoring)
+
+        if self.high_matches_mode is None:
+            self.high_matches_mode = HighMatchesModeConfig()
+        elif isinstance(self.high_matches_mode, dict):
+            self.high_matches_mode = HighMatchesModeConfig(**self.high_matches_mode)

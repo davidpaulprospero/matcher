@@ -32,6 +32,7 @@ from .utils import (
 )
 from .types import CacheStats, CacheConfig
 from .caption import CaptionCache, CaptionCacheEntry
+from .analyze import AnalyzeCache, AnalyzeResult
 
 __all__ = [
     # Base classes
@@ -41,6 +42,8 @@ __all__ = [
     # Specialized caches
     'CaptionCache',
     'CaptionCacheEntry',
+    'AnalyzeCache',
+    'AnalyzeResult',
 
     # Utilities
     'compute_hash',

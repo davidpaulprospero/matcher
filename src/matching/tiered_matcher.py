@@ -29,6 +29,7 @@ from .scoring import (
     apply_chapter_keyword_boost,
     apply_voiceover_keyword_boost,
     apply_entity_mismatch_penalty,
+    apply_premise_scoring,
 )
 from .location_matching import LocationMatcher
 from .tracking import extract_video_id
@@ -63,7 +64,13 @@ class TieredMatcher:
     - llm_providers.py for LLM interactions
     """
 
-    def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None):
+    def __init__(
+        self,
+        config: Optional['Config'] = None,
+        cache: Optional[CacheManager] = None,
+        video_topics: Optional[Dict[str, VideoTopics]] = None,
+        video_premises: Optional[Dict[str, str]] = None
+    ):
         """
         Initialize TieredMatcher.
 
@@ -71,10 +78,12 @@ class TieredMatcher:
             config: Configuration object (uses get_config() if None)
             cache: Cache manager for LLM responses
             video_topics: Dict mapping video paths to VideoTopics for chapter matching
+            video_premises: Dict mapping video_id to premise string for theme-based matching
         """
         self.config = config or get_config()
         self.cache = cache
         self.video_topics = video_topics or {}
+        self.video_premises = video_premises or {}
         mc = self.config.matching
 
         # Matching thresholds
@@ -186,6 +195,19 @@ class TieredMatcher:
         self.known_entities = entities or []
         if self.known_entities:
             logger.info(f"Set {len(self.known_entities)} known entities for voiceover keyword boost")
+
+    def set_video_premises(self, premises: Dict[str, str]):
+        """Set video premises for theme-based matching.
+
+        Each video gets a premise summary (e.g., "Documentary about restaurant closures")
+        that enables matching based on video theme instead of literal transcript.
+
+        Args:
+            premises: Dict mapping video_id to premise string
+        """
+        self.video_premises = premises or {}
+        if self.video_premises:
+            logger.info(f"Set {len(self.video_premises)} video premises for theme-based matching")
 
     # Listicle chapter methods (new chapter detection system)
     def set_listicle_chapters(self, chapters: List['DetectedChapter']):
@@ -427,6 +449,21 @@ class TieredMatcher:
             # Re-sort by adjusted scores
             boosted_candidates.sort(key=lambda x: x[1], reverse=True)
             valid_candidates = boosted_candidates
+
+        # Apply premise-based scoring to candidates BEFORE LLM selection
+        # Premise scoring replaces word-for-word matching with theme-based matching
+        premise_config = getattr(mc, 'premise_scoring', None)
+        if self.video_premises and premise_config and getattr(premise_config, 'enabled', False):
+            premise_scored_candidates = []
+            for seg, sim in valid_candidates:
+                blended_score, premise_score, premise_reason = apply_premise_scoring(
+                    sim, vo_segment, seg, self.video_premises, premise_config
+                )
+                premise_scored_candidates.append((seg, blended_score))
+            # Re-sort by premise-blended scores
+            premise_scored_candidates.sort(key=lambda x: x[1], reverse=True)
+            valid_candidates = premise_scored_candidates
+            logger.debug(f"  Applied premise scoring to {len(valid_candidates)} candidates")
 
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
@@ -980,7 +1017,7 @@ class TieredMatcher:
 
         low_confidence = [
             (i, m) for i, m in enumerate(matches)
-            if m.primary_match.confidence < self.config.matching.ambiguous_threshold
+            if m.primary_match and m.primary_match.confidence < self.config.matching.ambiguous_threshold
         ]
 
         if not low_confidence:

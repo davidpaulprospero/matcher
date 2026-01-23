@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage
+from ..cache import AnalyzeCache, AnalyzeResult
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -66,6 +67,20 @@ class AnalyzeStage(Stage):
 
             print(f"\n  ─── Stage 1: ANALYZE VOICEOVER ───")
 
+            # Initialize analyze cache in project directory
+            project_dir = getattr(state, 'project_dir', None)
+            if project_dir:
+                cache_dir = Path(project_dir) / ".cache" / "analyze"
+            else:
+                cache_dir = Path(".cache") / "analyze"
+            analyze_cache = AnalyzeCache(cache_dir)
+
+            # Check cache for existing analysis
+            cached_result = analyze_cache.get_by_file(voiceover_path, config)
+            if cached_result:
+                print(f"  ✓ Using cached analysis for {Path(voiceover_path).name}")
+                return self._restore_from_cache(state, cached_result, config, checkpoint)
+
             # Load voiceover segments
             segments = self._load_voiceover_segments(voiceover_path, config)
             if not segments:
@@ -95,7 +110,9 @@ class AnalyzeStage(Stage):
             chapter_detection_enabled = getattr(chapter_config, 'enabled', True) if chapter_config else True
 
             if chapter_detection_enabled:
-                listicle_chapters = self._detect_listicle_chapters(segments, config)
+                # Pass project_dir for proper cache location
+                project_dir = getattr(state, 'project_dir', None)
+                listicle_chapters = self._detect_listicle_chapters(segments, config, topic, project_dir=project_dir)
                 if listicle_chapters:
                     state.chapters = listicle_chapters
                     state.is_listicle = True
@@ -131,9 +148,10 @@ class AnalyzeStage(Stage):
                 self._print_listicle_summary(state.chapters)
 
             # Prepare checkpoint data
+            segment_dicts_for_cp = [self._segment_to_dict(s) for s in segments]
             checkpoint_data = {
                 'keywords': keywords,
-                'segments': [self._segment_to_dict(s) for s in segments],
+                'segments': segment_dicts_for_cp,
                 'topic_context': topic,
                 'entities': entities,
                 'segment_count': len(segments),
@@ -144,6 +162,19 @@ class AnalyzeStage(Stage):
                 'chapters': [ch.to_dict() for ch in state.chapters] if state.chapters else [],
                 'is_listicle': state.is_listicle,
             }
+
+            # Save to analyze cache for future runs
+            cache_result = AnalyzeResult(
+                keywords=keywords,
+                entities=entities,
+                topic_context=topic,
+                segments=segment_dicts_for_cp,
+                chapters=checkpoint_data['chapters'],
+                is_listicle=state.is_listicle,
+                location_chapters=checkpoint_data['location_chapters'],
+            )
+            analyze_cache.set_by_file(voiceover_path, config, cache_result)
+            print(f"  ✓ Cached analysis for future runs")
 
             return StageResult.ok(checkpoint_data, warnings)
 
@@ -237,6 +268,86 @@ class AnalyzeStage(Stage):
         if not Path(state.voiceover_path).exists():
             return f"Voiceover file not found: {state.voiceover_path}"
         return None
+
+    def _restore_from_cache(
+        self,
+        state: 'PipelineState',
+        cached: 'AnalyzeResult',
+        config: 'Config',
+        checkpoint: 'CheckpointManager'
+    ) -> 'StageResult':
+        """
+        Restore state from cached analysis result.
+
+        This is used when the same voiceover file has been analyzed before
+        with the same config settings.
+        """
+        from ..state import VoiceoverSegment, DetectedChapter
+
+        # Restore segments
+        segments = []
+        for seg_dict in cached.segments:
+            segments.append(VoiceoverSegment(
+                index=seg_dict.get('index', 0),
+                start=seg_dict.get('start', 0.0),
+                end=seg_dict.get('end', 0.0),
+                text=seg_dict.get('text', ''),
+            ))
+        state.voiceover_segments = segments
+
+        # Restore keywords and entities
+        state.keywords = cached.keywords
+        state.extracted_entities = cached.entities
+        state.topic_context = cached.topic_context
+
+        # Restore location chapters
+        state.location_chapters = cached.location_chapters
+
+        # Restore listicle chapters
+        if cached.chapters:
+            state.chapters = [
+                DetectedChapter(
+                    name=ch.get('name', ''),
+                    corrected_name=ch.get('corrected_name', ''),
+                    rank=ch.get('rank'),
+                    start_segment=ch.get('start_segment', 0),
+                    end_segment=ch.get('end_segment', 0),
+                    keywords=ch.get('keywords', []),
+                    description=ch.get('description', '')
+                )
+                for ch in cached.chapters
+            ]
+            state.is_listicle = cached.is_listicle
+            state.chapter_detection_enabled = True
+
+        print(f"  ✓ {len(segments)} segments restored from cache")
+        print(f"  ✓ {len(cached.keywords)} keywords")
+        if cached.topic_context:
+            print(f"  Detected topic: {cached.topic_context}")
+        if cached.entities:
+            print(f"  Entities found: {len(cached.entities)}")
+        if cached.chapters:
+            print(f"  ✓ {len(cached.chapters)} chapters restored")
+
+        # Print summaries
+        self._print_chapter_summary(cached.location_chapters, cached.segments)
+        self._print_entity_summary(cached.entities)
+        if state.chapters:
+            self._print_listicle_summary(state.chapters)
+
+        # Prepare checkpoint data (same format as normal run)
+        checkpoint_data = {
+            'keywords': cached.keywords,
+            'segments': cached.segments,
+            'topic_context': cached.topic_context,
+            'entities': cached.entities,
+            'segment_count': len(cached.segments),
+            'location_chapters': cached.location_chapters,
+            'chapters': cached.chapters,
+            'is_listicle': cached.is_listicle,
+        }
+
+        return StageResult.ok(checkpoint_data, [])
 
     # === Helper Methods ===
 
@@ -425,7 +536,9 @@ class AnalyzeStage(Stage):
     def _detect_listicle_chapters(
         self,
         segments: List['VoiceoverSegment'],
-        config: 'Config'
+        config: 'Config',
+        topic: str = "",
+        project_dir: str = None
     ) -> List['DetectedChapter']:
         """
         Detect listicle/ranking structure using LLM-based chapter detection.
@@ -437,11 +550,19 @@ class AnalyzeStage(Stage):
             from ..chapter_detector import ChapterDetector, detect_chapters
             from ..state import DetectedChapter
             from ..llm_client import create_client_from_config, LLMRequest, ResponseFormat
+            from pathlib import Path
 
             print(f"\n  Detecting listicle/chapter structure...")
 
-            # Create LLM client
-            llm_client = create_client_from_config(config, "gemini")
+            # Create LLM client - use project cache directory
+            # project_dir is passed from the stage's run() method
+            if project_dir:
+                llm_cache_dir = str(Path(project_dir) / ".cache" / "llm_responses")
+            else:
+                # Fallback to config.cache_dir (may be relative)
+                project_cache_dir = getattr(config, 'cache_dir', '.cache')
+                llm_cache_dir = f"{project_cache_dir}/llm_responses"
+            llm_client = create_client_from_config(config, cache_dir=llm_cache_dir)
 
             def llm_call_fn(prompt: str) -> str:
                 request = LLMRequest(
@@ -461,8 +582,8 @@ class AnalyzeStage(Stage):
                 for s in segments
             ]
 
-            # Run detection
-            result = detect_chapters(segment_dicts, llm_call_fn)
+            # Run detection with topic context for better keywords
+            result = detect_chapters(segment_dicts, llm_call_fn, topic=topic)
 
             if not result.is_listicle or not result.chapters:
                 logger.info("No listicle structure detected")
@@ -675,7 +796,7 @@ class AnalyzeStage(Stage):
     ) -> None:
         """Print a detailed summary of detected chapters for verification."""
         if not chapters:
-            print(f"\n  [Chapters] {title}: No chapters detected")
+            # Silently return if no location chapters (listicle chapters printed separately)
             return
 
         print(f"\n  {'-' * 60}")

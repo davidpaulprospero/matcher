@@ -751,6 +751,29 @@ def create_timeline(
         source_file_for_clip = resolved_source
         source_start = adjusted_start
 
+        # Skip empty source files (unmatched segments with 0.0 confidence)
+        # An empty source_file becomes the project directory after Path().resolve()
+        # which causes DaVinci "timecode extents do not match" errors
+        if not source_file_for_clip or not source_file_for_clip.strip():
+            logger.debug(f"Segment {match_idx}: No source file (unmatched), adding gap")
+            gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+            for track in video_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            for track in audio_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            timeline_frames += duration_frames
+            continue
+
         # Skip audio-only files - they cause DaVinci to hang during OTIO import
         # This happens when video segments weren't downloaded for some audio files
         # Also skip files with problematic unicode in path
@@ -1178,8 +1201,10 @@ def create_timeline(
                 actual_vo_path = None
 
         if actual_vo_path:
-            # Create absolute path for voiceover (forward slashes for DaVinci)
+            # Create absolute path for voiceover with file:/// prefix for DaVinci
             abs_vo_path = _to_windows_path(actual_vo_path)
+            if abs_vo_path and len(abs_vo_path) > 1 and abs_vo_path[1] == ':':
+                abs_vo_path = f'file:///{abs_vo_path}'
             vo_folder = Path(actual_vo_path).parent.name
             vo_filename = Path(actual_vo_path).name
             vo_unique_name = f"{vo_folder}_{vo_filename}"
