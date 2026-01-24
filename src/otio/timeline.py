@@ -31,6 +31,11 @@ AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
 # Non-media extensions that can't be imported (subtitles, text, etc.)
 NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
 
+# DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
+# DaVinci OTIO import hangs when total clips exceed ~3130
+CLIP_COUNT_WARNING_THRESHOLD = 2500  # Log warning when approaching limit
+CLIP_COUNT_ERROR_THRESHOLD = 3000    # Log error when likely to fail
+
 
 def _is_audio_only(file_path: str) -> bool:
     """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
@@ -129,6 +134,53 @@ if TYPE_CHECKING:
     from ..utils import MatchResult
 
 logger = logging.getLogger(__name__)
+
+
+def _count_timeline_clips(timeline: otio.schema.Timeline) -> int:
+    """
+    Count total number of clips (non-Gap items) across all tracks.
+
+    This is used to detect when clip count approaches DaVinci Resolve's limit.
+
+    Args:
+        timeline: The OTIO timeline to count clips in
+
+    Returns:
+        Total number of clips (excludes Gaps)
+    """
+    total_clips = 0
+    for track in timeline.tracks:
+        for item in track:
+            if isinstance(item, otio.schema.Clip):
+                total_clips += 1
+    return total_clips
+
+
+def _log_clip_count_warnings(clip_count: int) -> None:
+    """
+    Log warnings if clip count approaches or exceeds DaVinci Resolve limits.
+
+    DaVinci Resolve OTIO import hangs when total clips exceed ~3130.
+    This function logs appropriate warnings to help users avoid this issue.
+
+    Args:
+        clip_count: Total number of clips in the timeline
+    """
+    if clip_count >= CLIP_COUNT_ERROR_THRESHOLD:
+        logger.error(
+            f"Timeline has {clip_count} clips, exceeding safe limit of {CLIP_COUNT_ERROR_THRESHOLD}. "
+            f"DaVinci Resolve may hang during import. Consider using LITE mode (fewer tracks) "
+            f"or splitting the timeline into multiple files."
+        )
+        print(f"  ⚠ CRITICAL: {clip_count} clips exceeds safe limit ({CLIP_COUNT_ERROR_THRESHOLD})")
+        print(f"    → DaVinci Resolve may hang during OTIO import")
+        print(f"    → Consider: LITE mode, fewer tracks, or split timeline")
+    elif clip_count >= CLIP_COUNT_WARNING_THRESHOLD:
+        logger.warning(
+            f"Timeline has {clip_count} clips, approaching DaVinci limit of ~3130. "
+            f"Consider reducing tracks or segments to avoid import issues."
+        )
+        print(f"  ⚠ Warning: {clip_count} clips approaching DaVinci limit (~3130)")
 
 
 def _validate_entity_images(entity_images: Dict) -> Dict:
@@ -1216,5 +1268,11 @@ def create_timeline(
     # Optimize gaps in all tracks (merge consecutive, remove trailing)
     # This improves DaVinci Resolve import performance
     optimize_timeline_gaps(timeline)
+
+    # Check clip count and log warnings if approaching DaVinci Resolve limits
+    # DaVinci OTIO import hangs when total clips exceed ~3130
+    clip_count = _count_timeline_clips(timeline)
+    logger.debug(f"Timeline contains {clip_count} clips across all tracks")
+    _log_clip_count_warnings(clip_count)
 
     return timeline
