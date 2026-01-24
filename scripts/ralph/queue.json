@@ -18,16 +18,17 @@
     "skippedAreas":  [
 
                      ],
-    "currentIndex":  1,
+    "currentIndex":  2,
     "completedAreas":  [
-                           "pipeline"
+                           "pipeline",
+                           "testing"
                        ],
     "session":  {
-                    "startedAt":  "2026-01-25T06:09:46",
-                    "currentStoryId":  "US-003",
-                    "id":  "2026-01-25_060854",
-                    "iterationCount":  5,
-                    "lastActivityAt":  "2026-01-25T07:10:40"
+                    "startedAt":  "2026-01-25T08:00:00",
+                    "currentStoryId":  "US-001",
+                    "id":  "2026-01-25_080000",
+                    "iterationCount":  6,
+                    "lastActivityAt":  "2026-01-25T07:42:29"
                 },
     "networkRetries":  {
                            "lastError":  null,

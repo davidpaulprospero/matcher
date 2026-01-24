@@ -1,7 +1,7 @@
 {
-  "branchName": "ralph/sprint-2",
-  "sprintNumber": 2,
-  "focusArea": "testing",
+  "branchName": "ralph/sprint-3",
+  "sprintNumber": 3,
+  "focusArea": "speed",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
     "testFramework": "pytest",
@@ -12,153 +12,172 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint 2 testing verification test",
+      "title": "Create sprint 3 speed verification test",
       "acceptanceCriteria": [
-        "Create tests/test_sprint_2_testing_verification.py with import checks for all test modules",
-        "Test that tests/test_cli_args.py exists and imports cleanly",
-        "Test that tests/test_cleanup_module.py exists and imports cleanly",
-        "Test that pytest collection succeeds for all new test files",
-        "All verification tests pass with pytest tests/test_sprint_2_testing_verification.py -v --non-interactive",
+        "Create tests/test_sprint_3_speed_verification.py with import checks for speed-related modules",
+        "Test that src/transcription/parallel_processor.py imports cleanly",
+        "Test that src/cache/base.py imports cleanly",
+        "Test that src/embeddings.py imports cleanly",
+        "All verification tests pass with pytest tests/test_sprint_3_speed_verification.py -v --non-interactive",
         "Mark story as passed by setting passes: true in prd.json"
       ],
       "priority": "high",
       "passes": true,
-      "notes": "Created tests/test_sprint_2_testing_verification.py with 16 tests checking file existence, module imports (cli.args, cleanup, agents.watcher, agents.fallback, cli.environment, stages), pytest collection, and conftest markers. Also created test_cli_args.py (32 tests) and test_cleanup_module.py (25 tests) as required. All 73 tests pass."
+      "notes": "Created tests/test_sprint_3_speed_verification.py with 35 tests across 10 test classes covering: parallel_processor imports (6), cache/base imports (6), embeddings imports (4), function signatures (2), BaseCache methods (3), batch sizes (4), CacheEntry (5), EvictionResult (4), verification marker (1)"
     },
     {
       "id": "US-002",
-      "title": "Add CLI argument parser unit tests",
+      "title": "Add parallel download worker count configuration",
       "acceptanceCriteria": [
-        "Create tests/test_cli_args.py with tests for src/cli/args.py",
-        "Test parse_args() returns correct namespace for --voiceover flag",
-        "Test parse_args() returns correct namespace for --project flag",
-        "Test parse_args() handles --match-only and --output-only flags",
-        "Test parse_args() validates mutually exclusive options",
-        "All CLI argument tests pass"
+        "Add download.parallel_workers field to DownloadConfig dataclass in src/config/sections/download.py",
+        "Add parallel_workers: 4 to config.yaml under download section with comment",
+        "Update src/downloader/core.py to use config.download.parallel_workers instead of hardcoded value",
+        "Add unit test in tests/test_downloader_parallel.py verifying worker count is configurable",
+        "Test that setting parallel_workers=8 in config results in 8 workers being used",
+        "All tests pass with pytest tests/test_downloader_parallel.py -v --non-interactive"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added --output-only flag to src/cli/args.py. Added 4 tests for --output-only (flag set, default, with project, combined with match-only). Added TestParseArgumentsMutuallyExclusiveOptions class with 4 tests for conflicting options (--resume/--fresh, --match-only/--output-only, --use-keywords/--save-keywords, --validate-config with others). Total: 41 CLI arg tests pass."
+      "passes": false
     },
     {
       "id": "US-003",
-      "title": "Add cleanup module unit tests",
+      "title": "Add cache statistics tracking to BaseCache",
       "acceptanceCriteria": [
-        "Create tests/test_cleanup_module.py with tests for src/cleanup/",
-        "Test FileDeleter.delete() removes specified file",
-        "Test FileDeleter.delete() handles non-existent file gracefully",
-        "Test AudioCleanup.cleanup() removes temporary audio files",
-        "Test AudioCleanup.cleanup() preserves files outside temp directory",
-        "All cleanup module tests pass"
+        "Add hits, misses, and bytes_saved counters to BaseCache in src/cache/base.py",
+        "Increment hit counter in get() method when cache hit occurs",
+        "Increment miss counter in get() method when cache miss occurs",
+        "Add get_stats() method returning dict with hits, misses, hit_rate, bytes_saved",
+        "Add unit test in tests/test_cache_stats.py verifying stats are tracked correctly",
+        "Test that hit_rate calculation is correct (hits / (hits + misses))"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Test file already existed with 25 comprehensive tests across 7 test classes: TestFileDeleterDeleteFile (4 tests), TestFileDeleterDeleteDirectory (3 tests), TestAudioCleanupResult (2 tests), TestAudioCleanupServiceShouldCleanup (4 tests), TestAudioCleanupServiceCleanup (5 tests), TestAudioCleanupServiceCollectFiles (4 tests), TestAudioCleanupServiceDeleteOrphanedDirectories (3 tests). All tests pass."
+      "passes": false
     },
     {
       "id": "US-004",
-      "title": "Add agents watcher unit tests",
+      "title": "Add embedding batch size validation",
       "acceptanceCriteria": [
-        "Create tests/test_agents/test_watcher.py with tests for WatcherAgent",
-        "Test WatcherAgent.classify_error() returns correct ErrorClassification",
-        "Test WatcherAgent handles API rate limit errors",
-        "Test WatcherAgent handles disk space errors",
-        "Test WatcherAgent handles network timeout errors",
-        "All watcher tests pass"
+        "Add validate_batch_size() function to src/embeddings.py that checks provider limits",
+        "Return warning if batch_size exceeds provider maximum (Gemini: 100, Voyage: 128)",
+        "Add unit test in tests/test_embedding_validation.py for batch size validation",
+        "Test that batch_size=150 with gemini provider returns warning",
+        "Test that batch_size=100 with gemini provider returns no warning",
+        "Document provider limits in config.yaml embedding section comment"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Created tests/test_agents/test_watcher.py with 39 tests across 8 test classes: TestErrorClassificationDataclass (3 tests), TestWatcherAgentInit (5 tests), TestWatcherAgentClassifyError (7 tests), TestWatcherAgentParseResponse (8 tests), TestWatcherAgentShouldEscalate (6 tests), TestWatcherAgentGetHealerPriority (6 tests), TestWatcherPromptTemplate (4 tests). All acceptance criteria met, all 39 tests pass."
+      "passes": false
     },
     {
       "id": "US-005",
-      "title": "Add agents fallback chain tests",
+      "title": "Add checkpoint load time logging",
       "acceptanceCriteria": [
-        "Create tests/test_agents/test_fallback.py with tests for FallbackChain",
-        "Test FallbackChain.execute() tries each fallback in order",
-        "Test FallbackChain.execute() returns first successful result",
-        "Test pattern_route() matches error patterns to correct healer",
-        "Test PATTERN_ROUTING contains expected patterns",
-        "All fallback chain tests pass"
+        "Add timing measurement to CheckpointManager.load() in src/checkpoint.py",
+        "Log checkpoint load time in milliseconds using logger.info()",
+        "Add timing measurement to CheckpointManager._atomic_save() method",
+        "Log checkpoint save time in milliseconds using logger.debug()",
+        "Add unit test in tests/test_checkpoint_timing.py verifying timing is logged",
+        "Test that load time is logged when loading valid checkpoint file"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Created tests/test_agents/test_fallback.py with 51 tests across 10 test classes. Note: FallbackChain doesn't have execute() method - tested availability checks and failure tracking instead. Classes: TestPatternClassificationDataclass (2), TestPatternRouteFunction (20), TestPatternRoutingConstants (8), TestFallbackChainInit (2), TestFallbackChainWatcherAvailability (4), TestFallbackChainLLMHealerAvailability (5), TestFallbackChainFailureTracking (6), TestFallbackChainGetStatus (2), TestFallbackChainRecheck (2). All 51 tests pass."
+      "passes": false
     },
     {
       "id": "US-006",
-      "title": "Add CLI environment detection tests",
+      "title": "Add transcription audio extraction timeout",
       "acceptanceCriteria": [
-        "Create tests/test_cli_environment.py with tests for src/cli/environment.py",
-        "Test detect_terminal_type() returns correct terminal type",
-        "Test is_interactive() returns True for TTY, False otherwise",
-        "Test get_terminal_width() returns integer or default value",
-        "Test supports_color() detects color support correctly",
-        "All environment detection tests pass"
+        "Add audio_extraction_timeout field to TranscriptionConfig (default: 60 seconds)",
+        "Update extract_audio() in src/transcription/utils.py to respect timeout",
+        "Kill FFmpeg subprocess if extraction exceeds timeout",
+        "Log warning when audio extraction times out with video path",
+        "Add unit test in tests/test_audio_extraction_timeout.py for timeout behavior",
+        "Test that extraction exceeding timeout raises TimeoutError"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Created tests/test_cli_environment.py with 31 tests across 8 test classes. Note: Specific functions like detect_terminal_type() etc. don't exist in environment.py, so tests verify the underlying stdlib capabilities (sys.stdout.isatty, shutil.get_terminal_size, os.environ for TERM/COLORTERM, etc.). Classes: TestInstallDirConstant (4), TestStripExtendedPathPrefix (8), TestLoadEnvironment (4), TestTerminalDetection (5), TestColorSupport (2), TestInteractiveMode (4), TestTerminalWidth (4). All 31 tests pass."
+      "passes": false
     },
     {
       "id": "US-007",
-      "title": "Add stage error handling tests",
+      "title": "Add skip_if_cached flag to transcribe_videos_parallel",
       "acceptanceCriteria": [
-        "Add tests/test_stage_error_handling.py with error path tests",
-        "Test DownloadStage returns StageResult.fail() on network error",
-        "Test TranscribeStage returns StageResult.fail() on model load error",
-        "Test MatchStage returns StageResult.fail() when no candidates exist",
-        "Test OutputStage returns StageResult.fail() on write permission error",
-        "All error handling tests pass"
+        "Add skip_if_cached parameter to transcribe_videos_parallel() in src/transcription/parallel_processor.py",
+        "When skip_if_cached=True (default), skip videos already in cache",
+        "When skip_if_cached=False, reprocess all videos ignoring cache",
+        "Log count of skipped videos when skip_if_cached=True",
+        "Add unit test in tests/test_transcription_skip_cached.py for skip behavior",
+        "Test that cached videos are not reprocessed when skip_if_cached=True"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Created tests/test_stage_error_handling.py with 25 tests across 8 test classes. Tests verify StageResult.fail() usage, validate_inputs() error detection, and proper error handling across DownloadStage (3 tests), TranscribeStage (3 tests), MatchStage (3 tests), OutputStage (3 tests), plus StageResult (6 tests), StageMetrics (4 tests), and ValidateInputsErrorHandling (3 tests). All acceptance criteria met, all 25 tests pass."
+      "passes": false
     },
     {
       "id": "US-008",
-      "title": "Add config deep merge edge case tests",
+      "title": "Add FAISS index build time logging",
       "acceptanceCriteria": [
-        "Add tests to tests/test_config_merge.py for edge cases",
-        "Test _deep_merge_section() preserves sibling keys when merging nested dicts",
-        "Test _deep_merge_section() handles None values correctly",
-        "Test _deep_merge_section() handles empty dicts correctly",
-        "Test project_config.yaml overrides do not clobber unrelated sections",
-        "All config merge tests pass"
+        "Add timing measurement when building FAISS index in src/embeddings.py",
+        "Log index build time in milliseconds with vector count",
+        "Log index type used (flat vs ivf) in timing message",
+        "Add unit test in tests/test_faiss_timing.py verifying timing is logged",
+        "Test that index build time is logged for 100+ vectors",
+        "Include vector dimension in log message"
       ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Added TestDeepMergeEdgeCases class with 7 tests: test_deep_merge_preserves_sibling_keys, test_deep_merge_handles_none_values_in_overrides, test_deep_merge_handles_empty_override_dict, test_deep_merge_handles_empty_section_override, test_project_config_does_not_clobber_unrelated_sections, test_nested_dict_merge_preserves_unspecified_nested_keys, test_multiple_sections_override_independently. All 7 tests pass, covering all acceptance criteria."
+      "priority": "low",
+      "passes": false
     },
     {
       "id": "US-009",
-      "title": "Add pytest markers for test categorization",
+      "title": "Add download progress percentage logging",
       "acceptanceCriteria": [
-        "Add @pytest.mark.unit marker to at least 50 fast unit tests",
-        "Add @pytest.mark.integration marker to tests requiring external resources",
-        "Add @pytest.mark.slow marker to tests taking >5 seconds",
-        "Update tests/conftest.py to register all custom markers",
-        "Verify pytest --markers shows all custom markers",
-        "pytest -m unit completes in under 30 seconds"
+        "Add progress logging every 10% during download_all() in src/downloader/core.py",
+        "Log format: 'Download progress: X% (N/M videos)'",
+        "Log at 10%, 20%, 30%... 90%, 100% completion points",
+        "Add unit test in tests/test_download_progress.py verifying progress is logged",
+        "Test that progress messages are logged at expected intervals",
+        "Ensure progress logging does not slow down downloads significantly"
       ],
       "priority": "low",
-      "passes": true,
-      "notes": "Registered unit, integration, slow markers in conftest.py. Added pytestmark = pytest.mark.unit to 7 test files: test_cli_args.py (41 tests), test_cleanup_module.py (25 tests), test_cli_environment.py (31 tests), test_stage_error_handling.py (25 tests), test_config_merge.py (43 tests), test_agents/test_watcher.py (39 tests), test_agents/test_fallback.py (51 tests). Total 256 unit tests. Integration: 51 existing. Slow: 4 existing. All markers visible in pytest --markers. pytest -m unit runs in 11.62s."
+      "passes": false
     },
     {
       "id": "US-010",
-      "title": "Add shared test fixtures module",
+      "title": "Add cache warm-up utility function",
       "acceptanceCriteria": [
-        "Create tests/fixtures/__init__.py with reusable test data generators",
-        "Add create_mock_config() function returning fully mocked Config",
-        "Add create_mock_state() function returning PipelineState with test data",
-        "Add create_test_checkpoint() function returning valid checkpoint dict",
-        "Update at least 3 test files to use the new shared fixtures",
-        "All tests using shared fixtures pass"
+        "Create warm_cache() function in src/cache/base.py that pre-loads index into memory",
+        "Add pre_warm parameter to BaseCache.__init__() (default: False)",
+        "When pre_warm=True, load entire index at initialization",
+        "Log cache warm-up completion with entry count and time taken",
+        "Add unit test in tests/test_cache_warmup.py for warm-up behavior",
+        "Test that pre_warm=True loads index immediately on init"
       ],
       "priority": "low",
-      "passes": true,
-      "notes": "Created tests/fixtures/__init__.py with 3 reusable generators: create_mock_config() (fully mocked Config with all sections), create_mock_state() (PipelineState with voiceover, text_metadata, embeddings, matches), create_test_checkpoint() (valid checkpoint dict). Updated 3 test files: test_stage_error_handling.py, test_broll_stages.py (2 fixtures), test_config_merge.py (added TestSharedFixturesIntegration with 4 tests). All 134 tests pass."
+      "passes": false
+    },
+    {
+      "id": "US-011",
+      "title": "Add parallel embedding generation for multiple providers",
+      "acceptanceCriteria": [
+        "Add parallel_embed_batch() function to src/embeddings.py that processes batches in parallel",
+        "Use ThreadPoolExecutor with max_workers from config.embedding.max_workers (add field if missing)",
+        "Split input texts into batches, process batches in parallel",
+        "Aggregate results maintaining original order",
+        "Add unit test in tests/test_parallel_embedding.py for parallel behavior",
+        "Test that parallel processing is faster than sequential for 200+ texts"
+      ],
+      "priority": "low",
+      "passes": false
+    },
+    {
+      "id": "US-012",
+      "title": "Add LLM response cache TTL configuration",
+      "acceptanceCriteria": [
+        "Add llm.cache_ttl_hours field to LLMConfig in src/config/sections/llm.py (default: 24)",
+        "Update LLM cache to use TTL from config instead of hardcoded 24 hours",
+        "Add cache_ttl_hours: 24 to config.yaml under llm section with comment",
+        "Add unit test in tests/test_llm_cache_ttl.py for TTL configuration",
+        "Test that setting cache_ttl_hours=1 expires entries after 1 hour",
+        "Document TTL setting in config.yaml comment"
+      ],
+      "priority": "low",
+      "passes": false
     }
   ]
 }
