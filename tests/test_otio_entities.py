@@ -108,6 +108,7 @@ def mock_config():
     config.image_search = Mock()
     config.image_search.enable_sticky_matching = False
     config.image_search.semantic_match_threshold = 0.15
+    config.image_search.enable_consolidation = False  # Default to False for backward compatible tests
     return config
 
 
@@ -404,8 +405,8 @@ class TestAddEntityMediaToTrack:
         # Barack Obama has 2 images, so should have 2 clips
         assert len(clips) == 2
 
-    def test_image_available_range_one_frame(self, mock_exists, mock_matches, mock_entity_images, mock_config):
-        """Test that images have available_range of 1 frame (still image marker)"""
+    def test_image_available_range_matches_clip_duration(self, mock_exists, mock_matches, mock_entity_images, mock_config):
+        """Test that images have available_range = clip duration (OTIO timing model requirement)"""
         track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
 
         add_entity_media_to_track(
@@ -418,8 +419,9 @@ class TestAddEntityMediaToTrack:
         )
 
         clips = [item for item in track if isinstance(item, otio.schema.Clip)]
-        # Check first clip's available_range duration = 1 frame
-        assert clips[0].media_reference.available_range.duration.value == 1
+        # available_range >= source_range (OTIO timing model requirement)
+        # For still images, available_range = clip duration to satisfy this
+        assert clips[0].media_reference.available_range.duration.value >= clips[0].source_range.duration.value
 
     def test_video_available_range_from_ffprobe(self, mock_exists, mock_matches, mock_config):
         """Test that videos have available_range from ffprobe"""
@@ -635,3 +637,342 @@ class TestEdgeCases:
         # Should have at least one clip (even if tiny)
         clips = [item for item in track if isinstance(item, otio.schema.Clip)]
         assert len(clips) > 0
+
+
+class TestClipConsolidation:
+    """Test _consolidate_repeated_clips() function for V9/V10 entity tracks"""
+
+    def test_consolidate_consecutive_same_entity(self):
+        """Test that 3 consecutive clips with same entity are consolidated into 1"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        rate = 30.0
+
+        # Create 3 consecutive clips for same entity
+        for i in range(3):
+            clip = otio.schema.Clip(
+                name=f"clip_{i}",
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)  # 1 second each
+                )
+            )
+            clip.metadata['entity_name'] = 'Paris'
+            clip.metadata['is_still_image'] = True
+            clip.media_reference = otio.schema.ExternalReference(
+                target_url=f"/images/paris_{i}.jpg",
+                available_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)
+                )
+            )
+            track.append(clip)
+
+        # Before consolidation: 3 clips
+        assert len(list(track)) == 3
+
+        removed = _consolidate_repeated_clips(track)
+
+        # After consolidation: 1 clip with extended duration
+        items = list(track)
+        assert len(items) == 1
+        assert removed == 2
+        # Duration should be 90 frames (3 x 30)
+        assert items[0].source_range.duration.value == 90
+
+    def test_consolidate_preserves_non_consecutive(self):
+        """Test that non-consecutive clips with same entity stay separate"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        rate = 30.0
+
+        # Create: Paris -> Obama -> Paris (not consecutive for Paris)
+        entities = ['Paris', 'Obama', 'Paris']
+        for i, entity in enumerate(entities):
+            clip = otio.schema.Clip(
+                name=f"clip_{i}",
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)
+                )
+            )
+            clip.metadata['entity_name'] = entity
+            clip.media_reference = otio.schema.ExternalReference(
+                target_url=f"/images/{entity.lower()}_{i}.jpg"
+            )
+            track.append(clip)
+
+        # Before consolidation: 3 clips
+        assert len(list(track)) == 3
+
+        removed = _consolidate_repeated_clips(track)
+
+        # After: still 3 clips (not consolidated because not consecutive)
+        assert len(list(track)) == 3
+        assert removed == 0
+
+    def test_consolidate_different_entities_not_merged(self):
+        """Test that clips with different entities are not consolidated"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        rate = 30.0
+
+        # Create clips with different entities
+        for i, entity in enumerate(['Paris', 'London', 'Tokyo']):
+            clip = otio.schema.Clip(
+                name=f"clip_{i}",
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)
+                )
+            )
+            clip.metadata['entity_name'] = entity
+            clip.media_reference = otio.schema.ExternalReference(
+                target_url=f"/images/{entity.lower()}.jpg"
+            )
+            track.append(clip)
+
+        removed = _consolidate_repeated_clips(track)
+
+        # All 3 clips remain
+        assert len(list(track)) == 3
+        assert removed == 0
+
+    def test_consolidate_empty_track(self):
+        """Test consolidation of empty track returns 0"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        removed = _consolidate_repeated_clips(track)
+        assert removed == 0
+        assert len(list(track)) == 0
+
+    def test_consolidate_single_clip(self):
+        """Test consolidation of single clip returns 0"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        rate = 30.0
+
+        clip = otio.schema.Clip(
+            name="single_clip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(30, rate)
+            )
+        )
+        clip.metadata['entity_name'] = 'Paris'
+        clip.media_reference = otio.schema.ExternalReference(target_url="/images/paris.jpg")
+        track.append(clip)
+
+        removed = _consolidate_repeated_clips(track)
+        assert removed == 0
+        assert len(list(track)) == 1
+
+    def test_consolidate_extends_available_range_for_images(self):
+        """Test that still images have available_range extended to match source_range"""
+        from src.otio.entities import _consolidate_repeated_clips
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+        rate = 30.0
+
+        # Create 2 consecutive clips for same entity with is_still_image=True
+        for i in range(2):
+            clip = otio.schema.Clip(
+                name=f"clip_{i}",
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)
+                )
+            )
+            clip.metadata['entity_name'] = 'Paris'
+            clip.metadata['is_still_image'] = True
+            clip.media_reference = otio.schema.ExternalReference(
+                target_url=f"/images/paris_{i}.jpg",
+                available_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(30, rate)
+                )
+            )
+            track.append(clip)
+
+        _consolidate_repeated_clips(track)
+
+        # Consolidated clip should have available_range = 60 frames
+        items = list(track)
+        assert len(items) == 1
+        assert items[0].source_range.duration.value == 60
+        assert items[0].media_reference.available_range.duration.value == 60
+
+
+@patch('pathlib.Path.exists', return_value=True)
+class TestConsolidationIntegration:
+    """Test consolidation in add_entity_media_to_track()"""
+
+    def test_consolidation_applied_for_v9_images(self, mock_exists):
+        """Test that consolidation is applied for V9 entity images"""
+        # Create matches where same entity appears in consecutive segments
+        matches = []
+
+        # 3 consecutive segments all mentioning "Paris"
+        for i in range(3):
+            vo_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text="Paris is beautiful", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text=f"Video {i}", source_file=f"/videos/v{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg,
+                video_segment=vid_seg,
+                video_scene=None,
+                confidence=0.9,
+                reasoning=f'Match {i}'
+            )
+            matches.append(MatchResult(primary_match=match, alternatives=[], secondary_matches=[], strategy_matches=[]))
+
+        entity_images = {
+            'Paris': Mock(
+                images=["/images/paris1.jpg"],  # Single image per entity
+                videos=[],
+                entity_type='LOC',
+                query='Paris France'
+            )
+        }
+
+        config = Mock()
+        config.image_search = Mock()
+        config.image_search.enable_sticky_matching = False
+        config.image_search.semantic_match_threshold = 0.15
+        config.image_search.enable_consolidation = True
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+
+        add_entity_media_to_track(
+            track,
+            entity_images,
+            matches,
+            frame_rate=30.0,
+            config=config,
+            entity_type="images"
+        )
+
+        # Should have consolidated 3 clips into 1
+        clips = [item for item in track if isinstance(item, otio.schema.Clip)]
+        assert len(clips) == 1
+        # Duration should be 9 seconds = 270 frames
+        assert clips[0].source_range.duration.value == 270
+
+    def test_consolidation_disabled_keeps_separate_clips(self, mock_exists):
+        """Test that disabling consolidation keeps separate clips"""
+        matches = []
+
+        # 2 consecutive segments mentioning "Paris"
+        for i in range(2):
+            vo_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text="Paris is beautiful", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text=f"Video {i}", source_file=f"/videos/v{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg,
+                video_segment=vid_seg,
+                video_scene=None,
+                confidence=0.9,
+                reasoning=f'Match {i}'
+            )
+            matches.append(MatchResult(primary_match=match, alternatives=[], secondary_matches=[], strategy_matches=[]))
+
+        entity_images = {
+            'Paris': Mock(
+                images=["/images/paris1.jpg"],
+                videos=[],
+                entity_type='LOC',
+                query='Paris France'
+            )
+        }
+
+        config = Mock()
+        config.image_search = Mock()
+        config.image_search.enable_sticky_matching = False
+        config.image_search.semantic_match_threshold = 0.15
+        config.image_search.enable_consolidation = False  # Disabled
+
+        track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
+
+        add_entity_media_to_track(
+            track,
+            entity_images,
+            matches,
+            frame_rate=30.0,
+            config=config,
+            entity_type="images"
+        )
+
+        # Should have 2 separate clips (not consolidated)
+        clips = [item for item in track if isinstance(item, otio.schema.Clip)]
+        assert len(clips) == 2
+
+    def test_consolidation_for_v10_videos(self, mock_exists):
+        """Test that consolidation works for V10 stock videos"""
+        matches = []
+
+        # 3 consecutive segments mentioning "Obama"
+        for i in range(3):
+            vo_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text="Barack Obama was president", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=i * 3.0, end_time=(i + 1) * 3.0,
+                text=f"Video {i}", source_file=f"/videos/v{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg,
+                video_segment=vid_seg,
+                video_scene=None,
+                confidence=0.9,
+                reasoning=f'Match {i}'
+            )
+            matches.append(MatchResult(primary_match=match, alternatives=[], secondary_matches=[], strategy_matches=[]))
+
+        entity_videos = {
+            'Barack Obama': Mock(
+                images=[],
+                videos=["/stock/obama1.mp4"],  # Single video per entity
+                entity_type='PERSON',
+                query='Barack Obama president'
+            )
+        }
+
+        config = Mock()
+        config.image_search = Mock()
+        config.image_search.enable_sticky_matching = False
+        config.image_search.semantic_match_threshold = 0.15
+        config.image_search.enable_consolidation = True
+
+        track = otio.schema.Track(name="V10", kind=otio.schema.TrackKind.Video)
+
+        with patch('src.otio.entities._get_video_duration_frames', return_value=600):
+            add_entity_media_to_track(
+                track,
+                entity_videos,
+                matches,
+                frame_rate=30.0,
+                config=config,
+                entity_type="videos"
+            )
+
+        # Should have consolidated 3 clips into 1
+        clips = [item for item in track if isinstance(item, otio.schema.Clip)]
+        assert len(clips) == 1
+        # Duration should be 9 seconds = 270 frames
+        assert clips[0].source_range.duration.value == 270
