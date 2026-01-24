@@ -516,5 +516,208 @@ class TestResolveVideoSegment:
         # more detailed mocking of OTIO internals
 
 
+class TestClipCountWarnings:
+    """Test clip count warning functionality for DaVinci Resolve limits."""
+
+    def test_count_timeline_clips_counts_clips_only(self):
+        """Test that _count_timeline_clips counts only Clips, not Gaps."""
+        from src.otio.timeline import _count_timeline_clips
+
+        # Create a timeline with some clips and gaps
+        timeline = otio.schema.Timeline(name="Test")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+
+        # Add 2 clips and 1 gap
+        clip1 = otio.schema.Clip(
+            name="Clip1",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30),
+                duration=otio.opentime.RationalTime(30, 30)
+            )
+        )
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30),
+                duration=otio.opentime.RationalTime(10, 30)
+            )
+        )
+        clip2 = otio.schema.Clip(
+            name="Clip2",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30),
+                duration=otio.opentime.RationalTime(30, 30)
+            )
+        )
+
+        track.append(clip1)
+        track.append(gap)
+        track.append(clip2)
+        timeline.tracks.append(track)
+
+        # Should count 2 clips, not the gap
+        assert _count_timeline_clips(timeline) == 2
+
+    def test_count_timeline_clips_counts_across_tracks(self):
+        """Test that _count_timeline_clips counts clips across all tracks."""
+        from src.otio.timeline import _count_timeline_clips
+
+        timeline = otio.schema.Timeline(name="Test")
+
+        # Add 3 tracks with 2 clips each
+        for i in range(3):
+            track = otio.schema.Track(name=f"V{i+1}", kind=otio.schema.TrackKind.Video)
+            for j in range(2):
+                clip = otio.schema.Clip(
+                    name=f"Clip{i}_{j}",
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, 30),
+                        duration=otio.opentime.RationalTime(30, 30)
+                    )
+                )
+                track.append(clip)
+            timeline.tracks.append(track)
+
+        # Should count 6 clips total (3 tracks * 2 clips)
+        assert _count_timeline_clips(timeline) == 6
+
+    def test_count_timeline_clips_empty_timeline(self):
+        """Test that _count_timeline_clips returns 0 for empty timeline."""
+        from src.otio.timeline import _count_timeline_clips
+
+        timeline = otio.schema.Timeline(name="Empty")
+        assert _count_timeline_clips(timeline) == 0
+
+    def test_log_clip_count_warnings_below_threshold(self, caplog):
+        """Test that no warning is logged when clip count is below threshold."""
+        from src.otio.timeline import _log_clip_count_warnings, CLIP_COUNT_WARNING_THRESHOLD
+
+        # Clear logs and test with count below threshold
+        caplog.clear()
+        _log_clip_count_warnings(CLIP_COUNT_WARNING_THRESHOLD - 1)
+
+        # Should not log any warnings
+        assert "approaching DaVinci limit" not in caplog.text
+        assert "exceeding safe limit" not in caplog.text
+
+    def test_log_clip_count_warnings_at_warning_threshold(self, caplog):
+        """Test that warning is logged when clip count reaches warning threshold."""
+        import logging
+        from src.otio.timeline import _log_clip_count_warnings, CLIP_COUNT_WARNING_THRESHOLD
+
+        caplog.set_level(logging.WARNING)
+        _log_clip_count_warnings(CLIP_COUNT_WARNING_THRESHOLD)
+
+        # Should log warning
+        assert "approaching DaVinci limit" in caplog.text
+        assert len(caplog.records) >= 1
+        assert caplog.records[-1].levelno == logging.WARNING
+
+    def test_log_clip_count_warnings_at_error_threshold(self, caplog):
+        """Test that error is logged when clip count reaches error threshold."""
+        import logging
+        from src.otio.timeline import _log_clip_count_warnings, CLIP_COUNT_ERROR_THRESHOLD
+
+        caplog.set_level(logging.ERROR)
+        _log_clip_count_warnings(CLIP_COUNT_ERROR_THRESHOLD)
+
+        # Should log error
+        assert "exceeding safe limit" in caplog.text
+        assert "LITE mode" in caplog.text
+        assert len(caplog.records) >= 1
+        assert caplog.records[-1].levelno == logging.ERROR
+
+    def test_log_clip_count_warnings_error_includes_lite_suggestion(self, caplog):
+        """Test that error message includes LITE mode suggestion."""
+        import logging
+        from src.otio.timeline import _log_clip_count_warnings, CLIP_COUNT_ERROR_THRESHOLD
+
+        caplog.set_level(logging.ERROR)
+        _log_clip_count_warnings(CLIP_COUNT_ERROR_THRESHOLD + 100)
+
+        # Should mention LITE mode as solution
+        assert "LITE mode" in caplog.text
+
+    def test_threshold_constants_are_correct(self):
+        """Test that threshold constants have expected values."""
+        from src.otio.timeline import CLIP_COUNT_WARNING_THRESHOLD, CLIP_COUNT_ERROR_THRESHOLD
+
+        # Per acceptance criteria
+        assert CLIP_COUNT_WARNING_THRESHOLD == 2500
+        assert CLIP_COUNT_ERROR_THRESHOLD == 3000
+
+        # Error threshold should be higher than warning
+        assert CLIP_COUNT_ERROR_THRESHOLD > CLIP_COUNT_WARNING_THRESHOLD
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_create_timeline_calls_clip_count_check(self, mock_windows_path, mock_duration, caplog):
+        """Test that create_timeline calls clip count check."""
+        import logging
+        from src.otio.timeline import create_timeline
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 10.0
+        caplog.set_level(logging.DEBUG)
+
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=5.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+        config = MockConfig(output=MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        ))
+
+        timeline = create_timeline(matches, config)
+
+        # Should log debug message about clip count
+        assert "Timeline contains" in caplog.text
+        assert "clips across all tracks" in caplog.text
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_create_timeline_logs_warning_for_many_clips(self, mock_windows_path, mock_duration, caplog):
+        """Test that create_timeline logs warning when clip count is high.
+
+        This test creates many matches to generate enough clips to trigger the warning.
+        With 10 tracks (V1 + 2 alts + 3 secondary + 2 strategy + 2 entity) = ~10 video + 9 audio = 19 per segment
+        To reach 2500 clips would need ~132 segments (132 * 19 = 2508)
+        """
+        import logging
+        from src.otio.timeline import create_timeline, CLIP_COUNT_WARNING_THRESHOLD
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 1000.0
+        caplog.set_level(logging.WARNING)
+
+        # Create many matches to exceed warning threshold
+        # Each match creates ~2 clips minimum (V1 video + A1 audio)
+        # With no alternatives/strategies, need ~1250 matches for 2500 clips
+        num_matches = CLIP_COUNT_WARNING_THRESHOLD // 2 + 1  # 1251 matches
+
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file=f"video{i}.mp4", start=float(i), end=float(i + 0.5)),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+            for i in range(num_matches)
+        ]
+        config = MockConfig(output=MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        ))
+
+        timeline = create_timeline(matches, config)
+
+        # Should have logged a warning about approaching limit
+        assert "approaching DaVinci limit" in caplog.text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
