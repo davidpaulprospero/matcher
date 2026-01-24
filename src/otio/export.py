@@ -124,7 +124,8 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
 
 
 def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_rate: float = 30.0,
-                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
+                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None,
+                         drop_frame: bool = False):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
 
@@ -141,14 +142,21 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         frame_rate: Timeline frame rate
         timeline_start_tc: Timeline start timecode (default 01:00:00:00)
         entities: Optional list of entity dictionaries with 'name' and 'position_sec' keys
+        drop_frame: If True, use drop-frame timecode (semicolons) for 29.97/59.94fps
 
     Returns:
         Path to the generated EDL file
     """
     from .utils import get_confidence_color
 
+    # Determine timecode separator based on drop_frame mode
+    # Drop-frame uses semicolon between seconds and frames (HH:MM:SS;FF)
+    # Non-drop-frame uses colon (HH:MM:SS:FF)
+    tc_separator = ';' if drop_frame else ':'
+
     # Parse timeline start timecode to frame offset
-    tc_parts = timeline_start_tc.split(':')
+    # Handle both colon and semicolon separators in input
+    tc_parts = timeline_start_tc.replace(';', ':').split(':')
     start_frame_offset = (
         int(tc_parts[0]) * 3600 +
         int(tc_parts[1]) * 60 +
@@ -167,7 +175,8 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         mins = total_mins % 60
         hours = total_mins // 60
 
-        return f"{hours:02d}:{mins:02d}:{secs:02d}:{frame_in_sec:02d}"
+        # Use semicolon before frames for drop-frame, colon for non-drop-frame
+        return f"{hours:02d}:{mins:02d}:{secs:02d}{tc_separator}{frame_in_sec:02d}"
 
     # DaVinci Resolve EDL color mapping
     color_to_edl = {
@@ -181,7 +190,8 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
 
     edl_lines = []
     edl_lines.append("TITLE: Matched Footage Markers")
-    edl_lines.append(f"FCM: NON-DROP FRAME")
+    # FCM (Frame Count Mode) line: DROP FRAME or NON-DROP FRAME
+    edl_lines.append(f"FCM: {'DROP FRAME' if drop_frame else 'NON-DROP FRAME'}")
     edl_lines.append("")
 
     current_frame = 0

@@ -37,7 +37,8 @@
         "All export tests pass"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true,
+      "notes": "Added drop_frame parameter to save_timeline_as_edl(), FCM line shows DROP FRAME/NON-DROP FRAME, semicolon separator for drop-frame timecodes (HH:MM:SS;FF), 9 new tests in TestDropFrameTimecode class including CMX3600 validation"
     },
     {
       "id": "US-003",
