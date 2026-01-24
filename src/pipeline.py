@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .state import PipelineState
@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from .config import Config
     from .agents.runner import ResilientRunner
     from .agents.orchestrator import HealingOrchestrator
+
+# Type aliases for callbacks
+StageStartCallback = Callable[[str], None]  # (stage_name) -> None
+StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name, result, elapsed_seconds) -> None
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +107,9 @@ class PipelineOrchestrator:
         self,
         resume: bool = True,
         skip_stages: List[str] = None,
-        only_stages: List[str] = None
+        only_stages: List[str] = None,
+        on_stage_start: StageStartCallback = None,
+        on_stage_complete: StageCompleteCallback = None
     ) -> bool:
         """
         Run the pipeline.
@@ -112,6 +118,9 @@ class PipelineOrchestrator:
             resume: Whether to resume from checkpoint if available
             skip_stages: Stage names to skip
             only_stages: If provided, only run these stages
+            on_stage_start: Callback invoked when a stage starts (receives stage_name)
+            on_stage_complete: Callback invoked when a stage completes
+                               (receives stage_name, result, elapsed_seconds)
 
         Returns:
             True if pipeline completed successfully
@@ -153,12 +162,26 @@ class PipelineOrchestrator:
             self.current_stage = stage_name
             start_time = time.time()
 
+            # Invoke on_stage_start callback
+            if on_stage_start:
+                try:
+                    on_stage_start(stage_name)
+                except Exception as e:
+                    logger.warning(f"on_stage_start callback failed for {stage_name}: {e}")
+
             logger.info(f"Running stage: {stage_name}")
             result = stage.run(self.state, self.config, self.checkpoint)
 
             elapsed = time.time() - start_time
             self.stage_timings[stage_name] = elapsed
             self.state.stage_timings[stage_name] = elapsed
+
+            # Invoke on_stage_complete callback
+            if on_stage_complete:
+                try:
+                    on_stage_complete(stage_name, result, elapsed)
+                except Exception as e:
+                    logger.warning(f"on_stage_complete callback failed for {stage_name}: {e}")
 
             # Handle result
             if not result.success:

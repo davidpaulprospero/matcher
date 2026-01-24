@@ -77,3 +77,89 @@
 - Files modified:
   - tests/test_pipeline_orchestrator.py (new file, 370 lines)
 
+## Iteration 4 - [US-005] Add stage restore() error handling
+- Enhanced `MatchStage.restore()` with comprehensive validation:
+  - Logs specific warning when checkpoint returns None
+  - Validates matches_data is a list (not string or other type)
+  - Validates each match object is a dict with required fields
+  - Validates segment_index is numeric (int/float)
+  - Validates video_file is non-empty string
+  - Validates confidence is numeric, clamps out-of-range to [0, 1]
+  - Logs validation errors for debugging but continues with partial valid data
+  - Returns False only when ALL matches fail validation
+- Enhanced `OutputStage.restore()` with path validation:
+  - Logs specific warning when checkpoint returns None
+  - Validates data is a dict (not string or other type)
+  - Validates outputs is a dict
+  - Checks each path exists and logs missing files
+  - Handles non-string paths gracefully (skips them)
+  - Logs specific warnings for missing OTIO files
+- Added 12 new tests in TestRestoreErrorHandling class (test_stage_match.py)
+- Added 9 new tests in TestOutputRestoreErrorHandling class (test_stage_output.py)
+- Fixed test_stage_match_coverage.py test_validate_success missing text_metadata
+- All 461 stage tests pass, all 116 restore-related tests pass
+- Files modified:
+  - src/stages/match.py (enhanced restore(), lines 174-276)
+  - src/stages/output.py (enhanced restore(), lines 435-510)
+  - tests/test_stage_match.py (added TestRestoreErrorHandling class)
+  - tests/test_stage_output.py (added TestOutputRestoreErrorHandling class)
+  - tests/test_stage_match_coverage.py (fixed test_validate_success)
+
+## Iteration 5 - [US-006] Add DownloadStage video segment retry logic
+- Added retry configuration options to DownloadConfig dataclass:
+  - max_retries: int = 3 (maximum retry attempts per video)
+  - retry_delay: float = 2.0 (base delay between retries in seconds)
+  - retry_backoff: float = 2.0 (exponential backoff multiplier)
+- Implemented `_retry_with_backoff()` helper method in DownloadStage:
+  - Takes operation callable, config, and operation_name
+  - Returns tuple: (success: bool, result: Any, attempts: int)
+  - Calculates exponential backoff delay: base_delay * (backoff ** attempt)
+  - Logs warning messages with retry count and delay
+  - Logs error on final failure with full retry count
+- Updated `_run_audio_first()` to use retry logic:
+  - Wraps each tier download in retry_with_backoff
+  - Only marks keyword as failed if ALL tiers fail after retries
+  - Logs success message when recovery happens after retries
+- Updated config.yaml with retry settings and documentation:
+  - Added max_retries, retry_delay, retry_backoff options
+  - Added example showing delay calculation with backoff
+- Updated mock_config fixture with retry settings
+- Added 9 new tests across 2 test classes:
+  - TestDownloadRetryLogic (6 tests): first attempt success, success after retries, all fail, config defaults, exponential delay timing, logging
+  - TestAudioFirstRetryIntegration (3 tests): retries failed keywords, marks failed after exhaustion, partial tier success
+- All 75 download stage tests pass
+- Files modified:
+  - src/config/sections/download.py (added retry config fields)
+  - src/stages/download.py (added _retry_with_backoff, updated _run_audio_first)
+  - config.yaml (added retry settings section)
+  - tests/test_stage_download.py (added retry tests, updated fixture)
+
+## Iteration 6 - [US-007] Add stage progress callbacks
+- Added type aliases for callbacks at module level:
+  - `StageStartCallback = Callable[[str], None]` (receives stage_name)
+  - `StageCompleteCallback = Callable[[str, StageResult, float], None]` (receives stage_name, result, elapsed_seconds)
+- Added `on_stage_start` and `on_stage_complete` parameters to `PipelineOrchestrator.run()`:
+  - Both are optional callbacks (default None)
+  - on_stage_start called after validation, before stage.run()
+  - on_stage_complete called after stage.run(), before result handling
+- Callbacks are wrapped in try/except to prevent exceptions from stopping the pipeline:
+  - Logs warning: "on_stage_start callback failed for {stage_name}: {error}"
+  - Logs warning: "on_stage_complete callback failed for {stage_name}: {error}"
+- Added 12 new tests in TestStageProgressCallbacks class:
+  - test_on_stage_start_called_for_each_stage
+  - test_on_stage_complete_called_for_each_stage
+  - test_callbacks_called_in_correct_order
+  - test_on_stage_start_exception_does_not_stop_pipeline
+  - test_on_stage_complete_exception_does_not_stop_pipeline
+  - test_callbacks_receive_failed_stage_result
+  - test_callbacks_not_called_for_skipped_stages
+  - test_callbacks_not_called_for_checkpoint_skipped_stages
+  - test_on_stage_complete_receives_timing_info
+  - test_only_on_stage_start_callback
+  - test_only_on_stage_complete_callback
+  - test_no_callbacks_provided
+- All 45 orchestrator tests pass, all 28 pipeline tests pass (no regressions)
+- Files modified:
+  - src/pipeline.py (added type aliases and callback parameters)
+  - tests/test_pipeline_orchestrator.py (added TestStageProgressCallbacks class)
+
