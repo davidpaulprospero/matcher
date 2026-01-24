@@ -521,3 +521,161 @@ class TestEdlColorMapping:
 
         content = Path(output_path).with_suffix('.edl').read_text()
         assert "|C:" in content
+
+
+class TestDropFrameTimecode:
+    """Tests for drop-frame timecode support in EDL export."""
+
+    @pytest.fixture
+    def mock_match_result(self):
+        """Create a mock match result for testing."""
+        segment = Mock()
+        segment.start_time = 0.0
+        segment.end_time = 5.0
+        segment.text = "Test segment"
+
+        match = Mock()
+        match.confidence = 0.85
+        match.voiceover_segment = segment
+
+        result = Mock()
+        result.primary_match = match
+        return result
+
+    def test_drop_frame_parameter_exists(self, tmp_path, mock_match_result):
+        """Test drop_frame parameter is accepted."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        # Should not raise an error with drop_frame parameter
+        result = save_timeline_as_edl([mock_match_result], output_path, drop_frame=True)
+        assert Path(result).exists()
+
+    def test_drop_frame_fcm_line(self, tmp_path, mock_match_result):
+        """Test FCM line says 'DROP FRAME' when drop_frame=True."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+        assert "FCM: DROP FRAME" in content
+        assert "NON-DROP FRAME" not in content
+
+    def test_non_drop_frame_fcm_line(self, tmp_path, mock_match_result):
+        """Test FCM line says 'NON-DROP FRAME' when drop_frame=False (default)."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=False)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+        assert "FCM: NON-DROP FRAME" in content
+
+    def test_drop_frame_uses_semicolon_separator(self, tmp_path, mock_match_result):
+        """Test drop-frame mode uses semicolons between seconds and frames."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+        # Drop-frame format: HH:MM:SS;FF (semicolon before frames)
+        # Should have semicolon pattern like "01:00:00;00"
+        import re
+        pattern = r'\d{2}:\d{2}:\d{2};\d{2}'  # HH:MM:SS;FF
+        matches = re.findall(pattern, content)
+        assert len(matches) > 0, "Expected semicolon timecode format in drop-frame mode"
+
+    def test_non_drop_frame_uses_colon_separator(self, tmp_path, mock_match_result):
+        """Test non-drop-frame mode uses colons throughout."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=False)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+        # Non-drop-frame format: HH:MM:SS:FF (all colons)
+        import re
+        pattern = r'\d{2}:\d{2}:\d{2}:\d{2}'  # HH:MM:SS:FF
+        matches = re.findall(pattern, content)
+        assert len(matches) > 0, "Expected colon timecode format in non-drop-frame mode"
+
+        # Should NOT have semicolon timecode pattern
+        semicolon_pattern = r'\d{2}:\d{2}:\d{2};\d{2}'
+        semicolon_matches = re.findall(semicolon_pattern, content)
+        assert len(semicolon_matches) == 0, "Unexpected semicolon in non-drop-frame mode"
+
+    def test_drop_frame_with_29_97_fps(self, tmp_path, mock_match_result):
+        """Test drop-frame mode with 29.97fps (common use case)."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, frame_rate=29.97, drop_frame=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+        assert "FCM: DROP FRAME" in content
+        # Check for semicolon format
+        import re
+        pattern = r'\d{2}:\d{2}:\d{2};\d{2}'
+        matches = re.findall(pattern, content)
+        assert len(matches) > 0
+
+    def test_drop_frame_handles_semicolon_input_timecode(self, tmp_path, mock_match_result):
+        """Test drop-frame mode handles input timecode with semicolons."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        # Input timecode with semicolon separator
+        save_timeline_as_edl(
+            [mock_match_result],
+            output_path,
+            timeline_start_tc="01:00:00;00",  # semicolon input
+            drop_frame=True
+        )
+
+        # Should not raise an error
+        assert Path(output_path).with_suffix('.edl').exists()
+
+    def test_cmx3600_pattern_validation_drop_frame(self, tmp_path, mock_match_result):
+        """Validate generated drop-frame EDL follows CMX3600 format."""
+        from src.otio.export import save_timeline_as_edl
+        import re
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # CMX3600 requires TITLE line
+        assert "TITLE:" in content
+
+        # CMX3600 requires FCM line for drop-frame
+        assert "FCM: DROP FRAME" in content
+
+        # CMX3600 event format: event_num source track edit_type timecodes
+        # Example: 001  BL       V     C        01:00:00;00 01:00:00;00 01:00:00;00 01:00:00;00
+        event_pattern = r'\d{3}\s+\w+\s+V\s+C\s+\d{2}:\d{2}:\d{2};\d{2}'
+        event_matches = re.findall(event_pattern, content)
+        assert len(event_matches) > 0, "Expected CMX3600 event format with drop-frame timecodes"
+
+    def test_cmx3600_pattern_validation_non_drop_frame(self, tmp_path, mock_match_result):
+        """Validate generated non-drop-frame EDL follows CMX3600 format."""
+        from src.otio.export import save_timeline_as_edl
+        import re
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_result], output_path, drop_frame=False)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # CMX3600 requires TITLE line
+        assert "TITLE:" in content
+
+        # CMX3600 requires FCM line for non-drop-frame
+        assert "FCM: NON-DROP FRAME" in content
+
+        # CMX3600 event format with colons for non-drop-frame
+        event_pattern = r'\d{3}\s+\w+\s+V\s+C\s+\d{2}:\d{2}:\d{2}:\d{2}'
+        event_matches = re.findall(event_pattern, content)
+        assert len(event_matches) > 0, "Expected CMX3600 event format with non-drop-frame timecodes"

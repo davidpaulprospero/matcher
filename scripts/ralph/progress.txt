@@ -256,7 +256,7 @@ Branch: ralph/sprint-2
 
 ### Stories (10 total)
 [x] US-001: Create sprint 2 OTIO verification test (high)
-[ ] US-002: Add EDL drop-frame timecode support (high)
+[x] US-002: Add EDL drop-frame timecode support (high)
 [ ] US-003: Add EDL reel name generation from clip paths (medium)
 [ ] US-004: Add XML frame rate validation at export (medium)
 [ ] US-005: Add track count limit warning in create_timeline (medium)
@@ -266,7 +266,7 @@ Branch: ralph/sprint-2
 [ ] US-009: Add timeline split by segment count option (low)
 [ ] US-010: Add entity track clip consolidation for repeated entities (low)
 
-Progress: 1/10 stories complete
+Progress: 2/10 stories complete
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -279,4 +279,26 @@ Progress: 1/10 stories complete
 - All 28 tests pass with pytest tests/test_sprint_2_verification.py -v
 - Files created:
   - tests/test_sprint_2_verification.py (new file, ~270 lines)
+
+## Iteration 2 - [US-002] Add EDL drop-frame timecode support
+- Added `drop_frame` parameter to `save_timeline_as_edl()` in src/otio/export.py
+- Implementation details:
+  - Drop-frame uses semicolon separator between seconds and frames (HH:MM:SS;FF)
+  - Non-drop-frame uses colon separator (HH:MM:SS:FF)
+  - FCM line shows "DROP FRAME" or "NON-DROP FRAME" accordingly
+  - Input timecode can use either separator (converted internally)
+- Added 9 new tests in TestDropFrameTimecode class:
+  - test_drop_frame_parameter_exists
+  - test_drop_frame_fcm_line
+  - test_non_drop_frame_fcm_line
+  - test_drop_frame_uses_semicolon_separator
+  - test_non_drop_frame_uses_colon_separator
+  - test_drop_frame_with_29_97_fps
+  - test_drop_frame_handles_semicolon_input_timecode
+  - test_cmx3600_pattern_validation_drop_frame
+  - test_cmx3600_pattern_validation_non_drop_frame
+- All 35 export tests pass
+- Files modified:
+  - src/otio/export.py (enhanced save_timeline_as_edl)
+  - tests/test_otio_export.py (added TestDropFrameTimecode class)
 
