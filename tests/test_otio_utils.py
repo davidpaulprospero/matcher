@@ -26,7 +26,10 @@ from src.otio.utils import (
     is_segment_file,
     frames_to_tc,
     get_confidence_color,
-    create_clip_with_timewarp
+    create_clip_with_timewarp,
+    _validate_clip_metadata,
+    validate_timeline_clips,
+    ClipValidationError
 )
 import numpy as np
 
@@ -563,6 +566,316 @@ class TestOTIOTimingModel:
         assert clip.metadata['target_duration'] == 5.0
         assert clip.metadata['source_duration'] == 10.0
         assert clip.metadata['time_scalar'] == 1.0  # Always 1.0 (trim approach)
+
+
+class TestClipMetadataValidation:
+    """Test OTIO clip metadata validation functions."""
+
+    def test_validate_clip_valid_clip(self):
+        """Test validation passes for a well-formed clip."""
+        clip = create_clip_with_timewarp(
+            name="ValidClip",
+            source_path="C:/Videos/test.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0,
+            frame_rate=30.0
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 0
+
+    def test_validate_clip_negative_start_time(self):
+        """Test validation catches negative start_time."""
+        # Create a clip and manually set negative start_time
+        clip = otio.schema.Clip(
+            name="NegativeStartClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(-30, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "negative_start_time"
+        assert "-30" in errors[0].message
+
+    def test_validate_clip_zero_duration(self):
+        """Test validation catches zero duration."""
+        clip = otio.schema.Clip(
+            name="ZeroDurationClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(0, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "non_positive_duration"
+
+    def test_validate_clip_negative_duration(self):
+        """Test validation catches negative duration."""
+        clip = otio.schema.Clip(
+            name="NegativeDurationClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(-10, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "non_positive_duration"
+
+    def test_validate_clip_empty_target_url(self):
+        """Test validation catches empty target_url."""
+        clip = otio.schema.Clip(
+            name="EmptyUrlClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url=""
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "empty_target_url"
+
+    def test_validate_clip_whitespace_target_url(self):
+        """Test validation catches whitespace-only target_url."""
+        clip = otio.schema.Clip(
+            name="WhitespaceUrlClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="   "
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "empty_target_url"
+
+    def test_validate_clip_missing_media_reference(self):
+        """Test validation catches missing media_reference.
+
+        Note: OTIO creates MissingReference by default when no media_reference is provided.
+        """
+        clip = otio.schema.Clip(
+            name="NoMediaRefClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            )
+            # No media_reference - OTIO creates MissingReference by default
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "missing_media_reference"
+        assert "MissingReference" in errors[0].message
+
+    def test_validate_clip_missing_source_range(self):
+        """Test validation catches missing source_range."""
+        clip = otio.schema.Clip(
+            name="NoSourceRangeClip",
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        assert errors[0].error_type == "missing_source_range"
+
+    def test_validate_clip_multiple_errors(self):
+        """Test validation reports multiple errors."""
+        clip = otio.schema.Clip(
+            name="MultiErrorClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(-30, 30.0),
+                duration=otio.opentime.RationalTime(0, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url=""
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 3
+        error_types = [e.error_type for e in errors]
+        assert "negative_start_time" in error_types
+        assert "non_positive_duration" in error_types
+        assert "empty_target_url" in error_types
+
+    def test_validate_clip_unnamed_clip(self):
+        """Test validation handles unnamed clips."""
+        clip = otio.schema.Clip(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(-30, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        errors = _validate_clip_metadata(clip)
+        assert len(errors) == 1
+        # Should use "<unnamed>" as fallback
+        assert "<unnamed>" in errors[0].message
+
+    def test_clip_validation_error_repr(self):
+        """Test ClipValidationError string representation."""
+        error = ClipValidationError(
+            clip_name="TestClip",
+            error_type="negative_start_time",
+            message="Clip 'TestClip' has negative start_time: -30"
+        )
+        repr_str = repr(error)
+        assert "TestClip" in repr_str
+        assert "negative_start_time" in repr_str
+
+
+class TestTimelineClipsValidation:
+    """Test timeline-wide clip validation."""
+
+    def test_validate_timeline_all_valid(self):
+        """Test validation passes for timeline with valid clips."""
+        timeline = otio.schema.Timeline(name="ValidTimeline")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+
+        clip1 = create_clip_with_timewarp(
+            name="Clip1",
+            source_path="C:/Videos/test1.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0
+        )
+        clip2 = create_clip_with_timewarp(
+            name="Clip2",
+            source_path="C:/Videos/test2.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0
+        )
+        track.append(clip1)
+        track.append(clip2)
+        timeline.tracks.append(track)
+
+        errors = validate_timeline_clips(timeline)
+        assert len(errors) == 0
+
+    def test_validate_timeline_with_invalid_clips(self):
+        """Test validation finds errors across multiple tracks."""
+        timeline = otio.schema.Timeline(name="InvalidTimeline")
+
+        # Track 1 with invalid clip
+        track1 = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+        invalid_clip = otio.schema.Clip(
+            name="InvalidClip",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(-10, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test.mp4"
+            )
+        )
+        track1.append(invalid_clip)
+        timeline.tracks.append(track1)
+
+        # Track 2 with valid clip
+        track2 = otio.schema.Track(name="V2", kind=otio.schema.TrackKind.Video)
+        valid_clip = create_clip_with_timewarp(
+            name="ValidClip",
+            source_path="C:/Videos/test2.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0
+        )
+        track2.append(valid_clip)
+        timeline.tracks.append(track2)
+
+        errors = validate_timeline_clips(timeline)
+        assert len(errors) == 1
+        assert errors[0].clip_name == "InvalidClip"
+
+    def test_validate_timeline_empty_timeline(self):
+        """Test validation handles empty timeline."""
+        timeline = otio.schema.Timeline(name="EmptyTimeline")
+        errors = validate_timeline_clips(timeline)
+        assert len(errors) == 0
+
+    def test_validate_timeline_skips_gaps(self):
+        """Test validation ignores Gap items (only validates Clips)."""
+        timeline = otio.schema.Timeline(name="TimelineWithGaps")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+
+        # Add a gap
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(30, 30.0)
+            )
+        )
+        track.append(gap)
+
+        # Add a valid clip
+        clip = create_clip_with_timewarp(
+            name="ValidClip",
+            source_path="C:/Videos/test.mp4",
+            source_start=0.0,
+            source_duration=5.0,
+            target_duration=5.0
+        )
+        track.append(clip)
+        timeline.tracks.append(track)
+
+        errors = validate_timeline_clips(timeline)
+        assert len(errors) == 0
+
+    def test_validate_timeline_multiple_errors_in_track(self):
+        """Test validation aggregates errors from multiple clips in one track."""
+        timeline = otio.schema.Timeline(name="MultiErrorTimeline")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+
+        # Two invalid clips
+        invalid1 = otio.schema.Clip(
+            name="Invalid1",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(-10, 30.0),
+                duration=otio.opentime.RationalTime(150, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test1.mp4"
+            )
+        )
+        invalid2 = otio.schema.Clip(
+            name="Invalid2",
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 30.0),
+                duration=otio.opentime.RationalTime(0, 30.0)
+            ),
+            media_reference=otio.schema.ExternalReference(
+                target_url="C:/Videos/test2.mp4"
+            )
+        )
+        track.append(invalid1)
+        track.append(invalid2)
+        timeline.tracks.append(track)
+
+        errors = validate_timeline_clips(timeline)
+        assert len(errors) == 2
+        clip_names = [e.clip_name for e in errors]
+        assert "Invalid1" in clip_names
+        assert "Invalid2" in clip_names
 
 
 if __name__ == "__main__":

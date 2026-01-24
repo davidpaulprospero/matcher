@@ -405,3 +405,41 @@ Progress: 6/10 stories complete
   - config.yaml (added extend option documentation)
   - tests/test_otio_timeline.py (added TestGapModeExtend class with 6 tests)
 
+## Iteration 7 - [US-007] Add OTIO clip metadata validation before export
+- Added ClipValidationError class for representing validation errors with clip_name, error_type, message
+- Added _validate_clip_metadata() helper in src/otio/utils.py:
+  - Validates source_range exists (returns early if missing)
+  - Validates start_time is non-negative
+  - Validates duration is positive (> 0)
+  - Validates media_reference.target_url is non-empty string for ExternalReference
+  - Handles MissingReference (reports as missing_media_reference error)
+  - GeneratorReference is allowed (e.g., test patterns, color bars)
+- Added validate_timeline_clips() to validate all clips in a timeline:
+  - Iterates all tracks, validates each Clip (ignores Gaps)
+  - Returns aggregated list of ClipValidationError from all clips
+  - Logs warning with error count if issues found
+- Added 12 new tests in TestClipMetadataValidation class:
+  - test_validate_clip_valid_clip
+  - test_validate_clip_negative_start_time
+  - test_validate_clip_zero_duration
+  - test_validate_clip_negative_duration
+  - test_validate_clip_empty_target_url
+  - test_validate_clip_whitespace_target_url
+  - test_validate_clip_missing_media_reference
+  - test_validate_clip_missing_source_range
+  - test_validate_clip_multiple_errors
+  - test_validate_clip_unnamed_clip
+  - test_clip_validation_error_repr
+- Added 5 new tests in TestTimelineClipsValidation class:
+  - test_validate_timeline_all_valid
+  - test_validate_timeline_with_invalid_clips
+  - test_validate_timeline_empty_timeline
+  - test_validate_timeline_skips_gaps
+  - test_validate_timeline_multiple_errors_in_track
+- All 68 utils tests pass, all 177 sprint 2 core tests pass
+- Files modified:
+  - src/otio/utils.py (added ClipValidationError, _validate_clip_metadata, validate_timeline_clips)
+  - tests/test_otio_utils.py (added TestClipMetadataValidation and TestTimelineClipsValidation classes)
+
+Progress: 7/10 stories complete
+
