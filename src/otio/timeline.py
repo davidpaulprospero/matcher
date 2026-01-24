@@ -104,6 +104,26 @@ def _has_problematic_path(file_path: str) -> bool:
         return True
 
 
+def _is_missing_file(file_path: str) -> bool:
+    """
+    Check if the video file is missing from disk.
+
+    Returns True if the file does not exist, False if it exists or if the path
+    appears to be a URL or video ID (not a local file path).
+    """
+    # Skip check for URLs or video IDs (no path separators)
+    if '/' not in file_path and '\\' not in file_path:
+        # Likely a video ID or special reference, not a file path
+        return False
+
+    # Skip check for URLs
+    if file_path.startswith(('http://', 'https://', 'file://')):
+        return False
+
+    # Check if file exists
+    return not Path(file_path).exists()
+
+
 if TYPE_CHECKING:
     from ..config import Config
     from ..utils import MatchResult
@@ -658,9 +678,19 @@ def create_timeline(
 
         # Skip audio-only files - they cause DaVinci to hang during OTIO import
         # This happens when video segments weren't downloaded for some audio files
-        # Also skip files with problematic unicode in path
-        if _is_audio_only(source_file_for_clip) or _has_problematic_path(source_file_for_clip):
-            logger.debug(f"Segment {match_idx}: Skipping problematic file {source_file_for_clip}")
+        # Also skip files with problematic unicode in path or missing files
+        skip_reason = None
+        if _is_audio_only(source_file_for_clip):
+            skip_reason = "audio-only"
+        elif _has_problematic_path(source_file_for_clip):
+            skip_reason = "problematic path"
+        elif _is_missing_file(source_file_for_clip):
+            skip_reason = "missing file"
+            logger.warning(f"Segment {match_idx}: Video file missing, inserting gap: {source_file_for_clip}")
+
+        if skip_reason:
+            if skip_reason != "missing file":
+                logger.debug(f"Segment {match_idx}: Skipping {skip_reason}: {source_file_for_clip}")
             # Add gap instead of clip
             gap_duration = otio.opentime.RationalTime(duration_frames, rate)
             for track in video_tracks:
@@ -750,8 +780,10 @@ def create_timeline(
                 alt_source_file = alt_resolved_source
                 alt_source_start = alt_adjusted_start
 
-                # Skip audio-only files and problematic paths
-                if _is_audio_only(alt_source_file) or _has_problematic_path(alt_source_file):
+                # Skip audio-only files, problematic paths, and missing files
+                if _is_audio_only(alt_source_file) or _has_problematic_path(alt_source_file) or _is_missing_file(alt_source_file):
+                    if _is_missing_file(alt_source_file):
+                        logger.warning(f"Segment {match_idx} ALT{alt_idx+1}: Video file missing, inserting gap: {alt_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
                     video_tracks[alt_idx + 1].append(otio.schema.Gap(
                         source_range=otio.opentime.TimeRange(
@@ -846,8 +878,10 @@ def create_timeline(
                 sec_source_file = sec_resolved_source
                 sec_source_start = sec_adjusted_start
 
-                # Skip audio-only files and problematic paths
-                if _is_audio_only(sec_source_file) or _has_problematic_path(sec_source_file):
+                # Skip audio-only files, problematic paths, and missing files
+                if _is_audio_only(sec_source_file) or _has_problematic_path(sec_source_file) or _is_missing_file(sec_source_file):
+                    if _is_missing_file(sec_source_file):
+                        logger.warning(f"Segment {match_idx} SEC{sec_idx+1}: Video file missing, inserting gap: {sec_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
                     video_tracks[track_idx].append(otio.schema.Gap(
                         source_range=otio.opentime.TimeRange(
@@ -954,8 +988,10 @@ def create_timeline(
                 strat_source_file = strat_resolved_source
                 strat_source_start = strat_adjusted_start
 
-                # Skip audio-only files and problematic paths
-                if _is_audio_only(strat_source_file) or _has_problematic_path(strat_source_file):
+                # Skip audio-only files, problematic paths, and missing files
+                if _is_audio_only(strat_source_file) or _has_problematic_path(strat_source_file) or _is_missing_file(strat_source_file):
+                    if _is_missing_file(strat_source_file):
+                        logger.warning(f"Segment {match_idx} {strategy.upper()}: Video file missing, inserting gap: {strat_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
                     video_tracks[track_idx].append(otio.schema.Gap(
                         source_range=otio.opentime.TimeRange(
