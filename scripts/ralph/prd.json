@@ -66,7 +66,8 @@
         "Test stage timing is recorded in stage_timings dict"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Created tests/test_pipeline_orchestrator.py with 33 focused unit tests organized into 8 test classes: TestAddStageFluent (3), TestLoadCheckpoint (5), TestRunStageFiltering (6), TestRunResumeWithCheckpoint (5), TestStageTimingRecording (6), TestCheckpointSaving (2), TestEdgeCases (6). All 33 tests pass. Also verified all 28 existing test_pipeline.py tests still pass."
     },
     {
       "id": "US-005",

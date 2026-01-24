@@ -62,3 +62,18 @@
   - tests/test_stage_match.py (added TestInputValidationErrorMessages class)
   - tests/test_stage_output.py (added TestInputValidationErrorMessages class)
 
+## Iteration 3 - [US-004] Add PipelineOrchestrator unit tests
+- Created `tests/test_pipeline_orchestrator.py` with 33 focused unit tests
+- Organized into 8 test classes covering all acceptance criteria:
+  - TestAddStageFluent (3 tests): returns self, chaining, appending
+  - TestLoadCheckpoint (5 tests): no file, None return, invalid validation, valid, valid with warnings
+  - TestRunStageFiltering (6 tests): skip single/multiple, only single/multiple, precedence, timing
+  - TestRunResumeWithCheckpoint (5 tests): triggers load, skips completed, restore failure, mode handling
+  - TestStageTimingRecording (6 tests): single/multiple, actual duration, state sync, failed/validation
+  - TestCheckpointSaving (2 tests): saved after success, not saved on failure
+  - TestEdgeCases (6 tests): empty pipeline, current_stage cleared, failure stops, clear, summaries
+- All 33 new tests pass
+- Verified all 28 existing test_pipeline.py tests still pass (no regressions)
+- Files modified:
+  - tests/test_pipeline_orchestrator.py (new file, 370 lines)
+
