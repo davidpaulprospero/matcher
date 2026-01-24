@@ -37,7 +37,8 @@
         "All CLI argument tests pass"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true,
+      "notes": "Added --output-only flag to src/cli/args.py. Added 4 tests for --output-only (flag set, default, with project, combined with match-only). Added TestParseArgumentsMutuallyExclusiveOptions class with 4 tests for conflicting options (--resume/--fresh, --match-only/--output-only, --use-keywords/--save-keywords, --validate-config with others). Total: 41 CLI arg tests pass."
     },
     {
       "id": "US-003",
