@@ -36,6 +36,10 @@ NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
 CLIP_COUNT_WARNING_THRESHOLD = 2500  # Log warning when approaching limit
 CLIP_COUNT_ERROR_THRESHOLD = 3000    # Log error when likely to fail
 
+# Maximum clip extension factor for gap_mode='extend'
+# Prevents extreme slowdowns when extending clips to fill large gaps
+MAX_CLIP_EXTENSION_FACTOR = 2.0  # Max 2x original duration
+
 
 def _is_audio_only(file_path: str) -> bool:
     """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
@@ -553,8 +557,9 @@ def create_timeline(
     # - "scale": Scale SRT gaps by time_scale_factor (default)
     # - "proportional": Recalculate gaps to distribute content evenly
     # - "none": No gaps between clips
+    # - "extend": Extend previous clip to fill gap (max 2x original duration)
     gap_mode = getattr(config.output, 'gap_mode', 'scale')
-    if gap_mode not in ('scale', 'proportional', 'none'):
+    if gap_mode not in ('scale', 'proportional', 'none', 'extend'):
         logger.warning(f"Invalid gap_mode '{gap_mode}', using 'scale'")
         gap_mode = 'scale'
 
@@ -620,6 +625,10 @@ def create_timeline(
         logger.info("Gap mode: none - clips will be placed back-to-back")
         print(f"  ✓ Gap mode: none (back-to-back clips)")
 
+    if gap_mode == 'extend':
+        logger.info(f"Gap mode: extend - extending previous clips to fill gaps (max {MAX_CLIP_EXTENSION_FACTOR}x original duration)")
+        print(f"  ✓ Gap mode: extend (max {MAX_CLIP_EXTENSION_FACTOR}x original duration)")
+
     # Adjusted first segment start includes the offset and scaling
     adjusted_first_segment_start = max(0.0, (first_segment_start * time_scale_factor) + voiceover_offset)
 
@@ -646,6 +655,10 @@ def create_timeline(
         # Update timeline position
         timeline_frames += leading_frames
 
+    # Track previous segment's info for extend mode
+    prev_source_duration = 0.0
+    prev_target_duration_frames = 0
+
     # Process each match
     for match_idx, match_result in enumerate(matches):
         match = match_result.primary_match
@@ -657,10 +670,17 @@ def create_timeline(
         # - "scale": Use SRT gaps scaled by time_scale_factor
         # - "proportional": Use pre-calculated proportional gap positions
         # - "none": No gaps (back-to-back clips)
+        # - "extend": Extend previous clip to fill gap (max 2x original duration)
 
         if gap_mode == 'none':
             # No gaps mode - clips are placed back-to-back
             expected_start_frames = timeline_frames
+        elif gap_mode == 'extend':
+            # Extend mode - calculate where this segment should start based on SRT
+            # Then extend previous clip to fill the gap (handled below)
+            scaled_segment_start = vo_seg.start_time * time_scale_factor
+            adjusted_segment_start = scaled_segment_start + voiceover_offset
+            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
         elif gap_mode == 'proportional' and match_idx in proportional_gap_timing:
             # Proportional mode - use pre-calculated positions
             expected_start_seconds = proportional_gap_timing[match_idx]
@@ -677,30 +697,99 @@ def create_timeline(
             gap_seconds = gap_frames / rate
 
             if gap_seconds >= min_gap_threshold:
-                # Gap is significant - insert silence/gap clips on all tracks
-                gap_duration = otio.opentime.RationalTime(gap_frames, rate)
+                # Gap is significant
 
-                logger.debug(f"Segment {match_idx}: Inserting {gap_seconds:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
+                if gap_mode == 'extend' and match_idx > 0 and prev_source_duration > 0:
+                    # Extend mode: extend the previous clip to fill the gap
+                    # Calculate maximum extension allowed (2x original duration)
+                    max_extension_seconds = prev_source_duration * MAX_CLIP_EXTENSION_FACTOR
 
-                # Add gap to all video tracks
-                for track in video_tracks:
-                    track.append(otio.schema.Gap(
-                        source_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
-                            duration=gap_duration
-                        )
-                    ))
+                    # Current duration of previous clip is prev_target_duration_frames / rate
+                    # We want to add gap_seconds to it, but limit to max_extension_seconds total
+                    prev_target_seconds = prev_target_duration_frames / rate
+                    max_total_duration = max_extension_seconds
+                    max_additional = max(0, max_total_duration - prev_target_seconds)
 
-                # Add gap to all audio tracks
-                for track in audio_tracks:
-                    track.append(otio.schema.Gap(
-                        source_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
-                            duration=gap_duration
-                        )
-                    ))
+                    # How much can we actually extend?
+                    extension_seconds = min(gap_seconds, max_additional)
+                    extension_frames = round(extension_seconds * rate)
 
-                timeline_frames = expected_start_frames
+                    if extension_frames > 0:
+                        # Extend previous clips on all tracks
+                        for track in video_tracks:
+                            if len(track) > 0:
+                                last_item = track[-1]
+                                if isinstance(last_item, otio.schema.Clip):
+                                    # Extend the clip's source_range duration
+                                    old_range = last_item.source_range
+                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    last_item.source_range = otio.opentime.TimeRange(
+                                        start_time=old_range.start_time,
+                                        duration=otio.opentime.RationalTime(new_duration_frames, rate)
+                                    )
+
+                        for track in audio_tracks:
+                            if len(track) > 0:
+                                last_item = track[-1]
+                                if isinstance(last_item, otio.schema.Clip):
+                                    old_range = last_item.source_range
+                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    last_item.source_range = otio.opentime.TimeRange(
+                                        start_time=old_range.start_time,
+                                        duration=otio.opentime.RationalTime(new_duration_frames, rate)
+                                    )
+
+                        logger.debug(f"Segment {match_idx}: Extended previous clip by {extension_seconds:.2f}s")
+                        timeline_frames += extension_frames
+
+                    # If there's remaining gap after max extension, insert a gap
+                    remaining_gap_frames = gap_frames - extension_frames
+                    if remaining_gap_frames > 0:
+                        remaining_gap_seconds = remaining_gap_frames / rate
+                        logger.debug(f"Segment {match_idx}: Extension limit reached, inserting {remaining_gap_seconds:.2f}s remaining gap")
+
+                        remaining_gap_duration = otio.opentime.RationalTime(remaining_gap_frames, rate)
+                        for track in video_tracks:
+                            track.append(otio.schema.Gap(
+                                source_range=otio.opentime.TimeRange(
+                                    start_time=otio.opentime.RationalTime(0, rate),
+                                    duration=remaining_gap_duration
+                                )
+                            ))
+                        for track in audio_tracks:
+                            track.append(otio.schema.Gap(
+                                source_range=otio.opentime.TimeRange(
+                                    start_time=otio.opentime.RationalTime(0, rate),
+                                    duration=remaining_gap_duration
+                                )
+                            ))
+                        timeline_frames += remaining_gap_frames
+
+                else:
+                    # Standard gap insertion (scale, proportional modes, or first segment in extend mode)
+                    gap_duration = otio.opentime.RationalTime(gap_frames, rate)
+
+                    logger.debug(f"Segment {match_idx}: Inserting {gap_seconds:.2f}s gap before (vo gap from {timeline_frames/rate:.2f}s to {expected_start_frames/rate:.2f}s)")
+
+                    # Add gap to all video tracks
+                    for track in video_tracks:
+                        track.append(otio.schema.Gap(
+                            source_range=otio.opentime.TimeRange(
+                                start_time=otio.opentime.RationalTime(0, rate),
+                                duration=gap_duration
+                            )
+                        ))
+
+                    # Add gap to all audio tracks
+                    for track in audio_tracks:
+                        track.append(otio.schema.Gap(
+                            source_range=otio.opentime.TimeRange(
+                                start_time=otio.opentime.RationalTime(0, rate),
+                                duration=gap_duration
+                            )
+                        ))
+
+                    timeline_frames = expected_start_frames
             else:
                 # Gap is below threshold - collapse it (don't insert gap, clips will be back-to-back)
                 logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
@@ -1121,6 +1210,10 @@ def create_timeline(
                     )
                 )
                 audio_tracks[track_idx].append(a_gap)
+
+        # Track previous segment info for extend mode
+        prev_source_duration = source_duration
+        prev_target_duration_frames = duration_frames
 
         # Update timeline position using integer frames to avoid drift
         timeline_frames += duration_frames

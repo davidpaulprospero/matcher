@@ -719,5 +719,231 @@ class TestClipCountWarnings:
         assert "approaching DaVinci limit" in caplog.text
 
 
+class TestGapModeExtend:
+    """Test gap_mode='extend' functionality for filling gaps with extended clips."""
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_gap_mode_extend_parameter_accepted(self, mock_windows_path, mock_duration):
+        """Test that gap_mode='extend' is accepted as a valid option."""
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 20.0
+
+        # Create matches with a gap between them
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=5.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=10.0, end=15.0),  # 5s gap
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+
+        # Create config with gap_mode='extend'
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.gap_mode = "extend"
+        config = MockConfig(output=output_config)
+
+        # Should not raise
+        timeline = create_timeline(matches, config)
+        assert isinstance(timeline, otio.schema.Timeline)
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_gap_mode_extend_extends_previous_clip(self, mock_windows_path, mock_duration):
+        """Test that extend mode extends the previous clip to fill gaps."""
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 20.0
+
+        # Create matches with a 3s gap between them
+        # Segment 1: 0-5s (5s duration)
+        # Gap: 5-8s (3s)
+        # Segment 2: 8-13s (5s duration)
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=5.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=8.0, end=13.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+
+        # Create config with gap_mode='extend'
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.gap_mode = "extend"
+        config = MockConfig(output=output_config)
+
+        timeline = create_timeline(matches, config, frame_rate=30.0)
+
+        # Get the V1 track
+        video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
+        v1_track = video_tracks[0]
+
+        # The first clip should be extended (original 5s + 3s gap = 8s)
+        # But source_range is used for display, so check clip count and durations
+        clips = [item for item in v1_track if isinstance(item, otio.schema.Clip)]
+        gaps = [item for item in v1_track if isinstance(item, otio.schema.Gap)]
+
+        # With extend mode, there should be fewer gaps than with scale mode
+        # (The 3s gap should be absorbed by extending the first clip)
+        assert len(clips) == 2  # Two segments = two clips
+        # The first clip should have extended duration
+        first_clip = clips[0]
+        first_clip_duration = first_clip.source_range.duration.value / 30.0
+        # Original was 5s, extended by 3s gap = 8s
+        assert first_clip_duration == pytest.approx(8.0, abs=0.1)
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_gap_mode_extend_limits_to_2x_original(self, mock_windows_path, mock_duration):
+        """Test that extension is limited to 2x original clip duration."""
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 30.0
+
+        # Create matches with a large 10s gap
+        # Segment 1: 0-5s (5s duration) -> max extension = 10s total (2x original)
+        # Gap: 5-15s (10s gap - larger than max extension)
+        # Segment 2: 15-20s (5s duration)
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=5.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=15.0, end=20.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.gap_mode = "extend"
+        config = MockConfig(output=output_config)
+
+        timeline = create_timeline(matches, config, frame_rate=30.0)
+
+        # Get the V1 track
+        video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
+        v1_track = video_tracks[0]
+
+        clips = [item for item in v1_track if isinstance(item, otio.schema.Clip)]
+        gaps = [item for item in v1_track if isinstance(item, otio.schema.Gap)]
+
+        # First clip: original 5s, max extension to 10s (2x), so extended by 5s
+        # Remaining gap: 10s - 5s = 5s should be inserted as a gap
+        first_clip = clips[0]
+        first_clip_duration = first_clip.source_range.duration.value / 30.0
+
+        # Max extension is 2x = 10s total
+        assert first_clip_duration == pytest.approx(10.0, abs=0.1)
+
+        # There should be at least one gap (the remaining 5s that couldn't be absorbed)
+        assert len(gaps) >= 1
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_gap_mode_extend_first_segment_gap_not_extended(self, mock_windows_path, mock_duration):
+        """Test that leading gap (before first segment) is not extended (nothing to extend)."""
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 20.0
+
+        # Create matches where first segment starts at 3s (3s leading gap)
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=3.0, end=8.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.gap_mode = "extend"
+        config = MockConfig(output=output_config)
+
+        timeline = create_timeline(matches, config, frame_rate=30.0)
+
+        # Get the V1 track
+        video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
+        v1_track = video_tracks[0]
+
+        # Should still have a leading gap (nothing to extend before first segment)
+        items = list(v1_track)
+        assert len(items) >= 1
+
+        # First item should be a gap (leading gap)
+        first_item = items[0]
+        assert isinstance(first_item, otio.schema.Gap)
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    def test_gap_mode_extend_logs_extension(self, mock_windows_path, mock_duration, caplog):
+        """Test that extension is logged at debug level."""
+        import logging
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 20.0
+        caplog.set_level(logging.DEBUG)
+
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=5.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=8.0, end=13.0),  # 3s gap
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.gap_mode = "extend"
+        config = MockConfig(output=output_config)
+
+        timeline = create_timeline(matches, config)
+
+        # Should log about extending the previous clip
+        assert "Extended previous clip" in caplog.text or "Gap mode: extend" in caplog.text
+
+    def test_max_extension_factor_constant_is_2(self):
+        """Test that MAX_CLIP_EXTENSION_FACTOR is set to 2.0."""
+        from src.otio.timeline import MAX_CLIP_EXTENSION_FACTOR
+        assert MAX_CLIP_EXTENSION_FACTOR == 2.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

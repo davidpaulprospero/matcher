@@ -89,7 +89,9 @@ class OutputConfig:
     #   - "scale": (default) Scale SRT gaps by time_scale_factor
     #   - "proportional": Recalculate gaps to distribute content evenly across audio
     #   - "none": No gaps between clips, only leading/trailing gaps
+    #   - "extend": Extend previous clip to fill gaps (max 2x original clip duration)
     # Use "proportional" when Whisper's gap timing is inaccurate but segment durations are good
+    # Use "extend" to minimize gaps by stretching footage, creating a more continuous flow
     gap_mode: str = "scale"
 
     # Track structure
