@@ -16,6 +16,9 @@ from dataclasses import asdict
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Import shared fixtures
+from tests.fixtures import create_mock_config
+
 from src.config.sections.broll import BrollConfig, BrollSourceBoostConfig
 from src.stages.broll_download import BrollDownloadStage
 from src.stages.broll_match import BrollMatchStage, BrollScene, BrollMatch
@@ -191,10 +194,10 @@ class TestBrollDownloadStage:
 
     @pytest.fixture
     def mock_config(self):
-        """Create mock config"""
-        config = Mock()
+        """Create mock config using shared fixtures."""
+        config = create_mock_config()
+        # Add test-specific overrides
         config.broll = BrollConfig()
-        config.pipeline = Mock()
         config.pipeline.skip_download = False
         config.downloaded_videos_dir = "/tmp/videos"
         return config
@@ -451,10 +454,10 @@ class TestBrollMatchStage:
 
     @pytest.fixture
     def mock_config(self):
-        """Create mock config"""
-        config = Mock()
+        """Create mock config using shared fixtures."""
+        config = create_mock_config()
+        # Add test-specific overrides
         config.broll = BrollConfig()
-        config.download = Mock()
         config.download.audio_first = None
         config.vision = None
         config.embedding = Mock()

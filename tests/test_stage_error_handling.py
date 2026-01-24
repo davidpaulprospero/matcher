@@ -25,67 +25,40 @@ from typing import List, Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.stages import StageResult, StageMetrics
+from tests.fixtures import create_mock_config, create_mock_state, create_test_checkpoint
 
 
 @pytest.fixture
-def mock_config():
-    """Create a mock config object."""
-    config = Mock()
-
-    # Download config
-    config.download = Mock()
+def mock_config(tmp_path):
+    """Create a mock config object using shared fixtures."""
+    config = create_mock_config(tmp_path)
+    # Add test-specific overrides
     config.download.format = "bestvideo+bestaudio/best"
     config.download.socket_timeout = 30
-    config.download.root_dir = None
-    config.download.max_retries = 3
     config.download.retry_delay = 0.01
     config.download.retry_backoff = 1.0
-    config.download.audio_first = Mock()
-    config.download.audio_first.enabled = False
-    config.download.caption_first = Mock()
-    config.download.caption_first.enabled = False
-
-    # Transcribe config
-    config.transcription = Mock()
-    config.transcription.model = "small"
-    config.transcription.language = "en"
-    config.transcription.device = "cpu"
-    config.transcription.batch_size = 1
-
-    # Matching config
-    config.matching = Mock()
-    config.matching.min_confidence = 0.5
-
-    # Output config
-    config.output = Mock()
     config.output.gap_mode = "scale"
     config.output.frame_rate = 30.0
     config.output.include_alternatives = True
     config.output.export_edl = True
     config.output.export_xml = True
-
-    # LLM config
     config.llm = Mock()
     config.llm.provider = "gemini"
-
     return config
 
 
 @pytest.fixture
 def mock_state():
-    """Create a mock pipeline state."""
-    state = Mock()
-    state.voiceover_segments = []
-    state.keywords = []
+    """Create a mock pipeline state using shared fixtures."""
+    state = create_mock_state(
+        voiceover_segments=[],
+        text_metadata=[],
+        matches=[]
+    )
+    # Add test-specific attributes
     state.topics = []
-    state.entities = []
-    state.video_candidates = []
     state.downloaded_videos = []
-    state.text_metadata = []
     state.embeddings = {}
-    state.matches = []
-    state.entity_images = {}
-    state.entity_videos = {}
     state.stage_timings = {}
     return state
 
