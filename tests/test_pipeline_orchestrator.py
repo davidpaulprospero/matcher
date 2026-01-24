@@ -20,7 +20,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 from src.pipeline import PipelineOrchestrator
 from src.state import PipelineState
-from src.stages import Stage, StageResult
+from src.stages import Stage, StageResult, StageMetrics
 from src.config import Config
 
 
@@ -34,7 +34,9 @@ class MockStage(Stage):
         validation_error: str = None,
         can_skip_value: bool = False,
         restore_success: bool = True,
-        run_delay: float = 0.0
+        run_delay: float = 0.0,
+        items_processed: int = 0,
+        items_failed: int = 0
     ):
         self.name = name
         self._should_fail = should_fail
@@ -42,6 +44,8 @@ class MockStage(Stage):
         self._can_skip_value = can_skip_value
         self._restore_success = restore_success
         self._run_delay = run_delay
+        self._items_processed = items_processed
+        self._items_failed = items_failed
         self._run_called = False
         self._restore_called = False
         self._can_skip_called = False
@@ -71,7 +75,18 @@ class MockStage(Stage):
         if self._should_fail:
             return StageResult.fail(f"{self.name} failed intentionally")
 
-        return StageResult.ok(data={'stage': self.name, 'completed': True})
+        # Return metrics if items were specified
+        metrics = None
+        if self._items_processed > 0 or self._items_failed > 0:
+            metrics = StageMetrics(
+                items_processed=self._items_processed,
+                items_failed=self._items_failed
+            )
+
+        return StageResult.ok(
+            data={'stage': self.name, 'completed': True},
+            metrics=metrics
+        )
 
 
 @pytest.fixture
@@ -793,3 +808,173 @@ class TestStageProgressCallbacks:
         assert result is True
         assert "A" in pipeline.stage_timings
         assert "B" in pipeline.stage_timings
+
+
+class TestStageMetricsCollection:
+    """Test stage metrics collection and aggregation."""
+
+    def test_metrics_collected_for_single_stage(self, temp_project_dir, mock_config):
+        """Test that metrics are collected for a single stage."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("test_stage", items_processed=10, items_failed=2))
+
+        pipeline.run(resume=False)
+
+        assert "test_stage" in pipeline.stage_metrics
+        metrics = pipeline.stage_metrics["test_stage"]
+        assert metrics.items_processed == 10
+        assert metrics.items_failed == 2
+        assert metrics.duration_seconds >= 0
+
+    def test_metrics_collected_for_multiple_stages(self, temp_project_dir, mock_config):
+        """Test that metrics are collected for multiple stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5, items_failed=1))
+        pipeline.add_stage(MockStage("B", items_processed=10, items_failed=3))
+        pipeline.add_stage(MockStage("C", items_processed=15, items_failed=0))
+
+        pipeline.run(resume=False)
+
+        assert len(pipeline.stage_metrics) == 3
+        assert pipeline.stage_metrics["A"].items_processed == 5
+        assert pipeline.stage_metrics["B"].items_processed == 10
+        assert pipeline.stage_metrics["C"].items_processed == 15
+
+    def test_default_metrics_when_stage_returns_none(self, temp_project_dir, mock_config):
+        """Test that default metrics are created when stage returns no metrics."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        # Stage without items_processed/items_failed returns no metrics
+        pipeline.add_stage(MockStage("no_metrics_stage"))
+
+        pipeline.run(resume=False)
+
+        assert "no_metrics_stage" in pipeline.stage_metrics
+        metrics = pipeline.stage_metrics["no_metrics_stage"]
+        assert metrics.items_processed == 0
+        assert metrics.items_failed == 0
+        assert metrics.duration_seconds >= 0
+
+    def test_get_metrics_returns_aggregated_totals(self, temp_project_dir, mock_config):
+        """Test that get_metrics() returns aggregated totals."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5, items_failed=1))
+        pipeline.add_stage(MockStage("B", items_processed=10, items_failed=2))
+        pipeline.add_stage(MockStage("C", items_processed=15, items_failed=0))
+
+        pipeline.run(resume=False)
+
+        metrics = pipeline.get_metrics()
+
+        assert metrics['total_items_processed'] == 30  # 5 + 10 + 15
+        assert metrics['total_items_failed'] == 3      # 1 + 2 + 0
+        assert metrics['total_duration_seconds'] >= 0
+        assert 'stages' in metrics
+        assert len(metrics['stages']) == 3
+
+    def test_get_metrics_empty_pipeline(self, temp_project_dir, mock_config):
+        """Test get_metrics() for empty pipeline."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        pipeline.run(resume=False)
+
+        metrics = pipeline.get_metrics()
+
+        assert metrics['total_items_processed'] == 0
+        assert metrics['total_items_failed'] == 0
+        assert metrics['total_duration_seconds'] == 0.0
+        assert metrics['stages'] == {}
+
+    def test_metrics_duration_updated_from_actual_elapsed(self, temp_project_dir, mock_config):
+        """Test that duration_seconds is updated to actual elapsed time."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("slow_stage", items_processed=10, run_delay=0.05))
+
+        pipeline.run(resume=False)
+
+        metrics = pipeline.stage_metrics["slow_stage"]
+        # Duration should be at least 50ms
+        assert metrics.duration_seconds >= 0.05
+
+    def test_get_metrics_includes_stage_dict(self, temp_project_dir, mock_config):
+        """Test that get_metrics() includes the stages dict."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5, items_failed=1))
+
+        pipeline.run(resume=False)
+
+        metrics = pipeline.get_metrics()
+
+        assert 'stages' in metrics
+        assert "A" in metrics['stages']
+        assert isinstance(metrics['stages']["A"], StageMetrics)
+        assert metrics['stages']["A"].items_processed == 5
+
+    def test_metrics_not_collected_for_skipped_stages(self, temp_project_dir, mock_config):
+        """Test that metrics are not collected for skipped stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5))
+        pipeline.add_stage(MockStage("B", items_processed=10))
+        pipeline.add_stage(MockStage("C", items_processed=15))
+
+        pipeline.run(resume=False, skip_stages=["B"])
+
+        assert "A" in pipeline.stage_metrics
+        assert "B" not in pipeline.stage_metrics
+        assert "C" in pipeline.stage_metrics
+
+    def test_metrics_collected_for_failed_stage(self, temp_project_dir, mock_config):
+        """Test that metrics ARE collected for failed stages (before failure)."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("fail_stage", should_fail=True))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        # Failed stages still get recorded in stage_metrics
+        assert "fail_stage" in pipeline.stage_metrics
+        # Default metrics since MockStage doesn't return metrics when failing
+        assert pipeline.stage_metrics["fail_stage"].items_processed == 0
+
+    def test_stage_metrics_dataclass_to_dict(self, temp_project_dir, mock_config):
+        """Test StageMetrics.to_dict() method."""
+        metrics = StageMetrics(items_processed=10, items_failed=2, duration_seconds=5.5)
+
+        result = metrics.to_dict()
+
+        assert result == {
+            'items_processed': 10,
+            'items_failed': 2,
+            'duration_seconds': 5.5
+        }
+
+    def test_stage_metrics_dataclass_from_dict(self, temp_project_dir, mock_config):
+        """Test StageMetrics.from_dict() classmethod."""
+        data = {
+            'items_processed': 15,
+            'items_failed': 3,
+            'duration_seconds': 7.2
+        }
+
+        metrics = StageMetrics.from_dict(data)
+
+        assert metrics.items_processed == 15
+        assert metrics.items_failed == 3
+        assert metrics.duration_seconds == 7.2
+
+    def test_stage_result_ok_with_metrics(self, temp_project_dir, mock_config):
+        """Test StageResult.ok() with metrics parameter."""
+        metrics = StageMetrics(items_processed=5, items_failed=1)
+        result = StageResult.ok(data={'test': 1}, metrics=metrics)
+
+        assert result.success is True
+        assert result.metrics is metrics
+        assert result.metrics.items_processed == 5
+
+    def test_stage_result_fail_with_metrics(self, temp_project_dir, mock_config):
+        """Test StageResult.fail() with metrics parameter."""
+        metrics = StageMetrics(items_processed=3, items_failed=2)
+        result = StageResult.fail(error="Test error", metrics=metrics)
+
+        assert result.success is False
+        assert result.metrics is metrics
+        assert result.metrics.items_failed == 2

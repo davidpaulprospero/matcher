@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .state import PipelineState
-from .stages import Stage, StageResult
+from .stages import Stage, StageResult, StageMetrics
 
 if TYPE_CHECKING:
     from .config import Config
@@ -71,6 +71,7 @@ class PipelineOrchestrator:
         self.resume_mode = False
         self.current_stage: Optional[str] = None
         self.stage_timings: dict = {}
+        self.stage_metrics: dict = {}  # stage_name -> StageMetrics
 
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
         """Add a stage to the pipeline (fluent interface)"""
@@ -176,6 +177,15 @@ class PipelineOrchestrator:
             self.stage_timings[stage_name] = elapsed
             self.state.stage_timings[stage_name] = elapsed
 
+            # Store stage metrics if provided
+            if result.metrics:
+                # Update duration_seconds to actual elapsed time
+                result.metrics.duration_seconds = elapsed
+                self.stage_metrics[stage_name] = result.metrics
+            else:
+                # Create default metrics with just duration
+                self.stage_metrics[stage_name] = StageMetrics(duration_seconds=elapsed)
+
             # Invoke on_stage_complete callback
             if on_stage_complete:
                 try:
@@ -210,6 +220,33 @@ class PipelineOrchestrator:
             'total_time': sum(self.stage_timings.values()),
             'stage_timings': self.stage_timings,
             'state': self.state.to_checkpoint_dict(),
+        }
+
+    def get_metrics(self) -> dict:
+        """
+        Get aggregated metrics across all stages.
+
+        Returns:
+            Dictionary with:
+            - total_items_processed: Sum of items_processed across all stages
+            - total_items_failed: Sum of items_failed across all stages
+            - total_duration_seconds: Sum of duration_seconds across all stages
+            - stages: Dict mapping stage_name to StageMetrics
+        """
+        total_processed = 0
+        total_failed = 0
+        total_duration = 0.0
+
+        for stage_name, metrics in self.stage_metrics.items():
+            total_processed += metrics.items_processed
+            total_failed += metrics.items_failed
+            total_duration += metrics.duration_seconds
+
+        return {
+            'total_items_processed': total_processed,
+            'total_items_failed': total_failed,
+            'total_duration_seconds': total_duration,
+            'stages': self.stage_metrics
         }
 
     def clear_checkpoint(self):
