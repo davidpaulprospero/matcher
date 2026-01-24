@@ -149,6 +149,140 @@ class TestInputValidation:
         assert error is None
 
 
+class TestInputValidationErrorMessages:
+    """Test validation error messages contain specific field names and suggestions"""
+
+    def test_validate_error_contains_field_name_matches(self, mock_config):
+        """Test error message contains 'matches' field name"""
+        stage = OutputStage()
+        state = PipelineState()
+        state.matches = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "matches" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_suggests_match_stage(self, mock_config):
+        """Test error suggests running MATCH stage for matches"""
+        stage = OutputStage()
+        state = PipelineState()
+        state.matches = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "MATCH" in error
+
+    def test_validate_error_contains_config_field(self):
+        """Test error message contains 'config.otio_output_dir' field name"""
+        from unittest.mock import MagicMock
+        from src.utils import Match, SRTSegment
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        # Create minimal valid match
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0, text="Test", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0, text="Video", source_file="video.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=0.9,
+            reasoning='Test'
+        )
+        state.matches = [match]
+
+        # Create config without otio_output_dir
+        config = MagicMock()
+        del config.otio_output_dir  # Remove attribute
+
+        error = stage.validate_inputs(state, config)
+
+        assert error is not None
+        assert "otio_output_dir" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_suggests_config_setting(self):
+        """Test error suggests setting otio_output_dir in config"""
+        from unittest.mock import MagicMock
+        from src.utils import Match, SRTSegment
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        # Create minimal valid match
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0, text="Test", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0, text="Video", source_file="video.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=0.9,
+            reasoning='Test'
+        )
+        state.matches = [match]
+
+        # Create config without otio_output_dir
+        config = MagicMock()
+        del config.otio_output_dir  # Remove attribute
+
+        error = stage.validate_inputs(state, config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "otio_output_dir" in error
+
+    def test_validate_error_contains_multiple_missing_fields(self):
+        """Test error message contains multiple missing field names"""
+        from unittest.mock import MagicMock
+
+        stage = OutputStage()
+        state = PipelineState()
+        state.matches = []
+
+        # Create config without otio_output_dir
+        config = MagicMock()
+        del config.otio_output_dir  # Remove attribute
+
+        error = stage.validate_inputs(state, config)
+
+        assert error is not None
+        assert "matches" in error
+        assert "otio_output_dir" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_suggests_multiple_fixes(self):
+        """Test error suggests multiple fixes when multiple fields missing"""
+        from unittest.mock import MagicMock
+
+        stage = OutputStage()
+        state = PipelineState()
+        state.matches = []
+
+        # Create config without otio_output_dir
+        config = MagicMock()
+        del config.otio_output_dir  # Remove attribute
+
+        error = stage.validate_inputs(state, config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "MATCH" in error
+        assert "otio_output_dir" in error
+
+
 # ============================================================================
 # Test OTIO Generation
 # ============================================================================

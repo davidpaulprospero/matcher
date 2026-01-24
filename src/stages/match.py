@@ -225,11 +225,35 @@ class MatchStage(Stage):
         state: 'PipelineState',
         config: 'Config'
     ) -> Optional[str]:
-        """Validate inputs before running"""
+        """
+        Validate inputs before running.
+
+        Returns specific missing field names and suggestions for which stage to run.
+        """
+        missing_fields = []
+
         if not state.voiceover_segments:
-            return "No voiceover segments available for matching"
+            missing_fields.append("voiceover_segments")
+
         if is_embeddings_empty(state.embeddings):
-            return "No video embeddings available for matching"
+            missing_fields.append("embeddings")
+
+        if not state.text_metadata:
+            missing_fields.append("text_metadata")
+
+        if missing_fields:
+            fields_str = ", ".join(missing_fields)
+            suggestions = []
+
+            if "voiceover_segments" in missing_fields:
+                suggestions.append("run ANALYZE stage first to extract voiceover segments")
+
+            if "embeddings" in missing_fields or "text_metadata" in missing_fields:
+                suggestions.append("run TRANSCRIBE stage first to generate video embeddings and metadata")
+
+            suggestion_str = "; ".join(suggestions) if suggestions else "check pipeline configuration"
+            return f"Missing required fields: {fields_str}. Suggestion: {suggestion_str}"
+
         return None
 
     # === Helper Methods ===
