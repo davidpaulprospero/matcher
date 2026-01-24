@@ -81,7 +81,8 @@
         "All restore tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Enhanced MatchStage.restore() with validation for matches list, match objects, segment_index, video_file, and confidence. Enhanced OutputStage.restore() with validation for dict types and path existence. Added 12 new tests for MatchStage and 9 for OutputStage restore error handling. All 116 restore-related tests pass."
     },
     {
       "id": "US-006",
@@ -95,7 +96,8 @@
         "All download stage tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added max_retries, retry_delay, retry_backoff to DownloadConfig. Implemented _retry_with_backoff() helper with exponential backoff. Updated _run_audio_first() to use retry logic. Added 9 new tests in TestDownloadRetryLogic and TestAudioFirstRetryIntegration classes. All 75 download stage tests pass."
     },
     {
       "id": "US-007",
@@ -109,7 +111,8 @@
         "All pipeline tests pass"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added StageStartCallback and StageCompleteCallback type aliases. Added on_stage_start and on_stage_complete parameters to run(). Callbacks are wrapped in try/except to prevent exceptions from stopping the pipeline. Added 12 new tests in TestStageProgressCallbacks class. All 45 orchestrator tests and 28 pipeline tests pass."
     },
     {
       "id": "US-008",

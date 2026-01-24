@@ -546,3 +546,250 @@ class TestEdgeCases:
         assert summary['stages_run'] == ["A", "B"]
         assert summary['total_time'] >= 0
         assert len(summary['stage_timings']) == 2
+
+
+class TestStageProgressCallbacks:
+    """Test on_stage_start and on_stage_complete callbacks."""
+
+    def test_on_stage_start_called_for_each_stage(self, temp_project_dir, mock_config):
+        """Test that on_stage_start is called for each stage in order."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stages = [MockStage("A"), MockStage("B"), MockStage("C")]
+        for s in stages:
+            pipeline.add_stage(s)
+
+        started_stages = []
+
+        def on_start(stage_name):
+            started_stages.append(stage_name)
+
+        result = pipeline.run(resume=False, on_stage_start=on_start)
+
+        assert result is True
+        assert started_stages == ["A", "B", "C"]
+
+    def test_on_stage_complete_called_for_each_stage(self, temp_project_dir, mock_config):
+        """Test that on_stage_complete is called for each stage with result and timing."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stages = [MockStage("A"), MockStage("B")]
+        for s in stages:
+            pipeline.add_stage(s)
+
+        completed_stages = []
+
+        def on_complete(stage_name, result, elapsed):
+            completed_stages.append({
+                'name': stage_name,
+                'success': result.success,
+                'elapsed': elapsed
+            })
+
+        result = pipeline.run(resume=False, on_stage_complete=on_complete)
+
+        assert result is True
+        assert len(completed_stages) == 2
+        assert completed_stages[0]['name'] == "A"
+        assert completed_stages[0]['success'] is True
+        assert completed_stages[0]['elapsed'] >= 0
+        assert completed_stages[1]['name'] == "B"
+        assert completed_stages[1]['success'] is True
+
+    def test_callbacks_called_in_correct_order(self, temp_project_dir, mock_config):
+        """Test that start callback is called before complete for each stage."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B"))
+
+        events = []
+
+        def on_start(stage_name):
+            events.append(f"start:{stage_name}")
+
+        def on_complete(stage_name, result, elapsed):
+            events.append(f"complete:{stage_name}")
+
+        pipeline.run(resume=False, on_stage_start=on_start, on_stage_complete=on_complete)
+
+        assert events == [
+            "start:A", "complete:A",
+            "start:B", "complete:B"
+        ]
+
+    def test_on_stage_start_exception_does_not_stop_pipeline(self, temp_project_dir, mock_config):
+        """Test that exception in on_stage_start callback does not stop the pipeline."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B"))
+
+        def failing_start(stage_name):
+            if stage_name == "A":
+                raise ValueError("Callback error!")
+
+        completed = []
+
+        def track_complete(stage_name, result, elapsed):
+            completed.append(stage_name)
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(
+                resume=False,
+                on_stage_start=failing_start,
+                on_stage_complete=track_complete
+            )
+
+        assert result is True
+        assert completed == ["A", "B"]  # Both stages completed despite callback failure
+        # Should have logged a warning
+        assert any("on_stage_start callback failed" in str(call) for call in mock_logger.warning.call_args_list)
+
+    def test_on_stage_complete_exception_does_not_stop_pipeline(self, temp_project_dir, mock_config):
+        """Test that exception in on_stage_complete callback does not stop the pipeline."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B"))
+
+        started = []
+
+        def track_start(stage_name):
+            started.append(stage_name)
+
+        def failing_complete(stage_name, result, elapsed):
+            if stage_name == "A":
+                raise RuntimeError("Complete callback error!")
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(
+                resume=False,
+                on_stage_start=track_start,
+                on_stage_complete=failing_complete
+            )
+
+        assert result is True
+        assert started == ["A", "B"]  # Both stages started despite callback failure
+        # Should have logged a warning
+        assert any("on_stage_complete callback failed" in str(call) for call in mock_logger.warning.call_args_list)
+
+    def test_callbacks_receive_failed_stage_result(self, temp_project_dir, mock_config):
+        """Test that on_stage_complete receives failed result for failed stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", should_fail=True))
+
+        received_results = []
+
+        def on_complete(stage_name, result, elapsed):
+            received_results.append({
+                'name': stage_name,
+                'success': result.success,
+                'error': result.error
+            })
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, on_stage_complete=on_complete)
+
+        assert result is False
+        assert len(received_results) == 1
+        assert received_results[0]['name'] == "A"
+        assert received_results[0]['success'] is False
+        assert "failed intentionally" in received_results[0]['error']
+
+    def test_callbacks_not_called_for_skipped_stages(self, temp_project_dir, mock_config):
+        """Test that callbacks are not called for stages skipped via skip_stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B")).add_stage(MockStage("C"))
+
+        started = []
+        completed = []
+
+        def on_start(stage_name):
+            started.append(stage_name)
+
+        def on_complete(stage_name, result, elapsed):
+            completed.append(stage_name)
+
+        pipeline.run(
+            resume=False,
+            skip_stages=["B"],
+            on_stage_start=on_start,
+            on_stage_complete=on_complete
+        )
+
+        assert started == ["A", "C"]
+        assert completed == ["A", "C"]
+
+    def test_callbacks_not_called_for_checkpoint_skipped_stages(self, temp_project_dir, mock_config):
+        """Test that callbacks are not called for stages skipped via checkpoint resume."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", can_skip_value=True))
+        pipeline.add_stage(MockStage("B"))
+        pipeline.resume_mode = True
+
+        started = []
+        completed = []
+
+        def on_start(stage_name):
+            started.append(stage_name)
+
+        def on_complete(stage_name, result, elapsed):
+            completed.append(stage_name)
+
+        pipeline.run(
+            resume=False,
+            on_stage_start=on_start,
+            on_stage_complete=on_complete
+        )
+
+        assert started == ["B"]  # A was skipped via checkpoint
+        assert completed == ["B"]
+
+    def test_on_stage_complete_receives_timing_info(self, temp_project_dir, mock_config):
+        """Test that on_stage_complete receives accurate timing information."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("slow_stage", run_delay=0.05))
+
+        timing_info = {}
+
+        def on_complete(stage_name, result, elapsed):
+            timing_info[stage_name] = elapsed
+
+        pipeline.run(resume=False, on_stage_complete=on_complete)
+
+        assert "slow_stage" in timing_info
+        assert timing_info["slow_stage"] >= 0.05  # Should be at least 50ms
+
+    def test_only_on_stage_start_callback(self, temp_project_dir, mock_config):
+        """Test running with only on_stage_start callback."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+
+        started = []
+
+        def on_start(stage_name):
+            started.append(stage_name)
+
+        result = pipeline.run(resume=False, on_stage_start=on_start)
+
+        assert result is True
+        assert started == ["A"]
+
+    def test_only_on_stage_complete_callback(self, temp_project_dir, mock_config):
+        """Test running with only on_stage_complete callback."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+
+        completed = []
+
+        def on_complete(stage_name, result, elapsed):
+            completed.append(stage_name)
+
+        result = pipeline.run(resume=False, on_stage_complete=on_complete)
+
+        assert result is True
+        assert completed == ["A"]
+
+    def test_no_callbacks_provided(self, temp_project_dir, mock_config):
+        """Test that pipeline runs correctly when no callbacks are provided."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B"))
+
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert "A" in pipeline.stage_timings
+        assert "B" in pipeline.stage_timings
