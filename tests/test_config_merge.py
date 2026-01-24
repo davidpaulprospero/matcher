@@ -5,6 +5,10 @@ Tests duration_tiers merging, legacy path migration, and key name mapping.
 """
 
 import pytest
+
+# Mark all tests in this module as unit tests
+pytestmark = pytest.mark.unit
+
 from pathlib import Path
 import sys
 

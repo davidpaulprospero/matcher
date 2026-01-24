@@ -11,6 +11,10 @@ Tests for stages returning StageResult.fail() on various error conditions:
 """
 
 import pytest
+
+# Mark all tests in this module as unit tests
+pytestmark = pytest.mark.unit
+
 import sys
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
