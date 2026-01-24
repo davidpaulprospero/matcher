@@ -575,5 +575,26 @@ Branch: ralph/sprint-2
 - Files modified:
   - tests/test_sprint_2_testing_verification.py (fixed imports)
 
-Progress: 1/10 stories complete
+Progress: 2/10 stories complete
+
+## Iteration 2 - [US-002] Add CLI argument parser unit tests
+- Added --output-only flag to src/cli/args.py (was documented in CLAUDE.md but not implemented)
+  - Placed between --match-only and --resume for logical grouping
+  - Help text: "Regenerate OTIO/EDL/XML only (fastest, requires checkpoint with stage data)"
+- Added 4 new tests for --output-only flag in TestParseArgumentsMatchOnlyOutputOnly:
+  - test_output_only_flag_set: verifies flag is True when set
+  - test_output_only_default_false: verifies default is False
+  - test_output_only_with_project: verifies combination with --project
+  - test_match_only_and_output_only_both_set: documents parser allows both
+- Added 1 test in TestParseArgumentsResumeAndFresh:
+  - test_resume_and_fresh_both_set: documents parser allows both
+- Added TestParseArgumentsMutuallyExclusiveOptions class with 4 tests:
+  - test_resume_and_fresh_parser_allows
+  - test_match_only_and_output_only_parser_allows
+  - test_use_keywords_and_save_keywords_parser_allows
+  - test_validate_config_with_other_flags
+- All 41 CLI argument tests pass
+- Files modified:
+  - src/cli/args.py (added --output-only argument)
+  - tests/test_cli_args.py (added 9 new tests, updated class docstring)
 

@@ -69,6 +69,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--output-only',
+        action='store_true',
+        help='Regenerate OTIO/EDL/XML only (fastest, requires checkpoint with stage data)'
+    )
+
+    parser.add_argument(
         '--resume',
         action='store_true',
         help='Resume interrupted pipeline run'
