@@ -101,6 +101,11 @@ class BrollMatchStage(Stage):
                 'reason': 'broll_disabled'
             })
 
+        # Validate and normalize scoring weights
+        weight_warning = self._validate_and_normalize_weights(broll_config)
+        if weight_warning:
+            warnings.append(weight_warning)
+
         # Check if we have voiceover segments
         if not state.voiceover_segments:
             logger.debug("No voiceover segments to match against")
@@ -252,6 +257,58 @@ class BrollMatchStage(Stage):
     ) -> Optional[str]:
         """Validate inputs before running"""
         return None
+
+    def _validate_and_normalize_weights(self, broll_config) -> Optional[str]:
+        """
+        Validate that scoring weights sum to 1.0 and normalize if needed.
+
+        Returns a warning message if weights were normalized, None otherwise.
+        Logs warning if weights don't sum to 1.0.
+        Automatically normalizes weights if within 0.01 tolerance.
+        """
+        embedding_weight = getattr(broll_config, 'embedding_weight', 0.4)
+        keyword_weight = getattr(broll_config, 'keyword_weight', 0.35)
+        entity_weight = getattr(broll_config, 'entity_weight', 0.25)
+
+        weight_sum = embedding_weight + keyword_weight + entity_weight
+
+        # Check if weights already sum to 1.0 (within floating point tolerance)
+        if abs(weight_sum - 1.0) < 1e-9:
+            return None
+
+        # Log warning for non-standard weights
+        logger.warning(
+            f"B-roll scoring weights sum to {weight_sum:.4f}, not 1.0 "
+            f"(embedding={embedding_weight}, keyword={keyword_weight}, entity={entity_weight})"
+        )
+
+        # Normalize if within 0.01 tolerance
+        if abs(weight_sum - 1.0) <= 0.01:
+            # Normalize weights by dividing by their sum
+            if weight_sum > 0:
+                normalized_embedding = embedding_weight / weight_sum
+                normalized_keyword = keyword_weight / weight_sum
+                normalized_entity = entity_weight / weight_sum
+
+                # Update config attributes
+                if hasattr(broll_config, 'embedding_weight'):
+                    broll_config.embedding_weight = normalized_embedding
+                if hasattr(broll_config, 'keyword_weight'):
+                    broll_config.keyword_weight = normalized_keyword
+                if hasattr(broll_config, 'entity_weight'):
+                    broll_config.entity_weight = normalized_entity
+
+                logger.info(
+                    f"Normalized B-roll weights: embedding={normalized_embedding:.4f}, "
+                    f"keyword={normalized_keyword:.4f}, entity={normalized_entity:.4f}"
+                )
+                return f"B-roll scoring weights normalized from {weight_sum:.4f} to 1.0"
+
+        # Outside tolerance - return warning but don't normalize
+        return (
+            f"B-roll scoring weights sum to {weight_sum:.4f} (expected 1.0). "
+            "Weights outside 0.01 tolerance are not auto-normalized."
+        )
 
     def _detect_silent_scenes(
         self,

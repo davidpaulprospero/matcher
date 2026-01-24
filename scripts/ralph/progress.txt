@@ -163,3 +163,48 @@
   - src/pipeline.py (added type aliases and callback parameters)
   - tests/test_pipeline_orchestrator.py (added TestStageProgressCallbacks class)
 
+## Iteration 7 - [US-008] Add OutputStage segment validation
+- Added `_is_missing_file()` function in src/otio/timeline.py (line 107)
+  - Checks if video file path exists on disk
+  - Skips check for video IDs (no path separators) and URLs
+  - Returns True if file is missing, False otherwise
+- Updated `create_timeline()` to validate video files before creating clips:
+  - Primary track (V1): Checks source_file_for_clip, logs warning, inserts gap
+  - Alternative tracks (V2-V3): Same validation with warning including ALT index
+  - Secondary tracks (V4-V6): Same validation with warning including SEC index
+  - Strategy tracks (V7-V8): Same validation with warning including strategy name
+- Warning log format: "Segment {idx}: Video file missing, inserting gap: {path}"
+- Added 9 new tests across 3 test classes:
+  - TestSegmentValidation (4 tests): detection, existing file, video IDs, URLs
+  - TestGapInsertionForMissingFiles (3 tests): stage success, logging, gap duration
+  - TestMixedExistingAndMissingFiles (2 tests): existing file clips, mixed handling
+- All 54 output stage tests pass
+- Files modified:
+  - src/otio/timeline.py (added _is_missing_file, updated 4 clip creation locations)
+  - tests/test_stage_output.py (added 3 test classes with 9 tests)
+
+## Iteration 8 - [US-009] Add BrollMatchStage scoring weight validation
+- Added `_validate_and_normalize_weights()` method to BrollMatchStage (line 261)
+  - Validates that embedding_weight + keyword_weight + entity_weight sum to 1.0
+  - Logs warning if weights don't sum to 1.0 (includes individual weight values)
+  - Auto-normalizes weights if within 0.01 tolerance (divides by sum)
+  - Returns warning message for outside-tolerance weights (not auto-normalized)
+- Updated `run()` to call validation after broll_config is obtained
+  - Weight warning is added to StageResult.warnings if present
+- Added 10 new tests in TestBrollMatchWeightValidation class:
+  - test_weights_sum_to_one_no_warning: No warning for exact 1.0 sum
+  - test_weights_sum_to_one_custom_values: Custom weights that sum to 1.0
+  - test_weights_not_sum_to_one_logs_warning: Warning logged for non-1.0 sum
+  - test_weights_within_tolerance_normalized: Auto-normalize within 0.01
+  - test_weights_below_tolerance_normalized: Normalize weights below 1.0
+  - test_weights_outside_tolerance_not_normalized: Don't normalize outside 0.01
+  - test_weights_far_below_tolerance_not_normalized: Don't normalize far from 1.0
+  - test_normalization_preserves_ratios: Ratio preservation during normalization
+  - test_validation_called_in_run: Integration with run() method
+  - test_run_includes_warning_in_result: Warning in StageResult
+- All 61 broll stage tests pass
+- Files modified:
+  - src/stages/broll_match.py (added validation method, 55 lines)
+  - tests/test_broll_stages.py (added TestBrollMatchWeightValidation class, 10 tests)
+  - scripts/ralph/prd.json (marked US-009 as passed)
+
