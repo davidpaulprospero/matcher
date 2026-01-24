@@ -26,7 +26,8 @@
 - Check stage: checkpoint.json -> last_completed_stage
 
 ---
-# Iteration logs below
+# Sprint 1 Completed (Pipeline Focus)
+---
 
 ## Iteration 1 - [US-002] Add LLM-based description generation for silent videos
 - Implemented `_generate_llm_descriptions()` method in TranscribeStage (line 325)
@@ -207,4 +208,75 @@
   - src/stages/broll_match.py (added validation method, 55 lines)
   - tests/test_broll_stages.py (added TestBrollMatchWeightValidation class, 10 tests)
   - scripts/ralph/prd.json (marked US-009 as passed)
+
+## Iteration 9 - [US-010] Add stage metrics collection
+- Added `StageMetrics` dataclass to `src/stages/__init__.py`:
+  - `items_processed: int = 0` - Number of items successfully processed
+  - `items_failed: int = 0` - Number of items that failed processing
+  - `duration_seconds: float = 0.0` - Time taken to execute the stage
+  - `to_dict()` method for serialization
+  - `from_dict()` classmethod for deserialization
+- Updated `StageResult` to include optional `metrics` field:
+  - `StageResult.ok()` now accepts `metrics: StageMetrics = None` parameter
+  - `StageResult.fail()` now accepts `metrics: StageMetrics = None` parameter
+- Added metrics aggregation to `PipelineOrchestrator`:
+  - Added `stage_metrics: dict = {}` to store per-stage metrics
+  - Automatically captures metrics from StageResult or creates default metrics
+  - Updates duration_seconds to actual elapsed time
+- Added `get_metrics()` method to PipelineOrchestrator:
+  - Returns total_items_processed, total_items_failed, total_duration_seconds
+  - Returns stages dict mapping stage_name to StageMetrics
+- Added 14 new tests in `TestStageMetricsCollection` class:
+  - test_metrics_collected_for_single_stage
+  - test_metrics_collected_for_multiple_stages
+  - test_default_metrics_when_stage_returns_none
+  - test_get_metrics_returns_aggregated_totals
+  - test_get_metrics_empty_pipeline
+  - test_metrics_duration_updated_from_actual_elapsed
+  - test_get_metrics_includes_stage_dict
+  - test_metrics_not_collected_for_skipped_stages
+  - test_metrics_collected_for_failed_stage
+  - test_stage_metrics_dataclass_to_dict
+  - test_stage_metrics_dataclass_from_dict
+  - test_stage_result_ok_with_metrics
+  - test_stage_result_fail_with_metrics
+- All 58 orchestrator tests pass, all 28 pipeline tests pass
+- Files modified:
+  - src/stages/__init__.py (added StageMetrics, updated StageResult)
+  - src/pipeline.py (added stage_metrics dict and get_metrics method)
+  - tests/test_pipeline_orchestrator.py (added TestStageMetricsCollection class)
+
+---
+# Sprint 2 Started (OTIO Focus)
+---
+
+## Sprint 2 Overview
+Focus: EDL, XML, OTIO track layout and timeline building
+Branch: ralph/sprint-2
+
+### Stories (10 total)
+[x] US-001: Create sprint 2 OTIO verification test (high)
+[ ] US-002: Add EDL drop-frame timecode support (high)
+[ ] US-003: Add EDL reel name generation from clip paths (medium)
+[ ] US-004: Add XML frame rate validation at export (medium)
+[ ] US-005: Add track count limit warning in create_timeline (medium)
+[ ] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
+[ ] US-007: Add OTIO clip metadata validation before export (medium)
+[ ] US-008: Add track coverage reporting to segment map JSON (low)
+[ ] US-009: Add timeline split by segment count option (low)
+[ ] US-010: Add entity track clip consolidation for repeated entities (low)
+
+Progress: 1/10 stories complete
+
+## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
+- Created tests/test_sprint_2_verification.py with 28 tests covering:
+  - TestOTIOModuleImports (5 tests): timeline, tracks, utils, export, package imports
+  - TestCreateTimelineFunction (3 tests): existence, import from module, public API
+  - TestTrackBuilderBaseClass (3 tests): exists, is abstract, has build method
+  - TestTrackBuilderInstantiation (8 tests): all 7 track builders + count verification
+  - TestGetTrackBuilderFactory (5 tests): V1, V2, V8, V10, invalid index
+  - TestOTIOExportFunctions (4 tests): save functions and public API
+- All 28 tests pass with pytest tests/test_sprint_2_verification.py -v
+- Files created:
+  - tests/test_sprint_2_verification.py (new file, ~270 lines)
 

@@ -1,7 +1,7 @@
 {
-  "branchName": "ralph/sprint-1",
-  "sprintNumber": 1,
-  "focusArea": "pipeline",
+  "branchName": "ralph/sprint-2",
+  "sprintNumber": 2,
+  "focusArea": "otio",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
     "testFramework": "pytest",
@@ -12,148 +12,141 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint verification test",
+      "title": "Create sprint 2 OTIO verification test",
       "acceptanceCriteria": [
-        "Create tests/test_sprint_1_verification.py with basic import checks",
-        "Test imports src.stages, src.pipeline, src.agents",
-        "Test that all 12 registered stages can be instantiated",
-        "Test that PipelineOrchestrator can be created with mock config",
-        "All tests pass with pytest tests/test_sprint_1_verification.py -v",
+        "Create tests/test_sprint_2_verification.py with OTIO module import checks",
+        "Test imports src.otio.timeline, src.otio.tracks, src.otio.utils, src.otio.export",
+        "Test that create_timeline function exists and is callable",
+        "Test that TrackBuilder base class and all 7 track builders can be instantiated",
+        "All tests pass with pytest tests/test_sprint_2_verification.py -v --non-interactive",
         "Mark story as passed by setting passes: true in prd.json"
       ],
       "priority": "high",
-      "passes": true
+      "passes": true,
+      "notes": "Created tests/test_sprint_2_verification.py with 28 tests covering OTIO module imports, create_timeline function, TrackBuilder base class, all 7 track builders, get_track_builder factory, and export functions"
     },
     {
       "id": "US-002",
-      "title": "Add LLM-based description generation for silent videos",
+      "title": "Add EDL drop-frame timecode support",
       "acceptanceCriteria": [
-        "Implement _generate_llm_descriptions() in TranscribeStage at line 292",
-        "Use src/llm_client for LLM calls (per Rule 9)",
-        "Generate semantic descriptions from Vision API responses",
-        "Add test in tests/test_transcribe_stage_coverage.py for new method",
-        "Handle case where Vision API is unavailable (fallback to filename)",
-        "All existing transcribe tests pass"
+        "Add drop_frame parameter to save_timeline_as_edl() in src/otio/export.py",
+        "Generate semicolons between seconds and frames for drop-frame mode (HH:MM:SS;FF)",
+        "Add FCM line as 'DROP FRAME' when drop_frame=True",
+        "Add test in tests/test_otio_export.py for drop-frame EDL generation",
+        "Validate generated EDL passes CMX3600 pattern validation",
+        "All export tests pass"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Implemented _generate_llm_descriptions() and _generate_filename_descriptions() with Vision API + LLM fallback. Added 12 comprehensive tests in TestLLMDescriptionGeneration class."
+      "passes": false
     },
     {
       "id": "US-003",
-      "title": "Add stage input validation error messages",
+      "title": "Add EDL reel name generation from clip paths",
       "acceptanceCriteria": [
-        "MatchStage.validate_inputs returns specific missing field names",
-        "OutputStage.validate_inputs returns specific missing field names",
-        "Error messages include suggestion for which stage to run first",
-        "Add tests for validation error messages in test_stage_match.py",
-        "Add tests for validation error messages in test_stage_output.py",
-        "All stage validation tests pass"
+        "Extract reel name from video file path (max 32 chars) in save_timeline_as_edl()",
+        "Use folder_name + truncated filename pattern for unique reel identification",
+        "Sanitize reel names to alphanumeric + underscore only",
+        "Add test for reel name extraction from various path patterns",
+        "Add test that reel names do not exceed 32 characters",
+        "All EDL tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Enhanced validate_inputs() for MatchStage and OutputStage. Now returns 'Missing required fields: X, Y. Suggestion: run Z stage first'. Added 7 new tests for MatchStage and 6 for OutputStage covering field names and suggestions. All 76 stage tests pass."
+      "passes": false
     },
     {
       "id": "US-004",
-      "title": "Add PipelineOrchestrator unit tests",
+      "title": "Add XML frame rate validation at export",
       "acceptanceCriteria": [
-        "Create tests/test_pipeline_orchestrator.py",
-        "Test add_stage() fluent interface returns self",
-        "Test load_checkpoint() with valid and invalid checkpoints",
-        "Test run() stage filtering with skip_stages and only_stages",
-        "Test run() resume behavior with checkpoint",
-        "Test stage timing is recorded in stage_timings dict"
+        "Add _validate_frame_rate() helper in src/otio/xml_export.py",
+        "Log warning if frame_rate not in standard NLE rates (23.976, 24, 25, 29.97, 30, 50, 59.94, 60)",
+        "Round non-integer rates to nearest integer for timebase element",
+        "Add test for frame rate validation with standard and non-standard rates",
+        "Add test that generated XML timebase is always an integer",
+        "All XML export tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Created tests/test_pipeline_orchestrator.py with 33 focused unit tests organized into 8 test classes: TestAddStageFluent (3), TestLoadCheckpoint (5), TestRunStageFiltering (6), TestRunResumeWithCheckpoint (5), TestStageTimingRecording (6), TestCheckpointSaving (2), TestEdgeCases (6). All 33 tests pass. Also verified all 28 existing test_pipeline.py tests still pass."
+      "passes": false
     },
     {
       "id": "US-005",
-      "title": "Add stage restore() error handling",
+      "title": "Add track count limit warning in create_timeline",
       "acceptanceCriteria": [
-        "Each stage.restore() logs specific error when checkpoint data missing",
-        "MatchStage.restore() validates match objects before restoring",
-        "OutputStage.restore() validates paths exist before restoring",
-        "Add test for restore with corrupt/incomplete checkpoint data",
-        "Stage restore returns False (not exception) on validation failure",
-        "All restore tests pass"
+        "Add clip counter in create_timeline() that tracks total clips across all tracks",
+        "Log warning when clip count exceeds 2500 (approaching DaVinci 3130 limit)",
+        "Log error when clip count exceeds 3000 with suggestion to use LITE mode",
+        "Add test for clip count warning threshold detection",
+        "Add test that logging is triggered at correct thresholds",
+        "All timeline tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Enhanced MatchStage.restore() with validation for matches list, match objects, segment_index, video_file, and confidence. Enhanced OutputStage.restore() with validation for dict types and path existence. Added 12 new tests for MatchStage and 9 for OutputStage restore error handling. All 116 restore-related tests pass."
+      "passes": false
     },
     {
       "id": "US-006",
-      "title": "Add DownloadStage video segment retry logic",
+      "title": "Add gap_mode='extend' to fill gaps with extended clips",
       "acceptanceCriteria": [
-        "Add max_retries config option in DownloadConfig (default: 3)",
-        "DownloadStage retries failed video downloads up to max_retries",
-        "Log retry attempts with exponential backoff timing",
-        "Add test for retry behavior with mock failed downloads",
-        "Update config.yaml with max_retries option and comment",
-        "All download stage tests pass"
+        "Add 'extend' option to gap_mode in create_timeline()",
+        "When gap_mode='extend', extend previous clip duration to fill gap instead of inserting Gap",
+        "Limit extension to max 2x original clip duration to prevent extreme slowdowns",
+        "Add test for gap_mode='extend' behavior in test_otio_timeline.py",
+        "Add test that extension limit of 2x is respected",
+        "All timeline tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added max_retries, retry_delay, retry_backoff to DownloadConfig. Implemented _retry_with_backoff() helper with exponential backoff. Updated _run_audio_first() to use retry logic. Added 9 new tests in TestDownloadRetryLogic and TestAudioFirstRetryIntegration classes. All 75 download stage tests pass."
+      "passes": false
     },
     {
       "id": "US-007",
-      "title": "Add stage progress callbacks",
+      "title": "Add OTIO clip metadata validation before export",
       "acceptanceCriteria": [
-        "Add on_stage_start callback parameter to PipelineOrchestrator.run()",
-        "Add on_stage_complete callback parameter to PipelineOrchestrator.run()",
-        "Callbacks receive stage_name, result, and timing information",
-        "Add test for callbacks being called in correct order",
-        "Add test for callback exceptions not stopping pipeline",
-        "All pipeline tests pass"
+        "Add _validate_clip_metadata() helper in src/otio/utils.py",
+        "Check that clip source_range start_time is non-negative",
+        "Check that clip source_range duration is positive",
+        "Check that media_reference.target_url is non-empty string",
+        "Add test for metadata validation with valid and invalid clips",
+        "All utils tests pass"
       ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Added StageStartCallback and StageCompleteCallback type aliases. Added on_stage_start and on_stage_complete parameters to run(). Callbacks are wrapped in try/except to prevent exceptions from stopping the pipeline. Added 12 new tests in TestStageProgressCallbacks class. All 45 orchestrator tests and 28 pipeline tests pass."
+      "priority": "medium",
+      "passes": false
     },
     {
       "id": "US-008",
-      "title": "Add OutputStage segment validation",
+      "title": "Add track coverage reporting to segment map JSON",
       "acceptanceCriteria": [
-        "Validate match.video_path exists before creating timeline clip",
-        "Log warning for missing video files with file path",
-        "Add gap placeholder for missing video segments",
-        "Add test for OutputStage with missing video files",
-        "Add test for gap insertion behavior",
-        "All output stage tests pass"
+        "Add 'track_coverage' dict to generate_segment_map() output in src/otio/reporting.py",
+        "Calculate clip_count, gap_count, and coverage_percent for each track",
+        "Include V1-V10 tracks in coverage report",
+        "Add test for track_coverage presence in generated JSON",
+        "Add test for coverage calculation accuracy",
+        "All reporting tests pass"
       ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Added _is_missing_file() function in src/otio/timeline.py. Updated create_timeline() to check for missing files before creating clips - applies to primary, alternative, secondary, and strategy tracks. Logs warning with file path when missing. Inserts gap placeholder. Added 9 new tests in TestSegmentValidation (4), TestGapInsertionForMissingFiles (3), and TestMixedExistingAndMissingFiles (2). All 54 output stage tests pass."
+      "priority": "low",
+      "passes": false
     },
     {
       "id": "US-009",
-      "title": "Add BrollMatchStage scoring weight validation",
+      "title": "Add timeline split by segment count option",
       "acceptanceCriteria": [
-        "Validate scoring weights sum to 1.0 at stage initialization",
-        "Log warning if weights do not sum to 1.0",
-        "Normalize weights automatically if within 0.01 tolerance",
-        "Add test for weight validation in test_broll_stages.py",
-        "Add test for weight normalization behavior",
-        "All broll stage tests pass"
+        "Add max_segments_per_file parameter to save_timeline_split() in src/otio/export.py",
+        "Split timeline into multiple OTIO files when segment count exceeds limit",
+        "Generate filenames as timeline_FULL_part1.otio, timeline_FULL_part2.otio etc",
+        "Add test for timeline splitting with 3 segments and max_segments_per_file=1",
+        "Add test that each split file contains correct segment subset",
+        "All export tests pass"
       ],
       "priority": "low",
-      "passes": true,
-      "notes": "Added _validate_and_normalize_weights() method to BrollMatchStage. Validates weights at start of run(), logs warning if not 1.0, auto-normalizes within 0.01 tolerance. Added 10 new tests in TestBrollMatchWeightValidation class. All 61 broll stage tests pass."
+      "passes": false
     },
     {
       "id": "US-010",
-      "title": "Add stage metrics collection",
+      "title": "Add entity track clip consolidation for repeated entities",
       "acceptanceCriteria": [
-        "Add StageMetrics dataclass with items_processed, items_failed, duration_seconds",
-        "Each stage returns StageMetrics in StageResult.data",
-        "PipelineOrchestrator aggregates metrics across stages",
-        "Add get_metrics() method to PipelineOrchestrator",
-        "Add test for metrics collection in test_pipeline_orchestrator.py",
-        "All metrics tests pass"
+        "Add _consolidate_repeated_clips() helper in src/otio/entities.py",
+        "When same entity appears in consecutive segments, extend single clip instead of creating gaps",
+        "Apply consolidation for V9 (images) and V10 (videos) tracks",
+        "Add test for clip consolidation with 3 consecutive matching entities",
+        "Add test that non-consecutive entities create separate clips",
+        "All entity tests pass"
       ],
       "priority": "low",
       "passes": false
