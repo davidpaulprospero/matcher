@@ -1,0 +1,45 @@
+# Ralph Loop Progress Journal
+# This file captures learnings across iterations
+
+## Setup - 2026-01-24
+- Created Ralph Loop implementation based on EU-AUTO patterns
+- Features: activity-based timeout, TrueAuto mode, metrics, watch dashboard
+- Focus areas configured for this project: pipeline, otio, caption, speed, quality, etc.
+
+## Operational Notes
+
+### Project Conventions (from CLAUDE.md)
+- Config changes: update BOTH src/config.py AND config.yaml
+- LLM calls: use src/llm_client/ only
+- Tests: use --non-interactive flag
+- Dataclass imports: from src/state.py or src/config.py
+
+### Common Gotchas
+- Caption-first mode: video_path contains video IDs, not file paths
+- Embeddings: use is_embeddings_empty() - numpy fails bool()
+- Windows paths: use forward slashes, file:/// URLs
+- Project config: use project_config.yaml, not config.yaml for project-specific
+
+### Useful Commands
+- Quick test: pytest tests/ -v --tb=short -x
+- Sanity check: python main.py --help
+- Check stage: checkpoint.json -> last_completed_stage
+
+---
+# Iteration logs below
+
+## Iteration 1 - [US-002] Add LLM-based description generation for silent videos
+- Implemented `_generate_llm_descriptions()` method in TranscribeStage (line 325)
+- Implemented `_generate_filename_descriptions()` helper method (line 387)
+- Updated `_handle_silent_videos()` to detect sparse transcripts and generate descriptions
+- Uses Vision API via VisionProcessor when available (GEMINI_API_KEY)
+- Falls back to LLM-based filename description generation
+- Final fallback to simple `[Silent video: keywords]` format
+- Added 12 comprehensive tests in TestLLMDescriptionGeneration class
+- Fixed existing test mock configurations to include silent_video settings
+- All 88 transcribe tests pass
+- Files modified:
+  - src/stages/transcribe.py (added 150+ lines)
+  - tests/test_transcribe_stage_coverage.py (added 12 tests)
+  - tests/test_stage_transcribe.py (fixed mock_config fixture)
+

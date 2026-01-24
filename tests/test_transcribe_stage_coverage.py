@@ -917,3 +917,262 @@ class TestDeltaIndexingPath:
         # Should print message about all cached
         captured = capsys.readouterr()
         assert "cached" in captured.out.lower()
+
+
+# ============================================================================
+# Test LLM Description Generation for Silent Videos (US-002)
+# ============================================================================
+
+class TestLLMDescriptionGeneration:
+    """Tests for _generate_llm_descriptions and _generate_filename_descriptions"""
+
+    @patch('src.stages.transcribe.TranscribeStage._generate_llm_descriptions')
+    def test_handle_silent_videos_calls_generate_descriptions(
+        self, mock_generate, mock_config
+    ):
+        """Test that _handle_silent_videos calls _generate_llm_descriptions"""
+        stage = TranscribeStage()
+        video_files = [Path("silent_video.mp4"), Path("video_with_speech.mp4")]
+        transcripts = {
+            "video_with_speech.mp4": [{"text": "This is a video with lots of speech content"}]
+        }
+
+        # Configure silent_video settings
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.enabled = True
+        mock_config.silent_video.min_words_threshold = 10
+
+        mock_generate.return_value = {"silent_video.mp4": "A beautiful sunset over the ocean."}
+
+        stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+        mock_generate.assert_called_once()
+        # Should have passed the silent video
+        call_args = mock_generate.call_args[0]
+        assert Path("silent_video.mp4") in call_args[0]
+
+    @patch('src.stages.transcribe.TranscribeStage._generate_llm_descriptions')
+    def test_handle_silent_videos_updates_transcripts(
+        self, mock_generate, mock_config
+    ):
+        """Test that generated descriptions are added to transcripts"""
+        stage = TranscribeStage()
+        video_files = [Path("silent_video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.enabled = True
+        mock_config.silent_video.min_words_threshold = 10
+
+        mock_generate.return_value = {"silent_video.mp4": "Ocean waves crashing on a beach."}
+
+        stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+        # Transcripts should be updated with the description
+        assert "silent_video.mp4" in transcripts
+        assert transcripts["silent_video.mp4"][0]['text'] == "Ocean waves crashing on a beach."
+        assert transcripts["silent_video.mp4"][0]['is_generated'] is True
+        assert transcripts["silent_video.mp4"][0]['source'] == 'llm_description'
+
+    def test_handle_silent_videos_skips_when_disabled(self, mock_config):
+        """Test that silent video handling is skipped when disabled"""
+        stage = TranscribeStage()
+        video_files = [Path("video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.enabled = False
+
+        stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+        # No transcripts should be added
+        assert len(transcripts) == 0
+
+    def test_handle_silent_videos_skips_when_no_silent_config(self, mock_config):
+        """Test that silent video handling is skipped when config missing"""
+        stage = TranscribeStage()
+        video_files = [Path("video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = None
+
+        stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+        # No transcripts should be added
+        assert len(transcripts) == 0
+
+    def test_handle_silent_videos_detects_sparse_transcripts(self, mock_config):
+        """Test that videos with few words are detected as silent"""
+        stage = TranscribeStage()
+        video_files = [Path("sparse_video.mp4"), Path("chatty_video.mp4")]
+        transcripts = {
+            "sparse_video.mp4": [{"text": "Hello"}],  # 1 word
+            "chatty_video.mp4": [{"text": "This is a video with many words spoken throughout the entire duration of the clip"}]  # 17 words
+        }
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.enabled = True
+        mock_config.silent_video.min_words_threshold = 10
+
+        with patch.object(stage, '_generate_llm_descriptions') as mock_gen:
+            mock_gen.return_value = {}
+            stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+            # Only sparse_video should be processed
+            call_args = mock_gen.call_args[0]
+            silent_list = call_args[0]
+            assert len(silent_list) == 1
+            assert Path("sparse_video.mp4") in silent_list
+
+    @patch('src.vision.VisionProcessor')
+    def test_generate_llm_descriptions_uses_vision_api(
+        self, mock_processor_class, mock_config
+    ):
+        """Test that Vision API is used when available"""
+        stage = TranscribeStage()
+        silent_videos = [Path("test_video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.use_vision_api = True
+        mock_config.silent_video.use_llm_fallback = True
+        mock_config.cache = Mock()
+        mock_config.cache.cache_dir = ".cache"
+
+        mock_processor = Mock()
+        mock_processor.is_available.return_value = True
+        mock_processor.describe_scene.return_value = "A person walking on a beach."
+        mock_processor.get_stats.return_value = {'api_calls': 1, 'estimated_cost': 0.001}
+        mock_processor_class.return_value = mock_processor
+
+        descriptions = stage._generate_llm_descriptions(silent_videos, transcripts, mock_config)
+
+        assert "test_video.mp4" in descriptions
+        assert descriptions["test_video.mp4"] == "A person walking on a beach."
+        mock_processor.describe_scene.assert_called_once()
+
+    @patch('src.vision.VisionProcessor')
+    def test_generate_llm_descriptions_falls_back_when_vision_unavailable(
+        self, mock_processor_class, mock_config
+    ):
+        """Test fallback to filename description when Vision API unavailable"""
+        stage = TranscribeStage()
+        silent_videos = [Path("ocean_waves_sunset.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.use_vision_api = True
+        mock_config.silent_video.use_llm_fallback = True
+        mock_config.cache = Mock()
+        mock_config.cache.cache_dir = ".cache"
+        mock_config.llm = None
+
+        mock_processor = Mock()
+        mock_processor.is_available.return_value = False  # Vision not available
+        mock_processor_class.return_value = mock_processor
+
+        descriptions = stage._generate_llm_descriptions(silent_videos, transcripts, mock_config)
+
+        # Should fall back to filename extraction
+        assert "ocean_waves_sunset.mp4" in descriptions
+        assert "ocean waves sunset" in descriptions["ocean_waves_sunset.mp4"].lower()
+
+    def test_generate_filename_descriptions_simple_fallback(self, mock_config):
+        """Test simple filename extraction when LLM unavailable"""
+        stage = TranscribeStage()
+        videos = [
+            Path("beach_sunset_waves.mp4"),
+            Path("mountain-hiking-trail.mp4")
+        ]
+
+        mock_config.llm = None
+
+        descriptions = stage._generate_filename_descriptions(videos, mock_config)
+
+        assert "beach_sunset_waves.mp4" in descriptions
+        assert "[Silent video: beach sunset waves]" == descriptions["beach_sunset_waves.mp4"]
+        assert "mountain-hiking-trail.mp4" in descriptions
+        assert "[Silent video: mountain hiking trail]" == descriptions["mountain-hiking-trail.mp4"]
+
+    @patch('os.getenv')
+    @patch('src.llm_client.create_client')
+    def test_generate_filename_descriptions_uses_llm(
+        self, mock_create_client, mock_getenv, mock_config
+    ):
+        """Test LLM-based description generation from filename"""
+        stage = TranscribeStage()
+        videos = [Path("sunset_beach.mp4")]
+
+        mock_config.llm = Mock()
+        mock_config.llm.provider = 'gemini'
+        mock_config.llm.model = 'gemini-2.0-flash'
+
+        mock_getenv.return_value = "test-api-key"
+
+        mock_client = Mock()
+        mock_response = Mock()
+        mock_response.text = "A beautiful sunset over a sandy beach with gentle waves."
+        mock_client.generate.return_value = mock_response
+        mock_create_client.return_value = mock_client
+
+        descriptions = stage._generate_filename_descriptions(videos, mock_config)
+
+        assert "sunset_beach.mp4" in descriptions
+        assert descriptions["sunset_beach.mp4"] == "A beautiful sunset over a sandy beach with gentle waves."
+
+    def test_generate_llm_descriptions_respects_vision_disabled(self, mock_config):
+        """Test that Vision API is skipped when use_vision_api is False"""
+        stage = TranscribeStage()
+        silent_videos = [Path("test_video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.use_vision_api = False  # Disabled
+        mock_config.silent_video.use_llm_fallback = True
+        mock_config.llm = None
+
+        with patch('src.vision.VisionProcessor') as mock_processor_class:
+            descriptions = stage._generate_llm_descriptions(silent_videos, transcripts, mock_config)
+
+            # VisionProcessor should not be instantiated
+            mock_processor_class.assert_not_called()
+
+            # Should still get filename fallback
+            assert "test_video.mp4" in descriptions
+
+    def test_generate_llm_descriptions_handles_vision_error(self, mock_config):
+        """Test graceful handling of Vision API errors"""
+        stage = TranscribeStage()
+        silent_videos = [Path("test_video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.use_vision_api = True
+        mock_config.silent_video.use_llm_fallback = True
+        mock_config.cache = Mock()
+        mock_config.cache.cache_dir = ".cache"
+        mock_config.llm = None
+
+        with patch('src.vision.VisionProcessor') as mock_processor_class:
+            mock_processor_class.side_effect = Exception("Vision API error")
+
+            # Should not raise, should fall back
+            descriptions = stage._generate_llm_descriptions(silent_videos, transcripts, mock_config)
+
+            # Should get filename fallback
+            assert "test_video.mp4" in descriptions
+
+    def test_generate_llm_descriptions_no_fallback(self, mock_config):
+        """Test when both Vision and LLM fallback are disabled"""
+        stage = TranscribeStage()
+        silent_videos = [Path("test_video.mp4")]
+        transcripts = {}
+
+        mock_config.silent_video = Mock()
+        mock_config.silent_video.use_vision_api = False
+        mock_config.silent_video.use_llm_fallback = False
+
+        descriptions = stage._generate_llm_descriptions(silent_videos, transcripts, mock_config)
+
+        # Should return empty dict
+        assert descriptions == {}
