@@ -778,3 +778,209 @@ class TestBrollStagesIntegration:
 
         assert broll_download is not None
         assert broll_match is not None
+
+
+# ============================================================================
+# Weight Validation Tests
+# ============================================================================
+
+class TestBrollMatchWeightValidation:
+    """Test BrollMatchStage scoring weight validation and normalization"""
+
+    @pytest.fixture
+    def stage(self):
+        """Create BrollMatchStage instance"""
+        return BrollMatchStage()
+
+    def test_weights_sum_to_one_no_warning(self, stage):
+        """Test no warning when weights sum to exactly 1.0"""
+        broll_config = BrollConfig(
+            embedding_weight=0.4,
+            keyword_weight=0.35,
+            entity_weight=0.25
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is None
+
+    def test_weights_sum_to_one_custom_values(self, stage):
+        """Test no warning with custom weights that sum to 1.0"""
+        broll_config = BrollConfig(
+            embedding_weight=0.5,
+            keyword_weight=0.3,
+            entity_weight=0.2
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is None
+
+    def test_weights_not_sum_to_one_logs_warning(self, stage, caplog):
+        """Test warning logged when weights don't sum to 1.0"""
+        broll_config = BrollConfig(
+            embedding_weight=0.3,
+            keyword_weight=0.3,
+            entity_weight=0.3
+        )
+
+        import logging
+        with caplog.at_level(logging.WARNING):
+            stage._validate_and_normalize_weights(broll_config)
+
+        assert "sum to 0.9" in caplog.text
+        assert "not 1.0" in caplog.text
+
+    def test_weights_within_tolerance_normalized(self, stage):
+        """Test weights within 0.01 tolerance are auto-normalized"""
+        broll_config = BrollConfig(
+            embedding_weight=0.405,   # Sum = 1.005 (within 0.01)
+            keyword_weight=0.35,
+            entity_weight=0.25
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is not None
+        assert "normalized" in result.lower()
+        # Check weights were updated
+        total = broll_config.embedding_weight + broll_config.keyword_weight + broll_config.entity_weight
+        assert abs(total - 1.0) < 1e-9
+
+    def test_weights_below_tolerance_normalized(self, stage):
+        """Test weights sum below 1.0 within tolerance are normalized"""
+        broll_config = BrollConfig(
+            embedding_weight=0.396,   # Sum = 0.996 (within 0.01)
+            keyword_weight=0.35,
+            entity_weight=0.25
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is not None
+        assert "normalized" in result.lower()
+        # Check weights were updated
+        total = broll_config.embedding_weight + broll_config.keyword_weight + broll_config.entity_weight
+        assert abs(total - 1.0) < 1e-9
+
+    def test_weights_outside_tolerance_not_normalized(self, stage):
+        """Test weights outside 0.01 tolerance are NOT normalized"""
+        original_embedding = 0.5
+        original_keyword = 0.5
+        original_entity = 0.5
+        broll_config = BrollConfig(
+            embedding_weight=original_embedding,  # Sum = 1.5 (outside tolerance)
+            keyword_weight=original_keyword,
+            entity_weight=original_entity
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is not None
+        assert "not auto-normalized" in result.lower()
+        # Weights should NOT be changed
+        assert broll_config.embedding_weight == original_embedding
+        assert broll_config.keyword_weight == original_keyword
+        assert broll_config.entity_weight == original_entity
+
+    def test_weights_far_below_tolerance_not_normalized(self, stage):
+        """Test weights far below 1.0 are NOT normalized"""
+        broll_config = BrollConfig(
+            embedding_weight=0.2,  # Sum = 0.5 (way outside tolerance)
+            keyword_weight=0.2,
+            entity_weight=0.1
+        )
+
+        result = stage._validate_and_normalize_weights(broll_config)
+
+        assert result is not None
+        assert "not auto-normalized" in result.lower()
+
+    def test_normalization_preserves_ratios(self, stage):
+        """Test normalization preserves weight ratios"""
+        broll_config = BrollConfig(
+            embedding_weight=0.404,   # Ratio: 4:3.5:2.5
+            keyword_weight=0.353,     # Sum = 1.007
+            entity_weight=0.25
+        )
+
+        stage._validate_and_normalize_weights(broll_config)
+
+        # Check ratios are preserved (approximately)
+        embedding_ratio = broll_config.embedding_weight / broll_config.entity_weight
+        keyword_ratio = broll_config.keyword_weight / broll_config.entity_weight
+        # Original ratios: 0.404/0.25 = 1.616, 0.353/0.25 = 1.412
+        assert abs(embedding_ratio - (0.404/0.25)) < 0.01
+        assert abs(keyword_ratio - (0.353/0.25)) < 0.01
+
+    def test_validation_called_in_run(self, stage, caplog):
+        """Test weight validation is called during run()"""
+        from src.state import PipelineState, VoiceoverSegment
+
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        ]
+        state.transcripts = {}
+        state.text_metadata = []
+
+        config = Mock()
+        config.broll = BrollConfig(
+            embedding_weight=0.3,
+            keyword_weight=0.3,
+            entity_weight=0.3  # Sum = 0.9
+        )
+
+        checkpoint = Mock()
+        checkpoint.should_skip_stage.return_value = False
+
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = stage.run(state, config, checkpoint)
+
+        # Should log warning about weights
+        assert "sum to 0.9" in caplog.text
+
+    def test_run_includes_warning_in_result(self, stage):
+        """Test run() includes weight warning in result"""
+        from src.state import PipelineState, VoiceoverSegment
+
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        ]
+        state.transcripts = {}
+        # Add text_metadata so stage doesn't skip with "no_transcripts"
+        state.text_metadata = [
+            {
+                "source_file": "/video.mp4",
+                "start_time": 0.0,
+                "end_time": 10.0,
+                "text": "[Music]",
+                "is_broll": False
+            }
+        ]
+        state.downloaded_videos = []
+        state.keywords = []
+        state.extracted_entities = []
+
+        config = Mock()
+        config.broll = BrollConfig(
+            embedding_weight=0.5,
+            keyword_weight=0.5,
+            entity_weight=0.5  # Sum = 1.5
+        )
+        config.download = Mock()
+        config.download.audio_first = None
+        config.vision = None
+        config.embedding = Mock()
+        config.embedding.model = "all-MiniLM-L6-v2"
+
+        checkpoint = Mock()
+        checkpoint.should_skip_stage.return_value = False
+
+        result = stage.run(state, config, checkpoint)
+
+        # Result should contain warning about weights
+        assert result.warnings is not None
+        assert any("1.5" in str(w) for w in result.warnings)

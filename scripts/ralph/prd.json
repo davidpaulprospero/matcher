@@ -126,7 +126,8 @@
         "All output stage tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added _is_missing_file() function in src/otio/timeline.py. Updated create_timeline() to check for missing files before creating clips - applies to primary, alternative, secondary, and strategy tracks. Logs warning with file path when missing. Inserts gap placeholder. Added 9 new tests in TestSegmentValidation (4), TestGapInsertionForMissingFiles (3), and TestMixedExistingAndMissingFiles (2). All 54 output stage tests pass."
     },
     {
       "id": "US-009",
@@ -140,7 +141,8 @@
         "All broll stage tests pass"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added _validate_and_normalize_weights() method to BrollMatchStage. Validates weights at start of run(), logs warning if not 1.0, auto-normalizes within 0.01 tolerance. Added 10 new tests in TestBrollMatchWeightValidation class. All 61 broll stage tests pass."
     },
     {
       "id": "US-010",
