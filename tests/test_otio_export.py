@@ -679,3 +679,247 @@ class TestDropFrameTimecode:
         event_pattern = r'\d{3}\s+\w+\s+V\s+C\s+\d{2}:\d{2}:\d{2}:\d{2}'
         event_matches = re.findall(event_pattern, content)
         assert len(event_matches) > 0, "Expected CMX3600 event format with non-drop-frame timecodes"
+
+
+class TestReelNameGeneration:
+    """Tests for reel name generation from clip paths."""
+
+    def test_generate_reel_name_basic(self):
+        """Test basic reel name generation from path."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("E:/videos/stock/beach_sunset.mp4")
+        assert result == "STOCK_BEACH_SUNSET"
+
+    def test_generate_reel_name_max_length(self):
+        """Test reel name is truncated to max 32 chars."""
+        from src.otio.export import _generate_reel_name
+
+        # Long path that would exceed 32 chars
+        long_path = "E:/very_long_folder_name/very_long_video_filename_that_exceeds_limit.mp4"
+        result = _generate_reel_name(long_path)
+
+        assert len(result) <= 32, f"Reel name exceeds 32 chars: {len(result)}"
+        assert result.isupper()
+
+    def test_generate_reel_name_sanitizes_special_chars(self):
+        """Test reel name sanitizes special characters."""
+        from src.otio.export import _generate_reel_name
+
+        # Path with special chars
+        result = _generate_reel_name("E:/My Videos/Beach - Sunset (HD).mp4")
+
+        # Should only contain alphanumeric and underscore
+        assert all(c.isalnum() or c == '_' for c in result)
+        assert " " not in result
+        assert "-" not in result
+        assert "(" not in result
+        assert ")" not in result
+
+    def test_generate_reel_name_handles_unicode(self):
+        """Test reel name handles unicode characters."""
+        from src.otio.export import _generate_reel_name
+
+        # Path with unicode
+        result = _generate_reel_name("E:/vídeos/café_scene.mp4")
+
+        # Should still produce valid output
+        assert all(c.isalnum() or c == '_' for c in result)
+        assert len(result) > 0
+
+    def test_generate_reel_name_empty_path(self):
+        """Test reel name handles empty path."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("")
+        assert result == "BL"  # Default black
+
+    def test_generate_reel_name_none_path(self):
+        """Test reel name handles None path."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name(None)
+        assert result == "BL"  # Default black
+
+    def test_generate_reel_name_removes_consecutive_underscores(self):
+        """Test consecutive underscores are collapsed."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("E:/my  folder/file   name.mp4")
+
+        # Should not have consecutive underscores
+        assert "__" not in result
+
+    def test_generate_reel_name_uppercase(self):
+        """Test reel name is uppercase."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("E:/lowercase/filename.mp4")
+        assert result == result.upper()
+
+    def test_generate_reel_name_uses_folder_and_filename(self):
+        """Test reel name includes both folder and filename."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("E:/project/videos/clip001.mp4")
+
+        # Should contain parts of both folder and filename
+        assert "VIDEOS" in result
+        assert "CLIP" in result
+
+    def test_generate_reel_name_custom_max_length(self):
+        """Test custom max length parameter."""
+        from src.otio.export import _generate_reel_name
+
+        result = _generate_reel_name("E:/folder/filename.mp4", max_length=16)
+
+        assert len(result) <= 16
+
+
+class TestEdlWithReelNames:
+    """Tests for EDL export with reel names from clip paths."""
+
+    @pytest.fixture
+    def mock_match_with_video(self):
+        """Create mock match result with video segment."""
+        segment = Mock()
+        segment.start_time = 0.0
+        segment.end_time = 5.0
+        segment.text = "Test segment"
+
+        video_segment = Mock()
+        video_segment.source_file = "E:/stock/beach_sunset.mp4"
+        video_segment.start_time = 10.0
+        video_segment.end_time = 15.0
+
+        match = Mock()
+        match.confidence = 0.85
+        match.voiceover_segment = segment
+        match.video_segment = video_segment
+
+        result = Mock()
+        result.primary_match = match
+        return result
+
+    def test_edl_with_reel_names_enabled(self, tmp_path, mock_match_with_video):
+        """Test EDL includes reel names when include_reel_names=True."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_with_video], output_path, include_reel_names=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Should contain reel name from path (first 8 chars of generated name)
+        # STOCK_BEACH_SUNSET -> first 8 = STOCK_BE
+        assert "STOCK_BE" in content or "STOCK" in content
+
+    def test_edl_without_reel_names(self, tmp_path, mock_match_with_video):
+        """Test EDL uses BL when include_reel_names=False."""
+        from src.otio.export import save_timeline_as_edl
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_with_video], output_path, include_reel_names=False)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Should use BL as reel name
+        assert "001  BL" in content
+
+    def test_edl_reel_name_in_event_line(self, tmp_path, mock_match_with_video):
+        """Test reel name appears in correct position in event line."""
+        from src.otio.export import save_timeline_as_edl
+        import re
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([mock_match_with_video], output_path, include_reel_names=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # CMX3600 format: event_num reel_name track edit_type timecodes
+        # Reel name is padded to 8 characters
+        event_pattern = r'(\d{3})\s+(\w{1,8})\s+V\s+C'
+        matches = re.findall(event_pattern, content)
+
+        assert len(matches) > 0
+        event_num, reel_name = matches[0]
+        assert event_num == "001"
+        # Reel should be derived from video path
+        assert reel_name != "BL"
+
+    def test_edl_reel_name_max_8_chars_in_event(self, tmp_path):
+        """Test reel name is max 8 chars in event line (CMX3600 limit)."""
+        from src.otio.export import save_timeline_as_edl
+        import re
+
+        # Create match with very long path
+        segment = Mock()
+        segment.start_time = 0.0
+        segment.end_time = 5.0
+        segment.text = "Test"
+
+        video_segment = Mock()
+        video_segment.source_file = "E:/very_long_folder_name/very_long_filename.mp4"
+        video_segment.start_time = 0.0
+        video_segment.end_time = 5.0
+
+        match = Mock()
+        match.confidence = 0.8
+        match.voiceover_segment = segment
+        match.video_segment = video_segment
+
+        result = Mock()
+        result.primary_match = match
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl([result], output_path, include_reel_names=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Extract reel name from event line
+        event_pattern = r'(\d{3})\s+(\S+)\s+V\s+C'
+        matches = re.findall(event_pattern, content)
+
+        assert len(matches) > 0
+        _, reel_name = matches[0]
+        assert len(reel_name) <= 8, f"Reel name in event line exceeds 8 chars: {reel_name}"
+
+    def test_edl_multiple_matches_different_reels(self, tmp_path):
+        """Test multiple matches get different reel names."""
+        from src.otio.export import save_timeline_as_edl
+        import re
+
+        matches_list = []
+        for i, video_folder in enumerate(["beach", "mountain", "city"]):
+            segment = Mock()
+            segment.start_time = i * 5.0
+            segment.end_time = (i + 1) * 5.0
+            segment.text = f"Segment {i}"
+
+            video_segment = Mock()
+            video_segment.source_file = f"E:/{video_folder}/clip{i:03d}.mp4"
+            video_segment.start_time = 0.0
+            video_segment.end_time = 5.0
+
+            match = Mock()
+            match.confidence = 0.8
+            match.voiceover_segment = segment
+            match.video_segment = video_segment
+
+            result = Mock()
+            result.primary_match = match
+            matches_list.append(result)
+
+        output_path = str(tmp_path / "markers.edl")
+        save_timeline_as_edl(matches_list, output_path, include_reel_names=True)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Extract all reel names
+        event_pattern = r'\d{3}\s+(\S+)\s+V\s+C'
+        reel_names = re.findall(event_pattern, content)
+
+        assert len(reel_names) == 3
+        # Each should be different (derived from different folders)
+        unique_reels = set(reel_names)
+        assert len(unique_reels) >= 2, "Expected different reel names for different source folders"
