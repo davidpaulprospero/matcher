@@ -574,3 +574,127 @@ class TestWriteMediaXMLPart:
         assert bin_node is not None, "Missing <bin> under xmeml"
         sequence_node = root.find('sequence')
         assert sequence_node is not None, "Missing <sequence> sibling (required for DaVinci import)"
+
+
+class TestFrameRateValidation:
+    """Tests for frame rate validation in XML export."""
+
+    def test_validate_frame_rate_standard_rates(self):
+        """Test _validate_frame_rate accepts standard NLE rates."""
+        from src.otio.xml_export import _validate_frame_rate, STANDARD_NLE_RATES
+
+        for rate in STANDARD_NLE_RATES:
+            result = _validate_frame_rate(rate)
+            assert isinstance(result, int), f"Expected int for rate {rate}"
+            # 23.976, 29.97, 59.94 should round to 24, 30, 60
+            expected = round(rate)
+            assert result == expected, f"Expected {expected} for rate {rate}, got {result}"
+
+    def test_validate_frame_rate_non_standard_logs_warning(self, caplog):
+        """Test _validate_frame_rate logs warning for non-standard rates."""
+        from src.otio.xml_export import _validate_frame_rate
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            result = _validate_frame_rate(27.5)
+
+        # Should log warning about non-standard rate
+        assert "Non-standard frame rate" in caplog.text
+        assert "27.5" in caplog.text
+        # Should still return an integer
+        assert isinstance(result, int)
+        assert result == 28  # Rounded
+
+    def test_validate_frame_rate_returns_integer(self):
+        """Test _validate_frame_rate always returns an integer."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        test_rates = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0,
+                      15.5, 27.3, 45.8, 120.0]
+
+        for rate in test_rates:
+            result = _validate_frame_rate(rate)
+            assert isinstance(result, int), f"Expected int for rate {rate}, got {type(result)}"
+
+    def test_validate_frame_rate_23_976(self):
+        """Test 23.976 fps rounds to 24."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        result = _validate_frame_rate(23.976)
+        assert result == 24
+
+    def test_validate_frame_rate_29_97(self):
+        """Test 29.97 fps rounds to 30."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        result = _validate_frame_rate(29.97)
+        assert result == 30
+
+    def test_validate_frame_rate_59_94(self):
+        """Test 59.94 fps rounds to 60."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        result = _validate_frame_rate(59.94)
+        assert result == 60
+
+    def test_validate_frame_rate_integer_passthrough(self):
+        """Test integer frame rates pass through correctly."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        for rate in [24, 25, 30, 50, 60]:
+            result = _validate_frame_rate(float(rate))
+            assert result == rate
+
+    def test_xml_timebase_is_integer(self, mock_matches, temp_output_path):
+        """Test that XML timebase element is always an integer."""
+        paths = generate_resolve_xml_with_bins(
+            mock_matches,
+            temp_output_path,
+            frame_rate=29.97  # Non-integer rate
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        # Find all timebase elements
+        timebases = root.findall('.//timebase')
+        assert len(timebases) > 0, "Expected at least one timebase element"
+
+        for timebase in timebases:
+            value = timebase.text
+            # Should be an integer string (no decimal point)
+            assert '.' not in value, f"Timebase should be integer, got '{value}'"
+            # Should parse as int
+            int_value = int(value)
+            assert int_value == 30, f"Expected 30, got {int_value}"
+
+    def test_xml_timebase_non_standard_rate(self, mock_matches, temp_output_path, caplog):
+        """Test XML generation with non-standard frame rate logs warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            paths = generate_resolve_xml_with_bins(
+                mock_matches,
+                temp_output_path,
+                frame_rate=27.5  # Non-standard rate
+            )
+
+        # Should log warning
+        assert "Non-standard frame rate" in caplog.text
+
+        # XML should still be generated
+        assert len(paths) >= 1
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        # Timebase should be rounded to 28
+        timebases = root.findall('.//timebase')
+        assert len(timebases) > 0
+        assert timebases[0].text == "28"
+
+    def test_standard_nle_rates_constant(self):
+        """Test STANDARD_NLE_RATES contains expected values."""
+        from src.otio.xml_export import STANDARD_NLE_RATES
+
+        expected = {23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0}
+        assert STANDARD_NLE_RATES == expected
