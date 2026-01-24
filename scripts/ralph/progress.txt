@@ -706,5 +706,34 @@ Progress: 8/10 stories complete
 - Files modified:
   - tests/test_config_merge.py (added TestDeepMergeEdgeCases class, ~75 lines)
 
-Progress: 9/10 stories complete (US-009, US-010 remaining)
+## Iteration 9 - [US-009] Add pytest markers for test categorization
+- Registered 3 custom markers in tests/conftest.py:
+  - `unit`: Fast unit tests (no external resources, <1s)
+  - `integration`: Tests requiring external resources
+  - `slow`: Tests taking >5 seconds
+- Added `pytestmark = pytest.mark.unit` to 7 test files:
+  - tests/test_cli_args.py (41 tests)
+  - tests/test_cleanup_module.py (25 tests)
+  - tests/test_cli_environment.py (31 tests)
+  - tests/test_stage_error_handling.py (25 tests)
+  - tests/test_config_merge.py (43 tests)
+  - tests/test_agents/test_watcher.py (39 tests)
+  - tests/test_agents/test_fallback.py (51 tests)
+- Test marker counts:
+  - Unit tests: 256 (exceeds requirement of 50)
+  - Integration tests: 51 (pre-existing)
+  - Slow tests: 4 (pre-existing)
+- Verified `pytest --markers` shows all custom markers
+- Verified `pytest -m unit` completes in 11.62s (well under 30s requirement)
+- Files modified:
+  - tests/conftest.py (added unit and slow marker registration)
+  - tests/test_cli_args.py (added pytestmark)
+  - tests/test_cleanup_module.py (added pytestmark)
+  - tests/test_cli_environment.py (added pytestmark)
+  - tests/test_stage_error_handling.py (added pytestmark)
+  - tests/test_config_merge.py (added pytestmark)
+  - tests/test_agents/test_watcher.py (added pytestmark)
+  - tests/test_agents/test_fallback.py (added pytestmark)
+
+Progress: 10/10 stories complete (US-010 remaining)
 

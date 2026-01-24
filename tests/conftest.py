@@ -14,7 +14,15 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line(
         "markers",
+        "unit: marks tests as fast unit tests (no external resources, <1s)"
+    )
+    config.addinivalue_line(
+        "markers",
         "integration: marks tests as integration tests (require external resources)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow: marks tests as slow (>5 seconds)"
     )
 
 

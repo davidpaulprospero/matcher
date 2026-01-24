@@ -10,6 +10,10 @@ Tests for src/cli/environment.py covering:
 """
 
 import pytest
+
+# Mark all tests in this module as unit tests
+pytestmark = pytest.mark.unit
+
 import sys
 import os
 from pathlib import Path
