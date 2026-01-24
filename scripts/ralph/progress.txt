@@ -257,7 +257,7 @@ Branch: ralph/sprint-2
 ### Stories (10 total)
 [x] US-001: Create sprint 2 OTIO verification test (high)
 [x] US-002: Add EDL drop-frame timecode support (high)
-[ ] US-003: Add EDL reel name generation from clip paths (medium)
+[x] US-003: Add EDL reel name generation from clip paths (medium)
 [ ] US-004: Add XML frame rate validation at export (medium)
 [ ] US-005: Add track count limit warning in create_timeline (medium)
 [ ] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
@@ -266,7 +266,7 @@ Branch: ralph/sprint-2
 [ ] US-009: Add timeline split by segment count option (low)
 [ ] US-010: Add entity track clip consolidation for repeated entities (low)
 
-Progress: 2/10 stories complete
+Progress: 3/10 stories complete
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -301,4 +301,35 @@ Progress: 2/10 stories complete
 - Files modified:
   - src/otio/export.py (enhanced save_timeline_as_edl)
   - tests/test_otio_export.py (added TestDropFrameTimecode class)
+
+## Iteration 3 - [US-003] Add EDL reel name generation from clip paths
+- Added `_generate_reel_name()` helper function in src/otio/export.py
+  - Uses folder_name + filename pattern for unique identification
+  - Sanitizes to alphanumeric + underscore only
+  - Truncates to 32 chars (configurable via max_length param)
+  - Removes consecutive underscores, converts to uppercase
+- Added `include_reel_names` parameter to `save_timeline_as_edl()`
+  - When True, extracts reel name from video_segment.source_file
+  - Pads reel name to 8 chars in event line (CMX3600 format)
+- Added 10 tests in TestReelNameGeneration class:
+  - test_generate_reel_name_basic
+  - test_generate_reel_name_max_length
+  - test_generate_reel_name_sanitizes_special_chars
+  - test_generate_reel_name_handles_unicode
+  - test_generate_reel_name_empty_path
+  - test_generate_reel_name_none_path
+  - test_generate_reel_name_removes_consecutive_underscores
+  - test_generate_reel_name_uppercase
+  - test_generate_reel_name_uses_folder_and_filename
+  - test_generate_reel_name_custom_max_length
+- Added 5 tests in TestEdlWithReelNames class:
+  - test_edl_with_reel_names_enabled
+  - test_edl_without_reel_names
+  - test_edl_reel_name_in_event_line
+  - test_edl_reel_name_max_8_chars_in_event
+  - test_edl_multiple_matches_different_reels
+- All 50 export tests pass
+- Files modified:
+  - src/otio/export.py (added _generate_reel_name, enhanced save_timeline_as_edl)
+  - tests/test_otio_export.py (added TestReelNameGeneration and TestEdlWithReelNames)
 
