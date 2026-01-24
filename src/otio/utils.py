@@ -553,6 +553,143 @@ class MediaPathNormalizer:
 
 
 # ============================================================
+# OTIO Clip Metadata Validation
+# ============================================================
+
+class ClipValidationError:
+    """Represents a validation error for an OTIO clip."""
+
+    def __init__(self, clip_name: str, error_type: str, message: str):
+        self.clip_name = clip_name
+        self.error_type = error_type
+        self.message = message
+
+    def __repr__(self) -> str:
+        return f"ClipValidationError(clip='{self.clip_name}', type='{self.error_type}', message='{self.message}')"
+
+
+def _validate_clip_metadata(clip: otio.schema.Clip) -> List["ClipValidationError"]:
+    """
+    Validate OTIO clip metadata before export.
+
+    Performs validation checks to ensure clip is well-formed:
+    1. source_range.start_time is non-negative
+    2. source_range.duration is positive
+    3. media_reference.target_url is non-empty string
+
+    Args:
+        clip: OTIO Clip to validate
+
+    Returns:
+        List of ClipValidationError objects describing any validation failures.
+        Empty list if clip is valid.
+
+    Example:
+        errors = _validate_clip_metadata(clip)
+        if errors:
+            for err in errors:
+                logger.warning(f"Clip validation failed: {err.message}")
+    """
+    errors = []
+    clip_name = clip.name or "<unnamed>"
+
+    # Check source_range exists
+    if clip.source_range is None:
+        errors.append(ClipValidationError(
+            clip_name=clip_name,
+            error_type="missing_source_range",
+            message=f"Clip '{clip_name}' has no source_range"
+        ))
+        return errors  # Can't check further without source_range
+
+    # Check start_time is non-negative
+    if clip.source_range.start_time is not None:
+        start_value = clip.source_range.start_time.value
+        if start_value < 0:
+            errors.append(ClipValidationError(
+                clip_name=clip_name,
+                error_type="negative_start_time",
+                message=f"Clip '{clip_name}' has negative start_time: {start_value}"
+            ))
+    else:
+        errors.append(ClipValidationError(
+            clip_name=clip_name,
+            error_type="missing_start_time",
+            message=f"Clip '{clip_name}' has no start_time in source_range"
+        ))
+
+    # Check duration is positive
+    if clip.source_range.duration is not None:
+        duration_value = clip.source_range.duration.value
+        if duration_value <= 0:
+            errors.append(ClipValidationError(
+                clip_name=clip_name,
+                error_type="non_positive_duration",
+                message=f"Clip '{clip_name}' has non-positive duration: {duration_value}"
+            ))
+    else:
+        errors.append(ClipValidationError(
+            clip_name=clip_name,
+            error_type="missing_duration",
+            message=f"Clip '{clip_name}' has no duration in source_range"
+        ))
+
+    # Check media_reference.target_url is non-empty string
+    if clip.media_reference is None:
+        errors.append(ClipValidationError(
+            clip_name=clip_name,
+            error_type="missing_media_reference",
+            message=f"Clip '{clip_name}' has no media_reference"
+        ))
+    elif isinstance(clip.media_reference, otio.schema.MissingReference):
+        # MissingReference indicates the media file location is unknown
+        errors.append(ClipValidationError(
+            clip_name=clip_name,
+            error_type="missing_media_reference",
+            message=f"Clip '{clip_name}' has MissingReference (no actual media file)"
+        ))
+    elif isinstance(clip.media_reference, otio.schema.ExternalReference):
+        target_url = clip.media_reference.target_url
+        if target_url is None or (isinstance(target_url, str) and not target_url.strip()):
+            errors.append(ClipValidationError(
+                clip_name=clip_name,
+                error_type="empty_target_url",
+                message=f"Clip '{clip_name}' has empty or missing target_url"
+            ))
+    # Note: GeneratorReference is allowed (e.g., for test patterns, color bars)
+
+    return errors
+
+
+def validate_timeline_clips(timeline: otio.schema.Timeline) -> List["ClipValidationError"]:
+    """
+    Validate all clips in an OTIO timeline.
+
+    Args:
+        timeline: OTIO Timeline to validate
+
+    Returns:
+        List of all ClipValidationError objects from all clips in the timeline.
+        Empty list if all clips are valid.
+    """
+    all_errors = []
+
+    for track in timeline.tracks:
+        if not isinstance(track, otio.schema.Track):
+            continue
+
+        for item in track:
+            if isinstance(item, otio.schema.Clip):
+                errors = _validate_clip_metadata(item)
+                all_errors.extend(errors)
+
+    if all_errors:
+        logger.warning(f"Timeline validation found {len(all_errors)} clip issues")
+
+    return all_errors
+
+
+# ============================================================
 # OTIO Clip Creation
 # ============================================================
 
