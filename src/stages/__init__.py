@@ -18,6 +18,38 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class StageMetrics:
+    """
+    Metrics collected during stage execution.
+
+    Attributes:
+        items_processed: Number of items successfully processed
+        items_failed: Number of items that failed processing
+        duration_seconds: Time taken to execute the stage
+    """
+    items_processed: int = 0
+    items_failed: int = 0
+    duration_seconds: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert metrics to dictionary for serialization."""
+        return {
+            'items_processed': self.items_processed,
+            'items_failed': self.items_failed,
+            'duration_seconds': self.duration_seconds
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StageMetrics':
+        """Create StageMetrics from dictionary."""
+        return cls(
+            items_processed=data.get('items_processed', 0),
+            items_failed=data.get('items_failed', 0),
+            duration_seconds=data.get('duration_seconds', 0.0)
+        )
+
+
+@dataclass
 class StageResult:
     """
     Result of a pipeline stage execution.
@@ -27,21 +59,23 @@ class StageResult:
         data: Stage output data (for checkpointing)
         error: Error message if failed
         warnings: Non-fatal warnings encountered
+        metrics: Stage execution metrics (items processed, failed, duration)
     """
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
+    metrics: Optional[StageMetrics] = None
 
     @classmethod
-    def ok(cls, data: Dict[str, Any] = None, warnings: List[str] = None) -> 'StageResult':
+    def ok(cls, data: Dict[str, Any] = None, warnings: List[str] = None, metrics: StageMetrics = None) -> 'StageResult':
         """Create a successful result"""
-        return cls(success=True, data=data or {}, warnings=warnings or [])
+        return cls(success=True, data=data or {}, warnings=warnings or [], metrics=metrics)
 
     @classmethod
-    def fail(cls, error: str, warnings: List[str] = None) -> 'StageResult':
+    def fail(cls, error: str, warnings: List[str] = None, metrics: StageMetrics = None) -> 'StageResult':
         """Create a failed result"""
-        return cls(success=False, error=error, warnings=warnings or [])
+        return cls(success=False, error=error, warnings=warnings or [], metrics=metrics)
 
     def __bool__(self) -> bool:
         return self.success
