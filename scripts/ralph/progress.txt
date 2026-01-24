@@ -538,3 +538,42 @@ All acceptance criteria met for all 10 stories:
 - US-009: Timeline split by segment count ✓
 - US-010: Entity track clip consolidation ✓
 
+---
+# Sprint 2 Started (Testing Focus)
+---
+
+## Sprint 2 Testing Overview
+Focus: Unit tests for CLI, cleanup, agents, stages, and config modules
+Branch: ralph/sprint-2
+
+### Stories (10 total)
+[x] US-001: Create sprint 2 testing verification test (high)
+[ ] US-002: Add CLI argument parser unit tests (high)
+[ ] US-003: Add cleanup module unit tests (high)
+[ ] US-004: Add agents watcher unit tests (medium)
+[ ] US-005: Add agents fallback chain tests (medium)
+[ ] US-006: Add CLI environment detection tests (medium)
+[ ] US-007: Add stage error handling tests (medium)
+[ ] US-008: Add config deep merge edge case tests (medium)
+[ ] US-009: Add pytest markers for test categorization (low)
+[ ] US-010: Add shared test fixtures module (low)
+
+## Iteration 1 - [US-001] Create sprint 2 testing verification test
+- Fixed sys.path.insert in tests/test_sprint_2_testing_verification.py
+- Fixed stage imports (use src.stages.download.DownloadStage instead of src.stages.DownloadStage)
+- Verification file already existed, contains 16 tests across 6 test classes:
+  - TestSprintTestFileExistence (2 tests): test_cli_args, test_cleanup_module exist
+  - TestSourceModuleImports (5 tests): cli.args, cleanup, agents.watcher, agents.fallback, cli.environment
+  - TestPytestCollectionSucceeds (2 tests): verification collects, conftest has markers
+  - TestStagesCanBeImported (5 tests): DownloadStage, TranscribeStage, MatchStage, OutputStage, StageResult
+  - TestConfigMergeImports (1 test): config_utils imports
+  - TestVerificationPasses (1 test): verification complete marker
+- Dependent test files verified:
+  - tests/test_cli_args.py: 32 tests across 9 test classes
+  - tests/test_cleanup_module.py: 25 tests across 7 test classes
+- All 73 tests pass (16 + 32 + 25)
+- Files modified:
+  - tests/test_sprint_2_testing_verification.py (fixed imports)
+
+Progress: 1/10 stories complete
+
