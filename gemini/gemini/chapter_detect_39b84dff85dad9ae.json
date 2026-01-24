@@ -1,0 +1,66 @@
+{
+  "text": "```json\n{\n  \"is_listicle\": true,\n  \"list_type\": \"numbered\",\n  \"total_items\": 4,\n  \"intro_end_segment\": 120,\n  \"items\": [\n    {\n      \"rank\": 1,\n      \"name\": \"noise versus meaning\",\n      \"corrected_name\": \"noise versus meaning\",\n      \"start_segment\": 121,\n      \"keywords\": [\n        \"dog reacting to yelling\",\n        \"dog ignoring human\",\n        \"dog confused by noise\",\n        \"stressed dog footage\",\n        \"dog barks static\"\n      ]\n    },\n    {\n      \"rank\": 2,\n      \"name\": \"affection timing\",\n      \"corrected_name\": \"affection timing\",\n      \"start_segment\": 163,\n      \"keywords\": [\n        \"dog being petted\",\n        \"dog anxious for attention\",\n        \"human petting whining dog\",\n        \"dog demand barking footage\",\n        \"dog calming behavior\"\n      ]\n    },\n    {\n      \"rank\": 3,\n      \"name\": \"walk control versus decompression\",\n      \"corrected_name\": \"walk control versus decompression\",\n      \"start_segment\": 194,\n      \"keywords\": [\n        \"dog sniffing ground\",\n        \"dog frustrated on leash\",\n        \"dog pulling leash\",\n        \"dog relaxed sniffing\",\n        \"slow motion dog sniff\"\n      ]\n    },\n    {\n      \"rank\": 4,\n      \"name\": \"Emotional projection, that guilty look\",\n      \"corrected_name\": \"Emotional projection, that guilty look\",\n      \"start_segment\": 234,\n      \"keywords\": [\n        \"dog guilty look footage\",\n        \"dog head down\",\n        \"dog avoids eye contact\",\n        \"dog near mess\",\n        \"dog conflict management\"\n      ]\n    }\n  ]\n}\n```",
+  "parsed_data": {
+    "is_listicle": true,
+    "list_type": "numbered",
+    "total_items": 4,
+    "intro_end_segment": 120,
+    "items": [
+      {
+        "rank": 1,
+        "name": "noise versus meaning",
+        "corrected_name": "noise versus meaning",
+        "start_segment": 121,
+        "keywords": [
+          "dog reacting to yelling",
+          "dog ignoring human",
+          "dog confused by noise",
+          "stressed dog footage",
+          "dog barks static"
+        ]
+      },
+      {
+        "rank": 2,
+        "name": "affection timing",
+        "corrected_name": "affection timing",
+        "start_segment": 163,
+        "keywords": [
+          "dog being petted",
+          "dog anxious for attention",
+          "human petting whining dog",
+          "dog demand barking footage",
+          "dog calming behavior"
+        ]
+      },
+      {
+        "rank": 3,
+        "name": "walk control versus decompression",
+        "corrected_name": "walk control versus decompression",
+        "start_segment": 194,
+        "keywords": [
+          "dog sniffing ground",
+          "dog frustrated on leash",
+          "dog pulling leash",
+          "dog relaxed sniffing",
+          "slow motion dog sniff"
+        ]
+      },
+      {
+        "rank": 4,
+        "name": "Emotional projection, that guilty look",
+        "corrected_name": "Emotional projection, that guilty look",
+        "start_segment": 234,
+        "keywords": [
+          "dog guilty look footage",
+          "dog head down",
+          "dog avoids eye contact",
+          "dog near mess",
+          "dog conflict management"
+        ]
+      }
+    ]
+  },
+  "cached_at": 1769046149.292546,
+  "provider": "gemini",
+  "model": "gemini-2.0-flash"
+}

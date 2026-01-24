@@ -1,0 +1,39 @@
+﻿{
+    "apiRetries":  {
+                       "lastError":  null,
+                       "maxRetries":  5,
+                       "currentRetryCount":  0,
+                       "lastRetryAt":  null,
+                       "backoffSeconds":  30
+                   },
+    "createdAt":  "2026-01-25T06:09:46",
+    "queue":  [
+                  "pipeline",
+                  "testing",
+                  "speed",
+                  "quality",
+                  "rate-limiting"
+              ],
+    "retryCount":  0,
+    "skippedAreas":  [
+
+                     ],
+    "currentIndex":  1,
+    "completedAreas":  [
+                           "pipeline"
+                       ],
+    "session":  {
+                    "startedAt":  "2026-01-25T06:09:46",
+                    "currentStoryId":  "US-003",
+                    "id":  "2026-01-25_060854",
+                    "iterationCount":  5,
+                    "lastActivityAt":  "2026-01-25T07:10:40"
+                },
+    "networkRetries":  {
+                           "lastError":  null,
+                           "maxRetries":  10,
+                           "currentRetryCount":  0,
+                           "lastRetryAt":  null,
+                           "backoffSeconds":  60
+                       }
+}

@@ -1,0 +1,65 @@
+{
+  "text": "```json\n{\n  \"is_listicle\": true,\n  \"list_type\": \"numbered\",\n  \"total_items\": 4,\n  \"intro_end_segment\": 120,\n  \"items\": [\n    {\n      \"rank\": 1,\n      \"name\": \"one\",\n      \"corrected_name\": \"one\",\n      \"start_segment\": 121,\n      \"keywords\": [\n        \"noise versus meaning\",\n        \"talking and yelling\",\n        \"clear signals\",\n        \"consistent signals\"\n      ]\n    },\n    {\n      \"rank\": 2,\n      \"name\": \"one\",\n      \"corrected_name\": \"one\",\n      \"start_segment\": 162,\n      \"keywords\": [\n        \"affection timing\",\n        \"love\",\n        \"wrong message\",\n        \"anxious\",\n        \"whining\"\n      ]\n    },\n    {\n      \"rank\": 3,\n      \"name\": \"one\",\n      \"corrected_name\": \"one\",\n      \"start_segment\": 192,\n      \"keywords\": [\n        \"walk control\",\n        \"decompression\",\n        \"walks\",\n        \"sniffing\",\n        \"environment\"\n      ]\n    },\n    {\n      \"rank\": 4,\n      \"name\": \"one\",\n      \"corrected_name\": \"one\",\n      \"start_segment\": 230,\n      \"keywords\": [\n        \"emotional projection\",\n        \"guilty look\",\n        \"dog apology\",\n        \"body language\",\n        \"conflict management\"\n      ]\n    }\n  ]\n}\n```",
+  "parsed_data": {
+    "is_listicle": true,
+    "list_type": "numbered",
+    "total_items": 4,
+    "intro_end_segment": 120,
+    "items": [
+      {
+        "rank": 1,
+        "name": "one",
+        "corrected_name": "one",
+        "start_segment": 121,
+        "keywords": [
+          "noise versus meaning",
+          "talking and yelling",
+          "clear signals",
+          "consistent signals"
+        ]
+      },
+      {
+        "rank": 2,
+        "name": "one",
+        "corrected_name": "one",
+        "start_segment": 162,
+        "keywords": [
+          "affection timing",
+          "love",
+          "wrong message",
+          "anxious",
+          "whining"
+        ]
+      },
+      {
+        "rank": 3,
+        "name": "one",
+        "corrected_name": "one",
+        "start_segment": 192,
+        "keywords": [
+          "walk control",
+          "decompression",
+          "walks",
+          "sniffing",
+          "environment"
+        ]
+      },
+      {
+        "rank": 4,
+        "name": "one",
+        "corrected_name": "one",
+        "start_segment": 230,
+        "keywords": [
+          "emotional projection",
+          "guilty look",
+          "dog apology",
+          "body language",
+          "conflict management"
+        ]
+      }
+    ]
+  },
+  "cached_at": 1768957942.0192676,
+  "provider": "gemini",
+  "model": "gemini-2.0-flash"
+}

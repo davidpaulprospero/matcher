@@ -1,0 +1,13 @@
+{
+  "text": "```json\n{\n  \"is_listicle\": false,\n  \"list_type\": null,\n  \"total_items\": 0,\n  \"intro_end_segment\": null,\n  \"items\": []\n}\n```",
+  "parsed_data": {
+    "is_listicle": false,
+    "list_type": null,
+    "total_items": 0,
+    "intro_end_segment": null,
+    "items": []
+  },
+  "cached_at": 1768963163.6145086,
+  "provider": "gemini",
+  "model": "gemini-2.0-flash"
+}
