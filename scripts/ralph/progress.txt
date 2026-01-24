@@ -263,8 +263,8 @@ Branch: ralph/sprint-2
 [x] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
 [x] US-007: Add OTIO clip metadata validation before export (medium)
 [x] US-008: Add track coverage reporting to segment map JSON (low)
-[ ] US-009: Add timeline split by segment count option (low)
-[ ] US-010: Add entity track clip consolidation for repeated entities (low)
+[x] US-009: Add timeline split by segment count option (low)
+[x] US-010: Add entity track clip consolidation for repeated entities (low)
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -499,4 +499,42 @@ Progress: 9/10 stories complete
 - Files modified:
   - src/otio/export.py (added _split_timeline_by_segments helper, updated save_timeline_split)
   - tests/test_otio_export.py (added TestTimelineSplitBySegments and TestSplitTimelineBySegmentsHelper classes)
+
+## Iteration 10 - [US-010] Add entity track clip consolidation for repeated entities
+- Implementation already existed (verified, no new code needed):
+  - `_consolidate_repeated_clips()` helper in src/otio/entities.py (lines 142-251)
+  - Algorithm: Iterates track items, finds consecutive clips with same entity_name, extends first clip duration to cover all, removes subsequent clips
+  - Handles both still images (extends available_range) and videos
+  - Applied via `add_entity_media_to_track()` for V9 (images) and V10 (videos) tracks (line 539)
+  - Configurable via `config.image_search.enable_consolidation` (default: True)
+- Tests already existed in tests/test_otio_entities.py:
+  - TestClipConsolidation class (6 tests):
+    - test_consolidate_consecutive_same_entity: 3 clips → 1 with extended duration
+    - test_consolidate_preserves_non_consecutive: Different entities stay separate
+    - test_consolidate_different_entities_not_merged: A→B→C stays as 3 clips
+    - test_consolidate_empty_track, test_consolidate_single_clip: Edge cases
+    - test_consolidate_extends_available_range_for_images: OTIO constraint
+  - TestConsolidationIntegration class (3 tests): Full workflow for V9, V10, disabled
+- All 37 entity tests pass
+- Files verified (no changes made):
+  - src/otio/entities.py (consolidation at lines 142-251, applied at line 539)
+  - tests/test_otio_entities.py (TestClipConsolidation + TestConsolidationIntegration)
+
+---
+# Sprint 2 Complete (OTIO Focus)
+---
+
+Progress: 10/10 stories complete
+
+All acceptance criteria met for all 10 stories:
+- US-001: Sprint 2 OTIO verification test ✓
+- US-002: EDL drop-frame timecode support ✓
+- US-003: EDL reel name generation ✓
+- US-004: XML frame rate validation ✓
+- US-005: Track count limit warning ✓
+- US-006: gap_mode='extend' for gaps ✓
+- US-007: OTIO clip metadata validation ✓
+- US-008: Track coverage reporting ✓
+- US-009: Timeline split by segment count ✓
+- US-010: Entity track clip consolidation ✓
 
