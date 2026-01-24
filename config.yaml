@@ -811,6 +811,12 @@ download:
   retry_backoff: 2.0      # Exponential backoff multiplier (default: 2.0)
                           # Example: 3 retries with delay=2, backoff=2 → waits 2s, 4s, 8s
 
+  # Parallel download settings
+  # Number of concurrent downloads to run simultaneously
+  # Higher values = faster downloads but more bandwidth/CPU usage
+  # Note: Currently sequential, this setting is prepared for future parallel support
+  parallel_workers: 4     # Concurrent download workers (1-8 recommended)
+
 # -----------------------------------------------------------------------------
 # DURATION TIERS
 # -----------------------------------------------------------------------------
