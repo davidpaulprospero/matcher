@@ -324,6 +324,7 @@ class TestMatchValidateInputs:
         state = PipelineState()
         state.voiceover_segments = [Mock()]
         state.embeddings = np.array([[0.1, 0.2]])
+        state.text_metadata = [{'video_path': 'v.mp4', 'text': 'test'}]  # Required field
 
         error = stage.validate_inputs(state, mock_config)
 

@@ -438,29 +438,71 @@ class OutputStage(Stage):
         checkpoint: 'CheckpointManager',
         config: 'Config' = None
     ) -> bool:
-        """Restore output stage from checkpoint"""
+        """
+        Restore output stage from checkpoint.
+
+        Validates that output paths exist before restoring.
+        Logs specific errors for missing paths and invalid data.
+
+        Returns False on validation failure (not exception).
+        """
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
+                logger.warning(f"No checkpoint data for {self.name}: checkpoint returned None")
+                return False
+
+            # Validate data is a dict
+            if not isinstance(data, dict):
+                logger.warning(f"Invalid checkpoint data for {self.name}: expected dict, got {type(data).__name__}")
                 return False
 
             outputs = data.get('outputs', {})
 
-            # Restore output file paths
-            state.output_files = [
-                Path(p) for p in self._collect_output_paths(outputs)
-            ]
+            # Validate outputs is a dict
+            if not isinstance(outputs, dict):
+                logger.warning(f"Invalid checkpoint data for {self.name}: 'outputs' is not a dict (got {type(outputs).__name__})")
+                return False
 
-            # Restore OTIO paths
+            # Collect and validate output paths
+            all_paths = self._collect_output_paths(outputs)
+            existing_paths = []
+            missing_paths = []
+
+            for p in all_paths:
+                if not isinstance(p, str):
+                    logger.debug(f"Skipping non-string path in checkpoint: {repr(p)}")
+                    continue
+                if Path(p).exists():
+                    existing_paths.append(p)
+                else:
+                    missing_paths.append(p)
+
+            # Log missing paths but don't fail - files may be in different location
+            if missing_paths:
+                logger.warning(f"Some output files from checkpoint no longer exist: {missing_paths[:3]}")
+                if len(missing_paths) > 3:
+                    logger.warning(f"... and {len(missing_paths) - 3} more missing files")
+
+            # Restore output file paths (include all, not just existing)
+            state.output_files = [Path(p) for p in all_paths if isinstance(p, str)]
+
+            # Restore OTIO paths with validation
             otio_data = outputs.get('otio', [])
             if isinstance(otio_data, list):
-                state.otio_files = [Path(p) for p in otio_data]
+                state.otio_files = [Path(p) for p in otio_data if isinstance(p, str)]
             elif isinstance(otio_data, str):
                 state.otio_files = [Path(otio_data)]
             else:
+                logger.debug(f"Unexpected otio type in checkpoint: {type(otio_data).__name__}")
                 state.otio_files = []
 
-            logger.info(f"Restored OUTPUT: {len(state.output_files)} files")
+            # Validate OTIO paths exist
+            otio_missing = [str(p) for p in state.otio_files if not p.exists()]
+            if otio_missing:
+                logger.warning(f"OTIO files from checkpoint no longer exist: {otio_missing[:3]}")
+
+            logger.info(f"Restored OUTPUT: {len(state.output_files)} files ({len(existing_paths)} exist, {len(missing_paths)} missing)")
             return True
 
         except Exception as e:
