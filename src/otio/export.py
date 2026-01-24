@@ -123,9 +123,57 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     return generated_paths
 
 
+def _generate_reel_name(file_path: str, max_length: int = 32) -> str:
+    """
+    Generate a reel name from a video file path.
+
+    Reel names are used in CMX3600 EDL format to identify source media.
+    Format: folder_filename (sanitized, truncated to max_length).
+
+    Args:
+        file_path: Path to the video file
+        max_length: Maximum length for reel name (default 32 for CMX3600)
+
+    Returns:
+        Sanitized reel name, alphanumeric + underscore only, max 32 chars
+    """
+    if not file_path:
+        return "BL"  # Black/default
+
+    path = Path(file_path)
+    folder_name = path.parent.name
+    file_stem = path.stem
+
+    # Combine folder and filename
+    combined = f"{folder_name}_{file_stem}"
+
+    # Sanitize to alphanumeric + underscore only
+    sanitized = ''.join(c if c.isalnum() or c == '_' else '_' for c in combined)
+
+    # Remove consecutive underscores
+    while '__' in sanitized:
+        sanitized = sanitized.replace('__', '_')
+
+    # Strip leading/trailing underscores
+    sanitized = sanitized.strip('_')
+
+    # Truncate to max length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+
+    # Strip trailing underscore after truncation
+    sanitized = sanitized.rstrip('_')
+
+    # Ensure we have something
+    if not sanitized:
+        return "CLIP"
+
+    return sanitized.upper()
+
+
 def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_rate: float = 30.0,
                          timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None,
-                         drop_frame: bool = False):
+                         drop_frame: bool = False, include_reel_names: bool = False):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
 
@@ -143,6 +191,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         timeline_start_tc: Timeline start timecode (default 01:00:00:00)
         entities: Optional list of entity dictionaries with 'name' and 'position_sec' keys
         drop_frame: If True, use drop-frame timecode (semicolons) for 29.97/59.94fps
+        include_reel_names: If True, generate reel names from video file paths
 
     Returns:
         Path to the generated EDL file
@@ -218,8 +267,16 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         if len(vo_seg.text) > 40:
             marker_name += "..."
 
+        # Get reel name from video source file if include_reel_names is True
+        if include_reel_names and hasattr(match, 'video_segment') and hasattr(match.video_segment, 'source_file'):
+            reel_name = _generate_reel_name(match.video_segment.source_file)
+            # Pad reel name to 8 characters for CMX3600 format
+            reel_name_padded = reel_name[:8].ljust(8)
+        else:
+            reel_name_padded = "BL      "
+
         # EDL marker entry format (matches DaVinci export exactly)
-        edl_lines.append(f"{marker_num:03d}  BL       V     C        {marker_tc} {marker_tc} {marker_tc} {marker_tc}")
+        edl_lines.append(f"{marker_num:03d}  {reel_name_padded} V     C        {marker_tc} {marker_tc} {marker_tc} {marker_tc}")
         edl_lines.append(f"* FROM CLIP NAME: {marker_name}")
         edl_lines.append(f"|C:ResolveColorBlue |M:{marker_name} |D:1")
         edl_lines.append("")

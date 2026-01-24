@@ -52,7 +52,8 @@
         "All EDL tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added _generate_reel_name() helper function, include_reel_names parameter to save_timeline_as_edl(), 10 tests in TestReelNameGeneration + 5 tests in TestEdlWithReelNames"
     },
     {
       "id": "US-004",
