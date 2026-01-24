@@ -19,6 +19,9 @@ from src.config import load_config
 from src.config.sections.duration import DurationTierConfig, DurationTiersConfig
 from src.cli.config_utils import merge_config, _merge_duration_tiers
 
+# Import shared fixtures
+from tests.fixtures import create_mock_config, create_test_checkpoint
+
 
 class TestDurationTiersMerge:
     """Test duration_tiers merging in project config."""
@@ -840,6 +843,61 @@ class TestDeepMergeEdgeCases:
         assert hasattr(merged.download, 'max_retries')
         assert hasattr(merged.matching, 'high_confidence_threshold')
         assert hasattr(merged.duration_tiers.long, 'min_seconds')
+
+
+class TestSharedFixturesIntegration:
+    """Tests demonstrating shared fixtures module usage."""
+
+    def test_create_mock_config_returns_complete_config(self, tmp_path):
+        """Test create_mock_config returns a fully mocked Config object."""
+        config = create_mock_config(tmp_path)
+
+        # Verify core config sections exist
+        assert hasattr(config, 'download')
+        assert hasattr(config, 'matching')
+        assert hasattr(config, 'transcription')
+        assert hasattr(config, 'output')
+        assert hasattr(config, 'broll')
+        assert hasattr(config, 'healing')
+
+        # Verify config values are set
+        assert config.matching.min_confidence == 0.5
+        assert config.transcription.model == "base"
+        assert config.download.max_retries == 3
+
+    def test_create_mock_config_accepts_overrides(self, tmp_path):
+        """Test create_mock_config accepts section overrides."""
+        config = create_mock_config(
+            tmp_path,
+            matching={'min_confidence': 0.9}
+        )
+
+        assert config.matching.min_confidence == 0.9
+
+    def test_create_test_checkpoint_returns_valid_structure(self):
+        """Test create_test_checkpoint returns valid checkpoint dict."""
+        checkpoint = create_test_checkpoint()
+
+        # Verify required fields
+        assert 'version' in checkpoint
+        assert 'last_completed_stage' in checkpoint
+        assert 'stages' in checkpoint
+        assert checkpoint['last_completed_stage'] == "MATCH"
+
+        # Verify stages have expected data
+        assert 'ANALYZE' in checkpoint['stages']
+        assert 'MATCH' in checkpoint['stages']
+        assert 'matches' in checkpoint['stages']['MATCH']
+
+    def test_create_test_checkpoint_accepts_overrides(self):
+        """Test create_test_checkpoint accepts field overrides."""
+        checkpoint = create_test_checkpoint(
+            last_completed_stage="OUTPUT",
+            version="3.0"
+        )
+
+        assert checkpoint['last_completed_stage'] == "OUTPUT"
+        assert checkpoint['version'] == "3.0"
 
 
 if __name__ == "__main__":

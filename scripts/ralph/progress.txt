@@ -735,5 +735,45 @@ Progress: 8/10 stories complete
   - tests/test_agents/test_watcher.py (added pytestmark)
   - tests/test_agents/test_fallback.py (added pytestmark)
 
-Progress: 10/10 stories complete (US-010 remaining)
+## Iteration 10 - [US-010] Add shared test fixtures module
+- Created tests/fixtures/__init__.py with reusable test data generators:
+  - `create_mock_config(tmp_path, **overrides)`: Fully mocked Config with all sections
+    - cache, output, transcription, matching, keyword, download, duration_tiers
+    - pipeline, image_search, broll, scene_detection, healing, watcher
+    - Accepts tmp_path for directory paths, **overrides for custom values
+  - `create_mock_state(voiceover_segments, text_metadata, ...)`: Mock PipelineState
+    - Includes voiceover_segments, text_metadata, video_candidates, embeddings, matches
+    - Uses numpy for embedding arrays (384-dimensional)
+  - `create_test_checkpoint(last_completed_stage, stages, ...)`: Valid checkpoint dict
+    - Version, timestamp, stages dict with ANALYZE/DOWNLOAD/TRANSCRIBE/MATCH data
+    - Accepts overrides for customization
+- Updated 3 test files to use shared fixtures:
+  - tests/test_stage_error_handling.py: Replaced mock_config and mock_state fixtures
+  - tests/test_broll_stages.py: Updated 2 mock_config fixtures in TestBrollDownloadStage and TestBrollMatchStage
+  - tests/test_config_merge.py: Added TestSharedFixturesIntegration class with 4 tests
+- All 134 tests using shared fixtures pass
+- Files created:
+  - tests/fixtures/__init__.py (new file, ~270 lines)
+- Files modified:
+  - tests/test_stage_error_handling.py (updated fixtures)
+  - tests/test_broll_stages.py (updated fixtures)
+  - tests/test_config_merge.py (added import and test class)
+
+---
+# Sprint 2 Complete (Testing Focus)
+---
+
+Progress: 10/10 stories complete
+
+All acceptance criteria met for all 10 stories:
+- US-001: Sprint 2 testing verification test ✓
+- US-002: CLI argument parser unit tests ✓
+- US-003: Cleanup module unit tests ✓
+- US-004: Agents watcher unit tests ✓
+- US-005: Agents fallback chain tests ✓
+- US-006: CLI environment detection tests ✓
+- US-007: Stage error handling tests ✓
+- US-008: Config deep merge edge case tests ✓
+- US-009: pytest markers for test categorization ✓
+- US-010: Shared test fixtures module ✓
 
