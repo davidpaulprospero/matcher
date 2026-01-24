@@ -636,3 +636,22 @@ Progress: 4/10 stories complete
 - Files created:
   - tests/test_agents/test_watcher.py (new file, ~450 lines)
 
+Progress: 5/10 stories complete
+
+## Iteration 5 - [US-005] Add agents fallback chain tests
+- Created tests/test_agents/test_fallback.py with 51 tests
+- Note: FallbackChain doesn't have execute() method - tested availability checks and circuit breaker logic instead
+- Test classes (10 total):
+  - TestPatternClassificationDataclass (2 tests): all fields, default values
+  - TestPatternRouteFunction (20 tests): API rate limit, quota, timeout, connection, disk space/ENOSPC/permission, path too long/unicode, checkpoint corrupt/JSON, download video/yt-dlp, OTIO timeline/clip, unknown, case insensitive, false positive prevention
+  - TestPatternRoutingConstants (8 tests): category coverage for api/disk/path/checkpoint/download/otio, healer naming, valid categories
+  - TestFallbackChainInit (2 tests): basic init, with logger
+  - TestFallbackChainWatcherAvailability (4 tests): no requests, cached true/false, disabled config
+  - TestFallbackChainLLMHealerAvailability (5 tests): disabled, no API key (anthropic/gemini), with key, cached
+  - TestFallbackChainFailureTracking (6 tests): increment/disable/reset for watcher and LLM healer
+  - TestFallbackChainGetStatus (2 tests): returns state, thread-safe
+  - TestFallbackChainRecheck (2 tests): watcher recheck, LLM recheck after interval
+- All 51 fallback chain tests pass
+- Files created:
+  - tests/test_agents/test_fallback.py (new file, ~520 lines)
+
