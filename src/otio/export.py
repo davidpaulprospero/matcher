@@ -26,17 +26,120 @@ def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     logger.info(f"Saved timeline to {output_path}")
 
 
-def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_parts: int = 3, clips_per_file: int = 10) -> List[str]:
+def _split_timeline_by_segments(timeline: otio.schema.Timeline, max_segments: int,
+                                 frame_rate: float = 30.0) -> List[otio.schema.Timeline]:
+    """
+    Split a timeline into multiple timelines based on segment count.
+
+    Segments are determined by counting clips/gaps on the first video track (V1).
+    Each track is split at the same boundaries to maintain sync.
+
+    Args:
+        timeline: The timeline to split
+        max_segments: Maximum number of segments per output timeline
+        frame_rate: Frame rate for the output timelines
+
+    Returns:
+        List of split timelines (may be single element if no split needed)
+    """
+    # Get all tracks
+    video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
+    audio_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Audio]
+
+    if not video_tracks:
+        # No video tracks, return original timeline
+        return [timeline]
+
+    # Use first video track (V1) to determine segment boundaries
+    v1_track = video_tracks[0]
+    segment_count = len(list(v1_track))
+
+    if segment_count <= max_segments:
+        # No split needed
+        return [timeline]
+
+    # Calculate number of parts needed
+    import math
+    num_parts = math.ceil(segment_count / max_segments)
+
+    # Create split timelines
+    split_timelines = []
+
+    for part_idx in range(num_parts):
+        start_segment = part_idx * max_segments
+        end_segment = min((part_idx + 1) * max_segments, segment_count)
+
+        # Create new timeline for this part
+        part_timeline = otio.schema.Timeline(name=f"{timeline.name} (Part {part_idx + 1})")
+
+        # Copy metadata (update in place since metadata is read-only attribute)
+        if hasattr(timeline, 'metadata') and timeline.metadata:
+            part_timeline.metadata.update(dict(timeline.metadata))
+
+        # Add Resolve_OTIO metadata if not present
+        if 'Resolve_OTIO' not in part_timeline.metadata:
+            part_timeline.metadata['Resolve_OTIO'] = {
+                'Resolve OTIO Meta Version': '1.0'
+            }
+
+        # Set global_start_time
+        part_timeline.global_start_time = otio.opentime.RationalTime(
+            int(3600 * frame_rate),  # 1 hour in frames
+            frame_rate
+        )
+
+        # Split each video track
+        for track in video_tracks:
+            items = list(track)
+            new_track = otio.schema.Track(
+                name=track.name,
+                kind=otio.schema.TrackKind.Video
+            )
+            new_track.enabled = track.enabled
+
+            # Copy segment range for this part
+            for item in items[start_segment:end_segment]:
+                new_track.append(item.clone())
+
+            part_timeline.tracks.append(new_track)
+
+        # Split each audio track
+        for track in audio_tracks:
+            items = list(track)
+            new_track = otio.schema.Track(
+                name=track.name,
+                kind=otio.schema.TrackKind.Audio
+            )
+            new_track.enabled = track.enabled
+
+            # Copy segment range for this part
+            for item in items[start_segment:end_segment]:
+                new_track.append(item.clone())
+
+            part_timeline.tracks.append(new_track)
+
+        split_timelines.append(part_timeline)
+        logger.debug(f"Created timeline part {part_idx + 1} with segments {start_segment + 1}-{end_segment}")
+
+    return split_timelines
+
+
+def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_parts: int = 3,
+                        clips_per_file: int = 10, max_segments_per_file: int = None) -> List[str]:
     """
     Save timeline as:
     - Track-specific files (V1, V2, V3, etc.)
     - Full timeline with all tracks
+    - Optionally split full timeline by segment count
 
     Args:
         timeline: The full OTIO timeline
         output_path: Base output path
         num_parts: Ignored (kept for backwards compatibility)
         clips_per_file: Ignored (kept for backwards compatibility)
+        max_segments_per_file: If specified, split FULL timeline into multiple parts
+                               where each part contains at most this many segments.
+                               Generates files like timeline_FULL_part1.otio, timeline_FULL_part2.otio
 
     Returns:
         List of paths to generated OTIO files
@@ -108,12 +211,31 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
             break
 
     # =========================================================================
-    # 2. FULL TIMELINE (all tracks)
+    # 2. FULL TIMELINE (all tracks) - optionally split by segment count
     # =========================================================================
-    full_path = f"{base_path}_FULL.otio"
-    otio.adapters.write_to_file(timeline, full_path)
-    generated_paths.append(full_path)
-    logger.info(f"Saved FULL timeline: {full_path}")
+    if max_segments_per_file is not None and max_segments_per_file > 0:
+        # Split timeline by segment count
+        split_timelines = _split_timeline_by_segments(timeline, max_segments_per_file, frame_rate)
+
+        if len(split_timelines) == 1:
+            # Only one part needed, save as regular FULL
+            full_path = f"{base_path}_FULL.otio"
+            otio.adapters.write_to_file(timeline, full_path)
+            generated_paths.append(full_path)
+            logger.info(f"Saved FULL timeline: {full_path}")
+        else:
+            # Multiple parts
+            for part_num, part_timeline in enumerate(split_timelines, start=1):
+                part_path = f"{base_path}_FULL_part{part_num}.otio"
+                otio.adapters.write_to_file(part_timeline, part_path)
+                generated_paths.append(part_path)
+                logger.info(f"Saved FULL timeline part {part_num}/{len(split_timelines)}: {part_path}")
+    else:
+        # No splitting requested, save as single FULL file
+        full_path = f"{base_path}_FULL.otio"
+        otio.adapters.write_to_file(timeline, full_path)
+        generated_paths.append(full_path)
+        logger.info(f"Saved FULL timeline: {full_path}")
 
     logger.info(f"Generated {len(generated_paths)} OTIO files total")
 

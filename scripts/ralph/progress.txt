@@ -261,12 +261,10 @@ Branch: ralph/sprint-2
 [x] US-004: Add XML frame rate validation at export (medium)
 [x] US-005: Add track count limit warning in create_timeline (medium)
 [x] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
-[ ] US-007: Add OTIO clip metadata validation before export (medium)
-[ ] US-008: Add track coverage reporting to segment map JSON (low)
+[x] US-007: Add OTIO clip metadata validation before export (medium)
+[x] US-008: Add track coverage reporting to segment map JSON (low)
 [ ] US-009: Add timeline split by segment count option (low)
 [ ] US-010: Add entity track clip consolidation for repeated entities (low)
-
-Progress: 6/10 stories complete
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -441,5 +439,64 @@ Progress: 6/10 stories complete
   - src/otio/utils.py (added ClipValidationError, _validate_clip_metadata, validate_timeline_clips)
   - tests/test_otio_utils.py (added TestClipMetadataValidation and TestTimelineClipsValidation classes)
 
-Progress: 7/10 stories complete
+Progress: 9/10 stories complete
+
+## Iteration 8 - [US-008] Add track coverage reporting to segment map JSON
+- Added `_calculate_track_coverage()` helper function in src/otio/reporting.py:
+  - Takes matches list and frame_rate as input
+  - Returns dict mapping V1-V10 track names to coverage statistics
+  - Calculates from match data: has_gap for V1, alternatives for V2-V3, secondary_matches for V4-V6, strategy_matches for V7-V8
+  - V9-V10 (entity tracks) show as gaps since they're filled by separate stages
+- Added `track_coverage` dict to `generate_segment_map()` output:
+  - clip_count: number of segments with clips on this track
+  - gap_count: number of segments with gaps on this track
+  - clip_duration_sec: total duration of clips in seconds
+  - gap_duration_sec: total duration of gaps in seconds
+  - coverage_percent: percentage of timeline covered by clips (0-100)
+  - description: human-readable track purpose
+- Added 9 new tests in TestTrackCoverageReporting class:
+  - test_track_coverage_present_in_output
+  - test_track_coverage_includes_v1_to_v10
+  - test_track_coverage_contains_required_fields
+  - test_v1_coverage_calculation
+  - test_v2_v3_alternatives_coverage
+  - test_secondary_tracks_coverage
+  - test_empty_matches_track_coverage
+  - test_track_coverage_duration_calculations
+  - test_has_gap_affects_v1_coverage
+- All 25 reporting tests pass
+- Files modified:
+  - src/otio/reporting.py (added _calculate_track_coverage helper, 120 lines)
+  - tests/test_otio_reporting.py (added TestTrackCoverageReporting class with 9 tests)
+
+## Iteration 9 - [US-009] Add timeline split by segment count option
+- Added `_split_timeline_by_segments()` helper function in src/otio/export.py:
+  - Splits timeline based on segment count from V1 track
+  - Uses math.ceil to calculate number of parts needed
+  - Creates new timeline for each part with proper metadata and global_start_time
+  - Clones each track's segments for the appropriate range (start_segment:end_segment)
+  - Preserves Resolve_OTIO metadata in each part
+- Added `max_segments_per_file` parameter to `save_timeline_split()`:
+  - When None or 0, behaves like no splitting (single FULL file)
+  - When segment count <= max_segments_per_file, saves single FULL file
+  - When segment count > max_segments_per_file, splits into multiple parts
+  - Generates filenames: timeline_FULL_part1.otio, timeline_FULL_part2.otio, etc.
+- Added 9 new tests in TestTimelineSplitBySegments class:
+  - test_split_timeline_parameter_accepted
+  - test_split_creates_multiple_part_files
+  - test_split_generates_correct_filenames
+  - test_split_each_part_contains_correct_segments
+  - test_no_split_when_segments_under_limit
+  - test_split_preserves_metadata
+  - test_split_preserves_all_tracks
+  - test_split_with_none_max_segments
+  - test_split_with_zero_max_segments
+- Added 3 new tests in TestSplitTimelineBySegmentsHelper class:
+  - test_helper_returns_list
+  - test_helper_no_video_tracks_returns_original
+  - test_helper_segments_under_max_returns_single
+- All 62 export tests pass, all 246 OTIO/sprint 2 tests pass
+- Files modified:
+  - src/otio/export.py (added _split_timeline_by_segments helper, updated save_timeline_split)
+  - tests/test_otio_export.py (added TestTimelineSplitBySegments and TestSplitTimelineBySegmentsHelper classes)
 

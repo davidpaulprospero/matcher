@@ -923,3 +923,250 @@ class TestEdlWithReelNames:
         # Each should be different (derived from different folders)
         unique_reels = set(reel_names)
         assert len(unique_reels) >= 2, "Expected different reel names for different source folders"
+
+
+class TestTimelineSplitBySegments:
+    """Tests for timeline splitting by segment count."""
+
+    @pytest.fixture
+    def timeline_with_segments(self):
+        """Create a timeline with multiple segments on each track."""
+        import opentimelineio as otio
+
+        timeline = otio.schema.Timeline(name="Test Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(108000, 30.0)
+        timeline.metadata['Resolve_OTIO'] = {'Resolve OTIO Meta Version': '1.0'}
+
+        # Create video tracks with 5 segments each
+        for track_idx in range(3):
+            track = otio.schema.Track(
+                name=f"V{track_idx + 1}",
+                kind=otio.schema.TrackKind.Video
+            )
+            for seg_idx in range(5):
+                clip = otio.schema.Clip(
+                    name=f"V{track_idx + 1}_Clip_{seg_idx + 1}",
+                    source_range=otio.opentime.TimeRange(
+                        otio.opentime.RationalTime(seg_idx * 90, 30),
+                        otio.opentime.RationalTime(90, 30)
+                    )
+                )
+                track.append(clip)
+            timeline.tracks.append(track)
+
+        # Create audio tracks with 5 segments each
+        for track_idx in range(3):
+            track = otio.schema.Track(
+                name=f"A{track_idx + 1}",
+                kind=otio.schema.TrackKind.Audio
+            )
+            for seg_idx in range(5):
+                clip = otio.schema.Clip(
+                    name=f"A{track_idx + 1}_Clip_{seg_idx + 1}",
+                    source_range=otio.opentime.TimeRange(
+                        otio.opentime.RationalTime(seg_idx * 90, 30),
+                        otio.opentime.RationalTime(90, 30)
+                    )
+                )
+                track.append(clip)
+            timeline.tracks.append(track)
+
+        return timeline
+
+    def test_split_timeline_parameter_accepted(self, tmp_path, timeline_with_segments):
+        """Test max_segments_per_file parameter is accepted."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        # Should not raise an error
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=2)
+        assert len(paths) > 0
+
+    def test_split_creates_multiple_part_files(self, tmp_path, timeline_with_segments):
+        """Test splitting with max_segments_per_file=1 creates 5 part files."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=1)
+
+        # Should create part files (5 segments / 1 = 5 parts)
+        part_files = [p for p in paths if '_FULL_part' in p]
+        assert len(part_files) == 5
+
+        # Verify all files exist
+        for path in part_files:
+            assert Path(path).exists(), f"Part file missing: {path}"
+
+    def test_split_generates_correct_filenames(self, tmp_path, timeline_with_segments):
+        """Test split generates timeline_FULL_part1.otio, timeline_FULL_part2.otio etc."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "timeline.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=2)
+
+        # With 5 segments and max=2, should get 3 parts
+        part_files = [p for p in paths if '_FULL_part' in p]
+        assert len(part_files) == 3
+
+        # Check filename pattern
+        expected_names = ['timeline_FULL_part1.otio', 'timeline_FULL_part2.otio', 'timeline_FULL_part3.otio']
+        for expected in expected_names:
+            matching = [p for p in part_files if expected in p]
+            assert len(matching) == 1, f"Expected file with name containing {expected}"
+
+    def test_split_each_part_contains_correct_segments(self, tmp_path, timeline_with_segments):
+        """Test each split file contains correct segment subset."""
+        import opentimelineio as otio
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=2)
+
+        part_files = [p for p in paths if '_FULL_part' in p]
+        assert len(part_files) == 3
+
+        # Load each part and check segment count
+        part1 = otio.adapters.read_from_file(part_files[0])
+        part2 = otio.adapters.read_from_file(part_files[1])
+        part3 = otio.adapters.read_from_file(part_files[2])
+
+        # Get V1 track from each part
+        v1_part1 = [t for t in part1.tracks if t.name == "V1"][0]
+        v1_part2 = [t for t in part2.tracks if t.name == "V1"][0]
+        v1_part3 = [t for t in part3.tracks if t.name == "V1"][0]
+
+        # Part 1 and 2 should have 2 segments each, part 3 should have 1
+        assert len(list(v1_part1)) == 2, "Part 1 should have 2 segments"
+        assert len(list(v1_part2)) == 2, "Part 2 should have 2 segments"
+        assert len(list(v1_part3)) == 1, "Part 3 should have 1 segment"
+
+    def test_no_split_when_segments_under_limit(self, tmp_path, timeline_with_segments):
+        """Test no split occurs when segment count is under limit."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        # max_segments_per_file=10 but only 5 segments, so no split needed
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=10)
+
+        # Should create single FULL file, not parts
+        full_files = [p for p in paths if '_FULL.otio' in p and '_part' not in p]
+        part_files = [p for p in paths if '_FULL_part' in p]
+
+        assert len(full_files) == 1, "Should have single FULL file"
+        assert len(part_files) == 0, "Should not have part files"
+
+    def test_split_preserves_metadata(self, tmp_path, timeline_with_segments):
+        """Test split files preserve Resolve_OTIO metadata."""
+        import opentimelineio as otio
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=2)
+
+        part_files = [p for p in paths if '_FULL_part' in p]
+        for part_path in part_files:
+            loaded = otio.adapters.read_from_file(part_path)
+            assert 'Resolve_OTIO' in loaded.metadata, f"Missing Resolve_OTIO metadata in {part_path}"
+
+    def test_split_preserves_all_tracks(self, tmp_path, timeline_with_segments):
+        """Test split files contain all tracks (video and audio)."""
+        import opentimelineio as otio
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=2)
+
+        part_files = [p for p in paths if '_FULL_part' in p]
+        for part_path in part_files:
+            loaded = otio.adapters.read_from_file(part_path)
+            video_tracks = [t for t in loaded.tracks if t.kind == otio.schema.TrackKind.Video]
+            audio_tracks = [t for t in loaded.tracks if t.kind == otio.schema.TrackKind.Audio]
+
+            assert len(video_tracks) == 3, f"Expected 3 video tracks in {part_path}"
+            assert len(audio_tracks) == 3, f"Expected 3 audio tracks in {part_path}"
+
+    def test_split_with_none_max_segments(self, tmp_path, timeline_with_segments):
+        """Test max_segments_per_file=None behaves like no splitting."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=None)
+
+        # Should create single FULL file
+        full_files = [p for p in paths if '_FULL.otio' in p and '_part' not in p]
+        part_files = [p for p in paths if '_FULL_part' in p]
+
+        assert len(full_files) == 1
+        assert len(part_files) == 0
+
+    def test_split_with_zero_max_segments(self, tmp_path, timeline_with_segments):
+        """Test max_segments_per_file=0 behaves like no splitting."""
+        from src.otio.export import save_timeline_split
+
+        output_path = str(tmp_path / "output.otio")
+        paths = save_timeline_split(timeline_with_segments, output_path, max_segments_per_file=0)
+
+        # Should create single FULL file
+        full_files = [p for p in paths if '_FULL.otio' in p and '_part' not in p]
+        part_files = [p for p in paths if '_FULL_part' in p]
+
+        assert len(full_files) == 1
+        assert len(part_files) == 0
+
+
+class TestSplitTimelineBySegmentsHelper:
+    """Tests for _split_timeline_by_segments helper function."""
+
+    def test_helper_returns_list(self):
+        """Test helper function returns a list."""
+        import opentimelineio as otio
+        from src.otio.export import _split_timeline_by_segments
+
+        timeline = otio.schema.Timeline(name="Test")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+        for i in range(3):
+            clip = otio.schema.Clip(
+                name=f"Clip_{i}",
+                source_range=otio.opentime.TimeRange(
+                    otio.opentime.RationalTime(0, 30),
+                    otio.opentime.RationalTime(90, 30)
+                )
+            )
+            track.append(clip)
+        timeline.tracks.append(track)
+
+        result = _split_timeline_by_segments(timeline, max_segments=1)
+        assert isinstance(result, list)
+
+    def test_helper_no_video_tracks_returns_original(self):
+        """Test helper returns original timeline when no video tracks."""
+        import opentimelineio as otio
+        from src.otio.export import _split_timeline_by_segments
+
+        timeline = otio.schema.Timeline(name="Test")
+        audio_track = otio.schema.Track(name="A1", kind=otio.schema.TrackKind.Audio)
+        timeline.tracks.append(audio_track)
+
+        result = _split_timeline_by_segments(timeline, max_segments=1)
+        assert len(result) == 1
+        assert result[0] is timeline
+
+    def test_helper_segments_under_max_returns_single(self):
+        """Test helper returns original when segments under max."""
+        import opentimelineio as otio
+        from src.otio.export import _split_timeline_by_segments
+
+        timeline = otio.schema.Timeline(name="Test")
+        track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
+        clip = otio.schema.Clip(
+            name="Single Clip",
+            source_range=otio.opentime.TimeRange(
+                otio.opentime.RationalTime(0, 30),
+                otio.opentime.RationalTime(90, 30)
+            )
+        )
+        track.append(clip)
+        timeline.tracks.append(track)
+
+        result = _split_timeline_by_segments(timeline, max_segments=10)
+        assert len(result) == 1
