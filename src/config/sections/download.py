@@ -275,6 +275,12 @@ class DownloadConfig:
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
 
+    # Retry settings for failed downloads
+    # Used by DownloadStage to retry failed video/audio downloads
+    max_retries: int = 3  # Maximum retry attempts per video
+    retry_delay: float = 2.0  # Base delay between retries (seconds)
+    retry_backoff: float = 2.0  # Exponential backoff multiplier
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.llm_title_filter, dict):

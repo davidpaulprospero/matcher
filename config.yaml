@@ -803,6 +803,14 @@ download:
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"
 
+  # Retry settings for failed downloads
+  # When a video/audio download fails, retry with exponential backoff
+  # Useful for handling temporary network issues or rate limiting
+  max_retries: 3          # Maximum retry attempts per video (default: 3)
+  retry_delay: 2.0        # Base delay between retries in seconds (default: 2.0)
+  retry_backoff: 2.0      # Exponential backoff multiplier (default: 2.0)
+                          # Example: 3 retries with delay=2, backoff=2 → waits 2s, 4s, 8s
+
 # -----------------------------------------------------------------------------
 # DURATION TIERS
 # -----------------------------------------------------------------------------
