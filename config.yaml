@@ -116,17 +116,23 @@ transcription:
 embedding:
   # Options: gemini, openai, local, sentence_transformers
   provider: gemini
-  
+
   # Model names per provider
   gemini_model: models/text-embedding-004
   voyage_model: voyage-2
   local_model: all-MiniLM-L6-v2
-  
+
   # Batch processing
   # Chain-of-thought: Batching reduces API calls by 100x
+  # Provider maximum batch sizes (hard API limits):
+  #   - gemini: 100 (Gemini API hard limit)
+  #   - voyage: 128 (Voyage AI hard limit)
+  #   - openai: 2048 (OpenAI limit)
+  #   - local: 256 (reasonable memory limit)
+  # Note: validate_batch_size() warns if batch_size exceeds provider max
   batch_size: 100
   <<: *api_retry
-  
+
   # Caching
   cache_embeddings: true
   cache_batch_results: true
