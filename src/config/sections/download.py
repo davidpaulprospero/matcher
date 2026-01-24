@@ -281,6 +281,12 @@ class DownloadConfig:
     retry_delay: float = 2.0  # Base delay between retries (seconds)
     retry_backoff: float = 2.0  # Exponential backoff multiplier
 
+    # Parallel download settings
+    # Number of concurrent downloads to run simultaneously
+    # Higher values = faster downloads but more bandwidth/CPU usage
+    # Note: Currently sequential, this setting is prepared for future parallel support
+    parallel_workers: int = 4  # Concurrent download workers (1-8 recommended)
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.llm_title_filter, dict):

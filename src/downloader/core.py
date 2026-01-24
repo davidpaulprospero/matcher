@@ -323,7 +323,7 @@ class VideoDownloader:
         self,
         keywords: List[str],
         output_dir: Path,
-        max_concurrent: int = 3,
+        max_concurrent: int = None,
         resume: bool = False,
         topic: str = ""
     ) -> Tuple[List[DownloadedVideo], List[str]]:
@@ -333,13 +333,16 @@ class VideoDownloader:
         Args:
             keywords: List of search keywords
             output_dir: Output directory
-            max_concurrent: Max concurrent downloads (unused, sequential for now)
+            max_concurrent: Max concurrent downloads (uses config.download.parallel_workers if None)
             resume: Whether to resume from checkpoint
             topic: Topic context for LLM title filtering
 
         Returns:
             Tuple of (downloaded_videos, failed_keywords)
         """
+        # Use config value if not explicitly provided
+        if max_concurrent is None:
+            max_concurrent = getattr(self.download_config, 'parallel_workers', 4)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -384,6 +387,9 @@ class VideoDownloader:
         if llm_config and getattr(llm_config, 'enabled', False):
             provider = getattr(llm_config, 'provider', 'gemini')
             logger.info(f"  LLM title filter: enabled ({provider})")
+
+        # Log parallel workers setting
+        logger.info(f"  Parallel workers: {max_concurrent}")
 
         # Process keywords sequentially
         total_videos_downloaded = 0
