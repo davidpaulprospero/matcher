@@ -1,7 +1,7 @@
 {
   "branchName": "ralph/sprint-2",
   "sprintNumber": 2,
-  "focusArea": "otio",
+  "focusArea": "testing",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
     "testFramework": "pytest",
@@ -12,149 +12,140 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint 2 OTIO verification test",
+      "title": "Create sprint 2 testing verification test",
       "acceptanceCriteria": [
-        "Create tests/test_sprint_2_verification.py with OTIO module import checks",
-        "Test imports src.otio.timeline, src.otio.tracks, src.otio.utils, src.otio.export",
-        "Test that create_timeline function exists and is callable",
-        "Test that TrackBuilder base class and all 7 track builders can be instantiated",
-        "All tests pass with pytest tests/test_sprint_2_verification.py -v --non-interactive",
+        "Create tests/test_sprint_2_testing_verification.py with import checks for all test modules",
+        "Test that tests/test_cli_args.py exists and imports cleanly",
+        "Test that tests/test_cleanup_module.py exists and imports cleanly",
+        "Test that pytest collection succeeds for all new test files",
+        "All verification tests pass with pytest tests/test_sprint_2_testing_verification.py -v --non-interactive",
         "Mark story as passed by setting passes: true in prd.json"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Created tests/test_sprint_2_verification.py with 28 tests covering OTIO module imports, create_timeline function, TrackBuilder base class, all 7 track builders, get_track_builder factory, and export functions"
+      "passes": false
     },
     {
       "id": "US-002",
-      "title": "Add EDL drop-frame timecode support",
+      "title": "Add CLI argument parser unit tests",
       "acceptanceCriteria": [
-        "Add drop_frame parameter to save_timeline_as_edl() in src/otio/export.py",
-        "Generate semicolons between seconds and frames for drop-frame mode (HH:MM:SS;FF)",
-        "Add FCM line as 'DROP FRAME' when drop_frame=True",
-        "Add test in tests/test_otio_export.py for drop-frame EDL generation",
-        "Validate generated EDL passes CMX3600 pattern validation",
-        "All export tests pass"
+        "Create tests/test_cli_args.py with tests for src/cli/args.py",
+        "Test parse_args() returns correct namespace for --voiceover flag",
+        "Test parse_args() returns correct namespace for --project flag",
+        "Test parse_args() handles --match-only and --output-only flags",
+        "Test parse_args() validates mutually exclusive options",
+        "All CLI argument tests pass"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added drop_frame parameter to save_timeline_as_edl(), FCM line shows DROP FRAME/NON-DROP FRAME, semicolon separator for drop-frame timecodes (HH:MM:SS;FF), 9 new tests in TestDropFrameTimecode class including CMX3600 validation"
+      "passes": false
     },
     {
       "id": "US-003",
-      "title": "Add EDL reel name generation from clip paths",
+      "title": "Add cleanup module unit tests",
       "acceptanceCriteria": [
-        "Extract reel name from video file path (max 32 chars) in save_timeline_as_edl()",
-        "Use folder_name + truncated filename pattern for unique reel identification",
-        "Sanitize reel names to alphanumeric + underscore only",
-        "Add test for reel name extraction from various path patterns",
-        "Add test that reel names do not exceed 32 characters",
-        "All EDL tests pass"
+        "Create tests/test_cleanup_module.py with tests for src/cleanup/",
+        "Test FileDeleter.delete() removes specified file",
+        "Test FileDeleter.delete() handles non-existent file gracefully",
+        "Test AudioCleanup.cleanup() removes temporary audio files",
+        "Test AudioCleanup.cleanup() preserves files outside temp directory",
+        "All cleanup module tests pass"
       ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Added _generate_reel_name() helper function, include_reel_names parameter to save_timeline_as_edl(), 10 tests in TestReelNameGeneration + 5 tests in TestEdlWithReelNames"
+      "priority": "high",
+      "passes": false
     },
     {
       "id": "US-004",
-      "title": "Add XML frame rate validation at export",
+      "title": "Add agents watcher unit tests",
       "acceptanceCriteria": [
-        "Add _validate_frame_rate() helper in src/otio/xml_export.py",
-        "Log warning if frame_rate not in standard NLE rates (23.976, 24, 25, 29.97, 30, 50, 59.94, 60)",
-        "Round non-integer rates to nearest integer for timebase element",
-        "Add test for frame rate validation with standard and non-standard rates",
-        "Add test that generated XML timebase is always an integer",
-        "All XML export tests pass"
+        "Create tests/test_agents/test_watcher.py with tests for WatcherAgent",
+        "Test WatcherAgent.classify_error() returns correct ErrorClassification",
+        "Test WatcherAgent handles API rate limit errors",
+        "Test WatcherAgent handles disk space errors",
+        "Test WatcherAgent handles network timeout errors",
+        "All watcher tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added _validate_frame_rate() helper with STANDARD_NLE_RATES constant, logs warning for non-standard rates, rounds to integer for XML timebase, 10 new tests in TestFrameRateValidation class"
+      "passes": false
     },
     {
       "id": "US-005",
-      "title": "Add track count limit warning in create_timeline",
+      "title": "Add agents fallback chain tests",
       "acceptanceCriteria": [
-        "Add clip counter in create_timeline() that tracks total clips across all tracks",
-        "Log warning when clip count exceeds 2500 (approaching DaVinci 3130 limit)",
-        "Log error when clip count exceeds 3000 with suggestion to use LITE mode",
-        "Add test for clip count warning threshold detection",
-        "Add test that logging is triggered at correct thresholds",
-        "All timeline tests pass"
+        "Create tests/test_agents/test_fallback.py with tests for FallbackChain",
+        "Test FallbackChain.execute() tries each fallback in order",
+        "Test FallbackChain.execute() returns first successful result",
+        "Test pattern_route() matches error patterns to correct healer",
+        "Test PATTERN_ROUTING contains expected patterns",
+        "All fallback chain tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added CLIP_COUNT_WARNING_THRESHOLD (2500) and CLIP_COUNT_ERROR_THRESHOLD (3000) constants, _count_timeline_clips() helper, _log_clip_count_warnings() with warning at 2500 and error at 3000 with LITE mode suggestion, 10 new tests in TestClipCountWarnings class"
+      "passes": false
     },
     {
       "id": "US-006",
-      "title": "Add gap_mode='extend' to fill gaps with extended clips",
+      "title": "Add CLI environment detection tests",
       "acceptanceCriteria": [
-        "Add 'extend' option to gap_mode in create_timeline()",
-        "When gap_mode='extend', extend previous clip duration to fill gap instead of inserting Gap",
-        "Limit extension to max 2x original clip duration to prevent extreme slowdowns",
-        "Add test for gap_mode='extend' behavior in test_otio_timeline.py",
-        "Add test that extension limit of 2x is respected",
-        "All timeline tests pass"
+        "Create tests/test_cli_environment.py with tests for src/cli/environment.py",
+        "Test detect_terminal_type() returns correct terminal type",
+        "Test is_interactive() returns True for TTY, False otherwise",
+        "Test get_terminal_width() returns integer or default value",
+        "Test supports_color() detects color support correctly",
+        "All environment detection tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added MAX_CLIP_EXTENSION_FACTOR (2.0) constant, gap_mode='extend' support in create_timeline() that extends previous clips to fill gaps up to 2x original duration, remaining gap inserted if extension limit reached, 6 new tests in TestGapModeExtend class, updated config.yaml and src/config/sections/output.py documentation"
+      "passes": false
     },
     {
       "id": "US-007",
-      "title": "Add OTIO clip metadata validation before export",
+      "title": "Add stage error handling tests",
       "acceptanceCriteria": [
-        "Add _validate_clip_metadata() helper in src/otio/utils.py",
-        "Check that clip source_range start_time is non-negative",
-        "Check that clip source_range duration is positive",
-        "Check that media_reference.target_url is non-empty string",
-        "Add test for metadata validation with valid and invalid clips",
-        "All utils tests pass"
+        "Add tests/test_stage_error_handling.py with error path tests",
+        "Test DownloadStage returns StageResult.fail() on network error",
+        "Test TranscribeStage returns StageResult.fail() on model load error",
+        "Test MatchStage returns StageResult.fail() when no candidates exist",
+        "Test OutputStage returns StageResult.fail() on write permission error",
+        "All error handling tests pass"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added _validate_clip_metadata() and validate_timeline_clips() helpers with ClipValidationError class, validates start_time >= 0, duration > 0, target_url non-empty, handles MissingReference, 17 new tests in TestClipMetadataValidation and TestTimelineClipsValidation classes"
+      "passes": false
     },
     {
       "id": "US-008",
-      "title": "Add track coverage reporting to segment map JSON",
+      "title": "Add config deep merge edge case tests",
       "acceptanceCriteria": [
-        "Add 'track_coverage' dict to generate_segment_map() output in src/otio/reporting.py",
-        "Calculate clip_count, gap_count, and coverage_percent for each track",
-        "Include V1-V10 tracks in coverage report",
-        "Add test for track_coverage presence in generated JSON",
-        "Add test for coverage calculation accuracy",
-        "All reporting tests pass"
+        "Add tests to tests/test_config_merge.py for edge cases",
+        "Test _deep_merge_section() preserves sibling keys when merging nested dicts",
+        "Test _deep_merge_section() handles None values correctly",
+        "Test _deep_merge_section() handles empty dicts correctly",
+        "Test project_config.yaml overrides do not clobber unrelated sections",
+        "All config merge tests pass"
       ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Added _calculate_track_coverage() helper function, track_coverage dict in generate_segment_map() output with clip_count, gap_count, clip_duration_sec, gap_duration_sec, coverage_percent, description for V1-V10 tracks, 9 new tests in TestTrackCoverageReporting class"
+      "priority": "medium",
+      "passes": false
     },
     {
       "id": "US-009",
-      "title": "Add timeline split by segment count option",
+      "title": "Add pytest markers for test categorization",
       "acceptanceCriteria": [
-        "Add max_segments_per_file parameter to save_timeline_split() in src/otio/export.py",
-        "Split timeline into multiple OTIO files when segment count exceeds limit",
-        "Generate filenames as timeline_FULL_part1.otio, timeline_FULL_part2.otio etc",
-        "Add test for timeline splitting with 3 segments and max_segments_per_file=1",
-        "Add test that each split file contains correct segment subset",
-        "All export tests pass"
+        "Add @pytest.mark.unit marker to at least 50 fast unit tests",
+        "Add @pytest.mark.integration marker to tests requiring external resources",
+        "Add @pytest.mark.slow marker to tests taking >5 seconds",
+        "Update tests/conftest.py to register all custom markers",
+        "Verify pytest --markers shows all custom markers",
+        "pytest -m unit completes in under 30 seconds"
       ],
       "priority": "low",
-      "passes": true,
-      "notes": "Added _split_timeline_by_segments() helper function that splits based on V1 track segment count, max_segments_per_file parameter to save_timeline_split(), 9 tests in TestTimelineSplitBySegments and 3 tests in TestSplitTimelineBySegmentsHelper classes. All 62 export tests pass."
+      "passes": false
     },
     {
       "id": "US-010",
-      "title": "Add entity track clip consolidation for repeated entities",
+      "title": "Add shared test fixtures module",
       "acceptanceCriteria": [
-        "Add _consolidate_repeated_clips() helper in src/otio/entities.py",
-        "When same entity appears in consecutive segments, extend single clip instead of creating gaps",
-        "Apply consolidation for V9 (images) and V10 (videos) tracks",
-        "Add test for clip consolidation with 3 consecutive matching entities",
-        "Add test that non-consecutive entities create separate clips",
-        "All entity tests pass"
+        "Create tests/fixtures/__init__.py with reusable test data generators",
+        "Add create_mock_config() function returning fully mocked Config",
+        "Add create_mock_state() function returning PipelineState with test data",
+        "Add create_test_checkpoint() function returning valid checkpoint dict",
+        "Update at least 3 test files to use the new shared fixtures",
+        "All tests using shared fixtures pass"
       ],
       "priority": "low",
       "passes": false
