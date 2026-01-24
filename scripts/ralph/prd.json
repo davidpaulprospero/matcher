@@ -37,7 +37,8 @@
         "All tests pass with pytest tests/test_downloader_parallel.py -v --non-interactive"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true,
+      "notes": "Added parallel_workers field to DownloadConfig (default: 4). Updated VideoDownloader.download_all() to use config value when max_concurrent is None with getattr fallback. Added parallel workers logging. Created 10 unit tests covering config field, VideoDownloader usage, explicit override, and parallel_workers=8 scenario."
     },
     {
       "id": "US-003",
@@ -51,7 +52,8 @@
         "Test that hit_rate calculation is correct (hits / (hits + misses))"
       ],
       "priority": "high",
-      "passes": false
+      "passes": true,
+      "notes": "Added _hits, _misses, _bytes_saved counters to BaseCache.__init__(). Updated get() to increment hit/miss counters and track bytes_saved on hits. Enhanced get_stats() to return hits, misses, hit_rate, bytes_saved. Added reset_stats() utility method. Created tests/test_cache_stats.py with 22 tests across 7 test classes covering: counter initialization, hit/miss tracking, get_stats return values, hit_rate calculation (0%, 50%, 75%, 100%), reset_stats, expired entries, and existing stats fields. All 641 cache-related tests pass."
     },
     {
       "id": "US-004",

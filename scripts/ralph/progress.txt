@@ -777,3 +777,93 @@ All acceptance criteria met for all 10 stories:
 - US-009: pytest markers for test categorization ✓
 - US-010: Shared test fixtures module ✓
 
+---
+# Sprint 3 Started (Speed Focus)
+---
+
+## Sprint 3 Overview
+Focus: Speed optimizations for transcription, caching, and embeddings
+Branch: ralph/sprint-2 (continuing on same branch)
+
+### Stories (12 total)
+[x] US-001: Create sprint 3 speed verification test (high)
+[ ] US-002: Add parallel download worker count configuration (high)
+[ ] US-003: Add cache statistics tracking to BaseCache (high)
+[ ] US-004: Add embedding batch size validation (medium)
+[ ] US-005: Add checkpoint load time logging (medium)
+[ ] US-006: Add transcription audio extraction timeout (medium)
+[ ] US-007: Add skip_if_cached flag to transcribe_videos_parallel (medium)
+[ ] US-008: Add FAISS index build time logging (low)
+[ ] US-009: Add download progress percentage logging (low)
+[ ] US-010: Add cache warm-up utility function (low)
+[ ] US-011: Add parallel embedding generation for multiple providers (low)
+[ ] US-012: Add LLM response cache TTL configuration (low)
+
+## Iteration 1 - [US-001] Create sprint 3 speed verification test
+- Created tests/test_sprint_3_speed_verification.py with 35 tests across 10 test classes
+- TestTranscriptionParallelProcessorImports (6 tests): module, transcribe_videos_parallel, transcribe_video, transcribe_voiceover_audio, transcribe_voiceover_media, get_transcript_segments
+- TestCacheBaseImports (6 tests): module, BaseCache, is_abstract, CacheEntry, EvictionResult, generic
+- TestEmbeddingsImports (4 tests): module, cleanup_embeddings, BATCH_SIZES, _to_numpy
+- TestParallelProcessorFunctionSignatures (2 tests): transcribe_videos_parallel, transcribe_video
+- TestBaseCacheAbstractMethods (3 tests): _serialize_entry, _deserialize_entry, __init__ params
+- TestEmbeddingBatchSizes (4 tests): gemini, voyage, openai, local
+- TestCacheEntryDataclass (5 tests): data, cached_at, key, metadata, metadata_default
+- TestEvictionResultDataclass (4 tests): entries_removed, bytes_freed, evicted_keys, dry_run_default
+- TestVerificationComplete (1 test): sprint 3 verification marker
+- All 35 tests pass
+- Files created:
+  - tests/test_sprint_3_speed_verification.py (new file, ~240 lines)
+
+Progress: 2/12 stories complete
+
+## Iteration 2 - [US-002] Add parallel download worker count configuration
+- Added `parallel_workers: int = 4` field to DownloadConfig in src/config/sections/download.py
+  - Includes comment: "Concurrent download workers (1-8 recommended)"
+- Added parallel_workers setting to config.yaml under download section with documentation
+- Updated VideoDownloader.download_all() in src/downloader/core.py:
+  - Changed max_concurrent default from 3 to None
+  - Added getattr lookup: `max_concurrent = getattr(self.download_config, 'parallel_workers', 4)`
+  - Updated docstring to mention config usage
+  - Added info logging: "Parallel workers: {max_concurrent}"
+- Created tests/test_downloader_parallel.py with 10 unit tests:
+  - TestDownloadConfigParallelWorkers (5 tests): field exists, default=4, set to 8, set to 1, type is int
+  - TestVideoDownloaderParallelWorkers (3 tests): uses config value, explicit override, fallback default
+  - TestParallelWorkers8Configuration (2 tests): config with 8, downloader uses 8
+- All 10 new tests pass, all 75 existing download tests pass (no regressions)
+- Files modified:
+  - src/config/sections/download.py (added parallel_workers field)
+  - src/downloader/core.py (download_all uses config, added logging)
+  - config.yaml (added parallel_workers setting with docs)
+- Files created:
+  - tests/test_downloader_parallel.py (new file, ~250 lines)
+
+## Iteration 3 - [US-003] Add cache statistics tracking to BaseCache
+- Added statistics tracking counters to BaseCache in src/cache/base.py:
+  - `_hits: int = 0` - Number of cache hits
+  - `_misses: int = 0` - Number of cache misses
+  - `_bytes_saved: int = 0` - Estimated bytes saved from cache hits
+- Updated `get()` method to track hits and misses:
+  - Increments `_misses` when key not in index
+  - Increments `_misses` when entry is expired or invalid
+  - Increments `_misses` when deserialization fails
+  - Increments `_hits` on successful cache retrieval
+  - Adds serialized entry size to `_bytes_saved` on hit
+- Enhanced `get_stats()` method to return hit/miss statistics:
+  - Returns `hits`, `misses`, `hit_rate`, `bytes_saved` in addition to existing fields
+  - `hit_rate` calculated as `hits / (hits + misses)`, 0.0 if no requests
+- Added `reset_stats()` method to clear all counters to zero
+- Created tests/test_cache_stats.py with 22 tests across 7 test classes:
+  - TestCacheStatsCounters (5 tests): initialization, hit/miss increment, multiple tracking, bytes_saved
+  - TestCacheStatsGetStats (4 tests): returns hits, misses, hit_rate, bytes_saved
+  - TestCacheHitRateCalculation (5 tests): 0%, 100%, 50%, 75% hit rates
+  - TestCacheStatsResetStats (4 tests): clears all counters
+  - TestCacheStatsExpiredEntries (1 test): expired entries count as misses
+  - TestCacheStatsExistingStats (3 tests): existing fields still present
+- All 22 new tests pass, all 641 cache-related tests pass (no regressions)
+- Files modified:
+  - src/cache/base.py (added counters, updated get(), enhanced get_stats(), added reset_stats())
+- Files created:
+  - tests/test_cache_stats.py (new file, ~220 lines)
+
+Progress: 3/12 stories complete
+
