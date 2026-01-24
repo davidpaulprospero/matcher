@@ -22,6 +22,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Standard NLE frame rates
+STANDARD_NLE_RATES = {23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0}
+
+
+def _validate_frame_rate(frame_rate: float) -> int:
+    """
+    Validate and convert frame rate for XML timebase element.
+
+    NLE software expects integer timebases. This function:
+    1. Logs a warning if the rate is non-standard
+    2. Rounds to nearest integer for XML compatibility
+
+    Args:
+        frame_rate: The frame rate to validate (e.g., 29.97, 30.0)
+
+    Returns:
+        Integer timebase for XML (always an integer)
+    """
+    # Check if it's a standard NLE rate (within 0.01 tolerance)
+    is_standard = any(abs(frame_rate - std) < 0.01 for std in STANDARD_NLE_RATES)
+
+    if not is_standard:
+        logger.warning(
+            f"Non-standard frame rate {frame_rate:.3f} fps. "
+            f"Standard NLE rates: {sorted(STANDARD_NLE_RATES)}. "
+            f"Rounding to {round(frame_rate)} for XML timebase."
+        )
+
+    # Round to nearest integer for XML timebase
+    return round(frame_rate)
+
 
 def _build_segment_lookup(downloaded_segments: Optional[List]) -> Dict:
     """Build video_id -> segment info lookup for audio-first mode resolution."""
@@ -117,7 +148,7 @@ def generate_resolve_xml_with_bins(
         List of paths to generated XML files
     """
     base_path = Path(output_path).with_suffix('')
-    fps_int = int(frame_rate)
+    fps_int = _validate_frame_rate(frame_rate)
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)
@@ -716,7 +747,7 @@ def generate_davinci_sequence_xml(
     Returns:
         Path to generated XML file
     """
-    fps_int = int(frame_rate)
+    fps_int = _validate_frame_rate(frame_rate)
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)

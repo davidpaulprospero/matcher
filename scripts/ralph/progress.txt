@@ -258,7 +258,7 @@ Branch: ralph/sprint-2
 [x] US-001: Create sprint 2 OTIO verification test (high)
 [x] US-002: Add EDL drop-frame timecode support (high)
 [x] US-003: Add EDL reel name generation from clip paths (medium)
-[ ] US-004: Add XML frame rate validation at export (medium)
+[x] US-004: Add XML frame rate validation at export (medium)
 [ ] US-005: Add track count limit warning in create_timeline (medium)
 [ ] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
 [ ] US-007: Add OTIO clip metadata validation before export (medium)
@@ -266,7 +266,7 @@ Branch: ralph/sprint-2
 [ ] US-009: Add timeline split by segment count option (low)
 [ ] US-010: Add entity track clip consolidation for repeated entities (low)
 
-Progress: 3/10 stories complete
+Progress: 4/10 stories complete
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -332,4 +332,26 @@ Progress: 3/10 stories complete
 - Files modified:
   - src/otio/export.py (added _generate_reel_name, enhanced save_timeline_as_edl)
   - tests/test_otio_export.py (added TestReelNameGeneration and TestEdlWithReelNames)
+
+## Iteration 4 - [US-004] Add XML frame rate validation at export
+- Added `_validate_frame_rate()` helper function in src/otio/xml_export.py
+  - Added STANDARD_NLE_RATES constant: {23.976, 24, 25, 29.97, 30, 50, 59.94, 60}
+  - Logs warning for non-standard frame rates with list of valid rates
+  - Always returns integer (rounded) for XML timebase compatibility
+- Updated generate_resolve_xml_with_bins() and generate_davinci_sequence_xml() to use validation
+- Added 10 new tests in TestFrameRateValidation class:
+  - test_validate_frame_rate_standard_rates
+  - test_validate_frame_rate_non_standard_logs_warning
+  - test_validate_frame_rate_returns_integer
+  - test_validate_frame_rate_23_976
+  - test_validate_frame_rate_29_97
+  - test_validate_frame_rate_59_94
+  - test_validate_frame_rate_integer_passthrough
+  - test_xml_timebase_is_integer
+  - test_xml_timebase_non_standard_rate
+  - test_standard_nle_rates_constant
+- All 32 XML export tests pass
+- Files modified:
+  - src/otio/xml_export.py (added _validate_frame_rate, STANDARD_NLE_RATES, updated fps_int assignments)
+  - tests/test_otio_xml_export.py (added TestFrameRateValidation class)
 
