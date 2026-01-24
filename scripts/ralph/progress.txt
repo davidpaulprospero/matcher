@@ -620,3 +620,19 @@ Progress: 3/10 stories complete
 - Files verified (no changes needed):
   - tests/test_cleanup_module.py (already existed, already meets criteria)
 
+Progress: 4/10 stories complete
+
+## Iteration 4 - [US-004] Add agents watcher unit tests
+- Created tests/test_agents/test_watcher.py with 39 tests
+- Test classes (8 total):
+  - TestErrorClassificationDataclass (3 tests): field assignment, categories, severities
+  - TestWatcherAgentInit (5 tests): defaults, missing attrs, project_dir, healing_logger, fallback_chain
+  - TestWatcherAgentClassifyError (7 tests): success return, API rate limit, disk space, network timeout, client init failure, fallback recording, healing logging
+  - TestWatcherAgentParseResponse (8 tests): parsed_data, text JSON, markdown blocks, confidence clamp, invalid category, invalid severity, invalid JSON, default needs_llm_healer
+  - TestWatcherAgentShouldEscalate (6 tests): no classification, needs LLM, low confidence, high confidence, failed healer moderate, failed healer high
+  - TestWatcherAgentGetHealerPriority (6 tests): api, disk, path, suggested first, unknown, config categories
+  - TestWatcherPromptTemplate (4 tests): placeholders, categories list, severities list, JSON request
+- All 39 watcher tests pass
+- Files created:
+  - tests/test_agents/test_watcher.py (new file, ~450 lines)
+
