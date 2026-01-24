@@ -259,14 +259,14 @@ Branch: ralph/sprint-2
 [x] US-002: Add EDL drop-frame timecode support (high)
 [x] US-003: Add EDL reel name generation from clip paths (medium)
 [x] US-004: Add XML frame rate validation at export (medium)
-[ ] US-005: Add track count limit warning in create_timeline (medium)
-[ ] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
+[x] US-005: Add track count limit warning in create_timeline (medium)
+[x] US-006: Add gap_mode='extend' to fill gaps with extended clips (medium)
 [ ] US-007: Add OTIO clip metadata validation before export (medium)
 [ ] US-008: Add track coverage reporting to segment map JSON (low)
 [ ] US-009: Add timeline split by segment count option (low)
 [ ] US-010: Add entity track clip consolidation for repeated entities (low)
 
-Progress: 4/10 stories complete
+Progress: 6/10 stories complete
 
 ## Iteration 1 - [US-001] Create sprint 2 OTIO verification test
 - Created tests/test_sprint_2_verification.py with 28 tests covering:
@@ -354,4 +354,54 @@ Progress: 4/10 stories complete
 - Files modified:
   - src/otio/xml_export.py (added _validate_frame_rate, STANDARD_NLE_RATES, updated fps_int assignments)
   - tests/test_otio_xml_export.py (added TestFrameRateValidation class)
+
+## Iteration 5 - [US-005] Add track count limit warning in create_timeline
+- Added CLIP_COUNT_WARNING_THRESHOLD (2500) and CLIP_COUNT_ERROR_THRESHOLD (3000) constants
+- Added _count_timeline_clips() helper function to count Clips (excludes Gaps) across all tracks
+- Added _log_clip_count_warnings() to log:
+  - Warning at 2500 clips: "approaching DaVinci limit of ~3130"
+  - Error at 3000 clips: "exceeding safe limit" with LITE mode suggestion
+- Integrated clip count check at end of create_timeline() after gap optimization
+- Added 10 new tests in TestClipCountWarnings class:
+  - test_count_timeline_clips_counts_clips_only
+  - test_count_timeline_clips_counts_across_tracks
+  - test_count_timeline_clips_empty_timeline
+  - test_log_clip_count_warnings_below_threshold
+  - test_log_clip_count_warnings_at_warning_threshold
+  - test_log_clip_count_warnings_at_error_threshold
+  - test_log_clip_count_warnings_error_includes_lite_suggestion
+  - test_threshold_constants_are_correct
+  - test_create_timeline_calls_clip_count_check
+  - test_create_timeline_logs_warning_for_many_clips
+- All 25 timeline tests pass, all 135 sprint 2 tests pass
+- Files modified:
+  - src/otio/timeline.py (added constants, 2 helper functions, integrated in create_timeline)
+  - tests/test_otio_timeline.py (added TestClipCountWarnings class with 10 tests)
+
+## Iteration 6 - [US-006] Add gap_mode='extend' to fill gaps with extended clips
+- Added MAX_CLIP_EXTENSION_FACTOR (2.0) constant in src/otio/timeline.py
+- Added 'extend' option to gap_mode validation (line 558)
+- Implemented extend mode logic:
+  - Tracks prev_source_duration and prev_target_duration_frames between iterations
+  - When gap detected in extend mode, extends previous clip's source_range duration
+  - Calculates max extension allowed: 2x original source duration
+  - If gap exceeds max extension, extends to limit and inserts remaining gap
+  - First segment gaps (leading gaps) handled as standard gaps (nothing to extend)
+- Added info logging for extend mode: "Gap mode: extend (max 2x original duration)"
+- Added debug logging for extension actions
+- Updated config.yaml with extend option documentation
+- Updated src/config/sections/output.py with extend option documentation
+- Added 6 new tests in TestGapModeExtend class:
+  - test_gap_mode_extend_parameter_accepted
+  - test_gap_mode_extend_extends_previous_clip
+  - test_gap_mode_extend_limits_to_2x_original
+  - test_gap_mode_extend_first_segment_gap_not_extended
+  - test_gap_mode_extend_logs_extension
+  - test_max_extension_factor_constant_is_2
+- All 31 timeline tests pass, all 109 sprint 2 core tests pass
+- Files modified:
+  - src/otio/timeline.py (added constant, extend mode logic, tracking variables)
+  - src/config/sections/output.py (added extend option to docstring)
+  - config.yaml (added extend option documentation)
+  - tests/test_otio_timeline.py (added TestGapModeExtend class with 6 tests)
 

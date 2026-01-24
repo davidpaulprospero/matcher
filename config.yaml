@@ -930,6 +930,9 @@ output:
   #                   Use when Whisper's gap timing is inaccurate but segment durations are good
   #   "none": No gaps between clips, back-to-back placement
   #           Useful when SRT gaps are completely wrong or you want continuous clips
+  #   "extend": Extend previous clip duration to fill gaps (max 2x original duration)
+  #             Creates continuous flow by stretching clips instead of inserting silence
+  #             Good for B-roll or when you want to minimize empty space on timeline
   gap_mode: "scale"
 
   # Track structure

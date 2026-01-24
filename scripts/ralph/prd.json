@@ -82,7 +82,8 @@
         "All timeline tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added CLIP_COUNT_WARNING_THRESHOLD (2500) and CLIP_COUNT_ERROR_THRESHOLD (3000) constants, _count_timeline_clips() helper, _log_clip_count_warnings() with warning at 2500 and error at 3000 with LITE mode suggestion, 10 new tests in TestClipCountWarnings class"
     },
     {
       "id": "US-006",
@@ -96,7 +97,8 @@
         "All timeline tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added MAX_CLIP_EXTENSION_FACTOR (2.0) constant, gap_mode='extend' support in create_timeline() that extends previous clips to fill gaps up to 2x original duration, remaining gap inserted if extension limit reached, 6 new tests in TestGapModeExtend class, updated config.yaml and src/config/sections/output.py documentation"
     },
     {
       "id": "US-007",
