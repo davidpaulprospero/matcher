@@ -67,7 +67,8 @@
         "Document provider limits in config.yaml embedding section comment"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added PROVIDER_MAX_BATCH_SIZES constant and validate_batch_size() function in src/embeddings.py. Function checks provider limits (Gemini: 100, Voyage: 128, OpenAI: 2048, Local: 256), logs warning, and returns warning message string when exceeded. Created tests/test_embedding_validation.py with 33 tests across 10 test classes. Documented provider limits in config.yaml embedding section."
     },
     {
       "id": "US-005",

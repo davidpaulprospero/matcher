@@ -42,6 +42,45 @@ BATCH_SIZES = {
     'local': 32,        # Local models - limited by memory
 }
 
+# Provider maximum batch sizes (hard limits from APIs)
+PROVIDER_MAX_BATCH_SIZES = {
+    'gemini': 100,      # Gemini API hard limit
+    'voyage': 128,      # Voyage AI hard limit
+    'openai': 2048,     # OpenAI limit
+    'local': 256,       # Reasonable memory limit
+}
+
+
+def validate_batch_size(batch_size: int, provider: str = 'gemini') -> Optional[str]:
+    """
+    Validate batch size against provider limits.
+
+    Args:
+        batch_size: The batch size to validate
+        provider: The embedding provider name ('gemini', 'voyage', 'openai', 'local')
+
+    Returns:
+        Warning message string if batch_size exceeds provider maximum, None otherwise
+
+    Example:
+        >>> validate_batch_size(150, 'gemini')
+        'Batch size 150 exceeds gemini maximum of 100. Consider reducing batch_size in config.'
+        >>> validate_batch_size(100, 'gemini')
+        None
+    """
+    provider_lower = provider.lower()
+    max_batch = PROVIDER_MAX_BATCH_SIZES.get(provider_lower, 100)
+
+    if batch_size > max_batch:
+        warning = (
+            f"Batch size {batch_size} exceeds {provider_lower} maximum of {max_batch}. "
+            f"Consider reducing batch_size in config."
+        )
+        logger.warning(warning)
+        return warning
+
+    return None
+
 
 # Global reference for cleanup
 _local_embedding_model = None

@@ -865,5 +865,37 @@ Progress: 2/12 stories complete
 - Files created:
   - tests/test_cache_stats.py (new file, ~220 lines)
 
-Progress: 3/12 stories complete
+## Iteration 4 - [US-004] Add embedding batch size validation
+- Added PROVIDER_MAX_BATCH_SIZES constant to src/embeddings.py:
+  - gemini: 100 (Gemini API hard limit)
+  - voyage: 128 (Voyage AI hard limit)
+  - openai: 2048 (OpenAI limit)
+  - local: 256 (reasonable memory limit)
+- Added validate_batch_size(batch_size, provider) function:
+  - Checks batch_size against provider maximum from PROVIDER_MAX_BATCH_SIZES
+  - Returns warning message string if batch_size exceeds limit
+  - Returns None if batch_size is within limit
+  - Logs warning via logger.warning()
+  - Provider name is case-insensitive (normalized to lowercase)
+  - Unknown providers default to max of 100
+- Created tests/test_embedding_validation.py with 33 tests across 10 test classes:
+  - TestValidateBatchSizeFunction (3 tests): existence, signature, return types
+  - TestProviderMaxBatchSizes (6 tests): constant exists, all provider limits
+  - TestGeminiValidation (5 tests): 100 no warning, 150 warning, 50/99/101 edge cases
+  - TestVoyageValidation (3 tests): 128 no warning, 150 warning, 100 under
+  - TestOpenAIValidation (2 tests): 2048 no warning, 3000 warning
+  - TestLocalValidation (2 tests): 256 no warning, 500 warning
+  - TestCaseInsensitiveProvider (3 tests): GEMINI, Gemini, Voyage variations
+  - TestUnknownProvider (2 tests): defaults to 100 max
+  - TestWarningLogging (3 tests): caplog verification, suggestion text
+  - TestEdgeCases (4 tests): 0, 1, very large, negative batch sizes
+- Updated config.yaml embedding section with provider limits documentation
+- All 33 new tests pass
+- Files modified:
+  - src/embeddings.py (added PROVIDER_MAX_BATCH_SIZES, validate_batch_size)
+  - config.yaml (added provider limits documentation)
+- Files created:
+  - tests/test_embedding_validation.py (new file, 33 tests)
+
+Progress: 4/12 stories complete
 
