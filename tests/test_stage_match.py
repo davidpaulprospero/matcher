@@ -108,6 +108,7 @@ class TestInputValidation:
         stage = MatchStage()
         state = PipelineState()
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = [{'text': 'test'}]
 
         error = stage.validate_inputs(state, mock_config)
 
@@ -120,6 +121,7 @@ class TestInputValidation:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.embeddings = None
+        state.text_metadata = [{'text': 'test'}]
 
         error = stage.validate_inputs(state, mock_config)
 
@@ -132,10 +134,116 @@ class TestInputValidation:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = [{'text': 'test'}]
 
         error = stage.validate_inputs(state, mock_config)
 
         assert error is None
+
+
+class TestInputValidationErrorMessages:
+    """Test validation error messages contain specific field names and suggestions"""
+
+    def test_validate_error_contains_field_name_voiceover_segments(self, mock_config):
+        """Test error message contains 'voiceover_segments' field name"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = [{'text': 'test'}]
+        state.voiceover_segments = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "voiceover_segments" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_contains_field_name_embeddings(self, mock_config, mock_voiceover_segments):
+        """Test error message contains 'embeddings' field name"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.embeddings = None
+        state.text_metadata = [{'text': 'test'}]
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "embeddings" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_contains_field_name_text_metadata(self, mock_config, mock_voiceover_segments):
+        """Test error message contains 'text_metadata' field name"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "text_metadata" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_contains_multiple_field_names(self, mock_config):
+        """Test error message contains multiple missing field names"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = []
+        state.embeddings = None
+        state.text_metadata = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "voiceover_segments" in error
+        assert "embeddings" in error
+        assert "text_metadata" in error
+        assert "Missing required fields" in error
+
+    def test_validate_error_suggests_analyze_stage(self, mock_config):
+        """Test error suggests running ANALYZE stage for voiceover_segments"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = []
+        state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = [{'text': 'test'}]
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "ANALYZE" in error
+
+    def test_validate_error_suggests_transcribe_stage(self, mock_config, mock_voiceover_segments):
+        """Test error suggests running TRANSCRIBE stage for embeddings"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.embeddings = None
+        state.text_metadata = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "TRANSCRIBE" in error
+
+    def test_validate_error_suggests_multiple_stages(self, mock_config):
+        """Test error suggests multiple stages when multiple fields missing"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = []
+        state.embeddings = None
+        state.text_metadata = []
+
+        error = stage.validate_inputs(state, mock_config)
+
+        assert error is not None
+        assert "Suggestion:" in error
+        assert "ANALYZE" in error
+        assert "TRANSCRIBE" in error
 
 
 # ============================================================================

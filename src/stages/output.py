@@ -472,10 +472,33 @@ class OutputStage(Stage):
         state: 'PipelineState',
         config: 'Config'
     ) -> Optional[str]:
-        """Validate inputs before running"""
-        # Matches are required for meaningful output
+        """
+        Validate inputs before running.
+
+        Returns specific missing field names and suggestions for which stage to run.
+        """
+        missing_fields = []
+
         if not state.matches:
-            return "No matches available for output generation"
+            missing_fields.append("matches")
+
+        # Check optional but recommended fields and add warnings
+        if not hasattr(config, 'otio_output_dir') or not config.otio_output_dir:
+            missing_fields.append("config.otio_output_dir")
+
+        if missing_fields:
+            fields_str = ", ".join(missing_fields)
+            suggestions = []
+
+            if "matches" in missing_fields:
+                suggestions.append("run MATCH stage first to generate matches")
+
+            if "config.otio_output_dir" in missing_fields:
+                suggestions.append("set otio_output_dir in config")
+
+            suggestion_str = "; ".join(suggestions) if suggestions else "check pipeline configuration"
+            return f"Missing required fields: {fields_str}. Suggestion: {suggestion_str}"
+
         return None
 
     # === Helper Methods ===
