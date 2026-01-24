@@ -1,0 +1,155 @@
+{
+  "branchName": "ralph/sprint-1",
+  "sprintNumber": 1,
+  "focusArea": "pipeline",
+  "projectContext": {
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short",
+    "sourceDir": "src/",
+    "testsDir": "tests/"
+  },
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create sprint verification test",
+      "acceptanceCriteria": [
+        "Create tests/test_sprint_1_verification.py with basic import checks",
+        "Test imports src.stages, src.pipeline, src.agents",
+        "Test that all 12 registered stages can be instantiated",
+        "Test that PipelineOrchestrator can be created with mock config",
+        "All tests pass with pytest tests/test_sprint_1_verification.py -v",
+        "Mark story as passed by setting passes: true in prd.json"
+      ],
+      "priority": "high",
+      "passes": true
+    },
+    {
+      "id": "US-002",
+      "title": "Add LLM-based description generation for silent videos",
+      "acceptanceCriteria": [
+        "Implement _generate_llm_descriptions() in TranscribeStage at line 292",
+        "Use src/llm_client for LLM calls (per Rule 9)",
+        "Generate semantic descriptions from Vision API responses",
+        "Add test in tests/test_transcribe_stage_coverage.py for new method",
+        "Handle case where Vision API is unavailable (fallback to filename)",
+        "All existing transcribe tests pass"
+      ],
+      "priority": "high",
+      "passes": true,
+      "notes": "Implemented _generate_llm_descriptions() and _generate_filename_descriptions() with Vision API + LLM fallback. Added 12 comprehensive tests in TestLLMDescriptionGeneration class."
+    },
+    {
+      "id": "US-003",
+      "title": "Add stage input validation error messages",
+      "acceptanceCriteria": [
+        "MatchStage.validate_inputs returns specific missing field names",
+        "OutputStage.validate_inputs returns specific missing field names",
+        "Error messages include suggestion for which stage to run first",
+        "Add tests for validation error messages in test_stage_match.py",
+        "Add tests for validation error messages in test_stage_output.py",
+        "All stage validation tests pass"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-004",
+      "title": "Add PipelineOrchestrator unit tests",
+      "acceptanceCriteria": [
+        "Create tests/test_pipeline_orchestrator.py",
+        "Test add_stage() fluent interface returns self",
+        "Test load_checkpoint() with valid and invalid checkpoints",
+        "Test run() stage filtering with skip_stages and only_stages",
+        "Test run() resume behavior with checkpoint",
+        "Test stage timing is recorded in stage_timings dict"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-005",
+      "title": "Add stage restore() error handling",
+      "acceptanceCriteria": [
+        "Each stage.restore() logs specific error when checkpoint data missing",
+        "MatchStage.restore() validates match objects before restoring",
+        "OutputStage.restore() validates paths exist before restoring",
+        "Add test for restore with corrupt/incomplete checkpoint data",
+        "Stage restore returns False (not exception) on validation failure",
+        "All restore tests pass"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-006",
+      "title": "Add DownloadStage video segment retry logic",
+      "acceptanceCriteria": [
+        "Add max_retries config option in DownloadConfig (default: 3)",
+        "DownloadStage retries failed video downloads up to max_retries",
+        "Log retry attempts with exponential backoff timing",
+        "Add test for retry behavior with mock failed downloads",
+        "Update config.yaml with max_retries option and comment",
+        "All download stage tests pass"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-007",
+      "title": "Add stage progress callbacks",
+      "acceptanceCriteria": [
+        "Add on_stage_start callback parameter to PipelineOrchestrator.run()",
+        "Add on_stage_complete callback parameter to PipelineOrchestrator.run()",
+        "Callbacks receive stage_name, result, and timing information",
+        "Add test for callbacks being called in correct order",
+        "Add test for callback exceptions not stopping pipeline",
+        "All pipeline tests pass"
+      ],
+      "priority": "low",
+      "passes": false
+    },
+    {
+      "id": "US-008",
+      "title": "Add OutputStage segment validation",
+      "acceptanceCriteria": [
+        "Validate match.video_path exists before creating timeline clip",
+        "Log warning for missing video files with file path",
+        "Add gap placeholder for missing video segments",
+        "Add test for OutputStage with missing video files",
+        "Add test for gap insertion behavior",
+        "All output stage tests pass"
+      ],
+      "priority": "medium",
+      "passes": false
+    },
+    {
+      "id": "US-009",
+      "title": "Add BrollMatchStage scoring weight validation",
+      "acceptanceCriteria": [
+        "Validate scoring weights sum to 1.0 at stage initialization",
+        "Log warning if weights do not sum to 1.0",
+        "Normalize weights automatically if within 0.01 tolerance",
+        "Add test for weight validation in test_broll_stages.py",
+        "Add test for weight normalization behavior",
+        "All broll stage tests pass"
+      ],
+      "priority": "low",
+      "passes": false
+    },
+    {
+      "id": "US-010",
+      "title": "Add stage metrics collection",
+      "acceptanceCriteria": [
+        "Add StageMetrics dataclass with items_processed, items_failed, duration_seconds",
+        "Each stage returns StageMetrics in StageResult.data",
+        "PipelineOrchestrator aggregates metrics across stages",
+        "Add get_metrics() method to PipelineOrchestrator",
+        "Add test for metrics collection in test_pipeline_orchestrator.py",
+        "All metrics tests pass"
+      ],
+      "priority": "low",
+      "passes": false
+    }
+  ]
+}

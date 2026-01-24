@@ -45,6 +45,12 @@ def mock_config():
     config.embedding.batch_size = 32
     config.matching.chapter_matching_enabled = False
     config.cache.cache_dir = ".cache"
+    # Silent video settings
+    config.silent_video = Mock()
+    config.silent_video.enabled = True
+    config.silent_video.min_words_threshold = 10
+    config.silent_video.use_vision_api = True
+    config.silent_video.use_llm_fallback = True
     return config
 
 
@@ -299,14 +305,23 @@ class TestSilentVideoHandling:
         """Test finding silent videos"""
         stage = TranscribeStage()
         mock_config.silent_video.enabled = True
+        mock_config.silent_video.min_words_threshold = 10
 
         video_files = [Path("video1.mp4"), Path("video2.mp4")]
-        transcripts = {"video1.mp4": [{"text": "Hello"}]}
+        transcripts = {"video1.mp4": [{"text": "This video has enough words to not be silent"}]}
 
-        # video2.mp4 has no transcript (silent)
-        stage._handle_silent_videos(video_files, transcripts, mock_config)
+        # Mock the description generation
+        with patch.object(stage, '_generate_llm_descriptions') as mock_gen:
+            mock_gen.return_value = {"video2.mp4": "Silent video description"}
 
-        # Should complete without error
+            # video2.mp4 has no transcript (silent)
+            stage._handle_silent_videos(video_files, transcripts, mock_config)
+
+            # Should have called generate for the silent video
+            mock_gen.assert_called_once()
+            call_args = mock_gen.call_args[0]
+            # video2 should be in the list (no transcript)
+            assert Path("video2.mp4") in call_args[0]
 
 
 # ============================================================================
