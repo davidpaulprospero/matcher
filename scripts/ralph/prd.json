@@ -142,7 +142,8 @@
         "pytest -m unit completes in under 30 seconds"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Registered unit, integration, slow markers in conftest.py. Added pytestmark = pytest.mark.unit to 7 test files: test_cli_args.py (41 tests), test_cleanup_module.py (25 tests), test_cli_environment.py (31 tests), test_stage_error_handling.py (25 tests), test_config_merge.py (43 tests), test_agents/test_watcher.py (39 tests), test_agents/test_fallback.py (51 tests). Total 256 unit tests. Integration: 51 existing. Slow: 4 existing. All markers visible in pytest --markers. pytest -m unit runs in 11.62s."
     },
     {
       "id": "US-010",

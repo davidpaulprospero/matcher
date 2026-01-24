@@ -10,6 +10,10 @@ Tests for src/cleanup/ covering:
 """
 
 import pytest
+
+# Mark all tests in this module as unit tests
+pytestmark = pytest.mark.unit
+
 import sys
 import os
 import stat
