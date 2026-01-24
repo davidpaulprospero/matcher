@@ -699,6 +699,187 @@ class TestOutputCheckpoint:
 
 
 # ============================================================================
+# Test Restore Error Handling (US-005)
+# ============================================================================
+
+class TestOutputRestoreErrorHandling:
+    """Test restore() error handling with corrupt/incomplete checkpoint data"""
+
+    def test_restore_logs_warning_on_no_data(self, mock_checkpoint, caplog):
+        """Test restore logs specific warning when checkpoint data is missing"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = OutputStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = None
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "No checkpoint data for OUTPUT" in caplog.text
+
+    def test_restore_validates_data_is_dict(self, mock_checkpoint, caplog):
+        """Test restore returns False when data is not a dict"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = OutputStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = "not a dict"
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "expected dict" in caplog.text
+
+    def test_restore_validates_outputs_is_dict(self, mock_checkpoint, caplog):
+        """Test restore returns False when outputs is not a dict"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = OutputStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': "not a dict"  # Invalid
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "'outputs' is not a dict" in caplog.text
+
+    def test_restore_warns_about_missing_files(self, mock_checkpoint, caplog, tmp_path):
+        """Test restore logs warning about missing output files"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        # Create one real file and one non-existent
+        real_file = tmp_path / "existing.otio"
+        real_file.touch()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': {
+                'otio': [str(real_file), '/nonexistent/path/file.otio'],
+                'edl': '/nonexistent/path/timeline.edl'
+            }
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        # Should succeed but warn about missing files
+        assert result is True
+        assert "no longer exist" in caplog.text
+
+    def test_restore_validates_path_existence(self, mock_checkpoint, tmp_path):
+        """Test restore validates that paths exist"""
+        stage = OutputStage()
+        state = PipelineState()
+
+        # Create real files
+        otio1 = tmp_path / "file1.otio"
+        otio2 = tmp_path / "file2.otio"
+        edl = tmp_path / "timeline.edl"
+        otio1.touch()
+        otio2.touch()
+        edl.touch()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': {
+                'otio': [str(otio1), str(otio2)],
+                'edl': str(edl)
+            }
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.output_files) == 3
+        assert len(state.otio_files) == 2
+
+    def test_restore_handles_non_string_paths(self, mock_checkpoint, caplog):
+        """Test restore skips non-string paths in output data"""
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': {
+                'otio': [123, None, 'valid.otio'],  # Mixed types
+                'edl': 456  # Invalid
+            }
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        # Only valid.otio should be in output_files
+        assert len(state.otio_files) == 1
+
+    def test_restore_handles_unexpected_otio_type(self, mock_checkpoint, caplog):
+        """Test restore handles unexpected type for otio data"""
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': {
+                'otio': 12345,  # Not a list or string
+                'edl': 'timeline.edl'
+            }
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.otio_files) == 0  # No valid OTIO paths
+        assert "Unexpected otio type" in caplog.text
+
+    def test_restore_returns_false_not_exception(self, mock_checkpoint):
+        """Test restore returns False instead of raising exception on validation failure"""
+        stage = OutputStage()
+        state = PipelineState()
+
+        # Various invalid checkpoint data structures
+        invalid_data_cases = [
+            None,
+            "string instead of dict",
+            {'outputs': "not a dict"},
+        ]
+
+        for data in invalid_data_cases:
+            mock_checkpoint.get_stage_data.return_value = data
+            result = stage.restore(state, mock_checkpoint)
+            assert result is False, f"Expected False for data: {data}"
+
+    def test_restore_warns_about_missing_otio_files(self, mock_checkpoint, caplog, tmp_path):
+        """Test restore logs warning about missing OTIO files"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = OutputStage()
+        state = PipelineState()
+
+        mock_checkpoint.get_stage_data.return_value = {
+            'outputs': {
+                'otio': ['/nonexistent/file1.otio', '/nonexistent/file2.otio']
+            }
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert "OTIO files from checkpoint no longer exist" in caplog.text
+
+
+# ============================================================================
 # Test Helper Methods
 # ============================================================================
 

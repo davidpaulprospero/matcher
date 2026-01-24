@@ -177,37 +177,92 @@ class MatchStage(Stage):
         checkpoint: 'CheckpointManager',
         config: 'Config' = None
     ) -> bool:
-        """Restore match stage from checkpoint"""
+        """
+        Restore match stage from checkpoint.
+
+        Validates match objects before restoring:
+        - segment_index must be a valid integer
+        - video_file must be a non-empty string
+        - confidence must be a valid float between 0 and 1
+
+        Returns False on validation failure (not exception).
+        """
         from ..state import Match
 
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
+                logger.warning(f"No checkpoint data for {self.name}: checkpoint returned None")
                 return False
 
             # Load matches from checkpoint
             matches_data = data.get('matches', [])
             if matches_data:
+                # Validate matches_data is a list
+                if not isinstance(matches_data, list):
+                    logger.warning(f"Invalid checkpoint data for {self.name}: 'matches' is not a list (got {type(matches_data).__name__})")
+                    return False
+
                 restored_matches = []
-                for m in matches_data:
+                validation_errors = []
+
+                for i, m in enumerate(matches_data):
+                    # Validate each match object is a dict
+                    if not isinstance(m, dict):
+                        validation_errors.append(f"match[{i}] is not a dict")
+                        continue
+
                     # Handle both old format (source_file) and new format (video_file)
                     video_file = m.get('video_file') or m.get('source_file', '')
+
+                    # Validate video_file is a non-empty string
+                    if not video_file or not isinstance(video_file, str):
+                        validation_errors.append(f"match[{i}] has invalid video_file: {repr(video_file)}")
+                        continue
+
+                    # Validate segment_index is an integer
+                    segment_index = m.get('segment_index', 0)
+                    if not isinstance(segment_index, (int, float)):
+                        validation_errors.append(f"match[{i}] has invalid segment_index: {repr(segment_index)}")
+                        continue
+                    segment_index = int(segment_index)
+
+                    # Validate confidence is a valid float
+                    confidence = m.get('confidence', 0.0)
+                    if not isinstance(confidence, (int, float)):
+                        validation_errors.append(f"match[{i}] has invalid confidence: {repr(confidence)}")
+                        continue
+                    confidence = float(confidence)
+                    if not (0.0 <= confidence <= 1.0):
+                        logger.debug(f"match[{i}] confidence {confidence} out of range [0, 1], clamping")
+                        confidence = max(0.0, min(1.0, confidence))
 
                     # Estimate video_end if not provided (old checkpoints)
                     video_start = m.get('video_start', m.get('start_time', 0.0))
                     video_end = m.get('video_end', video_start + 10.0)  # Default 10s clip
 
                     match = Match(
-                        segment_index=m.get('segment_index', 0),
+                        segment_index=segment_index,
                         video_file=video_file,
-                        video_start=video_start,
-                        video_end=video_end,
-                        confidence=m.get('confidence', 0.0),
+                        video_start=float(video_start),
+                        video_end=float(video_end),
+                        confidence=confidence,
                         strategy=m.get('strategy', 'restored'),
                         reason=m.get('reason', ''),
                         face_score=m.get('face_score', 0.5)
                     )
                     restored_matches.append(match)
+
+                # Log validation errors but don't fail if we got some valid matches
+                if validation_errors:
+                    logger.warning(f"Match validation errors during restore: {validation_errors[:5]}")
+                    if len(validation_errors) > 5:
+                        logger.warning(f"... and {len(validation_errors) - 5} more validation errors")
+
+                # Return False if no valid matches were restored from non-empty data
+                if not restored_matches and matches_data:
+                    logger.warning(f"No valid matches restored from {len(matches_data)} checkpoint entries")
+                    return False
 
                 state.matches = restored_matches
                 logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")

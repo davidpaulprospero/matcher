@@ -577,6 +577,200 @@ class TestMatchCheckpoint:
 
 
 # ============================================================================
+# Test Restore Error Handling (US-005)
+# ============================================================================
+
+class TestRestoreErrorHandling:
+    """Test restore() error handling with corrupt/incomplete checkpoint data"""
+
+    def test_restore_logs_warning_on_no_data(self, mock_checkpoint, caplog):
+        """Test restore logs specific warning when checkpoint data is missing"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = None
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "No checkpoint data for MATCH" in caplog.text
+
+    def test_restore_validates_matches_is_list(self, mock_checkpoint, caplog):
+        """Test restore returns False when matches is not a list"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': "not a list"  # Invalid: should be list
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "not a list" in caplog.text
+
+    def test_restore_validates_match_objects(self, mock_checkpoint, caplog):
+        """Test restore validates individual match objects are dicts"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                "not a dict",  # Invalid
+                123,  # Invalid
+                None,  # Invalid
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False  # No valid matches
+        assert "is not a dict" in caplog.text
+
+    def test_restore_validates_video_file_required(self, mock_checkpoint, caplog):
+        """Test restore validates video_file is non-empty string"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'video_file': ''},  # Empty video_file
+                {'segment_index': 1, 'video_file': None},  # None video_file
+                {'segment_index': 2},  # Missing video_file
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False  # No valid matches
+        assert "invalid video_file" in caplog.text
+
+    def test_restore_validates_segment_index_type(self, mock_checkpoint, caplog):
+        """Test restore validates segment_index is numeric"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 'not a number', 'video_file': 'v1.mp4'},
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "invalid segment_index" in caplog.text
+
+    def test_restore_validates_confidence_type(self, mock_checkpoint, caplog):
+        """Test restore validates confidence is numeric"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'video_file': 'v1.mp4', 'confidence': 'high'},
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is False
+        assert "invalid confidence" in caplog.text
+
+    def test_restore_clamps_confidence_to_valid_range(self, mock_checkpoint, caplog):
+        """Test restore clamps out-of-range confidence values"""
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'video_file': 'v1.mp4', 'confidence': 1.5},  # Out of range
+                {'segment_index': 1, 'video_file': 'v2.mp4', 'confidence': -0.2},  # Out of range
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.matches) == 2
+        assert state.matches[0].confidence == 1.0  # Clamped to max
+        assert state.matches[1].confidence == 0.0  # Clamped to min
+
+    def test_restore_partial_valid_data(self, mock_checkpoint, caplog):
+        """Test restore succeeds with partial valid data, logs validation errors"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'video_file': 'valid.mp4', 'confidence': 0.8},  # Valid
+                {'segment_index': 'bad', 'video_file': 'v2.mp4'},  # Invalid segment_index
+                {'segment_index': 2, 'video_file': ''},  # Invalid video_file
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        # Should succeed with partial data
+        assert result is True
+        assert len(state.matches) == 1
+        assert state.matches[0].video_file == 'valid.mp4'
+        # Should log validation errors
+        assert "validation errors" in caplog.text
+
+    def test_restore_returns_false_not_exception(self, mock_checkpoint):
+        """Test restore returns False instead of raising exception on validation failure"""
+        stage = MatchStage()
+        state = PipelineState()
+
+        # Various invalid checkpoint data structures
+        invalid_data_cases = [
+            None,
+            {'matches': 'not a list'},
+            {'matches': [None, None]},
+            {'matches': [{'video_file': ''}]},
+        ]
+
+        for data in invalid_data_cases:
+            mock_checkpoint.get_stage_data.return_value = data
+            result = stage.restore(state, mock_checkpoint)
+            assert result is False, f"Expected False for data: {data}"
+
+    def test_restore_handles_legacy_source_file_field(self, mock_checkpoint):
+        """Test restore handles legacy 'source_file' field name"""
+        stage = MatchStage()
+        state = PipelineState()
+        mock_checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'source_file': 'legacy.mp4', 'start_time': 5.0},  # Legacy format
+            ]
+        }
+
+        result = stage.restore(state, mock_checkpoint)
+
+        assert result is True
+        assert len(state.matches) == 1
+        assert state.matches[0].video_file == 'legacy.mp4'
+        assert state.matches[0].video_start == 5.0
+
+
+# ============================================================================
 # Test Settings Display
 # ============================================================================
 
