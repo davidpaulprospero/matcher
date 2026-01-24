@@ -127,7 +127,8 @@
         "All reporting tests pass"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added _calculate_track_coverage() helper function, track_coverage dict in generate_segment_map() output with clip_count, gap_count, clip_duration_sec, gap_duration_sec, coverage_percent, description for V1-V10 tracks, 9 new tests in TestTrackCoverageReporting class"
     },
     {
       "id": "US-009",
@@ -141,7 +142,8 @@
         "All export tests pass"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added _split_timeline_by_segments() helper function that splits based on V1 track segment count, max_segments_per_file parameter to save_timeline_split(), 9 tests in TestTimelineSplitBySegments and 3 tests in TestSplitTimelineBySegmentsHelper classes. All 62 export tests pass."
     },
     {
       "id": "US-010",
