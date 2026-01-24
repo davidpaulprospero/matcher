@@ -74,6 +74,11 @@ class BaseCache(ABC, Generic[T]):
         self.index: Dict[str, Any] = {}
         self._load_index()
 
+        # Statistics tracking
+        self._hits: int = 0
+        self._misses: int = 0
+        self._bytes_saved: int = 0
+
     # ==================== Abstract Methods ====================
 
     @abstractmethod
@@ -199,6 +204,7 @@ class BaseCache(ABC, Generic[T]):
             Cache entry or None
         """
         if key not in self.index:
+            self._misses += 1
             return None
 
         try:
@@ -208,11 +214,16 @@ class BaseCache(ABC, Generic[T]):
             if not self._is_valid_entry(entry):
                 logger.debug(f"Cache entry expired or invalid: {key}")
                 self.delete(key)
+                self._misses += 1
                 return None
 
+            self._hits += 1
+            # Track bytes saved (estimate from serialized entry size)
+            self._bytes_saved += len(json.dumps(entry_data))
             return entry
         except Exception as e:
             logger.warning(f"Failed to deserialize cache entry {key}: {e}")
+            self._misses += 1
             return None
 
     def set(self, key: str, value: T, metadata: Dict[str, Any] = None) -> None:
@@ -409,10 +420,19 @@ class BaseCache(ABC, Generic[T]):
 
     def get_stats(self) -> Dict[str, Any]:
         """
-        Get cache statistics.
+        Get cache statistics including hit/miss tracking.
 
         Returns:
-            Dict with cache metrics
+            Dict with cache metrics including:
+            - hits: Number of cache hits
+            - misses: Number of cache misses
+            - hit_rate: Ratio of hits to total requests (0.0 if no requests)
+            - bytes_saved: Estimated bytes saved from cache hits
+            - total_entries: Number of entries in cache
+            - cache_size_mb: Cache size in MB
+            - cache_dir: Cache directory path
+            - index_file: Index file path
+            - ttl_seconds: TTL configuration
         """
         total_entries = self._count_entries()
 
@@ -426,13 +446,27 @@ class BaseCache(ABC, Generic[T]):
                     except OSError:
                         pass
 
+        # Calculate hit rate
+        total_requests = self._hits + self._misses
+        hit_rate = self._hits / total_requests if total_requests > 0 else 0.0
+
         return {
+            'hits': self._hits,
+            'misses': self._misses,
+            'hit_rate': hit_rate,
+            'bytes_saved': self._bytes_saved,
             'total_entries': total_entries,
             'cache_size_mb': cache_size / (1024 * 1024),
             'cache_dir': str(self.cache_dir),
             'index_file': str(self.index_path),
             'ttl_seconds': self.ttl_seconds
         }
+
+    def reset_stats(self) -> None:
+        """Reset hit/miss/bytes_saved counters to zero."""
+        self._hits = 0
+        self._misses = 0
+        self._bytes_saved = 0
 
     def __repr__(self) -> str:
         """String representation"""
