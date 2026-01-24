@@ -67,7 +67,8 @@
         "All XML export tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added _validate_frame_rate() helper with STANDARD_NLE_RATES constant, logs warning for non-standard rates, rounds to integer for XML timebase, 10 new tests in TestFrameRateValidation class"
     },
     {
       "id": "US-005",
