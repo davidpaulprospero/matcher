@@ -279,17 +279,202 @@ class TranscribeStage(Stage):
         if not silent_config or not getattr(silent_config, 'enabled', True):
             return
 
-        # Find videos with no transcription
-        silent_videos = [
-            vf for vf in video_files
-            if str(vf) not in transcripts or not transcripts.get(str(vf))
-        ]
+        # Find videos with no transcription or very few words
+        min_words = getattr(silent_config, 'min_words_threshold', 10)
+        silent_videos = []
+        for vf in video_files:
+            vf_str = str(vf)
+            if vf_str not in transcripts or not transcripts.get(vf_str):
+                silent_videos.append(vf)
+            else:
+                # Check word count
+                segments = transcripts.get(vf_str, [])
+                word_count = sum(
+                    len(seg.get('text', '').split()) if isinstance(seg, dict)
+                    else len(getattr(seg, 'text', '').split())
+                    for seg in segments
+                )
+                if word_count < min_words:
+                    silent_videos.append(vf)
 
         if not silent_videos:
             return
 
         logger.info(f"Found {len(silent_videos)} silent videos for description generation")
-        # TODO: Implement LLM-based description generation for silent videos
+        print(f"  Generating descriptions for {len(silent_videos)} silent videos...")
+
+        # Generate LLM descriptions
+        descriptions = self._generate_llm_descriptions(silent_videos, transcripts, config)
+
+        # Update transcripts with generated descriptions
+        for video_path, description in descriptions.items():
+            if description:
+                # Create a synthetic transcript segment with the description
+                transcripts[video_path] = [{
+                    'text': description,
+                    'start_time': 0.0,
+                    'end_time': 30.0,  # Assume 30s default duration
+                    'is_generated': True,
+                    'source': 'llm_description'
+                }]
+                logger.debug(f"Generated description for {Path(video_path).name}: {description[:50]}...")
+
+        generated_count = sum(1 for d in descriptions.values() if d)
+        print(f"  + Generated {generated_count}/{len(silent_videos)} descriptions")
+
+    def _generate_llm_descriptions(
+        self,
+        silent_videos: List[Path],
+        transcripts: Dict[str, List[Any]],
+        config: 'Config'
+    ) -> Dict[str, str]:
+        """
+        Generate semantic descriptions for silent videos using Vision API or LLM fallback.
+
+        Uses Vision API if available (GEMINI_API_KEY), otherwise falls back to
+        generating descriptions from filename keywords.
+
+        Args:
+            silent_videos: List of video paths with no/sparse transcription
+            transcripts: Dict of existing transcripts (will be updated)
+            config: Configuration object
+
+        Returns:
+            Dict mapping video_path to generated description
+        """
+        descriptions = {}
+        silent_config = getattr(config, 'silent_video', None)
+
+        use_vision = getattr(silent_config, 'use_vision_api', True) if silent_config else True
+        use_llm_fallback = getattr(silent_config, 'use_llm_fallback', True) if silent_config else True
+
+        # Try Vision API first
+        if use_vision:
+            try:
+                from ..vision import VisionProcessor
+
+                processor = VisionProcessor(config)
+                if processor.is_available():
+                    cache_dir = getattr(config.cache, 'cache_dir', '.cache')
+
+                    for vf in silent_videos:
+                        video_path = str(vf)
+                        # Create a pseudo-scene covering the video
+                        scene = {'start_time': 0.0, 'end_time': 30.0}
+
+                        description = processor.describe_scene(video_path, scene, cache_dir)
+                        if description:
+                            descriptions[video_path] = description
+
+                    stats = processor.get_stats()
+                    if stats.get('api_calls', 0) > 0:
+                        logger.info(f"Vision API: {stats['api_calls']} calls, ~${stats['estimated_cost']:.4f}")
+
+            except ImportError:
+                logger.debug("Vision module not available, using fallback")
+            except Exception as e:
+                logger.warning(f"Vision API error: {e}, using fallback")
+
+        # LLM fallback for videos without descriptions
+        if use_llm_fallback:
+            missing_videos = [vf for vf in silent_videos if str(vf) not in descriptions]
+
+            if missing_videos:
+                descriptions.update(self._generate_filename_descriptions(missing_videos, config))
+
+        return descriptions
+
+    def _generate_filename_descriptions(
+        self,
+        videos: List[Path],
+        config: 'Config'
+    ) -> Dict[str, str]:
+        """
+        Generate descriptions from video filenames using LLM.
+
+        Falls back to simple keyword extraction if LLM unavailable.
+
+        Args:
+            videos: List of video paths
+            config: Configuration object
+
+        Returns:
+            Dict mapping video_path to generated description
+        """
+        import re
+        descriptions = {}
+
+        # Try LLM-based description
+        try:
+            from ..llm_client import create_client, LLMRequest, ResponseFormat
+
+            # Get LLM config
+            llm_config = getattr(config, 'llm', None)
+            api_key = None
+            model = "gemini-2.0-flash"
+
+            if llm_config:
+                provider = getattr(llm_config, 'provider', 'gemini')
+                model = getattr(llm_config, 'model', model)
+                import os
+                if provider == 'gemini':
+                    api_key = os.getenv('GEMINI_API_KEY')
+                elif provider == 'anthropic':
+                    api_key = os.getenv('ANTHROPIC_API_KEY')
+
+            if api_key:
+                client = create_client("gemini", api_key=api_key, model=model)
+
+                for vf in videos:
+                    video_path = str(vf)
+                    filename = vf.stem
+
+                    # Clean filename to keywords
+                    keywords = re.sub(r'[_\-\.]', ' ', filename)
+                    keywords = re.sub(r'\s+', ' ', keywords).strip()
+
+                    prompt = f"""Generate a brief 2-sentence description for a stock video based on these keywords from its filename:
+Keywords: {keywords}
+
+Describe what the video likely shows, focusing on: subjects, actions, setting.
+Return ONLY the description, no other text."""
+
+                    request = LLMRequest(
+                        prompt=prompt,
+                        response_format=ResponseFormat.TEXT,
+                        max_tokens=100,
+                        temperature=0.3,
+                        cache_key_prefix="silent_video_desc",
+                        use_cache=True
+                    )
+
+                    try:
+                        response = client.generate(request)
+                        if response.text:
+                            descriptions[video_path] = response.text.strip()
+                    except Exception as e:
+                        logger.debug(f"LLM description failed for {filename}: {e}")
+
+                return descriptions
+
+        except ImportError:
+            logger.debug("LLM client not available, using simple extraction")
+        except Exception as e:
+            logger.debug(f"LLM description error: {e}")
+
+        # Simple fallback: extract keywords from filename
+        for vf in videos:
+            video_path = str(vf)
+            filename = vf.stem
+
+            # Clean filename
+            keywords = re.sub(r'[_\-\.]', ' ', filename)
+            keywords = re.sub(r'\s+', ' ', keywords).strip()
+
+            if keywords:
+                descriptions[video_path] = f"[Silent video: {keywords}]"
+
+        return descriptions
 
     def _compute_embeddings(
         self,
