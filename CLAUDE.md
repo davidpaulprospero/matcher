@@ -1,13 +1,18 @@
-# Claude Code Project Guide
+# CLAUDE.md
 
-> **LLM Editing Guide:** This file is optimized for token efficiency. When editing:
-> - **Rules 1-8**: Add to the table, not as new verbose sections
-> - **Rules 9+**: Keep to ~10 lines max with table + 1-2 key points
-> - **Session History**: Keep only last 6 entries, archive older to CHANGELOG.md
-> - **Never**: Add verbose code examples (put in code comments instead)
-> - **Format**: Tables > prose, one-liners > paragraphs
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This file helps Claude Code sessions understand project conventions and avoid common mistakes.
+> **LLM Editing Guide:** Tables > prose, one-liners > paragraphs. Keep rules to ~10 lines max. Session history: last 6 entries only.
+
+## MCP Tools (Use Proactively)
+
+| Tool | When to Use | Example |
+|------|-------------|---------|
+| `mcp__context7__*` | **Any library/API question** - always check docs first | "How does X work?" → search Context7 |
+| `mcp__remotion-documentation__*` | Remotion-specific questions | Video rendering, React compositions |
+| `mcp__markitdown__*` | Convert URLs/PDFs to readable markdown | Fetch and parse external docs |
+
+**Rule:** When answering questions about libraries, APIs, or external tools, **search documentation first** using Context7 or the relevant MCP tool before responding from memory. This ensures up-to-date, accurate answers.
 
 ## Quick Reference
 
@@ -18,68 +23,72 @@ This file helps Claude Code sessions understand project conventions and avoid co
 | `--voiceover`, `-v` | Path to voiceover file (SRT, MP3, WAV, MP4) |
 | `--project`, `-p` | Project directory path |
 | `--config`, `-c` | Path to config file |
-| `--keywords`, `-k` | Number of keywords to extract |
 | `--match-only` | Skip download/transcribe, use cached data |
-| `--resume` | Resume from checkpoint |
-| `--fresh` | Force fresh start, ignore checkpoint |
-| `--force-rematch` | Force rematch all videos |
-| `--use-keywords [NAME]` | Use saved keywords (latest or named preset) |
-| `--save-keywords [NAME]` | Save keywords as preset |
-| `--list-keywords` | List saved keyword presets |
-| `--validate-config` | Validate config and exit |
-| `--refresh-entities` | Re-download entity images (ignore local cache) |
+| `--output-only` | Regenerate OTIO/EDL/XML only (fastest, no re-matching) |
+| `--resume` / `--fresh` | Resume from checkpoint / Force fresh start |
+| `--keyword-list "a,b,c"` | Keyword mode: comma-separated keywords (no voiceover) |
+| `--keyword-mode MODE` | montage, script, or collection |
+| `--duration SECS` | Target duration for keyword mode |
 | `--non-interactive` | Skip prompts, use defaults |
-| `--save-matching-fixtures` | Save matching inputs for testing |
+| `--client CLIENT_ID` | Client ID for cross-project learning (e.g., "theresa", "stu") |
+| `--evolve-preset` | Generate evolved preset from project history (requires `--client`) |
+| `--list-clients` | List all client profiles and exit |
+| `--client-stats [ID]` | Show client statistics (specific client or "all") |
+| `--high-matches` | Enable iterative matching until target confidence achieved |
+| `--target-confidence SCORE` | Target confidence for high matches mode (default: 0.90) |
+| `--coverage-target RATIO` | Coverage target for high matches mode (default: 0.85) |
 
 ### Common Commands
 
 ```bash
-# Basic run
 python main.py --voiceover script.srt --project "E:\Projects\MyDoc"
+python main.py --match-only                    # Re-run matching only
+python main.py --output-only                   # Regenerate OTIO only (fastest, needs checkpoint)
+python main.py --keyword-list "sunset,ocean" --keyword-mode montage --duration 60
+python main.py --project "E:\Edit Job\theresa\Project" --client theresa  # Cross-project learning
+python main.py --evolve-preset --client theresa  # Generate evolved preset from history
+python main.py --voiceover script.srt --high-matches  # Iterate until 90%+ confidence
 
-# Resume interrupted run
-python main.py --resume
-
-# Re-run matching only (after config tweaks)
-python main.py --match-only
-
-# Use saved keywords
-python main.py --use-keywords mypreset
+# Standalone OTIO regeneration (bypasses checkpoint - works even when corrupted)
+python scripts/regenerate_otio.py "E:\Edit Job\client\project"
+python scripts/regenerate_otio.py "E:\Edit Job\client\project" --output-folder 20260124_052654
 ```
 
 ### Skill Commands
 
 | Command | Description |
 |---------|-------------|
-| `/logcheck <project>` | Check project log for errors/warnings and fix them immediately |
-| `/match-only <project>` | Re-run matching and output generation (skips download/transcribe) |
-| `/newproject <name> <client> <doc_url>` | Create project, download voiceover from Google Doc links, start pipeline |
-| `/validate-output [path]` | Validate output **structure** (OTIO/XML/EDL format, track layout) |
+| `/logcheck <project>` | Check log for errors, auto-fix |
+| `/match-only <project>` | Re-run matching (skips download/transcribe) |
+| `/newproject <name> <client> <doc_url>` | Create project from Google Doc links |
+| `/validate-output [path]` | Validate output structure |
+| `/ollama-check` | Diagnose Ollama setup for keyword mode |
+| `/watch <project>` | Monitor pipeline progress (5-min intervals, maintains `PIPELINE_STATUS.md`) |
+| `/research <topic>` | Research a topic using Perplexity AI |
+| `/import-feedback <project> [csv]` | Import DaVinci Resolve marker feedback |
 
-```bash
-# Check project log and auto-fix issues
-/logcheck E:/Edit Job/Stu/January/6__2026-01-15
+**Use `/research` proactively** for API docs, library usage, error debugging, best practices, or any unfamiliar topic. Don't guess—research first.
 
-# Re-run matching after config tweaks
-/match-only E:/Edit Job/Project/MyDoc__2026-01-15
+**Pipeline monitoring:** Don't ask "is the pipeline progressing?" - use `/watch` or check logs directly. Proactively monitor when user shares pipeline output. The `/watch` skill maintains `PIPELINE_STATUS.md` in the project folder with current status, problems being investigated, and solutions in progress.
 
-# Create new project with Google Doc voiceover links
-/newproject 67 Stu https://docs.google.com/document/d/1abc123/edit
+**PIPELINE_STATUS.md maintenance:** When investigating/fixing pipeline issues, ALWAYS update `PIPELINE_STATUS.md` in the project folder with:
+- Current stage and progress
+- Problems found and root causes
+- Fixes applied (with code snippets)
+- Remaining issues to investigate
+- Recent activity log
 
-# Validate baseline itself
-/validate-output
+**Output ≠ Success:** Pipeline completing with output files doesn't mean quality is acceptable. Always verify: match counts, confidence scores, video variety, empty source_file warnings. Low segment downloads or many gaps = investigate root cause.
 
-# Validate specific output folder
-/validate-output E:/Edit Job/Project/output/20260115_123456
-
-# Validate project (auto-finds latest output)
-/validate-output E:/Edit Job/Project/MyDoc__2026-01-15
+**Checkpoint file:** Located at `<project>/checkpoint.json` (NOT `.matcher_checkpoint.json`). To force a stage to re-run:
+```python
+import json
+cp_path = r'E:/Edit Job/client/project/checkpoint.json'
+with open(cp_path, 'r') as f: cp = json.load(f)
+cp['last_completed_stage'] = 'STAGE_BEFORE_TARGET'  # e.g., 'ITERATIVE_MATCH' to re-run DOWNLOAD_SEGMENTS
+with open(cp_path, 'w') as f: json.dump(cp, f, indent=2)
 ```
-
-`/logcheck` reads latest run log, detects errors (downloads, API, OTIO), and applies fixes automatically.
-`/newproject` creates `E:\Edit Job\{client}\{month}\{name}__{date}`, downloads+combines Drive audio, starts pipeline.
-`/match-only` uses cached transcriptions/embeddings - fast iteration on matching settings.
-`/validate-output` accepts output paths OR project paths (auto-resolves to latest output).
+Then run with `--resume`. Stage order: ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_METADATA → CAPTION → DOWNLOAD → STOCK → BROLL_DOWNLOAD → REMIX → TRANSCRIBE → PREMISE → SCENE_DETECTION → MATCH → BROLL_MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
 
 ## Refactoring Roadmap
 
@@ -359,396 +368,234 @@ image_search:
 | Rule | Summary | Key Point |
 |------|---------|-----------|
 | 1 | Config sync | Update BOTH `src/config.py` AND `config.yaml` |
-| 2 | `__post_init__` | Nested dataclass fields load as `dict` - convert in `__post_init__` |
+| 2 | `__post_init__` | Nested dataclass fields load as `dict` - convert |
 | 3 | DownloadedVideo | Use `file=`, `duration_tier=` NOT `path=`, `tier=` |
-| 4 | Regex lookbehind | Python needs fixed-width - use capture groups instead |
-| 5 | Live streams | Add `!is_live` to yt-dlp match-filter |
+| 4 | Regex lookbehind | Python needs fixed-width - use capture groups |
+| 5 | Live streams | Add `!is_live & !was_live` to yt-dlp match-filter |
 | 6 | Dict/Object config | Handle both: `vc.get()` if dict, `getattr()` if object |
-| 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy arrays fail bool check |
-| 8 | B-roll propagation | SceneDetectionStage → text_metadata → MatchStage restores is_broll |
+| 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy fails bool |
+| 8 | B-roll propagation | SceneDetection → text_metadata → Match restores is_broll |
+| 9 | Test non-interactive | Tests MUST use `--non-interactive` |
+| 10 | LLM Client | Use `src/llm_client/` for ALL LLM calls |
+| 11 | Dataclass imports | Import from `src/state.py` or `src/config.py` only |
+| 12 | VAD Filter | Videos: OFF (hardcoded). Voiceover: ON (config) |
+| 21 | Project vs Global config | Use `project_config.yaml` for project-specific settings |
+| 22 | Caption-first paths | Video IDs not file paths - don't filter as `caption_only` |
+| 23 | Project config merge | Deep merge preserves sibling sections (`_deep_merge_section`) |
+| 24 | Running pipeline = latest code | Python imports dynamically - fixes take effect immediately |
+| 25 | `--output-only` needs stage data | Checkpoint must have populated `stages` dict, not just `last_completed_stage` |
 
-### Rule 9: LLM Client
-Use `src/llm_client/` for ALL LLM calls. Never directly initialize provider SDKs.
+### DaVinci Rules (13-17)
 
-```python
-from src.llm_client import create_client, LLMRequest, ResponseFormat
-client = create_client("gemini", api_key=api_key, model=model)
-response = client.generate(LLMRequest(prompt=prompt, response_format=ResponseFormat.JSON))
+| Rule | Issue | Solution |
+|------|-------|----------|
+| 13 | XML bin structure | `<bin>` under `<xmeml>`, `file:///` paths, skip audio-only |
+| 14 | OTIO paths | Use `file:///E:/...` URLs (not plain paths), forward slashes, skip unicode/audio-only |
+| 15 | OTIO caching | Rename file after fixes to bypass corrupt cache |
+| 16 | Duplicate paths | `MediaPathNormalizer` dedupes same file in different folders |
+| 17 | Large timelines | Auto-split at 3000 items into PART1-4 |
+
+### Healer Rules (18-20)
+
+| Rule | Summary |
+|------|---------|
+| 18 | Use `getattr`/`setattr` - never replace config object |
+| 19 | `.fixed()` for retry, `.failed()` to abort |
+| 20 | Use `self.log_attempt()` and `self.log_success()` |
+
+### Rule 21: Project vs Global Config
+
+**NEVER modify `config.yaml` for project-specific changes.** Use `project_config.yaml` in the project folder instead.
+
+| Change Type | File to Edit |
+|-------------|--------------|
+| Project-specific settings | `E:\Edit Job\client\project\project_config.yaml` |
+| New default features | `D:\_Projects\voiceover-matcher-subtitle\config.yaml` |
+| New config fields | `src/config.py` AND `config.yaml` (Rule 1) |
+
+**Warning signs you're editing the wrong file:**
+- User mentions a specific project path (e.g., `E:\Edit Job\theresa\...`)
+- Change is based on client feedback for one project
+- Setting would be too restrictive as a global default
+
+### Rule 22: Caption-First Mode Paths
+
+In **caption-first mode**, `video_path` in `text_metadata` contains YouTube video IDs (11 chars like `EPcZIso6bHw`), NOT file paths. Any filtering logic that:
+- Checks if path exists as file
+- Detects "video ID pattern" (11 alphanumeric chars)
+- Marks entries as `caption_only` for later filtering
+
+**MUST first check `config.download.caption_first.enabled`**. If enabled, caption entries ARE the primary candidates and should NOT be filtered out.
+
+**Symptom:** "no candidates" for most segments, 0% confidence, empty `source_file` in matches, V2-V6 tracks empty.
+
+### Rule 23: Project Config Deep Merge
+
+`project_config.yaml` merges **deeply** into `config.yaml` via `_deep_merge_section()` in `src/cli/config_utils.py`.
+
+**What this means:** When project_config.yaml has:
+```yaml
+download:
+  fallback:
+    proxy:
+      enabled: true
 ```
 
-**Benefits:** Retry, caching, JSON parsing, provider switching (Gemini/Anthropic/Ollama)
+It merges INTO `config.download.fallback.proxy` - it does NOT replace the entire `fallback` section. Sibling sections like `fallback.caption` are preserved from `config.yaml`.
 
-### Rule 10: Dataclass Imports
-Import dataclasses from canonical locations - never redefine locally.
+**When adding new nested config sections:**
+1. Defaults in dataclass (`src/config/sections/*.py`) are used if not in YAML
+2. `config.yaml` values override dataclass defaults
+3. `project_config.yaml` values override `config.yaml` (deep merge)
 
-| Type | Location | Examples |
-|------|----------|----------|
-| State | `src/state.py` | VoiceoverSegment, DownloadedVideo, AudioDownload, Match, PipelineState |
-| Config | `src/config.py` | Config, LLMConfig, DownloadConfig |
+**Symptom of broken merge:** Config values from `config.yaml` ignored when `project_config.yaml` touches a sibling section. Check `_deep_merge_section()` handles nested objects correctly.
 
-**Never**: Duplicate dataclass definitions (causes field name mismatches at runtime)
+### Rule 25: `--output-only` Checkpoint Requirements
 
-### Rule 11: VAD Filter (CRITICAL - Recurring Bug)
-Voiceover and videos need OPPOSITE VAD settings. Config only affects voiceover.
+`--output-only` mode relies on checkpoint data restoration. It works when:
+- Checkpoint has populated `stages` dict with data from each stage
+- Pipeline completed normally before (wrote stage data to checkpoint)
 
-| Context | VAD | File | Why |
-|---------|-----|------|-----|
-| Voiceover | ON (config) | analyze.py:256 | Gap detection |
-| Videos | OFF (hardcoded) | parallel_processor.py:64 | Audio quality varies |
+**Fails when:**
+- `stages` dict is empty `{}` (even if `last_completed_stage` is set correctly)
+- Checkpoint was manually edited or corrupted
+- Pipeline was interrupted before writing stage data
 
-**Symptoms:** "VAD filter removed XX:XX of audio" = VAD wrongly enabled for videos
+**Symptom:** `--output-only` runs through earlier stages (CAPTION, TRANSCRIBE, etc.) instead of jumping to OUTPUT.
 
-**Never**: Read VAD from config for video transcription
+**Workaround when checkpoint corrupted:**
+1. Use `--match-only` instead (re-runs MATCH + OUTPUT, slower but works)
+2. Or restore from a backup checkpoint that has stage data
 
-### Rule 12: XML Media Bin Import (DaVinci Resolve)
-DaVinci Resolve media bin XML requires specific structure:
+### Rule 26: Caption-First Segment Resolution
 
-| Requirement | Detail |
-|-------------|--------|
-| `<bin>` placement | Directly under `<xmeml>` (NO `<project>` wrapper) |
-| `<file>` placement | Inside `<clipitem>`, not at clip level |
-| Empty `<sequence>` | Required sibling to trigger import |
-| Path format | Plain `E:/path/file.mp4` (no `file://` prefix) |
-| Audio-only files | Skip them - DaVinci XML import fails on .mp3/.wav |
+In **caption-first mode**, matches store **video IDs** (e.g., `DDi-Swd7Qcw`) NOT file paths. The `source_file` field contains:
+- YouTube video ID (11 chars) - needs segment resolution
+- Full path (if from audio-first cache) - already resolved
 
-**File:** `src/otio/xml_export.py:_write_media_xml_part()`
+**DOWNLOAD_SEGMENTS** only downloads segments for videos in `video_candidates`. Videos from the **global caption cache** (other projects) won't have segments downloaded.
 
-### Rule 13: OTIO Path Compatibility (DaVinci Resolve)
-DaVinci Resolve OTIO import hangs on certain path issues:
+**Symptom:** OTIO has invalid paths like `file:///D:/_Projects/.../DDi-Swd7Qcw` (video ID used as filename, no `.mp4` extension).
 
-| Issue | Solution | Files |
-|-------|----------|-------|
-| Backslashes in paths | Use forward slashes: `E:/v/file.mp4` | `utils.py:_to_windows_path()` |
-| Audio-only files (.mp3, .wav) | Skip them, add gap instead | `timeline.py`, `tracks.py` |
-| Unicode in paths (ñ, ü, etc.) | Skip clips with non-ASCII chars | `timeline.py`, `tracks.py`, `entities.py` |
-| Corrupted unicode (�) | Skip clips with replacement char | All OTIO generation files |
-
-**Helper function:** `_has_problematic_path()` in timeline.py, tracks.py, entities.py
-
-### Rule 14: DaVinci OTIO Caching & Gap Optimization
-DaVinci Resolve caches OTIO import state by filename. Failed imports can corrupt this cache.
-
-| Issue | Solution |
-|-------|----------|
-| Import hangs after fixing issues | Rename OTIO file or use new DaVinci project |
-| Many consecutive gaps in track | `optimize_timeline_gaps()` merges them automatically |
-| Trailing gaps after last clip | `optimize_track_gaps()` removes them automatically |
-
-**Gap optimization** is applied automatically at end of `create_timeline()`. Manual use:
+**Analysis pattern:**
 ```python
-from src.otio.utils import optimize_timeline_gaps
-timeline = create_timeline(...)  # Already optimized
-# Or manually: optimize_timeline_gaps(timeline)
+# Check segment coverage
+segment_ids = {extract_video_id(f) for f in glob('E:/v/project/*_segments/*.mp4')}
+match_ids = {m['video_file'] for m in checkpoint['match']['matches']}
+missing = match_ids - segment_ids  # These won't have video in OTIO
 ```
 
-**Files:** `src/otio/utils.py` (optimize functions), `src/otio/timeline.py` (auto-applies)
-
-### Rule 15: DaVinci OTIO Clip Count Limit
-DaVinci Resolve OTIO import hangs when total clips exceed **3130**.
-
-| Metric | Limit | Notes |
-|--------|-------|-------|
-| Total clips | 3130 | Across ALL tracks (video + audio) |
-| Clips per segment | ~200 | With 10 tracks × 2 (V+A) = 20 clips/segment |
-
-**Workarounds when over limit:**
-1. Generate `timeline_LITE.otio` with fewer tracks (V1-V3 only)
-2. Split into multiple OTIO files (Part 1, Part 2)
-3. Reduce alternatives per segment
-
-**Detection:** `create_timeline()` logs warning when approaching limit.
-
-### Rule 16: DaVinci OTIO Duplicate Media Paths
-DaVinci Resolve hangs when the same video file is referenced from **multiple different paths**.
-
-| Scenario | Example | Result |
-|----------|---------|--------|
-| Same file, two paths | `stock/video.mp4` + `broll/video.mp4` | ❌ Hang |
-| Same file, one path | `stock/video.mp4` (used 5x) | ✅ OK |
-
-**Root cause:** "Automatically import source clips into media pool" tries to import both paths, causing infinite loop.
-
-**Fix:** `MediaPathNormalizer` in `src/otio/utils.py` deduplicates paths automatically:
-- Identifies duplicates by filename + file size
-- Prefers `stock/` over `broll/` paths
-- Applied in `create_timeline()` before clip creation
-
-**Files:** `src/otio/utils.py` (MediaPathNormalizer), `src/otio/timeline.py` (integration)
+**Fix options:**
+1. Re-run DOWNLOAD_SEGMENTS to download missing segments (needs video_candidates update)
+2. Limit matching to project's candidates only (loses global cache benefit)
+3. Add segment download for global cache videos (significant change)
 
 ### Testing Checklist
 
 - [ ] `python -m py_compile main.py`
 - [ ] `python -m py_compile src/config.py`
-- [ ] `python -m py_compile src/downloader.py`
-- [ ] `python -m py_compile src/matching.py`
+- [ ] `pytest tests/ -v --tb=short -x` (quick verification)
 - [ ] Config in both `config.py` AND `config.yaml`
 - [ ] Nested configs have `__post_init__`
 
-### Output Structure Validation
+## DaVinci API Integration
 
-Validates output **structure, integrity, and NLE importability**, NOT content/matches.
+**See:** [DAVINCI_INTEGRATION_ROADMAP.md](DAVINCI_INTEGRATION_ROADMAP.md) for full automation plan.
 
-```bash
-# Validate any output directory
-python tests/test_output_comparison.py "E:/path/to/output" -v
+| Principle | Implementation |
+|-----------|----------------|
+| **JSON I/O** | Analysis results → JSON for DaVinci scripts |
+| **Modular** | Each stage callable independently |
+| **Feedback-ready** | Hooks for editor decisions → learning |
+| **API-first** | Core logic headless; CLI optional |
 
-# JSON output for CI
-python tests/test_output_comparison.py "E:/path/to/output" --json
-```
+**Scripts:** `scripts/davinci/` - quick_setup, track_manager, diagnose, relink, import, export
 
-**What It Validates:**
+**Requires DaVinci Resolve Studio** (scripting is Studio-only).
 
-| Category | Checks |
-|----------|--------|
-| **File Structure** | Required files exist, minimum file counts |
-| **Format Integrity** | OTIO parses, XML well-formed, JSON valid |
-| **Track Structure** | Required tracks present, naming convention (V#/A#) |
-| **Coverage Thresholds** | V1 >= 90%, V2 >= 50%, V3 >= 40%, V8 >= 20% |
-| **Clip Integrity** | No zero-duration/overlapping clips, valid speed effects |
-| **EDL (CMX3600)** | Valid timecodes, event numbers, edit types, reel names |
-| **XML (XMEML)** | DaVinci bin structure, pathurl format, frame rate consistency |
-| **Media Paths** | Reserved names, NLE-problematic chars, path length, UNC paths |
-| **Cross-File** | Frame rate consistency across OTIO/XML/EDL |
-| **Export Capability** | Tests OTIO → EDL/FCPXML export |
+## Configuration
 
-**Extending for New Features:**
+### Short Paths (E:/v, E:/i)
 
-Edit `STRUCTURE_SPEC` in `tests/test_output_comparison.py`:
-
-```python
-STRUCTURE_SPEC = {
-    "required_files": [...],           # Add new required files
-    "required_tracks": [...],          # Add new required tracks
-    "coverage_thresholds": {...},      # Add new track thresholds
-    "segment_entry_keys": [...],       # Add new segment keys
-}
-```
-
-## Key Features
-
-### Audio-First Mode
-Downloads audio only, transcribes, matches, then downloads only matched video segments (~95% bandwidth savings).
 ```yaml
 download:
-  audio_first:
-    enabled: true
-    buffer_seconds: 30.0
-    merge_gap_seconds: 15.0
+  root_dir: "E:/v"    # Videos: E:/v/ProjectName/
+image_search:
+  root_dir: "E:/i"    # Images: E:/i/ProjectName/
 ```
 
-### Location-Aware Matching
-Filters video candidates by geographic proximity for travel content.
+Avoids 260-char Windows limit, faster NLE imports.
+
+### Key Feature Configs
+
 ```yaml
-matching:
-  location_matching:
-    enabled: true
-    geonames_username: "your_username"  # Must enable web services at geonames.org
-    hard_filter_level: "city"  # city, state, country, continent
-```
-**Note:** GeoNames web services must be enabled at https://www.geonames.org/login (401 errors = not enabled).
+# Audio-first: download audio only, then matched video segments
+download.audio_first.enabled: true
 
-### Pause-Split Segments
-```yaml
-transcription:
-  pause_split:
-    enabled: true
-    split_at_sentences: true
-    split_at_list_markers: true
-    split_at_locations: true
+# Caption-first: YouTube captions instead of Whisper
+download.caption_first.enabled: true
+
+# Self-healing
+healing.enabled: true
+healing.strategy: "conservative"  # aggressive, conservative, interactive, minimal
 ```
 
-### Vision API for Silent Videos
-Generates semantic descriptions of silent stock footage using Gemini Vision API.
-```yaml
-vision:
-  enabled: true
-  provider: gemini
-  model: gemini-2.0-flash
-  max_scenes_per_video: 50
-  estimated_cost_per_call: 0.001
+### PO Token Server (YouTube Auth)
+
+YouTube requires PO Tokens for subtitle/video access. The pipeline auto-starts the server when needed.
+
+**Setup (one-time):**
+```bash
+pip install bgutil-ytdlp-pot-provider
+git clone --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git ~/bgutil-ytdlp-pot-provider
+cd ~/bgutil-ytdlp-pot-provider/server && npm install && npx tsc
 ```
-**Behavior:**
-- **Auto-detection**: SceneDetectionStage identifies silent videos (no transcripts)
-- **Vision processing**: Extracts mid-frame from each scene and describes it via Gemini Vision API
-- **Embedding improvement**: Visual descriptions enable better semantic matching vs placeholder text `[Silent video: name]`
-- **B-roll enhancement**: B-roll scenes get meaningful descriptions for context-aware matching
-- **Cost control**: Only processes silent videos, skips videos with transcripts
-- **Caching**: Vision responses cached in `.cache/vision_cache/` to avoid redundant API calls
-- **Fallback**: If API unavailable (no GEMINI_API_KEY), uses placeholder text
 
-**Setup:**
-1. Set `GEMINI_API_KEY` environment variable
-2. Enable in config: `vision.enabled: true`
-3. Run pipeline normally - vision processing is automatic for silent videos
+**Manual start:** `scripts\start_pot_server.bat` or `node ~/bgutil-ytdlp-pot-provider/server/build/main.js`
 
-**Cost Estimate**: ~$0.001 per scene (configurable via `estimated_cost_per_call`)
+The pipeline automatically checks and starts the PO Token server before running.
+
+## Caching
+
+| Cache | Location |
+|-------|----------|
+| Transcriptions | `.cache/transcriptions/` |
+| Embeddings | `.cache/embeddings/` |
+| Captions | `.cache/captions/` |
+| Global videos | `~/.matcher_global_cache/` |
+| Entity images | `~/.matcher_entity_cache/` |
+
+Clear with `--fresh` or `rm -rf .cache/`
 
 ## Self-Healing Agents
 
 Location: `src/agents/` - Auto-recovery for pipeline errors.
 
-### Quick Start (Simple)
-
-```python
-from src.agents import create_resilient_pipeline
-
-pipeline, runner = create_resilient_pipeline(config, project_dir)
-success = runner.run_pipeline(pipeline)
-runner.print_summary()
-```
-
-### Quick Start (With Orchestrator - Recommended)
-
-```python
-from src.agents import create_orchestrated_pipeline, HealingStrategy
-
-pipeline, orchestrator, runner = create_orchestrated_pipeline(
-    config, project_dir,
-    strategy=HealingStrategy.aggressive()
-)
-success = runner.run_pipeline(pipeline)
-orchestrator.print_report()
-```
-
-### Healing Strategies
-
-| Strategy | Attempts | Behavior |
-|----------|----------|----------|
-| `HealingStrategy.aggressive()` | 5/stage, 50 total | Try everything, minimal user interaction |
-| `HealingStrategy.conservative()` | 3/stage, 20 total | Safe fixes only, preserve config |
-| `HealingStrategy.interactive()` | 3/stage, 30 total | Ask user before major changes |
-| `HealingStrategy.minimal()` | 1/stage, 5 total | Fail fast, critical fixes only |
-
-### Healer Registry
-
 | Healer | Detects | Auto-Fix |
 |--------|---------|----------|
-| `CheckpointHealer` | JSON parse errors, corrupt checkpoint | Restore from backup, rebuild from cache |
-| `APIHealer` | Rate limits (429), auth errors, quota | Backoff + retry, switch provider |
-| `DownloadHealer` | YouTube 429, unavailable videos | Backoff, skip video, try alt format |
-| `DiskHealer` | Disk full, permission denied | Clean caches, suggest short paths |
-| `PathHealer` | Windows 260 char limit, unicode | Switch to E:/v, sanitize filenames |
-| `OTIOHealer` | Timeline generation failures | Fix gaps, resolve paths, simplify |
-
-### OTIOHealer Details
-
-**Clip Timing Fixes:**
-
-| Issue | Detection | Fix |
-|-------|-----------|-----|
-| Zero/negative duration | `end <= start` | Clamp to MIN_DURATION (0.04s) |
-| Excessive duration | `duration > 24h` | Clamp to MAX_DURATION |
-| Clip overlaps | `clip[i].end > clip[i+1].start` | Trim earlier clip with 20ms buffer |
-| Invalid speed | `time_scalar < 0.1 or > 10` | Clamp to 10%-1000% range |
-| Negative start_time | `start < 0` | Set to 0 |
-| Gap overflow | Total gaps > available time | Switch gap_mode progressively |
-
-**Media Reference Fixes:**
-
-| Issue | Detection | Fix |
-|-------|-----------|-----|
-| Missing file | `not Path(video_path).exists()` | Search caches by filename, video_id |
-| Path encoding | Unicode chars in path | Sanitize to ASCII, rename file |
-| Invalid URL | Backslash/extended path issues | Convert to forward slashes |
-| Broken reference | File moved/deleted | Search project/.cache, global cache, E:/v |
-
-**Preflight Check:** Call `healer.preflight_check(state)` before timeline generation to detect issues early.
-
-**Safe Mode:** Last resort applies minimal settings (V1 only, no EDL/XML, gap_mode=none, 30fps).
-
-### HealingOrchestrator
-
-Coordinates all healers with:
-
-| Feature | Description |
-|---------|-------------|
-| **Preflight checks** | Disk space, API keys, paths, media files before run |
-| **Smart healer selection** | Priority ordering, picks best healer for error |
-| **Config rollback** | Snapshot before each stage, restore on failure |
-| **Cross-healer coordination** | Notifies healers when others make changes |
-| **User escalation** | Asks user for critical decisions (interactive mode) |
-| **Metrics tracking** | Success rates, time spent, issues found/fixed |
-
-```python
-# Manual preflight check
-issues = orchestrator.run_preflight(pipeline.state)
-for issue in issues:
-    print(f"[{issue.severity}] {issue.message}")
-
-# Fix preflight issues
-fixed, remaining = orchestrator.fix_preflight_issues(issues, pipeline.state)
-
-# Get metrics after run
-metrics = orchestrator.get_metrics()
-print(metrics.summary())
-```
-
-### Adding New Healers
-
-1. Create `src/agents/healers/my_healer.py`
-2. Extend `Healer` base class
-3. Set `error_patterns` and/or `exception_types`
-4. Implement `fix()` returning `HealerResult`
-5. Add to `HEALER_REGISTRY` in `src/agents/healers/__init__.py`
-
-### Healer Development Rules
-
-| Rule | Key Point |
-|------|-----------|
-| 12 | Healers update config via `getattr`/`setattr` - never replace config object |
-| 13 | Return `HealerResult.fixed()` for retry, `.failed()` to abort |
-| 14 | Log attempts with `self.log_attempt()`, success with `self.log_success()` |
+| CheckpointHealer | Corrupt JSON | Restore backup |
+| APIHealer | Rate limits, auth | Backoff, switch provider |
+| DownloadHealer | YouTube 429 | Backoff, skip, alt format |
+| PathHealer | Windows 260 char | Switch to E:/v |
+| OTIOHealer | Timeline failures | Fix gaps, resolve paths |
 
 ## Git Conventions
 
-### Branch Strategy
-
-**Main branch protection:**
-- Keep `main` stable and production-ready
-- Never push major refactors directly to main
-- Use feature branches for all significant changes
-
-**Branch naming:**
-- Feature branches: `feature/descriptive-name`
-- Bug fixes: `fix/issue-description`
-- Refactors: `refactor/component-name`
-- Claude Code branches: `claude/auto-generated-name`
-
-**Workflow for major changes:**
-```bash
-# Create feature branch
-git checkout -b feature/pipeline-stages
-
-# Work and commit incrementally
-git add -A
-git commit -m "feat: Add AnalyzeStage class"
-
-# Push to remote
-git push -u origin feature/pipeline-stages
-
-# Create PR when ready
-gh pr create --title "Feature: Modular pipeline stages" --base main
-
-# After review and testing, merge to main via PR
-```
-
-**Commit prefixes:**
-- `feat:` - New features
-- `fix:` - Bug fixes
-- `docs:` - Documentation only
-- `refactor:` - Code restructuring without behavior change
-- `test:` - Test additions/modifications
-- `chore:` - Build/config changes
+| Type | Format |
+|------|--------|
+| Features | `feature/descriptive-name` |
+| Fixes | `fix/issue-description` |
+| Commits | `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` |
 
 ## Session History
 
 | Date | Changes |
 |------|---------|
-| 2026-01-16 | Duplicate media paths fix (Rule 16): `MediaPathNormalizer` deduplicates same files in different folders |
-| 2026-01-16 | DaVinci caching fix (Rule 14): Rename OTIO files after fixing issues to bypass corrupted cache |
-| 2026-01-16 | Gap optimization: `optimize_timeline_gaps()` merges consecutive gaps, removes trailing gaps |
-| 2026-01-15 | OTIO unicode filter (Rule 13): Skip clips with non-ASCII paths causing DaVinci hang |
-| 2026-01-15 | `/validate-output` NLE importability: EDL CMX3600, XML XMEML, path compatibility, cross-file consistency |
-| 2026-01-15 | XML media bin fix (Rule 12): No `<project>` wrapper, `<file>` inside `<clipitem>`, skip audio-only |
+| 2026-01-25 | Ralph startup improvements: Claude CLI path resolution, startup validation, -Resume flag, queue persistence, fast-fail detection |
+| 2026-01-24 | Global cache segment download: VideoCandidate creation for cache videos, strategy_matches remapping (V7+), duration clamping fix |
+| 2026-01-24 | Caption-first segment gap fix: 65% of matches from global cache lack segments. Rule 26 added |
+| 2026-01-24 | MatchResultWrapper voiceover timing fix: Was using video_start/end (wrong), now uses segment timing |
+| 2026-01-24 | V10 spam fix: Skip populating V10 track if <5 entity videos (prevents same video repeating) |
+| 2026-01-24 | Force DOWNLOAD_SEGMENTS re-run: Edit checkpoint.json, set last_completed_stage to ITERATIVE_MATCH |
 
 *Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
