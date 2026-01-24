@@ -675,5 +675,168 @@ class TestTierConfigValidation:
         assert merged.duration_tiers.long.videos_per_keyword == 2
 
 
+class TestDeepMergeEdgeCases:
+    """
+    US-008: Edge case tests for deep merge behavior.
+
+    Tests for:
+    - Preserving sibling keys when merging nested dicts
+    - Handling None values correctly
+    - Handling empty dicts correctly
+    - Project config overrides don't clobber unrelated sections
+    """
+
+    def test_deep_merge_preserves_sibling_keys(self):
+        """Test merge preserves sibling keys when merging nested dicts."""
+        config = load_config()
+
+        # Get original values from sibling sections
+        original_matching_confidence = config.matching.min_confidence
+        original_transcription_model = config.transcription.model
+
+        # Only override download section
+        overrides = {
+            'download': {
+                'quality': '720p'
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Sibling sections should be preserved
+        assert merged.matching.min_confidence == original_matching_confidence
+        assert merged.transcription.model == original_transcription_model
+        # Overridden section should have new value
+        assert merged.download.quality == '720p'
+
+    def test_deep_merge_handles_none_values_in_overrides(self):
+        """Test merge handles None values in override dict."""
+        config = load_config()
+
+        # Override with None value (should not crash)
+        overrides = {
+            'download': {
+                'quality': None,
+                'max_retries': 5
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # None value should be set
+        assert merged.download.quality is None
+        # Other overrides should work
+        assert merged.download.max_retries == 5
+
+    def test_deep_merge_handles_empty_override_dict(self):
+        """Test merge handles empty override dict without errors."""
+        config = load_config()
+        original_quality = config.download.quality
+        original_model = config.transcription.model
+
+        # Empty overrides
+        overrides = {}
+        merged = merge_config(config, overrides)
+
+        # Config should be unchanged
+        assert merged.download.quality == original_quality
+        assert merged.transcription.model == original_model
+
+    def test_deep_merge_handles_empty_section_override(self):
+        """Test merge handles empty section override dict."""
+        config = load_config()
+        original_quality = config.download.quality
+
+        # Override with empty section dict
+        overrides = {
+            'download': {}
+        }
+        merged = merge_config(config, overrides)
+
+        # Config should be unchanged
+        assert merged.download.quality == original_quality
+
+    def test_project_config_does_not_clobber_unrelated_sections(self, tmp_path):
+        """Test project_config.yaml overrides don't affect unrelated sections."""
+        import yaml
+        from src.cli.config_utils import load_project_config
+
+        project_dir = tmp_path / "isolated_override_project"
+        project_dir.mkdir()
+
+        # Load base config to get original values
+        base_config = load_config()
+        original_transcription_model = base_config.transcription.model
+        original_matching_confidence = base_config.matching.min_confidence
+        original_llm_provider = base_config.llm.provider
+
+        # Project config only touches download section
+        project_config = {
+            'download': {
+                'quality': '1080p',
+                'max_retries': 10
+            }
+        }
+
+        config_file = project_dir / "project_config.yaml"
+        with open(config_file, 'w') as f:
+            yaml.dump(project_config, f)
+
+        config = load_project_config(project_dir)
+
+        # Unrelated sections should be unchanged
+        assert config.transcription.model == original_transcription_model
+        assert config.matching.min_confidence == original_matching_confidence
+        assert config.llm.provider == original_llm_provider
+        # Only download section should change
+        assert config.download.quality == '1080p'
+        assert config.download.max_retries == 10
+
+    def test_nested_dict_merge_preserves_unspecified_nested_keys(self):
+        """Test merging nested dicts preserves unspecified keys at all levels."""
+        config = load_config()
+
+        # Get original nested values
+        original_short_min = config.duration_tiers.short.min_seconds
+        original_short_max = config.duration_tiers.short.max_seconds
+        original_medium = config.duration_tiers.medium.videos_per_keyword
+
+        # Only override one key in one tier
+        overrides = {
+            'duration_tiers': {
+                'short': {'count': 99}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Unspecified keys in short tier should be preserved
+        assert merged.duration_tiers.short.min_seconds == original_short_min
+        assert merged.duration_tiers.short.max_seconds == original_short_max
+        assert merged.duration_tiers.short.videos_per_keyword == 99
+        # Other tiers should be unchanged
+        assert merged.duration_tiers.medium.videos_per_keyword == original_medium
+
+    def test_multiple_sections_override_independently(self):
+        """Test overriding multiple sections doesn't cause interference."""
+        config = load_config()
+
+        overrides = {
+            'download': {'quality': 'best'},
+            'matching': {'min_confidence': 0.8},
+            'duration_tiers': {
+                'long': {'count': 5}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # All overrides should be applied
+        assert merged.download.quality == 'best'
+        assert merged.matching.min_confidence == 0.8
+        assert merged.duration_tiers.long.videos_per_keyword == 5
+
+        # Each section should be independently correct
+        assert hasattr(merged.download, 'max_retries')
+        assert hasattr(merged.matching, 'high_confidence_threshold')
+        assert hasattr(merged.duration_tiers.long, 'min_seconds')
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

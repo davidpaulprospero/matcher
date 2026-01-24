@@ -690,3 +690,21 @@ Progress: 7/10 stories complete
 - Files created:
   - tests/test_stage_error_handling.py (new file, ~310 lines)
 
+Progress: 8/10 stories complete
+
+## Iteration 8 - [US-008] Add config deep merge edge case tests
+- Added TestDeepMergeEdgeCases class to tests/test_config_merge.py with 7 tests
+- Test coverage:
+  - test_deep_merge_preserves_sibling_keys: Verifies merge doesn't clobber unrelated sections
+  - test_deep_merge_handles_none_values_in_overrides: None values set field to None
+  - test_deep_merge_handles_empty_override_dict: Empty dict preserves original config
+  - test_deep_merge_handles_empty_section_override: Empty section dict preserves section
+  - test_project_config_does_not_clobber_unrelated_sections: Project overrides isolated
+  - test_nested_dict_merge_preserves_unspecified_nested_keys: Deep nested merge works
+  - test_multiple_sections_override_independently: Multiple sections merged independently
+- All 7 new tests pass, all acceptance criteria met
+- Files modified:
+  - tests/test_config_merge.py (added TestDeepMergeEdgeCases class, ~75 lines)
+
+Progress: 9/10 stories complete (US-009, US-010 remaining)
+
