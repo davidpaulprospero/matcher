@@ -139,6 +139,118 @@ def _find_best_entity_match(
     return None, 'none'
 
 
+def _consolidate_repeated_clips(track: otio.schema.Track) -> int:
+    """
+    Consolidate consecutive clips for the same entity into extended clips.
+
+    When the same entity appears in consecutive segments, this function extends
+    the first clip to cover the full duration instead of having gaps between
+    separate clips. This creates cleaner timelines with fewer cuts.
+
+    Algorithm:
+    1. Iterate through track items
+    2. When finding consecutive clips with same entity_name:
+       - Extend first clip's duration to cover all consecutive matching clips
+       - Remove the subsequent clips (they're now covered by the extended clip)
+    3. Return count of clips removed (consolidation metric)
+
+    Args:
+        track: OTIO track to consolidate (V9 or V10)
+
+    Returns:
+        Number of clips removed through consolidation
+    """
+    # Build list of items to process
+    items = list(track)
+    if not items:
+        return 0
+
+    # Find consecutive clip sequences with same entity
+    # Track: (start_index, entity_name, clips_in_sequence)
+    sequences_to_consolidate = []
+    current_sequence_start = None
+    current_entity = None
+    current_sequence_clips = []
+
+    for i, item in enumerate(items):
+        if isinstance(item, otio.schema.Clip):
+            entity_name = item.metadata.get('entity_name')
+            if entity_name is None:
+                # No entity metadata, end current sequence
+                if current_sequence_start is not None and len(current_sequence_clips) > 1:
+                    sequences_to_consolidate.append((current_sequence_start, current_entity, current_sequence_clips))
+                current_sequence_start = None
+                current_entity = None
+                current_sequence_clips = []
+            elif current_entity == entity_name:
+                # Same entity, extend sequence
+                current_sequence_clips.append(i)
+            else:
+                # Different entity, save previous sequence if valid
+                if current_sequence_start is not None and len(current_sequence_clips) > 1:
+                    sequences_to_consolidate.append((current_sequence_start, current_entity, current_sequence_clips))
+                # Start new sequence
+                current_sequence_start = i
+                current_entity = entity_name
+                current_sequence_clips = [i]
+        elif isinstance(item, otio.schema.Gap):
+            # Gap between clips - check if we should continue the sequence
+            # If the gap is small (between consecutive segments), we can consolidate
+            # For now, end the sequence on gaps
+            if current_sequence_start is not None and len(current_sequence_clips) > 1:
+                sequences_to_consolidate.append((current_sequence_start, current_entity, current_sequence_clips))
+            current_sequence_start = None
+            current_entity = None
+            current_sequence_clips = []
+
+    # Handle final sequence
+    if current_sequence_start is not None and len(current_sequence_clips) > 1:
+        sequences_to_consolidate.append((current_sequence_start, current_entity, current_sequence_clips))
+
+    if not sequences_to_consolidate:
+        return 0
+
+    # Process sequences in reverse order to avoid index shifting issues
+    total_removed = 0
+    for start_idx, entity_name, clip_indices in reversed(sequences_to_consolidate):
+        if len(clip_indices) <= 1:
+            continue
+
+        # Get the first clip and extend its duration
+        first_clip = items[clip_indices[0]]
+        first_rate = first_clip.source_range.duration.rate
+
+        # Calculate total duration of all clips in sequence
+        total_duration_frames = sum(
+            items[idx].source_range.duration.value
+            for idx in clip_indices
+            if isinstance(items[idx], otio.schema.Clip)
+        )
+
+        # Extend first clip's source_range to cover all
+        first_clip.source_range = otio.opentime.TimeRange(
+            start_time=first_clip.source_range.start_time,
+            duration=otio.opentime.RationalTime(total_duration_frames, first_rate)
+        )
+
+        # For images, also extend available_range to match source_range
+        # (OTIO requires source_range <= available_range)
+        if first_clip.metadata.get('is_still_image'):
+            first_clip.media_reference.available_range = otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, first_rate),
+                duration=otio.opentime.RationalTime(total_duration_frames, first_rate)
+            )
+
+        # Remove subsequent clips from track (in reverse to avoid index issues)
+        for idx in reversed(clip_indices[1:]):
+            track.remove(items[idx])
+            total_removed += 1
+
+        logger.debug(f"Consolidated {len(clip_indices)} clips for entity '{entity_name}' into 1")
+
+    return total_removed
+
+
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
     """
     Get video duration in frames using ffprobe.
@@ -419,15 +531,27 @@ def add_entity_media_to_track(
         )
         track.append(gap)
 
+    # Consolidate repeated consecutive clips for same entity
+    # This extends clips instead of creating gaps when same entity appears in consecutive segments
+    enable_consolidation = getattr(config.image_search, 'enable_consolidation', True)
+    clips_consolidated = 0
+    if enable_consolidation:
+        clips_consolidated = _consolidate_repeated_clips(track)
+        if clips_consolidated > 0:
+            logger.info(f"{track_name}: Consolidated {clips_consolidated} repeated clips")
+
     # Log entity matching statistics
     total_segments = len(segment_timing)
     matched = match_stats['exact'] + match_stats['semantic'] + match_stats['sticky']
     media_label = "Entity matching" if is_image else "Stock video matching"
-    print(f"  [{track_name}] {media_label}: {matched}/{total_segments} segments" + (f", {clips_added} clips added" if not is_image else ""))
+    clips_after = clips_added - clips_consolidated
+    print(f"  [{track_name}] {media_label}: {matched}/{total_segments} segments" + (f", {clips_after} clips" if not is_image else ""))
     print(f"    Exact: {match_stats['exact']} ({100*match_stats['exact']/max(1,total_segments):.1f}%)")
     print(f"    Semantic: {match_stats['semantic']} ({100*match_stats['semantic']/max(1,total_segments):.1f}%)")
     if enable_sticky:
         print(f"    Sticky: {match_stats['sticky']} ({100*match_stats['sticky']/max(1,total_segments):.1f}%)")
+    if clips_consolidated > 0:
+        print(f"    Consolidated: {clips_consolidated} clips")
 
 
 # Public API for backward compatibility
