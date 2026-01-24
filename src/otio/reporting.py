@@ -23,6 +23,135 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _calculate_track_coverage(
+    matches: List['MatchResult'],
+    frame_rate: float
+) -> dict:
+    """
+    Calculate track coverage statistics from match results.
+
+    Args:
+        matches: List of MatchResult from matching stage
+        frame_rate: Timeline frame rate for duration calculations
+
+    Returns:
+        Dict mapping track names (V1-V10) to coverage statistics
+    """
+    total_segments = len(matches)
+    if total_segments == 0:
+        return {}
+
+    # Calculate total timeline duration
+    total_duration = 0.0
+    for match_result in matches:
+        vo_seg = match_result.primary_match.voiceover_segment
+        total_duration += vo_seg.end_time - vo_seg.start_time
+
+    # Initialize track statistics
+    track_stats = {}
+    track_names = [
+        ("V1", "Primary"),
+        ("V2", "Alternative 1"),
+        ("V3", "Alternative 2"),
+        ("V4", "Secondary 1"),
+        ("V5", "Secondary 2"),
+        ("V6", "Secondary 3"),
+        ("V7", "Strategy: Embedding-Diversity"),
+        ("V8", "Strategy: B-roll Only"),
+        ("V9", "Entity Images"),
+        ("V10", "Stock Videos"),
+    ]
+
+    for track_id, track_desc in track_names:
+        track_stats[track_id] = {
+            "description": track_desc,
+            "clip_count": 0,
+            "gap_count": 0,
+            "clip_duration_sec": 0.0,
+            "gap_duration_sec": 0.0,
+            "coverage_percent": 0.0
+        }
+
+    # Count clips and gaps per track
+    for match_idx, match_result in enumerate(matches):
+        vo_seg = match_result.primary_match.voiceover_segment
+        segment_duration = vo_seg.end_time - vo_seg.start_time
+
+        # V1 - Primary track
+        if match_result.has_gap:
+            track_stats["V1"]["gap_count"] += 1
+            track_stats["V1"]["gap_duration_sec"] += segment_duration
+        else:
+            track_stats["V1"]["clip_count"] += 1
+            track_stats["V1"]["clip_duration_sec"] += segment_duration
+
+        # V2-V3 - Alternatives
+        for alt_idx, alt in enumerate(match_result.alternatives[:2]):
+            track_id = f"V{alt_idx + 2}"
+            track_stats[track_id]["clip_count"] += 1
+            track_stats[track_id]["clip_duration_sec"] += segment_duration
+
+        # Count gaps for unfilled V2-V3 slots
+        for gap_idx in range(len(match_result.alternatives[:2]), 2):
+            track_id = f"V{gap_idx + 2}"
+            track_stats[track_id]["gap_count"] += 1
+            track_stats[track_id]["gap_duration_sec"] += segment_duration
+
+        # V4-V6 - Secondary matches
+        for sec_idx, sec in enumerate(match_result.secondary_matches[:3]):
+            track_id = f"V{sec_idx + 4}"
+            track_stats[track_id]["clip_count"] += 1
+            track_stats[track_id]["clip_duration_sec"] += segment_duration
+
+        # Count gaps for unfilled V4-V6 slots
+        for gap_idx in range(len(match_result.secondary_matches[:3]), 3):
+            track_id = f"V{gap_idx + 4}"
+            track_stats[track_id]["gap_count"] += 1
+            track_stats[track_id]["gap_duration_sec"] += segment_duration
+
+        # V7-V8 - Strategy matches (check by strategy name)
+        v7_filled = False
+        v8_filled = False
+        for strategy_match in match_result.strategy_matches:
+            strategy = getattr(strategy_match, 'strategy', '').lower()
+            if 'diversity' in strategy or 'embedding' in strategy:
+                if not v7_filled:
+                    track_stats["V7"]["clip_count"] += 1
+                    track_stats["V7"]["clip_duration_sec"] += segment_duration
+                    v7_filled = True
+            elif 'broll' in strategy or 'b-roll' in strategy or 'silent' in strategy:
+                if not v8_filled:
+                    track_stats["V8"]["clip_count"] += 1
+                    track_stats["V8"]["clip_duration_sec"] += segment_duration
+                    v8_filled = True
+
+        # Count gaps for unfilled V7-V8
+        if not v7_filled:
+            track_stats["V7"]["gap_count"] += 1
+            track_stats["V7"]["gap_duration_sec"] += segment_duration
+        if not v8_filled:
+            track_stats["V8"]["gap_count"] += 1
+            track_stats["V8"]["gap_duration_sec"] += segment_duration
+
+        # V9-V10 are typically filled by entity matching stage, not in MatchResult
+        # They'll show as gaps unless explicitly tracked
+        track_stats["V9"]["gap_count"] += 1
+        track_stats["V9"]["gap_duration_sec"] += segment_duration
+        track_stats["V10"]["gap_count"] += 1
+        track_stats["V10"]["gap_duration_sec"] += segment_duration
+
+    # Calculate coverage percentages
+    for track_id, stats in track_stats.items():
+        if total_duration > 0:
+            stats["coverage_percent"] = round(
+                (stats["clip_duration_sec"] / total_duration) * 100, 1
+            )
+        stats["clip_duration_sec"] = round(stats["clip_duration_sec"], 3)
+        stats["gap_duration_sec"] = round(stats["gap_duration_sec"], 3)
+
+    return track_stats
+
+
 def generate_segment_map(
     matches: List['MatchResult'],
     output_path: str,
@@ -129,6 +258,9 @@ def generate_segment_map(
     # Calculate total frames from the last segment's end frame
     total_frames = segments[-1]["end_frame"] if segments else 0
 
+    # Calculate track coverage statistics
+    track_coverage = _calculate_track_coverage(matches, frame_rate)
+
     # Build output structure
     segment_map = {
         "generated_at": datetime.now().isoformat(),
@@ -138,6 +270,7 @@ def generate_segment_map(
         "total_segments": len(segments),
         "total_frames": total_frames,
         "total_duration_sec": round(total_frames / frame_rate, 3),
+        "track_coverage": track_coverage,
         "segments": segments
     }
 

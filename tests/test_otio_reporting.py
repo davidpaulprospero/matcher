@@ -545,6 +545,222 @@ class TestPrintTimelineStatistics:
 
 
 # =============================================================================
+# TEST: Track Coverage Reporting
+# =============================================================================
+
+class TestTrackCoverageReporting:
+    """Test track coverage statistics in segment map JSON."""
+
+    def test_track_coverage_present_in_output(self, mock_matches, tmp_path):
+        """Test that track_coverage dict is included in segment map."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert 'track_coverage' in data
+        assert isinstance(data['track_coverage'], dict)
+
+    def test_track_coverage_includes_v1_to_v10(self, mock_matches, tmp_path):
+        """Test that all V1-V10 tracks are included in coverage report."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        track_coverage = data['track_coverage']
+
+        # Check all V1-V10 tracks present
+        expected_tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10']
+        for track in expected_tracks:
+            assert track in track_coverage, f"Track {track} missing from coverage"
+
+    def test_track_coverage_contains_required_fields(self, mock_matches, tmp_path):
+        """Test that each track has clip_count, gap_count, and coverage_percent."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        for track_id, stats in data['track_coverage'].items():
+            assert 'clip_count' in stats, f"{track_id} missing clip_count"
+            assert 'gap_count' in stats, f"{track_id} missing gap_count"
+            assert 'coverage_percent' in stats, f"{track_id} missing coverage_percent"
+            assert 'description' in stats, f"{track_id} missing description"
+
+    def test_v1_coverage_calculation(self, mock_matches, tmp_path):
+        """Test V1 primary track coverage is calculated correctly."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        v1_stats = data['track_coverage']['V1']
+
+        # mock_matches has 2 segments, both with primary matches (no gaps)
+        assert v1_stats['clip_count'] == 2
+        assert v1_stats['gap_count'] == 0
+        assert v1_stats['coverage_percent'] == 100.0
+
+    def test_v2_v3_alternatives_coverage(self, mock_matches, tmp_path):
+        """Test V2-V3 alternative track coverage calculation."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Segment 0 has 2 alternatives, Segment 1 has 0
+        # Total duration: 3.0 + 2.5 = 5.5 seconds
+
+        # V2: 1 clip (segment 0 has alt 0), 1 gap (segment 1 has no alt)
+        v2_stats = data['track_coverage']['V2']
+        assert v2_stats['clip_count'] == 1
+        assert v2_stats['gap_count'] == 1
+
+        # V3: 1 clip (segment 0 has alt 1), 1 gap (segment 1 has no alt)
+        v3_stats = data['track_coverage']['V3']
+        assert v3_stats['clip_count'] == 1
+        assert v3_stats['gap_count'] == 1
+
+        # Coverage should be ~54.5% (3.0/5.5 * 100)
+        assert 54.0 <= v2_stats['coverage_percent'] <= 55.0
+        assert 54.0 <= v3_stats['coverage_percent'] <= 55.0
+
+    def test_secondary_tracks_coverage(self, mock_matches, tmp_path):
+        """Test V4-V6 secondary track coverage calculation."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Segment 0 has 1 secondary, Segment 1 has 0
+        # V4: 1 clip (segment 0), 1 gap (segment 1)
+        v4_stats = data['track_coverage']['V4']
+        assert v4_stats['clip_count'] == 1
+        assert v4_stats['gap_count'] == 1
+        assert 54.0 <= v4_stats['coverage_percent'] <= 55.0
+
+        # V5, V6: 0 clips, 2 gaps (no secondary matches at these indices)
+        v5_stats = data['track_coverage']['V5']
+        assert v5_stats['clip_count'] == 0
+        assert v5_stats['gap_count'] == 2
+        assert v5_stats['coverage_percent'] == 0.0
+
+        v6_stats = data['track_coverage']['V6']
+        assert v6_stats['clip_count'] == 0
+        assert v6_stats['gap_count'] == 2
+        assert v6_stats['coverage_percent'] == 0.0
+
+    def test_empty_matches_track_coverage(self, tmp_path):
+        """Test track coverage with empty matches returns empty dict."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=[],
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['track_coverage'] == {}
+
+    def test_track_coverage_duration_calculations(self, mock_matches, tmp_path):
+        """Test that clip and gap durations are calculated correctly."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        v1_stats = data['track_coverage']['V1']
+
+        # Total V1 clip duration should be 3.0 + 2.5 = 5.5 seconds
+        assert v1_stats['clip_duration_sec'] == 5.5
+        assert v1_stats['gap_duration_sec'] == 0.0
+
+    def test_has_gap_affects_v1_coverage(self, tmp_path):
+        """Test that has_gap=True segments count as gaps on V1."""
+        # Create a match with has_gap=True
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0,
+            text="Segment text", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=13.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=0.3,  # Low confidence
+            reasoning='Low confidence match'
+        )
+        matches = [MatchResult(
+            primary_match=match,
+            alternatives=[],
+            secondary_matches=[],
+            strategy_matches=[],
+            has_gap=True,  # This segment has a gap
+            gap_reason="No good match found"
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        v1_stats = data['track_coverage']['V1']
+        assert v1_stats['clip_count'] == 0
+        assert v1_stats['gap_count'] == 1
+        assert v1_stats['coverage_percent'] == 0.0
+
+
+# =============================================================================
 # TEST: Edge Cases and Error Handling
 # =============================================================================
 
