@@ -11,6 +11,7 @@ Stage 2 of the video matching pipeline:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -314,21 +315,36 @@ class DownloadStage(Stage):
             for idx, keyword in enumerate(state.keywords, 1):
                 print(f"\n  [{idx}/{total_keywords}] {keyword}")
 
-                try:
-                    for tier in tiers:
-                        per_kw = self.downloader._get_tier_value(tier, 'per_keyword', 5)
-                        if per_kw <= 0:
-                            continue
+                keyword_success = False
+                for tier in tiers:
+                    per_kw = self.downloader._get_tier_value(tier, 'per_keyword', 5)
+                    if per_kw <= 0:
+                        continue
 
-                        audio_downloads = self.downloader.audio_first.download_audio_for_keyword(
+                    # Use retry logic for each tier download
+                    def download_tier():
+                        return self.downloader.audio_first.download_audio_for_keyword(
                             keyword=keyword,
                             output_dir=output_dir,
                             tier=tier,
                             topic=state.topic_context or ""
                         )
-                        all_audio_downloads.extend(audio_downloads)
-                except Exception as e:
-                    logger.error(f"Audio download failed for '{keyword}': {e}")
+
+                    success, result, attempts = self._retry_with_backoff(
+                        download_tier,
+                        config,
+                        operation_name=f"audio download '{keyword}' tier={tier}"
+                    )
+
+                    if success:
+                        all_audio_downloads.extend(result)
+                        keyword_success = True
+                        if attempts > 1:
+                            logger.info(f"Successfully downloaded '{keyword}' after {attempts} attempts")
+                    else:
+                        logger.error(f"Audio download failed for '{keyword}' tier={tier} after {attempts} attempts: {result}")
+
+                if not keyword_success:
                     failed_keywords.append(keyword)
 
             # Store results
@@ -354,6 +370,47 @@ class DownloadStage(Stage):
             return StageResult.fail(f"Could not import downloader: {e}", warnings)
 
     # === Helper Methods ===
+
+    def _retry_with_backoff(
+        self,
+        operation: callable,
+        config: 'Config',
+        operation_name: str = "download"
+    ) -> tuple:
+        """
+        Retry an operation with exponential backoff.
+
+        Args:
+            operation: Callable that returns (result, error_message)
+            config: Config object with retry settings
+            operation_name: Name for logging
+
+        Returns:
+            tuple: (success: bool, result: Any, attempts: int)
+        """
+        max_retries = getattr(config.download, 'max_retries', 3)
+        base_delay = getattr(config.download, 'retry_delay', 2.0)
+        backoff_multiplier = getattr(config.download, 'retry_backoff', 2.0)
+
+        for attempt in range(max_retries):
+            try:
+                result = operation()
+                return (True, result, attempt + 1)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (backoff_multiplier ** attempt)
+                    logger.warning(
+                        f"Retry {attempt + 1}/{max_retries} for {operation_name} "
+                        f"after error: {e}. Waiting {delay:.1f}s..."
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(
+                        f"All {max_retries} retries failed for {operation_name}: {e}"
+                    )
+                    return (False, str(e), max_retries)
+
+        return (False, "Unknown error", max_retries)
 
     def _is_audio_first_enabled(self, config: 'Config') -> bool:
         """Check if audio-first mode is enabled"""

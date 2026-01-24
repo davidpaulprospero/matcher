@@ -43,6 +43,10 @@ def mock_config():
     config.download.audio_first.enabled = False
     config.download.audio_first.buffer_seconds = 30.0
     config.download.audio_first.merge_gap_seconds = 15.0
+    # Retry settings (defaults matching DownloadConfig)
+    config.download.max_retries = 3
+    config.download.retry_delay = 0.01  # Short delay for tests
+    config.download.retry_backoff = 2.0
     return config
 
 
@@ -1595,6 +1599,253 @@ class TestStoreDownloadResultsExtended:
 # ============================================================================
 # Test Restore Obsolete Fields
 # ============================================================================
+
+# ============================================================================
+# Test Retry Logic
+# ============================================================================
+
+class TestDownloadRetryLogic:
+    """Test retry with exponential backoff behavior"""
+
+    def test_retry_with_backoff_success_first_attempt(self, mock_config):
+        """Test successful operation on first attempt"""
+        stage = DownloadStage()
+        mock_config.download.max_retries = 3
+        mock_config.download.retry_delay = 0.1  # Short delay for tests
+        mock_config.download.retry_backoff = 2.0
+
+        call_count = 0
+        def successful_op():
+            nonlocal call_count
+            call_count += 1
+            return ["result"]
+
+        success, result, attempts = stage._retry_with_backoff(
+            successful_op, mock_config, "test_op"
+        )
+
+        assert success is True
+        assert result == ["result"]
+        assert attempts == 1
+        assert call_count == 1
+
+    def test_retry_with_backoff_success_after_retries(self, mock_config):
+        """Test successful operation after retries"""
+        stage = DownloadStage()
+        mock_config.download.max_retries = 3
+        mock_config.download.retry_delay = 0.01  # Very short delay for tests
+        mock_config.download.retry_backoff = 2.0
+
+        call_count = 0
+        def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("Temporary failure")
+            return ["success"]
+
+        success, result, attempts = stage._retry_with_backoff(
+            fail_then_succeed, mock_config, "test_op"
+        )
+
+        assert success is True
+        assert result == ["success"]
+        assert attempts == 3
+        assert call_count == 3
+
+    def test_retry_with_backoff_all_attempts_fail(self, mock_config):
+        """Test all retry attempts fail"""
+        stage = DownloadStage()
+        mock_config.download.max_retries = 3
+        mock_config.download.retry_delay = 0.01
+        mock_config.download.retry_backoff = 2.0
+
+        call_count = 0
+        def always_fail():
+            nonlocal call_count
+            call_count += 1
+            raise Exception("Permanent failure")
+
+        success, result, attempts = stage._retry_with_backoff(
+            always_fail, mock_config, "test_op"
+        )
+
+        assert success is False
+        assert "Permanent failure" in result
+        assert attempts == 3
+        assert call_count == 3
+
+    def test_retry_with_backoff_uses_config_defaults(self):
+        """Test retry uses getattr defaults when config fields missing"""
+        stage = DownloadStage()
+        mock_config = MagicMock()
+        # Simulate missing attributes - getattr should use defaults
+        mock_config.download.max_retries = None  # Will trigger default
+        del mock_config.download.retry_delay
+        del mock_config.download.retry_backoff
+
+        # Re-mock to trigger getattr default behavior
+        mock_config.download = MagicMock(spec=[])  # Empty spec means no attributes
+
+        call_count = 0
+        def succeed():
+            nonlocal call_count
+            call_count += 1
+            return ["ok"]
+
+        # Should use defaults: max_retries=3
+        success, result, attempts = stage._retry_with_backoff(
+            succeed, mock_config, "test_op"
+        )
+
+        assert success is True
+        assert call_count == 1
+
+    @patch('time.sleep')
+    def test_retry_with_backoff_exponential_delay(self, mock_sleep, mock_config):
+        """Test exponential backoff delays are calculated correctly"""
+        stage = DownloadStage()
+        mock_config.download.max_retries = 4
+        mock_config.download.retry_delay = 2.0
+        mock_config.download.retry_backoff = 2.0
+
+        call_count = 0
+        def always_fail():
+            nonlocal call_count
+            call_count += 1
+            raise Exception("Failure")
+
+        success, result, attempts = stage._retry_with_backoff(
+            always_fail, mock_config, "test_op"
+        )
+
+        # Should have slept 3 times (between attempts 1-2, 2-3, 3-4)
+        # Delays: 2.0 * 2^0 = 2.0, 2.0 * 2^1 = 4.0, 2.0 * 2^2 = 8.0
+        assert mock_sleep.call_count == 3
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        assert delays[0] == 2.0   # First retry delay
+        assert delays[1] == 4.0   # Second retry delay
+        assert delays[2] == 8.0   # Third retry delay
+
+    @patch('src.stages.download.logger')
+    def test_retry_logs_warnings_and_errors(self, mock_logger, mock_config):
+        """Test retry logs appropriate messages"""
+        stage = DownloadStage()
+        mock_config.download.max_retries = 2
+        mock_config.download.retry_delay = 0.01
+        mock_config.download.retry_backoff = 2.0
+
+        def always_fail():
+            raise Exception("Test error")
+
+        success, result, attempts = stage._retry_with_backoff(
+            always_fail, mock_config, "test_op"
+        )
+
+        # Should have logged warning for first retry, error for final failure
+        assert mock_logger.warning.call_count == 1
+        assert mock_logger.error.call_count == 1
+        assert "Retry 1/2" in str(mock_logger.warning.call_args)
+        assert "All 2 retries failed" in str(mock_logger.error.call_args)
+
+
+class TestAudioFirstRetryIntegration:
+    """Test retry integration in audio-first mode"""
+
+    @patch('src.downloader.VideoDownloader')
+    def test_audio_first_retries_failed_keywords(self, mock_downloader_class, mock_config, mock_checkpoint):
+        """Test audio-first mode retries failed keyword downloads"""
+        stage = DownloadStage()
+        state = PipelineState()
+        state.keywords = ["beach"]
+
+        mock_config.download.max_retries = 3
+        mock_config.download.retry_delay = 0.01
+        mock_config.download.retry_backoff = 2.0
+
+        mock_downloader = Mock()
+        mock_downloader.DURATION_TIERS = {'short': {}}
+        mock_downloader._get_tier_value.return_value = 5
+
+        # Fail twice, then succeed
+        call_count = 0
+        def fail_then_succeed(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("Network error")
+            return [Mock(file="audio.mp3", video_id="vid1", url="url")]
+
+        mock_downloader.audio_first.download_audio_for_keyword.side_effect = fail_then_succeed
+        mock_downloader_class.return_value = mock_downloader
+
+        result = stage._run_audio_first(state, mock_config, mock_checkpoint, [])
+
+        assert result.success is True
+        assert len(state.downloaded_audio) == 1
+        assert len(state.failed_keywords) == 0
+        assert call_count == 3
+
+    @patch('src.downloader.VideoDownloader')
+    def test_audio_first_marks_keyword_failed_after_all_retries(self, mock_downloader_class, mock_config, mock_checkpoint):
+        """Test audio-first mode marks keyword as failed after all retries exhausted"""
+        stage = DownloadStage()
+        state = PipelineState()
+        state.keywords = ["beach"]
+
+        mock_config.download.max_retries = 2
+        mock_config.download.retry_delay = 0.01
+        mock_config.download.retry_backoff = 2.0
+
+        mock_downloader = Mock()
+        mock_downloader.DURATION_TIERS = {'short': {}}
+        mock_downloader._get_tier_value.return_value = 5
+        mock_downloader.audio_first.download_audio_for_keyword.side_effect = Exception("Permanent error")
+        mock_downloader_class.return_value = mock_downloader
+
+        result = stage._run_audio_first(state, mock_config, mock_checkpoint, [])
+
+        assert result.success is True  # Stage succeeds even with failed keywords
+        assert len(state.downloaded_audio) == 0
+        assert "beach" in state.failed_keywords
+
+    @patch('src.downloader.VideoDownloader')
+    def test_audio_first_partial_tier_success(self, mock_downloader_class, mock_config, mock_checkpoint):
+        """Test audio-first mode succeeds if any tier succeeds (even if others fail)"""
+        stage = DownloadStage()
+        state = PipelineState()
+        state.keywords = ["beach"]
+
+        mock_config.download.max_retries = 2
+        mock_config.download.retry_delay = 0.01
+        mock_config.download.retry_backoff = 2.0
+
+        mock_downloader = Mock()
+        mock_downloader.DURATION_TIERS = {'short': {}, 'medium': {}}
+        mock_downloader._get_tier_value.return_value = 5
+
+        # First tier fails, second succeeds
+        tier_results = {
+            'short': Exception("Tier short failed"),
+            'medium': [Mock(file="audio.mp3", video_id="vid1", url="url")]
+        }
+
+        def download_by_tier(**kwargs):
+            tier = kwargs.get('tier')
+            result = tier_results.get(tier)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        mock_downloader.audio_first.download_audio_for_keyword.side_effect = download_by_tier
+        mock_downloader_class.return_value = mock_downloader
+
+        result = stage._run_audio_first(state, mock_config, mock_checkpoint, [])
+
+        assert result.success is True
+        assert len(state.downloaded_audio) == 1
+        assert len(state.failed_keywords) == 0  # Keyword succeeded because medium tier worked
+
 
 class TestRestoreObsoleteFields:
     """Test restore handles obsolete fields from old checkpoints"""
