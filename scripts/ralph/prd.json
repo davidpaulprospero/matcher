@@ -51,7 +51,8 @@
         "All stage validation tests pass"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Enhanced validate_inputs() for MatchStage and OutputStage. Now returns 'Missing required fields: X, Y. Suggestion: run Z stage first'. Added 7 new tests for MatchStage and 6 for OutputStage covering field names and suggestions. All 76 stage tests pass."
     },
     {
       "id": "US-004",

@@ -43,3 +43,22 @@
   - tests/test_transcribe_stage_coverage.py (added 12 tests)
   - tests/test_stage_transcribe.py (fixed mock_config fixture)
 
+## Iteration 2 - [US-003] Add stage input validation error messages
+- Enhanced `MatchStage.validate_inputs()` to return specific missing field names
+  - Now checks: voiceover_segments, embeddings, text_metadata
+  - Format: "Missing required fields: X, Y. Suggestion: run Z stage first"
+  - Suggests ANALYZE stage for voiceover_segments, TRANSCRIBE for embeddings/text_metadata
+- Enhanced `OutputStage.validate_inputs()` to return specific missing field names
+  - Now checks: matches, config.otio_output_dir
+  - Format: "Missing required fields: X. Suggestion: run MATCH stage first"
+  - Suggests MATCH stage for matches, config setting for otio_output_dir
+- Added 7 new tests in TestInputValidationErrorMessages class (test_stage_match.py)
+- Added 6 new tests in TestInputValidationErrorMessages class (test_stage_output.py)
+- Updated 3 existing validation tests to include text_metadata in state setup
+- All 76 stage tests pass
+- Files modified:
+  - src/stages/match.py (enhanced validate_inputs, lines 223-257)
+  - src/stages/output.py (enhanced validate_inputs, lines 470-502)
+  - tests/test_stage_match.py (added TestInputValidationErrorMessages class)
+  - tests/test_stage_output.py (added TestInputValidationErrorMessages class)
+
