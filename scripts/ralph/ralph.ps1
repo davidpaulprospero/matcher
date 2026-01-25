@@ -38,6 +38,11 @@ $script:ConsecutiveFailures = 0
 $script:SessionStartTime = Get-Date
 $script:CurrentMode = "Standard"  # "Interview", "Standard", or "TrueAuto"
 
+# Retry tracking
+$script:CurrentRetryCount = 0      # Attempts on current focus area/story
+$script:LastFocusAreaId = ""       # Track when focus area changes
+$script:LastStoryId = ""           # Track when story changes
+
 # Ensure logs directory exists
 if (-not (Test-Path $script:LogDir)) {
     New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null
@@ -362,6 +367,13 @@ function Invoke-ClaudeForFocusArea {
         [string]$Context = ""
     )
 
+    # Track retries per focus area
+    if ($FocusAreaId -ne $script:LastFocusAreaId) {
+        $script:CurrentRetryCount = 0
+        $script:LastFocusAreaId = $FocusAreaId
+    }
+    $script:CurrentRetryCount++
+
     $script:IterationCount++
     $iterationStart = Get-Date
 
@@ -447,7 +459,7 @@ function Invoke-ClaudeForFocusArea {
             # Log timeout
             "Timeout after $timeout seconds" | Add-Content $iterationLog
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
 
             $script:ConsecutiveFailures++
             return $false
@@ -456,7 +468,7 @@ function Invoke-ClaudeForFocusArea {
         if ($process.ExitCode -eq 0) {
             Write-Host "  Iteration completed successfully" -ForegroundColor Green
             "Completed successfully in $([math]::Round($iterationDuration.TotalSeconds)) seconds" | Add-Content $iterationLog
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount
 
             $script:ConsecutiveFailures = 0
             return $true
@@ -465,7 +477,7 @@ function Invoke-ClaudeForFocusArea {
             Write-Host "  Iteration failed with exit code $($process.ExitCode)" -ForegroundColor Red
             "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
 
             $script:ConsecutiveFailures++
             return $false
@@ -475,7 +487,7 @@ function Invoke-ClaudeForFocusArea {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         "Error: $_" | Add-Content $iterationLog
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults ""
+        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount
 
         $script:ConsecutiveFailures++
         return $false
@@ -495,6 +507,13 @@ function Invoke-ClaudeForStory {
         [Parameter(Mandatory=$true)]
         [string]$StoryId
     )
+
+    # Track retries per story
+    if ($StoryId -ne $script:LastStoryId) {
+        $script:CurrentRetryCount = 0
+        $script:LastStoryId = $StoryId
+    }
+    $script:CurrentRetryCount++
 
     $script:IterationCount++
     $iterationStart = Get-Date
@@ -564,21 +583,21 @@ function Invoke-ClaudeForStory {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
             $script:ConsecutiveFailures++
             return $false
         }
 
         if ($process.ExitCode -eq 0) {
             Write-Host "  Story completed successfully" -ForegroundColor Green
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount
             $script:ConsecutiveFailures = 0
             return $true
         }
         else {
             Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
             $script:ConsecutiveFailures++
             return $false
         }
@@ -586,7 +605,7 @@ function Invoke-ClaudeForStory {
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults ""
+        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount
         $script:ConsecutiveFailures++
         return $false
     }
@@ -706,12 +725,13 @@ function Record-Metric {
         [int]$TokensUsed = 0,
         [string]$ErrorCategory = "",
         [int]$HourOfDay = -1,
-        [string]$TestResults = ""
+        [string]$TestResults = "",
+        [int]$RetryCount = 0
     )
 
     # Ensure metrics file exists with header
     if (-not (Test-Path $script:MetricsFile)) {
-        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results" | Set-Content $script:MetricsFile
+        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count" | Set-Content $script:MetricsFile
     }
 
     # Use defaults from script variables if not provided
@@ -733,7 +753,7 @@ function Record-Metric {
     }
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults"
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount"
     Add-Content -Path $script:MetricsFile -Value $row
 }
 
