@@ -459,7 +459,7 @@ function Invoke-ClaudeForFocusArea {
             # Log timeout
             "Timeout after $timeout seconds" | Add-Content $iterationLog
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
 
             $script:ConsecutiveFailures++
             return $false
@@ -468,7 +468,10 @@ function Invoke-ClaudeForFocusArea {
         if ($process.ExitCode -eq 0) {
             Write-Host "  Iteration completed successfully" -ForegroundColor Green
             "Completed successfully in $([math]::Round($iterationDuration.TotalSeconds)) seconds" | Add-Content $iterationLog
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount
+
+            # Capture git diff stats on success
+            $gitStats = Get-GitDiffStats
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
 
             $script:ConsecutiveFailures = 0
             return $true
@@ -477,7 +480,7 @@ function Invoke-ClaudeForFocusArea {
             Write-Host "  Iteration failed with exit code $($process.ExitCode)" -ForegroundColor Red
             "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
 
             $script:ConsecutiveFailures++
             return $false
@@ -487,7 +490,7 @@ function Invoke-ClaudeForFocusArea {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         "Error: $_" | Add-Content $iterationLog
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount
+        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
 
         $script:ConsecutiveFailures++
         return $false
@@ -583,21 +586,24 @@ function Invoke-ClaudeForStory {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
             $script:ConsecutiveFailures++
             return $false
         }
 
         if ($process.ExitCode -eq 0) {
             Write-Host "  Story completed successfully" -ForegroundColor Green
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount
+
+            # Capture git diff stats on success
+            $gitStats = Get-GitDiffStats
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
             $script:ConsecutiveFailures = 0
             return $true
         }
         else {
             Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
             $script:ConsecutiveFailures++
             return $false
         }
@@ -605,7 +611,7 @@ function Invoke-ClaudeForStory {
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount
+        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
         $script:ConsecutiveFailures++
         return $false
     }
@@ -614,6 +620,37 @@ function Invoke-ClaudeForStory {
 # ============================================================================
 # METRICS
 # ============================================================================
+
+function Get-GitDiffStats {
+    <#
+    .SYNOPSIS
+    Gets lines added/deleted since last commit using git diff
+    #>
+
+    try {
+        # Get diff stats for staged and unstaged changes
+        $diffOutput = git diff --numstat HEAD~1 2>$null
+
+        if (-not $diffOutput) {
+            return @{ Added = 0; Deleted = 0 }
+        }
+
+        $totalAdded = 0
+        $totalDeleted = 0
+
+        foreach ($line in $diffOutput -split "`n") {
+            if ($line -match '^(\d+)\s+(\d+)\s+') {
+                $totalAdded += [int]$Matches[1]
+                $totalDeleted += [int]$Matches[2]
+            }
+        }
+
+        return @{ Added = $totalAdded; Deleted = $totalDeleted }
+    }
+    catch {
+        return @{ Added = 0; Deleted = 0 }
+    }
+}
 
 function Get-TestResults {
     <#
@@ -726,12 +763,14 @@ function Record-Metric {
         [string]$ErrorCategory = "",
         [int]$HourOfDay = -1,
         [string]$TestResults = "",
-        [int]$RetryCount = 0
+        [int]$RetryCount = 0,
+        [int]$LinesAdded = 0,
+        [int]$LinesDeleted = 0
     )
 
     # Ensure metrics file exists with header
     if (-not (Test-Path $script:MetricsFile)) {
-        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count" | Set-Content $script:MetricsFile
+        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted" | Set-Content $script:MetricsFile
     }
 
     # Use defaults from script variables if not provided
@@ -753,7 +792,7 @@ function Record-Metric {
     }
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount"
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount,$LinesAdded,$LinesDeleted"
     Add-Content -Path $script:MetricsFile -Value $row
 }
 
