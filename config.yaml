@@ -330,6 +330,14 @@ matching:
   broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
   broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
 
+  # Temporal coherence (adjacent segment scoring)
+  # Chain-of-thought: Adjacent segments should have visual continuity
+  # Reasoning: Clips from same source video as previous/next segment feel more cohesive
+  # Decision: Apply small boost for same-source, small penalty for jarring switches
+  temporal_coherence_enabled: true  # Enable temporal coherence scoring
+  temporal_coherence_same_source_boost: 0.05  # Boost for clips from same source as adjacent (+5%)
+  temporal_coherence_context_switch_penalty: 0.05  # Penalty for jarring context switches (-5%)
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
