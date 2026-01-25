@@ -516,8 +516,8 @@ Start by reading the config and prompt files, then generate the PRD.
     # Get Claude path
     $claudePath = Get-ClaudePath
 
-    # Build arguments - FLAGS FIRST, then prompt LAST
-    # Claude CLI expects: claude [flags] "prompt"
+    # Build arguments (prompt is passed via stdin, not as argument)
+    # This avoids multiline string issues with Start-Process
     $claudeArgs = @(
         "--print",
         "--dangerously-skip-permissions"
@@ -529,9 +529,7 @@ Start by reading the config and prompt files, then generate the PRD.
     if ($GeneratePRD -or $SkipPlanApproval) {
         $claudeArgs += "--allowedTools=Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
-
-    # Prompt must be LAST (positional argument)
-    $claudeArgs += $prompt
+    # NOTE: Prompt is piped via stdin (see promptFile below), not passed as argument
 
     Write-Host "  Invoking Claude..." -ForegroundColor Cyan
     Write-Host "  Prompt: Focus on $FocusAreaId" -ForegroundColor DarkGray
@@ -549,10 +547,19 @@ Start by reading the config and prompt files, then generate the PRD.
         # Output file paths for reading after completion
         $outFile = Join-Path $script:SessionLogDir "claude_out_$($script:IterationCount).log"
         $errFile = Join-Path $script:SessionLogDir "claude_err_$($script:IterationCount).log"
+        $promptFile = Join-Path $script:SessionLogDir "prompt_$($script:IterationCount).txt"
 
-        # Run Claude with timeout
-        $process = Start-Process -FilePath $claudePath `
-            -ArgumentList $claudeArgs `
+        # Write prompt to file (multiline strings break when passed as arguments)
+        $prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
+
+        # Build the command with stdin redirection via cmd
+        # This properly handles multiline prompts
+        $flagsString = ($claudeArgs -join ' ')
+        $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
+
+        # Run Claude with timeout using cmd for proper stdin piping
+        $process = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", $cmdCommand `
             -WorkingDirectory $script:ProjectRoot `
             -NoNewWindow `
             -PassThru `
@@ -663,11 +670,10 @@ function Invoke-ClaudeForStory {
     # Get Claude path
     $claudePath = Get-ClaudePath
 
-    # Build arguments
+    # Build arguments (prompt is passed via stdin for consistency)
     $claudeArgs = @(
         "--print",
-        "--dangerously-skip-permissions",
-        $prompt
+        "--dangerously-skip-permissions"
     )
 
     Write-Host "  Invoking Claude for $StoryId..." -ForegroundColor Cyan
@@ -681,9 +687,15 @@ function Invoke-ClaudeForStory {
         # Output file paths for reading after completion
         $outFile = Join-Path $script:SessionLogDir "claude_out_$($script:IterationCount).log"
         $errFile = Join-Path $script:SessionLogDir "claude_err_$($script:IterationCount).log"
+        $promptFile = Join-Path $script:SessionLogDir "prompt_$($script:IterationCount).txt"
 
-        $process = Start-Process -FilePath $claudePath `
-            -ArgumentList $claudeArgs `
+        # Write prompt to file and pipe via stdin (consistent with Invoke-ClaudeForFocusArea)
+        $prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
+        $flagsString = ($claudeArgs -join ' ')
+        $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
+
+        $process = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", $cmdCommand `
             -WorkingDirectory $script:ProjectRoot `
             -NoNewWindow `
             -PassThru `
