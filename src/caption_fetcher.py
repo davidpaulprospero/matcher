@@ -199,6 +199,27 @@ class ConfigValidationError(CaptionError):
         super().__init__(message)
 
 
+class ErrorPatternAbortError(CaptionError):
+    """Raised when batch fetch is aborted due to detected error pattern (US-007 Sprint 7).
+
+    This exception is raised when abort_on_error_pattern='abort' and a pattern
+    is detected (e.g., 30%+ of videos failing with the same error).
+
+    Attributes:
+        pattern_result: The ErrorPatternResult with detection details.
+        partial_results: Dict of results collected before abort.
+    """
+    def __init__(
+        self,
+        pattern_result: 'ErrorPatternResult',
+        partial_results: Optional[Dict[str, Any]] = None
+    ):
+        self.pattern_result = pattern_result
+        self.partial_results = partial_results or {}
+        message = str(pattern_result)
+        super().__init__(message)
+
+
 # Import Enum for CaptionErrorCategory
 from enum import Enum, auto
 
@@ -360,6 +381,281 @@ class ParseResult:
     def has_skipped(self) -> bool:
         """Check if any segments were skipped."""
         return len(self.skipped_segments) > 0
+
+
+@dataclass
+class ErrorPatternResult:
+    """Result of error pattern detection (US-007 Sprint 7).
+
+    When batch fetching encounters repeated errors of the same type,
+    this dataclass captures the detected pattern for logging and decision-making.
+
+    Attributes:
+        detected: Whether a pattern was detected (threshold exceeded).
+        error_signature: Canonical signature of the error (e.g., "403 Forbidden").
+        affected_video_ids: List of video IDs that failed with this error.
+        sample_size: Total videos checked when pattern was evaluated.
+        ratio: Ratio of affected videos to sample size (e.g., 0.8 for 8/10).
+        likely_cause: Human-readable probable cause (e.g., "possible geoblocking").
+
+    Example:
+        >>> result = ErrorPatternResult(
+        ...     detected=True,
+        ...     error_signature="403 Forbidden",
+        ...     affected_video_ids=["abc", "def", "ghi"],
+        ...     sample_size=10,
+        ...     ratio=0.3,
+        ...     likely_cause="possible geoblocking"
+        ... )
+        >>> print(result)
+        'Pattern detected: 403 Forbidden (3/10 videos, 30.0%) - possible geoblocking'
+    """
+    detected: bool = False
+    error_signature: str = ""
+    affected_video_ids: List[str] = field(default_factory=list)
+    sample_size: int = 0
+    ratio: float = 0.0
+    likely_cause: str = ""
+
+    def __str__(self) -> str:
+        """Format as log-friendly string."""
+        if not self.detected:
+            return "No error pattern detected"
+        count = len(self.affected_video_ids)
+        pct = self.ratio * 100
+        return (
+            f"Pattern detected: {self.error_signature} "
+            f"({count}/{self.sample_size} videos, {pct:.1f}%) - {self.likely_cause}"
+        )
+
+
+class ErrorPatternDetector:
+    """Detects repeated error patterns during batch caption fetching (US-007 Sprint 7).
+
+    Tracks error signatures as videos are processed and triggers pattern detection
+    when the same error affects a configurable threshold of videos. This enables
+    early detection of systemic issues like:
+    - Geoblocking (403 Forbidden from many videos)
+    - Rate limiting (429 Too Many Requests)
+    - Network issues (connection timeouts across batch)
+    - API restrictions (specific error messages)
+
+    The detector is thread-safe for use with concurrent caption fetching.
+
+    Args:
+        threshold: Ratio of videos that must fail with same error to trigger.
+            Default 0.3 = 30% of sample_size videos must fail with same error.
+        sample_size: Number of videos to check before evaluating patterns.
+            Default 10 = check first 10 videos for patterns.
+
+    Example:
+        >>> detector = ErrorPatternDetector(threshold=0.3, sample_size=10)
+        >>> detector.record_error("abc", "403 Forbidden")
+        >>> detector.record_error("def", "403 Forbidden")
+        >>> detector.record_error("ghi", "403 Forbidden")
+        >>> detector.record_success("jkl")
+        >>> result = detector.check_pattern()
+        >>> if result.detected:
+        ...     print(result)  # "Pattern detected: 403 Forbidden (3/4 videos)..."
+
+    Thread Safety:
+        All methods use internal locking for safe concurrent access.
+    """
+
+    # Common error patterns and their likely causes
+    ERROR_CAUSES = {
+        "403": "possible geoblocking or access restriction",
+        "forbidden": "possible geoblocking or access restriction",
+        "429": "rate limiting - consider reducing parallel fetches",
+        "too many requests": "rate limiting - consider reducing parallel fetches",
+        "rate limit": "rate limiting - consider reducing parallel fetches",
+        "timeout": "network issues - check connection or increase timeout",
+        "connection": "network connectivity issues",
+        "dns": "DNS resolution failure - check network",
+        "ssl": "SSL/TLS certificate issue",
+        "unavailable": "captions disabled or unavailable for region",
+        "not found": "videos may be deleted or private",
+    }
+
+    def __init__(self, threshold: float = 0.3, sample_size: int = 10):
+        """Initialize the detector.
+
+        Args:
+            threshold: Ratio of videos that must fail with same error to trigger.
+            sample_size: Number of videos to check before evaluating patterns.
+        """
+        self.threshold = threshold
+        self.sample_size = sample_size
+        self._errors: Dict[str, List[str]] = {}  # signature -> [video_ids]
+        self._successes: List[str] = []
+        self._total_processed = 0
+        self._pattern_checked = False
+        self._pattern_result: Optional[ErrorPatternResult] = None
+        self._lock = threading.Lock()
+
+    def _extract_signature(self, error_reason: str) -> str:
+        """Extract a canonical error signature from an error reason.
+
+        Normalizes error messages to group similar errors together.
+        For example, "HTTP Error 403: Forbidden" and "403 access denied"
+        both become "403 Forbidden".
+
+        Args:
+            error_reason: The error message or reason string.
+
+        Returns:
+            Canonical error signature string.
+        """
+        reason_lower = error_reason.lower()
+
+        # Check for HTTP status codes
+        http_patterns = [
+            (r"403|forbidden", "403 Forbidden"),
+            (r"429|too many requests", "429 Too Many Requests"),
+            (r"404|not found", "404 Not Found"),
+            (r"500|internal server error", "500 Internal Server Error"),
+            (r"502|bad gateway", "502 Bad Gateway"),
+            (r"503|service unavailable", "503 Service Unavailable"),
+            (r"timeout|timed out", "Timeout"),
+            (r"connection refused|refused", "Connection Refused"),
+            (r"connection reset|reset", "Connection Reset"),
+            (r"dns|resolve", "DNS Error"),
+            (r"ssl|certificate", "SSL Error"),
+            (r"rate limit|throttle", "Rate Limited"),
+            (r"unavailable|no subtitles|no captions", "Captions Unavailable"),
+            (r"private|not available", "Video Private/Unavailable"),
+        ]
+
+        for pattern, signature in http_patterns:
+            if re.search(pattern, reason_lower):
+                return signature
+
+        # Truncate long messages and return as-is
+        if len(error_reason) > 50:
+            return error_reason[:50] + "..."
+        return error_reason
+
+    def _infer_cause(self, signature: str) -> str:
+        """Infer likely cause from error signature.
+
+        Args:
+            signature: The canonical error signature.
+
+        Returns:
+            Human-readable likely cause string.
+        """
+        sig_lower = signature.lower()
+        for pattern, cause in self.ERROR_CAUSES.items():
+            if pattern in sig_lower:
+                return cause
+        return "unknown cause - check error details"
+
+    def record_error(self, video_id: str, error_reason: str) -> None:
+        """Record a failed video with its error reason.
+
+        Thread-safe method to track errors during batch processing.
+
+        Args:
+            video_id: The YouTube video ID that failed.
+            error_reason: The error message or reason for failure.
+        """
+        signature = self._extract_signature(error_reason)
+        with self._lock:
+            if signature not in self._errors:
+                self._errors[signature] = []
+            self._errors[signature].append(video_id)
+            self._total_processed += 1
+
+    def record_success(self, video_id: str) -> None:
+        """Record a successfully processed video.
+
+        Thread-safe method to track successes during batch processing.
+
+        Args:
+            video_id: The YouTube video ID that succeeded.
+        """
+        with self._lock:
+            self._successes.append(video_id)
+            self._total_processed += 1
+
+    def should_check_pattern(self) -> bool:
+        """Check if enough videos have been processed to evaluate patterns.
+
+        Returns:
+            True if sample_size videos have been processed and pattern
+            hasn't been checked yet.
+        """
+        with self._lock:
+            return (
+                self._total_processed >= self.sample_size
+                and not self._pattern_checked
+            )
+
+    def check_pattern(self) -> ErrorPatternResult:
+        """Evaluate error patterns and return detection result.
+
+        Checks if any error signature affects more than threshold ratio
+        of processed videos. Should be called after sample_size videos
+        have been processed (use should_check_pattern() to verify).
+
+        Returns:
+            ErrorPatternResult with detection status and details.
+            If called multiple times, returns cached result.
+        """
+        with self._lock:
+            # Return cached result if already checked
+            if self._pattern_checked and self._pattern_result:
+                return self._pattern_result
+
+            self._pattern_checked = True
+
+            # Find the most common error signature
+            if not self._errors:
+                self._pattern_result = ErrorPatternResult(
+                    detected=False,
+                    sample_size=self._total_processed
+                )
+                return self._pattern_result
+
+            # Find signature with most affected videos
+            max_sig = max(self._errors.keys(), key=lambda s: len(self._errors[s]))
+            affected = self._errors[max_sig]
+            ratio = len(affected) / self._total_processed if self._total_processed > 0 else 0
+
+            if ratio >= self.threshold:
+                self._pattern_result = ErrorPatternResult(
+                    detected=True,
+                    error_signature=max_sig,
+                    affected_video_ids=list(affected),
+                    sample_size=self._total_processed,
+                    ratio=ratio,
+                    likely_cause=self._infer_cause(max_sig)
+                )
+            else:
+                self._pattern_result = ErrorPatternResult(
+                    detected=False,
+                    error_signature=max_sig,
+                    affected_video_ids=list(affected),
+                    sample_size=self._total_processed,
+                    ratio=ratio,
+                    likely_cause=""
+                )
+
+            return self._pattern_result
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get current statistics for debugging.
+
+        Returns:
+            Dict with total_processed, success_count, error_counts by signature.
+        """
+        with self._lock:
+            return {
+                "total_processed": self._total_processed,
+                "success_count": len(self._successes),
+                "error_counts": {sig: len(vids) for sig, vids in self._errors.items()},
+                "pattern_checked": self._pattern_checked,
+            }
 
 
 # ISO 639-1 language codes (US-005)
@@ -2054,6 +2350,14 @@ class CaptionFetcher:
         projects with 50+ videos. Uses ThreadPoolExecutor with configurable
         max_workers (default: 4).
 
+        US-007 Sprint 7: Adds error pattern detection to identify systemic issues
+        (geoblocking, rate limiting) early in the batch. When 30%+ of the first
+        N videos fail with the same error, the pattern is detected and handled
+        based on config.abort_on_error_pattern setting:
+        - 'abort': Raises ErrorPatternAbortError with partial results
+        - 'warn': Logs warning and continues fetching (default)
+        - 'skip': Disables pattern detection entirely
+
         Args:
             video_ids: List of YouTube video IDs to fetch captions for.
             preferred_language: Preferred caption language (ISO 639-1 code).
@@ -2064,7 +2368,7 @@ class CaptionFetcher:
                 If provided, metrics are updated as fetches complete.
             progress_callback: Optional callback for real-time progress updates.
                 Called with (video_id, status, details) where:
-                - status: 'fetching', 'success', 'failed', 'skipped'
+                - status: 'fetching', 'success', 'failed', 'skipped', 'pattern_detected'
                 - details: Dict with language, quality, segment_count, error, etc.
             skip_video_ids: Set of video IDs to skip (already cached).
 
@@ -2072,6 +2376,10 @@ class CaptionFetcher:
             Dict mapping video_id to either:
             - CaptionResult on success
             - Dict with 'error': True or 'unavailable': True on failure
+
+        Raises:
+            ErrorPatternAbortError: When abort_on_error_pattern='abort' and
+                error pattern is detected. Exception contains partial_results.
 
         Example:
             fetcher = CaptionFetcher(config)
@@ -2092,6 +2400,7 @@ class CaptionFetcher:
 
         # Get max_workers from config or parameter
         workers = max_workers
+        caption_config = None
         if workers is None:
             if self.config:
                 caption_config = getattr(self.config.download, 'caption_first', None)
@@ -2102,6 +2411,25 @@ class CaptionFetcher:
 
         # Ensure at least 1 worker
         workers = max(1, workers)
+
+        # US-007 Sprint 7: Setup error pattern detection
+        error_pattern_mode = "warn"  # Default
+        error_pattern_threshold = 0.3  # Default 30%
+        error_pattern_sample_size = 10  # Default first 10 videos
+        if caption_config is None and self.config:
+            caption_config = getattr(self.config.download, 'caption_first', None)
+        if caption_config:
+            error_pattern_mode = getattr(caption_config, 'abort_on_error_pattern', 'warn')
+            error_pattern_threshold = getattr(caption_config, 'error_pattern_threshold', 0.3)
+            error_pattern_sample_size = getattr(caption_config, 'error_pattern_sample_size', 10)
+
+        # Create error pattern detector (None if mode is 'skip')
+        pattern_detector: Optional[ErrorPatternDetector] = None
+        if error_pattern_mode != 'skip':
+            pattern_detector = ErrorPatternDetector(
+                threshold=error_pattern_threshold,
+                sample_size=error_pattern_sample_size
+            )
 
         # Filter out skipped video IDs
         skip_set = skip_video_ids or set()
@@ -2298,6 +2626,9 @@ class CaptionFetcher:
 
                 return video_id, error_result
 
+        # US-007 Sprint 7: Track whether we've handled a pattern already
+        pattern_handled = False
+
         # Execute fetches in parallel
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
@@ -2310,7 +2641,69 @@ class CaptionFetcher:
                 try:
                     vid, result = future.result()
                     results[vid] = result
+
+                    # US-007 Sprint 7: Record result with pattern detector
+                    if pattern_detector and not pattern_handled:
+                        if isinstance(result, CaptionResult):
+                            pattern_detector.record_success(vid)
+                        else:
+                            # It's an error dict
+                            error_reason = result.get('reason', 'unknown error')
+                            pattern_detector.record_error(vid, error_reason)
+
+                        # Check if we should evaluate patterns
+                        if pattern_detector.should_check_pattern():
+                            pattern_result = pattern_detector.check_pattern()
+
+                            if pattern_result.detected:
+                                # Log the pattern with full details
+                                logger.warning(
+                                    f"Error pattern detected: {pattern_result.error_signature} "
+                                    f"({len(pattern_result.affected_video_ids)}/{pattern_result.sample_size} videos, "
+                                    f"{pattern_result.ratio * 100:.1f}%) - {pattern_result.likely_cause}"
+                                )
+
+                                # Record in metrics if available
+                                if metrics:
+                                    metrics.record_error_pattern_detected(
+                                        pattern_result.error_signature,
+                                        len(pattern_result.affected_video_ids),
+                                        pattern_result.sample_size
+                                    )
+
+                                # Notify progress callback about pattern
+                                if progress_callback:
+                                    try:
+                                        progress_callback('', 'pattern_detected', {
+                                            'error_signature': pattern_result.error_signature,
+                                            'affected_count': len(pattern_result.affected_video_ids),
+                                            'sample_size': pattern_result.sample_size,
+                                            'ratio': pattern_result.ratio,
+                                            'likely_cause': pattern_result.likely_cause,
+                                        })
+                                    except Exception as cb_err:
+                                        logger.debug(f"Progress callback error: {cb_err}")
+
+                                # Handle based on mode
+                                if error_pattern_mode == 'abort':
+                                    logger.error(
+                                        f"Aborting batch fetch due to error pattern: "
+                                        f"{pattern_result}"
+                                    )
+                                    # Cancel remaining futures
+                                    for f in futures:
+                                        f.cancel()
+                                    raise ErrorPatternAbortError(
+                                        pattern_result=pattern_result,
+                                        partial_results=dict(results)
+                                    )
+                                # 'warn' mode: already logged, continue
+
+                            pattern_handled = True  # Only check once
+
                 except Exception as e:
+                    if isinstance(e, ErrorPatternAbortError):
+                        raise  # Re-raise abort exception
                     # Should not happen as fetch_single catches all exceptions
                     logger.error(f"Batch fetch future error for {video_id}: {e}")
                     results[video_id] = {
@@ -2319,6 +2712,10 @@ class CaptionFetcher:
                         'reason': str(e),
                         'caption_quality': 'low',
                     }
+
+                    # Also record this with pattern detector
+                    if pattern_detector and not pattern_handled:
+                        pattern_detector.record_error(video_id, str(e))
 
         logger.info(
             f"Batch caption fetch complete: {len(results)} processed, "
@@ -5118,6 +5515,43 @@ class CaptionMetrics:
                 'top_category': top_category,
                 'category_rates': category_rates
             }
+
+    def record_error_pattern_detected(
+        self,
+        error_signature: str,
+        affected_count: int,
+        sample_size: int
+    ) -> None:
+        """Record that an error pattern was detected (US-007 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called when the ErrorPatternDetector detects a systemic error pattern
+        (e.g., 30%+ of videos failing with the same error). This is tracked
+        for metrics reporting and debugging.
+
+        Args:
+            error_signature: The canonical error signature (e.g., "403 Forbidden").
+            affected_count: Number of videos affected by this error.
+            sample_size: Total videos checked when pattern was detected.
+
+        Example:
+            >>> metrics.record_error_pattern_detected("403 Forbidden", 8, 10)
+        """
+        with self._lock:
+            if not hasattr(self, 'error_patterns_detected'):
+                self.error_patterns_detected: List[Dict[str, Any]] = []
+            self.error_patterns_detected.append({
+                'error_signature': error_signature,
+                'affected_count': affected_count,
+                'sample_size': sample_size,
+                'ratio': affected_count / sample_size if sample_size > 0 else 0,
+            })
+
+        logger.debug(
+            f"Error pattern recorded: {error_signature} "
+            f"({affected_count}/{sample_size} videos)"
+        )
 
     def record_skipped_live_stream(self, video_id: str = "") -> None:
         """Record a skipped live stream (US-002).

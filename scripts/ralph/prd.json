@@ -97,8 +97,8 @@
         "Track pre_check_batched_count in metrics showing API calls saved",
         "Tests verify 50 videos from same channel use 5 sample checks instead of 50"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Feature already fully implemented: ChannelCaptionPattern dataclass (line 3386), batch_precheck_by_channel() method (line 3081), config options in download.py (batch_precheck_by_channel, batch_precheck_confidence, batch_precheck_min_samples, batch_precheck_sample_size), metrics tracking (pre_check_batched_total/skipped/checked, api_calls_saved), cache persistence (save/load_channel_patterns). 31 comprehensive tests in test_batch_precheck.py all pass, including test_50_videos_same_channel_uses_5_checks verifying acceptance criteria."
     },
     {
       "id": "US-007",
@@ -113,8 +113,8 @@
         "Modes: 'abort' (stop immediately), 'warn' (log and continue), 'skip' (no detection)",
         "Tests verify pattern detection triggers at threshold with correct error signature"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented ErrorPatternResult dataclass, ErrorPatternDetector class (thread-safe, signature extraction, cause inference), ErrorPatternAbortError exception. Config options: abort_on_error_pattern (warn/abort/skip), error_pattern_threshold (0.3), error_pattern_sample_size (10). Integration in fetch_captions_batch() with pattern logging, progress callback, and metrics tracking. 30 new tests in 4 test classes all pass."
     },
     {
       "id": "US-008",

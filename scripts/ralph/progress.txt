@@ -4639,3 +4639,59 @@ by grouping videos by YouTube channel and using representative samples.
 - 382 tests pass (test_caption_fetcher.py + test_batch_precheck.py)
 - Syntax checks pass for all modified files
 
+## Iteration 7 - US-007: Network error pattern detection with early abort
+- Focus: caption
+- Status: COMPLETE
+
+### What Was Implemented
+Network error pattern detection and early abort for caption batch fetching (US-007 Sprint 7):
+
+1. **ErrorPatternResult dataclass** - Captures detected patterns with:
+   - error_signature (canonical error name like "403 Forbidden")
+   - affected_video_ids
+   - sample_size, ratio, likely_cause
+   - `__str__` for log-friendly formatting
+
+2. **ErrorPatternDetector class** - Thread-safe detector with:
+   - Configurable threshold (default 30%) and sample_size (default 10)
+   - Signature extraction normalizing error messages (e.g., "HTTP 403: Forbidden" -> "403 Forbidden")
+   - Cause inference for common errors (geoblocking, rate limiting, timeout, etc.)
+   - `record_error()`, `record_success()`, `should_check_pattern()`, `check_pattern()`
+
+3. **ErrorPatternAbortError exception** - Raised when mode='abort' with:
+   - pattern_result and partial_results for graceful handling
+
+4. **Config options in CaptionFirstConfig**:
+   - `abort_on_error_pattern`: "warn" (default), "abort", or "skip"
+   - `error_pattern_threshold`: 0.3 (30%)
+   - `error_pattern_sample_size`: 10
+
+5. **Integration in fetch_captions_batch()**:
+   - Creates detector based on config (None if skip mode)
+   - Records success/error for each video
+   - Checks pattern after sample_size videos processed
+   - Logs pattern with signature, count, ratio, and likely cause
+   - Calls progress_callback with 'pattern_detected' status
+   - Records in metrics via `record_error_pattern_detected()`
+   - Raises ErrorPatternAbortError in abort mode, continues in warn mode
+
+### Acceptance Criteria Met
+- [x] Track error patterns: {error_signature: [video_ids]} during batch fetch
+- [x] Trigger pattern alert when same error affects >30% of first 10 videos
+- [x] Log pattern detection: "Pattern detected: 403 Forbidden (8/10 videos, 80.0%) - possible geoblocking"
+- [x] Config option caption_first.abort_on_error_pattern (default: warn)
+- [x] Modes: 'abort' (stop immediately), 'warn' (log and continue), 'skip' (no detection)
+- [x] Tests verify pattern detection triggers at threshold with correct error signature
+
+### Files Modified
+- src/caption_fetcher.py (ErrorPatternResult, ErrorPatternDetector, ErrorPatternAbortError, batch fetch integration, metrics method)
+- src/config/sections/download.py (3 new config options)
+- config.yaml (config documentation)
+- tests/test_caption_fetcher.py (30 new tests in 4 test classes)
+
+### Verification
+- 30 new tests pass (TestErrorPatternDetector: 18, TestErrorPatternAbortError: 2, TestFetchCaptionsBatchWithErrorPattern: 5, TestErrorPatternConfigOptions: 5)
+- 235 config tests pass
+- Syntax checks pass for all modified files
+- main.py --help runs successfully
+
