@@ -958,6 +958,13 @@ download:
     max_switches_per_session: 10  # Limit VPN rotations (0 = unlimited)
     verify_connection: true     # Verify connectivity after switch
     verify_timeout: 30          # Timeout for connection verification
+    # Configurable verification endpoints (US-010)
+    # For privacy-conscious users who don't want verification pinging Google
+    skip_verification: false    # Skip verification entirely (true = no ping/curl check)
+    verification_endpoint: "https://www.google.com"  # HTTPS endpoint for curl check
+    # Alternatives: "https://cloudflare.com", "https://1.1.1.1"
+    verification_ip: "8.8.8.8"  # IP for ping fallback (Google DNS)
+    # Alternatives: "1.1.1.1" (Cloudflare), "208.67.222.222" (OpenDNS)
 
   # Speed tracking: monitor download speeds for adaptive timeouts
   # Tracks actual download speeds and adjusts timeouts dynamically based on

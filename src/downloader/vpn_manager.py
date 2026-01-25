@@ -116,11 +116,13 @@ class VPNManager:
                 logger.debug(f"Waiting {self.config.switch_delay_seconds}s for VPN connection...")
                 time.sleep(self.config.switch_delay_seconds)
 
-            # Verify connection if enabled
-            if self.config.verify_connection:
+            # Verify connection if enabled (skip_verification overrides verify_connection)
+            if self.config.verify_connection and not getattr(self.config, 'skip_verification', False):
                 if not self._verify_connection():
                     logger.warning("VPN connection verification failed, but continuing...")
                     # Don't return False - the switch command succeeded
+            elif getattr(self.config, 'skip_verification', False):
+                logger.debug("VPN verification skipped (skip_verification=True)")
 
             logger.info(f"VPN switch successful (total: {self._switch_count})")
             return True
@@ -198,18 +200,23 @@ class VPNManager:
         Verify VPN connection is working.
 
         Attempts to connect to a reliable host to verify connectivity.
+        Uses configured endpoints (verification_endpoint for HTTPS, verification_ip for ping).
 
         Returns:
             True if connection is verified
         """
-        logger.debug("Verifying VPN connection...")
+        # Get configured endpoints (with defaults for backward compatibility)
+        endpoint = getattr(self.config, 'verification_endpoint', 'https://www.google.com')
+        ip_address = getattr(self.config, 'verification_ip', '8.8.8.8')
+
+        logger.debug(f"Verifying VPN connection (endpoint={endpoint}, ip={ip_address})...")
 
         # Try multiple verification methods
         verification_commands = [
-            # Try curl to a reliable endpoint
-            "curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://www.google.com",
-            # Fallback: ping (works on most systems)
-            "ping -c 1 -W 10 8.8.8.8" if not self._is_windows() else "ping -n 1 -w 10000 8.8.8.8",
+            # Try curl to configured endpoint
+            f"curl -s --max-time 10 -o /dev/null -w '%{{http_code}}' {endpoint}",
+            # Fallback: ping to configured IP (works on most systems)
+            f"ping -c 1 -W 10 {ip_address}" if not self._is_windows() else f"ping -n 1 -w 10000 {ip_address}",
         ]
 
         for cmd in verification_commands:
@@ -227,11 +234,16 @@ class VPNManager:
                     return True
 
             except subprocess.TimeoutExpired:
+                logger.debug(f"Verification command timed out: {cmd}")
                 continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Verification command failed: {cmd} - {e}")
                 continue
 
-        logger.warning("Could not verify VPN connection")
+        # Log failure with endpoints used for troubleshooting
+        logger.warning(
+            f"Could not verify VPN connection (tried endpoint={endpoint}, ip={ip_address})"
+        )
         return False
 
     def _is_windows(self) -> bool:
