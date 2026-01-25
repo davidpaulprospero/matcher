@@ -16,16 +16,21 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
+def extract_audio(video_path: str, output_dir: str = None, timeout: int = 60) -> Optional[str]:
     """
     Extract audio from video file using ffmpeg.
 
     Args:
         video_path: Path to video file
         output_dir: Directory for output audio file (default: same as video)
+        timeout: Maximum time in seconds for extraction (default: 60).
+                 If exceeded, FFmpeg subprocess is killed and TimeoutError is raised.
 
     Returns:
         Path to extracted audio file, or None if extraction fails
+
+    Raises:
+        TimeoutError: If audio extraction exceeds the timeout limit
     """
     video_path = Path(video_path)
 
@@ -55,7 +60,7 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=timeout
         )
 
         if result.returncode == 0 and audio_path.exists():
@@ -63,6 +68,16 @@ def extract_audio(video_path: str, output_dir: str = None) -> Optional[str]:
         else:
             logger.debug(f"FFmpeg error: {result.stderr}")
             return None
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Audio extraction timed out after {timeout}s: {video_path}")
+        # Clean up partial file if it exists
+        if audio_path.exists():
+            try:
+                audio_path.unlink()
+            except OSError:
+                pass
+        raise TimeoutError(f"Audio extraction timed out after {timeout} seconds: {video_path}")
 
     except Exception as e:
         logger.debug(f"Audio extraction error: {e}")
