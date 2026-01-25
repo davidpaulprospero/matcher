@@ -33,8 +33,8 @@
         "Backoff progress is logged for debugging",
         "Tests verify backoff occurs before rotation"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added RateLimitConfig dataclass with initial_backoff_seconds (5.0), max_backoff_before_rotate (60.0), backoff_multiplier (2.0). Modified handle_rate_limit_error() to apply progressive backoff before rotation. Added _reset_rate_limit_backoff() for state reset on success. 20 new unit tests in tests/test_rate_limit_backoff.py. All 57 download/cookie/retry tests pass."
     },
     {
       "id": "US-003",

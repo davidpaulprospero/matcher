@@ -156,6 +156,10 @@ class VideoDownloader:
         else:
             self.vpn_manager = None
 
+        # Rate limit backoff state (progressive delay before cookie rotation)
+        self._rate_limit_backoff_count = 0  # Current backoff attempt count
+        self._rate_limit_total_delay = 0.0  # Cumulative delay applied
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -394,19 +398,57 @@ class VideoDownloader:
 
     def handle_rate_limit_error(self, error_message: str) -> bool:
         """
-        Handle rate limit or authentication error with rotation/VPN.
+        Handle rate limit or authentication error with progressive backoff.
 
         Tries in order:
-        1. Cookie rotation (if enabled and available)
-        2. VPN switch (if enabled and cookies exhausted)
+        1. Progressive exponential backoff (until max_backoff_before_rotate reached)
+        2. Cookie rotation (if enabled and available)
+        3. VPN switch (if enabled and cookies exhausted)
+
+        The backoff phase handles brief rate-limit windows without exhausting
+        cookies too quickly.
 
         Args:
             error_message: Error string from yt-dlp
 
         Returns:
-            True if recovery was attempted, False if no options left
+            True if recovery was attempted (backoff or rotation), False if no options left
         """
-        # Try cookie rotation first
+        # Get rate limit config settings
+        rate_limit_config = getattr(self.download_config, 'rate_limit', None)
+        initial_backoff = getattr(rate_limit_config, 'initial_backoff_seconds', 5.0) if rate_limit_config else 5.0
+        max_backoff = getattr(rate_limit_config, 'max_backoff_before_rotate', 60.0) if rate_limit_config else 60.0
+        backoff_multiplier = getattr(rate_limit_config, 'backoff_multiplier', 2.0) if rate_limit_config else 2.0
+
+        # Check if we should try backoff first (before cookie rotation)
+        if self._rate_limit_total_delay < max_backoff:
+            # Calculate next backoff delay: initial * (multiplier ^ attempt)
+            delay = initial_backoff * (backoff_multiplier ** self._rate_limit_backoff_count)
+
+            # Cap delay so we don't exceed max_backoff total
+            remaining = max_backoff - self._rate_limit_total_delay
+            delay = min(delay, remaining)
+
+            if delay > 0:
+                self._rate_limit_backoff_count += 1
+                self._rate_limit_total_delay += delay
+
+                logger.info(
+                    f"Rate limit backoff {self._rate_limit_backoff_count}: "
+                    f"waiting {delay:.1f}s (total: {self._rate_limit_total_delay:.1f}s / {max_backoff:.0f}s max)"
+                )
+                time.sleep(delay)
+                return True
+
+        # Backoff exhausted - reset counters and escalate to cookie rotation
+        if self._rate_limit_total_delay > 0:
+            logger.info(
+                f"Rate limit backoff exhausted after {self._rate_limit_total_delay:.1f}s total delay, "
+                "escalating to cookie rotation"
+            )
+            self._reset_rate_limit_backoff()
+
+        # Try cookie rotation
         if self.rotate_cookie_on_error(error_message):
             return True
 
@@ -415,6 +457,11 @@ class VideoDownloader:
             return True
 
         return False
+
+    def _reset_rate_limit_backoff(self) -> None:
+        """Reset rate limit backoff state after successful download or cookie rotation."""
+        self._rate_limit_backoff_count = 0
+        self._rate_limit_total_delay = 0.0
 
     def download_all(
         self,
@@ -1079,6 +1126,8 @@ class VideoDownloader:
 
         if new_videos:
             logger.debug(f"    Downloaded {len(new_videos)} video(s)")
+            # Reset rate limit backoff on successful download
+            self._reset_rate_limit_backoff()
 
         downloaded = []
 
