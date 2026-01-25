@@ -955,6 +955,19 @@ download:
     max_timeout_multiplier: 2.0  # Maximum timeout extension (2x)
     enable_adaptive_timeout: true  # Auto-extend timeouts on slow networks
 
+  # Circuit breaker: pause searches after consecutive failures
+  # Implements the circuit breaker pattern to prevent hammering YouTube
+  # when multiple keywords fail in a row (e.g., during rate limiting).
+  #
+  # How it works:
+  #   1. Tracks consecutive search failures (no results or errors)
+  #   2. After threshold failures, "trips" and pauses for pause_seconds
+  #   3. On first successful search after pause, resets to normal
+  circuit_breaker:
+    enabled: true                       # Enable circuit breaker
+    consecutive_failures_threshold: 5   # Failures before tripping (default: 5)
+    pause_seconds: 60.0                 # Seconds to pause after tripping (default: 60)
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

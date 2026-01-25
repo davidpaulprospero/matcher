@@ -44,6 +44,7 @@ from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 # Segment utilities (public helpers)
 from . import segment_utils
@@ -84,6 +85,8 @@ __all__ = [
     'DownloadSpeedTracker',
     'DownloadSpeedConfig',
     'DownloadRecord',
+    'CircuitBreaker',
+    'CircuitBreakerConfig',
 
     # Segment utilities
     'collect_matched_segments',
