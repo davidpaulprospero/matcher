@@ -887,6 +887,141 @@ function Append-SessionTimeline {
 }
 
 # ============================================================================
+# STATE MACHINE LOGGING (Phase 2 - Task 2.5)
+# ============================================================================
+
+function Log-StateTransition {
+    <#
+    .SYNOPSIS
+        Log state machine transitions for debugging
+    .PARAMETER From
+        Previous state
+    .PARAMETER To
+        New state
+    .PARAMETER Reason
+        Reason for transition
+    .PARAMETER Context
+        Additional context (optional)
+    #>
+    param(
+        [string]$From,
+        [string]$To,
+        [string]$Reason,
+        [hashtable]$Context = @{}
+    )
+
+    $stateFile = Join-Path $script:SessionLogDir "state_transitions.jsonl"
+
+    $entry = @{
+        timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        from = $From
+        to = $To
+        reason = $Reason
+        iteration = $script:IterationCount
+        session = $script:SessionId
+    }
+
+    # Merge context
+    foreach ($key in $Context.Keys) {
+        $entry[$key] = $Context[$key]
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $stateFile -Encoding UTF8
+}
+
+# ============================================================================
+# PHASE TIMING (Phase 2 - Task 2.1)
+# ============================================================================
+
+function Measure-PhaseTimings {
+    <#
+    .SYNOPSIS
+        Estimate phase timings from Claude output
+    .PARAMETER Output
+        Claude's output text
+    .PARAMETER TotalDurationMs
+        Total execution time in milliseconds
+    .RETURNS
+        Hashtable with estimated phase timings
+    #>
+    param(
+        [string]$Output,
+        [int]$TotalDurationMs
+    )
+
+    $timings = @{
+        read_ms = 0
+        analyze_ms = 0
+        implement_ms = 0
+        test_ms = 0
+        commit_ms = 0
+    }
+
+    if (-not $Output -or $TotalDurationMs -le 0) {
+        return $timings
+    }
+
+    # Estimate based on output content patterns
+    $hasReadOps = $Output -match "Read tool|Reading file|file_path"
+    $hasAnalysis = $Output -match "analy|understand|plan|think|consider"
+    $hasImplement = $Output -match "Edit tool|Write tool|Editing|Writing|implement"
+    $hasTests = $Output -match "pytest|test.*pass|test.*fail|running tests"
+    $hasGit = $Output -match "git commit|git add|Bash.*git"
+
+    # Count pattern occurrences to weight phases
+    $readWeight = if ($hasReadOps) { ([regex]::Matches($Output, "Read tool|Reading file")).Count + 1 } else { 0 }
+    $analyzeWeight = if ($hasAnalysis) { 2 } else { 1 }  # Analysis always happens
+    $implementWeight = if ($hasImplement) { ([regex]::Matches($Output, "Edit tool|Write tool")).Count + 1 } else { 0 }
+    $testWeight = if ($hasTests) { 3 } else { 0 }  # Tests take significant time
+    $gitWeight = if ($hasGit) { 1 } else { 0 }
+
+    $totalWeight = [math]::Max(1, $readWeight + $analyzeWeight + $implementWeight + $testWeight + $gitWeight)
+
+    # Distribute time based on weights
+    $timings.read_ms = [int](($readWeight / $totalWeight) * $TotalDurationMs)
+    $timings.analyze_ms = [int](($analyzeWeight / $totalWeight) * $TotalDurationMs)
+    $timings.implement_ms = [int](($implementWeight / $totalWeight) * $TotalDurationMs)
+    $timings.test_ms = [int](($testWeight / $totalWeight) * $TotalDurationMs)
+    $timings.commit_ms = [int](($gitWeight / $totalWeight) * $TotalDurationMs)
+
+    return $timings
+}
+
+# ============================================================================
+# ERROR EVOLUTION (Phase 2 - Task 2.4)
+# ============================================================================
+
+function Log-ErrorEvolution {
+    <#
+    .SYNOPSIS
+        Track error patterns over time
+    .PARAMETER ErrorCategory
+        Category of error
+    .PARAMETER ErrorDetails
+        Additional error details
+    .PARAMETER Iteration
+        Current iteration number
+    #>
+    param(
+        [string]$ErrorCategory,
+        [string]$ErrorDetails = "",
+        [int]$Iteration
+    )
+
+    $errorFile = Join-Path $script:SessionLogDir "error_evolution.jsonl"
+
+    $entry = @{
+        timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        category = $ErrorCategory
+        details = $ErrorDetails
+        iteration = $Iteration
+        session = $script:SessionId
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $errorFile -Encoding UTF8
+}
+
+# ============================================================================
 # CLAUDE INVOCATION
 # ============================================================================
 
@@ -1028,6 +1163,12 @@ Start by reading the config and prompt files, then generate the PRD.
     # Capture git state BEFORE Claude runs
     $gitStateBefore = Get-GitState
 
+    # Phase 2 - Task 2.5: Log state transition
+    Log-StateTransition -From "idle" -To "running" -Reason "Starting iteration for focus area: $FocusAreaId" -Context @{
+        focusArea = $FocusAreaId
+        promptType = $promptType
+    }
+
     # Log timeline event: iteration start
     Append-SessionTimeline -Event "iteration_start" -Data @{
         iteration = $script:IterationCount
@@ -1100,6 +1241,10 @@ Start by reading the config and prompt files, then generate the PRD.
         $success = $false
         $timedOut = $false
 
+        # Phase 2 - Task 2.1: Measure phase timings
+        $executionDurationMs = [int](($executionEnd - $executionStart).TotalMilliseconds)
+        $phaseTimings = Measure-PhaseTimings -Output $claudeOutput -TotalDurationMs $executionDurationMs
+
         if (-not $exited) {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
@@ -1109,7 +1254,14 @@ Start by reading the config and prompt files, then generate the PRD.
             # Log timeout
             "Timeout after $timeout seconds" | Add-Content $iterationLog
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+            # Phase 2 - Task 2.4: Log error evolution
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Timeout after ${timeout}s" -Iteration $script:IterationCount
+
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "failed" -Reason "Timeout after ${timeout}s"
+
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
             $script:ConsecutiveFailures++
         }
@@ -1119,9 +1271,12 @@ Start by reading the config and prompt files, then generate the PRD.
             $iterationStatus = "completed"
             $success = $true
 
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "completed" -Reason "Success"
+
             # Capture git diff stats on success
             $gitStats = Get-GitDiffStats
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
             $script:ConsecutiveFailures = 0
         }
@@ -1130,7 +1285,14 @@ Start by reading the config and prompt files, then generate the PRD.
             "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
             $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+            # Phase 2 - Task 2.4: Log error evolution
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $($process.ExitCode)" -Iteration $script:IterationCount
+
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $($process.ExitCode)"
+
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
             $script:ConsecutiveFailures++
         }
@@ -1192,7 +1354,14 @@ Start by reading the config and prompt files, then generate the PRD.
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         "Error: $_" | Add-Content $iterationLog
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+        # Phase 2 - Task 2.4: Log error evolution
+        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails $_.ToString() -Iteration $script:IterationCount
+
+        # Phase 2 - Task 2.5: Log state transition
+        Log-StateTransition -From "running" -To "error" -Reason $_.ToString()
+
+        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs 0 -PhaseAnalyzeMs 0 -PhaseImplementMs 0 -PhaseTestMs 0 -PhaseCommitMs 0
 
         # Log timeline event: error
         Append-SessionTimeline -Event "iteration_error" -Data @{
@@ -1257,6 +1426,12 @@ function Invoke-ClaudeForStory {
 
     # Capture git state BEFORE Claude runs
     $gitStateBefore = Get-GitState
+
+    # Phase 2 - Task 2.5: Log state transition
+    Log-StateTransition -From "idle" -To "running" -Reason "Starting story: $StoryId" -Context @{
+        storyId = $StoryId
+        focusArea = $focusArea
+    }
 
     # Log timeline event: iteration start
     Append-SessionTimeline -Event "iteration_start" -Data @{
@@ -1327,6 +1502,10 @@ function Invoke-ClaudeForStory {
         $fileOps = Get-FileOperations -BeforeHash $gitStateBefore.hash
         $commits = Get-GitCommits -SinceHash $gitStateBefore.hash
 
+        # Phase 2 - Task 2.1: Measure phase timings
+        $executionDurationMs = [int](($executionEnd - $executionStart).TotalMilliseconds)
+        $phaseTimings = Measure-PhaseTimings -Output $claudeOutput -TotalDurationMs $executionDurationMs
+
         # Determine status
         $iterationStatus = "completed"
         $success = $false
@@ -1338,7 +1517,14 @@ function Invoke-ClaudeForStory {
             $iterationStatus = "timeout"
             $timedOut = $true
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+            # Phase 2 - Task 2.4: Log error evolution
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Timeout after ${timeout}s on story $StoryId" -Iteration $script:IterationCount
+
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "failed" -Reason "Timeout after ${timeout}s" -Context @{ storyId = $StoryId }
+
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
             $script:ConsecutiveFailures++
         }
         elseif ($process.ExitCode -eq 0) {
@@ -1346,9 +1532,12 @@ function Invoke-ClaudeForStory {
             $iterationStatus = "completed"
             $success = $true
 
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "completed" -Reason "Success" -Context @{ storyId = $StoryId }
+
             # Capture git diff stats on success
             $gitStats = Get-GitDiffStats
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
             $script:ConsecutiveFailures = 0
 
             # Log story verification (Task 1.3)
@@ -1364,7 +1553,14 @@ function Invoke-ClaudeForStory {
             Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
             $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
-            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+            # Phase 2 - Task 2.4: Log error evolution
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $($process.ExitCode) on story $StoryId" -Iteration $script:IterationCount
+
+            # Phase 2 - Task 2.5: Log state transition
+            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $($process.ExitCode)" -Context @{ storyId = $StoryId }
+
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
             $script:ConsecutiveFailures++
         }
 
@@ -1425,7 +1621,14 @@ function Invoke-ClaudeForStory {
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
-        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+        # Phase 2 - Task 2.4: Log error evolution
+        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails $_.ToString() -Iteration $script:IterationCount
+
+        # Phase 2 - Task 2.5: Log state transition
+        Log-StateTransition -From "running" -To "error" -Reason $_.ToString() -Context @{ storyId = $StoryId }
+
+        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs 0 -PhaseAnalyzeMs 0 -PhaseImplementMs 0 -PhaseTestMs 0 -PhaseCommitMs 0
 
         # Log timeline event: error
         Append-SessionTimeline -Event "iteration_error" -Data @{
@@ -1587,12 +1790,31 @@ function Record-Metric {
         [string]$TestResults = "",
         [int]$RetryCount = 0,
         [int]$LinesAdded = 0,
-        [int]$LinesDeleted = 0
+        [int]$LinesDeleted = 0,
+        # Phase 2 - Task 2.1: Phase timing breakdown
+        [int]$PhaseReadMs = 0,
+        [int]$PhaseAnalyzeMs = 0,
+        [int]$PhaseImplementMs = 0,
+        [int]$PhaseTestMs = 0,
+        [int]$PhaseCommitMs = 0
     )
 
-    # Ensure metrics file exists with header
+    # Ensure metrics file exists with header (v2 schema with phase timings)
     if (-not (Test-Path $script:MetricsFile)) {
-        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted" | Set-Content $script:MetricsFile
+        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms" | Set-Content $script:MetricsFile
+    }
+
+    # Check if we need to migrate to v2 schema (add phase columns if missing)
+    $header = Get-Content $script:MetricsFile -First 1
+    if ($header -notmatch "phase_read_ms") {
+        # Migrate: add new columns to header
+        $lines = Get-Content $script:MetricsFile
+        $lines[0] = $lines[0] + ",phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"
+        # Add empty values to existing rows
+        for ($i = 1; $i -lt $lines.Count; $i++) {
+            $lines[$i] = $lines[$i] + ",0,0,0,0,0"
+        }
+        $lines | Set-Content $script:MetricsFile
     }
 
     # Use defaults from script variables if not provided
@@ -1614,7 +1836,7 @@ function Record-Metric {
     }
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount,$LinesAdded,$LinesDeleted"
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount,$LinesAdded,$LinesDeleted,$PhaseReadMs,$PhaseAnalyzeMs,$PhaseImplementMs,$PhaseTestMs,$PhaseCommitMs"
     Add-Content -Path $script:MetricsFile -Value $row
 }
 
