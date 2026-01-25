@@ -344,6 +344,318 @@ DEFAULT_RETRY_BUDGETS = {
 
 
 @dataclass
+class BatchRetryBudget:
+    """Tracks cumulative errors across all videos in a batch (US-001 Sprint 8).
+
+    Per-category retry budgets (US-003 Sprint 7) work per-video, but don't adapt
+    based on batch-wide failure patterns. When 30% of videos fail with network
+    errors, retrying remaining videos at full budget wastes time.
+
+    This class tracks cumulative errors across the batch and reduces retry budgets
+    based on detected patterns:
+    - >30% network errors: reduce retry budget from 3 to 1
+    - >50% network errors: disable retries entirely
+
+    Thread Safety:
+        All mutation methods are protected by a Lock for concurrent access
+        during parallel caption fetching.
+
+    Attributes:
+        total_videos: Total videos in the batch.
+        processed_videos: Number of videos processed so far.
+        category_counts: Dict mapping CaptionErrorCategory -> count of failures.
+        original_budgets: Copy of per-category retry budgets at batch start.
+        reduced_budgets: Current (possibly reduced) per-category retry budgets.
+        budget_reductions: List of (threshold, category, old_budget, new_budget) events.
+
+    Example:
+        >>> budget = BatchRetryBudget(total_videos=100)
+        >>> budget.record_error(CaptionErrorCategory.NETWORK)
+        >>> # After 31 network errors in 100 videos:
+        >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
+        1  # Reduced from 3
+    """
+    total_videos: int = 0
+    processed_videos: int = 0
+    category_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    original_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    reduced_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    budget_reductions: List[tuple] = field(default_factory=list)
+
+    # Threshold configuration
+    network_reduce_threshold: float = 0.30  # >30% network errors -> reduce retries
+    network_disable_threshold: float = 0.50  # >50% network errors -> disable retries
+
+    # Thread-safety lock (RLock for reentrant access from nested methods)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+
+    def __post_init__(self):
+        """Initialize budgets from defaults."""
+        if not self.original_budgets:
+            self.original_budgets = dict(DEFAULT_RETRY_BUDGETS)
+        if not self.reduced_budgets:
+            self.reduced_budgets = dict(self.original_budgets)
+
+    def record_success(self, video_id: str = "") -> None:
+        """Record a successful caption fetch.
+
+        Args:
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.processed_videos += 1
+        logger.debug(f"BatchRetryBudget: success recorded for {video_id or 'unknown'}")
+
+    def record_error(self, category: CaptionErrorCategory, video_id: str = "") -> None:
+        """Record a failed caption fetch and update budgets if threshold crossed.
+
+        Args:
+            category: The error category (NETWORK, TIMEOUT, etc.).
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.processed_videos += 1
+            self.category_counts[category] = self.category_counts.get(category, 0) + 1
+
+            # Check if we need to reduce budgets
+            self._check_thresholds_locked(category)
+
+        logger.debug(
+            f"BatchRetryBudget: {category.name} error recorded for {video_id or 'unknown'}, "
+            f"count={self.category_counts.get(category, 0)}/{self.processed_videos}"
+        )
+
+    def _check_thresholds_locked(self, category: CaptionErrorCategory) -> None:
+        """Check if error rate thresholds are crossed and reduce budgets.
+
+        Must be called while holding the lock.
+
+        Args:
+            category: The error category to check thresholds for.
+        """
+        if self.processed_videos == 0:
+            return
+
+        error_rate = self.category_counts.get(category, 0) / self.processed_videos
+
+        # Only apply threshold logic to NETWORK errors (most common transient issue)
+        if category == CaptionErrorCategory.NETWORK:
+            current_budget = self.reduced_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
+            original_budget = self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
+
+            # >50% threshold: disable retries entirely
+            if error_rate > self.network_disable_threshold and current_budget > 0:
+                self.reduced_budgets[category] = 0
+                self.budget_reductions.append((
+                    error_rate,
+                    category,
+                    current_budget,
+                    0,
+                    f">50% network errors ({error_rate:.1%})"
+                ))
+                logger.warning(
+                    f"BatchRetryBudget: >50% network errors ({error_rate:.1%}), "
+                    f"disabling retries (was {current_budget})"
+                )
+
+            # >30% threshold: reduce to 1 retry (if not already at 0)
+            elif error_rate > self.network_reduce_threshold and current_budget > 1:
+                self.reduced_budgets[category] = 1
+                self.budget_reductions.append((
+                    error_rate,
+                    category,
+                    current_budget,
+                    1,
+                    f">30% network errors ({error_rate:.1%})"
+                ))
+                logger.warning(
+                    f"BatchRetryBudget: >30% network errors ({error_rate:.1%}), "
+                    f"reducing retries from {current_budget} to 1"
+                )
+
+    def budget_remaining(self, category: CaptionErrorCategory) -> int:
+        """Get the current retry budget for a category.
+
+        Returns the reduced budget if thresholds have been crossed,
+        otherwise returns the original budget.
+
+        Args:
+            category: The error category to get budget for.
+
+        Returns:
+            Number of retries allowed for this category.
+
+        Example:
+            >>> budget = BatchRetryBudget(total_videos=100)
+            >>> # Initially:
+            >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
+            3
+            >>> # After 35 network errors in 100 videos:
+            >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
+            1
+        """
+        with self._lock:
+            return self.reduced_budgets.get(
+                category,
+                self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 0))
+            )
+
+    def get_error_rate(self, category: CaptionErrorCategory) -> float:
+        """Get the current error rate for a category.
+
+        Args:
+            category: The error category to get rate for.
+
+        Returns:
+            Error rate as a float between 0.0 and 1.0.
+        """
+        with self._lock:
+            if self.processed_videos == 0:
+                return 0.0
+            return self.category_counts.get(category, 0) / self.processed_videos
+
+    def get_total_retries_saved(self) -> int:
+        """Calculate total retries saved by budget reduction.
+
+        Estimates how many retry attempts were avoided by reducing budgets.
+
+        Returns:
+            Estimated retries saved across remaining videos.
+        """
+        with self._lock:
+            if not self.budget_reductions:
+                return 0
+
+            remaining_videos = max(0, self.total_videos - self.processed_videos)
+            total_saved = 0
+
+            # For each reduction, calculate retries saved
+            for error_rate, category, old_budget, new_budget, _ in self.budget_reductions:
+                # Estimate: if X% of videos had this error type, X% of remaining will too
+                expected_errors = int(remaining_videos * error_rate)
+                retries_per_video_saved = old_budget - new_budget
+                total_saved += expected_errors * retries_per_video_saved
+
+            return total_saved
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Get a summary of batch retry budget state.
+
+        Returns:
+            Dict with budget tracking statistics suitable for CaptionMetrics.
+
+        Example:
+            >>> budget = BatchRetryBudget(total_videos=100)
+            >>> # After some processing...
+            >>> summary = budget.get_summary()
+            >>> print(summary)
+            {
+                'total_videos': 100,
+                'processed_videos': 50,
+                'error_rates': {'NETWORK': 0.35, 'TIMEOUT': 0.05},
+                'original_budgets': {'NETWORK': 3, ...},
+                'reduced_budgets': {'NETWORK': 1, ...},
+                'reductions_applied': 1,
+                'estimated_retries_saved': 45
+            }
+        """
+        with self._lock:
+            error_rates = {}
+            if self.processed_videos > 0:
+                for cat, count in self.category_counts.items():
+                    error_rates[cat.name] = round(count / self.processed_videos, 3)
+
+            return {
+                'total_videos': self.total_videos,
+                'processed_videos': self.processed_videos,
+                'error_rates': error_rates,
+                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
+                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
+                'reductions_applied': len(self.budget_reductions),
+                'estimated_retries_saved': self.get_total_retries_saved(),
+            }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize budget state for checkpoint persistence.
+
+        Returns:
+            Dict with all budget state data.
+        """
+        with self._lock:
+            return {
+                'total_videos': self.total_videos,
+                'processed_videos': self.processed_videos,
+                'category_counts': {k.name: v for k, v in self.category_counts.items()},
+                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
+                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
+                'budget_reductions': [
+                    (rate, cat.name, old, new, reason)
+                    for rate, cat, old, new, reason in self.budget_reductions
+                ],
+            }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict]) -> "BatchRetryBudget":
+        """Create budget from checkpoint data.
+
+        Args:
+            data: Checkpoint data dict (may be None for new batches).
+
+        Returns:
+            BatchRetryBudget with restored state.
+        """
+        if not data:
+            return cls()
+
+        budget = cls(
+            total_videos=data.get('total_videos', 0),
+            processed_videos=data.get('processed_videos', 0),
+        )
+
+        # Restore category counts
+        for name, count in data.get('category_counts', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.category_counts[cat] = count
+            except KeyError:
+                logger.warning(f"Unknown error category in checkpoint: {name}")
+
+        # Restore budgets
+        for name, value in data.get('original_budgets', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.original_budgets[cat] = value
+            except KeyError:
+                pass
+
+        for name, value in data.get('reduced_budgets', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.reduced_budgets[cat] = value
+            except KeyError:
+                pass
+
+        # Restore reduction history
+        for rate, cat_name, old, new, reason in data.get('budget_reductions', []):
+            try:
+                cat = CaptionErrorCategory[cat_name]
+                budget.budget_reductions.append((rate, cat, old, new, reason))
+            except KeyError:
+                pass
+
+        return budget
+
+    def reset(self) -> None:
+        """Reset budget state for a new batch."""
+        with self._lock:
+            self.processed_videos = 0
+            self.category_counts.clear()
+            self.reduced_budgets = dict(self.original_budgets)
+            self.budget_reductions.clear()
+        logger.debug("BatchRetryBudget: reset for new batch")
+
+
+@dataclass
 class ParseResult:
     """Result of parsing caption content with error recovery (US-001 Sprint 7).
 
@@ -5465,6 +5777,13 @@ class CaptionMetrics:
     # - Reporting top/bottom channels by caption availability
     channel_patterns: Dict[str, 'ChannelCaptionPattern'] = field(default_factory=dict)
 
+    # Batch retry budget tracking (US-001 Sprint 8)
+    # Tracks cumulative errors across batch to reduce retry budget when patterns detected
+    # - >30% network errors: reduce retries from 3 to 1
+    # - >50% network errors: disable retries entirely
+    # Summary dict stored here after batch completion, not the full BatchRetryBudget object
+    batch_retry_budget: Optional[Dict[str, Any]] = None
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -5631,6 +5950,40 @@ class CaptionMetrics:
             )
 
         logger.debug(f"Error category recorded for {video_id or 'unknown'}: {category_name}")
+
+    def set_batch_retry_budget(self, budget_summary: Dict[str, Any]) -> None:
+        """Store batch retry budget summary (US-001 Sprint 8).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called after batch processing to record the final state of the
+        BatchRetryBudget, including error rates and any budget reductions
+        that were applied due to pattern detection.
+
+        Args:
+            budget_summary: Dict from BatchRetryBudget.get_summary() containing:
+                - 'total_videos': Total videos in batch
+                - 'processed_videos': Videos processed
+                - 'error_rates': Dict mapping category -> rate
+                - 'original_budgets': Original per-category budgets
+                - 'reduced_budgets': Final per-category budgets (may be reduced)
+                - 'reductions_applied': Number of threshold reductions triggered
+                - 'estimated_retries_saved': Estimated retries avoided
+
+        Example:
+            >>> budget = BatchRetryBudget(total_videos=100)
+            >>> # ... batch processing ...
+            >>> metrics.set_batch_retry_budget(budget.get_summary())
+        """
+        with self._lock:
+            self.batch_retry_budget = budget_summary
+
+        reductions = budget_summary.get('reductions_applied', 0)
+        saved = budget_summary.get('estimated_retries_saved', 0)
+        logger.debug(
+            f"Batch retry budget recorded: {reductions} reductions, "
+            f"~{saved} retries saved"
+        )
 
     def get_error_category_summary(self) -> Dict[str, Any]:
         """Get summary of error categories (US-003 Sprint 7).
