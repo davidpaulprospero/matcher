@@ -537,6 +537,86 @@ function Get-ApprovedAreas {
 }
 
 # ============================================================================
+# QUEUE SAVE AND WINDOW SPAWNING
+# ============================================================================
+
+function Save-InterviewQueue {
+    <#
+    .SYNOPSIS
+        Saves the interview context and focus areas to queue.json
+    .PARAMETER Context
+        The interview context hashtable from Start-Interview
+    .PARAMETER FocusAreas
+        Array or ArrayList of approved focus area IDs
+    .RETURNS
+        The queue hashtable that was saved
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Context,
+        [Parameter(Mandatory=$true)]
+        $FocusAreas
+    )
+
+    # Build focus area objects with tracking fields
+    $focusAreaObjects = @()
+    foreach ($area in $FocusAreas) {
+        $focusAreaObjects += @{
+            id = $area
+            completed = $false
+            startedAt = $null
+            completedAt = $null
+        }
+    }
+
+    # Create the queue structure
+    $queue = @{
+        interviewContext = "$($Context.workType): $($Context.details)"
+        interviewDetails = $Context
+        focusAreas = $focusAreaObjects
+        createdAt = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        sessionId = [guid]::NewGuid().ToString().Substring(0, 8)
+    }
+
+    # Save to queue.json
+    $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
+
+    Write-Host "  Saved queue with $($FocusAreas.Count) focus areas" -ForegroundColor Green
+
+    return $queue
+}
+
+function Start-RalphWindows {
+    <#
+    .SYNOPSIS
+        Spawns Ralph loop and watch windows
+    .PARAMETER FocusAreas
+        Array of focus areas (for display purposes)
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        $FocusAreas
+    )
+
+    Write-Host ""
+    Write-Host "  Launching Ralph..." -ForegroundColor Cyan
+
+    # Spawn Ralph loop in new window
+    $ralphCmd = "Set-Location '$script:ProjectRoot'; .\scripts\ralph\ralph.ps1 -Queue -SkipPlanApproval"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$ralphCmd}"
+
+    Start-Sleep -Seconds 2
+
+    # Spawn Watch in new window
+    $watchCmd = "Set-Location '$script:ProjectRoot'; .\scripts\ralph\watch.ps1"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$watchCmd}"
+
+    Write-Host ""
+    Write-Host "  Ralph loop and watch windows launched!" -ForegroundColor Green
+    Write-Host "  You can close this window now." -ForegroundColor Gray
+}
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 
@@ -579,6 +659,39 @@ if (-not $script:ResumeMode) {
     Write-Host "  Got it. Let me suggest some focus areas..." -ForegroundColor Green
     Write-Host ""
 
-    # Store context for later use (Task 5 will use this)
-    $script:InterviewContext = $interviewContext
+    # Get suggested focus areas based on interview context
+    $suggestions = Get-SuggestedFocusAreas -Context $interviewContext
+
+    # Let user approve/modify the suggestions
+    $approvedAreas = Get-ApprovedAreas -Suggestions $suggestions
+
+    # If user chose to restart, re-run the script
+    if ($null -eq $approvedAreas) {
+        Write-Host ""
+        Write-Host "  Restarting interview..." -ForegroundColor Yellow
+        Write-Host ""
+        & $PSCommandPath
+        return
+    }
+
+    # Save the queue
+    $queue = Save-InterviewQueue -Context $interviewContext -FocusAreas $approvedAreas
+
+    # Launch Ralph windows
+    Start-RalphWindows -FocusAreas $approvedAreas
+} else {
+    # Resume mode - just launch Ralph windows with remaining focus areas
+    $remainingAreas = @()
+    foreach ($area in $script:FocusAreas) {
+        $areaId = if ($area.id) { $area.id } else { $area }
+        $remainingAreas += $areaId
+    }
+
+    Write-Host ""
+    Write-Host "  Resuming with $($remainingAreas.Count) remaining focus areas:" -ForegroundColor Cyan
+    foreach ($area in $remainingAreas) {
+        Write-Host "    - $area" -ForegroundColor Gray
+    }
+
+    Start-RalphWindows -FocusAreas $remainingAreas
 }
