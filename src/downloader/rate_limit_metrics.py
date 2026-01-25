@@ -70,6 +70,7 @@ class RateLimitMetrics:
 
     # Rate limit handling
     rate_limit_events: int = 0
+    tier_rate_limit_events: Dict[str, int] = field(default_factory=dict)  # US-001: per-tier tracking
     backoff_attempts: int = 0
     time_spent_backing_off: float = 0.0
 
@@ -121,9 +122,15 @@ class RateLimitMetrics:
         """Record that max retries were reached for a download."""
         self.max_retry_count_reached += 1
 
-    def record_rate_limit_event(self) -> None:
-        """Record a rate limit error occurrence."""
+    def record_rate_limit_event(self, tier: str = None) -> None:
+        """Record a rate limit error occurrence.
+
+        Args:
+            tier: Duration tier (short, medium, long, longer) for per-tier tracking
+        """
         self.rate_limit_events += 1
+        if tier:
+            self.tier_rate_limit_events[tier] = self.tier_rate_limit_events.get(tier, 0) + 1
 
     def record_backoff(self, seconds: float) -> None:
         """Record a progressive backoff delay.
@@ -337,6 +344,10 @@ class RateLimitMetrics:
                 f"Rate limiting: {self.rate_limit_events} events, "
                 f"{self.backoff_attempts} backoffs ({self.time_spent_backing_off:.1f}s total)"
             )
+            # Show per-tier breakdown if available
+            if self.tier_rate_limit_events:
+                tier_str = ", ".join(f"{k}: {v}" for k, v in sorted(self.tier_rate_limit_events.items()))
+                lines.append(f"  By tier: {tier_str}")
 
         # Escalation summary
         escalations = []
@@ -400,6 +411,7 @@ class RateLimitMetrics:
             retries_by_error_type=data.get('retries_by_error_type', {}),
             max_retry_count_reached=data.get('max_retry_count_reached', 0),
             rate_limit_events=data.get('rate_limit_events', 0),
+            tier_rate_limit_events=data.get('tier_rate_limit_events', {}),
             backoff_attempts=data.get('backoff_attempts', 0),
             time_spent_backing_off=data.get('time_spent_backing_off', 0.0),
             cookie_rotations=data.get('cookie_rotations', 0),
@@ -425,6 +437,7 @@ class RateLimitMetrics:
         self.retries_by_error_type = {}
         self.max_retry_count_reached = 0
         self.rate_limit_events = 0
+        self.tier_rate_limit_events = {}
         self.backoff_attempts = 0
         self.time_spent_backing_off = 0.0
         self.cookie_rotations = 0

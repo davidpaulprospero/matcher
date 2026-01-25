@@ -269,6 +269,11 @@ class RateLimitConfig:
       Rate limit events are saved to checkpoint with timestamp. On resume,
       if last rate limit was within cooldown period, the session starts
       with aggressive recovery mode (longer delays, faster escalation).
+
+    Per-tier isolation:
+      When downloading multiple tiers (short, medium, long, longer), rate limit
+      state can be tracked separately per tier. This prevents a rate limit on
+      one tier from affecting backoff counters for other tiers.
     """
     # Initial backoff delay on first rate limit error (seconds)
     initial_backoff_seconds: float = 5.0
@@ -283,6 +288,10 @@ class RateLimitConfig:
     # Cross-session cooldown: minutes to wait before assuming rate limit cleared
     # If resuming within this period, start with recovery mode
     resume_cooldown_minutes: float = 15.0
+
+    # Per-tier isolation: track rate limit state separately for each duration tier
+    # When True, rate limit on 'long' tier won't affect 'short' tier backoff
+    per_tier_isolation: bool = True
 
 
 @dataclass

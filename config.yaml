@@ -930,6 +930,9 @@ download:
     # If resuming within this period, start with recovery mode (longer delays,
     # faster escalation to cookie/VPN rotation)
     resume_cooldown_minutes: 15.0
+    # Per-tier isolation: track rate limit state separately for each duration tier
+    # When true, rate limit on 'long' tier won't affect 'short' tier backoff
+    per_tier_isolation: true
 
   # VPN integration: switch VPN servers when cookies are exhausted
   # Requires a VPN client with CLI support (NordVPN, ExpressVPN, Mullvad, etc.)

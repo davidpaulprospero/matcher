@@ -333,7 +333,7 @@ class TestRecoveryModeBehavior:
     def mock_downloader_for_backoff(self):
         """Create a mock VideoDownloader for testing backoff behavior."""
         with patch('src.downloader.core.VideoDownloader.__init__', return_value=None):
-            from src.downloader.core import VideoDownloader
+            from src.downloader.core import VideoDownloader, TierRateLimitState
             downloader = VideoDownloader.__new__(VideoDownloader)
 
             # Set up minimal required attributes
@@ -341,6 +341,15 @@ class TestRecoveryModeBehavior:
             downloader._rate_limit_total_delay = 0.0
             downloader._rate_limit_event_count = 0
             downloader._in_cooldown_recovery_mode = False
+
+            # Per-tier rate limit state (US-001)
+            downloader._per_tier_isolation = True
+            downloader._tier_rate_limit_states = {
+                'short': TierRateLimitState(),
+                'medium': TierRateLimitState(),
+                'long': TierRateLimitState(),
+                'longer': TierRateLimitState(),
+            }
 
             # Create checkpoint
             downloader.checkpoint = DownloadCheckpoint(
@@ -362,6 +371,7 @@ class TestRecoveryModeBehavior:
             rate_limit_config.initial_backoff_seconds = 5.0
             rate_limit_config.max_backoff_before_rotate = 60.0
             rate_limit_config.backoff_multiplier = 2.0
+            rate_limit_config.per_tier_isolation = True
 
             download_config = MagicMock()
             download_config.rate_limit = rate_limit_config
@@ -549,7 +559,7 @@ class TestCooldownIntegration:
     def test_rate_limit_increments_event_count(self):
         """handle_rate_limit_error should increment event count."""
         with patch('src.downloader.core.VideoDownloader.__init__', return_value=None):
-            from src.downloader.core import VideoDownloader
+            from src.downloader.core import VideoDownloader, TierRateLimitState
             downloader = VideoDownloader.__new__(VideoDownloader)
 
             # Set up minimal required attributes
@@ -557,6 +567,15 @@ class TestCooldownIntegration:
             downloader._rate_limit_total_delay = 0.0
             downloader._rate_limit_event_count = 0
             downloader._in_cooldown_recovery_mode = False
+
+            # Per-tier rate limit state (US-001)
+            downloader._per_tier_isolation = True
+            downloader._tier_rate_limit_states = {
+                'short': TierRateLimitState(),
+                'medium': TierRateLimitState(),
+                'long': TierRateLimitState(),
+                'longer': TierRateLimitState(),
+            }
 
             # Create checkpoint
             downloader.checkpoint = DownloadCheckpoint(
@@ -577,6 +596,7 @@ class TestCooldownIntegration:
             rate_limit_config.initial_backoff_seconds = 5.0
             rate_limit_config.max_backoff_before_rotate = 60.0
             rate_limit_config.backoff_multiplier = 2.0
+            rate_limit_config.per_tier_isolation = True
 
             download_config = MagicMock()
             download_config.rate_limit = rate_limit_config
