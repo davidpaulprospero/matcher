@@ -696,3 +696,161 @@ class TestScoringEdgeCases:
 
         result, _ = scoring.apply_broll_boost(0.7, video_seg, config_obj)
         assert result == 0.85  # 0.7 + 0.15
+
+
+# ============================================================================
+# Test apply_caption_quality_adjustment() (US-007)
+# ============================================================================
+
+class TestApplyCaptionQualityAdjustment:
+    """Test caption quality confidence adjustments (US-007)"""
+
+    @pytest.fixture
+    def caption_quality_config(self):
+        """Mock config with caption quality settings"""
+        config = Mock()
+        matching = Mock()
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_high_boost = 0.05
+        matching.caption_quality_low_penalty = 0.1
+        config.matching = matching
+        return config
+
+    def test_high_quality_boost(self, caption_quality_config, sample_video_segment):
+        """Test confidence boost for high-quality human captions"""
+        confidence = 0.7
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 0.75  # 0.7 + 0.05
+        assert "caption quality high" in reason
+        assert "+0.05" in reason
+
+    def test_medium_quality_no_adjustment(self, caption_quality_config, sample_video_segment):
+        """Test no adjustment for medium-quality auto captions"""
+        confidence = 0.7
+        sample_video_segment.caption_quality = "medium"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 0.7  # No change
+        assert reason == ""
+
+    def test_low_quality_penalty(self, caption_quality_config, sample_video_segment):
+        """Test confidence penalty for low-quality/fallback captions"""
+        confidence = 0.7
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 0.6  # 0.7 - 0.1
+        assert "caption quality low" in reason
+        assert "-0.10" in reason
+
+    def test_no_caption_quality_attribute(self, caption_quality_config, sample_video_segment):
+        """Test no adjustment when caption_quality not set"""
+        confidence = 0.7
+        # Don't set caption_quality attribute
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_disabled_via_config(self, sample_video_segment):
+        """Test no adjustment when feature disabled in config"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = False
+
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=0.7,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_boost_capped_at_1(self, caption_quality_config, sample_video_segment):
+        """Test that boost is capped at 1.0"""
+        confidence = 0.98
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 1.0  # Not 1.03
+        assert "caption quality high" in reason
+
+    def test_penalty_capped_at_0(self, caption_quality_config, sample_video_segment):
+        """Test that penalty doesn't go below 0"""
+        confidence = 0.05
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=caption_quality_config
+        )
+
+        assert result_conf == 0.0  # Not negative
+        assert "caption quality low" in reason
+
+    def test_zero_boost_config(self, sample_video_segment):
+        """Test no boost when config boost is zero"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        config.matching.caption_quality_high_boost = 0.0
+        config.matching.caption_quality_low_penalty = 0.1
+
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=0.7,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        assert result_conf == 0.7
+        assert reason == ""
+
+    def test_missing_config_defaults(self, sample_video_segment):
+        """Test fallback to default values when config attributes missing"""
+        config = Mock()
+        config.matching = Mock(spec=[])  # Empty spec = no attributes
+
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=0.7,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # Default enabled=True, high_boost=0.05
+        assert result_conf == 0.75
+        assert "caption quality high" in reason

@@ -390,6 +390,7 @@ class MatchStage(Stage):
         logger.info(f"text_metadata has {broll_count}/{len(state.text_metadata)} entries with is_broll=True")
 
         broll_segments_created = 0
+        caption_quality_count = {'high': 0, 'medium': 0, 'low': 0}
         for i, meta in enumerate(state.text_metadata):
             if isinstance(meta, dict):
                 vid_segment = SRTSegment(
@@ -409,6 +410,11 @@ class MatchStage(Stage):
                         broll_segments_created += 1
                 if meta.get('scene_index') is not None:
                     vid_segment.scene_index = meta['scene_index']
+                # US-007: Caption quality for confidence adjustment
+                if meta.get('caption_quality') is not None:
+                    vid_segment.caption_quality = meta['caption_quality']
+                    if meta['caption_quality'] in caption_quality_count:
+                        caption_quality_count[meta['caption_quality']] += 1
                 video_paths_set.add(meta.get('video_path', ''))
             else:
                 vid_segment = meta
@@ -417,6 +423,10 @@ class MatchStage(Stage):
             video_segments.append(vid_segment)
 
         logger.info(f"Created {broll_segments_created} video_segments with is_broll=True")
+        # US-007: Log caption quality distribution
+        if any(caption_quality_count.values()):
+            logger.info(f"Caption quality distribution: {caption_quality_count['high']} high, "
+                       f"{caption_quality_count['medium']} medium, {caption_quality_count['low']} low")
 
         return vo_segments, video_segments, list(video_paths_set)
 

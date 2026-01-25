@@ -336,6 +336,14 @@ matching:
   broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
   broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
 
+  # Caption quality adjustment (US-007)
+  # Chain-of-thought: Caption quality varies significantly between human-uploaded and auto-generated
+  # Reasoning: Human captions more reliable for matching, auto-generated may have errors
+  # Decision: Boost confidence for high quality, penalize low quality/fallback
+  caption_quality_adjustment_enabled: true  # Enable caption quality confidence adjustment
+  caption_quality_high_boost: 0.05  # Boost for high-quality human captions (+5%)
+  caption_quality_low_penalty: 0.1  # Penalty for low-quality/fallback captions (-10%)
+
   # Temporal coherence (adjacent segment scoring)
   # Chain-of-thought: Adjacent segments should have visual continuity
   # Reasoning: Clips from same source video as previous/next segment feel more cohesive

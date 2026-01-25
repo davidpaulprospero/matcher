@@ -199,6 +199,13 @@ class MatchingConfig:
     # Boosts confidence for: 1) silent/B-roll videos, 2) scenes without faces when topic matches
     broll_boost: float = 0.2  # Confidence boost for B-roll videos (0.0-0.3)
 
+    # Caption quality boost/penalty (US-007)
+    # Adjusts confidence based on caption quality: high, medium, low
+    # High quality (human captions): +boost, Medium (auto): no change, Low (fallback): -penalty
+    caption_quality_adjustment_enabled: bool = True  # Enable caption quality confidence adjustment
+    caption_quality_high_boost: float = 0.05  # Boost for high-quality human captions
+    caption_quality_low_penalty: float = 0.1  # Penalty for low-quality/fallback captions
+
     # B-roll preference (scene-level face detection)
     # When topic matches, prefer scenes without faces (B-roll) over talking heads
     prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference
