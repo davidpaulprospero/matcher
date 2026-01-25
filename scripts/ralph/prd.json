@@ -28,14 +28,15 @@
       "id": "US-002",
       "title": "Replace bare except blocks with specific exception handling in face_detection.py",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Replace bare except: at lines 132, 154, 211, 240 with specific exception types",
         "Use appropriate exceptions: cv2.error, OSError, ValueError for OpenCV operations",
         "Add logger.debug() calls for caught exceptions to aid troubleshooting",
         "Ensure face detection continues to work gracefully when one frame fails",
         "Syntax check passes: python -m py_compile src/face_detection.py"
-      ]
+      ],
+      "notes": "Replaced 4 bare except: blocks with specific exception handling: (OSError, IOError, json.JSONDecodeError) for cache reads, (OSError, IOError) for cache writes. Added logger.debug() calls for troubleshooting. Syntax check passes."
     },
     {
       "id": "US-003",

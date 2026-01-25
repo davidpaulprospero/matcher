@@ -129,8 +129,9 @@ class FaceDetector:
                         score = disk_cache[cache_key]
                         FaceDetector._cache[cache_key] = score
                         return score
-                except:
-                    pass
+                except (OSError, IOError, json.JSONDecodeError) as e:
+                    # Cache read failed (corrupt file, permission issue) - compute fresh
+                    logger.debug(f"Face cache read failed for {cache_key}: {e}")
 
         # Compute face score
         if FaceDetector._mediapipe_available:
@@ -151,8 +152,9 @@ class FaceDetector:
                 disk_cache[cache_key] = score
                 with open(cache_path, 'w') as f:
                     json.dump(disk_cache, f)
-            except:
-                pass
+            except (OSError, IOError) as e:
+                # Cache write failed (permission issue, disk full) - continue without caching
+                logger.debug(f"Face cache write failed for {cache_key}: {e}")
 
         return score
 
@@ -208,8 +210,9 @@ class FaceDetector:
                             FaceDetector._scene_cache[normalized_path] = {}
                         FaceDetector._scene_cache[normalized_path][time_key] = score
                         return score
-                except:
-                    pass
+                except (OSError, IOError, json.JSONDecodeError) as e:
+                    # Segment cache read failed - compute fresh
+                    logger.debug(f"Segment face cache read failed for {cache_key}: {e}")
 
         # Compute face score for scene/segment
         if FaceDetector._mediapipe_available:
@@ -237,8 +240,9 @@ class FaceDetector:
                 disk_cache[cache_key] = score
                 with open(cache_path, 'w') as f:
                     json.dump(disk_cache, f)
-            except:
-                pass
+            except (OSError, IOError) as e:
+                # Segment cache write failed - continue without caching
+                logger.debug(f"Segment face cache write failed for {cache_key}: {e}")
 
         return score
 
