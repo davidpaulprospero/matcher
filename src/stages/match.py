@@ -139,15 +139,18 @@ class MatchStage(Stage):
                         conf = getattr(pm, 'confidence', 0.0)
                         # Get confidence variance from MatchResult
                         conf_variance = getattr(m, 'confidence_variance', 0.0)
+                        # Get matched keywords from MatchResult
+                        matched_kws = getattr(m, 'matched_keywords', [])
 
                         serialized_matches.append({
                             'segment_index': i,
                             'source_file': source_file,
                             'start_time': float(start_time),
                             'confidence': float(conf),
-                            'confidence_variance': float(conf_variance)
+                            'confidence_variance': float(conf_variance),
+                            'matched_keywords': list(matched_kws) if matched_kws else []
                         })
-                    # Handle direct Match structure (no confidence_variance available)
+                    # Handle direct Match structure (no confidence_variance/matched_keywords available)
                     elif hasattr(m, 'video_segment'):
                         source_file = getattr(m.video_segment, 'source_file', '')
                         start_time = getattr(m.video_segment, 'start_time', 0.0)
@@ -158,7 +161,8 @@ class MatchStage(Stage):
                             'source_file': source_file,
                             'start_time': float(start_time),
                             'confidence': float(conf),
-                            'confidence_variance': 0.0  # Not available for direct Match
+                            'confidence_variance': 0.0,  # Not available for direct Match
+                            'matched_keywords': []  # Not available for direct Match
                         })
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
