@@ -42,6 +42,7 @@ from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .retry_queue import RetryQueue, BatchRetryConfig
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ class VideoDownloader:
         self.checkpoint: Optional[DownloadCheckpoint] = None
         self.DURATION_TIERS = self.checkpoint_mgr.duration_tiers
         self._last_download_timed_out = False
+        self._last_download_rate_limited = False  # Track rate limit failures for batch retry
 
         # Cookie authentication
         self._cookies_from_browser = getattr(self.download_config, 'cookies_from_browser', '')
@@ -161,6 +163,8 @@ class VideoDownloader:
         # Rate limit backoff state (progressive delay before cookie rotation)
         self._rate_limit_backoff_count = 0  # Current backoff attempt count
         self._rate_limit_total_delay = 0.0  # Cumulative delay applied
+        self._rate_limit_event_count = 0  # Count of rate limit events this session
+        self._in_cooldown_recovery_mode = False  # True if resumed within cooldown period
 
         # Speed tracker (for adaptive timeouts)
         speed_tracking_config = getattr(self.download_config, 'speed_tracking', None)
@@ -239,6 +243,41 @@ class VideoDownloader:
             )
         else:
             self.circuit_breaker = CircuitBreaker(CircuitBreakerConfig(enabled=False))
+
+        # Batch retry queue (for rate-limited videos)
+        batch_retry_config = getattr(self.download_config, 'batch_retry', None)
+        batch_retry_enabled = False
+        if batch_retry_config:
+            try:
+                enabled_val = getattr(batch_retry_config, 'enabled', False)
+                batch_retry_enabled = enabled_val is True
+            except (TypeError, ValueError):
+                batch_retry_enabled = False
+
+        if batch_retry_enabled:
+            # Get config values with safe defaults
+            try:
+                delay_secs = float(getattr(batch_retry_config, 'delay_seconds', 120.0))
+            except (TypeError, ValueError):
+                delay_secs = 120.0
+            try:
+                max_passes = int(getattr(batch_retry_config, 'max_passes', 2))
+            except (TypeError, ValueError):
+                max_passes = 2
+
+            self.retry_queue = RetryQueue(
+                BatchRetryConfig(
+                    enabled=True,
+                    delay_seconds=delay_secs,
+                    max_passes=max_passes
+                )
+            )
+            logger.debug(
+                f"Batch retry enabled: {delay_secs:.0f}s delay, "
+                f"max {max_passes} passes"
+            )
+        else:
+            self.retry_queue = RetryQueue(BatchRetryConfig(enabled=False))
 
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
@@ -490,17 +529,34 @@ class VideoDownloader:
         The backoff phase handles brief rate-limit windows without exhausting
         cookies too quickly.
 
+        When in cooldown recovery mode (resumed within cooldown period), uses
+        longer initial backoff and faster escalation to cookie/VPN rotation.
+
         Args:
             error_message: Error string from yt-dlp
 
         Returns:
             True if recovery was attempted (backoff or rotation), False if no options left
         """
+        # Record rate limit event for cross-session tracking
+        self._rate_limit_event_count += 1
+        self._record_rate_limit_event()
+
         # Get rate limit config settings
         rate_limit_config = getattr(self.download_config, 'rate_limit', None)
         initial_backoff = getattr(rate_limit_config, 'initial_backoff_seconds', 5.0) if rate_limit_config else 5.0
         max_backoff = getattr(rate_limit_config, 'max_backoff_before_rotate', 60.0) if rate_limit_config else 60.0
         backoff_multiplier = getattr(rate_limit_config, 'backoff_multiplier', 2.0) if rate_limit_config else 2.0
+
+        # In recovery mode, use more aggressive settings
+        if self._in_cooldown_recovery_mode:
+            # Longer initial delay, shorter max before escalation
+            initial_backoff = initial_backoff * 2
+            max_backoff = max_backoff * 0.5  # Escalate faster to cookie/VPN rotation
+            logger.debug(
+                f"Cooldown recovery mode: initial_backoff={initial_backoff:.1f}s, "
+                f"max_backoff={max_backoff:.1f}s"
+            )
 
         # Check if we should try backoff first (before cookie rotation)
         if self._rate_limit_total_delay < max_backoff:
@@ -515,8 +571,9 @@ class VideoDownloader:
                 self._rate_limit_backoff_count += 1
                 self._rate_limit_total_delay += delay
 
+                recovery_note = " (recovery mode)" if self._in_cooldown_recovery_mode else ""
                 logger.info(
-                    f"Rate limit backoff {self._rate_limit_backoff_count}: "
+                    f"Rate limit backoff {self._rate_limit_backoff_count}{recovery_note}: "
                     f"waiting {delay:.1f}s (total: {self._rate_limit_total_delay:.1f}s / {max_backoff:.0f}s max)"
                 )
                 time.sleep(delay)
@@ -540,10 +597,64 @@ class VideoDownloader:
 
         return False
 
+    def _record_rate_limit_event(self) -> None:
+        """Record rate limit event to checkpoint for cross-session tracking."""
+        if self.checkpoint:
+            self.checkpoint.last_rate_limit_timestamp = datetime.now().isoformat()
+            self.checkpoint.rate_limit_event_count = self._rate_limit_event_count
+            self._save_checkpoint()
+
     def _reset_rate_limit_backoff(self) -> None:
         """Reset rate limit backoff state after successful download or cookie rotation."""
         self._rate_limit_backoff_count = 0
         self._rate_limit_total_delay = 0.0
+
+    def _check_rate_limit_cooldown(self, checkpoint: DownloadCheckpoint) -> bool:
+        """
+        Check if last rate limit was within cooldown period.
+
+        If within cooldown, enables recovery mode with longer delays and
+        faster escalation to cookie/VPN rotation.
+
+        Args:
+            checkpoint: Loaded checkpoint with rate limit history
+
+        Returns:
+            True if within cooldown period, False otherwise
+        """
+        if not checkpoint.last_rate_limit_timestamp:
+            return False
+
+        try:
+            last_rate_limit = datetime.fromisoformat(checkpoint.last_rate_limit_timestamp)
+        except (ValueError, TypeError):
+            logger.debug("Invalid rate limit timestamp in checkpoint, ignoring cooldown")
+            return False
+
+        # Get cooldown config
+        rate_limit_config = getattr(self.download_config, 'rate_limit', None)
+        cooldown_minutes = getattr(rate_limit_config, 'resume_cooldown_minutes', 15.0) if rate_limit_config else 15.0
+
+        # Calculate time since last rate limit
+        now = datetime.now()
+        minutes_since = (now - last_rate_limit).total_seconds() / 60
+
+        if minutes_since < cooldown_minutes:
+            logger.info(
+                f"⚠ Rate limit cooldown: Last rate limit was {minutes_since:.1f} min ago "
+                f"(cooldown: {cooldown_minutes:.0f} min). "
+                f"Previous session had {checkpoint.rate_limit_event_count} rate limit events."
+            )
+            logger.info(
+                "  Enabling recovery mode: longer delays, faster escalation to cookie/VPN rotation"
+            )
+            return True
+        else:
+            logger.info(
+                f"✓ Rate limit cooldown cleared: {minutes_since:.1f} min since last rate limit "
+                f"(cooldown: {cooldown_minutes:.0f} min)"
+            )
+            return False
 
     def download_all(
         self,
@@ -593,6 +704,10 @@ class VideoDownloader:
                 if self.checkpoint.speed_tracker_state:
                     self.speed_tracker.from_checkpoint_dict(self.checkpoint.speed_tracker_state)
                     logger.debug(f"Restored speed tracker state: {self.speed_tracker.get_speed_stats()['samples']} samples")
+                # Check rate limit cooldown from previous session
+                self._in_cooldown_recovery_mode = self._check_rate_limit_cooldown(self.checkpoint)
+                # Restore rate limit event count for continued tracking
+                self._rate_limit_event_count = self.checkpoint.rate_limit_event_count
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(
@@ -602,7 +717,9 @@ class VideoDownloader:
                 current_keyword=None,
                 current_tier=None,
                 timestamp=datetime.now().isoformat(),
-                speed_tracker_state=None
+                speed_tracker_state=None,
+                last_rate_limit_timestamp=None,
+                rate_limit_event_count=0
             )
 
         all_downloaded = []
@@ -670,6 +787,13 @@ class VideoDownloader:
         if 100 not in logged_milestones:
             logger.info(f"Download progress: 100% ({len(keywords)}/{len(keywords)} keywords)")
 
+        # Process batch retry queue if there are pending items
+        retry_downloaded, retry_failed = self._process_retry_queue(output_dir, topic)
+        if retry_downloaded:
+            all_downloaded.extend(retry_downloaded)
+            total_videos_downloaded += len(retry_downloaded)
+            print(f"  ✓ Batch retry recovered {len(retry_downloaded)} additional videos")
+
         # Log inter-keyword source diversity report
         self.log_source_diversity_report()
 
@@ -677,6 +801,80 @@ class VideoDownloader:
         self._clear_checkpoint()
 
         return all_downloaded, failed_keywords
+
+    def _process_retry_queue(
+        self,
+        output_dir: Path,
+        topic: str = ""
+    ) -> Tuple[List[DownloadedVideo], List[str]]:
+        """
+        Process the batch retry queue after main download completes.
+
+        Retries all rate-limited keyword/tier combinations with a delay
+        between passes to allow rate limit windows to pass.
+
+        Args:
+            output_dir: Output directory for downloads
+            topic: Topic context for LLM filtering
+
+        Returns:
+            Tuple of (recovered_videos, still_failed_keywords)
+        """
+        if not self.retry_queue.is_enabled or not self.retry_queue.has_pending():
+            return [], []
+
+        recovered = []
+        still_failed = []
+
+        # Process retry passes
+        while self.retry_queue.has_pending():
+            # Start retry pass (applies delay)
+            pass_num = self.retry_queue.start_retry_pass()
+            if pass_num == 0:
+                break
+
+            # Get items to retry
+            items = self.retry_queue.get_pending_items()
+            logger.info(f"Batch retry pass {pass_num}: attempting {len(items)} keyword/tier combinations")
+
+            for item in items:
+                keyword = item.keyword
+                tier = item.tier
+
+                # Reset rate limit flag before retry
+                self._last_download_rate_limited = False
+
+                # Try downloading again
+                downloaded = self._download_single(keyword, tier, output_dir, topic)
+
+                if downloaded:
+                    # Success - mark in queue and add to recovered
+                    self.retry_queue.mark_success(item.video_id)
+                    recovered.extend(downloaded)
+
+                    # Update tier counts and sources
+                    with self._lock:
+                        self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
+                        self.sources.extend(downloaded)
+                        self._save_sources()
+
+                    logger.info(f"  Batch retry: recovered {len(downloaded)} video(s) for '{keyword}' ({tier})")
+                else:
+                    # Still failing
+                    self.retry_queue.mark_failed(item.video_id)
+
+            # Finish this pass (moves exhausted items to permanently failed)
+            self.retry_queue.finish_retry_pass()
+
+        # Collect still-failed keywords
+        stats = self.retry_queue.get_stats()
+        if stats['failed'] > 0:
+            logger.warning(
+                f"Batch retry: {stats['failed']} keyword/tier combinations "
+                f"still failed after {stats['max_passes']} retry passes"
+            )
+
+        return recovered, still_failed
 
     def download_for_keyword(
         self,
@@ -771,22 +969,32 @@ class VideoDownloader:
                     self.sources.extend(downloaded)
                     self._save_sources()
             else:
-                # ZERO-DOWNLOAD REMIX: Try LLM-based keyword remix when 0 results
-                remix_keyword = self._get_remix_keyword(keyword, topic)
-                if remix_keyword and remix_keyword != keyword:
-                    logger.info(f"  [{tier}] No results - trying remix: '{remix_keyword}'")
-                    downloaded = self._download_single(remix_keyword, tier, output_dir, topic)
-                    if downloaded:
-                        logger.debug(f"  [{tier}] ✓ Remix success: {len(downloaded)} video(s)")
-                        all_downloaded.extend(downloaded)
-                        with self._lock:
-                            self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
-                            self.sources.extend(downloaded)
-                            self._save_sources()
-                    else:
-                        logger.debug(f"  [{tier}] Remix also returned no results")
+                # Check if failure was due to rate limiting - add to batch retry queue
+                if getattr(self, '_last_download_rate_limited', False):
+                    self.retry_queue.add(
+                        video_id=f"{keyword}|{tier}",  # Use keyword|tier as ID
+                        keyword=keyword,
+                        tier=tier,
+                        error_message="Rate limited after retries exhausted"
+                    )
+                    logger.debug(f"  [{tier}] Added to batch retry queue")
                 else:
-                    logger.debug(f"  [{tier}] No results")
+                    # ZERO-DOWNLOAD REMIX: Try LLM-based keyword remix when 0 results
+                    remix_keyword = self._get_remix_keyword(keyword, topic)
+                    if remix_keyword and remix_keyword != keyword:
+                        logger.info(f"  [{tier}] No results - trying remix: '{remix_keyword}'")
+                        downloaded = self._download_single(remix_keyword, tier, output_dir, topic)
+                        if downloaded:
+                            logger.debug(f"  [{tier}] ✓ Remix success: {len(downloaded)} video(s)")
+                            all_downloaded.extend(downloaded)
+                            with self._lock:
+                                self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
+                                self.sources.extend(downloaded)
+                                self._save_sources()
+                        else:
+                            logger.debug(f"  [{tier}] Remix also returned no results")
+                    else:
+                        logger.debug(f"  [{tier}] No results")
 
             # Update checkpoint
             if self.checkpoint:
@@ -1175,8 +1383,9 @@ class VideoDownloader:
         retry_delay = getattr(self.download_config, 'retry_delay', 2.0)
         retry_backoff = getattr(self.download_config, 'retry_backoff', 2.0)
 
-        # Track timeout for retry logic
+        # Track timeout and rate limit for retry logic
         self._last_download_timed_out = False
+        self._last_download_rate_limited = False
         process = None
         last_stderr = ""
 
@@ -1224,12 +1433,18 @@ class VideoDownloader:
                         return []
 
                     # Check for transient errors - retry with backoff
-                    if self._is_transient_error(stderr) and attempt < max_retries:
-                        delay = retry_delay * (retry_backoff ** attempt)
-                        logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
-                        logger.debug(f"  Error: {stderr[:200]}")
-                        time.sleep(delay)
-                        continue
+                    if self._is_transient_error(stderr):
+                        if attempt < max_retries:
+                            delay = retry_delay * (retry_backoff ** attempt)
+                            logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                            logger.debug(f"  Error: {stderr[:200]}")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            # Exhausted retries on transient error - mark for batch retry
+                            logger.warning(f"Rate limit error for '{keyword}' ({tier}) after {max_retries} retries - added to batch retry queue")
+                            self._last_download_rate_limited = True
+                            return []
 
                 # Only log actual errors (not retried)
                 if stderr:

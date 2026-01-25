@@ -34,6 +34,11 @@ class DownloadCheckpoint:
     timestamp: str
     # Speed tracker state for adaptive timeout persistence (US-005)
     speed_tracker_state: Optional[Dict] = None
+    # Rate limit tracking for cross-session cooldown (US-008)
+    # ISO timestamp of last rate limit event
+    last_rate_limit_timestamp: Optional[str] = None
+    # Count of rate limit events in current/last session
+    rate_limit_event_count: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,6 +48,11 @@ class DownloadCheckpoint:
         # Handle checkpoints created before speed_tracker_state was added
         if 'speed_tracker_state' not in data:
             data['speed_tracker_state'] = None
+        # Handle checkpoints created before rate limit tracking was added (US-008)
+        if 'last_rate_limit_timestamp' not in data:
+            data['last_rate_limit_timestamp'] = None
+        if 'rate_limit_event_count' not in data:
+            data['rate_limit_event_count'] = 0
         return cls(**data)
 
 
