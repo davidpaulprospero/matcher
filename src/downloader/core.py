@@ -24,6 +24,7 @@ import subprocess
 import time
 import logging
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Set
@@ -47,6 +48,52 @@ from .rate_limit_metrics import RateLimitMetrics
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TierRateLimitState:
+    """Per-tier rate limit state tracking.
+
+    Maintains independent backoff state for each duration tier (short, medium, long, longer).
+    When per_tier_isolation is enabled, rate limiting on one tier doesn't affect others.
+
+    Attributes:
+        backoff_count: Number of backoff attempts for this tier
+        total_delay: Cumulative delay applied for this tier (seconds)
+        in_recovery: Whether this tier is in cooldown recovery mode
+        last_event_time: Timestamp of last rate limit event for this tier
+    """
+    backoff_count: int = 0
+    total_delay: float = 0.0
+    in_recovery: bool = False
+    last_event_time: Optional[str] = None
+
+    def reset(self) -> None:
+        """Reset backoff state after successful download or cookie rotation."""
+        self.backoff_count = 0
+        self.total_delay = 0.0
+        # Don't reset in_recovery - that's session-level from checkpoint
+
+    def to_dict(self) -> dict:
+        """Serialize state for checkpoint."""
+        return {
+            'backoff_count': self.backoff_count,
+            'total_delay': self.total_delay,
+            'in_recovery': self.in_recovery,
+            'last_event_time': self.last_event_time
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TierRateLimitState':
+        """Create from checkpoint data."""
+        if not data:
+            return cls()
+        return cls(
+            backoff_count=data.get('backoff_count', 0),
+            total_delay=data.get('total_delay', 0.0),
+            in_recovery=data.get('in_recovery', False),
+            last_event_time=data.get('last_event_time')
+        )
 
 
 class VideoDownloader:
@@ -162,10 +209,22 @@ class VideoDownloader:
             self.vpn_manager = None
 
         # Rate limit backoff state (progressive delay before cookie rotation)
-        self._rate_limit_backoff_count = 0  # Current backoff attempt count
-        self._rate_limit_total_delay = 0.0  # Cumulative delay applied
+        self._rate_limit_backoff_count = 0  # Current backoff attempt count (global fallback)
+        self._rate_limit_total_delay = 0.0  # Cumulative delay applied (global fallback)
         self._rate_limit_event_count = 0  # Count of rate limit events this session
         self._in_cooldown_recovery_mode = False  # True if resumed within cooldown period
+
+        # Per-tier rate limit state (US-001: tier isolation)
+        # Each tier maintains independent backoff state when per_tier_isolation is enabled
+        self._tier_rate_limit_states: Dict[str, TierRateLimitState] = {
+            'short': TierRateLimitState(),
+            'medium': TierRateLimitState(),
+            'long': TierRateLimitState(),
+            'longer': TierRateLimitState(),
+        }
+        # Check if per-tier isolation is enabled in config
+        rate_limit_config = getattr(self.download_config, 'rate_limit', None)
+        self._per_tier_isolation = getattr(rate_limit_config, 'per_tier_isolation', True) if rate_limit_config else True
 
         # Speed tracker (for adaptive timeouts)
         speed_tracking_config = getattr(self.download_config, 'speed_tracking', None)
@@ -554,7 +613,7 @@ class VideoDownloader:
 
         return False
 
-    def handle_rate_limit_error(self, error_message: str) -> bool:
+    def handle_rate_limit_error(self, error_message: str, tier: str = None) -> bool:
         """
         Handle rate limit or authentication error with progressive backoff.
 
@@ -569,8 +628,12 @@ class VideoDownloader:
         When in cooldown recovery mode (resumed within cooldown period), uses
         longer initial backoff and faster escalation to cookie/VPN rotation.
 
+        When per_tier_isolation is enabled, each tier maintains independent
+        backoff state. Rate limiting on 'long' tier won't affect 'short' tier.
+
         Args:
             error_message: Error string from yt-dlp
+            tier: Duration tier (short, medium, long, longer) for tier-specific tracking
 
         Returns:
             True if recovery was attempted (backoff or rotation), False if no options left
@@ -578,7 +641,7 @@ class VideoDownloader:
         # Record rate limit event for cross-session tracking and metrics
         self._rate_limit_event_count += 1
         self._record_rate_limit_event()
-        self.rate_limit_metrics.record_rate_limit_event()
+        self.rate_limit_metrics.record_rate_limit_event(tier=tier)
 
         # Get rate limit config settings
         rate_limit_config = getattr(self.download_config, 'rate_limit', None)
@@ -586,45 +649,69 @@ class VideoDownloader:
         max_backoff = getattr(rate_limit_config, 'max_backoff_before_rotate', 60.0) if rate_limit_config else 60.0
         backoff_multiplier = getattr(rate_limit_config, 'backoff_multiplier', 2.0) if rate_limit_config else 2.0
 
+        # Get tier-specific state if isolation enabled
+        if self._per_tier_isolation and tier and tier in self._tier_rate_limit_states:
+            tier_state = self._tier_rate_limit_states[tier]
+            backoff_count = tier_state.backoff_count
+            total_delay = tier_state.total_delay
+            in_recovery = tier_state.in_recovery or self._in_cooldown_recovery_mode
+            tier_label = f" [{tier}]"
+        else:
+            # Fallback to global state
+            tier_state = None
+            backoff_count = self._rate_limit_backoff_count
+            total_delay = self._rate_limit_total_delay
+            in_recovery = self._in_cooldown_recovery_mode
+            tier_label = ""
+
         # In recovery mode, use more aggressive settings
-        if self._in_cooldown_recovery_mode:
+        if in_recovery:
             # Longer initial delay, shorter max before escalation
             initial_backoff = initial_backoff * 2
             max_backoff = max_backoff * 0.5  # Escalate faster to cookie/VPN rotation
             logger.debug(
-                f"Cooldown recovery mode: initial_backoff={initial_backoff:.1f}s, "
+                f"Cooldown recovery mode{tier_label}: initial_backoff={initial_backoff:.1f}s, "
                 f"max_backoff={max_backoff:.1f}s"
             )
 
         # Check if we should try backoff first (before cookie rotation)
-        if self._rate_limit_total_delay < max_backoff:
+        if total_delay < max_backoff:
             # Calculate next backoff delay: initial * (multiplier ^ attempt)
-            delay = initial_backoff * (backoff_multiplier ** self._rate_limit_backoff_count)
+            delay = initial_backoff * (backoff_multiplier ** backoff_count)
 
             # Cap delay so we don't exceed max_backoff total
-            remaining = max_backoff - self._rate_limit_total_delay
+            remaining = max_backoff - total_delay
             delay = min(delay, remaining)
 
             if delay > 0:
-                self._rate_limit_backoff_count += 1
-                self._rate_limit_total_delay += delay
+                # Update tier-specific or global state
+                if tier_state:
+                    tier_state.backoff_count += 1
+                    tier_state.total_delay += delay
+                    tier_state.last_event_time = datetime.now().isoformat()
+                else:
+                    self._rate_limit_backoff_count += 1
+                    self._rate_limit_total_delay += delay
+
                 self.rate_limit_metrics.record_backoff(delay)
 
-                recovery_note = " (recovery mode)" if self._in_cooldown_recovery_mode else ""
+                recovery_note = " (recovery mode)" if in_recovery else ""
+                new_count = tier_state.backoff_count if tier_state else self._rate_limit_backoff_count
+                new_total = tier_state.total_delay if tier_state else self._rate_limit_total_delay
                 logger.info(
-                    f"Rate limit backoff {self._rate_limit_backoff_count}{recovery_note}: "
-                    f"waiting {delay:.1f}s (total: {self._rate_limit_total_delay:.1f}s / {max_backoff:.0f}s max)"
+                    f"Rate limit backoff{tier_label} {new_count}{recovery_note}: "
+                    f"waiting {delay:.1f}s (total: {new_total:.1f}s / {max_backoff:.0f}s max)"
                 )
                 time.sleep(delay)
                 return True
 
         # Backoff exhausted - reset counters and escalate to cookie rotation
-        if self._rate_limit_total_delay > 0:
+        if total_delay > 0:
             logger.info(
-                f"Rate limit backoff exhausted after {self._rate_limit_total_delay:.1f}s total delay, "
+                f"Rate limit backoff{tier_label} exhausted after {total_delay:.1f}s total delay, "
                 "escalating to cookie rotation"
             )
-            self._reset_rate_limit_backoff()
+            self._reset_rate_limit_backoff(tier=tier)
 
         # Try cookie rotation
         if self.rotate_cookie_on_error(error_message):
@@ -643,10 +730,22 @@ class VideoDownloader:
             self.checkpoint.rate_limit_event_count = self._rate_limit_event_count
             self._save_checkpoint()
 
-    def _reset_rate_limit_backoff(self) -> None:
-        """Reset rate limit backoff state after successful download or cookie rotation."""
-        self._rate_limit_backoff_count = 0
-        self._rate_limit_total_delay = 0.0
+    def _reset_rate_limit_backoff(self, tier: str = None) -> None:
+        """Reset rate limit backoff state after successful download or cookie rotation.
+
+        When per_tier_isolation is enabled, only resets the specified tier's state.
+        Otherwise, resets global state.
+
+        Args:
+            tier: Duration tier to reset (short, medium, long, longer), or None for global
+        """
+        if self._per_tier_isolation and tier and tier in self._tier_rate_limit_states:
+            self._tier_rate_limit_states[tier].reset()
+            logger.debug(f"Reset rate limit backoff for tier '{tier}'")
+        else:
+            # Reset global state
+            self._rate_limit_backoff_count = 0
+            self._rate_limit_total_delay = 0.0
 
     def _check_rate_limit_cooldown(self, checkpoint: DownloadCheckpoint) -> bool:
         """

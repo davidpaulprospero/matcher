@@ -1,168 +1,189 @@
 {
-  "branchName": "ralph/sprint-2",
-  "sprintNumber": 2,
+  "branchName": "ralph/sprint-3",
+  "sprintNumber": 3,
   "focusArea": "rate-limiting",
-  "projectContext": "Improve YouTube download resilience through retry mechanisms, progressive backoff, and configurable rate-limit handling. Key gap: config.yaml has max_retries/retry_delay/retry_backoff settings that are NOT used in VideoDownloader._run_download_cmd(). Cookie rotator and VPN manager exist but escalation is too aggressive.",
+  "projectContext": "Continue improving YouTube download resilience. Sprint 2 established core retry mechanisms, circuit breaker, batch retry queue, speed tracking, and metrics. Sprint 3 focuses on cross-component coordination, per-tier isolation, proactive rate limit detection, and checkpoint persistence improvements. Key gaps: rate limit state is global (not per-tier), circuit breaker and batch retry don't coordinate, VPN manager state not persisted, metrics not loaded on resume, cookie cooldown and batch retry delays not synchronized.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Implement exponential backoff retry in _run_download_cmd",
-      "description": "The download config defines max_retries (3), retry_delay (2s), and retry_backoff (2.0) but these are NOT used in VideoDownloader._run_download_cmd(). Implement retry logic with exponential backoff for transient failures.",
+      "title": "Implement per-tier rate limit state isolation",
+      "description": "Rate limiting state (backoff count, delay, cooldown mode) is tracked globally. When downloading multiple tiers simultaneously, a rate limit on 'long' tier affects 'short' tier backoff. Each tier should maintain independent rate limit state.",
       "priority": 1,
       "acceptanceCriteria": [
-        "VideoDownloader._run_download_cmd uses config.download.max_retries for retry attempts",
-        "Delay between retries follows exponential backoff: retry_delay * (retry_backoff ^ attempt)",
-        "Retries only occur for transient errors (timeout, connection reset, 429 rate limit)",
-        "Permanent errors (video unavailable, private, age-restricted) fail immediately without retry",
-        "Each retry attempt is logged with attempt number and delay duration",
-        "Unit tests verify retry behavior with mocked subprocess calls"
+        "New TierRateLimitState class tracks backoff_count, current_delay, in_recovery for each tier",
+        "RateLimitConfig gains per_tier_isolation option (default: true)",
+        "handle_rate_limit_error() uses tier-specific state when isolation enabled",
+        "_reset_rate_limit_backoff() resets only the affected tier's state",
+        "Rate limit metrics track events per tier in tier_rate_limit_events dict",
+        "Tests verify tier A rate limit does not affect tier B backoff"
       ],
       "passes": true,
-      "notes": "Implemented retry loop in _run_download_cmd with TRANSIENT_ERROR_PATTERNS and PERMANENT_ERROR_PATTERNS class variables. 21 new unit tests in tests/test_downloader_retry.py. All 68 related tests pass."
+      "notes": "Implemented TierRateLimitState dataclass, added per_tier_isolation config option (default: true), updated handle_rate_limit_error() and _reset_rate_limit_backoff() for tier-specific state, added tier_rate_limit_events to metrics. 25 tests verify isolation behavior."
     },
     {
       "id": "US-002",
-      "title": "Add progressive backoff before cookie rotation",
-      "description": "Currently rate limit errors immediately trigger cookie rotation. Add a progressive delay phase before escalating to cookie rotation to handle brief rate-limit windows.",
+      "title": "Add proactive rate limit detection via speed drop monitoring",
+      "description": "Speed tracker monitors download speeds but doesn't signal potential rate limiting. A sudden drop to near-zero or stalled progress often precedes hard rate limit failures. Add proactive detection.",
       "priority": 2,
       "acceptanceCriteria": [
-        "New config option download.rate_limit.initial_backoff_seconds (default: 5)",
-        "New config option download.rate_limit.max_backoff_before_rotate (default: 60)",
-        "Rate limit errors trigger exponential backoff BEFORE rotating cookies",
-        "After max_backoff_before_rotate seconds total delay, then rotate cookie",
-        "Backoff progress is logged for debugging",
-        "Tests verify backoff occurs before rotation"
+        "SpeedTracker gains detect_rate_limit_signals() method checking for speed anomalies",
+        "New config option speed_tracking.rate_limit_signal_threshold (default: 0.1 Mbps)",
+        "When speed drops below threshold for 3+ consecutive samples, emit rate_limit_signal",
+        "Signal triggers preemptive backoff via circuit breaker integration",
+        "Signal logged at WARNING level with speed history context",
+        "Tests verify signal detection and preemptive action"
       ],
-      "passes": true,
-      "notes": "Added RateLimitConfig dataclass with initial_backoff_seconds (5.0), max_backoff_before_rotate (60.0), backoff_multiplier (2.0). Modified handle_rate_limit_error() to apply progressive backoff before rotation. Added _reset_rate_limit_backoff() for state reset on success. 20 new unit tests in tests/test_rate_limit_backoff.py. All 57 download/cookie/retry tests pass."
+      "passes": false
     },
     {
       "id": "US-003",
-      "title": "Make cookie rotator error patterns configurable",
-      "description": "Cookie rotator has hard-coded error patterns (429, rate limit, etc.) at line 222. Move patterns to config.yaml so users can add new YouTube error formats without code changes.",
+      "title": "Coordinate circuit breaker pause with batch retry scheduling",
+      "description": "Circuit breaker pauses for 60s after failures, but batch retry queue has its own 120s delay. If circuit breaker is paused, batch retry should wait for it to recover before processing.",
       "priority": 3,
       "acceptanceCriteria": [
-        "New config section download.cookie_rotation.error_patterns as list of strings",
-        "Default patterns include: 429, rate limit, too many requests, sign in, login required, bot detection",
-        "CookieRotator.rotate_on_errors() reads from config instead of hard-coded list",
-        "Patterns support case-insensitive matching",
-        "Config validation ensures error_patterns is a non-empty list",
-        "Tests verify custom patterns trigger rotation"
+        "RetryQueue gains set_circuit_breaker() method to link to circuit breaker instance",
+        "Before processing batch retry, check if circuit breaker is tripped",
+        "If tripped, wait for circuit breaker pause to complete before retry",
+        "New config option batch_retry.respect_circuit_breaker (default: true)",
+        "Batch retry delay extends if circuit breaker pause overlaps",
+        "Tests verify batch retry waits for circuit breaker recovery"
       ],
-      "passes": true,
-      "notes": "Error patterns already configurable via rotate_on_errors in CookieRotationConfig. Added __post_init__ validation for non-empty list when enabled. Case-insensitive matching via .lower(). Also added cookie file validation at startup (validates existence AND readability, logs warnings with reason, get_status includes valid_cookies count). 28 tests pass in test_cookie_rotation.py (8 validation + 5 custom patterns + 15 existing)."
+      "passes": false
     },
     {
       "id": "US-004",
-      "title": "Add search timeout fallback with keyword remix",
-      "description": "Search queries that timeout (yt-dlp search hangs) currently kill the entire keyword. Add fallback to try remixed keyword when search times out.",
+      "title": "Add cross-keyword rate limit budget tracking",
+      "description": "When processing multiple keywords, rate limit events from keyword A are not shared with keyword B. If keyword A exhausted cookie rotations, keyword B doesn't know. Add shared rate limit budget.",
       "priority": 4,
       "acceptanceCriteria": [
-        "Search timeout (default: 30s) is detected separately from download timeout",
-        "On search timeout, try LLM keyword remix before giving up",
-        "New config option download.search_timeout_seconds (default: 30)",
-        "Maximum 2 remix attempts per original keyword on timeout",
-        "Timeout is logged with original keyword and remix attempts",
-        "Tests verify remix is tried after search timeout"
+        "New RateLimitBudget class tracks: rotations_used, vpn_switches_used, backoff_time_spent",
+        "Budget shared across all keywords in a download session",
+        "New config option rate_limit.share_budget_across_keywords (default: true)",
+        "When budget exhausted (e.g., all rotations used), skip to next escalation level",
+        "Budget state saved to checkpoint for resume",
+        "Tests verify keyword B skips exhausted rotations from keyword A"
       ],
-      "passes": true,
-      "notes": "Implemented SearchResult class in title_filter.py to track timeout state. Modified search_video_metadata() to return SearchResult with timed_out flag. Updated _download_single() in core.py with timeout-based remix loop (max 2 attempts). Changed search_timeout default from 60s to 30s. 18 new tests in tests/test_search_timeout_remix.py. Updated existing test mocks to use SearchResult. All 23 related tests pass."
+      "passes": false
     },
     {
       "id": "US-005",
-      "title": "Implement download speed monitoring for adaptive timeouts",
-      "description": "Current tier-based timeouts are fixed. Track actual download speeds per session to dynamically adjust timeouts based on network conditions.",
+      "title": "Add VPN manager checkpoint persistence",
+      "description": "VPN manager tracks switch_count in memory but doesn't persist to checkpoint. On resume, switch count is lost and may exceed max_switches_per_session.",
       "priority": 5,
       "acceptanceCriteria": [
-        "New DownloadSpeedTracker class tracks bytes downloaded and time per video",
-        "Average speed calculated across last 5 downloads (sliding window)",
-        "Timeout can be extended by up to 2x if speed is below expected threshold",
-        "Speed stats exposed via get_speed_stats() for debugging",
-        "Tracker state persisted in checkpoint for resume scenarios",
-        "Tests verify timeout extension on slow networks"
+        "VpnManager gains to_checkpoint_state() and from_checkpoint_state() methods",
+        "Checkpoint includes vpn_manager_state with switch_count, last_switch_timestamp",
+        "On resume, VpnManager loads previous state and continues tracking",
+        "max_switches_per_session enforced across resume boundaries",
+        "Status logged on resume: 'Resuming VPN manager: X/Y switches used'",
+        "Tests verify switch count preserved across checkpoint save/load"
       ],
-      "passes": true,
-      "notes": "Implemented DownloadSpeedTracker class in src/downloader/speed_tracker.py with DownloadSpeedConfig dataclass (enabled, window_size=5, min_speed_mbps=1.0, max_timeout_multiplier=2.0). DownloadRecord tracks per-video stats with speed_mbps property. Sliding window via deque(maxlen=window_size). get_adjusted_timeout() extends timeout proportionally when speed < min_speed_mbps. Added SpeedTrackingConfig to download.py config, integrated in core.py _run_download_cmd(). Checkpoint persistence via speed_tracker_state field in DownloadCheckpoint. 28 tests in test_speed_tracker.py covering config, recording, averaging, adaptive timeout, checkpoint persistence, and integration. All 356 download tests pass."
+      "passes": false
     },
     {
       "id": "US-006",
-      "title": "Add circuit breaker for repeated search failures",
-      "description": "If multiple keywords in a row fail to return results, pause searching briefly instead of hammering YouTube. Implement circuit breaker pattern.",
+      "title": "Implement rate limit metrics aggregation on resume",
+      "description": "Rate limit metrics are saved to checkpoint but not loaded on resume. Users can't see cumulative metrics across session boundaries for multi-day downloads.",
       "priority": 6,
       "acceptanceCriteria": [
-        "New config option download.circuit_breaker.consecutive_failures_threshold (default: 5)",
-        "New config option download.circuit_breaker.pause_seconds (default: 60)",
-        "After threshold consecutive search failures, pause for pause_seconds",
-        "Circuit breaker resets on first successful search",
-        "Pause duration is logged clearly (not hidden in debug)",
-        "Tests verify circuit breaker triggers and resets correctly"
+        "RateLimitMetrics gains from_checkpoint() classmethod to load previous state",
+        "On resume, metrics loaded and aggregation continues from previous values",
+        "New session_count field tracks how many sessions contributed to metrics",
+        "Cross-session metrics distinguished in report (e.g., 'Total across 3 sessions')",
+        "Metrics reset method clears all values including session count",
+        "Tests verify cumulative metrics across multiple save/load cycles"
       ],
-      "passes": true,
-      "notes": "Implemented CircuitBreaker class in src/downloader/circuit_breaker.py with CircuitBreakerConfig dataclass. Added circuit_breaker section to DownloadConfig and config.yaml. Integrated into VideoDownloader search flow - checks breaker before search, records success/failure after. Pause logged at INFO level. 33 new tests in tests/test_circuit_breaker.py covering config, state management, trip/reset, pause timing, checkpoint persistence, and VideoDownloader integration. All 363 download tests pass (4 pre-existing failures unrelated to circuit breaker)."
+      "passes": false
     },
     {
       "id": "US-007",
-      "title": "Add batch-level retry queue for rate-limited videos",
-      "description": "Currently each video retries independently. If rate limiting affects a batch, collect failed videos and retry the entire batch after a delay.",
+      "title": "Synchronize cookie cooldown with batch retry delay",
+      "description": "Cookie rotation tracks per-cookie cooldown (300s), batch retry has 120s delay. If a cookie fails, batch retry might reuse it before cooldown expires. Synchronize these delays.",
       "priority": 7,
       "acceptanceCriteria": [
-        "New RetryQueue class collects rate-limited video IDs with their keywords",
-        "After batch completes, retry queue is processed with backoff",
-        "New config option download.batch_retry.enabled (default: true)",
-        "New config option download.batch_retry.delay_seconds (default: 120)",
-        "Maximum 2 batch retry passes per download session",
-        "Tests verify batch retry with multiple failed videos"
+        "RetryQueue gains set_cookie_rotator() method to access cooldown info",
+        "Before batch retry, check if any required cookies are in cooldown",
+        "If cookies in cooldown, extend batch retry delay to wait for cooldown expiry",
+        "New config option batch_retry.wait_for_cookie_cooldown (default: true)",
+        "Log when batch retry delay extended due to cookie cooldown",
+        "Tests verify batch retry waits for cookie cooldown expiry"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": false
     },
     {
       "id": "US-008",
-      "title": "Add rate limit cooldown tracking across sessions",
-      "description": "Rate limit history is lost between pipeline runs. Persist rate limit events to avoid aggressive retries when resuming after rate limiting.",
+      "title": "Add adaptive backoff multiplier based on error severity",
+      "description": "Rate limit backoff uses fixed 2.0 multiplier regardless of error type. A 429 quota exceeded should use higher multiplier than 'too many requests'. Add severity-based adjustment.",
       "priority": 8,
       "acceptanceCriteria": [
-        "Rate limit events saved to checkpoint with timestamp",
-        "On resume, check if last rate limit was within cooldown period",
-        "New config option download.rate_limit.resume_cooldown_minutes (default: 15)",
-        "If within cooldown, start with longer delays and skip to VPN/cookie rotation faster",
-        "Cooldown status logged on pipeline resume",
-        "Tests verify cooldown applied on resume"
+        "New error_severity dict maps error patterns to severity levels (low, medium, high)",
+        "Backoff multiplier adjusted based on severity: low=1.5, medium=2.0, high=3.0",
+        "New config option rate_limit.adaptive_multiplier (default: true)",
+        "Severity classification logged with each rate limit event",
+        "Metrics track backoff events by severity level",
+        "Tests verify different multipliers applied for different error types"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": false
     },
     {
       "id": "US-009",
-      "title": "Add download healer integration with retry mechanism",
-      "description": "DownloadHealer in src/agents/healers/download.py has backoff logic but it's not integrated with the new retry mechanism. Ensure healers and retry work together.",
+      "title": "Add per-keyword rate limit event tracking in metrics",
+      "description": "Metrics aggregate rate limit events globally but don't track which keywords trigger the most. Keyword-level metrics help identify problematic search terms.",
       "priority": 9,
       "acceptanceCriteria": [
-        "DownloadHealer checks if _run_download_cmd already retried before applying its own backoff",
-        "New flag passed to healer: already_retried_count",
-        "Healer skips exponential backoff if retries already exhausted",
-        "Healer proceeds directly to cookie/VPN rotation after retries exhausted",
-        "Clear logging shows retry handoff between core and healer",
-        "Tests verify healer skips redundant retries"
+        "RateLimitMetrics gains keyword_rate_limit_events dict tracking events per keyword",
+        "record_rate_limit_event() accepts optional keyword parameter",
+        "Report shows top 5 keywords by rate limit events when > 10 events total",
+        "Config recommendation suggests skipping high-rate-limit keywords",
+        "Keyword events saved to checkpoint for cross-session analysis",
+        "Tests verify per-keyword tracking and report output"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": false
     },
     {
       "id": "US-010",
-      "title": "Add rate limiting metrics to pipeline report",
-      "description": "After pipeline completes, show rate limiting statistics so users can tune their config. Add metrics to the healing report.",
+      "title": "Add configurable VPN connection verification endpoint",
+      "description": "VPN manager verifies connection by pinging Google (8.8.8.8). For privacy-conscious users, this leaks connection tests to Google. Make endpoint configurable.",
       "priority": 10,
       "acceptanceCriteria": [
-        "New RateLimitMetrics class tracks: retries, backoffs, cookie rotations, VPN switches",
-        "Metrics include: total_downloads, rate_limit_events, avg_retry_count, time_spent_backing_off",
-        "Metrics printed in healing report under 'Rate Limiting' section",
-        "Metrics saved to checkpoint for cross-session analysis",
-        "Config recommendations printed if rate_limit_events > 10% of downloads",
-        "Tests verify metrics collection and report output"
+        "New config option vpn.verification_endpoint (default: 'https://www.google.com')",
+        "New config option vpn.verification_ip (default: '8.8.8.8')",
+        "VpnManager uses configured endpoints instead of hardcoded Google",
+        "Option to disable verification entirely: vpn.skip_verification (default: false)",
+        "Verification failure logged with endpoint used",
+        "Tests verify custom endpoints are used for verification"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": false
+    },
+    {
+      "id": "US-011",
+      "title": "Implement download retry and circuit breaker timeout coordination",
+      "description": "Download retry loop and circuit breaker operate independently. If circuit breaker pauses during a download retry, the two mechanisms don't coordinate. Add synchronization.",
+      "priority": 11,
+      "acceptanceCriteria": [
+        "Download retry loop checks circuit breaker state before each attempt",
+        "If circuit breaker tripped during retry, wait for recovery before continuing",
+        "New config option circuit_breaker.block_download_retries (default: true)",
+        "Retry count preserved across circuit breaker pause (not reset)",
+        "Log when download retry paused due to circuit breaker",
+        "Tests verify download retry waits for circuit breaker recovery"
+      ],
+      "passes": false
+    },
+    {
+      "id": "US-012",
+      "title": "Add rate limit health dashboard data export",
+      "description": "Rate limit metrics are shown in pipeline report but not exportable. Add JSON export for external monitoring and visualization tools.",
+      "priority": 12,
+      "acceptanceCriteria": [
+        "RateLimitMetrics gains export_to_json() method returning structured data",
+        "Export includes all metrics, timestamps, and session info",
+        "New CLI flag --export-metrics <path> saves metrics JSON after pipeline",
+        "JSON schema documented in rate_limit_metrics.py docstring",
+        "Export includes config values that were active during session",
+        "Tests verify JSON export matches expected schema"
+      ],
+      "passes": false
     }
   ]
 }

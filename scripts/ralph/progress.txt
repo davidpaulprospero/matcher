@@ -971,3 +971,503 @@ Created `tests/test_circuit_breaker.py` with 33 tests in 12 test classes:
 - src/downloader/core.py - Circuit breaker integration
 - src/downloader/__init__.py - Exports
 
+
+## Iteration 21 - US-007: Add batch-level retry queue for rate-limited videos
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented batch-level retry queue to collect rate-limited videos and retry them together after a delay, allowing rate limit windows to pass before batch retry.
+
+**New RetryQueue class (src/downloader/retry_queue.py):**
+- `BatchRetryConfig` dataclass with:
+  - `enabled: bool = True` - Enable/disable batch retry
+  - `delay_seconds: float = 120.0` - Delay before retry pass (2 minutes)
+  - `max_passes: int = 2` - Maximum retry passes per session
+- `RetryItem` dataclass tracking:
+  - `video_id` - Unique ID (keyword|tier format)
+  - `keyword` - Search keyword that failed
+  - `tier` - Duration tier (short, medium, long, longer)
+  - `error_message` - Error that caused failure
+  - `retry_count` - Number of retry attempts
+  - `added_at` - Timestamp when added to queue
+- `RetryQueue` class with:
+  - `add()` - Add failed video to queue
+  - `mark_success()` - Remove from queue on successful retry
+  - `mark_failed()` - Increment retry count
+  - `start_retry_pass()` - Begin retry pass with delay
+  - `finish_retry_pass()` - Move exhausted items to failed set
+  - `has_pending()` - Check if more items to retry
+  - `can_retry` - Check if passes remain
+  - `get_stats()` - Return stats for reporting
+  - `to_checkpoint_dict()` / `from_checkpoint_dict()` - Checkpoint persistence
+  - `clear()` - Clear all state for new session
+
+**Config additions (src/config/sections/download.py):**
+- New `BatchRetryConfig` dataclass
+- Added `batch_retry: BatchRetryConfig` field to `DownloadConfig`
+- Added `__post_init__` handling for dict-to-dataclass conversion
+
+**Config additions (config.yaml):**
+- New `download.batch_retry` section with all settings
+- Documented how it works in comments
+
+**Integration (src/downloader/core.py):**
+- Initialize `RetryQueue` in `VideoDownloader.__init__`
+- Added `_last_download_rate_limited` flag to track rate limit failures
+- Modified `_run_download_cmd()` to set flag when transient error exhausts retries
+- Modified `download_for_keyword()` to add failed keyword/tier to queue when rate limited
+- Added `_process_retry_queue()` method to process queue after batch completes:
+  1. For each retry pass: wait delay_seconds, then retry all queued items
+  2. Mark success/failed based on retry outcome
+  3. After max_passes, move remaining to permanently failed
+- Called `_process_retry_queue()` at end of `download_all()`
+- Logging at INFO level for retry pass start, success, and failures
+
+**Exports (src/downloader/__init__.py):**
+- Added `RetryQueue`, `BatchRetryConfig`, `RetryItem` to exports
+
+### Tests Added
+Created `tests/test_batch_retry.py` with 35 tests in 14 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestBatchRetryConfig | 2 | Default and custom config values |
+| TestRetryItem | 2 | Default values, custom retry count |
+| TestRetryQueueInitialization | 3 | Default, custom config, disabled |
+| TestRetryQueueAdd | 5 | Single, multiple, duplicate, disabled, completed |
+| TestRetryQueueState | 3 | has_pending, after max passes, get pending items |
+| TestRetryQueueMarking | 3 | Mark success, nonexistent, failed |
+| TestRetryQueuePasses | 4 | Start pass, disabled, empty, finish moves to failed |
+| TestRetryQueueStats | 2 | Empty stats, with items |
+| TestRetryQueueCheckpoint | 4 | Save, restore, empty, roundtrip |
+| TestRetryQueueClear | 1 | Clear all state |
+| TestVideoDownloaderBatchRetryIntegration | 2 | Enabled/disabled initialization |
+| TestBatchRetryWithMultipleFailedVideos | 2 | Multiple videos queued, max passes respected |
+| TestConfigYamlIntegration | 2 | Config section exists, dict conversion |
+
+### Verification
+- Syntax check: All new/modified files pass `python -m py_compile`
+- All 35 new tests: `pytest tests/test_batch_retry.py -v` - PASSED
+- All 137 related tests: `pytest tests/test_batch_retry.py tests/test_circuit_breaker.py tests/test_speed_tracker.py tests/test_rate_limit_backoff.py tests/test_downloader_retry.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- src/downloader/retry_queue.py - RetryQueue class
+- tests/test_batch_retry.py (35 tests)
+
+### Files Modified
+- src/config/sections/download.py - BatchRetryConfig dataclass
+- config.yaml - download.batch_retry section
+- src/downloader/core.py - Retry queue integration
+- src/downloader/__init__.py - Exports
+
+
+## Iteration 22 - US-008: Add rate limit cooldown tracking across sessions
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented cross-session rate limit tracking to avoid aggressive retries when resuming after rate limiting.
+
+**Config additions (src/config/sections/download.py):**
+- Added `resume_cooldown_minutes: float = 15.0` to `RateLimitConfig`
+- Documents cross-session cooldown behavior in docstring
+
+**Checkpoint additions (src/downloader/checkpoint.py):**
+- Added `last_rate_limit_timestamp: Optional[str]` - ISO timestamp of last rate limit event
+- Added `rate_limit_event_count: int` - Count of rate limit events in session
+- Updated `from_dict()` for backward compatibility with old checkpoints
+
+**Core implementation (src/downloader/core.py):**
+- Added `_rate_limit_event_count` and `_in_cooldown_recovery_mode` state tracking
+- Added `_record_rate_limit_event()` - saves timestamp and count to checkpoint on each rate limit
+- Added `_check_rate_limit_cooldown()` - checks if resuming within cooldown period
+- Modified `handle_rate_limit_error()` to apply recovery mode settings:
+  - Doubles initial backoff (5s -> 10s)
+  - Halves max backoff before escalation (60s -> 30s)
+- Modified `download_all()` to check cooldown and enable recovery mode on resume
+- Clear INFO-level logging of cooldown status on resume
+
+**Config additions (config.yaml):**
+- Added `resume_cooldown_minutes: 15.0` with explanatory comment
+
+### Recovery Mode Behavior
+When resuming within cooldown period (last rate limit < 15 min ago):
+```
+Normal:   initial=5s,  max_before_rotate=60s
+Recovery: initial=10s, max_before_rotate=30s
+```
+
+Recovery mode escalates faster to cookie/VPN rotation since rate limit is likely still active.
+
+### Tests Added
+Created `tests/test_rate_limit_cooldown.py` with 23 tests in 9 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestRateLimitConfig | 3 | resume_cooldown_minutes default and custom |
+| TestDownloadCheckpointRateLimitFields | 4 | Checkpoint fields, to_dict, from_dict, backward compat |
+| TestCooldownCheck | 5 | No previous, within cooldown, outside, invalid timestamp, custom period |
+| TestRateLimitEventRecording | 4 | Timestamp, count, save, no checkpoint |
+| TestRecoveryModeBehavior | 3 | Doubled initial, standard, halved max |
+| TestCooldownLogging | 2 | Within cooldown, cleared |
+| TestCheckpointRoundtrip | 1 | Full roundtrip with all fields |
+| TestCooldownIntegration | 1 | Event count increment |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 23 new tests: `pytest tests/test_rate_limit_cooldown.py -v` - PASSED
+- All 64 related tests: `pytest tests/test_rate_limit_backoff.py tests/test_rate_limit_cooldown.py tests/test_downloader_retry.py -v` - PASSED
+- All 124 sprint tests: `pytest tests/test_batch_retry.py tests/test_circuit_breaker.py tests/test_speed_tracker.py tests/test_cookie_rotation.py -v` - PASSED (1 skipped)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_rate_limit_cooldown.py (23 tests)
+
+### Files Modified
+- src/config/sections/download.py - resume_cooldown_minutes field
+- src/downloader/checkpoint.py - Rate limit tracking fields
+- src/downloader/core.py - Cooldown check and recovery mode logic
+- config.yaml - resume_cooldown_minutes setting
+
+
+## Iteration 23 - US-009: Add download healer integration with retry mechanism
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented integration between DownloadHealer and the core retry mechanism to avoid redundant backoff delays.
+
+**New DownloadError exception class (src/downloader/types.py):**
+- Created `DownloadError` exception that carries retry context:
+  - `message: str` - Error description
+  - `retry_count: int` - Number of retries already attempted
+  - `max_retries: int` - Maximum retries configured
+  - `error_type: str` - Error category ('transient', 'permanent', 'timeout', 'unknown')
+  - `original_error: Optional[str]` - Underlying error from yt-dlp
+- Added `retries_exhausted` property to check if all retries have been used
+- Custom `__str__` includes retry info when applicable
+
+**DownloadHealer updates (src/agents/healers/download.py):**
+- Added `_get_retry_context()` method to extract retry info from exceptions:
+  - Returns (retry_count, max_retries, retries_exhausted) tuple
+  - Returns defaults (0, 3, False) for regular exceptions
+- Modified `fix()` method to check retry context and log handoff
+- Updated `_handle_rate_limit()` to accept `retries_exhausted` parameter:
+  - When exhausted: skip healer backoff, proceed to cookie/VPN rotation
+  - If cookie/VPN also exhausted, fail immediately with clear message
+- Updated `_handle_network_error()` to skip backoff when exhausted
+- Updated `_handle_generic_error()` to fail fast when exhausted
+- Clear logging at handoff: "Core retry exhausted (X/Y), proceeding to escalation"
+
+**Test fixture updates (tests/test_agents/conftest.py):**
+- Updated `mock_config` fixture to properly mock cookie_rotation and vpn configs
+- Fixes pre-existing test failures caused by US-003 cookie file validation
+
+**Exports (src/downloader/__init__.py):**
+- Added `DownloadError` to exports
+
+### Behavior Summary
+| Scenario | retries_exhausted=False | retries_exhausted=True |
+|----------|------------------------|------------------------|
+| Rate limit | Backoff then rotate | Skip backoff, rotate directly, fail if exhausted |
+| Network error | Wait then increase timeout | Skip wait, increase timeout immediately |
+| Generic error | Backoff with counter | Fail fast |
+
+### Tests Added
+Created `tests/test_agents/test_download_healer_retry.py` with 21 tests in 9 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestDownloadError | 4 | Exception defaults, custom context, retries_exhausted, __str__ |
+| TestGetRetryContext | 3 | With DownloadError, regular exception, ValueError |
+| TestHealerSkipsRedundantBackoff | 4 | Rate limit, network, generic - exhausted vs not |
+| TestCookieRotationWithRetryContext | 2 | Cookie rotation works, VPN switch after exhaustion |
+| TestHandoffLogging | 2 | Logs exhaustion, logs skipping backoff |
+| TestHealerWithRegularException | 2 | Regular exceptions still apply backoff |
+| TestHealerResultDetails | 2 | Result includes core_retries_exhausted flag |
+| TestExportFromDownloader | 2 | DownloadError importable, in __all__ |
+
+### Verification
+- Syntax check: `python -m py_compile src/downloader/types.py` - PASSED
+- Syntax check: `python -m py_compile src/agents/healers/download.py` - PASSED
+- All 21 new tests: `pytest tests/test_agents/test_download_healer_retry.py -v` - PASSED
+- All 31 download healer tests: `pytest tests/test_agents/test_download_healer_retry.py tests/test_agents/test_healers.py::TestDownloadHealer -v` - PASSED
+- All 431 agent tests: `pytest tests/test_agents/ -v` - 431 PASSED (1 pre-existing OTIO test failure)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_agents/test_download_healer_retry.py (21 tests)
+
+### Files Modified
+- src/downloader/types.py - DownloadError exception class
+- src/downloader/__init__.py - DownloadError export
+- src/agents/healers/download.py - Retry context integration
+- tests/test_agents/conftest.py - Fixed mock_config for cookie_rotation/vpn
+
+
+## Iteration 24 - US-010: Add rate limiting metrics to pipeline report
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented comprehensive rate limiting metrics collection and reporting to help users tune their configuration.
+
+**New RateLimitMetrics class (src/downloader/rate_limit_metrics.py):**
+- `RateLimitMetrics` dataclass with comprehensive tracking:
+  - **Download counts:** total_downloads, successful_downloads, failed_downloads
+  - **Retry metrics:** retry_attempts, retries_by_error_type (dict), max_retry_count_reached
+  - **Rate limit handling:** rate_limit_events, backoff_attempts, time_spent_backing_off
+  - **Escalation:** cookie_rotations, vpn_switches
+  - **Circuit breaker:** circuit_breaker_trips, circuit_breaker_pause_seconds
+  - **Batch retry:** batch_retry_passes, batch_retry_successes, batch_retry_failures
+  - **Speed tracking:** speed_samples, avg_speed_mbps, timeout_extensions
+- Recording methods for each metric type
+- Calculated properties: avg_retry_count, rate_limit_percentage, success_rate
+- Update methods for subsystem stats: update_from_circuit_breaker(), update_from_retry_queue(), update_from_speed_tracker()
+- Config recommendations via get_config_recommendations():
+  - High rate limiting (>10% of downloads)
+  - High retry exhaustion rate (>20%)
+  - Frequent circuit breaker trips (>3)
+  - Rate limits without cookie rotation
+  - Many timeout extensions (>5)
+  - Low batch retry recovery (<30%)
+- summary() method for human-readable report output
+- Checkpoint persistence: to_dict() / from_dict()
+- clear() method for session reset
+
+**Integration (src/downloader/core.py):**
+- Initialize `rate_limit_metrics` in `VideoDownloader.__init__`
+- Instrumented `_run_download_cmd()`:
+  - record_download_attempt() at start
+  - record_download_success() when videos found
+  - record_download_failure() on permanent error or retry exhaustion
+  - record_retry() with error type on each retry
+  - record_retries_exhausted() when max retries reached
+  - record_timeout_extension() when timeout extended
+  - record_speed_sample() for each downloaded video
+- Instrumented `handle_rate_limit_error()`:
+  - record_rate_limit_event() on each event
+  - record_backoff() for each backoff delay
+- Instrumented `rotate_cookie_on_error()`: record_cookie_rotation()
+- Instrumented `switch_vpn_on_error()`: record_vpn_switch()
+- Added `get_rate_limit_metrics()` method for report integration
+- Added `get_speed_stats()` method for detailed speed data
+- Checkpoint save includes rate_limit_metrics via to_dict()
+- Resume restores metrics via from_dict()
+
+**Checkpoint additions (src/downloader/checkpoint.py):**
+- Added `rate_limit_metrics: Optional[Dict]` field to `DownloadCheckpoint`
+- Updated `from_dict()` for backward compatibility
+
+**Healing report integration (src/agents/orchestrator.py):**
+- Added `_rate_limit_metrics` attribute to `HealingOrchestrator`
+- Added `set_rate_limit_metrics()` method to receive metrics from pipeline
+- Updated `print_report()` to print "RATE LIMITING" section:
+  - Calls metrics.summary() for human-readable output
+  - Calls metrics.get_config_recommendations() for improvement suggestions
+- Updated `reset()` to clear rate_limit_metrics
+
+**Exports (src/downloader/__init__.py):**
+- Added `RateLimitMetrics` to exports
+
+### Example Report Output
+```
+============================================================
+HEALING ORCHESTRATOR REPORT
+============================================================
+
+Strategy: conservative
+Healers active: 5
+
+Total heals: 2 (2 successful, 0 failed)
+By healer: download: 2
+
+------------------------------------------------------------
+RATE LIMITING
+------------------------------------------------------------
+Downloads: 45 total (40 successful, 5 failed)
+Success rate: 88.9%
+Retries: 23 total, avg 0.51/download
+  By type: timeout: 8, transient: 12, network: 3
+  Retries exhausted: 5 downloads
+Rate limiting: 8 events, 6 backoffs (35.0s total)
+Escalations: cookie rotations: 2, VPN switches: 1
+Circuit breaker: 1 trips, 60.0s paused
+Batch retry: 1 passes, 3 recovered, 2 failed
+Network: 2.35 MB/s avg (40 samples), 3 timeout extensions
+
+Recommendations:
+  - Rate limit events detected but no cookie rotation configured...
+============================================================
+```
+
+### Tests Added
+Created `tests/test_rate_limit_metrics.py` with 61 tests in 13 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestRateLimitMetricsInit | 2 | Default values, custom values |
+| TestDownloadRecording | 4 | Attempt, success, failure, multiple |
+| TestRetryRecording | 4 | Single, multiple same type, different types, exhausted |
+| TestRateLimitRecording | 5 | Event, backoff, multiple backoffs, cookie rotation, VPN switch |
+| TestCircuitBreakerRecording | 2 | Single trip, multiple trips |
+| TestBatchRetryRecording | 2 | Single pass, multiple passes |
+| TestSpeedRecording | 3 | Single sample, multiple samples, timeout extension |
+| TestCalculatedProperties | 6 | avg_retry_count (0, with downloads), rate_limit_percentage, success_rate |
+| TestSubsystemIntegration | 5 | Circuit breaker, retry queue, speed tracker (enabled/disabled) |
+| TestConfigRecommendations | 7 | No issues, high rate limit, retry exhaustion, circuit breaker, no cookie, timeouts, low recovery |
+| TestSummary | 9 | Empty, downloads, retries, rate limiting, escalations, circuit breaker, batch retry, speed |
+| TestPersistence | 6 | to_dict, from_dict (full, empty, None, missing fields), roundtrip |
+| TestClear | 1 | Reset all metrics |
+| TestVideoDownloaderIntegration | 2 | Import available, in __all__ |
+| TestHealingOrchestratorIntegration | 4 | set_rate_limit_metrics, print_report, recommendations, reset |
+
+**Test updates:**
+- Updated `tests/test_rate_limit_cooldown.py` fixtures to include `rate_limit_metrics` attribute
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 61 new tests: `pytest tests/test_rate_limit_metrics.py -v` - PASSED
+- All 180 rate limiting tests: `pytest tests/test_rate_limit_metrics.py tests/test_circuit_breaker.py tests/test_speed_tracker.py tests/test_batch_retry.py tests/test_rate_limit_cooldown.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- src/downloader/rate_limit_metrics.py - RateLimitMetrics class (441 lines)
+- tests/test_rate_limit_metrics.py (61 tests, 696 lines)
+
+### Files Modified
+- src/downloader/__init__.py - RateLimitMetrics export
+- src/downloader/checkpoint.py - rate_limit_metrics field
+- src/downloader/core.py - Metrics instrumentation (67 lines added)
+- src/agents/orchestrator.py - Report integration (26 lines added)
+- tests/test_rate_limit_cooldown.py - Added rate_limit_metrics to fixtures
+
+---
+
+## SPRINT 2 COMPLETE
+
+**Summary:** All 10 user stories completed successfully.
+
+| ID | Title | Status |
+|----|-------|--------|
+| US-001 | Implement exponential backoff retry in _run_download_cmd | PASSED |
+| US-002 | Add progressive backoff before cookie rotation | PASSED |
+| US-003 | Make cookie rotator error patterns configurable | PASSED |
+| US-004 | Add search timeout fallback with keyword remix | PASSED |
+| US-005 | Implement download speed monitoring for adaptive timeouts | PASSED |
+| US-006 | Add circuit breaker for repeated search failures | PASSED |
+| US-007 | Add batch-level retry queue for rate-limited videos | PASSED |
+| US-008 | Add rate limit cooldown tracking across sessions | PASSED |
+| US-009 | Add download healer integration with retry mechanism | PASSED |
+| US-010 | Add rate limiting metrics to pipeline report | PASSED |
+
+**Focus Area:** rate-limiting
+**Iterations:** 10 (24 total including Sprint 1)
+**New Tests Added:** 241 (vs Sprint 1: 113) = 354 total new tests in 2 sprints
+**New Files Created:** 8 source files, 8 test files
+**Total Lines Added:** ~3500 lines of production code + tests
+
+**Key Improvements:**
+- Download retry with exponential backoff (unused config now active)
+- Progressive backoff before escalation (rate limit -> backoff -> cookie -> VPN)
+- Configurable error patterns and cookie file validation
+- Search timeout with LLM keyword remix fallback
+- Download speed tracking with adaptive timeouts
+- Circuit breaker for repeated search failures
+- Batch-level retry queue for rate-limited videos
+- Cross-session cooldown tracking
+- Healer/core retry integration (avoids redundant delays)
+- Comprehensive metrics and config recommendations in healing report
+
+
+## Focus Area: rate-limiting - 2026-01-25 19:57:37
+- Status: In Progress
+
+## Iteration 25 - US-001: Implement per-tier rate limit state isolation
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented per-tier rate limit state isolation to prevent rate limiting on one duration tier from affecting others.
+
+**New TierRateLimitState class (src/downloader/core.py):**
+- Created `TierRateLimitState` dataclass with:
+  - `backoff_count: int` - Current backoff attempt count for tier
+  - `total_delay: float` - Cumulative delay applied for tier
+  - `in_recovery: bool` - Whether tier is in cooldown recovery mode
+  - `last_event_time: Optional[str]` - Timestamp of last rate limit event
+- `reset()` method clears backoff state (preserves recovery mode)
+- `to_dict()` / `from_dict()` for checkpoint persistence
+
+**Config additions (src/config/sections/download.py):**
+- Added `per_tier_isolation: bool = True` to `RateLimitConfig`
+- Documented behavior in docstring
+
+**Config additions (config.yaml):**
+- Added `per_tier_isolation: true` with explanatory comment
+
+**Core implementation (src/downloader/core.py):**
+- Added `_tier_rate_limit_states: Dict[str, TierRateLimitState]` for all tiers (short, medium, long, longer)
+- Added `_per_tier_isolation: bool` flag from config
+- Modified `handle_rate_limit_error(error_message, tier=None)`:
+  - When `per_tier_isolation=True` and tier provided, uses tier-specific state
+  - Falls back to global state when disabled or no tier provided
+  - Logs include tier label `[tier]` when applicable
+- Modified `_reset_rate_limit_backoff(tier=None)`:
+  - When `per_tier_isolation=True` and tier provided, resets only that tier's state
+  - Falls back to global state reset otherwise
+
+**Metrics tracking (src/downloader/rate_limit_metrics.py):**
+- Added `tier_rate_limit_events: Dict[str, int]` to `RateLimitMetrics`
+- Updated `record_rate_limit_event(tier=None)` to track per-tier events
+- Updated `summary()` to show "By tier:" breakdown when tier events exist
+- Updated `from_dict()` and `clear()` for the new field
+
+### Example Behavior
+With per_tier_isolation=True (default):
+```
+# 'long' tier gets rate limited 3 times
+Rate limit backoff [long] 1: waiting 5.0s (total: 5.0s / 60.0s max)
+Rate limit backoff [long] 2: waiting 10.0s (total: 15.0s / 60.0s max)
+Rate limit backoff [long] 3: waiting 20.0s (total: 35.0s / 60.0s max)
+
+# 'short' tier starts fresh - not affected by 'long' tier state
+Rate limit backoff [short] 1: waiting 5.0s (total: 5.0s / 60.0s max)
+```
+
+### Tests Added
+Created `tests/test_tier_rate_limit_isolation.py` with 25 tests in 11 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestTierRateLimitState | 6 | Initialization, reset, to_dict, from_dict |
+| TestPerTierIsolationConfig | 3 | Default true, can disable, all tiers initialized |
+| TestTierIsolatedBackoff | 3 | Tier A doesn't affect B, independent tracking, disabled uses global |
+| TestTierSpecificReset | 2 | Reset only affects specified tier, no tier resets global |
+| TestTierRateLimitMetrics | 2 | Metrics track per-tier, total includes all |
+| TestMetricsTierDict | 5 | record_rate_limit_event with/without tier, summary, persistence, clear |
+| TestTierBackoffLogging | 1 | Log includes tier label |
+| TestTierWithCookieRotation | 1 | Tier escalation independent |
+| TestConfigYamlIntegration | 2 | Dataclass has field, configurable |
+
+**Test fixture updates:**
+- Updated `tests/test_rate_limit_cooldown.py` fixtures to include new tier attributes
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 25 new tests: `pytest tests/test_tier_rate_limit_isolation.py -v` - PASSED
+- All 129 rate limit tests: `pytest tests/test_rate_limit*.py tests/test_tier_rate_limit_isolation.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_tier_rate_limit_isolation.py (25 tests)
+
+### Files Modified
+- src/config/sections/download.py - per_tier_isolation field in RateLimitConfig
+- config.yaml - per_tier_isolation setting
+- src/downloader/core.py - TierRateLimitState class, tier-specific state tracking
+- src/downloader/rate_limit_metrics.py - tier_rate_limit_events tracking
+- tests/test_rate_limit_cooldown.py - Updated fixtures with tier attributes
+
