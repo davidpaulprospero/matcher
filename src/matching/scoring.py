@@ -798,6 +798,312 @@ def _calculate_language_consistency(text: str, words: List[str]) -> float:
     return max(0.0, score)
 
 
+# Multi-modal similarity weighting defaults
+# These are normalized weights that must sum to 1.0
+DEFAULT_MULTIMODAL_WEIGHTS = {
+    'text_embedding': 0.40,     # Embedding similarity weight (40%)
+    'keyword_overlap': 0.25,    # Keyword overlap weight (25%)
+    'entity_match': 0.20,       # Entity match weight (20%)
+    'visual_description': 0.15  # Visual description weight (15%)
+}
+
+
+def compute_multimodal_score(
+    embedding_similarity: float,
+    keyword_overlap_score: float,
+    entity_match_score: float,
+    visual_description_score: float,
+    weights: dict = None,
+    multimodal_enabled: bool = True
+) -> Tuple[float, str, dict]:
+    """
+    Compute weighted multi-modal similarity score.
+
+    Combines multiple similarity signals into a single score using weighted fusion:
+    - text_embedding: Raw embedding similarity (semantic match)
+    - keyword_overlap: Normalized keyword overlap between voiceover and video
+    - entity_match: Normalized named entity overlap (people, places, organizations)
+    - visual_description: Similarity based on visual scene descriptions
+
+    Each component should be normalized to [0, 1] before passing to this function.
+
+    Args:
+        embedding_similarity: Text embedding similarity score (0-1)
+        keyword_overlap_score: Keyword overlap score (0-1)
+        entity_match_score: Entity match score (0-1)
+        visual_description_score: Visual description similarity score (0-1)
+        weights: Optional dict with weight values (defaults to DEFAULT_MULTIMODAL_WEIGHTS)
+        multimodal_enabled: Whether to use multimodal weighting (if False, returns embedding_similarity)
+
+    Returns:
+        Tuple of:
+        - multimodal_score: Weighted combined score (0-1)
+        - reason: Explanation string showing component contributions
+        - component_scores: Dict with individual component scores and weights
+    """
+    if not multimodal_enabled:
+        return embedding_similarity, "multimodal_disabled", {
+            'embedding_similarity': embedding_similarity,
+            'keyword_overlap': keyword_overlap_score,
+            'entity_match': entity_match_score,
+            'visual_description': visual_description_score,
+            'weights_used': None
+        }
+
+    # Use default weights if not provided
+    w = weights if weights else DEFAULT_MULTIMODAL_WEIGHTS
+
+    # Ensure weights sum to 1.0 (normalize if needed)
+    weight_sum = sum(w.values())
+    if abs(weight_sum - 1.0) > 0.01:
+        logger.warning(f"Multimodal weights sum to {weight_sum:.3f}, normalizing to 1.0")
+        w = {k: v / weight_sum for k, v in w.items()}
+
+    # Clamp input scores to [0, 1] range
+    emb_clamped = max(0.0, min(1.0, embedding_similarity))
+    kw_clamped = max(0.0, min(1.0, keyword_overlap_score))
+    ent_clamped = max(0.0, min(1.0, entity_match_score))
+    vis_clamped = max(0.0, min(1.0, visual_description_score))
+
+    # Compute weighted contributions
+    emb_contrib = emb_clamped * w.get('text_embedding', 0.4)
+    kw_contrib = kw_clamped * w.get('keyword_overlap', 0.25)
+    ent_contrib = ent_clamped * w.get('entity_match', 0.2)
+    vis_contrib = vis_clamped * w.get('visual_description', 0.15)
+
+    # Sum weighted contributions
+    multimodal_score = emb_contrib + kw_contrib + ent_contrib + vis_contrib
+
+    # Clamp final score to [0, 1]
+    multimodal_score = max(0.0, min(1.0, multimodal_score))
+
+    # Build component scores dict for detailed logging
+    component_scores = {
+        'embedding_similarity': emb_clamped,
+        'keyword_overlap': kw_clamped,
+        'entity_match': ent_clamped,
+        'visual_description': vis_clamped,
+        'embedding_contribution': emb_contrib,
+        'keyword_contribution': kw_contrib,
+        'entity_contribution': ent_contrib,
+        'visual_contribution': vis_contrib,
+        'weights_used': w
+    }
+
+    # Build reason string
+    reason_parts = []
+    if emb_clamped > 0:
+        reason_parts.append(f"emb:{emb_clamped:.2f}*{w.get('text_embedding', 0.4):.0%}={emb_contrib:.3f}")
+    if kw_clamped > 0:
+        reason_parts.append(f"kw:{kw_clamped:.2f}*{w.get('keyword_overlap', 0.25):.0%}={kw_contrib:.3f}")
+    if ent_clamped > 0:
+        reason_parts.append(f"ent:{ent_clamped:.2f}*{w.get('entity_match', 0.2):.0%}={ent_contrib:.3f}")
+    if vis_clamped > 0:
+        reason_parts.append(f"vis:{vis_clamped:.2f}*{w.get('visual_description', 0.15):.0%}={vis_contrib:.3f}")
+
+    reason = f"multimodal({' + '.join(reason_parts)})={multimodal_score:.3f}"
+
+    logger.debug(
+        f"Multimodal score: emb={emb_clamped:.3f}, kw={kw_clamped:.3f}, "
+        f"ent={ent_clamped:.3f}, vis={vis_clamped:.3f} -> {multimodal_score:.3f}"
+    )
+
+    return multimodal_score, reason, component_scores
+
+
+def calculate_keyword_overlap_score(
+    vo_keywords: List[str],
+    video_keywords: List[str]
+) -> Tuple[float, List[str]]:
+    """
+    Calculate normalized keyword overlap score between voiceover and video.
+
+    Args:
+        vo_keywords: Keywords from voiceover segment
+        video_keywords: Keywords from video segment
+
+    Returns:
+        Tuple of (overlap_score, matched_keywords)
+        - overlap_score: Normalized score (0-1) based on number of matches
+        - matched_keywords: List of matched keyword strings
+    """
+    if not vo_keywords or not video_keywords:
+        return 0.0, []
+
+    # Normalize to lowercase for comparison
+    vo_lower = {k.lower().strip() for k in vo_keywords if k}
+    video_lower = {k.lower().strip() for k in video_keywords if k}
+
+    # Find intersection
+    matched = vo_lower & video_lower
+
+    if not matched:
+        return 0.0, []
+
+    # Normalize score: more matches = higher score, with diminishing returns
+    # 1 match = 0.3, 2 matches = 0.5, 3 matches = 0.7, 4+ matches = 0.85-1.0
+    match_count = len(matched)
+    if match_count >= 5:
+        score = 1.0
+    elif match_count >= 4:
+        score = 0.9
+    elif match_count >= 3:
+        score = 0.75
+    elif match_count >= 2:
+        score = 0.55
+    else:
+        score = 0.35
+
+    # Get original-case matched keywords
+    matched_original = [k for k in vo_keywords if k.lower().strip() in matched]
+
+    return score, matched_original
+
+
+def calculate_entity_match_score(
+    vo_entities: List[str],
+    video_entities: List[str]
+) -> Tuple[float, List[str]]:
+    """
+    Calculate normalized entity match score between voiceover and video.
+
+    Named entities (people, places, organizations) are strong signals for matching.
+    A video mentioning the same person or place as the voiceover is highly relevant.
+
+    Args:
+        vo_entities: Entity texts from voiceover segment
+        video_entities: Entity texts from video segment
+
+    Returns:
+        Tuple of (entity_score, matched_entities)
+        - entity_score: Normalized score (0-1) based on entity matches
+        - matched_entities: List of matched entity strings
+    """
+    if not vo_entities or not video_entities:
+        return 0.0, []
+
+    # Normalize for comparison
+    vo_lower = {e.lower().strip() for e in vo_entities if e and len(e) >= 2}
+    video_lower = {e.lower().strip() for e in video_entities if e and len(e) >= 2}
+
+    # Find matching entities
+    matched = vo_lower & video_lower
+
+    if not matched:
+        return 0.0, []
+
+    # Normalize score: entities are strong signals
+    # 1 match = 0.6, 2 matches = 0.8, 3+ matches = 1.0
+    match_count = len(matched)
+    if match_count >= 3:
+        score = 1.0
+    elif match_count >= 2:
+        score = 0.8
+    else:
+        score = 0.6
+
+    # Get original-case matched entities
+    matched_original = [e for e in vo_entities if e.lower().strip() in matched]
+
+    return score, matched_original
+
+
+def calculate_visual_description_score(
+    vo_text: str,
+    video_description: str,
+    visual_keywords: List[str] = None
+) -> float:
+    """
+    Calculate visual description similarity score.
+
+    Compares voiceover text to video visual description/keywords.
+    Useful when video has scene descriptions from vision API.
+
+    Args:
+        vo_text: Voiceover segment text
+        video_description: Video visual description or transcript
+        visual_keywords: Optional list of visual keywords from scene analysis
+
+    Returns:
+        Visual similarity score (0-1)
+    """
+    if not vo_text:
+        return 0.0
+
+    if not video_description and not visual_keywords:
+        return 0.0
+
+    score = 0.0
+
+    # Extract significant words from voiceover (longer words, no stopwords)
+    stopwords = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'can', 'must', 'to', 'of', 'in', 'for',
+        'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+        'before', 'after', 'above', 'below', 'between', 'under', 'again',
+        'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why',
+        'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
+        'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+        'just', 'but', 'and', 'if', 'or', 'because', 'until', 'while', 'this',
+        'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their', 'what',
+        'which', 'who', 'whom', 'you', 'your', 'we', 'our', 'he', 'she', 'him',
+        'her', 'his', 'i', 'me', 'my'
+    }
+
+    vo_words = set(
+        w.lower().strip('.,!?:;"\'()[]{}')
+        for w in vo_text.split()
+        if len(w) >= 4 and w.lower() not in stopwords
+    )
+
+    if not vo_words:
+        return 0.0
+
+    matched_count = 0
+    total_checks = 0
+
+    # Check against video description
+    if video_description:
+        desc_words = set(
+            w.lower().strip('.,!?:;"\'()[]{}')
+            for w in video_description.split()
+            if len(w) >= 4 and w.lower() not in stopwords
+        )
+
+        desc_overlap = vo_words & desc_words
+        if desc_words:
+            matched_count += len(desc_overlap)
+            total_checks += min(len(vo_words), len(desc_words))
+
+    # Check against visual keywords
+    if visual_keywords:
+        vis_kw_lower = set(k.lower().strip() for k in visual_keywords if k)
+        for vo_word in vo_words:
+            for vis_kw in vis_kw_lower:
+                if vo_word in vis_kw or vis_kw in vo_word:
+                    matched_count += 1
+                    break
+        total_checks += len(vo_words)
+
+    if total_checks == 0:
+        return 0.0
+
+    # Calculate raw ratio and apply diminishing returns
+    raw_ratio = matched_count / total_checks
+    # Scale: 10% overlap = 0.3, 30% = 0.6, 50%+ = 0.85-1.0
+    if raw_ratio >= 0.5:
+        score = 0.85 + (raw_ratio - 0.5) * 0.3
+    elif raw_ratio >= 0.3:
+        score = 0.6 + (raw_ratio - 0.3) * 1.25
+    elif raw_ratio >= 0.1:
+        score = 0.3 + (raw_ratio - 0.1) * 1.5
+    else:
+        score = raw_ratio * 3.0
+
+    return min(1.0, max(0.0, score))
+
+
 def adjust_embedding_weight_for_transcript_quality(
     base_weight: float,
     quality_tier: str,

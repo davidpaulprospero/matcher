@@ -246,6 +246,16 @@ class MatchingConfig:
     obvious_match_min_keywords: int = 3  # Minimum matched keywords for obvious match
     obvious_match_min_confidence: float = 0.92  # Minimum confidence for obvious matches
 
+    # Multi-modal similarity weighting
+    # When enabled, combines multiple similarity signals with weighted fusion:
+    # - text_embedding (40%): Semantic similarity from embeddings
+    # - keyword_overlap (25%): Matched keywords between voiceover and video
+    # - entity_match (20%): Named entity overlap (people, places, organizations)
+    # - visual_description (15%): Visual scene description similarity
+    # Replaces simple additive boosting with weighted multi-modal scoring
+    multimodal_enabled: bool = True  # Enable multi-modal similarity weighting
+    multimodal_weights: dict = None  # Custom weights dict (defaults used if None)
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 
