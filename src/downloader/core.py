@@ -395,10 +395,20 @@ class VideoDownloader:
         total_videos_downloaded = 0
         print(f"\n  Downloading videos for {len(keywords)} keywords...")
 
+        # Track which 10% milestones have been logged (10, 20, 30, ... 100)
+        logged_milestones = set()
+
         for i, keyword in enumerate(keywords, 1):
             # Compact progress line
             progress_pct = (i - 1) / len(keywords) * 100
             print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
+
+            # Log at 10% milestones (10%, 20%, ... 90%, 100%)
+            current_pct = (i - 1) / len(keywords) * 100
+            milestone = int(current_pct // 10) * 10
+            if milestone > 0 and milestone not in logged_milestones:
+                logger.info(f"Download progress: {milestone}% ({i-1}/{len(keywords)} keywords)")
+                logged_milestones.add(milestone)
 
             logger.info(f"[{i}/{len(keywords)}] Processing: {keyword}")
 
@@ -424,6 +434,10 @@ class VideoDownloader:
         # Final progress line
         print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
         print(f"  ✓ Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
+
+        # Log 100% milestone
+        if 100 not in logged_milestones:
+            logger.info(f"Download progress: 100% ({len(keywords)}/{len(keywords)} keywords)")
 
         # Log inter-keyword source diversity report
         self.log_source_diversity_report()
