@@ -915,6 +915,11 @@ download:
     # Coverage threshold (US-004): videos below this ratio are flagged for transcription fallback
     # Coverage = sum of segment durations / video duration (0.0-1.0)
     min_coverage_threshold: 0.5       # Flag videos with <50% caption coverage
+    # Format preference (US-006): order of subtitle formats to try
+    # json3 is preferred by default since it's already structured (no conversion needed)
+    # Falls back to next format on parse error or unavailability
+    # Available formats: json3, srv3, vtt, srt
+    preferred_formats: ["json3", "vtt", "srt"]
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

@@ -97,8 +97,8 @@
         "Log which format was ultimately used",
         "Tests verify format selection and fallback behavior"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented. All 6 acceptance criteria verified: (1) preferred_formats config option added to CaptionFirstConfig (default: ['json3', 'vtt', 'srt']), (2) CaptionFetcher._fetch_subtitle() now iterates through _preferred_formats, calling _fetch_subtitle_with_format() for each, (3) json3 is first in default list since it's pre-structured, (4) CaptionFetchError caught in format loop triggers fallback to next format (not just CaptionUnavailableError), (5) logger.info() logs 'Using {fmt} format ({N} segments)' when format succeeds, (6) 11 new tests in TestCaptionFormatPreference class covering: default formats, config formats, format order, parse error fallback, first success, logging, exhausted formats, custom order, single format, unavailable error fallback."
     },
     {
       "id": "US-007",

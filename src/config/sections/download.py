@@ -210,6 +210,13 @@ class CaptionFirstConfig:
     # High coverage = better matching accuracy
     min_coverage_threshold: float = 0.5
 
+    # Format preference (US-006)
+    # Order of subtitle formats to try when fetching captions
+    # Available formats: json3, srv3, vtt, srt
+    # json3 is preferred by default since it's already structured (no conversion needed)
+    # Falls back to next format on parse error or unavailability
+    preferred_formats: List[str] = field(default_factory=lambda: ["json3", "vtt", "srt"])
+
 
 @dataclass
 class AudioFirstConfig:
