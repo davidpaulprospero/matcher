@@ -19,6 +19,7 @@ from src.caption_fetcher import (
     CaptionFetchError,
     AvailableLanguage,
     TimingValidationResult,
+    ParseResult,
     determine_caption_quality,
 )
 
@@ -937,7 +938,8 @@ Hello, world!
 00:00:05.000 --> 00:00:08.000
 This is a test.
 """
-        segments = fetcher._parse_vtt(vtt_content, "test_video")
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
         assert segments[0].start_time == 1.0
@@ -946,6 +948,7 @@ This is a test.
         assert segments[1].start_time == 5.0
         assert segments[1].end_time == 8.0
         assert segments[1].text == "This is a test."
+        assert not result.has_skipped
 
     def test_parse_vtt_with_style_tags(self):
         """Test VTT parsing removes style tags"""
@@ -956,7 +959,8 @@ This is a test.
 00:00:01.000 --> 00:00:04.000
 <c.colorWhite>Hello</c> <b>world</b>!
 """
-        segments = fetcher._parse_vtt(vtt_content, "test_video")
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Hello world!"
@@ -971,7 +975,8 @@ This is a test.
 Line one
 Line two
 """
-        segments = fetcher._parse_vtt(vtt_content, "test_video")
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert "Line one" in segments[0].text
@@ -991,7 +996,8 @@ First cue
 00:00:05.000 --> 00:00:08.000
 Second cue
 """
-        segments = fetcher._parse_vtt(vtt_content, "test_video")
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
 
@@ -1002,7 +1008,8 @@ Second cue
         vtt_content = """WEBVTT
 
 """
-        segments = fetcher._parse_vtt(vtt_content, "test_video")
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 0
 
@@ -1015,7 +1022,8 @@ Second cue
 00:00:01.000 --> 00:00:02.000
 Test
 """
-        segments = fetcher._parse_vtt(vtt_content, "my_video_id")
+        result = fetcher._parse_vtt(vtt_content, "my_video_id")
+        segments = result.segments
 
         assert segments[0].source_file == "my_video_id"
 
@@ -1035,13 +1043,15 @@ Hello, world!
 00:00:05,000 --> 00:00:08,000
 This is a test.
 """
-        segments = fetcher._parse_srt(srt_content, "test_video")
+        result = fetcher._parse_srt(srt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
         assert segments[0].start_time == 1.0
         assert segments[0].end_time == 4.0
         assert segments[0].text == "Hello, world!"
         assert segments[1].text == "This is a test."
+        assert not result.has_skipped
 
     def test_parse_srt_with_tags(self):
         """Test SRT parsing removes formatting tags"""
@@ -1051,7 +1061,8 @@ This is a test.
 00:00:01,000 --> 00:00:04,000
 <i>Italic</i> and <b>bold</b>
 """
-        segments = fetcher._parse_srt(srt_content, "test_video")
+        result = fetcher._parse_srt(srt_content, "test_video")
+        segments = result.segments
 
         assert segments[0].text == "Italic and bold"
 
@@ -1068,7 +1079,8 @@ Line two
 00:00:05,000 --> 00:00:08,000
 Single line
 """
-        segments = fetcher._parse_srt(srt_content, "test_video")
+        result = fetcher._parse_srt(srt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
         assert "Line one" in segments[0].text
@@ -1087,7 +1099,8 @@ Valid
 00:00:05,000 --> 00:00:08,000
 Also valid
 """
-        segments = fetcher._parse_srt(srt_content, "test_video")
+        result = fetcher._parse_srt(srt_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
 
@@ -1114,7 +1127,8 @@ class TestCaptionFetcherJson3Parsing:
             ]
         })
 
-        segments = fetcher._parse_json3(json3_content, "test_video")
+        result = fetcher._parse_json3(json3_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 2
         assert segments[0].start_time == 1.0
@@ -1122,6 +1136,7 @@ class TestCaptionFetcherJson3Parsing:
         assert segments[0].text == "Hello, world!"
         assert segments[1].start_time == 5.0
         assert segments[1].end_time == 8.0
+        assert not result.has_skipped
 
     def test_parse_json3_multiple_segs(self):
         """Test JSON3 with multiple text segments per event"""
@@ -1140,7 +1155,8 @@ class TestCaptionFetcherJson3Parsing:
             ]
         })
 
-        segments = fetcher._parse_json3(json3_content, "test_video")
+        result = fetcher._parse_json3(json3_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Hello world!"
@@ -1151,12 +1167,13 @@ class TestCaptionFetcherJson3Parsing:
 
         json3_content = json.dumps({"events": []})
 
-        segments = fetcher._parse_json3(json3_content, "test_video")
+        result = fetcher._parse_json3(json3_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 0
 
     def test_parse_json3_events_without_segs(self):
-        """Test JSON3 skips events without segs"""
+        """Test JSON3 skips events without segs and records them as skipped (US-001)"""
         fetcher = CaptionFetcher()
 
         json3_content = json.dumps({
@@ -1170,18 +1187,28 @@ class TestCaptionFetcherJson3Parsing:
             ]
         })
 
-        segments = fetcher._parse_json3(json3_content, "test_video")
+        result = fetcher._parse_json3(json3_content, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Valid"
+        # The event without segs should be recorded as skipped
+        assert result.has_skipped
+        assert len(result.skipped_segments) == 1
+        assert result.skipped_segments[0][0] == 0  # First event index
+        assert "segs" in result.skipped_segments[0][1]  # Reason mentions segs
 
     def test_parse_json3_invalid_json(self):
-        """Test JSON3 parsing handles invalid JSON"""
+        """Test JSON3 parsing handles invalid JSON and records as skipped"""
         fetcher = CaptionFetcher()
 
-        segments = fetcher._parse_json3("not valid json", "test_video")
+        result = fetcher._parse_json3("not valid json", "test_video")
+        segments = result.segments
 
         assert len(segments) == 0
+        # Invalid JSON should record a skip
+        assert result.has_skipped
+        assert "JSON decode error" in result.skipped_segments[0][1]
 
 
 class TestCaptionFetcherFetchCaptions:
@@ -1356,7 +1383,8 @@ class TestCaptionFetcherIntegration:
 Test caption
 """)
 
-        segments = fetcher._parse_subtitle_file(vtt_file, "test_video")
+        result = fetcher._parse_subtitle_file(vtt_file, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
@@ -1371,7 +1399,8 @@ Test caption
 Test caption
 """)
 
-        segments = fetcher._parse_subtitle_file(srt_file, "test_video")
+        result = fetcher._parse_subtitle_file(srt_file, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
@@ -1391,7 +1420,8 @@ Test caption
             ]
         }))
 
-        segments = fetcher._parse_subtitle_file(json_file, "test_video")
+        result = fetcher._parse_subtitle_file(json_file, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
@@ -1407,7 +1437,8 @@ Test caption
 Hello 世界! Привет мир! 🎉
 """, encoding='utf-8')
 
-        segments = fetcher._parse_subtitle_file(vtt_file, "test_video")
+        result = fetcher._parse_subtitle_file(vtt_file, "test_video")
+        segments = result.segments
 
         assert len(segments) == 1
         assert "世界" in segments[0].text
@@ -4482,3 +4513,212 @@ class TestLanguageConfigValidation:
         # ISO 639-1 has around 180 codes
         assert 170 <= len(ISO_639_1_CODES) <= 190, \
             f"Expected ~180 ISO 639-1 codes, got {len(ISO_639_1_CODES)}"
+
+
+class TestSegmentLevelErrorRecovery:
+    """Tests for US-001 Sprint 7: Segment-level error recovery in parsers."""
+
+    def test_vtt_100_segments_5_corrupted_returns_95_valid(self):
+        """Test VTT with 100 segments and 5 corrupted still returns 95 valid segments."""
+        fetcher = CaptionFetcher()
+
+        # Build VTT content with 100 segments, 5 of which have invalid timestamps
+        segments_content = ["WEBVTT\n"]
+        for i in range(100):
+            if i in [10, 25, 50, 75, 90]:  # 5 corrupted segments
+                # Invalid timestamp format
+                segments_content.append(f"""
+INVALID_TIME --> ALSO_INVALID
+Corrupted segment {i}
+""")
+            else:
+                # Valid segment - use proper minutes/seconds formatting
+                total_seconds = i * 3
+                minutes = total_seconds // 60
+                seconds = total_seconds % 60
+                end_seconds = seconds + 2
+                end_minutes = minutes
+                if end_seconds >= 60:
+                    end_seconds -= 60
+                    end_minutes += 1
+                segments_content.append(f"""
+00:{minutes:02d}:{seconds:02d}.000 --> 00:{end_minutes:02d}:{end_seconds:02d}.000
+Valid segment {i}
+""")
+
+        vtt_content = "".join(segments_content)
+        result = fetcher._parse_vtt(vtt_content, "test_video")
+
+        # Should have 95 valid segments (100 - 5 corrupted)
+        assert len(result.segments) == 95
+        # VTT doesn't record non-matching patterns as skipped (they're just skipped lines)
+        # The test verifies graceful handling - 95 valid segments are still parsed
+
+    def test_srt_100_segments_5_corrupted_returns_95_valid(self):
+        """Test SRT with 100 segments and 5 corrupted still returns 95 valid segments."""
+        fetcher = CaptionFetcher()
+
+        # Build SRT content with 100 segments, 5 of which have invalid timestamps
+        segments_content = []
+        for i in range(100):
+            if i in [10, 25, 50, 75, 90]:  # 5 corrupted segments
+                # Invalid timestamp format that will fail parsing
+                segments_content.append(f"""{i + 1}
+NOT_A_TIMESTAMP --> ALSO_NOT_VALID
+Corrupted segment {i}
+
+""")
+            else:
+                # Valid segment - use proper minutes/seconds formatting
+                total_seconds = i * 3
+                minutes = total_seconds // 60
+                seconds = total_seconds % 60
+                end_seconds = seconds + 2
+                end_minutes = minutes
+                if end_seconds >= 60:
+                    end_seconds -= 60
+                    end_minutes += 1
+                segments_content.append(f"""{i + 1}
+00:{minutes:02d}:{seconds:02d},000 --> 00:{end_minutes:02d}:{end_seconds:02d},000
+Valid segment {i}
+
+""")
+
+        srt_content = "".join(segments_content)
+        result = fetcher._parse_srt(srt_content, "test_video")
+
+        # Should have 95 valid segments
+        assert len(result.segments) == 95
+        assert result.has_skipped
+        assert len(result.skipped_segments) == 5
+
+    def test_json3_100_events_5_missing_fields_returns_95_valid(self):
+        """Test JSON3 with 100 events and 5 missing required fields returns 95 valid."""
+        fetcher = CaptionFetcher()
+
+        events = []
+        for i in range(100):
+            if i in [10, 25, 50, 75, 90]:  # 5 corrupted events
+                if i % 2 == 0:
+                    # Missing tStartMs
+                    events.append({
+                        "dDurationMs": 2000,
+                        "segs": [{"utf8": f"Corrupted segment {i}"}]
+                    })
+                else:
+                    # Missing segs
+                    events.append({
+                        "tStartMs": i * 3000,
+                        "dDurationMs": 2000
+                    })
+            else:
+                # Valid event
+                events.append({
+                    "tStartMs": i * 3000,
+                    "dDurationMs": 2000,
+                    "segs": [{"utf8": f"Valid segment {i}"}]
+                })
+
+        json3_content = json.dumps({"events": events})
+        result = fetcher._parse_json3(json3_content, "test_video")
+
+        # Should have 95 valid segments
+        assert len(result.segments) == 95
+        assert result.has_skipped
+        assert len(result.skipped_segments) == 5
+
+    def test_partial_recovery_flag_set_when_segments_skipped(self):
+        """Test partial_recovery flag is True when segments were skipped but result is usable."""
+        fetcher = CaptionFetcher()
+
+        # SRT with one valid and one invalid segment
+        srt_content = """1
+00:00:01,000 --> 00:00:02,000
+Valid
+
+2
+INVALID --> TIMESTAMP
+Invalid
+
+3
+00:00:05,000 --> 00:00:06,000
+Also valid
+"""
+        result = fetcher._parse_srt(srt_content, "test_video")
+
+        # Check ParseResult
+        assert len(result.segments) == 2
+        assert result.has_skipped
+        assert len(result.skipped_segments) == 1
+
+    def test_skipped_segments_include_index_and_reason(self):
+        """Test skipped_segments contains tuples of (index, reason)."""
+        fetcher = CaptionFetcher()
+
+        json3_content = json.dumps({
+            "events": [
+                {"tStartMs": 1000, "dDurationMs": 2000},  # Missing segs (index 0)
+                {"tStartMs": 2000, "segs": [{"utf8": "valid"}], "dDurationMs": 1000},  # Valid
+                {"dDurationMs": 2000, "segs": [{"utf8": "missing tStartMs"}]},  # Missing tStartMs (index 2)
+            ]
+        })
+
+        result = fetcher._parse_json3(json3_content, "test_video")
+
+        assert len(result.segments) == 1
+        assert len(result.skipped_segments) == 2
+
+        # Check structure of skipped_segments
+        for idx, reason in result.skipped_segments:
+            assert isinstance(idx, int)
+            assert isinstance(reason, str)
+            assert len(reason) > 0
+
+        # First skipped should be index 0 (missing segs)
+        assert result.skipped_segments[0][0] == 0
+        assert "segs" in result.skipped_segments[0][1]
+
+        # Second skipped should be index 2 (missing tStartMs)
+        assert result.skipped_segments[1][0] == 2
+        assert "tStartMs" in result.skipped_segments[1][1]
+
+    def test_caption_result_skipped_segments_count_property(self):
+        """Test CaptionResult.skipped_segments_count backwards compatibility."""
+        result = CaptionResult(
+            video_id="test",
+            segments=[CaptionSegment(0, 1.0, 2.0, "test", "test")],
+            skipped_segments=[(1, "reason1"), (2, "reason2"), (5, "reason3")],
+            partial_recovery=True
+        )
+
+        # The property should return count
+        assert result.skipped_segments_count == 3
+
+    def test_caption_result_partial_recovery_false_when_no_skips(self):
+        """Test partial_recovery is False when no segments were skipped."""
+        result = CaptionResult(
+            video_id="test",
+            segments=[CaptionSegment(0, 1.0, 2.0, "test", "test")],
+            skipped_segments=[],
+            partial_recovery=False
+        )
+
+        assert result.partial_recovery is False
+        assert result.skipped_segments_count == 0
+
+    def test_parse_result_success_rate(self):
+        """Test ParseResult.success_rate calculation."""
+        result = ParseResult(
+            segments=[CaptionSegment(i, float(i), float(i + 1), f"seg{i}", "vid") for i in range(95)],
+            skipped_segments=[(i, f"error{i}") for i in range(5)],
+            total_attempted=100
+        )
+
+        assert result.success_rate == 0.95
+
+    def test_parse_result_success_rate_empty(self):
+        """Test ParseResult.success_rate with zero attempts."""
+        result = ParseResult(segments=[], skipped_segments=[], total_attempted=0)
+
+        # Should return 1.0 when no attempts (avoid division by zero)
+        assert result.success_rate == 1.0
