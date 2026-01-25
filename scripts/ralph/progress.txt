@@ -2032,3 +2032,43 @@ Progress: 9/12 stories complete
   - tests/test_multimodal_scoring.py (580+ lines)
 
 Progress: 10/12 stories complete
+
+## Iteration 11 - [US-011] Add semantic coherence between adjacent segments
+- Implemented compute_semantic_coherence() function in src/matching/scoring.py:
+  - Computes topic flow using embedding similarity between current and previous match
+  - Uses cosine_similarity from embeddings module
+  - Returns (adjustment, reason) tuple
+- Defined semantic coherence constants:
+  - SEMANTIC_COHERENCE_SMOOTH_THRESHOLD = 0.6
+  - SEMANTIC_COHERENCE_ABRUPT_THRESHOLD = 0.3
+  - SEMANTIC_COHERENCE_SMOOTH_BOOST = 0.03
+  - SEMANTIC_COHERENCE_ABRUPT_PENALTY = 0.05
+- Adjustment logic:
+  - Smooth flow (similarity > 0.6): +0.03 boost for good continuity
+  - Abrupt flow (similarity < 0.3): -0.05 penalty for jarring transitions
+  - Neutral (0.3 - 0.6): no adjustment
+- Added semantic_coherence_enabled config option:
+  - In src/config/sections/matching.py (default: true)
+  - In config.yaml with chain-of-thought documentation
+- Created tests/test_semantic_coherence.py with 34 tests across 12 test classes:
+  - TestConstants (5 tests): threshold and boost/penalty values
+  - TestDisabledMode (2 tests): returns zero when disabled
+  - TestMissingEmbeddings (3 tests): handles None embeddings gracefully
+  - TestSmoothTopicFlow (3 tests): identical, high similarity, near-threshold
+  - TestAbruptTopicFlow (3 tests): orthogonal, opposite, low similarity
+  - TestNeutralTopicFlow (3 tests): medium similarity, boundary cases
+  - TestListInputs (2 tests): Python lists and mixed types
+  - TestHighDimensionalEmbeddings (2 tests): 768-dim and 384-dim vectors
+  - TestReasonStrings (3 tests): format includes similarity value
+  - TestEdgeCases (3 tests): empty array, mismatched dims, zero vector
+  - TestIntegrationWithConfig (3 tests): config option exists, defaults, can disable
+  - TestSimilarityCalculation (2 tests): range and adjustment verification
+- All 34 tests pass
+- Files modified:
+  - src/matching/scoring.py (added ~75 lines including constants and function)
+  - src/config/sections/matching.py (added semantic_coherence_enabled option)
+  - config.yaml (added semantic_coherence documentation)
+- Files created:
+  - tests/test_semantic_coherence.py (new file, 410+ lines)
+
+Progress: 11/12 stories complete
