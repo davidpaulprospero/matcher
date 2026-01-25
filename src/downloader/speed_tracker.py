@@ -25,12 +25,16 @@ class DownloadSpeedConfig:
         min_speed_mbps: Minimum expected speed in MB/s (default: 1.0)
         max_timeout_multiplier: Maximum timeout extension (default: 2.0)
         enable_adaptive_timeout: Use speed data to extend timeouts (default: True)
+        rate_limit_signal_threshold: Speed in MB/s below which rate limiting is suspected
+        consecutive_slow_samples: Number of slow samples before emitting rate limit signal
     """
     enabled: bool = True
     window_size: int = 5
     min_speed_mbps: float = 1.0  # MB/s below which timeout gets extended
     max_timeout_multiplier: float = 2.0  # Maximum timeout extension (2x)
     enable_adaptive_timeout: bool = True
+    rate_limit_signal_threshold: float = 0.1  # MB/s (100 KB/s) - near-stalled threshold
+    consecutive_slow_samples: int = 3  # Samples below threshold before signal
 
 
 @dataclass
@@ -56,6 +60,24 @@ class DownloadRecord:
         if self.duration_seconds <= 0:
             return 0.0
         return (self.bytes_downloaded / (1024 * 1024)) / self.duration_seconds
+
+
+@dataclass
+class RateLimitSignal:
+    """Signal indicating potential rate limiting detected from speed patterns.
+
+    Attributes:
+        detected: True if rate limit signal is active
+        consecutive_slow_count: Number of consecutive slow samples
+        recent_speeds: List of recent speeds in MB/s (for context)
+        threshold: Speed threshold used for detection
+        message: Human-readable description of the signal
+    """
+    detected: bool
+    consecutive_slow_count: int
+    recent_speeds: List[float]
+    threshold: float
+    message: str
 
 
 class DownloadSpeedTracker:
@@ -191,6 +213,75 @@ class DownloadSpeedTracker:
             )
 
         return adjusted_timeout
+
+    def detect_rate_limit_signals(self) -> RateLimitSignal:
+        """Detect potential rate limiting based on speed anomalies.
+
+        Analyzes recent download speeds to detect patterns that often precede
+        hard rate limit failures:
+        - Near-zero speeds (< rate_limit_signal_threshold) for consecutive samples
+        - Stalled progress indicating throttling
+
+        This allows preemptive backoff before receiving actual rate limit errors,
+        reducing the chance of getting blocked.
+
+        Returns:
+            RateLimitSignal with detection status and context.
+            - detected: True if rate limit signal is active
+            - consecutive_slow_count: Number of slow samples
+            - recent_speeds: Last N speeds for debugging
+            - message: Human-readable description
+
+        Example:
+            signal = tracker.detect_rate_limit_signals()
+            if signal.detected:
+                circuit_breaker.record_failure()  # Trigger preemptive backoff
+        """
+        threshold = self.config.rate_limit_signal_threshold
+        required_samples = self.config.consecutive_slow_samples
+
+        # Need enough samples to detect pattern
+        if len(self._records) < required_samples:
+            return RateLimitSignal(
+                detected=False,
+                consecutive_slow_count=0,
+                recent_speeds=[],
+                threshold=threshold,
+                message=f"Insufficient samples ({len(self._records)}/{required_samples})"
+            )
+
+        # Get speeds from most recent records (newest last in deque)
+        recent_speeds = [r.speed_mbps for r in self._records]
+
+        # Count consecutive slow samples from the end (most recent)
+        consecutive_slow = 0
+        for speed in reversed(recent_speeds):
+            if speed < threshold:
+                consecutive_slow += 1
+            else:
+                break  # Stop at first non-slow sample
+
+        detected = consecutive_slow >= required_samples
+
+        if detected:
+            # Build descriptive message with speed history
+            speed_history = ", ".join(f"{s:.2f}" for s in recent_speeds[-required_samples:])
+            message = (
+                f"Rate limit signal: {consecutive_slow} consecutive downloads below "
+                f"{threshold} MB/s threshold. Recent speeds (MB/s): [{speed_history}]"
+            )
+            # Log at WARNING level for visibility
+            logger.warning(message)
+        else:
+            message = f"No rate limit signal ({consecutive_slow}/{required_samples} slow samples)"
+
+        return RateLimitSignal(
+            detected=detected,
+            consecutive_slow_count=consecutive_slow,
+            recent_speeds=recent_speeds[-self.config.window_size:],
+            threshold=threshold,
+            message=message
+        )
 
     def get_speed_stats(self) -> Dict[str, Any]:
         """Get speed statistics for debugging.

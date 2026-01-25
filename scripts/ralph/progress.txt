@@ -1471,3 +1471,64 @@ Created `tests/test_tier_rate_limit_isolation.py` with 25 tests in 11 test class
 - src/downloader/rate_limit_metrics.py - tier_rate_limit_events tracking
 - tests/test_rate_limit_cooldown.py - Updated fixtures with tier attributes
 
+
+## Iteration 26 - US-002: Add proactive rate limit detection via speed drop monitoring
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented proactive rate limit detection by monitoring download speeds for patterns that precede hard rate limit failures.
+
+**New RateLimitSignal dataclass (src/downloader/speed_tracker.py):**
+- `detected: bool` - True if rate limit signal is active
+- `consecutive_slow_count: int` - Number of consecutive slow samples
+- `recent_speeds: List[float]` - Recent speeds for debugging context
+- `threshold: float` - Speed threshold used for detection
+- `message: str` - Human-readable description
+
+**New detect_rate_limit_signals() method (src/downloader/speed_tracker.py):**
+- Analyzes recent download speeds to detect throttling patterns
+- Counts consecutive samples below `rate_limit_signal_threshold`
+- Triggers when 3+ consecutive slow samples detected (configurable)
+- Logs at WARNING level with speed history for visibility
+- Returns RateLimitSignal dataclass with full context
+
+**Config additions (src/config/sections/download.py, config.yaml):**
+- `rate_limit_signal_threshold: float = 0.1` (0.1 MB/s = 100 KB/s) - near-stalled threshold
+- `consecutive_slow_samples: int = 3` - samples below threshold before signal
+
+**Circuit breaker integration (src/downloader/core.py):**
+- After recording download speeds, checks for rate limit signals
+- If signal detected and circuit breaker enabled, records failure
+- Logs: "Proactive rate limit response: X consecutive slow downloads detected"
+- Allows preemptive backoff before hard rate limit errors occur
+
+**SpeedTracker initialization update (src/downloader/core.py):**
+- Reads new config options from speed_tracking config section
+- Applies to DownloadSpeedConfig when creating tracker
+
+### Tests Added
+Added 20 tests to `tests/test_speed_tracker.py` in 6 new test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestRateLimitSignalDataclass | 2 | RateLimitSignal attributes and states |
+| TestRateLimitSignalConfigDefaults | 4 | Default and custom config values |
+| TestDetectRateLimitSignals | 6 | Detection logic, consecutive samples, edge cases |
+| TestSignalLogging | 2 | WARNING log when detected, no log when not |
+| TestSignalWithCircuitBreaker | 2 | Integration with circuit breaker triggering |
+| TestSignalEdgeCases | 4 | Empty tracker, at/below threshold, custom high threshold |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 48 tests: `pytest tests/test_speed_tracker.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/downloader/speed_tracker.py - RateLimitSignal dataclass, detect_rate_limit_signals() method, config fields
+- src/config/sections/download.py - SpeedTrackingConfig with new fields
+- config.yaml - speed_tracking section with new options
+- src/downloader/core.py - Signal detection integration, config reading
+- src/downloader/__init__.py - RateLimitSignal export
+- tests/test_speed_tracker.py - 20 new tests
+

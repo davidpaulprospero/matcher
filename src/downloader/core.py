@@ -256,13 +256,25 @@ class VideoDownloader:
             except (TypeError, ValueError):
                 adaptive = True
 
+            # Rate limit signal detection config (US-002)
+            try:
+                rate_limit_threshold = float(getattr(speed_tracking_config, 'rate_limit_signal_threshold', 0.1))
+            except (TypeError, ValueError):
+                rate_limit_threshold = 0.1
+            try:
+                consecutive_slow = int(getattr(speed_tracking_config, 'consecutive_slow_samples', 3))
+            except (TypeError, ValueError):
+                consecutive_slow = 3
+
             self.speed_tracker = DownloadSpeedTracker(
                 DownloadSpeedConfig(
                     enabled=True,
                     window_size=window_size,
                     min_speed_mbps=min_speed,
                     max_timeout_multiplier=max_mult,
-                    enable_adaptive_timeout=adaptive
+                    enable_adaptive_timeout=adaptive,
+                    rate_limit_signal_threshold=rate_limit_threshold,
+                    consecutive_slow_samples=consecutive_slow
                 )
             )
             logger.debug("Speed tracker enabled for adaptive timeouts")
@@ -1665,6 +1677,19 @@ class VideoDownloader:
                         # Record speed sample for metrics
                         speed_mbps = (file_size / 1024 / 1024) / video_duration if video_duration > 0 else 0
                         self.rate_limit_metrics.record_speed_sample(speed_mbps)
+
+            # Check for rate limit signals after recording speeds (US-002)
+            # Proactive detection: slow speeds often precede hard rate limit errors
+            if self.speed_tracker.config.enabled:
+                signal = self.speed_tracker.detect_rate_limit_signals()
+                if signal.detected:
+                    # Trigger preemptive backoff via circuit breaker
+                    if self.circuit_breaker.is_enabled:
+                        logger.info(
+                            f"Proactive rate limit response: {signal.consecutive_slow_count} "
+                            f"consecutive slow downloads detected, triggering circuit breaker"
+                        )
+                        self.circuit_breaker.record_failure()
 
         downloaded = []
 

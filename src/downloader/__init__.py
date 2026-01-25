@@ -44,7 +44,7 @@ from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
-from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord
+from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
 from .rate_limit_metrics import RateLimitMetrics
@@ -89,6 +89,7 @@ __all__ = [
     'DownloadSpeedTracker',
     'DownloadSpeedConfig',
     'DownloadRecord',
+    'RateLimitSignal',
     'CircuitBreaker',
     'CircuitBreakerConfig',
     'RetryQueue',

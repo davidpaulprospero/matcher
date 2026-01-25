@@ -961,6 +961,11 @@ download:
     min_speed_mbps: 1.0        # Below this, timeout gets extended (MB/s)
     max_timeout_multiplier: 2.0  # Maximum timeout extension (2x)
     enable_adaptive_timeout: true  # Auto-extend timeouts on slow networks
+    # Rate limit signal detection (US-002)
+    # When downloads slow to near-stalled speeds, signals potential rate limiting
+    # before hard errors occur. Triggers preemptive backoff via circuit breaker.
+    rate_limit_signal_threshold: 0.1  # MB/s - near-stalled threshold (100 KB/s)
+    consecutive_slow_samples: 3       # Slow samples before triggering signal
 
   # Circuit breaker: pause searches after consecutive failures
   # Implements the circuit breaker pattern to prevent hammering YouTube

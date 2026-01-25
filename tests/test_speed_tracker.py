@@ -7,7 +7,8 @@ from unittest.mock import patch, MagicMock
 from src.downloader.speed_tracker import (
     DownloadSpeedTracker,
     DownloadSpeedConfig,
-    DownloadRecord
+    DownloadRecord,
+    RateLimitSignal
 )
 
 
@@ -453,3 +454,338 @@ class TestIntegration:
         assert stats1['samples'] == stats2['samples']
         assert stats1['avg_speed_mbps'] == pytest.approx(stats2['avg_speed_mbps'], rel=0.01)
         assert stats1['total_bytes'] == stats2['total_bytes']
+
+
+# ============================================================================
+# US-002: Rate limit signal detection tests
+# ============================================================================
+
+
+class TestRateLimitSignalDataclass:
+    """Tests for RateLimitSignal dataclass."""
+
+    def test_signal_attributes(self):
+        """Test RateLimitSignal has all expected attributes."""
+        signal = RateLimitSignal(
+            detected=True,
+            consecutive_slow_count=3,
+            recent_speeds=[0.05, 0.08, 0.03],
+            threshold=0.1,
+            message="Test signal"
+        )
+        assert signal.detected is True
+        assert signal.consecutive_slow_count == 3
+        assert signal.recent_speeds == [0.05, 0.08, 0.03]
+        assert signal.threshold == 0.1
+        assert signal.message == "Test signal"
+
+    def test_signal_false_detected(self):
+        """Test RateLimitSignal with no detection."""
+        signal = RateLimitSignal(
+            detected=False,
+            consecutive_slow_count=1,
+            recent_speeds=[0.05],
+            threshold=0.1,
+            message="Insufficient samples"
+        )
+        assert signal.detected is False
+        assert signal.consecutive_slow_count == 1
+
+
+class TestRateLimitSignalConfigDefaults:
+    """Tests for rate limit signal config defaults."""
+
+    def test_default_threshold(self):
+        """Test default rate limit signal threshold is 0.1 MB/s."""
+        config = DownloadSpeedConfig()
+        assert config.rate_limit_signal_threshold == 0.1
+
+    def test_default_consecutive_samples(self):
+        """Test default consecutive slow samples is 3."""
+        config = DownloadSpeedConfig()
+        assert config.consecutive_slow_samples == 3
+
+    def test_custom_threshold(self):
+        """Test custom rate limit signal threshold."""
+        config = DownloadSpeedConfig(rate_limit_signal_threshold=0.05)
+        assert config.rate_limit_signal_threshold == 0.05
+
+    def test_custom_consecutive_samples(self):
+        """Test custom consecutive slow samples."""
+        config = DownloadSpeedConfig(consecutive_slow_samples=5)
+        assert config.consecutive_slow_samples == 5
+
+
+class TestDetectRateLimitSignals:
+    """Tests for detect_rate_limit_signals method."""
+
+    def test_insufficient_samples_returns_no_signal(self):
+        """Test no signal when not enough samples."""
+        config = DownloadSpeedConfig(consecutive_slow_samples=3)
+        tracker = DownloadSpeedTracker(config)
+
+        # Only 2 samples, need 3
+        tracker.record_download("v1", 500 * 1024, 10.0, "short")  # 0.05 MB/s
+        tracker.record_download("v2", 500 * 1024, 10.0, "short")  # 0.05 MB/s
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False
+        assert "Insufficient samples" in signal.message
+
+    def test_signal_detected_with_consecutive_slow_downloads(self):
+        """Test signal detected when 3+ consecutive downloads are slow."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,  # 0.1 MB/s threshold
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 3 downloads all below 0.1 MB/s (throttled)
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")  # 0.005 MB/s
+        tracker.record_download("v2", 80 * 1024, 10.0, "short")  # 0.008 MB/s
+        tracker.record_download("v3", 30 * 1024, 10.0, "short")  # 0.003 MB/s
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is True
+        assert signal.consecutive_slow_count >= 3
+        assert "Rate limit signal" in signal.message
+
+    def test_no_signal_when_downloads_fast(self):
+        """Test no signal when downloads are above threshold."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 3 downloads all above 0.1 MB/s (healthy)
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v3", 15 * 1024 * 1024, 10.0, "short")  # 1.5 MB/s
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False
+        assert "No rate limit signal" in signal.message
+
+    def test_signal_requires_consecutive_slow(self):
+        """Test signal only fires when slow samples are consecutive (most recent)."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Mix of fast and slow - only 2 consecutive slow at end
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s (fast)
+        tracker.record_download("v3", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+        tracker.record_download("v4", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False  # Only 2 consecutive slow, need 3
+        assert signal.consecutive_slow_count == 2
+
+    def test_signal_triggers_on_three_consecutive_at_end(self):
+        """Test signal fires when last 3 are slow, even after fast ones."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Fast then slow (network degrading)
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s (fast)
+        tracker.record_download("v2", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+        tracker.record_download("v3", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+        tracker.record_download("v4", 50 * 1024, 10.0, "short")  # 0.005 MB/s (slow)
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is True
+        assert signal.consecutive_slow_count == 3
+
+    def test_signal_includes_recent_speeds(self):
+        """Test signal includes recent speeds for debugging."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,
+            window_size=5
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Record 4 downloads
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")
+        tracker.record_download("v2", 60 * 1024, 10.0, "short")
+        tracker.record_download("v3", 70 * 1024, 10.0, "short")
+        tracker.record_download("v4", 80 * 1024, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        assert len(signal.recent_speeds) == 4
+        assert signal.threshold == 0.1
+
+
+class TestSignalLogging:
+    """Tests for rate limit signal logging."""
+
+    def test_signal_logs_warning_when_detected(self):
+        """Test WARNING log emitted when signal detected."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 3 slow downloads
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")
+        tracker.record_download("v2", 50 * 1024, 10.0, "short")
+        tracker.record_download("v3", 50 * 1024, 10.0, "short")
+
+        with patch('src.downloader.speed_tracker.logger') as mock_logger:
+            signal = tracker.detect_rate_limit_signals()
+            assert signal.detected is True
+            mock_logger.warning.assert_called_once()
+            assert "Rate limit signal" in mock_logger.warning.call_args[0][0]
+
+    def test_no_warning_when_no_signal(self):
+        """Test no WARNING log when no signal detected."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Fast downloads
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("v3", 10 * 1024 * 1024, 10.0, "short")
+
+        with patch('src.downloader.speed_tracker.logger') as mock_logger:
+            signal = tracker.detect_rate_limit_signals()
+            assert signal.detected is False
+            mock_logger.warning.assert_not_called()
+
+
+class TestSignalWithCircuitBreaker:
+    """Integration tests for signal with circuit breaker."""
+
+    def test_signal_can_trigger_circuit_breaker_failure(self):
+        """Test signal detection can be used to trigger circuit breaker."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        breaker_config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=3
+        )
+        breaker = CircuitBreaker(breaker_config)
+
+        # 3 slow downloads trigger signal
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")
+        tracker.record_download("v2", 50 * 1024, 10.0, "short")
+        tracker.record_download("v3", 50 * 1024, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        if signal.detected:
+            breaker.record_failure()
+
+        # Verify failure was recorded
+        assert breaker.state.consecutive_failures == 1
+
+    def test_multiple_signals_can_trip_circuit_breaker(self):
+        """Test multiple signals can accumulate to trip circuit breaker."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=2,
+            window_size=3
+        )
+
+        breaker_config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=2
+        )
+        breaker = CircuitBreaker(breaker_config)
+
+        # First batch of slow downloads
+        tracker = DownloadSpeedTracker(config)
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")
+        tracker.record_download("v2", 50 * 1024, 10.0, "short")
+        signal = tracker.detect_rate_limit_signals()
+        if signal.detected:
+            breaker.record_failure()
+
+        # Simulate recovery (would need new tracker in real scenario)
+        # but continue with more slow downloads
+        tracker.record_download("v3", 50 * 1024, 10.0, "short")
+        signal = tracker.detect_rate_limit_signals()
+        if signal.detected:
+            tripped = breaker.record_failure()
+            assert tripped is True  # Circuit should trip now
+            assert breaker.is_open is True
+
+
+class TestSignalEdgeCases:
+    """Edge case tests for rate limit signal detection."""
+
+    def test_empty_tracker(self):
+        """Test signal detection with no records."""
+        tracker = DownloadSpeedTracker()
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False
+        assert signal.consecutive_slow_count == 0
+        assert signal.recent_speeds == []
+
+    def test_exactly_at_threshold(self):
+        """Test download speed exactly at threshold is NOT considered slow."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Exactly 0.1 MB/s = 1 MB in 10s = 1048576 bytes in 10s
+        tracker.record_download("v1", 1024 * 1024, 10.0, "short")  # 0.1 MB/s exactly
+        tracker.record_download("v2", 1024 * 1024, 10.0, "short")
+        tracker.record_download("v3", 1024 * 1024, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        # At threshold should NOT be considered slow (< not <=)
+        assert signal.detected is False
+
+    def test_just_below_threshold(self):
+        """Test download speed just below threshold IS considered slow."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Just below 0.1 MB/s (0.099 MB/s)
+        bytes_for_099 = int(0.099 * 1024 * 1024 * 10)  # for 10 seconds
+        tracker.record_download("v1", bytes_for_099, 10.0, "short")
+        tracker.record_download("v2", bytes_for_099, 10.0, "short")
+        tracker.record_download("v3", bytes_for_099, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is True
+
+    def test_custom_high_threshold(self):
+        """Test with higher threshold (more sensitive detection)."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=1.0,  # 1 MB/s - much higher
+            consecutive_slow_samples=2
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 0.5 MB/s is slow when threshold is 1.0
+        tracker.record_download("v1", 5 * 1024 * 1024, 10.0, "short")  # 0.5 MB/s
+        tracker.record_download("v2", 5 * 1024 * 1024, 10.0, "short")  # 0.5 MB/s
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is True
+        assert signal.threshold == 1.0

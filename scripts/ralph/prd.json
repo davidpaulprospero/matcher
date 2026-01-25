@@ -33,7 +33,8 @@
         "Signal logged at WARNING level with speed history context",
         "Tests verify signal detection and preemptive action"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented detect_rate_limit_signals() method returning RateLimitSignal dataclass with detection status and speed history. Added rate_limit_signal_threshold (0.1 MB/s) and consecutive_slow_samples (3) config options. Integrated with circuit breaker in core.py to trigger preemptive backoff when signal detected. 20 new tests cover signal detection, logging, circuit breaker integration, and edge cases."
     },
     {
       "id": "US-003",
