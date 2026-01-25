@@ -304,6 +304,50 @@ while ($true) {
                     }
                 }
 
+                # Phase 2 - Task 2.4: Error Evolution (from error_evolution.jsonl if available)
+                $errorLogDir = if (Test-Path $LogsDir) {
+                    Get-ChildItem $LogsDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
+                } else { $null }
+                if ($errorLogDir) {
+                    $errorEvolutionFile = Join-Path $errorLogDir.FullName "error_evolution.jsonl"
+                    if (Test-Path $errorEvolutionFile) {
+                        $errorLines = Get-Content $errorEvolutionFile -ErrorAction SilentlyContinue
+                        if ($errorLines -and $errorLines.Count -gt 0) {
+                            Write-Host "  ERROR EVOLUTION:" -ForegroundColor Cyan
+                            # Group by category and show trend
+                            $errorEvents = @()
+                            foreach ($line in $errorLines) {
+                                try {
+                                    $evt = $line | ConvertFrom-Json
+                                    $errorEvents += $evt
+                                } catch {}
+                            }
+
+                            if ($errorEvents.Count -gt 0) {
+                                $byCategory = $errorEvents | Group-Object category
+                                foreach ($cat in $byCategory | Sort-Object Count -Descending | Select-Object -First 4) {
+                                    $firstOccurrence = $cat.Group | Select-Object -First 1
+                                    $lastOccurrence = $cat.Group | Select-Object -Last 1
+                                    $timeSinceFirst = if ($firstOccurrence.timestamp) {
+                                        [math]::Round(((Get-Date) - [datetime]$firstOccurrence.timestamp).TotalMinutes)
+                                    } else { 0 }
+
+                                    $trend = if ($cat.Group.Count -eq 1) { "(new)" } else { "($($cat.Group.Count)x)" }
+                                    $color = switch ($cat.Name) {
+                                        "Timeout" { "Yellow" }
+                                        "TestFailure" { "Red" }
+                                        "SyntaxError" { "Red" }
+                                        "APIError" { "Magenta" }
+                                        default { "Gray" }
+                                    }
+                                    Write-Host "    $($cat.Name): $($cat.Group.Count) $trend - ${timeSinceFirst}m ago" -ForegroundColor $color
+                                }
+                            }
+                            Write-Host ""
+                        }
+                    }
+                }
+
                 # Test Results Summary
                 if ($hasTests) {
                     $withTests = @($sessionMetrics | Where-Object { $_.test_results -and $_.test_results -ne '' })
@@ -387,17 +431,57 @@ while ($true) {
                     Write-Host "    Longest: $maxDuration min" -ForegroundColor $(if ($maxDuration -le 15) { 'Green' } elseif ($maxDuration -le 30) { 'Yellow' } else { 'Red' })
                 }
 
-                # Focus Area Summary (always available)
+                # Phase 2 - Task 2.2: Focus Area Health (enhanced with timing and cost)
                 $focusGroups = $sessionMetrics | Group-Object focus_area | Sort-Object Count -Descending
                 if ($focusGroups.Count -gt 0) {
                     Write-Host ""
-                    Write-Host "  FOCUS AREAS:" -ForegroundColor Cyan
+                    Write-Host "  FOCUS AREA HEALTH:" -ForegroundColor Cyan
                     foreach ($fg in $focusGroups | Select-Object -First 5) {
                         $areaSuccesses = @($fg.Group | Where-Object { $_.success -eq 'true' }).Count
                         $areaTotal = $fg.Group.Count
                         $areaRate = [math]::Round(($areaSuccesses / $areaTotal) * 100)
                         $areaColor = if ($areaRate -ge 80) { 'Green' } elseif ($areaRate -ge 50) { 'Yellow' } else { 'Red' }
-                        Write-Host "    $($fg.Name): $areaRate% ($areaSuccesses/$areaTotal)" -ForegroundColor $areaColor
+
+                        # Calculate avg duration for this focus area
+                        $areaDurations = @($fg.Group | Where-Object { $_.duration_min -and $_.duration_min -ne '' } | ForEach-Object { [double]$_.duration_min })
+                        $areaAvgMin = if ($areaDurations.Count -gt 0) { [math]::Round(($areaDurations | Measure-Object -Average).Average, 1) } else { 0 }
+
+                        # Calculate avg cost for this focus area
+                        $areaTokens = @($fg.Group | Where-Object { $_.tokens_used -and $_.tokens_used -ne '' } | ForEach-Object { [int]$_.tokens_used })
+                        $areaCost = if ($areaTokens.Count -gt 0) { [math]::Round((($areaTokens | Measure-Object -Sum).Sum * 0.000003), 3) } else { 0 }
+
+                        Write-Host "    $($fg.Name): $areaRate% ($areaSuccesses/$areaTotal) | ${areaAvgMin} min avg | `$$areaCost" -ForegroundColor $areaColor
+                    }
+                }
+
+                # Phase 2 - Task 2.1: Phase Timing Breakdown (if available)
+                $hasPhaseTimings = $null -ne $sessionMetrics[0].PSObject.Properties['phase_read_ms']
+                if ($hasPhaseTimings) {
+                    $withTimings = @($sessionMetrics | Where-Object {
+                        $_.phase_read_ms -and $_.phase_read_ms -ne '' -and $_.phase_read_ms -ne '0'
+                    })
+                    if ($withTimings.Count -gt 0) {
+                        Write-Host ""
+                        Write-Host "  PHASE BREAKDOWN (avg):" -ForegroundColor Cyan
+
+                        $avgRead = [math]::Round(($withTimings | ForEach-Object { [int]$_.phase_read_ms } | Measure-Object -Average).Average / 1000, 1)
+                        $avgAnalyze = [math]::Round(($withTimings | ForEach-Object { [int]$_.phase_analyze_ms } | Measure-Object -Average).Average / 1000, 1)
+                        $avgImpl = [math]::Round(($withTimings | ForEach-Object { [int]$_.phase_implement_ms } | Measure-Object -Average).Average / 1000, 1)
+                        $avgTest = [math]::Round(($withTimings | ForEach-Object { [int]$_.phase_test_ms } | Measure-Object -Average).Average / 1000, 1)
+                        $avgCommit = [math]::Round(($withTimings | ForEach-Object { [int]$_.phase_commit_ms } | Measure-Object -Average).Average / 1000, 1)
+                        $totalAvg = $avgRead + $avgAnalyze + $avgImpl + $avgTest + $avgCommit
+
+                        if ($totalAvg -gt 0) {
+                            # Calculate percentages
+                            $pctRead = [math]::Round(($avgRead / $totalAvg) * 100)
+                            $pctAnalyze = [math]::Round(($avgAnalyze / $totalAvg) * 100)
+                            $pctImpl = [math]::Round(($avgImpl / $totalAvg) * 100)
+                            $pctTest = [math]::Round(($avgTest / $totalAvg) * 100)
+                            $pctCommit = [math]::Round(($avgCommit / $totalAvg) * 100)
+
+                            Write-Host "    R:${pctRead}% A:${pctAnalyze}% I:${pctImpl}% T:${pctTest}% C:${pctCommit}%" -ForegroundColor Gray
+                            Write-Host "    (Read:${avgRead}s Analyze:${avgAnalyze}s Impl:${avgImpl}s Test:${avgTest}s Commit:${avgCommit}s)" -ForegroundColor DarkGray
+                        }
                     }
                 }
             } else {
@@ -536,6 +620,33 @@ while ($true) {
                                 default { "Gray" }
                             }
                             Write-Host "    $eventTime $eventName$detailStr" -ForegroundColor $color
+                        }
+                        catch {}
+                    }
+                }
+            }
+
+            # Phase 2 - Task 2.5: State Transitions (last 3)
+            $stateFile = Join-Path $latestLogDir.FullName "state_transitions.jsonl"
+            if (Test-Path $stateFile) {
+                $stateLines = Get-Content $stateFile -Tail 3 -ErrorAction SilentlyContinue
+                if ($stateLines -and $stateLines.Count -gt 0) {
+                    Write-Host ""
+                    Write-Host "  STATE MACHINE (last 3):" -ForegroundColor Cyan
+                    foreach ($line in $stateLines) {
+                        try {
+                            $state = $line | ConvertFrom-Json
+                            $stateTime = ([datetime]$state.timestamp).ToString("HH:mm:ss")
+                            $transition = "$($state.from) -> $($state.to)"
+                            $reason = if ($state.reason.Length -gt 30) { $state.reason.Substring(0, 27) + "..." } else { $state.reason }
+                            $color = switch ($state.to) {
+                                "completed" { "Green" }
+                                "running" { "Cyan" }
+                                "failed" { "Red" }
+                                "error" { "Red" }
+                                default { "Gray" }
+                            }
+                            Write-Host "    $stateTime [$transition] $reason" -ForegroundColor $color
                         }
                         catch {}
                     }
