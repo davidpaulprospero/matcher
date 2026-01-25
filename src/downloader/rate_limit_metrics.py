@@ -95,6 +95,7 @@ class RateLimitMetrics:
     # Session metadata
     session_start_time: Optional[str] = None
     session_end_time: Optional[str] = None
+    session_count: int = 1  # US-006: Track number of sessions contributing to metrics
 
     def record_download_attempt(self) -> None:
         """Record a download attempt."""
@@ -320,6 +321,10 @@ class RateLimitMetrics:
         """
         lines = []
 
+        # Session indicator for cross-session metrics (US-006)
+        if self.session_count > 1:
+            lines.append(f"Total across {self.session_count} sessions:")
+
         # Download summary
         lines.append(
             f"Downloads: {self.total_downloads} total "
@@ -426,10 +431,51 @@ class RateLimitMetrics:
             timeout_extensions=data.get('timeout_extensions', 0),
             session_start_time=data.get('session_start_time'),
             session_end_time=data.get('session_end_time'),
+            session_count=data.get('session_count', 1),
         )
 
+    @classmethod
+    def from_checkpoint(cls, data: dict) -> 'RateLimitMetrics':
+        """Create RateLimitMetrics from checkpoint and increment session count.
+
+        Unlike from_dict(), this method is used specifically for resuming from
+        a checkpoint. It:
+        1. Loads previous metrics state
+        2. Increments session_count to track cross-session aggregation
+        3. Logs the restored state for visibility
+
+        This enables cumulative metrics across multiple session boundaries for
+        multi-day downloads.
+
+        Args:
+            data: Dict from checkpoint's rate_limit_metrics field
+
+        Returns:
+            New RateLimitMetrics instance with incremented session_count
+
+        Note:
+            The session_count reflects how many download sessions have
+            contributed to the cumulative metrics. For example, if a user
+            runs the pipeline 3 times (with interruptions), session_count=3.
+        """
+        if not data:
+            return cls()
+
+        # First create the metrics from the checkpoint data
+        metrics = cls.from_dict(data)
+
+        # Increment session count since we're starting a new session
+        metrics.session_count += 1
+
+        logger.info(
+            f"Restored rate limit metrics from checkpoint (session {metrics.session_count}): "
+            f"{metrics.total_downloads} downloads, {metrics.rate_limit_events} rate limits"
+        )
+
+        return metrics
+
     def clear(self) -> None:
-        """Reset all metrics for a new session."""
+        """Reset all metrics for a new session including session count."""
         self.total_downloads = 0
         self.successful_downloads = 0
         self.failed_downloads = 0
@@ -452,3 +498,4 @@ class RateLimitMetrics:
         self.timeout_extensions = 0
         self.session_start_time = None
         self.session_end_time = None
+        self.session_count = 1  # Reset to 1 for new session (US-006)

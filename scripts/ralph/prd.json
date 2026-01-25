@@ -49,7 +49,8 @@
         "Batch retry delay extends if circuit breaker pause overlaps",
         "Tests verify batch retry waits for circuit breaker recovery"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented set_circuit_breaker() method in RetryQueue, added respect_circuit_breaker config option (default: true), modified start_retry_pass() to check and wait for circuit breaker recovery before processing. Tracks circuit_breaker_wait_time in stats/checkpoint. 30 tests verify all acceptance criteria including VideoDownloader integration."
     },
     {
       "id": "US-004",
@@ -64,7 +65,8 @@
         "Budget state saved to checkpoint for resume",
         "Tests verify keyword B skips exhausted rotations from keyword A"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented RateLimitBudget dataclass with rotations_used, vpn_switches_used, backoff_time_spent tracking plus budget limits and keyword tracking. Added share_budget_across_keywords (default: true) and max_backoff_budget (300s) config options. Modified handle_rate_limit_error(), rotate_cookie_on_error(), switch_vpn_on_error() to check and record in shared budget. Budget persisted to checkpoint and restored on resume. 47 tests verify all acceptance criteria including cross-keyword budget sharing scenario."
     },
     {
       "id": "US-005",
@@ -79,7 +81,8 @@
         "Status logged on resume: 'Resuming VPN manager: X/Y switches used'",
         "Tests verify switch count preserved across checkpoint save/load"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented to_checkpoint_state() and from_checkpoint_state() methods on VPNManager class. Added restore_from_checkpoint() for updating existing instance. Added vpn_manager_state field to DownloadCheckpoint with backward compatibility. Integrated save/restore in core.py's _save_checkpoint() and download_all(). Logs 'Resuming VPN manager: X/Y switches used' on restore. 24 new tests verify checkpoint persistence, roundtrip, timestamp helpers, and max_switches enforcement across resume."
     },
     {
       "id": "US-006",
@@ -94,7 +97,8 @@
         "Metrics reset method clears all values including session count",
         "Tests verify cumulative metrics across multiple save/load cycles"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented from_checkpoint() classmethod that loads metrics and increments session_count. Added session_count field (default: 1) to track sessions. Updated summary() to show 'Total across N sessions:' when session_count > 1. Updated clear() to reset session_count to 1. Changed core.py to use from_checkpoint() instead of from_dict() on resume. 24 new tests verify cumulative metrics across multiple save/load cycles including backward compatibility."
     },
     {
       "id": "US-007",

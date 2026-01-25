@@ -963,10 +963,10 @@ class VideoDownloader:
                 self._in_cooldown_recovery_mode = self._check_rate_limit_cooldown(self.checkpoint)
                 # Restore rate limit event count for continued tracking
                 self._rate_limit_event_count = self.checkpoint.rate_limit_event_count
-                # Restore rate limit metrics for cross-session analysis (US-010)
+                # Restore rate limit metrics for cross-session aggregation (US-006)
                 if self.checkpoint.rate_limit_metrics:
-                    self.rate_limit_metrics = RateLimitMetrics.from_dict(self.checkpoint.rate_limit_metrics)
-                    logger.debug(f"Restored rate limit metrics: {self.rate_limit_metrics.total_downloads} downloads")
+                    self.rate_limit_metrics = RateLimitMetrics.from_checkpoint(self.checkpoint.rate_limit_metrics)
+                    # from_checkpoint() increments session_count and logs the restore
                 # Restore cross-keyword rate limit budget (US-004)
                 if self._share_budget_across_keywords and self.checkpoint.rate_limit_budget:
                     self.rate_limit_budget = RateLimitBudget.from_dict(self.checkpoint.rate_limit_budget)
