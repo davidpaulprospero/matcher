@@ -2583,11 +2583,26 @@ function Start-InterviewQueueLoop {
     if ($focusAreas.Count -eq 0) {
         Write-Host "  No pending focus areas in queue" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "  Run the interview first to add focus areas:" -ForegroundColor Cyan
-        Write-Host "    .\scripts\ralph\7-hi-super-nintendo-chalmers.bat" -ForegroundColor White
+        Write-Host "  Starting interview to add focus areas..." -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  Or add areas directly to queue.json" -ForegroundColor DarkGray
-        return
+
+        # Launch interview inline (with -NoLaunch to prevent spawning new windows)
+        $interviewPath = Join-Path $script:RalphDir "interview.ps1"
+        if (Test-Path $interviewPath) {
+            & $interviewPath -NoLaunch
+
+            # Re-check for focus areas after interview
+            $focusAreas = Get-InterviewFocusAreas
+            if ($focusAreas.Count -eq 0) {
+                Write-Host "  No focus areas added. Exiting." -ForegroundColor Yellow
+                return
+            }
+            # Update context after interview
+            $context = Get-InterviewContext
+        } else {
+            Write-Host "  Interview script not found at: $interviewPath" -ForegroundColor Red
+            return
+        }
     }
 
     Write-Host "  Processing $($focusAreas.Count) focus areas from interview queue" -ForegroundColor Cyan

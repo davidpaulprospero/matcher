@@ -1,8 +1,9 @@
 # Ralph Interview Mode
-# Usage: .\scripts\ralph\interview.ps1 [-Resume]
+# Usage: .\scripts\ralph\interview.ps1 [-Resume] [-NoLaunch]
 
 param(
-    [switch]$Resume
+    [switch]$Resume,
+    [switch]$NoLaunch  # Skip launching Ralph/Watch windows (used when called from Ralph)
 )
 
 # Set up paths
@@ -762,8 +763,13 @@ if (-not $script:ResumeMode) {
     # Save the queue
     $queue = Save-InterviewQueue -Context $interviewContext -FocusAreas $approvedAreas
 
-    # Launch Ralph windows
-    Start-RalphWindows -FocusAreas $approvedAreas
+    # Launch Ralph windows (unless -NoLaunch was specified)
+    if (-not $NoLaunch) {
+        Start-RalphWindows -FocusAreas $approvedAreas
+    } else {
+        Write-Host ""
+        Write-Host "  Queue saved. Returning to caller..." -ForegroundColor Green
+    }
 } else {
     # Resume mode - just launch Ralph windows with remaining focus areas
     $remainingAreas = @()
@@ -778,5 +784,10 @@ if (-not $script:ResumeMode) {
         Write-Host "    - $area" -ForegroundColor Gray
     }
 
-    Start-RalphWindows -FocusAreas $remainingAreas
+    if (-not $NoLaunch) {
+        Start-RalphWindows -FocusAreas $remainingAreas
+    } else {
+        Write-Host ""
+        Write-Host "  Queue ready. Returning to caller..." -ForegroundColor Green
+    }
 }
