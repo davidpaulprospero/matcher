@@ -1623,3 +1623,503 @@ class CaptionCache(BaseCache):
         })
 
         return base_stats
+
+
+class CaptionNormalizationError(CaptionError):
+    """Raised when caption normalization fails."""
+
+    def __init__(self, reason: str = ""):
+        self.reason = reason
+        message = "Caption normalization failed"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)
+
+
+@dataclass
+class NormalizationConfig:
+    """Configuration for caption timestamp normalization.
+
+    Attributes:
+        overlap_strategy: How to handle overlapping segments.
+            - 'merge': Merge overlapping segments into one.
+            - 'split': Split at the midpoint of overlap.
+            - 'truncate': Truncate earlier segment's end to later's start.
+        gap_strategy: How to handle gaps between segments.
+            - 'extend': Extend previous segment's end to next segment's start.
+            - 'placeholder': Insert empty placeholder segments.
+            - 'ignore': Leave gaps as-is.
+        max_gap_to_extend: Maximum gap size (seconds) to extend (larger gaps use placeholder).
+        min_segment_duration: Minimum valid segment duration (seconds).
+        validate_timestamps: Whether to validate and fix timestamps.
+    """
+
+    overlap_strategy: str = "truncate"
+    gap_strategy: str = "ignore"
+    max_gap_to_extend: float = 1.0
+    min_segment_duration: float = 0.1
+    validate_timestamps: bool = True
+
+
+class CaptionNormalizer:
+    """Normalizes YouTube caption timestamps for consistency.
+
+    YouTube captions can have irregular timing:
+    - Overlapping segments (two segments with overlapping time ranges)
+    - Gaps between segments
+    - Inconsistent timestamp formats (VTT, SRT, JSON3)
+    - Invalid timestamps (negative, end < start)
+
+    This class normalizes segments to a consistent format expected by
+    the matching stage.
+
+    Usage:
+        normalizer = CaptionNormalizer()
+        normalized = normalizer.normalize(caption_result.segments, video_id="abc123")
+
+        # With custom config:
+        config = NormalizationConfig(overlap_strategy="merge", gap_strategy="extend")
+        normalizer = CaptionNormalizer(config)
+        normalized = normalizer.normalize(segments)
+
+    Example:
+        >>> segments = [
+        ...     CaptionSegment(0, 0.0, 5.0, "First", "vid"),
+        ...     CaptionSegment(1, 4.0, 8.0, "Second", "vid"),  # Overlaps with first
+        ...     CaptionSegment(2, 10.0, 12.0, "Third", "vid"),  # Gap before this
+        ... ]
+        >>> normalizer = CaptionNormalizer()
+        >>> normalized = normalizer.normalize(segments)
+    """
+
+    def __init__(self, config: Optional[NormalizationConfig] = None):
+        """Initialize the normalizer.
+
+        Args:
+            config: Optional normalization configuration.
+        """
+        self.config = config or NormalizationConfig()
+
+    def normalize(
+        self,
+        segments: List[CaptionSegment],
+        video_id: str = ""
+    ) -> List[CaptionSegment]:
+        """Normalize a list of caption segments.
+
+        Applies the following normalization steps:
+        1. Validate and fix individual segment timestamps
+        2. Sort segments by start time
+        3. Handle overlapping segments (based on overlap_strategy)
+        4. Handle gaps between segments (based on gap_strategy)
+        5. Re-index segments sequentially
+
+        Args:
+            segments: List of CaptionSegment to normalize.
+            video_id: Video ID for source_file field in new segments.
+
+        Returns:
+            List of normalized CaptionSegment objects.
+
+        Raises:
+            CaptionNormalizationError: If normalization fails catastrophically.
+        """
+        if not segments:
+            return []
+
+        logger.debug(f"Normalizing {len(segments)} caption segments for video {video_id}")
+
+        # Step 1: Validate and fix individual timestamps
+        if self.config.validate_timestamps:
+            segments = [self._validate_segment(seg, video_id) for seg in segments]
+            # Filter out None (invalid segments)
+            segments = [seg for seg in segments if seg is not None]
+
+        if not segments:
+            logger.warning("All segments were invalid after validation")
+            return []
+
+        # Step 2: Sort by start time
+        segments = sorted(segments, key=lambda s: s.start_time)
+
+        # Step 3: Handle overlapping segments
+        segments = self._handle_overlaps(segments, video_id)
+
+        # Step 4: Handle gaps
+        segments = self._handle_gaps(segments, video_id)
+
+        # Step 5: Re-index
+        segments = self._reindex(segments)
+
+        logger.debug(f"Normalization complete: {len(segments)} segments")
+        return segments
+
+    def _validate_segment(
+        self,
+        segment: CaptionSegment,
+        video_id: str
+    ) -> Optional[CaptionSegment]:
+        """Validate and fix a single segment's timestamps.
+
+        Validation rules:
+        - start_time must be >= 0
+        - end_time must be > start_time
+        - Duration must be >= min_segment_duration
+
+        Args:
+            segment: Segment to validate.
+            video_id: Video ID for logging.
+
+        Returns:
+            Fixed segment, or None if segment is invalid and unfixable.
+        """
+        start = segment.start_time
+        end = segment.end_time
+
+        # Fix negative start time
+        if start < 0:
+            logger.debug(f"Fixing negative start_time ({start}) in segment {segment.index}")
+            start = 0.0
+
+        # Fix negative end time
+        if end < 0:
+            logger.debug(f"Invalid negative end_time ({end}) in segment {segment.index}")
+            return None
+
+        # Fix end <= start
+        if end <= start:
+            # Try extending end by minimum duration
+            new_end = start + self.config.min_segment_duration
+            logger.debug(
+                f"Fixing end <= start ({end} <= {start}) in segment {segment.index}, "
+                f"extending to {new_end}"
+            )
+            end = new_end
+
+        # Check minimum duration
+        duration = end - start
+        if duration < self.config.min_segment_duration:
+            logger.debug(
+                f"Segment {segment.index} duration ({duration}) below minimum "
+                f"({self.config.min_segment_duration}), extending"
+            )
+            end = start + self.config.min_segment_duration
+
+        # Skip empty text
+        if not segment.text.strip():
+            logger.debug(f"Skipping empty segment {segment.index}")
+            return None
+
+        return CaptionSegment(
+            index=segment.index,
+            start_time=start,
+            end_time=end,
+            text=segment.text,
+            source_file=segment.source_file or video_id
+        )
+
+    def _handle_overlaps(
+        self,
+        segments: List[CaptionSegment],
+        video_id: str
+    ) -> List[CaptionSegment]:
+        """Handle overlapping segments based on strategy.
+
+        Args:
+            segments: Sorted list of segments.
+            video_id: Video ID for new segments.
+
+        Returns:
+            List of segments with overlaps resolved.
+        """
+        if len(segments) < 2:
+            return segments
+
+        strategy = self.config.overlap_strategy
+        result = []
+
+        i = 0
+        while i < len(segments):
+            current = segments[i]
+
+            # Check for overlap with next segment
+            if i + 1 < len(segments):
+                next_seg = segments[i + 1]
+
+                if current.end_time > next_seg.start_time:
+                    # Overlap detected
+                    logger.debug(
+                        f"Overlap detected: segment {current.index} "
+                        f"({current.start_time:.2f}-{current.end_time:.2f}) overlaps with "
+                        f"segment {next_seg.index} ({next_seg.start_time:.2f}-{next_seg.end_time:.2f})"
+                    )
+
+                    if strategy == "merge":
+                        # Merge overlapping segments
+                        merged = self._merge_segments(current, next_seg, video_id)
+                        # Replace next segment with merged for further processing
+                        segments[i + 1] = merged
+                        i += 1
+                        continue
+
+                    elif strategy == "split":
+                        # Split at midpoint
+                        midpoint = (current.end_time + next_seg.start_time) / 2
+                        current = CaptionSegment(
+                            index=current.index,
+                            start_time=current.start_time,
+                            end_time=midpoint,
+                            text=current.text,
+                            source_file=current.source_file or video_id
+                        )
+                        segments[i + 1] = CaptionSegment(
+                            index=next_seg.index,
+                            start_time=midpoint,
+                            end_time=next_seg.end_time,
+                            text=next_seg.text,
+                            source_file=next_seg.source_file or video_id
+                        )
+
+                    elif strategy == "truncate":
+                        # Truncate current's end to next's start
+                        current = CaptionSegment(
+                            index=current.index,
+                            start_time=current.start_time,
+                            end_time=next_seg.start_time,
+                            text=current.text,
+                            source_file=current.source_file or video_id
+                        )
+
+            result.append(current)
+            i += 1
+
+        return result
+
+    def _merge_segments(
+        self,
+        seg1: CaptionSegment,
+        seg2: CaptionSegment,
+        video_id: str
+    ) -> CaptionSegment:
+        """Merge two overlapping segments into one.
+
+        Args:
+            seg1: First segment (earlier start time).
+            seg2: Second segment (overlapping).
+            video_id: Video ID for merged segment.
+
+        Returns:
+            Merged CaptionSegment.
+        """
+        return CaptionSegment(
+            index=seg1.index,
+            start_time=min(seg1.start_time, seg2.start_time),
+            end_time=max(seg1.end_time, seg2.end_time),
+            text=f"{seg1.text} {seg2.text}".strip(),
+            source_file=seg1.source_file or seg2.source_file or video_id
+        )
+
+    def _handle_gaps(
+        self,
+        segments: List[CaptionSegment],
+        video_id: str
+    ) -> List[CaptionSegment]:
+        """Handle gaps between segments based on strategy.
+
+        Args:
+            segments: List of segments with overlaps resolved.
+            video_id: Video ID for new segments.
+
+        Returns:
+            List of segments with gaps handled.
+        """
+        if len(segments) < 2 or self.config.gap_strategy == "ignore":
+            return segments
+
+        strategy = self.config.gap_strategy
+        result = []
+
+        for i, segment in enumerate(segments):
+            result.append(segment)
+
+            # Check for gap before next segment
+            if i + 1 < len(segments):
+                next_seg = segments[i + 1]
+                gap = next_seg.start_time - segment.end_time
+
+                if gap > 0:
+                    logger.debug(
+                        f"Gap detected: {gap:.2f}s between segment {segment.index} "
+                        f"and {next_seg.index}"
+                    )
+
+                    if strategy == "extend":
+                        # Extend if gap is small enough
+                        if gap <= self.config.max_gap_to_extend:
+                            # Extend current segment's end
+                            result[-1] = CaptionSegment(
+                                index=segment.index,
+                                start_time=segment.start_time,
+                                end_time=next_seg.start_time,
+                                text=segment.text,
+                                source_file=segment.source_file or video_id
+                            )
+                        else:
+                            # Insert placeholder for large gaps
+                            placeholder = CaptionSegment(
+                                index=-1,  # Will be re-indexed
+                                start_time=segment.end_time,
+                                end_time=next_seg.start_time,
+                                text="",  # Empty placeholder
+                                source_file=video_id
+                            )
+                            result.append(placeholder)
+
+                    elif strategy == "placeholder":
+                        # Always insert placeholder
+                        placeholder = CaptionSegment(
+                            index=-1,
+                            start_time=segment.end_time,
+                            end_time=next_seg.start_time,
+                            text="",
+                            source_file=video_id
+                        )
+                        result.append(placeholder)
+
+        return result
+
+    def _reindex(self, segments: List[CaptionSegment]) -> List[CaptionSegment]:
+        """Re-index segments sequentially.
+
+        Args:
+            segments: List of segments to re-index.
+
+        Returns:
+            List of segments with sequential indexes starting from 0.
+        """
+        return [
+            CaptionSegment(
+                index=i,
+                start_time=seg.start_time,
+                end_time=seg.end_time,
+                text=seg.text,
+                source_file=seg.source_file
+            )
+            for i, seg in enumerate(segments)
+        ]
+
+    def validate_continuity(
+        self,
+        segments: List[CaptionSegment]
+    ) -> List[str]:
+        """Validate segment timing continuity.
+
+        Checks for common issues:
+        - Negative durations
+        - end_time < start_time
+        - Overlaps
+        - Gaps
+
+        Args:
+            segments: List of segments to validate.
+
+        Returns:
+            List of warning messages (empty if all valid).
+        """
+        warnings = []
+
+        for i, seg in enumerate(segments):
+            # Check individual segment
+            if seg.end_time < seg.start_time:
+                warnings.append(
+                    f"Segment {i}: end_time ({seg.end_time}) < start_time ({seg.start_time})"
+                )
+
+            duration = seg.end_time - seg.start_time
+            if duration <= 0:
+                warnings.append(f"Segment {i}: non-positive duration ({duration})")
+
+            # Check relationship with next segment
+            if i + 1 < len(segments):
+                next_seg = segments[i + 1]
+
+                if seg.end_time > next_seg.start_time:
+                    overlap = seg.end_time - next_seg.start_time
+                    warnings.append(
+                        f"Segments {i}-{i+1}: overlap of {overlap:.2f}s"
+                    )
+
+        return warnings
+
+    @staticmethod
+    def convert_timestamp_to_seconds(timestamp: str) -> Optional[float]:
+        """Convert a timestamp string to seconds.
+
+        Supports formats:
+        - HH:MM:SS,mmm (SRT)
+        - HH:MM:SS.mmm (VTT)
+        - MM:SS.mmm (VTT short)
+        - Seconds as float string
+
+        Args:
+            timestamp: Timestamp string to convert.
+
+        Returns:
+            Time in seconds, or None if parsing fails.
+        """
+        if not timestamp:
+            return None
+
+        timestamp = timestamp.strip().replace(',', '.')
+
+        # Try float directly (e.g., "1.5")
+        try:
+            return float(timestamp)
+        except ValueError:
+            pass
+
+        # Pattern for HH:MM:SS.mmm or MM:SS.mmm
+        match = re.match(r'^(?:(\d+):)?(\d+):(\d+)(?:\.(\d+))?$', timestamp)
+        if match:
+            hours = int(match.group(1)) if match.group(1) else 0
+            minutes = int(match.group(2))
+            seconds = int(match.group(3))
+            millis = int(match.group(4).ljust(3, '0')[:3]) if match.group(4) else 0
+
+            return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+
+        logger.warning(f"Could not parse timestamp: {timestamp}")
+        return None
+
+    @staticmethod
+    def seconds_to_vtt_timestamp(seconds: float) -> str:
+        """Convert seconds to VTT timestamp format.
+
+        Args:
+            seconds: Time in seconds.
+
+        Returns:
+            VTT timestamp string (HH:MM:SS.mmm).
+        """
+        if seconds < 0:
+            seconds = 0
+
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds * 1000) % 1000)
+
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+    @staticmethod
+    def seconds_to_srt_timestamp(seconds: float) -> str:
+        """Convert seconds to SRT timestamp format.
+
+        Args:
+            seconds: Time in seconds.
+
+        Returns:
+            SRT timestamp string (HH:MM:SS,mmm).
+        """
+        vtt_ts = CaptionNormalizer.seconds_to_vtt_timestamp(seconds)
+        return vtt_ts.replace('.', ',')

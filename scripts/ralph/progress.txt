@@ -2684,3 +2684,135 @@ Created 19 new tests in tests/test_caption_fetcher.py:
 - [x] Log detailed error context: video_id, error type, retry attempt
 - [x] After max_retries, video available for transcription fallback (raises CaptionFetchError)
 - [x] Tests verify retry behavior and error classification
+
+## Iteration 9 - US-009: Implement caption timestamp normalization
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+
+Created comprehensive caption timestamp normalization system with CaptionNormalizer class.
+
+**New Classes:**
+1. **NormalizationConfig dataclass** - Configurable normalization settings:
+   - `overlap_strategy`: 'merge' | 'split' | 'truncate' (default: 'truncate')
+   - `gap_strategy`: 'extend' | 'placeholder' | 'ignore' (default: 'ignore')
+   - `max_gap_to_extend`: Maximum gap size to extend (default: 1.0s)
+   - `min_segment_duration`: Minimum valid segment duration (default: 0.1s)
+   - `validate_timestamps`: Whether to validate/fix timestamps (default: True)
+
+2. **CaptionNormalizer class** - Main normalization engine:
+   - `normalize(segments, video_id)`: Full normalization pipeline
+   - `validate_continuity(segments)`: Validate segment timing, return warnings
+   - `convert_timestamp_to_seconds(timestamp)`: Static method for VTT/SRT/JSON3 parsing
+   - `seconds_to_vtt_timestamp(seconds)`: Convert seconds to VTT format
+   - `seconds_to_srt_timestamp(seconds)`: Convert seconds to SRT format
+
+3. **CaptionNormalizationError exception** - For normalization failures
+
+**Normalization Steps:**
+1. Validate individual segment timestamps (fix negatives, extend short durations)
+2. Sort segments by start_time
+3. Handle overlapping segments based on strategy
+4. Handle gaps between segments based on strategy
+5. Re-index segments sequentially
+
+**Overlap Strategies:**
+- `merge`: Combine overlapping segments into one (concatenate text)
+- `split`: Divide at midpoint of overlap
+- `truncate`: Trim earlier segment's end to later's start
+
+**Gap Strategies:**
+- `extend`: Extend previous segment's end (up to max_gap_to_extend)
+- `placeholder`: Insert empty placeholder segments
+- `ignore`: Leave gaps as-is (default)
+
+**Validation Fixes:**
+- Negative start_time → 0.0
+- Negative end_time → segment removed
+- end <= start → extend end by min_segment_duration
+- Short duration → extend to min_segment_duration
+- Empty/whitespace text → segment removed
+- Missing source_file → set from video_id
+
+### Tests Added
+
+Created tests/test_caption_normalizer.py with 60 tests across 12 test classes:
+
+**Configuration Tests:**
+- TestNormalizationConfig: Default values, custom values
+- TestCaptionNormalizerInit: Default/custom config initialization
+
+**Validation Tests:**
+- TestNormalizeEmptyInput: Empty list, single segment
+- TestValidateSegment: 10 tests for timestamp validation
+  - Valid segment unchanged
+  - Negative start_time fixed
+  - Negative end_time removed
+  - end < start fixed
+  - Short duration extended
+  - Empty text removed
+  - Validation disable option
+  - source_file from video_id
+
+**Overlap Handling Tests:**
+- TestOverlapHandling: 6 tests for overlap strategies
+  - No overlap unchanged
+  - Truncate strategy
+  - Merge strategy
+  - Split strategy
+  - Multiple overlaps
+  - Complete overlap (containment)
+
+**Gap Handling Tests:**
+- TestGapHandling: 5 tests for gap strategies
+  - Ignore strategy
+  - Extend small gap
+  - Extend large gap (placeholder fallback)
+  - Placeholder strategy
+  - No gap no change
+
+**Utility Tests:**
+- TestReindexing: Sequential reindexing, sorting
+- TestValidateContinuity: Warning generation
+- TestTimestampConversion: 8 tests for format conversion
+- TestSecondsToTimestamp: 5 tests for output formatting
+- TestCaptionNormalizationError: Exception behavior
+
+**Complex Scenario Tests:**
+- TestComplexScenarios: 7 tests
+  - All segments invalid
+  - Mixed valid/invalid
+  - Multiple merge chains
+  - Overlap + gap combined
+  - Unsorted input
+  - Real-world VTT patterns
+  - Source file preservation
+
+**Edge Case Tests:**
+- TestEdgeCases: 5 tests
+  - Very small overlap (< 0.01s)
+  - Very small gap (< 0.01s)
+  - Unicode text preserved
+  - Very long segment (hours)
+  - Millisecond precision
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+- New tests: 60 passed in tests/test_caption_normalizer.py
+- All caption tests: 115 passed, 1 skipped (network test)
+
+### Files Modified
+- src/caption_fetcher.py - Added CaptionNormalizer, NormalizationConfig, CaptionNormalizationError
+
+### Files Created
+- tests/test_caption_normalizer.py - 60 comprehensive tests
+
+### Acceptance Criteria Met
+- [x] CaptionSegment dataclass with start_time, end_time, text fields (existing, matches TranscriptSegment)
+- [x] Normalize overlapping segments: merge, split, or truncate strategies
+- [x] Handle gap segments: extend, placeholder, or ignore strategies
+- [x] Convert various timestamp formats (VTT, SRT, JSON3) to consistent float seconds
+- [x] Validate segment continuity: no negative durations, start < end
+- [x] Tests verify normalization with edge cases (60 tests covering all scenarios)
