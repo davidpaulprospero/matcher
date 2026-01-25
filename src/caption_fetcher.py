@@ -1235,7 +1235,9 @@ class CaptionFetcher:
                         quality=result.caption_quality,
                         segment_count=len(result.segments),
                         is_auto_generated=result.is_auto_generated,
-                        elapsed_seconds=elapsed_seconds  # US-002 Sprint 6
+                        elapsed_seconds=elapsed_seconds,  # US-002 Sprint 6
+                        format_source=result.format_source,  # US-004 Sprint 6
+                        preferred_format=self._preferred_formats[0] if self._preferred_formats else None  # US-004 Sprint 6
                     )
 
                 # Notify progress callback: success
@@ -1249,6 +1251,7 @@ class CaptionFetcher:
                             'segment_count': len(result.segments),
                             'is_auto_generated': result.is_auto_generated,
                             'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
+                            'format_source': result.format_source,  # US-004 Sprint 6
                         })
                     except Exception as e:
                         logger.debug(f"Progress callback error: {e}")
@@ -2906,6 +2909,7 @@ class CaptionMetrics:
     Updated US-004: Tracks coverage distribution (high/medium/low).
     Updated US-008: Tracks pre-check availability results.
     Updated US-003 Sprint 6: Language selection audit trail for fallback debugging.
+    Updated US-004 Sprint 6: Format preference success rate telemetry.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
@@ -2916,6 +2920,7 @@ class CaptionMetrics:
     - Coverage distribution (high >80%, medium 50-80%, low <50%) (US-004)
     - Total segments fetched
     - Language selection audit trail (US-003 Sprint 6)
+    - Format success counts and fallback tracking (US-004 Sprint 6)
 
     Thread Safety:
         All mutation methods are protected by a Lock for concurrent access
@@ -2948,6 +2953,9 @@ class CaptionMetrics:
         quality_distribution: Dict mapping quality level -> count
         coverage_distribution: Dict mapping coverage level -> count (US-004)
         language_selection_trace: List of language selection audit entries (US-003 Sprint 6)
+        format_success_counts: Dict mapping format -> success count (US-004 Sprint 6)
+        format_fallback_count: Videos needing format != first preference (US-004 Sprint 6)
+        video_format_used: Dict mapping video_id -> format used (US-004 Sprint 6)
         total_segments: Total caption segments fetched
     """
 
@@ -2987,6 +2995,14 @@ class CaptionMetrics:
     # Each entry: {video_id, attempted_codes, selected_code, selection_reason, is_auto_generated}
     language_selection_trace: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Format preference tracking (US-004 Sprint 6)
+    # Dict mapping format name -> success count (e.g., {'json3': 92, 'vtt': 8})
+    format_success_counts: Dict[str, int] = field(default_factory=dict)
+    # Count of videos that needed format != first preference
+    format_fallback_count: int = 0
+    # Dict mapping video_id -> format that succeeded for that video
+    video_format_used: Dict[str, str] = field(default_factory=dict)
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -3011,7 +3027,9 @@ class CaptionMetrics:
         is_auto_generated: bool = False,
         coverage_ratio: Optional[float] = None,
         min_coverage_threshold: float = 0.5,
-        elapsed_seconds: Optional[float] = None
+        elapsed_seconds: Optional[float] = None,
+        format_source: Optional[str] = None,
+        preferred_format: Optional[str] = None
     ) -> None:
         """Record a successful caption fetch.
 
@@ -3026,6 +3044,8 @@ class CaptionMetrics:
             coverage_ratio: Caption coverage ratio 0.0-1.0 (US-004).
             min_coverage_threshold: Threshold for low coverage warning (US-004).
             elapsed_seconds: Time taken for this fetch in seconds (US-002 Sprint 6).
+            format_source: Caption format used (e.g., 'json3', 'vtt', 'srt') (US-004 Sprint 6).
+            preferred_format: First format in preference list (US-004 Sprint 6).
         """
         with self._lock:
             self.successes += 1
@@ -3056,6 +3076,17 @@ class CaptionMetrics:
             # Track per-video fetch time (US-002 Sprint 6)
             if elapsed_seconds is not None and video_id:
                 self.video_fetch_times[video_id] = elapsed_seconds
+
+            # Track format success (US-004 Sprint 6)
+            if format_source:
+                self.format_success_counts[format_source] = (
+                    self.format_success_counts.get(format_source, 0) + 1
+                )
+                if video_id:
+                    self.video_format_used[video_id] = format_source
+                # Track fallback: format != preferred_format
+                if preferred_format and format_source != preferred_format:
+                    self.format_fallback_count += 1
 
         logger.debug(
             f"Caption fetch success for {video_id or 'unknown'}: "
@@ -3329,6 +3360,51 @@ class CaptionMetrics:
 
         return summary
 
+    def get_format_statistics(self) -> Dict[str, Any]:
+        """Get format preference success rate statistics (US-004 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict with format statistics:
+            - 'format_counts': Dict mapping format -> success count
+            - 'format_rates': Dict mapping format -> success rate percentage
+            - 'fallback_count': Number of videos that used non-preferred format
+            - 'fallback_rate': Percentage of videos using non-preferred format
+            - 'total_with_format': Total videos with format tracking
+
+        Example:
+            >>> stats = metrics.get_format_statistics()
+            >>> print(f"json3: {stats['format_rates'].get('json3', 0)}%")
+            >>> print(f"Fallback rate: {stats['fallback_rate']}%")
+        """
+        with self._lock:
+            total = sum(self.format_success_counts.values())
+
+            if total == 0:
+                return {
+                    'format_counts': {},
+                    'format_rates': {},
+                    'fallback_count': 0,
+                    'fallback_rate': 0.0,
+                    'total_with_format': 0
+                }
+
+            # Calculate success rate per format
+            format_rates = {}
+            for fmt, count in self.format_success_counts.items():
+                format_rates[fmt] = round(100.0 * count / total, 1)
+
+            fallback_rate = round(100.0 * self.format_fallback_count / total, 1) if total else 0.0
+
+            return {
+                'format_counts': dict(self.format_success_counts),
+                'format_rates': format_rates,
+                'fallback_count': self.format_fallback_count,
+                'fallback_rate': fallback_rate,
+                'total_with_format': total
+            }
+
     @property
     def total_processed(self) -> int:
         """Total videos processed (successes + failures + cache_hits + skipped_live_streams)."""
@@ -3462,6 +3538,29 @@ class CaptionMetrics:
             if summary_parts:
                 lines.append(f"  Language fallback: {', '.join(summary_parts)}")
 
+        # Format success statistics (US-004 Sprint 6)
+        if self.format_success_counts:
+            format_stats = self.get_format_statistics()
+            # Format: "Format success: json3 92% (92/100), vtt 8% (fallback)"
+            format_parts = []
+            # Sort by count descending to show most used formats first
+            sorted_formats = sorted(
+                format_stats['format_counts'].items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            for fmt, count in sorted_formats:
+                rate = format_stats['format_rates'].get(fmt, 0.0)
+                total = format_stats['total_with_format']
+                format_parts.append(f"{fmt} {rate:.0f}% ({count}/{total})")
+
+            if format_parts:
+                format_line = f"  Format success: {', '.join(format_parts)}"
+                # Add fallback indication if any
+                if format_stats['fallback_count'] > 0:
+                    format_line += f" ({format_stats['fallback_count']} fallback)"
+                lines.append(format_line)
+
         return "\n".join(lines)
 
     def get_slowest_videos(self, n: int = 5) -> List[tuple]:
@@ -3511,6 +3610,9 @@ class CaptionMetrics:
             'low_coverage_videos': list(self.low_coverage_videos),  # US-004
             'video_fetch_times': dict(self.video_fetch_times),  # US-002 Sprint 6
             'language_selection_trace': list(self.language_selection_trace),  # US-003 Sprint 6
+            'format_success_counts': dict(self.format_success_counts),  # US-004 Sprint 6
+            'format_fallback_count': self.format_fallback_count,  # US-004 Sprint 6
+            'video_format_used': dict(self.video_format_used),  # US-004 Sprint 6
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
@@ -3543,6 +3645,9 @@ class CaptionMetrics:
             low_coverage_videos=data.get('low_coverage_videos', []),  # US-004
             video_fetch_times=data.get('video_fetch_times', {}),  # US-002 Sprint 6
             language_selection_trace=data.get('language_selection_trace', []),  # US-003 Sprint 6
+            format_success_counts=data.get('format_success_counts', {}),  # US-004 Sprint 6
+            format_fallback_count=data.get('format_fallback_count', 0),  # US-004 Sprint 6
+            video_format_used=data.get('video_format_used', {}),  # US-004 Sprint 6
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
@@ -3596,6 +3701,16 @@ class CaptionMetrics:
             # Merge language selection trace (US-003 Sprint 6)
             self.language_selection_trace.extend(other.language_selection_trace)
 
+            # Merge format success counts (US-004 Sprint 6)
+            for fmt, count in other.format_success_counts.items():
+                self.format_success_counts[fmt] = self.format_success_counts.get(fmt, 0) + count
+            self.format_fallback_count += other.format_fallback_count
+
+            # Merge video format used (US-004 Sprint 6) - keep first occurrence
+            for vid, fmt in other.video_format_used.items():
+                if vid not in self.video_format_used:
+                    self.video_format_used[vid] = fmt
+
         return self
 
     def clear(self) -> None:
@@ -3617,6 +3732,9 @@ class CaptionMetrics:
             self.low_coverage_videos = []  # US-004
             self.video_fetch_times = {}  # US-002 Sprint 6
             self.language_selection_trace = []  # US-003 Sprint 6
+            self.format_success_counts = {}  # US-004 Sprint 6
+            self.format_fallback_count = 0  # US-004 Sprint 6
+            self.video_format_used = {}  # US-004 Sprint 6
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0

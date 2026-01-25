@@ -3685,3 +3685,130 @@ Implemented per-video timeout tracking to provide granular timing data for debug
 - [x] Add CaptionMetrics method get_slowest_videos(n=5) returning video_ids by fetch time
 - [x] Print summary in CaptionStage: "Slowest fetches: abc123=8.2s, def456=7.1s"
 - [x] Tests verify timing data captured correctly for 10+ video batch
+
+## Iteration - US-003: Add language selection audit trail to metrics
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Added language selection audit trail to CaptionMetrics for debugging multilingual projects:
+
+**CaptionMetrics Fields:**
+- `language_selection_trace: List[Dict]` - Audit trail of language selection decisions
+
+**CaptionMetrics Methods:**
+- `record_language_selection()` - Records video_id, attempted_codes, selected_code, selection_reason, is_auto_generated
+- `get_language_fallback_efficiency(preferred_language)` - Returns % of videos using preferred language
+- `get_language_fallback_summary()` - Returns counts by category (preferred, fallback_1, fallback_2, english_fallback, any_available, none)
+
+**Summary Output:**
+- Updated `summary()` to print: "Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2"
+
+**Serialization:**
+- Updated `to_dict()`, `from_dict()`, `merge()`, `clear()` to handle language_selection_trace
+
+### Tests Added (17 in TestLanguageSelectionTrace)
+1. `test_record_language_selection_stores_trace_entry` - Entry contains all required fields
+2. `test_record_language_selection_multiple_entries` - Multiple decisions tracked
+3. `test_get_language_fallback_efficiency_preferred` - Correct % calculation
+4. `test_get_language_fallback_efficiency_empty_trace` - 0.0 when empty
+5. `test_get_language_fallback_efficiency_case_insensitive` - Case-insensitive matching
+6. `test_get_language_fallback_summary_categories` - Correct categorization
+7. `test_summary_includes_language_fallback_line` - Format verification
+8. `test_trace_includes_auto_vs_manual` - is_auto_generated tracked
+9. `test_to_dict_includes_language_selection_trace` - Serialization
+10. `test_from_dict_restores_language_selection_trace` - Deserialization
+11. `test_merge_combines_language_selection_traces` - Merge behavior
+12. `test_clear_resets_language_selection_trace` - Clear resets list
+13. `test_get_language_fallback_summary_english_fallback` - English fallback category
+14. `test_get_language_fallback_summary_any_available` - Any available category
+15. `test_get_language_fallback_summary_none_available` - None available category
+16. `test_thread_safety_record_language_selection` - Thread-safe with 16 concurrent workers
+17. `test_summary_no_language_fallback_when_empty` - No line when empty
+
+### Verification
+- All 70 caption stage tests pass (53 existing + 17 new)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/caption_fetcher.py - CaptionMetrics language selection trace
+- tests/test_stage_caption.py - TestLanguageSelectionTrace class (17 tests)
+
+### Acceptance Criteria Met
+- [x] Add language_selection_trace: List[Dict] field to CaptionMetrics
+- [x] Each trace entry includes: video_id, attempted_codes, selected_code, selection_reason
+- [x] Print trace summary in CaptionStage: 'Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2'
+- [x] Add method get_language_fallback_efficiency() returning % using preferred language
+- [x] Trace entries include whether manual or auto captions were selected
+- [x] Tests verify trace captures full decision chain for multi-fallback scenario
+
+## Iteration 4 - [US-004] Track format preference success rates in metrics
+
+### Summary
+Implemented format preference telemetry for CaptionMetrics. Users can now see which caption formats succeed most often and how many videos needed fallback formats.
+
+### Implementation Details
+
+#### CaptionMetrics Fields Added
+- `format_success_counts: Dict[str, int]` - Maps format name to success count (e.g., {'json3': 92, 'vtt': 8})
+- `format_fallback_count: int` - Count of videos needing format != first preference
+- `video_format_used: Dict[str, str]` - Maps video_id to the format that succeeded
+
+#### record_fetch_success() Updated
+- Added `format_source: Optional[str]` parameter - the format that succeeded
+- Added `preferred_format: Optional[str]` parameter - first format in preference list
+- Tracks fallback when format_source != preferred_format
+
+#### get_format_statistics() Method
+Returns dict with:
+- `format_counts`: Dict[str, int] - raw counts per format
+- `format_rates`: Dict[str, float] - percentage per format (0-100)
+- `fallback_count`: int - total fallback count
+- `fallback_rate`: float - fallback percentage
+- `total_with_format`: int - total videos with format tracking
+
+#### summary() Output
+Prints: `Format success: json3 92% (92/100), vtt 8% (8/100) (8 fallback)`
+- Formats sorted by count descending
+- Includes fallback count if any
+
+#### Serialization
+- to_dict(), from_dict(), merge(), clear() all updated for format fields
+
+#### fetch_single() Integration
+- Passes result.format_source to record_fetch_success()
+- Passes self._preferred_formats[0] as preferred_format
+- Added format_source to progress_callback details
+
+### Tests Added (15 total)
+1. `test_record_fetch_success_tracks_format` - Basic format tracking
+2. `test_record_fetch_success_tracks_fallback` - Fallback counting
+3. `test_get_format_statistics_empty` - Empty state
+4. `test_get_format_statistics_single_format` - 100% rate
+5. `test_get_format_statistics_mixed_formats` - 92/8 split
+6. `test_summary_includes_format_success_line` - Summary output format
+7. `test_summary_no_format_when_not_tracked` - No line when empty
+8. `test_video_format_used_tracks_per_video` - Per-video tracking
+9. `test_to_dict_includes_format_fields` - Serialization
+10. `test_from_dict_restores_format_fields` - Deserialization
+11. `test_merge_combines_format_counts` - Merge behavior
+12. `test_clear_resets_format_fields` - Clear resets fields
+13. `test_format_tracking_thread_safe` - 8 concurrent workers
+14. `test_statistics_batch_mixed_results` - 100 videos, 3 formats
+15. `test_no_preferred_format_no_fallback_counted` - None preferred case
+
+### Verification
+- All 85 caption stage tests pass (70 existing + 15 new)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/caption_fetcher.py - CaptionMetrics format tracking
+- tests/test_stage_caption.py - TestFormatPreferenceTracking class (15 tests)
+
+### Acceptance Criteria Met
+- [x] Add format_success_counts: Dict[str, int] to CaptionMetrics tracking successes per format
+- [x] Track format_fallback_count: number of videos that needed format != first preference
+- [x] Add method get_format_statistics() returning success rate per format
+- [x] Print in CaptionStage summary: 'Format success: json3 92% (92/100), vtt 8% (fallback)'
+- [x] Track which format ultimately succeeded for each video in fetch result
+- [x] Tests verify statistics calculated correctly across batch with mixed format results
