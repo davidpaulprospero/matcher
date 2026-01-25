@@ -53,7 +53,8 @@ class BaseCache(ABC, Generic[T]):
         cache_dir: Path | str,
         index_name: str = "index.json",
         ttl_seconds: int = 0,
-        auto_save: bool = True
+        auto_save: bool = True,
+        pre_warm: bool = False
     ):
         """
         Initialize cache.
@@ -63,6 +64,7 @@ class BaseCache(ABC, Generic[T]):
             index_name: Index filename (default: index.json)
             ttl_seconds: Time-to-live in seconds (0 = no expiration)
             auto_save: Auto-save index after modifications
+            pre_warm: Pre-load entire index into memory at init (default: False)
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +80,10 @@ class BaseCache(ABC, Generic[T]):
         self._hits: int = 0
         self._misses: int = 0
         self._bytes_saved: int = 0
+
+        # Pre-warm cache if requested
+        if pre_warm:
+            self.warm_cache()
 
     # ==================== Abstract Methods ====================
 
@@ -467,6 +473,61 @@ class BaseCache(ABC, Generic[T]):
         self._hits = 0
         self._misses = 0
         self._bytes_saved = 0
+
+    # ==================== Cache Warm-up ====================
+
+    def warm_cache(self) -> Dict[str, Any]:
+        """
+        Pre-load entire index into memory for faster subsequent access.
+
+        This method iterates through all index entries and deserializes them,
+        keeping valid entries in memory. Expired or invalid entries are removed.
+
+        Returns:
+            Dict with warm-up statistics:
+            - entries_loaded: Number of entries successfully loaded
+            - entries_removed: Number of expired/invalid entries removed
+            - elapsed_ms: Time taken in milliseconds
+        """
+        start_time = time.perf_counter()
+
+        entries_loaded = 0
+        entries_removed = 0
+        keys_to_remove = []
+
+        for key in list(self.index.keys()):
+            try:
+                entry_data = self.index[key]
+                entry = self._deserialize_entry(entry_data)
+
+                if self._is_valid_entry(entry):
+                    entries_loaded += 1
+                else:
+                    keys_to_remove.append(key)
+                    entries_removed += 1
+            except Exception as e:
+                logger.debug(f"Failed to deserialize entry during warm-up: {key}: {e}")
+                keys_to_remove.append(key)
+                entries_removed += 1
+
+        # Remove invalid entries
+        for key in keys_to_remove:
+            del self.index[key]
+
+        if keys_to_remove and self.auto_save:
+            self._save_index()
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(f"Cache warm-up complete: {entries_loaded} entries loaded in {elapsed_ms:.1f}ms")
+        if entries_removed > 0:
+            logger.debug(f"Removed {entries_removed} expired/invalid entries during warm-up")
+
+        return {
+            'entries_loaded': entries_loaded,
+            'entries_removed': entries_removed,
+            'elapsed_ms': elapsed_ms
+        }
 
     def __repr__(self) -> str:
         """String representation"""
