@@ -929,6 +929,7 @@ output:
   generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
   xml_parts: 6  # Split XML into multiple files (helps with large projects)
   generate_report: true
+  quality_report_enabled: true  # Generate quality_report.json with match quality metrics
 
   # Voiceover alignment offset (seconds)
   # Use this to fix alignment when SRT timestamps don't match the actual audio
