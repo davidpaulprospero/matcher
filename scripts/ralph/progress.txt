@@ -1346,3 +1346,107 @@ Progress: 6/12 stories complete
 - Files created:
   - tests/test_temporal_coherence.py (new file, 38 tests)
 
+Progress: 7/12 stories complete
+
+## Iteration 7 - [US-007] Add source diversity scoring for V4-V6 tracks
+- Added calculate_source_diversity_score() function in src/matching/strategies.py:
+  - Scores based on unique source files (60% weight) and unique keywords (40% weight)
+  - Returns 0.0-1.0 score where higher = more different from V1-V3
+  - Different source = +0.6, unique keywords = +0.4 (scaled by overlap)
+- Added diversity_score field to AlternativeMatch dataclass in src/utils.py:
+  - Type: float, default: 0.0
+  - Documents source diversity score for V4-V6 tracks
+- Updated get_secondary_matches_diversity() in StrategyMatcher:
+  - Collects V1-V3 keywords for comparison (in addition to sources and embeddings)
+  - Calculates source diversity score for each secondary match
+  - Logs at DEBUG level: "V{track} source diversity: {score} (source: {name}, unique_file: {bool})"
+  - Populates diversity_score in returned AlternativeMatch objects
+- Created tests/test_source_diversity.py with 28 tests across 10 test classes:
+  - TestCalculateSourceDiversityScoreFunction (4 tests): function existence, args, returns, range
+  - TestSourceDiversityScoring (3 tests): different/same source scoring
+  - TestKeywordDiversityScoring (4 tests): unique keywords, partial overlap, edge cases
+  - TestCombinedDiversityScoring (3 tests): max/min/moderate scores
+  - TestAlternativeMatchDiversityScore (3 tests): field existence, default, type
+  - TestStrategyMatcherDiversityIntegration (1 test): full integration test
+  - TestDiversityScoreLogging (1 test): DEBUG logging verification
+  - TestSameSourceAlternativesLowerScore (3 tests): same source = lower score
+  - TestEdgeCases (4 tests): empty sets, many keywords, case handling
+  - TestRealWorldScenarios (2 tests): documentary, cooking show examples
+- All 28 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/matching/strategies.py (added calculate_source_diversity_score function, ~45 lines, updated get_secondary_matches_diversity)
+  - src/utils.py (added diversity_score field to AlternativeMatch)
+- Files created:
+  - tests/test_source_diversity.py (new file, 28 tests)
+
+Progress: 8/12 stories complete
+
+## Iteration 8 - [US-008] Add keyword match highlighting in match reasoning
+- Added matched_keywords list field to MatchResult dataclass in src/utils.py
+  - Type: List[str], default: field(default_factory=list)
+  - Comment documents common keywords between voiceover and video transcript
+- Implemented _extract_matched_keywords() helper method in TieredMatcher:
+  - Extracts keywords from both segment.keywords list and text content
+  - Filters common stopwords (the, and, for, etc.) and short words (<3 chars)
+  - Case-insensitive matching using set intersection
+  - Returns sorted, deduplicated list of matched keywords
+- Populated matched_keywords in all 3 MatchResult return paths in match_segment():
+  - High-confidence embedding match path (line 504)
+  - Cached response path (line 581)
+  - Main LLM match path (line 739)
+- Updated checkpoint serialization in MatchStage.run():
+  - Added matched_kws extraction with getattr() for backwards compatibility
+  - Serializes as 'matched_keywords': list(matched_kws) or []
+  - Both MatchResult and direct Match structures handled
+- Created tests/test_keyword_highlighting.py with 25 tests across 7 test classes:
+  - TestMatchResultMatchedKeywords (4 tests): field existence, defaults, setter, type
+  - TestExtractMatchedKeywordsHelper (4 tests): existence, return type, common words, keywords list
+  - TestKeywordMatchingLogic (5 tests): filters common words, case-insensitive, filters short, sorted, no duplicates
+  - TestKeywordEdgeCases (4 tests): empty text, no common, punctuation, None keywords
+  - TestCheckpointSerialization (3 tests): includes field, empty, handles None
+  - TestRealWorldScenarios (3 tests): documentary, nature, cooking show examples
+  - TestMatchResultIntegration (2 tests): all fields, defaults
+- All 25 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/utils.py (added matched_keywords field to MatchResult)
+  - src/matching/tiered_matcher.py (added _extract_matched_keywords helper, ~58 lines, updated 3 return points)
+  - src/stages/match.py (added matched_keywords to checkpoint serialization)
+- Files created:
+  - tests/test_keyword_highlighting.py (new file, 25 tests)
+
+Progress: 9/12 stories complete
+
+## Iteration 9 - [US-009] Add entity match scoring boost
+- Added apply_entity_match_boost() function to src/matching/scoring.py:
+  - Returns tuple of (boosted_confidence, reason, matched_entities)
+  - Extracts entities from segment.entities field (dict or string format)
+  - Also extracts entity-like keywords (capitalized proper nouns)
+  - Graduated boost: +0.05 for 1 match, +0.08 for 2, +0.12 for 3+
+  - Case-insensitive entity matching
+  - Confidence capped at 1.0
+- Added _extract_entity_texts() helper function:
+  - Handles dict entities with 'text' key
+  - Handles string entities (legacy format)
+  - Filters short entities (< 2 chars)
+  - Detects entity-like keywords from keywords list
+- Added _looks_like_entity() helper function:
+  - Detects proper nouns (capitalized words)
+  - Filters common words (The, Is, They, etc.)
+  - Multi-word phrases checked for majority capitalized
+- Created tests/test_entity_match_boost.py with 37 tests across 10 test classes:
+  - TestApplyEntityMatchBoostFunction (5 tests): function existence, callable, args, tuple return, types
+  - TestGraduatedBoostValues (4 tests): +0.05, +0.08, +0.12 graduated boost values
+  - TestNoBoostScenarios (4 tests): no entities in voiceover, video, no matching, None
+  - TestCaseInsensitiveMatching (2 tests): lowercase, uppercase matching
+  - TestConfidenceCapping (2 tests): capped at 1.0, already at 1.0
+  - TestMatchedEntitiesReturn (3 tests): entity names, multiple entities, reason string
+  - TestExtractEntityTextsHelper (6 tests): dict, string, short, keywords, empty, None
+  - TestLooksLikeEntityHelper (6 tests): multi-word, single, common words, lowercase, empty, mixed
+  - TestPersonPlaceNameMatching (3 tests): person, place, organization names
+  - TestLogging (2 tests): logs boost, no log when no boost
+- All 37 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/matching/scoring.py (added apply_entity_match_boost, _extract_entity_texts, _looks_like_entity, ~145 lines)
+- Files created:
+  - tests/test_entity_match_boost.py (new file, 37 tests)
+

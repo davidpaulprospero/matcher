@@ -386,3 +386,152 @@ def _is_jarring_context_switch(
 
     # Jarring = no overlap at all
     return len(overlap) == 0
+
+
+def apply_entity_match_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment
+) -> Tuple[float, str, List[str]]:
+    """
+    Apply confidence boost when video contains same named entities as voiceover.
+
+    Named entities (people, places, organizations) are strong signals for
+    video-voiceover matching. A video mentioning the same person or place
+    as the voiceover is highly relevant.
+
+    Graduated boost values:
+    - 1 matching entity: +0.05
+    - 2 matching entities: +0.08
+    - 3+ matching entities: +0.12
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Voiceover segment (may have entities from analysis)
+        video_segment: Video segment being considered
+
+    Returns:
+        Tuple of (boosted_confidence, boost_reason, matched_entities)
+    """
+    # Extract entity texts from voiceover segment
+    vo_entities = _extract_entity_texts(vo_segment)
+    if not vo_entities:
+        return confidence, "", []
+
+    # Extract entity texts from video segment
+    video_entities = _extract_entity_texts(video_segment)
+    if not video_entities:
+        return confidence, "", []
+
+    # Find matching entities (case-insensitive)
+    vo_lower = {e.lower() for e in vo_entities}
+    video_lower = {e.lower() for e in video_entities}
+    matching = vo_lower & video_lower
+
+    if not matching:
+        return confidence, "", []
+
+    # Graduated boost based on match count
+    match_count = len(matching)
+    if match_count >= 3:
+        boost = 0.12
+    elif match_count == 2:
+        boost = 0.08
+    else:
+        boost = 0.05
+
+    # Apply boost (cap at 1.0)
+    boosted = min(1.0, confidence + boost)
+
+    # Get original-case matched entity names for return
+    matched_entities = [e for e in vo_entities if e.lower() in matching]
+
+    reason = f"entity match: +{boost:.2f} ({match_count} entities: {', '.join(matched_entities[:3])})"
+
+    logger.debug(f"Entity match boost applied: {confidence:.2f} -> {boosted:.2f} ({matched_entities})")
+
+    return boosted, reason, matched_entities
+
+
+def _extract_entity_texts(segment: SRTSegment) -> List[str]:
+    """
+    Extract entity text values from a segment.
+
+    Entities are stored as dicts with 'text', 'type', and 'context' keys.
+    Also checks keywords list for entity-like entries.
+
+    Args:
+        segment: SRTSegment to extract entities from
+
+    Returns:
+        List of entity text values (names)
+    """
+    entities = []
+
+    # Get entities from the entities field
+    segment_entities = getattr(segment, 'entities', []) or []
+    for entity in segment_entities:
+        if isinstance(entity, dict):
+            text = entity.get('text', '')
+            if text and len(text) >= 2:  # Skip very short entities
+                entities.append(text)
+        elif isinstance(entity, str):
+            if entity and len(entity) >= 2:
+                entities.append(entity)
+
+    # Also check keywords for entity-like entries (proper nouns, capitalized words)
+    keywords = getattr(segment, 'keywords', []) or []
+    for kw in keywords:
+        if kw and len(kw) >= 2:
+            # Check if it looks like a proper noun (capitalized, multi-word)
+            if _looks_like_entity(kw):
+                entities.append(kw)
+
+    return entities
+
+
+def _looks_like_entity(text: str) -> bool:
+    """
+    Check if a keyword looks like a named entity.
+
+    Named entities typically:
+    - Start with capital letter
+    - Are proper nouns (person names, place names, organization names)
+    - May contain multiple capitalized words
+
+    Args:
+        text: Keyword text to check
+
+    Returns:
+        True if text looks like a named entity
+    """
+    if not text:
+        return False
+
+    words = text.split()
+    if not words:
+        return False
+
+    # Check if first word starts with capital
+    first_word = words[0]
+    if not first_word or not first_word[0].isupper():
+        return False
+
+    # Multi-word capitalized phrases are likely entities
+    if len(words) > 1:
+        # Check if most words are capitalized
+        capitalized_count = sum(1 for w in words if w and w[0].isupper())
+        return capitalized_count >= len(words) // 2 + 1
+
+    # Single capitalized word - could be entity if not a common word
+    # Skip very common words that happen to be capitalized
+    common_words = {
+        'The', 'A', 'An', 'This', 'That', 'These', 'Those',
+        'It', 'They', 'We', 'He', 'She', 'You', 'I',
+        'Is', 'Are', 'Was', 'Were', 'Be', 'Been', 'Being',
+        'Have', 'Has', 'Had', 'Do', 'Does', 'Did',
+        'Will', 'Would', 'Could', 'Should', 'May', 'Might',
+        'Can', 'Must', 'Shall'
+    }
+
+    return text not in common_words

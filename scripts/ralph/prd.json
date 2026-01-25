@@ -112,8 +112,8 @@
         "Test that same-source alternatives get lower diversity score"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added calculate_source_diversity_score() function with 60% weight for unique source files, 40% weight for unique keywords. Added diversity_score field to AlternativeMatch dataclass (default: 0.0). Updated get_secondary_matches_diversity() to calculate and populate diversity scores for V4-V6 matches. Added DEBUG logging for diversity scores. Created 28 comprehensive tests in 10 test classes covering function signature, scoring logic, integration, logging, and edge cases. All tests pass."
     },
     {
       "id": "US-008",
@@ -127,8 +127,8 @@
         "Test that common keywords between VO and video are correctly identified"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added matched_keywords list field to MatchResult dataclass. Implemented _extract_matched_keywords() helper in TieredMatcher that extracts common keywords from both keywords lists and text content. Filters common stopwords, short words, and returns sorted deduplicated list. Populated matched_keywords in all 3 MatchResult return paths (high-conf embedding, cached, LLM match). Added matched_keywords to checkpoint serialization in MatchStage. Created 25 comprehensive tests in 7 test classes covering field existence, helper function, matching logic, edge cases, checkpoint serialization, real-world scenarios, and integration. All tests pass."
     },
     {
       "id": "US-009",
@@ -142,8 +142,8 @@
         "Test that matching person/place names boost confidence appropriately"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added apply_entity_match_boost() function in src/matching/scoring.py. Returns tuple of (boosted_confidence, reason, matched_entities). Added _extract_entity_texts() helper to extract entity text from entities field (dict or string format) and from capitalized keywords. Added _looks_like_entity() helper to detect proper nouns. Graduated boost: +0.05 for 1 entity, +0.08 for 2, +0.12 for 3+ matches. Case-insensitive matching. Confidence capped at 1.0. Created 37 comprehensive tests in 10 test classes covering function existence, graduated boost values, no-boost scenarios, case-insensitive matching, confidence capping, matched entities return, helper functions, person/place name matching, and logging. All tests pass."
     },
     {
       "id": "US-010",
