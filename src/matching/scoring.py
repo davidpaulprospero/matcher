@@ -214,12 +214,20 @@ def apply_caption_quality_adjustment(
     config
 ) -> Tuple[float, str]:
     """
-    Apply confidence adjustment based on caption quality (US-007).
+    Apply confidence adjustment based on caption quality (US-007, US-006).
+
+    Supports two modes:
+    1. Multiplicative weights (US-006): When caption_quality_weights dict is set,
+       applies: adjusted = raw_confidence * weight
+       Example: {high: 1.0, medium: 0.9, low: 0.75}
+
+    2. Additive boost/penalty (US-007): When caption_quality_weights is None,
+       uses high_boost and low_penalty for additive adjustments.
 
     Caption quality levels:
-    - 'high': Human-uploaded captions -> confidence boost
-    - 'medium': Auto-generated captions -> no change
-    - 'low': Missing/fallback/sparse captions -> confidence penalty
+    - 'high': Human-uploaded captions
+    - 'medium': Auto-generated captions
+    - 'low': Missing/fallback/sparse captions
 
     Args:
         confidence: Original confidence score
@@ -241,7 +249,25 @@ def apply_caption_quality_adjustment(
     if not caption_quality:
         return confidence, ""
 
-    # Get adjustment values from config
+    # US-006: Check for multiplicative weights mode
+    quality_weights = getattr(mc, 'caption_quality_weights', None)
+
+    if quality_weights is not None and isinstance(quality_weights, dict):
+        # Multiplicative weights mode (US-006)
+        # Default weights if not specified: high=1.0, medium=0.9, low=0.75
+        default_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+        weight = quality_weights.get(caption_quality, default_weights.get(caption_quality, 1.0))
+
+        if weight != 1.0:
+            adjusted = max(0.0, min(1.0, confidence * weight))
+            reason = f"caption quality {caption_quality}: x{weight:.2f}"
+            # US-006: Specific log format requested
+            logger.info(f"Confidence adjusted {confidence:.2f} -> {adjusted:.2f} ({caption_quality} quality caption)")
+            return adjusted, reason
+
+        return confidence, ""
+
+    # Legacy additive mode (US-007) - when caption_quality_weights is None
     high_boost = getattr(mc, 'caption_quality_high_boost', 0.05)
     low_penalty = getattr(mc, 'caption_quality_low_penalty', 0.1)
 
