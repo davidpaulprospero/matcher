@@ -170,14 +170,15 @@
       "id": "US-012",
       "title": "Replace bare except blocks in deduplication.py and global_cache.py",
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Replace bare except: in src/deduplication.py lines 209, 224",
         "Replace bare except: in src/global_cache.py line 746",
         "Use OSError, shutil.Error, or other specific exception types",
         "Log caught exceptions with appropriate log level",
         "Syntax check passes for both files"
-      ]
+      ],
+      "notes": "Both files already fixed (likely during earlier sprint work): deduplication.py uses (ValueError, TypeError) for hash comparison, global_cache.py uses (ValueError, OSError) for timestamp parsing. Both have logger.debug() calls. Syntax checks pass."
     }
   ]
 }
