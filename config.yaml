@@ -891,6 +891,11 @@ download:
     enabled: false                    # Enable caption-first mode (per-project)
     fallback_to_transcription: true   # Fall back to Whisper when captions unavailable
     preferred_language: "en"          # Preferred caption language (ISO 639-1 code)
+    # Configurable language fallback chain (US-003)
+    # List of ISO 639-1 codes to try after preferred_language fails
+    # Example for multilingual projects: ["es", "pt", "fr"]
+    # Empty list = default behavior (preferred_language -> en -> any)
+    fallback_languages: []            # Language fallback chain (empty = default)
     timeout: 30                       # Timeout for caption fetch requests (seconds)
     prefer_human_captions: true       # Prefer human-uploaded over auto-generated
     cache_captions: true              # Cache captions for cross-project reuse

@@ -159,8 +159,14 @@ class CaptionFirstConfig:
     fallback_to_transcription: bool = True
 
     # Preferred caption language (ISO 639-1 code)
-    # Fallback chain: preferred_language -> 'en' -> any available
+    # Fallback chain: preferred_language -> fallback_languages -> 'en' -> any available
     preferred_language: str = "en"
+
+    # Configurable language fallback chain (US-003)
+    # List of ISO 639-1 codes to try after preferred_language fails
+    # Example for multilingual projects: ["es", "pt", "fr"]
+    # Empty list = use default behavior (preferred_language -> en -> any)
+    fallback_languages: List[str] = field(default_factory=list)
 
     # Timeout for caption fetch requests (seconds)
     timeout: int = 30
