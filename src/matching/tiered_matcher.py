@@ -209,6 +209,65 @@ class TieredMatcher:
         except statistics.StatisticsError:
             return 0.0
 
+    def _extract_matched_keywords(
+        self,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment
+    ) -> List[str]:
+        """
+        Extract common keywords between voiceover and video transcript.
+
+        Finds keywords that appear in both the voiceover segment and the selected
+        video's transcript/keywords. Returns unique matched keywords sorted by
+        frequency of occurrence.
+
+        Args:
+            vo_segment: Voiceover segment with text and optional keywords
+            video_segment: Selected video segment with text and optional keywords
+
+        Returns:
+            List of matched keywords (lowercase, deduplicated)
+        """
+        matched = set()
+
+        # Get voiceover keywords from both keywords list and text
+        vo_keywords = set()
+        if hasattr(vo_segment, 'keywords') and vo_segment.keywords:
+            vo_keywords.update(kw.lower().strip() for kw in vo_segment.keywords if kw)
+
+        # Extract significant words from voiceover text (>= 4 chars, not common words)
+        common_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+                        'can', 'her', 'was', 'one', 'our', 'out', 'has', 'have',
+                        'been', 'from', 'this', 'that', 'with', 'they', 'what',
+                        'will', 'there', 'their', 'about', 'would', 'which', 'into'}
+        if vo_segment.text:
+            words = vo_segment.text.lower().split()
+            vo_keywords.update(
+                w.strip('.,!?:;"\'()[]{}') for w in words
+                if len(w) >= 4 and w.lower() not in common_words
+            )
+
+        # Get video keywords from both keywords list and text
+        video_keywords = set()
+        if hasattr(video_segment, 'keywords') and video_segment.keywords:
+            video_keywords.update(kw.lower().strip() for kw in video_segment.keywords if kw)
+
+        # Extract significant words from video text
+        if video_segment.text:
+            words = video_segment.text.lower().split()
+            video_keywords.update(
+                w.strip('.,!?:;"\'()[]{}') for w in words
+                if len(w) >= 4 and w.lower() not in common_words
+            )
+
+        # Find intersection
+        matched = vo_keywords & video_keywords
+
+        # Filter out very short keywords and return sorted list
+        result = sorted([kw for kw in matched if len(kw) >= 3])
+
+        return result
+
     def _should_skip_llm(self, similarity: float) -> bool:
         """Skip LLM if embedding similarity is high enough"""
         return similarity >= self.config.matching.high_confidence_threshold
@@ -441,11 +500,15 @@ class TieredMatcher:
             # Calculate confidence variance for top candidates
             confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
+            # Extract matched keywords between voiceover and selected video
+            matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
+
             return MatchResult(
                 primary_match=match,
                 alternatives=alternatives,
                 secondary_matches=secondary_matches,
-                confidence_variance=confidence_variance
+                confidence_variance=confidence_variance,
+                matched_keywords=matched_keywords
             )
 
         # Check cache
@@ -514,11 +577,15 @@ class TieredMatcher:
                 # Calculate confidence variance for top candidates
                 confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
+                # Extract matched keywords between voiceover and selected video
+                matched_keywords = self._extract_matched_keywords(vo_segment, cached_seg)
+
                 return MatchResult(
                     primary_match=match,
                     alternatives=alternatives,
                     secondary_matches=secondary_matches,
-                    confidence_variance=confidence_variance
+                    confidence_variance=confidence_variance,
+                    matched_keywords=matched_keywords
                 )
 
         # Build context and use LLM
@@ -668,13 +735,17 @@ class TieredMatcher:
         # Calculate confidence variance for top candidates
         confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
+        # Extract matched keywords between voiceover and selected video
+        matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
+
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,
             secondary_matches=secondary_matches,
             has_gap=has_gap,
             gap_reason=gap_reason,
-            confidence_variance=confidence_variance
+            confidence_variance=confidence_variance,
+            matched_keywords=matched_keywords
         )
 
     def _get_alternatives(
