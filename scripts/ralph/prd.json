@@ -156,14 +156,15 @@
       "id": "US-011",
       "title": "Add type hints and docstrings to GlobalClipTracker class",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add return type hints to all methods in GlobalClipTracker (src/matching/tracking.py)",
         "Add comprehensive docstrings explaining clip tracking across segments",
         "Document the get_clip_id() logic for audio-first segment ID calculation",
         "Document the used_clips tracking and how it prevents duplicate selections",
         "Syntax check passes: python -m py_compile src/matching/tracking.py"
-      ]
+      ],
+      "notes": "Return type hints already present from US-005. Added comprehensive docstrings to GlobalClipTracker class and all 5 methods: __init__, get_clip_id (detailed audio-first segment ID calculation with examples), is_used (usage patterns and performance), record_usage (location format and idempotency), get_used_clips (copy semantics), get_stats (interpretation guide). Syntax check passes."
     },
     {
       "id": "US-012",

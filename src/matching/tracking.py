@@ -138,15 +138,36 @@ class GlobalClipTracker:
     """
     Hard-block clip reuse across entire timeline.
 
-    Tracks all clips used across ALL segments and ALL tracks (V1-V7+).
-    Prevents the same clip from ever appearing twice in the timeline.
+    This tracker ensures that the same video segment is never used twice in
+    the output timeline, across ALL voiceover segments and ALL tracks (V1-V7+).
+    Unlike TimelineVarietyTracker which allows limited repeats within time
+    windows, this provides absolute deduplication.
 
-    For audio-first segment files (e.g., abc12345678_0045.mp4), the clip ID
-    is calculated using the original video coordinates to properly detect
-    overlapping segments from the same source video.
+    Key Concepts:
+        Clip ID: A unique identifier for a specific time range within a video.
+            Format: "{video_source}:{start_time:.2f}-{end_time:.2f}"
+
+        Audio-First Mode: When videos are pre-segmented (e.g., abc12345678_0045.mp4),
+            the clip ID is calculated using ORIGINAL video coordinates, not the
+            segment file's timestamps. This correctly detects overlapping segments.
+
+        Used Clips Set: All recorded clips are stored in a set for O(1) lookup.
+            Before selecting any clip, callers check is_used() to filter it out.
+
+    Why This Matters:
+        Without global tracking, the same compelling 5-second clip might be
+        selected for multiple voiceover segments (e.g., V1@S001, V2@S005, V3@S010).
+        This creates jarring repetition for viewers. GlobalClipTracker ensures
+        each unique moment in the source footage appears at most once.
+
+    Attributes:
+        used_clips: Set of clip IDs that have been used in the timeline.
+        clip_track_map: Maps clip_id to location string (e.g., "V1@S003") for
+            debugging and statistics.
     """
 
     def __init__(self) -> None:
+        """Initialize empty clip tracker with no used clips."""
         self.used_clips: Set[str] = set()
         self.clip_track_map: Dict[str, str] = {}  # clip_id -> "V1@S003"
 
@@ -154,11 +175,41 @@ class GlobalClipTracker:
         """
         Generate unique clip ID using ORIGINAL video coordinates.
 
-        For audio-first segment files (e.g., abc12345678_0045.mp4):
-        - Extract video ID from filename
-        - Add file offset to segment times to get original coords
+        This method handles two distinct video file patterns:
 
-        Format: "{video_id}:{original_start:.2f}-{original_end:.2f}"
+        1. Audio-First Segment Files (e.g., abc12345678_0045.mp4):
+           - Filename pattern: {11-char YouTube video ID}_{4-digit offset}
+           - The offset indicates where this segment starts in the original video
+           - Example: "dQw4w9WgXcQ_0045.mp4" means segment starts at 45 seconds
+           - Clip ID calculation:
+             * Extract video_id: "dQw4w9WgXcQ"
+             * Extract file_offset: 45.0 seconds
+             * original_start = file_offset + segment.start_time
+             * original_end = file_offset + segment.end_time
+           - Result: "dQw4w9WgXcQ:47.50-52.30"
+
+        2. Regular Video Files (full downloads or other formats):
+           - Uses normalized file path as the video identifier
+           - Clip ID: "{normalized_path}:{start:.2f}-{end:.2f}"
+           - Path is lowercased and backslashes converted to forward slashes
+
+        Why Original Coordinates Matter:
+            Consider segment files "xyz_0030.mp4" and "xyz_0040.mp4".
+            If segment.start_time=5, segment.end_time=10 for both:
+            - Without original coords: both would be "xyz:5.00-10.00" (collision!)
+            - With original coords: "xyz:35.00-40.00" and "xyz:45.00-50.00"
+            This correctly identifies them as different clips.
+
+        Args:
+            segment: SRTSegment containing source_file path and start/end times.
+
+        Returns:
+            Unique string identifier for this clip in format:
+            "{source}:{start_time:.2f}-{end_time:.2f}"
+
+        Notes:
+            The regex pattern expects exactly 11 alphanumeric characters for the
+            video ID (standard YouTube format) followed by underscore and 4 digits.
         """
         file_path = segment.source_file
         filename = Path(file_path).stem
@@ -180,11 +231,29 @@ class GlobalClipTracker:
         """
         Check if this exact clip has been used anywhere in the timeline.
 
+        This is the primary filter method used during matching. Before selecting
+        any candidate clip for a voiceover segment, callers should check is_used()
+        to prevent duplicate selections.
+
+        Typical Usage in StrategyMatcher:
+            for candidate in candidates:
+                if global_clip_tracker.is_used(candidate):
+                    continue  # Skip - already used elsewhere
+                # ... score and potentially select candidate
+
+        Performance:
+            O(1) lookup via set membership test. The clip ID is computed
+            each time (involves regex match and string formatting), but this
+            is negligible compared to other matching operations.
+
         Args:
-            segment: The SRT segment to check.
+            segment: The SRT segment to check, containing source_file and
+                start_time/end_time. Note: the segment's text content is
+                ignored - only the video coordinates matter for deduplication.
 
         Returns:
-            True if the clip has been used, False otherwise.
+            True if this exact clip (same video source and time range) has
+            been recorded via record_usage(). False if the clip is available.
         """
         return self.get_clip_id(segment) in self.used_clips
 
@@ -192,10 +261,34 @@ class GlobalClipTracker:
         """
         Record that a clip was used on a specific track.
 
+        After a clip is selected for the timeline, this method must be called
+        to mark it as used. Subsequent calls to is_used() for the same clip
+        will then return True, preventing reuse.
+
+        Recording Process:
+            1. Generate clip_id via get_clip_id()
+            2. Add to used_clips set (enables O(1) lookup)
+            3. Store location in clip_track_map (for debugging/stats)
+
+        Location Format:
+            clip_track_map stores "{track}@S{segment_idx:03d}" format.
+            Example: "V1@S003" means the clip is used on V1 for voiceover
+            segment 3. This helps debugging when investigating why certain
+            clips were excluded.
+
         Args:
-            segment: The SRT segment that was used.
-            track: Track name (e.g., "V1", "V2").
-            segment_idx: Index of the voiceover segment.
+            segment: The SRT segment containing the clip's video source and
+                time coordinates.
+            track: Track name where the clip will appear (e.g., "V1", "V2",
+                "V3", "V4", "V5", "V6", "V7" for embedding-diversity, "V8"
+                for B-roll only).
+            segment_idx: Zero-based index of the voiceover segment this clip
+                is matched to. Used for the location string.
+
+        Notes:
+            This method should only be called once per clip. Calling it
+            multiple times with the same segment is safe (set.add is
+            idempotent) but would overwrite the clip_track_map entry.
         """
         clip_id = self.get_clip_id(segment)
         self.used_clips.add(clip_id)
@@ -203,19 +296,56 @@ class GlobalClipTracker:
 
     def get_used_clips(self) -> Set[str]:
         """
-        Get all used clip IDs for filtering.
+        Get all used clip IDs for bulk filtering.
+
+        Returns a copy of the used_clips set for external filtering operations.
+        This is useful when multiple components need to filter candidates
+        without having access to the SRTSegment objects.
+
+        Use Case - StrategyMatcher:
+            When get_strategy_matches() is called, it passes get_used_clips()
+            to filtering methods so they can quickly check membership without
+            repeatedly calling is_used() with segment objects.
 
         Returns:
-            Copy of the set of used clip IDs.
+            A copy of the used_clips set. Modifications to the returned set
+            do not affect the tracker's internal state.
+
+        Notes:
+            Returns a copy to prevent external code from accidentally
+            modifying the tracker's state. The copy operation is O(n) but
+            typically the set contains at most thousands of clips.
         """
         return self.used_clips.copy()
 
     def get_stats(self) -> Dict[str, Any]:
         """
-        Get statistics for logging.
+        Get statistics about clip usage for logging and debugging.
+
+        Provides a summary of how many unique clips were used and across
+        how many tracks. Useful for pipeline logging and understanding
+        timeline diversity.
+
+        Example Output:
+            {
+                "total_clips_used": 145,
+                "tracks_used": 6
+            }
+
+        Interpretation:
+            - total_clips_used: Number of unique video segments in the timeline.
+              Higher numbers indicate more variety.
+            - tracks_used: Number of distinct tracks (V1, V2, etc.) that have
+              clips. If only 1 track is used, alternatives weren't generated.
 
         Returns:
-            Dict with total_clips_used and tracks_used counts.
+            Dict containing:
+            - "total_clips_used" (int): Count of unique clips across all tracks
+            - "tracks_used" (int): Count of distinct track names (e.g., V1, V2)
+
+        Notes:
+            The tracks_used count is derived from clip_track_map by extracting
+            the track name before the "@" in location strings like "V1@S003".
         """
         return {
             "total_clips_used": len(self.used_clips),
