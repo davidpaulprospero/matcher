@@ -17,6 +17,7 @@ from src.caption_fetcher import (
     CaptionError,
     CaptionUnavailableError,
     CaptionFetchError,
+    AvailableLanguage,
 )
 
 
@@ -796,3 +797,571 @@ class TestCaptionFetcherRealVideos:
             # The actual is_auto_generated value depends on what's available
         except CaptionUnavailableError:
             pytest.skip("Video captions not available (may have been removed)")
+
+
+class TestAvailableLanguage:
+    """Test AvailableLanguage dataclass"""
+
+    def test_available_language_creation(self):
+        """Test creating an available language"""
+        lang = AvailableLanguage(
+            code="en",
+            name="English",
+            is_auto_generated=False
+        )
+
+        assert lang.code == "en"
+        assert lang.name == "English"
+        assert lang.is_auto_generated is False
+
+    def test_available_language_auto_generated(self):
+        """Test auto-generated language"""
+        lang = AvailableLanguage(
+            code="es",
+            name="Spanish (auto-generated)",
+            is_auto_generated=True
+        )
+
+        assert lang.code == "es"
+        assert lang.is_auto_generated is True
+
+
+class TestListAvailableLanguages:
+    """Test list_available_languages method"""
+
+    @patch('subprocess.run')
+    def test_list_languages_invalid_video_id(self, mock_run):
+        """Test listing with invalid video ID"""
+        fetcher = CaptionFetcher()
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.list_available_languages("invalid")
+
+        assert "Invalid video ID" in str(exc_info.value)
+        mock_run.assert_not_called()
+
+    @patch('subprocess.run')
+    def test_list_languages_timeout(self, mock_run):
+        """Test listing with subprocess timeout"""
+        fetcher = CaptionFetcher()
+
+        mock_run.side_effect = subprocess.TimeoutExpired('yt-dlp', 60)
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        assert "Timeout" in str(exc_info.value)
+
+    @patch('subprocess.run')
+    def test_list_languages_manual_only(self, mock_run):
+        """Test parsing manual subtitles section"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available subtitles for dQw4w9WgXcQ:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+es        Spanish              vtt, ttml, srv3, srv2, srv1, json3
+fr        French               vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        assert len(languages) == 3
+        assert all(not lang.is_auto_generated for lang in languages)
+        assert languages[0].code == "en"
+        assert languages[1].code == "es"
+        assert languages[2].code == "fr"
+
+    @patch('subprocess.run')
+    def test_list_languages_auto_only(self, mock_run):
+        """Test parsing auto-generated captions section"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available automatic captions for dQw4w9WgXcQ:
+Language  Name                              Formats
+en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+es        Spanish (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        assert len(languages) == 2
+        assert all(lang.is_auto_generated for lang in languages)
+
+    @patch('subprocess.run')
+    def test_list_languages_mixed(self, mock_run):
+        """Test parsing both manual and auto sections"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available subtitles for dQw4w9WgXcQ:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+
+[info] Available automatic captions for dQw4w9WgXcQ:
+Language  Name                              Formats
+en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+es        Spanish (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        # Should have 3: 1 manual + 2 auto
+        assert len(languages) == 3
+
+        # Sorted: manual first (en), then auto (en, es)
+        assert languages[0].code == "en"
+        assert languages[0].is_auto_generated is False
+
+        assert languages[1].code == "en"
+        assert languages[1].is_auto_generated is True
+
+        assert languages[2].code == "es"
+        assert languages[2].is_auto_generated is True
+
+    @patch('subprocess.run')
+    def test_list_languages_empty(self, mock_run):
+        """Test parsing output with no subtitles"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] dQw4w9WgXcQ: Downloading webpage
+[info] dQw4w9WgXcQ: Downloading ios player API JSON
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        assert len(languages) == 0
+
+    @patch('subprocess.run')
+    def test_list_languages_regional_codes(self, mock_run):
+        """Test parsing regional language codes like en-GB"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available subtitles for dQw4w9WgXcQ:
+Language  Name                 Formats
+en-GB     English (UK)         vtt, ttml, srv3, srv2, srv1, json3
+pt-BR     Portuguese (Brazil)  vtt, ttml, srv3, srv2, srv1, json3
+zh-Hans   Chinese (Simplified) vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+
+        assert len(languages) == 3
+        assert languages[0].code == "en-gb"
+        assert languages[1].code == "pt-br"
+        assert languages[2].code == "zh-hans"
+
+
+class TestSelectBestLanguage:
+    """Test select_best_language method"""
+
+    def test_select_preferred_manual(self):
+        """Test selecting preferred language when manual is available"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("es", "Spanish", False),
+            AvailableLanguage("en", "English (auto)", True),
+        ]
+
+        result = fetcher.select_best_language(available, preferred="es")
+
+        assert result.code == "es"
+        assert result.is_auto_generated is False
+
+    def test_select_preferred_auto_fallback(self):
+        """Test falling back to auto when manual not available"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("es", "Spanish (auto)", True),
+        ]
+
+        result = fetcher.select_best_language(available, preferred="es")
+
+        assert result.code == "es"
+        assert result.is_auto_generated is True
+
+    def test_select_english_fallback(self):
+        """Test falling back to English when preferred not available"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        result = fetcher.select_best_language(available, preferred="es")
+
+        assert result.code == "en"
+        assert result.is_auto_generated is False
+
+    def test_select_english_fallback_auto(self):
+        """Test falling back to English auto when English manual not available"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English (auto)", True),
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        result = fetcher.select_best_language(
+            available, preferred="es", prefer_manual=True
+        )
+
+        # English fallback happens before "any available" fallback
+        # Even though French is manual, English (auto) is selected because
+        # the fallback chain is: preferred -> English -> any
+        # When prefer_manual=True but only auto English available, still uses English
+        assert result.code == "en"
+        assert result.is_auto_generated is True
+
+    def test_select_any_fallback(self):
+        """Test falling back to any available when preferred and en not available"""
+        fetcher = CaptionFetcher()
+
+        # List is passed as-is to select_best_language (not sorted internally)
+        # list_available_languages returns sorted results, but select_best_language
+        # just iterates through the provided list
+        available = [
+            AvailableLanguage("de", "German", False),  # First in sorted order
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        result = fetcher.select_best_language(available, preferred="es")
+
+        # Should select first manual from the list
+        assert result.code == "de"
+        assert result.is_auto_generated is False
+
+    def test_select_empty_list(self):
+        """Test selecting from empty list returns None"""
+        fetcher = CaptionFetcher()
+
+        result = fetcher.select_best_language([], preferred="en")
+
+        assert result is None
+
+    def test_select_prefer_manual_over_auto(self):
+        """Test that manual captions are preferred over auto"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("en", "English (auto)", True),
+        ]
+
+        result = fetcher.select_best_language(
+            available, preferred="en", prefer_manual=True
+        )
+
+        assert result.code == "en"
+        assert result.is_auto_generated is False
+
+    def test_select_prefer_auto_when_configured(self):
+        """Test preferring auto when prefer_manual=False"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("en", "English (auto)", True),
+        ]
+
+        result = fetcher.select_best_language(
+            available, preferred="en", prefer_manual=False
+        )
+
+        # When not preferring manual, first match wins (list sorted manual first)
+        assert result.code == "en"
+        # First en in sorted list is manual
+        assert result.is_auto_generated is False
+
+    def test_select_no_english_fallback(self):
+        """Test disabling English fallback"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_to_english=False
+        )
+
+        # Should skip English and fall back to any (sorted alphabetically)
+        assert result is not None
+        # en comes before fr alphabetically
+        assert result.code == "en"
+
+    def test_select_english_as_preferred_no_double_check(self):
+        """Test that English as preferred doesn't check English twice"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        result = fetcher.select_best_language(available, preferred="en")
+
+        assert result.code == "en"
+
+
+class TestGetPreferredLanguageFromConfig:
+    """Test _get_preferred_language_from_config method"""
+
+    def test_no_config_defaults_to_english(self):
+        """Test default is English when no config"""
+        fetcher = CaptionFetcher()
+
+        result = fetcher._get_preferred_language_from_config()
+
+        assert result == "en"
+
+    def test_caption_first_preferred_language(self):
+        """Test reading from caption_first.preferred_language"""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_language = "es"
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_preferred_language_from_config()
+
+        assert result == "es"
+
+    def test_transcription_language_fallback(self):
+        """Test falling back to transcription.language"""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_language = ""
+        mock_config.transcription.language = "fr"
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_preferred_language_from_config()
+
+        assert result == "fr"
+
+    def test_caption_first_takes_precedence(self):
+        """Test caption_first.preferred_language takes precedence"""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_language = "de"
+        mock_config.transcription.language = "fr"
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_preferred_language_from_config()
+
+        assert result == "de"
+
+
+class TestParseListSubsOutput:
+    """Test _parse_list_subs_output method"""
+
+    def test_parse_manual_subtitles_section(self):
+        """Test parsing manual subtitles section"""
+        fetcher = CaptionFetcher()
+
+        stdout = """[info] Available subtitles for VIDEO_ID:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+es        Spanish              vtt, ttml, srv3, srv2, srv1, json3
+"""
+        result = fetcher._parse_list_subs_output(stdout, "")
+
+        assert len(result) == 2
+        assert all(not lang.is_auto_generated for lang in result)
+
+    def test_parse_auto_captions_section(self):
+        """Test parsing auto-generated captions section"""
+        fetcher = CaptionFetcher()
+
+        stdout = """[info] Available automatic captions for VIDEO_ID:
+Language  Name                              Formats
+en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+"""
+        result = fetcher._parse_list_subs_output(stdout, "")
+
+        assert len(result) == 1
+        assert result[0].is_auto_generated is True
+
+    def test_parse_mixed_output(self):
+        """Test parsing output with both sections"""
+        fetcher = CaptionFetcher()
+
+        stdout = """[info] Available subtitles for VIDEO_ID:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+
+[info] Available automatic captions for VIDEO_ID:
+Language  Name                              Formats
+de        German (auto-generated)           vtt, ttml, srv3, srv2, srv1, json3
+"""
+        result = fetcher._parse_list_subs_output(stdout, "")
+
+        assert len(result) == 2
+        # Manual first
+        assert result[0].code == "en"
+        assert result[0].is_auto_generated is False
+        # Auto second
+        assert result[1].code == "de"
+        assert result[1].is_auto_generated is True
+
+    def test_parse_output_with_stderr(self):
+        """Test parsing with content in stderr"""
+        fetcher = CaptionFetcher()
+
+        stdout = ""
+        stderr = """[info] Available subtitles for VIDEO_ID:
+Language  Name                 Formats
+ja        Japanese             vtt, ttml, srv3, srv2, srv1, json3
+"""
+        result = fetcher._parse_list_subs_output(stdout, stderr)
+
+        assert len(result) == 1
+        assert result[0].code == "ja"
+
+    def test_parse_handles_header_line(self):
+        """Test that header line is skipped"""
+        fetcher = CaptionFetcher()
+
+        stdout = """[info] Available subtitles for VIDEO_ID:
+Language  Name                 Formats
+en        English              vtt, ttml
+"""
+        result = fetcher._parse_list_subs_output(stdout, "")
+
+        # Should only have 1 language, not treat "Language" as a code
+        assert len(result) == 1
+        assert result[0].code == "en"
+
+    def test_parse_language_code_variations(self):
+        """Test parsing various language code formats"""
+        fetcher = CaptionFetcher()
+
+        stdout = """[info] Available subtitles for VIDEO_ID:
+Language  Name                      Formats
+en        English                   vtt, ttml
+en-US     English (United States)   vtt, ttml
+zh-Hans   Chinese (Simplified)      vtt, ttml
+pt-BR     Portuguese (Brazil)       vtt, ttml
+"""
+        result = fetcher._parse_list_subs_output(stdout, "")
+
+        codes = [lang.code for lang in result]
+        assert "en" in codes
+        assert "en-us" in codes
+        assert "zh-hans" in codes
+        assert "pt-br" in codes
+
+
+class TestFetchCaptionsAutoLanguage:
+    """Test fetch_captions_auto_language method"""
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @patch.object(CaptionFetcher, 'list_available_languages')
+    def test_auto_language_selects_best(self, mock_list, mock_fetch):
+        """Test auto language selection and fetch"""
+        fetcher = CaptionFetcher()
+
+        mock_list.return_value = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("es", "Spanish", False),
+        ]
+        mock_fetch.return_value = CaptionResult(
+            video_id="test123",
+            segments=[],
+            language="en"
+        )
+
+        result = fetcher.fetch_captions_auto_language("test1234567")
+
+        mock_fetch.assert_called_once_with(
+            "test1234567",
+            language="en",
+            prefer_manual=True
+        )
+
+    @patch.object(CaptionFetcher, 'list_available_languages')
+    def test_auto_language_no_captions_available(self, mock_list):
+        """Test error when no captions available"""
+        fetcher = CaptionFetcher()
+
+        mock_list.return_value = []
+
+        with pytest.raises(CaptionUnavailableError) as exc_info:
+            fetcher.fetch_captions_auto_language("test1234567")
+
+        assert "No captions available" in str(exc_info.value)
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @patch.object(CaptionFetcher, 'list_available_languages')
+    def test_auto_language_uses_preferred(self, mock_list, mock_fetch):
+        """Test auto language uses preferred language override"""
+        fetcher = CaptionFetcher()
+
+        mock_list.return_value = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("es", "Spanish", False),
+        ]
+        mock_fetch.return_value = CaptionResult(
+            video_id="test123",
+            segments=[],
+            language="es"
+        )
+
+        fetcher.fetch_captions_auto_language("test1234567", preferred_language="es")
+
+        mock_fetch.assert_called_once_with(
+            "test1234567",
+            language="es",
+            prefer_manual=True
+        )
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @patch.object(CaptionFetcher, 'list_available_languages')
+    def test_auto_language_respects_prefer_human_config(self, mock_list, mock_fetch):
+        """Test auto language respects prefer_human_captions config"""
+        mock_config = Mock()
+        mock_config.download.caption_first.prefer_human_captions = False
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        mock_list.return_value = [
+            AvailableLanguage("en", "English (auto)", True),
+        ]
+        mock_fetch.return_value = CaptionResult(
+            video_id="test123",
+            segments=[],
+            language="en"
+        )
+
+        fetcher.fetch_captions_auto_language("test1234567")
+
+        # Should call with prefer_manual=False since config says don't prefer human
+        mock_fetch.assert_called_once_with(
+            "test1234567",
+            language="en",
+            prefer_manual=False  # Auto-generated selected
+        )

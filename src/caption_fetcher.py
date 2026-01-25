@@ -119,6 +119,14 @@ class CaptionResult:
         }
 
 
+@dataclass
+class AvailableLanguage:
+    """Represents an available caption language for a video."""
+    code: str  # ISO 639-1 code (e.g., 'en', 'es', 'fr')
+    name: str  # Human-readable name (e.g., 'English', 'Spanish')
+    is_auto_generated: bool  # True if auto-generated captions
+
+
 class CaptionFetcher:
     """Fetches YouTube captions using yt-dlp.
 
@@ -129,6 +137,11 @@ class CaptionFetcher:
         fetcher = CaptionFetcher()
         result = fetcher.fetch_captions("dQw4w9WgXcQ")
         print(f"Found {len(result.segments)} segments, auto={result.is_auto_generated}")
+
+        # List available languages first
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+        for lang in languages:
+            print(f"{lang.code}: {lang.name} (auto={lang.is_auto_generated})")
     """
 
     def __init__(self, config: Optional['Config'] = None):
@@ -139,6 +152,338 @@ class CaptionFetcher:
         """
         self.config = config
         self._timeout = 60  # seconds
+
+    def list_available_languages(self, video_id: str) -> List[AvailableLanguage]:
+        """List available caption languages for a YouTube video.
+
+        Uses yt-dlp to query subtitle metadata without downloading.
+        Returns both manual and auto-generated caption languages.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+
+        Returns:
+            List of AvailableLanguage objects, sorted with manual captions first,
+            then auto-generated. Within each group, sorted by language code.
+
+        Raises:
+            CaptionFetchError: If unable to query video metadata.
+
+        Example:
+            languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+            # [AvailableLanguage(code='en', name='English', is_auto_generated=False),
+            #  AvailableLanguage(code='en', name='English (auto-generated)', is_auto_generated=True)]
+        """
+        if not self._is_valid_video_id(video_id):
+            raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '--skip-download',
+            '--list-subs',
+            '--no-playlist',
+            '--no-warnings',
+        ]
+
+        # Add cookies if configured
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout
+            )
+
+            # Parse the output to extract available languages
+            return self._parse_list_subs_output(result.stdout, result.stderr)
+
+        except subprocess.TimeoutExpired:
+            raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
+        except Exception as e:
+            raise CaptionFetchError(video_id, str(e))
+
+    def _parse_list_subs_output(
+        self,
+        stdout: str,
+        stderr: str
+    ) -> List[AvailableLanguage]:
+        """Parse yt-dlp --list-subs output to extract available languages.
+
+        The output format looks like:
+            [info] Available subtitles for VIDEO_ID:
+            Language  Name                 Formats
+            en        English              vtt, ttml, srv3, srv2, srv1, json3
+            es        Spanish              vtt, ttml, srv3, srv2, srv1, json3
+
+            [info] Available automatic captions for VIDEO_ID:
+            Language  Name                              Formats
+            en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+
+        Args:
+            stdout: Standard output from yt-dlp.
+            stderr: Standard error from yt-dlp.
+
+        Returns:
+            List of AvailableLanguage objects.
+        """
+        languages = []
+        combined_output = stdout + "\n" + stderr
+
+        # Track which section we're in
+        in_manual_section = False
+        in_auto_section = False
+
+        # Pattern to match language lines (after header)
+        # Format: "en        English              vtt, ttml, ..."
+        lang_line_pattern = re.compile(
+            r'^([a-z]{2,3}(?:-[A-Za-z]{2,4})?)\s+(.+?)\s+(?:vtt|ttml|srv|json)',
+            re.IGNORECASE
+        )
+
+        for line in combined_output.split('\n'):
+            line = line.strip()
+
+            # Detect section headers
+            if 'Available subtitles' in line:
+                in_manual_section = True
+                in_auto_section = False
+                continue
+            elif 'Available automatic captions' in line:
+                in_manual_section = False
+                in_auto_section = True
+                continue
+            elif line.startswith('[info]') or line.startswith('Language'):
+                # Skip info lines and headers
+                continue
+            elif not line:
+                # Empty line might end a section
+                continue
+
+            # Try to parse language line
+            match = lang_line_pattern.match(line)
+            if match:
+                lang_code = match.group(1).lower()
+                lang_name = match.group(2).strip()
+
+                # Determine if auto-generated
+                is_auto = in_auto_section or '(auto' in lang_name.lower()
+
+                # Clean up the name
+                if '(auto-generated)' in lang_name:
+                    display_name = lang_name
+                elif is_auto:
+                    display_name = f"{lang_name} (auto-generated)"
+                else:
+                    display_name = lang_name
+
+                languages.append(AvailableLanguage(
+                    code=lang_code,
+                    name=display_name,
+                    is_auto_generated=is_auto
+                ))
+
+        # Sort: manual captions first, then auto-generated, alphabetically within each
+        languages.sort(key=lambda x: (x.is_auto_generated, x.code))
+
+        logger.debug(f"Found {len(languages)} available caption languages")
+        return languages
+
+    def select_best_language(
+        self,
+        available: List[AvailableLanguage],
+        preferred: Optional[str] = None,
+        fallback_to_english: bool = True,
+        prefer_manual: bool = True
+    ) -> Optional[AvailableLanguage]:
+        """Select the best language from available options using fallback chain.
+
+        Implements the fallback chain:
+        1. Preferred language (manual if prefer_manual, else any)
+        2. English 'en' (manual if prefer_manual, else any)
+        3. Any available language (manual if prefer_manual, else any)
+
+        Args:
+            available: List of available languages from list_available_languages().
+            preferred: Preferred language code (e.g., 'en', 'es'). If None, uses
+                       config.download.caption_first.preferred_language or
+                       config.transcription.language.
+            fallback_to_english: If True, fall back to English if preferred unavailable.
+            prefer_manual: If True, prefer manual captions over auto-generated.
+
+        Returns:
+            Selected AvailableLanguage, or None if no languages available.
+
+        Example:
+            languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+            best = fetcher.select_best_language(languages, preferred='es')
+            if best:
+                result = fetcher.fetch_captions("dQw4w9WgXcQ", language=best.code)
+        """
+        if not available:
+            logger.warning("No caption languages available to select from")
+            return None
+
+        # Determine preferred language from args or config
+        if preferred is None:
+            preferred = self._get_preferred_language_from_config()
+
+        logger.debug(f"Selecting caption language: preferred={preferred}, "
+                    f"fallback_english={fallback_to_english}, prefer_manual={prefer_manual}")
+
+        def find_language(code: str, manual_only: bool = False) -> Optional[AvailableLanguage]:
+            """Find a language by code, optionally filtering to manual only."""
+            for lang in available:
+                if lang.code.lower() == code.lower():
+                    if manual_only and lang.is_auto_generated:
+                        continue
+                    return lang
+            return None
+
+        # Step 1: Try preferred language
+        if preferred:
+            # Try manual first if preferred
+            if prefer_manual:
+                result = find_language(preferred, manual_only=True)
+                if result:
+                    logger.info(f"Selected preferred language: {result.code} (manual)")
+                    return result
+
+            # Try auto if manual not found
+            result = find_language(preferred, manual_only=False)
+            if result:
+                logger.info(f"Selected preferred language: {result.code} "
+                           f"({'auto' if result.is_auto_generated else 'manual'})")
+                return result
+
+            logger.debug(f"Preferred language '{preferred}' not available")
+
+        # Step 2: Fall back to English
+        if fallback_to_english and (preferred is None or preferred.lower() != 'en'):
+            if prefer_manual:
+                result = find_language('en', manual_only=True)
+                if result:
+                    logger.info("Falling back to English (manual)")
+                    return result
+
+            result = find_language('en', manual_only=False)
+            if result:
+                logger.info(f"Falling back to English "
+                           f"({'auto' if result.is_auto_generated else 'manual'})")
+                return result
+
+            logger.debug("English not available")
+
+        # Step 3: Fall back to any available language
+        if prefer_manual:
+            manual_langs = [l for l in available if not l.is_auto_generated]
+            if manual_langs:
+                result = manual_langs[0]  # Already sorted by code
+                logger.info(f"Falling back to any available: {result.code} (manual)")
+                return result
+
+        if available:
+            result = available[0]  # Already sorted: manual first, then auto
+            logger.info(f"Falling back to any available: {result.code} "
+                       f"({'auto' if result.is_auto_generated else 'manual'})")
+            return result
+
+        logger.warning("No suitable caption language found")
+        return None
+
+    def _get_preferred_language_from_config(self) -> str:
+        """Get preferred language from config.
+
+        Checks in order:
+        1. config.download.caption_first.preferred_language
+        2. config.transcription.language
+        3. Default to 'en'
+
+        Returns:
+            Language code (ISO 639-1).
+        """
+        if not self.config:
+            return 'en'
+
+        try:
+            # First try caption_first.preferred_language
+            caption_first = getattr(self.config.download, 'caption_first', None)
+            if caption_first:
+                preferred = getattr(caption_first, 'preferred_language', None)
+                if preferred:
+                    return preferred
+
+            # Then try transcription.language
+            transcription = getattr(self.config, 'transcription', None)
+            if transcription:
+                lang = getattr(transcription, 'language', None)
+                if lang:
+                    return lang
+        except AttributeError:
+            pass
+
+        return 'en'
+
+    def fetch_captions_auto_language(
+        self,
+        video_id: str,
+        preferred_language: Optional[str] = None
+    ) -> CaptionResult:
+        """Fetch captions with automatic language selection.
+
+        Combines list_available_languages and fetch_captions with intelligent
+        language selection based on config and availability.
+
+        Args:
+            video_id: YouTube video ID.
+            preferred_language: Optional override for preferred language.
+
+        Returns:
+            CaptionResult with captions in the best available language.
+
+        Raises:
+            CaptionUnavailableError: If no captions available in any language.
+            CaptionFetchError: If fetch fails due to network/temporary error.
+        """
+        # List available languages
+        available = self.list_available_languages(video_id)
+
+        if not available:
+            raise CaptionUnavailableError(
+                video_id,
+                "No captions available in any language"
+            )
+
+        # Select best language
+        prefer_manual = True
+        if self.config:
+            caption_first = getattr(self.config.download, 'caption_first', None)
+            if caption_first:
+                prefer_manual = getattr(caption_first, 'prefer_human_captions', True)
+
+        selected = self.select_best_language(
+            available,
+            preferred=preferred_language,
+            fallback_to_english=True,
+            prefer_manual=prefer_manual
+        )
+
+        if not selected:
+            raise CaptionUnavailableError(
+                video_id,
+                "No suitable language found despite available captions"
+            )
+
+        # Fetch captions in selected language
+        return self.fetch_captions(
+            video_id,
+            language=selected.code,
+            prefer_manual=not selected.is_auto_generated
+        )
 
     def fetch_captions(
         self,

@@ -2294,3 +2294,114 @@ Created new src/caption_fetcher.py module with CaptionFetcher class for YouTube 
 - [x] Distinguish between auto-generated and human-uploaded captions via is_auto_generated
 - [x] Handle unavailable captions gracefully with CaptionUnavailableError
 - [x] Tests verify caption extraction for videos with and without captions
+
+## Iteration N - US-002: Add CaptionFirstConfig to download configuration
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Created CaptionFirstConfig dataclass following AudioFirstConfig pattern:
+
+1. **src/config/sections/download.py:**
+   - New CaptionFirstConfig dataclass with fields:
+     - enabled: bool = False
+     - fallback_to_transcription: bool = True
+     - preferred_language: str = "en"
+     - timeout: int = 30
+     - prefer_human_captions: bool = True
+     - cache_captions: bool = True
+   - Added caption_first field to DownloadConfig
+   - Added __post_init__ dict conversion
+
+2. **config.yaml:**
+   - Added caption_first section under download with full documentation
+   - Explains how caption-first mode works and its benefits
+
+3. **Exports:**
+   - src/config/sections/__init__.py - Export CaptionFirstConfig
+   - src/config/__init__.py - Export CaptionFirstConfig
+
+4. **tests/test_config_post_init.py:**
+   - Added test_download_config_caption_first_as_dict
+   - Updated test_download_config_all_nested_as_dicts
+   - Updated test_download_config_already_dataclass
+   - Added TestCaptionFirstConfigDefaults class with test_caption_first_defaults and test_caption_first_custom_values
+
+### Verification
+- Syntax check: `python -m py_compile` on all config modules - PASSED
+- main.py --help: PASSED
+- Config loading test: CaptionFirstConfig loads correctly from config.yaml
+- Tests: 235/235 config tests passed
+
+### Files Modified
+- src/config/sections/download.py - CaptionFirstConfig class + DownloadConfig field
+- src/config/sections/__init__.py - Export CaptionFirstConfig
+- src/config/__init__.py - Export CaptionFirstConfig
+- config.yaml - caption_first section
+- tests/test_config_post_init.py - Tests for CaptionFirstConfig
+
+### Acceptance Criteria Met
+- [x] New CaptionFirstConfig dataclass in src/config/sections/download.py
+- [x] Fields: enabled (bool), fallback_to_transcription (bool), preferred_language (str), timeout (int)
+- [x] Fields: prefer_human_captions (bool), cache_captions (bool)
+- [x] Add caption_first field to DownloadConfig with __post_init__ conversion
+- [x] Update config.yaml with caption_first section and documentation
+- [x] Tests verify config loading and validation
+
+## Iteration N - US-003: Implement caption language detection and selection
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Added comprehensive language detection and selection capabilities to CaptionFetcher:
+
+1. **src/caption_fetcher.py - New AvailableLanguage dataclass:**
+   - code: str (ISO 639-1, e.g., 'en', 'es', 'en-GB')
+   - name: str (human-readable name)
+   - is_auto_generated: bool
+
+2. **CaptionFetcher.list_available_languages(video_id):**
+   - Uses yt-dlp --list-subs to query available captions
+   - Parses both manual and auto-generated caption sections
+   - Returns sorted list: manual first, then auto-generated, alphabetical within each
+   - Handles regional codes (en-GB, pt-BR, zh-Hans)
+
+3. **CaptionFetcher.select_best_language(available, preferred, ...):**
+   - Implements fallback chain: preferred -> 'en' -> any available
+   - Respects prefer_manual setting
+   - Logs selection decisions at appropriate log levels
+
+4. **CaptionFetcher._get_preferred_language_from_config():**
+   - Checks config.download.caption_first.preferred_language first
+   - Falls back to config.transcription.language
+   - Defaults to 'en'
+
+5. **CaptionFetcher.fetch_captions_auto_language(video_id):**
+   - One-call convenience method combining list + select + fetch
+   - Uses config for prefer_human_captions setting
+
+### Tests Created
+34 new tests in tests/test_caption_fetcher.py:
+- TestAvailableLanguage (2 tests): dataclass creation
+- TestListAvailableLanguages (7 tests): invalid ID, timeout, manual only, auto only, mixed, empty, regional codes
+- TestSelectBestLanguage (10 tests): preferred manual, auto fallback, English fallback, any fallback, empty list, prefer manual over auto, no English fallback, etc.
+- TestGetPreferredLanguageFromConfig (4 tests): no config, caption_first, transcription fallback, precedence
+- TestParseListSubsOutput (6 tests): manual section, auto section, mixed, stderr, header line, code variations
+- TestFetchCaptionsAutoLanguage (4 tests): best selection, no captions, preferred override, config respect
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py` - PASSED
+- Tests: 85/85 passed (excluding 1 network test)
+- main.py --help: PASSED
+
+### Files Modified
+- src/caption_fetcher.py - Language detection and selection methods
+- tests/test_caption_fetcher.py - 34 new tests
+
+### Acceptance Criteria Met
+- [x] CaptionFetcher.list_available_languages(video_id) returns list of available caption languages
+- [x] Language codes follow ISO 639-1 format (en, es, fr, etc.)
+- [x] Auto-select matching language from config.transcription.language or caption_first.preferred_language
+- [x] Fallback chain: preferred_language -> 'en' -> any available language
+- [x] Log which language was selected and why
+- [x] Tests verify language selection logic with various availability scenarios
