@@ -216,6 +216,13 @@ class MatchingConfig:
     # adjusted = raw_confidence * weight
     caption_quality_weights: dict = None  # Dict[str, float] or None to use additive mode
 
+    # Caption timing penalty (US-008 Sprint 7)
+    # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)
+    # Formula: adjusted = raw * quality_weight * timing_penalty
+    # timing_penalty = 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+    # Example: 50% coverage, 20% exceeds -> timing_penalty = 0.84 (~16% penalty)
+    apply_timing_penalty: bool = True  # Enable timing-based confidence penalty
+
     # B-roll preference (scene-level face detection)
     # When topic matches, prefer scenes without faces (B-roll) over talking heads
     prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference

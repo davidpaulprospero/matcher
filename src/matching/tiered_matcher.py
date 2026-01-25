@@ -26,6 +26,7 @@ from .scoring import (
     apply_topic_penalty,
     apply_broll_boost,
     apply_caption_quality_adjustment,  # US-007
+    apply_timing_penalty,  # US-008 Sprint 7
     apply_current_project_boost,
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -663,6 +664,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            # US-008 Sprint 7: Apply timing penalty for poor caption timing
+            adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
+                adjusted_confidence, best_seg, self.config
+            )
+
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
@@ -678,6 +684,8 @@ class TieredMatcher:
                 final_reasoning += f" [{broll_reason}]"
             if caption_quality_reason:
                 final_reasoning += f" [{caption_quality_reason}]"
+            if timing_penalty_reason:
+                final_reasoning += f" [{timing_penalty_reason}]"
             if project_reason:
                 final_reasoning += f" [{project_reason}]"
 
@@ -737,6 +745,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            # US-008 Sprint 7: Apply timing penalty for poor caption timing
+            adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
+                adjusted_confidence, best_seg, self.config
+            )
+
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
@@ -748,6 +761,8 @@ class TieredMatcher:
                 reasoning += f" [{broll_reason}]"
             if caption_quality_reason:
                 reasoning += f" [{caption_quality_reason}]"
+            if timing_penalty_reason:
+                reasoning += f" [{timing_penalty_reason}]"
             if project_reason:
                 reasoning += f" [{project_reason}]"
 
@@ -818,6 +833,11 @@ class TieredMatcher:
                     adjusted_confidence, cached_seg, self.config
                 )
 
+                # US-008 Sprint 7: Apply timing penalty for poor caption timing
+                adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
+                    adjusted_confidence, cached_seg, self.config
+                )
+
                 adjusted_confidence, project_reason = apply_current_project_boost(
                     adjusted_confidence, cached_seg, self.config
                 )
@@ -829,6 +849,8 @@ class TieredMatcher:
                     final_reasoning += f" [{broll_reason}]"
                 if caption_quality_reason:
                     final_reasoning += f" [{caption_quality_reason}]"
+                if timing_penalty_reason:
+                    final_reasoning += f" [{timing_penalty_reason}]"
                 if project_reason:
                     final_reasoning += f" [{project_reason}]"
 
@@ -967,6 +989,11 @@ class TieredMatcher:
             adjusted_confidence, best_seg, self.config
         )
 
+        # US-008 Sprint 7: Apply timing penalty for poor caption timing
+        adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
+            adjusted_confidence, best_seg, self.config
+        )
+
         adjusted_confidence, project_reason = apply_current_project_boost(
             adjusted_confidence, best_seg, self.config
         )
@@ -980,6 +1007,8 @@ class TieredMatcher:
             final_reasoning += f" [{broll_reason}]"
         if caption_quality_reason:
             final_reasoning += f" [{caption_quality_reason}]"
+        if timing_penalty_reason:
+            final_reasoning += f" [{timing_penalty_reason}]"
         if project_reason:
             final_reasoning += f" [{project_reason}]"
 

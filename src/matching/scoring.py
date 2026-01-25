@@ -287,6 +287,56 @@ def apply_caption_quality_adjustment(
     return confidence, ""
 
 
+def apply_timing_penalty(
+    confidence: float,
+    video_segment: SRTSegment,
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence penalty based on caption timing validation (US-008 Sprint 7).
+
+    When caption timing is poor (low coverage or exceeds video duration),
+    apply a multiplicative penalty to reduce match confidence. The penalty
+    was calculated at caption fetch time using:
+
+    penalty = 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+
+    Examples:
+        - Perfect timing (100% coverage, no exceeds): penalty = 1.0 (no change)
+        - 50% coverage, 20% exceeds: penalty = 0.84 (~16% reduction)
+        - 80% coverage, no exceeds: penalty = 0.96 (~4% reduction)
+
+    Args:
+        confidence: Current confidence score (may already be adjusted by caption quality)
+        video_segment: Video segment with timing_penalty attribute
+        config: Config with matching.apply_timing_penalty setting
+
+    Returns:
+        Tuple of (adjusted_confidence, adjustment_reason)
+    """
+    mc = config.matching
+
+    # Check if timing penalty is enabled
+    if not getattr(mc, 'apply_timing_penalty', True):
+        return confidence, ""
+
+    # Get timing penalty from video segment (set by CaptionStage)
+    timing_penalty = getattr(video_segment, 'timing_penalty', None)
+
+    # No penalty attribute or perfect timing - no adjustment
+    if timing_penalty is None or timing_penalty >= 1.0:
+        return confidence, ""
+
+    # Apply multiplicative penalty
+    adjusted = max(0.0, min(1.0, confidence * timing_penalty))
+    penalty_pct = (1.0 - timing_penalty) * 100
+
+    reason = f"timing penalty: x{timing_penalty:.2f} (-{penalty_pct:.0f}%)"
+    logger.info(f"Timing penalty applied: {confidence:.2f} -> {adjusted:.2f} ({reason})")
+
+    return adjusted, reason
+
+
 def apply_current_project_boost(
     confidence: float,
     video_segment: SRTSegment,
