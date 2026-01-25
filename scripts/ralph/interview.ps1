@@ -18,6 +18,31 @@ if (Test-Path $script:ConfigFile) {
 }
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+function Test-FocusAreaExists {
+    <#
+    .SYNOPSIS
+        Validates if a focus area ID exists in the config
+    .PARAMETER AreaId
+        The focus area ID to validate
+    .RETURNS
+        $true if valid or can't validate, $false if definitely invalid
+    #>
+    param([string]$AreaId)
+
+    if (-not $config -or -not $config.focusAreas) {
+        return $true  # Can't validate, assume valid
+    }
+
+    $validAreas = $config.focusAreas | ForEach-Object {
+        if ($_.id) { $_.id } else { $_ }
+    }
+    return $AreaId -in $validAreas
+}
+
+# ============================================================================
 # LOGGING FUNCTION
 # ============================================================================
 
@@ -549,11 +574,27 @@ function Get-ApprovedAreas {
         if ($choice -match "^\+(.+)$") {
             $newArea = $Matches[1].Trim().ToLower()
             if ($approved -notcontains $newArea) {
+                # Validate against known focus areas
+                if (-not (Test-FocusAreaExists -AreaId $newArea)) {
+                    Write-Host "    Warning: '$newArea' is not a known focus area" -ForegroundColor Yellow
+                    if ($config -and $config.focusAreas) {
+                        $knownAreas = $config.focusAreas | ForEach-Object {
+                            if ($_.id) { $_.id } else { $_ }
+                        }
+                        Write-Host "    Known areas: $($knownAreas -join ', ')" -ForegroundColor DarkGray
+                    }
+                    $confirm = Read-Host "    Add anyway? [Y]es / [N]o"
+                    if ($confirm -notmatch "^[Yy]") {
+                        Write-InterviewLog "User declined to add unknown area: $newArea"
+                        continue
+                    }
+                    Write-InterviewLog "User added unknown area (confirmed): $newArea" "WARN"
+                }
                 [void]$approved.Add($newArea)
                 Write-Host "  Added: $newArea" -ForegroundColor Green
                 Write-InterviewLog "User added area: $newArea"
             } else {
-                Write-Host "  Already in list: $newArea" -ForegroundColor Yellow
+                Write-Host "  Already in list: $newArea" -ForegroundColor DarkGray
             }
             continue
         }
