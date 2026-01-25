@@ -1087,3 +1087,171 @@ class TestCaptionQualityMultiplicativeWeights:
 
         # low not in dict -> use default 0.75
         assert abs(result_conf - 0.60) < 0.001  # 0.80 * 0.75 = 0.60
+
+
+# ============================================================================
+# Test apply_timing_penalty() (US-008 Sprint 7)
+# ============================================================================
+
+class TestApplyTimingPenalty:
+    """Test timing penalty confidence adjustments (US-008 Sprint 7)
+
+    The timing penalty is calculated at caption fetch time:
+    penalty = 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+
+    This test class verifies that apply_timing_penalty() correctly:
+    1. Reads timing_penalty from video_segment
+    2. Applies multiplicative penalty when enabled
+    3. Respects config setting to disable
+    """
+
+    @pytest.fixture
+    def timing_penalty_config(self):
+        """Mock config with timing penalty enabled"""
+        config = Mock()
+        matching = Mock()
+        matching.apply_timing_penalty = True
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def timing_penalty_disabled_config(self):
+        """Mock config with timing penalty disabled"""
+        config = Mock()
+        matching = Mock()
+        matching.apply_timing_penalty = False
+        config.matching = matching
+        return config
+
+    def test_no_penalty_when_perfect_timing(self, timing_penalty_config, sample_video_segment):
+        """Test no penalty when timing_penalty=1.0"""
+        confidence = 0.85
+        sample_video_segment.timing_penalty = 1.0
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        assert result_conf == 0.85
+        assert reason == ""
+
+    def test_penalty_applied_multiplicatively(self, timing_penalty_config, sample_video_segment):
+        """Test that timing penalty is applied multiplicatively"""
+        confidence = 0.80
+        sample_video_segment.timing_penalty = 0.84  # 16% penalty
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        # 0.80 * 0.84 = 0.672
+        assert abs(result_conf - 0.672) < 0.001
+        assert "timing penalty" in reason
+        assert "x0.84" in reason
+
+    def test_penalty_disabled_no_effect(self, timing_penalty_disabled_config, sample_video_segment):
+        """Test no penalty when config disabled"""
+        confidence = 0.80
+        sample_video_segment.timing_penalty = 0.5  # Would be 50% penalty
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_disabled_config
+        )
+
+        assert result_conf == 0.80  # No change
+        assert reason == ""
+
+    def test_no_timing_penalty_attribute(self, timing_penalty_config, sample_video_segment):
+        """Test no penalty when timing_penalty attribute missing"""
+        confidence = 0.80
+        # Don't set timing_penalty attribute
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        assert result_conf == 0.80
+        assert reason == ""
+
+    def test_penalty_capped_at_zero(self, timing_penalty_config, sample_video_segment):
+        """Test that result is capped at 0.0"""
+        confidence = 0.50
+        sample_video_segment.timing_penalty = -0.5  # Invalid but tests capping
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        assert result_conf == 0.0
+
+    def test_penalty_above_one_is_no_penalty(self, timing_penalty_config, sample_video_segment):
+        """Test that timing_penalty >= 1.0 means no penalty applied"""
+        confidence = 0.80
+        sample_video_segment.timing_penalty = 1.5  # Invalid, but >= 1.0 means no penalty
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        # timing_penalty >= 1.0 means no penalty applied
+        assert result_conf == 0.80
+        assert reason == ""
+
+    def test_10_percent_penalty(self, timing_penalty_config, sample_video_segment):
+        """Test 10% penalty (90% coverage, no exceeds)"""
+        confidence = 0.85
+        sample_video_segment.timing_penalty = 0.98  # 2% penalty from low coverage
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        # 0.85 * 0.98 = 0.833
+        assert abs(result_conf - 0.833) < 0.001
+
+    def test_reason_format(self, timing_penalty_config, sample_video_segment):
+        """Test reason string format"""
+        confidence = 0.80
+        sample_video_segment.timing_penalty = 0.90
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=timing_penalty_config
+        )
+
+        # Reason format: "timing penalty: x0.90 (-10%)"
+        assert "timing penalty" in reason
+        assert "x0.90" in reason
+        assert "-10%" in reason
+
+    def test_config_default_enabled(self, sample_video_segment):
+        """Test default behavior when config attribute missing"""
+        config = Mock()
+        config.matching = Mock(spec=[])  # Empty spec
+
+        confidence = 0.80
+        sample_video_segment.timing_penalty = 0.90
+
+        result_conf, reason = scoring.apply_timing_penalty(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # Default is enabled, so penalty should apply
+        assert abs(result_conf - 0.72) < 0.001  # 0.80 * 0.90

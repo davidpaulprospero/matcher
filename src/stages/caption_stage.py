@@ -382,6 +382,18 @@ class CaptionStage(Stage):
                         video_duration = video_durations.get(video_id)
                         coverage_ratio = result.calculate_coverage(video_duration)
 
+                        # US-008 Sprint 7: Validate timing and get penalty factor
+                        timing_penalty = 1.0  # Default: no penalty
+                        if video_duration:
+                            result.validate_timing(video_duration=video_duration)
+                            timing_penalty = result.timing_penalty_factor
+                            if timing_penalty < 1.0:
+                                logger.debug(
+                                    f"Timing penalty for {video_id}: {timing_penalty:.2f} "
+                                    f"(exceeds={result.timing_validated.exceeds_ratio:.2f}, "
+                                    f"coverage={result.timing_validated.coverage_ratio:.2f})"
+                                )
+
                         # Success - convert to serializable dict
                         caption_results[video_id] = {
                             'video_id': video_id,
@@ -393,6 +405,7 @@ class CaptionStage(Stage):
                             'caption_quality': result.caption_quality,
                             'video_duration': video_duration,  # US-004
                             'coverage_ratio': coverage_ratio,  # US-004
+                            'timing_penalty': timing_penalty,  # US-008 Sprint 7
                         }
 
                         # US-004: Update metrics with coverage info
@@ -759,6 +772,7 @@ class CaptionStage(Stage):
         Compatible with TranscriptSegment format used by TRANSCRIBE stage.
 
         US-007: Includes caption_quality field for matching confidence adjustment.
+        US-008 Sprint 7: Includes timing_penalty for timing-based confidence adjustment.
         """
         text_metadata = []
 
@@ -771,6 +785,7 @@ class CaptionStage(Stage):
             language = result.get('language', 'en')
             is_auto = result.get('is_auto_generated', False)
             caption_quality = result.get('caption_quality', 'medium')  # US-007
+            timing_penalty = result.get('timing_penalty', 1.0)  # US-008 Sprint 7
 
             for seg in segments:
                 text_metadata.append({
@@ -784,6 +799,7 @@ class CaptionStage(Stage):
                     'caption_language': language,
                     'caption_auto_generated': is_auto,
                     'caption_quality': caption_quality,  # US-007: Quality indicator
+                    'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
                 })
 
         # Extend existing text_metadata (don't replace, as TRANSCRIBE may add more)

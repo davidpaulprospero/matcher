@@ -415,6 +415,9 @@ class MatchStage(Stage):
                     vid_segment.caption_quality = meta['caption_quality']
                     if meta['caption_quality'] in caption_quality_count:
                         caption_quality_count[meta['caption_quality']] += 1
+                # US-008 Sprint 7: Timing penalty for confidence adjustment
+                if meta.get('timing_penalty') is not None:
+                    vid_segment.timing_penalty = meta['timing_penalty']
                 video_paths_set.add(meta.get('video_path', ''))
             else:
                 vid_segment = meta

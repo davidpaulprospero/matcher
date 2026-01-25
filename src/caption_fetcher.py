@@ -1215,6 +1215,9 @@ class TimingValidationResult:
     below_coverage: bool = False
     message: str = ""
     timing_epsilon_applied: float = 0.0  # US-007: Epsilon in milliseconds
+    # US-008 Sprint 7: Ratio fields for penalty calculation
+    exceeds_ratio: float = 0.0  # How much captions exceed video duration (0.0 = at/below, 0.2 = 20% over)
+    coverage_ratio: float = 1.0  # Caption coverage as ratio of video duration (1.0 = 100% covered)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -1226,6 +1229,8 @@ class TimingValidationResult:
             'below_coverage': self.below_coverage,
             'message': self.message,
             'timing_epsilon_applied': self.timing_epsilon_applied,
+            'exceeds_ratio': self.exceeds_ratio,
+            'coverage_ratio': self.coverage_ratio,
         }
 
 
@@ -1339,6 +1344,44 @@ class CaptionResult:
         """
         return self.calculate_coverage()
 
+    @property
+    def timing_penalty_factor(self) -> float:
+        """Calculate timing penalty factor based on validation results (US-008 Sprint 7).
+
+        The penalty is applied multiplicatively to match confidence to account for
+        caption timing issues that may affect match quality.
+
+        Formula:
+            penalty = 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+
+        Example calculations:
+            - Perfect timing (100% coverage, no exceeds): 1.0 (no penalty)
+            - 50% coverage, 20% exceeds: 1.0 - (0.2 * 0.3) - (0.5 * 0.2) = 0.84 (~16% penalty)
+            - 80% coverage, no exceeds: 1.0 - 0 - (0.2 * 0.2) = 0.96 (~4% penalty)
+            - 100% coverage, 10% exceeds: 1.0 - (0.1 * 0.3) - 0 = 0.97 (~3% penalty)
+
+        Returns:
+            Float between 0.0 and 1.0. Returns 1.0 (no penalty) if timing not validated
+            or video duration unknown.
+        """
+        if self.timing_validated is None:
+            return 1.0
+
+        # Get ratios from timing validation result
+        exceeds_ratio = getattr(self.timing_validated, 'exceeds_ratio', 0.0)
+        coverage_ratio = getattr(self.timing_validated, 'coverage_ratio', 1.0)
+
+        # Apply penalty formula: 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+        # Exceeds penalty: penalize up to 30% of confidence for captions extending past video
+        # Coverage penalty: penalize up to 20% of confidence for low caption coverage
+        exceeds_penalty = exceeds_ratio * 0.3
+        coverage_penalty = (1.0 - coverage_ratio) * 0.2
+
+        penalty_factor = 1.0 - exceeds_penalty - coverage_penalty
+
+        # Clamp to valid range [0.0, 1.0]
+        return max(0.0, min(1.0, penalty_factor))
+
     def validate_timing(
         self,
         video_duration: Optional[float] = None,
@@ -1449,6 +1492,12 @@ class CaptionResult:
             messages.append(f"Timing valid: captions end at {caption_end_time:.1f}s, "
                           f"video is {duration:.1f}s")
 
+        # US-008: Calculate ratios for timing penalty
+        # exceeds_ratio: how much captions exceed duration (0.0 if at/below, 0.2 = 20% over)
+        exceeds_ratio = max(0.0, (caption_end_time / duration) - 1.0) if duration > 0 else 0.0
+        # coverage_ratio: caption coverage of video duration (capped at 1.0)
+        coverage_ratio = min(1.0, caption_coverage)
+
         result = TimingValidationResult(
             is_valid=is_valid,
             caption_end_time=caption_end_time,
@@ -1457,6 +1506,8 @@ class CaptionResult:
             below_coverage=below_coverage,
             message="; ".join(messages),
             timing_epsilon_applied=timing_epsilon_ms,
+            exceeds_ratio=exceeds_ratio,
+            coverage_ratio=coverage_ratio,
         )
 
         self.timing_validated = result
