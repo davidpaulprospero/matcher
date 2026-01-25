@@ -33,7 +33,7 @@ from .strategies import StrategyMatcher
 from . import scoring
 
 # Phase 4b: Quality Metrics
-from .metrics import MatchQualityMetrics, calculate_match_quality_metrics, log_quality_summary
+from .metrics import MatchQualityMetrics, calculate_match_quality_metrics, log_quality_summary, log_confidence_histogram
 
 # Phase 5: Location Matching
 from .location_matching import LocationMatcher
@@ -68,4 +68,5 @@ __all__ = [
     'MatchQualityMetrics',
     'calculate_match_quality_metrics',
     'log_quality_summary',
+    'log_confidence_histogram',
 ]
