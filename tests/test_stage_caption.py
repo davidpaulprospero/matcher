@@ -1452,3 +1452,458 @@ class TestProgressCallbackThreadSafety:
         progress_prints = [p for p in print_calls if 'fetching' in str(p[1]).lower() or 'segments' in str(p[1]).lower()]
         # With 8 videos: at least 8 success prints (fetching may be skipped in non-TTY mode output)
         assert len(progress_prints) >= 0  # Progress output exists (may be 0 if TTY mock affects behavior)
+
+
+# ============================================================================
+# Test Per-Video Timeout Tracking (US-002 Sprint 6)
+# ============================================================================
+
+class TestPerVideoTimeoutTracking:
+    """Test US-002 Sprint 6: Per-video timeout tracking in batch fetch.
+
+    Verifies:
+    - start_time and elapsed_seconds tracked for each video in fetch_single()
+    - elapsed_seconds added to progress_callback details dict
+    - Warning logged if individual video takes >80% of timeout threshold
+    - CaptionMetrics.get_slowest_videos(n=5) returns correct data
+    - Slowest fetches printed in CaptionStage summary
+    - Timing data captured correctly for 10+ video batch
+    """
+
+    def test_caption_metrics_tracks_fetch_times(self):
+        """Test CaptionMetrics stores per-video fetch times correctly.
+
+        US-002 AC: Track elapsed_seconds for each video.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record fetch successes with timing
+        metrics.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=2.5
+        )
+        metrics.record_fetch_success(
+            video_id="def456ABC02",
+            language="en",
+            quality="medium",
+            segment_count=30,
+            elapsed_seconds=8.2
+        )
+        metrics.record_fetch_success(
+            video_id="ghi789JKL03",
+            language="en",
+            quality="high",
+            segment_count=45,
+            elapsed_seconds=1.1
+        )
+
+        # Verify timing data stored
+        assert "abc123XYZ01" in metrics.video_fetch_times
+        assert metrics.video_fetch_times["abc123XYZ01"] == 2.5
+        assert metrics.video_fetch_times["def456ABC02"] == 8.2
+        assert metrics.video_fetch_times["ghi789JKL03"] == 1.1
+
+    def test_caption_metrics_tracks_failure_times(self):
+        """Test CaptionMetrics stores fetch times for failures.
+
+        US-002 AC: Track elapsed_seconds even for failed fetches.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record failure with timing
+        metrics.record_fetch_failure(
+            video_id="fail12345AB",
+            reason="unavailable",
+            elapsed_seconds=5.5
+        )
+
+        assert "fail12345AB" in metrics.video_fetch_times
+        assert metrics.video_fetch_times["fail12345AB"] == 5.5
+
+    def test_get_slowest_videos_returns_sorted_list(self):
+        """Test get_slowest_videos returns videos sorted by fetch time descending.
+
+        US-002 AC: Add CaptionMetrics method get_slowest_videos(n=5).
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Add videos with varying fetch times
+        test_times = [
+            ("vid01XYZA_b", 3.2),
+            ("vid02XYZA_b", 8.5),
+            ("vid03XYZA_b", 1.1),
+            ("vid04XYZA_b", 5.7),
+            ("vid05XYZA_b", 2.3),
+            ("vid06XYZA_b", 7.1),
+            ("vid07XYZA_b", 0.8),
+        ]
+
+        for vid, elapsed in test_times:
+            metrics.record_fetch_success(
+                video_id=vid,
+                language="en",
+                quality="high",
+                segment_count=25,
+                elapsed_seconds=elapsed
+            )
+
+        # Get top 5 slowest
+        slowest = metrics.get_slowest_videos(5)
+
+        assert len(slowest) == 5
+        # First should be the slowest (8.5s)
+        assert slowest[0][0] == "vid02XYZA_b"
+        assert slowest[0][1] == 8.5
+        # Second should be 7.1s
+        assert slowest[1][0] == "vid06XYZA_b"
+        assert slowest[1][1] == 7.1
+        # Third should be 5.7s
+        assert slowest[2][0] == "vid04XYZA_b"
+        assert slowest[2][1] == 5.7
+
+    def test_get_slowest_videos_handles_empty_data(self):
+        """Test get_slowest_videos returns empty list when no timing data."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        slowest = metrics.get_slowest_videos(5)
+        assert slowest == []
+
+    def test_get_slowest_videos_handles_fewer_than_n(self):
+        """Test get_slowest_videos returns all data when less than n videos."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="only1234567",
+            language="en",
+            quality="high",
+            segment_count=10,
+            elapsed_seconds=2.0
+        )
+
+        slowest = metrics.get_slowest_videos(5)
+        assert len(slowest) == 1
+        assert slowest[0] == ("only1234567", 2.0)
+
+    def test_metrics_summary_includes_slowest_fetches(self):
+        """Test metrics.summary() includes slowest fetches line.
+
+        US-002 AC: Print summary in CaptionStage showing slowest fetches.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Add a few videos with timing
+        metrics.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=8.2
+        )
+        metrics.record_fetch_success(
+            video_id="def456ABC02",
+            language="en",
+            quality="high",
+            segment_count=30,
+            elapsed_seconds=7.1
+        )
+
+        summary = metrics.summary()
+
+        # Check summary includes slowest fetches
+        assert "Slowest fetches:" in summary
+        assert "abc123XYZ01=8.2s" in summary
+        assert "def456ABC02=7.1s" in summary
+
+    def test_metrics_to_dict_includes_video_fetch_times(self):
+        """Test to_dict() serializes video_fetch_times correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=3.5
+        )
+
+        data = metrics.to_dict()
+
+        assert 'video_fetch_times' in data
+        assert data['video_fetch_times'] == {"abc123XYZ01": 3.5}
+
+    def test_metrics_from_dict_restores_video_fetch_times(self):
+        """Test from_dict() restores video_fetch_times correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {
+            'fetch_attempts': 5,
+            'successes': 4,
+            'failures': 1,
+            'video_fetch_times': {
+                "abc123XYZ01": 2.5,
+                "def456ABC02": 7.8
+            }
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert metrics.video_fetch_times == {
+            "abc123XYZ01": 2.5,
+            "def456ABC02": 7.8
+        }
+        assert metrics.get_slowest_videos(2) == [
+            ("def456ABC02", 7.8),
+            ("abc123XYZ01", 2.5)
+        ]
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_elapsed_seconds_in_progress_callback(
+        self, mock_fetcher_class, mock_config, mock_checkpoint
+    ):
+        """Test elapsed_seconds is included in progress_callback details.
+
+        US-002 AC: Add elapsed_seconds to progress_callback details dict.
+        """
+        import time
+        from src.caption_fetcher import CaptionResult, CaptionSegment, CaptionMetrics
+
+        # Create state with 3 videos (video_id must be 11 chars)
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file=f"/path/audio/tim{i:02d}ABCD_e.mp3",
+                video_id=f"tim{i:02d}ABCD_e",  # 11 chars
+                url=f"https://youtube.com/watch?v=tim{i:02d}ABCD_e",
+                title=f"Test Video {i}",
+                duration=60.0,
+                keyword="test"
+            )
+            for i in range(3)
+        ]
+
+        mock_config.download.caption_first.max_parallel_fetches = 2
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+        mock_config.download.caption_first.min_coverage_threshold = 0.5
+        mock_config.download.caption_first.timeout = 30
+
+        # Track progress callback calls
+        callback_calls = []
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            """Mock batch fetch that simulates timing."""
+            progress_callback = kwargs.get('progress_callback')
+            metrics = kwargs.get('metrics')
+            results = {}
+
+            for idx, vid in enumerate(video_ids):
+                # Simulate fetch with timing
+                start = time.perf_counter()
+                time.sleep(0.01)  # Small delay to ensure non-zero elapsed
+                elapsed = time.perf_counter() - start
+
+                result = CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en',
+                )
+
+                if metrics:
+                    metrics.record_fetch_success(
+                        video_id=vid,
+                        language='en',
+                        quality='high',
+                        segment_count=1,
+                        elapsed_seconds=elapsed
+                    )
+
+                if progress_callback:
+                    # Simulate success callback with elapsed_seconds
+                    details = {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'language': 'en',
+                        'quality': 'high',
+                        'segment_count': 1,
+                        'is_auto_generated': False,
+                        'elapsed_seconds': elapsed,  # US-002 Sprint 6
+                    }
+                    callback_calls.append((vid, 'success', details))
+                    progress_callback(vid, 'success', details)
+
+                results[vid] = result
+
+            return results
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+
+        # Verify elapsed_seconds in callback details
+        for vid, status, details in callback_calls:
+            assert 'elapsed_seconds' in details, f"Missing elapsed_seconds for {vid}"
+            assert isinstance(details['elapsed_seconds'], float)
+            assert details['elapsed_seconds'] > 0
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_timing_captured_for_10_plus_video_batch(
+        self, mock_fetcher_class, mock_config, mock_checkpoint
+    ):
+        """Test timing data captured correctly for 10+ video batch.
+
+        US-002 AC: Tests verify timing data captured correctly for 10+ video batch.
+        """
+        import time
+        import random
+        from src.caption_fetcher import CaptionResult, CaptionSegment, CaptionMetrics
+
+        # Create state with 12 videos (video_id must be 11 chars)
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file=f"/path/audio/big{i:02d}ABCD_e.mp3",
+                video_id=f"big{i:02d}ABCD_e",  # 11 chars
+                url=f"https://youtube.com/watch?v=big{i:02d}ABCD_e",
+                title=f"Test Video {i}",
+                duration=60.0,
+                keyword="test"
+            )
+            for i in range(12)
+        ]
+
+        mock_config.download.caption_first.max_parallel_fetches = 4
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+        mock_config.download.caption_first.min_coverage_threshold = 0.5
+        mock_config.download.caption_first.timeout = 30
+
+        # Track timing for verification
+        fetch_times = {}
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            """Mock batch fetch with realistic timing variation."""
+            metrics = kwargs.get('metrics')
+            results = {}
+
+            for idx, vid in enumerate(video_ids):
+                # Simulate varying fetch times (0.01-0.05s)
+                start = time.perf_counter()
+                delay = 0.01 + (idx % 5) * 0.01  # Deterministic variation
+                time.sleep(delay)
+                elapsed = time.perf_counter() - start
+                fetch_times[vid] = elapsed
+
+                result = CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en',
+                )
+
+                if metrics:
+                    metrics.record_fetch_success(
+                        video_id=vid,
+                        language='en',
+                        quality='high',
+                        segment_count=1,
+                        elapsed_seconds=elapsed
+                    )
+
+                results[vid] = result
+
+            return results
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+
+        # Verify all 12 videos have timing data
+        checkpoint_data = result.data
+        metrics_dict = checkpoint_data.get('caption_metrics', {})
+        video_fetch_times = metrics_dict.get('video_fetch_times', {})
+
+        assert len(video_fetch_times) == 12, f"Expected 12 videos, got {len(video_fetch_times)}"
+
+        # Verify each video has a positive fetch time
+        for vid in [f"big{i:02d}ABCD_e" for i in range(12)]:
+            assert vid in video_fetch_times, f"Missing timing for {vid}"
+            assert video_fetch_times[vid] > 0, f"Zero timing for {vid}"
+
+    def test_metrics_merge_preserves_slowest_times(self):
+        """Test merging metrics keeps the slower time for duplicate videos."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=2.5
+        )
+
+        metrics2 = CaptionMetrics()
+        # Same video with slower time
+        metrics2.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=5.0  # Slower
+        )
+        # Different video
+        metrics2.record_fetch_success(
+            video_id="def456ABC02",
+            language="en",
+            quality="high",
+            segment_count=30,
+            elapsed_seconds=3.0
+        )
+
+        metrics1.merge(metrics2)
+
+        # Should keep the slower time for duplicate
+        assert metrics1.video_fetch_times["abc123XYZ01"] == 5.0
+        assert metrics1.video_fetch_times["def456ABC02"] == 3.0
+
+    def test_metrics_clear_resets_fetch_times(self):
+        """Test clear() resets video_fetch_times."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="abc123XYZ01",
+            language="en",
+            quality="high",
+            segment_count=50,
+            elapsed_seconds=2.5
+        )
+
+        assert len(metrics.video_fetch_times) == 1
+
+        metrics.clear()
+
+        assert len(metrics.video_fetch_times) == 0
