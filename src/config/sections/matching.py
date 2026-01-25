@@ -227,6 +227,14 @@ class MatchingConfig:
     # Formula: sqrt(pool_size/50) capped at [0.8, 1.2]
     pool_normalization_enabled: bool = True  # Enable confidence normalization by pool size
 
+    # Chain-of-thought prompting for LLM matching
+    # When enabled, uses structured 4-step reasoning prompt:
+    # 1. Identify voiceover themes, 2. List video elements
+    # 3. Evaluate rubric (visual 30%, topic 40%, keyword 20%, flow 10%)
+    # 4. Compute weighted final score
+    # Produces more reliable and explainable match decisions
+    chain_of_thought_enabled: bool = True  # Enable chain-of-thought structured prompting
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 

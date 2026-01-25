@@ -13,15 +13,17 @@ Providers:
 Utilities:
 - validate_llm_reasoning: Check if LLM reasoning is specific (not generic)
 - select_negative_sample: Select a negative sample from bottom candidates
+- build_cot_prompt: Build chain-of-thought structured prompt
+- parse_cot_reasoning: Parse structured CoT response into components
 """
 
 import logging
 import random
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple, Set
 
 from ..utils import SRTSegment
 
@@ -57,6 +59,56 @@ class ReasoningValidation:
     specific_references: int
     matched_keywords: List[str]
     warning_message: Optional[str] = None
+
+
+# Chain-of-thought scoring rubric weights
+COT_RUBRIC_WEIGHTS = {
+    'visual_relevance': 0.30,  # How well video visuals match voiceover content
+    'topic_match': 0.40,       # Alignment of video topic with voiceover theme
+    'keyword_overlap': 0.20,   # Specific keywords shared between voiceover and video
+    'flow': 0.10               # How well the video maintains narrative flow
+}
+
+
+@dataclass
+class CotReasoning:
+    """Parsed chain-of-thought reasoning from LLM response.
+
+    The CoT structure guides LLMs through a 4-step reasoning process:
+    1. Identify key voiceover themes
+    2. List matching elements in video
+    3. Evaluate fit using the rubric
+    4. Compute final score
+
+    This produces more reliable and explainable match decisions.
+    """
+    voiceover_themes: List[str] = field(default_factory=list)
+    video_elements: List[str] = field(default_factory=list)
+    rubric_scores: Dict[str, float] = field(default_factory=dict)
+    final_score: float = 0.0
+    reasoning_text: str = ""
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if all reasoning components are present."""
+        return (
+            len(self.voiceover_themes) > 0 and
+            len(self.video_elements) > 0 and
+            len(self.rubric_scores) > 0 and
+            self.final_score > 0
+        )
+
+    def compute_weighted_score(self) -> float:
+        """Compute final score from rubric scores using weights."""
+        total = 0.0
+        weight_sum = 0.0
+        for key, weight in COT_RUBRIC_WEIGHTS.items():
+            if key in self.rubric_scores:
+                total += self.rubric_scores[key] * weight
+                weight_sum += weight
+        if weight_sum > 0:
+            return total / weight_sum * 1.0  # Normalize to 0-1
+        return self.final_score
 
 
 def _extract_keywords(text: str, min_length: int = 3) -> Set[str]:
@@ -244,6 +296,250 @@ def format_negative_sample_for_prompt(
     return f"  {index_label}. [{source_name}] \"{text_preview}\" (unlikely match - for comparison)"
 
 
+def build_cot_prompt(
+    voiceover_text: str,
+    candidates: List[Tuple[SRTSegment, float]],
+    negative_sample: Optional[Tuple[SRTSegment, float]] = None,
+    context: Optional[str] = None,
+    negative_rules: Optional[List[str]] = None
+) -> str:
+    """
+    Build a chain-of-thought structured prompt for LLM matching.
+
+    The CoT prompt guides the LLM through 4 reasoning steps:
+    1. Identify key voiceover themes
+    2. List matching elements in video
+    3. Evaluate fit using explicit rubric
+    4. Compute final score
+
+    Rubric weights:
+    - Visual relevance: 30%
+    - Topic match: 40%
+    - Keyword overlap: 20%
+    - Flow/pacing: 10%
+
+    Args:
+        voiceover_text: The voiceover text to match
+        candidates: List of (video_segment, similarity) tuples
+        negative_sample: Optional negative sample for calibration
+        context: Optional context string
+        negative_rules: Optional list of things to avoid
+
+    Returns:
+        Formatted CoT prompt string
+    """
+    vo_text_clean = voiceover_text.replace('"', "'")[:100]
+
+    # Format candidates
+    candidates_text = "\n".join([
+        f"  {j+1}. [{Path(seg.source_file).stem[:30] if seg.source_file else 'unknown'}] "
+        f"\"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
+        for j, (seg, sim) in enumerate(candidates[:5])
+    ])
+
+    # Add negative sample if provided
+    negative_sample_text = ""
+    if negative_sample:
+        negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_sample)
+
+    # Build context and rules sections
+    context_str = f"\nCONTEXT: {context}" if context else ""
+    negative_str = ""
+    if negative_rules:
+        negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
+
+    negative_instruction = ""
+    if negative_sample:
+        negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches - do NOT select them."
+
+    # Chain-of-thought structured prompt
+    prompt = f"""Match the voiceover to the best video candidate using structured reasoning.
+{context_str}{negative_str}{negative_instruction}
+
+VOICEOVER: "{vo_text_clean}"
+
+CANDIDATES:
+{candidates_text}{negative_sample_text}
+
+## SCORING RUBRIC (use these weights):
+- Visual Relevance (30%): How well video visuals match voiceover content
+- Topic Match (40%): Alignment of video topic with voiceover theme
+- Keyword Overlap (20%): Specific keywords shared between voiceover and video
+- Flow (10%): How well the video maintains narrative pacing
+
+## REASONING STEPS (follow this structure):
+
+STEP 1 - VOICEOVER THEMES: List 2-3 key themes from the voiceover
+STEP 2 - VIDEO ELEMENTS: For best candidate, list matching visual elements
+STEP 3 - RUBRIC EVALUATION: Score each rubric dimension (0.0-1.0)
+STEP 4 - FINAL SCORE: Compute weighted average
+
+## RESPONSE FORMAT (JSON only, no other text):
+{{
+  "selected": 1,
+  "voiceover_themes": ["theme1", "theme2"],
+  "video_elements": ["element1", "element2"],
+  "rubric_scores": {{"visual_relevance": 0.8, "topic_match": 0.9, "keyword_overlap": 0.7, "flow": 0.8}},
+  "confidence": 0.85,
+  "reason": "brief summary"
+}}"""
+
+    return prompt
+
+
+def parse_cot_reasoning(response_data: dict) -> CotReasoning:
+    """
+    Parse structured CoT response from LLM into CotReasoning object.
+
+    Extracts:
+    - voiceover_themes: List of identified themes
+    - video_elements: List of matching video elements
+    - rubric_scores: Dict of rubric dimension scores
+    - final_score: Computed confidence score
+    - reasoning_text: Brief reason text
+
+    Args:
+        response_data: Parsed JSON response from LLM
+
+    Returns:
+        CotReasoning object with parsed components
+    """
+    if not response_data or not isinstance(response_data, dict):
+        logger.warning("parse_cot_reasoning: Invalid response data")
+        return CotReasoning()
+
+    # Extract themes
+    voiceover_themes = response_data.get('voiceover_themes', [])
+    if isinstance(voiceover_themes, str):
+        voiceover_themes = [voiceover_themes]
+    elif not isinstance(voiceover_themes, list):
+        voiceover_themes = []
+
+    # Extract video elements
+    video_elements = response_data.get('video_elements', [])
+    if isinstance(video_elements, str):
+        video_elements = [video_elements]
+    elif not isinstance(video_elements, list):
+        video_elements = []
+
+    # Extract rubric scores
+    rubric_scores = response_data.get('rubric_scores', {})
+    if not isinstance(rubric_scores, dict):
+        rubric_scores = {}
+
+    # Validate and normalize rubric scores
+    normalized_scores = {}
+    for key in COT_RUBRIC_WEIGHTS:
+        if key in rubric_scores:
+            try:
+                score = float(rubric_scores[key])
+                normalized_scores[key] = max(0.0, min(1.0, score))
+            except (ValueError, TypeError):
+                logger.debug(f"parse_cot_reasoning: Invalid score for {key}")
+
+    # Get confidence/final score
+    final_score = response_data.get('confidence', 0.0)
+    try:
+        final_score = max(0.0, min(1.0, float(final_score)))
+    except (ValueError, TypeError):
+        final_score = 0.0
+
+    # Get reasoning text
+    reasoning_text = str(response_data.get('reason', ''))[:100]
+
+    cot = CotReasoning(
+        voiceover_themes=voiceover_themes,
+        video_elements=video_elements,
+        rubric_scores=normalized_scores,
+        final_score=final_score,
+        reasoning_text=reasoning_text
+    )
+
+    # Log if incomplete
+    if not cot.is_complete:
+        logger.debug(
+            f"parse_cot_reasoning: Incomplete reasoning - "
+            f"themes={len(voiceover_themes)}, elements={len(video_elements)}, "
+            f"rubric={len(normalized_scores)}, score={final_score}"
+        )
+
+    return cot
+
+
+def build_cot_batch_prompt(
+    items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
+    context: Optional[str] = None,
+    negative_rules: Optional[List[str]] = None,
+    negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
+) -> str:
+    """
+    Build a batched chain-of-thought prompt for multiple voiceover-candidate pairs.
+
+    Args:
+        items: List of (voiceover_text, candidates) tuples
+        context: Optional context string for the batch
+        negative_rules: Optional list of negative matching rules
+        negative_samples: Optional list of negative samples (one per item)
+
+    Returns:
+        Formatted batched CoT prompt string
+    """
+    batch_sections = []
+    for i, (vo_text, candidates) in enumerate(items):
+        vo_text_clean = vo_text.replace('"', "'")[:100]
+        candidates_text = "\n".join([
+            f"  {j+1}. [{Path(seg.source_file).stem[:30] if seg.source_file else 'unknown'}] "
+            f"\"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
+            for j, (seg, sim) in enumerate(candidates[:5])
+        ])
+
+        # Add negative sample if provided for this item
+        negative_sample_text = ""
+        if negative_samples and i < len(negative_samples) and negative_samples[i]:
+            negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
+
+        batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
+
+    context_str = f"\nCONTEXT: {context}" if context else ""
+    negative_str = ""
+    if negative_rules:
+        negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
+
+    negative_instruction = ""
+    if negative_samples and any(ns is not None for ns in negative_samples):
+        negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches - do NOT select them."
+
+    prompt = f"""Match each voiceover to its best video candidate using structured reasoning.
+{context_str}{negative_str}{negative_instruction}
+
+{chr(10).join(batch_sections)}
+
+## SCORING RUBRIC (use these weights for each match):
+- Visual Relevance (30%): How well video visuals match voiceover content
+- Topic Match (40%): Alignment of video topic with voiceover theme
+- Keyword Overlap (20%): Specific keywords shared between voiceover and video
+- Flow (10%): How well the video maintains narrative pacing
+
+## REASONING STEPS (for each voiceover):
+1. Identify 2-3 key themes from voiceover
+2. List matching visual elements in best candidate
+3. Score each rubric dimension (0.0-1.0)
+4. Compute weighted average for final confidence
+
+## RESPONSE FORMAT (JSON array only, no other text):
+[{{
+  "voiceover": 1,
+  "selected": 1,
+  "voiceover_themes": ["theme1", "theme2"],
+  "video_elements": ["element1", "element2"],
+  "rubric_scores": {{"visual_relevance": 0.8, "topic_match": 0.9, "keyword_overlap": 0.7, "flow": 0.8}},
+  "confidence": 0.85,
+  "reason": "brief summary"
+}}]"""
+
+    return prompt
+
+
 class LLMProvider(ABC):
     """Base class for LLM providers"""
 
@@ -253,8 +549,9 @@ class LLMProvider(ABC):
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
         negative_rules: Optional[List[str]] = None,
-        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
-    ) -> List[Tuple[int, float, str]]:
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None,
+        use_cot: bool = False
+    ) -> List[Tuple[int, float, str, Optional[CotReasoning]]]:
         """
         Batch match voiceover segments to candidates.
 
@@ -264,9 +561,11 @@ class LLMProvider(ABC):
             negative_rules: Optional list of negative matching rules
             negative_samples: Optional list of negative samples (one per item), used for
                               calibrating confidence by showing what a poor match looks like
+            use_cot: Whether to use chain-of-thought prompting (default: False)
 
         Returns:
-            List of (selected_idx, confidence, reasoning) tuples
+            List of (selected_idx, confidence, reasoning, cot_reasoning) tuples.
+            cot_reasoning is populated when use_cot=True, None otherwise.
         """
         pass
 
@@ -283,39 +582,45 @@ class GeminiMatcher(LLMProvider):
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
         negative_rules: Optional[List[str]] = None,
-        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
-    ) -> List[Tuple[int, float, str]]:
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None,
+        use_cot: bool = False
+    ) -> List[Tuple[int, float, str, Optional[CotReasoning]]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
-        # Build batch prompt
-        batch_sections = []
-        for i, (vo_text, candidates) in enumerate(items):
-            # Escape quotes in text to avoid JSON issues
-            vo_text_clean = vo_text.replace('"', "'")
-            candidates_text = "\n".join([
-                f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
-                for j, (seg, sim) in enumerate(candidates[:5])
-            ])
+        # Use CoT prompt when enabled
+        if use_cot:
+            prompt = build_cot_batch_prompt(items, context, negative_rules, negative_samples)
+            logger.info(f"    GeminiMatcher: using chain-of-thought prompt (timeout=120s)...")
+        else:
+            # Build standard batch prompt
+            batch_sections = []
+            for i, (vo_text, candidates) in enumerate(items):
+                # Escape quotes in text to avoid JSON issues
+                vo_text_clean = vo_text.replace('"', "'")
+                candidates_text = "\n".join([
+                    f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
+                    for j, (seg, sim) in enumerate(candidates[:5])
+                ])
 
-            # Add negative sample if provided for this item
-            negative_sample_text = ""
-            if negative_samples and i < len(negative_samples) and negative_samples[i]:
-                negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
+                # Add negative sample if provided for this item
+                negative_sample_text = ""
+                if negative_samples and i < len(negative_samples) and negative_samples[i]:
+                    negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
 
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean[:100]}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
+                batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean[:100]}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
 
-        context_str = f"\nCONTEXT: {context}" if context else ""
+            context_str = f"\nCONTEXT: {context}" if context else ""
 
-        negative_str = ""
-        if negative_rules:
-            negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
+            negative_str = ""
+            if negative_rules:
+                negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
 
-        # Include instruction about negative sample if any are present
-        negative_instruction = ""
-        if negative_samples and any(ns is not None for ns in negative_samples):
-            negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
+            # Include instruction about negative sample if any are present
+            negative_instruction = ""
+            if negative_samples and any(ns is not None for ns in negative_samples):
+                negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
 
-        prompt = f"""Match each voiceover to its best video candidate based on semantic meaning and topic alignment.
+            prompt = f"""Match each voiceover to its best video candidate based on semantic meaning and topic alignment.
 {context_str}{negative_str}{negative_instruction}
 
 {chr(10).join(batch_sections)}
@@ -323,13 +628,13 @@ class GeminiMatcher(LLMProvider):
 Respond with ONLY a valid JSON array, no other text. Use simple reasons without special characters:
 [{{"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"}}]"""
 
-        logger.info(f"    GeminiMatcher: sending request (timeout=120s)...")
+            logger.info(f"    GeminiMatcher: sending request (timeout=120s)...")
 
         # Call unified LLM client (handles retry and parsing)
         request = LLMRequest(
             prompt=prompt,
             response_format=ResponseFormat.JSON_ARRAY,
-            cache_key_prefix="matching",
+            cache_key_prefix="matching_cot" if use_cot else "matching",
             timeout=120
         )
 
@@ -350,14 +655,29 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
                         confidence = result.get('confidence', 0.7)
                         # Clamp confidence to valid range
                         confidence = max(0.0, min(1.0, float(confidence)))
+
+                        # Parse CoT reasoning if CoT is enabled
+                        cot_reasoning = None
+                        if use_cot:
+                            cot_reasoning = parse_cot_reasoning(result)
+                            # Use weighted score if CoT rubric is complete
+                            if cot_reasoning.is_complete:
+                                weighted_score = cot_reasoning.compute_weighted_score()
+                                # Blend with LLM confidence (70% weighted, 30% LLM)
+                                confidence = 0.7 * weighted_score + 0.3 * confidence
+                                logger.debug(
+                                    f"    CoT: weighted={weighted_score:.3f}, blended={confidence:.3f}"
+                                )
+
                         outputs.append((
                             selected_idx,
                             confidence,
-                            str(result.get('reason', 'matched'))[:50]
+                            str(result.get('reason', 'matched'))[:50],
+                            cot_reasoning
                         ))
                     else:
                         # Fallback for missing voiceover entry
-                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
+                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback", None))
 
                 return outputs
             else:
@@ -368,7 +688,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
             logger.warning(f"Gemini batch error: {e}")
             raise
 
-        return [(0, 0.5, "error fallback") for _ in items]
+        return [(0, 0.5, "error fallback", None) for _ in items]
 
 
 class ClaudeMatcher(LLMProvider):
@@ -383,38 +703,43 @@ class ClaudeMatcher(LLMProvider):
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
         negative_rules: Optional[List[str]] = None,
-        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
-    ) -> List[Tuple[int, float, str]]:
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None,
+        use_cot: bool = False
+    ) -> List[Tuple[int, float, str, Optional[CotReasoning]]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
-        batch_sections = []
-        for i, (vo_text, candidates) in enumerate(items):
-            # Escape quotes in text to avoid JSON issues
-            vo_text_clean = vo_text.replace('"', "'")[:100]
-            candidates_text = "\n".join([
-                f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
-                for j, (seg, sim) in enumerate(candidates[:5])
-            ])
+        # Use CoT prompt when enabled
+        if use_cot:
+            prompt = build_cot_batch_prompt(items, context, negative_rules, negative_samples)
+        else:
+            batch_sections = []
+            for i, (vo_text, candidates) in enumerate(items):
+                # Escape quotes in text to avoid JSON issues
+                vo_text_clean = vo_text.replace('"', "'")[:100]
+                candidates_text = "\n".join([
+                    f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
+                    for j, (seg, sim) in enumerate(candidates[:5])
+                ])
 
-            # Add negative sample if provided for this item
-            negative_sample_text = ""
-            if negative_samples and i < len(negative_samples) and negative_samples[i]:
-                negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
+                # Add negative sample if provided for this item
+                negative_sample_text = ""
+                if negative_samples and i < len(negative_samples) and negative_samples[i]:
+                    negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
 
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
+                batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
 
-        context_str = f"\nCONTEXT: {context}" if context else ""
+            context_str = f"\nCONTEXT: {context}" if context else ""
 
-        negative_str = ""
-        if negative_rules:
-            negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
+            negative_str = ""
+            if negative_rules:
+                negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
 
-        # Include instruction about negative sample if any are present
-        negative_instruction = ""
-        if negative_samples and any(ns is not None for ns in negative_samples):
-            negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
+            # Include instruction about negative sample if any are present
+            negative_instruction = ""
+            if negative_samples and any(ns is not None for ns in negative_samples):
+                negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
 
-        prompt = f"""Match each voiceover to its best video candidate. Consider semantic meaning, visual relevance, and topic alignment.
+            prompt = f"""Match each voiceover to its best video candidate. Consider semantic meaning, visual relevance, and topic alignment.
 {context_str}{negative_str}{negative_instruction}
 
 {chr(10).join(batch_sections)}
@@ -426,7 +751,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
         request = LLMRequest(
             prompt=prompt,
             response_format=ResponseFormat.JSON_ARRAY,
-            cache_key_prefix="matching",
+            cache_key_prefix="matching_cot" if use_cot else "matching",
             max_tokens=1500,
             timeout=120
         )
@@ -447,13 +772,23 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
                         confidence = result.get('confidence', 0.7)
                         # Clamp confidence to valid range
                         confidence = max(0.0, min(1.0, float(confidence)))
+
+                        # Parse CoT reasoning if CoT is enabled
+                        cot_reasoning = None
+                        if use_cot:
+                            cot_reasoning = parse_cot_reasoning(result)
+                            if cot_reasoning.is_complete:
+                                weighted_score = cot_reasoning.compute_weighted_score()
+                                confidence = 0.7 * weighted_score + 0.3 * confidence
+
                         outputs.append((
                             selected_idx,
                             confidence,
-                            str(result.get('reason', 'matched'))[:50]
+                            str(result.get('reason', 'matched'))[:50],
+                            cot_reasoning
                         ))
                     else:
-                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback"))
+                        outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback", None))
 
                 return outputs
             else:
@@ -464,7 +799,7 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
             logger.warning(f"Claude batch error: {e}")
             raise
 
-        return [(0, 0.5, "error fallback") for _ in items]
+        return [(0, 0.5, "error fallback", None) for _ in items]
 
 
 class LocalLLMMatcher(LLMProvider):
@@ -479,8 +814,9 @@ class LocalLLMMatcher(LLMProvider):
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
         negative_rules: Optional[List[str]] = None,
-        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
-    ) -> List[Tuple[int, float, str]]:
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None,
+        use_cot: bool = False
+    ) -> List[Tuple[int, float, str, Optional[CotReasoning]]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
         outputs = []
@@ -506,7 +842,21 @@ class LocalLLMMatcher(LLMProvider):
             if negative_sample_text:
                 negative_instruction = " Do NOT select UNLIKELY - it shows what a poor match looks like."
 
-            prompt = f"""Match this voiceover to the best candidate:{negative_instruction}
+            # Use CoT prompt when enabled (simplified for local LLM)
+            if use_cot:
+                prompt = f"""Match this voiceover to the best candidate using structured reasoning:{negative_instruction}
+
+VOICEOVER: "{vo_text_clean}"
+
+CANDIDATES:
+{candidates_text}{negative_sample_text}
+
+RUBRIC: visual_relevance (30%), topic_match (40%), keyword_overlap (20%), flow (10%)
+
+Respond with ONLY valid JSON:
+{{"selected": 1, "voiceover_themes": ["theme1"], "video_elements": ["element1"], "rubric_scores": {{"visual_relevance": 0.8, "topic_match": 0.9, "keyword_overlap": 0.7, "flow": 0.8}}, "confidence": 0.85, "reason": "topic match"}}"""
+            else:
+                prompt = f"""Match this voiceover to the best candidate:{negative_instruction}
 
 VOICEOVER: "{vo_text_clean}"
 
@@ -520,7 +870,7 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
                 request = LLMRequest(
                     prompt=prompt,
                     response_format=ResponseFormat.JSON,
-                    cache_key_prefix="matching",
+                    cache_key_prefix="matching_cot" if use_cot else "matching",
                     timeout=60
                 )
 
@@ -532,18 +882,28 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
                     selected_idx = data.get('selected', 1) - 1
                     selected_idx = max(0, min(selected_idx, len(candidates) - 1))
                     confidence = max(0.0, min(1.0, float(data.get('confidence', 0.5))))
+
+                    # Parse CoT reasoning if CoT is enabled
+                    cot_reasoning = None
+                    if use_cot:
+                        cot_reasoning = parse_cot_reasoning(data)
+                        if cot_reasoning.is_complete:
+                            weighted_score = cot_reasoning.compute_weighted_score()
+                            confidence = 0.7 * weighted_score + 0.3 * confidence
+
                     outputs.append((
                         selected_idx,
                         confidence,
-                        str(data.get('reason', 'local match'))[:50]
+                        str(data.get('reason', 'local match'))[:50],
+                        cot_reasoning
                     ))
                 else:
                     # Fallback
-                    outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback"))
+                    outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback", None))
 
             except Exception as e:
                 logger.debug(f"Local LLM error: {e}")
                 # Fallback
-                outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback"))
+                outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback", None))
 
         return outputs

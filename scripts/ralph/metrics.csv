@@ -108,3 +108,4 @@ timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,t
 2026-01-25 13:47:11,2026-01-25_125204,sprint-5,US-003,Standard,9,true,false,quality,438,,13,,1,537,15,0,102716,102716,308148,0
 2026-01-25 13:54:54,2026-01-25_134911,sprint-5,US-004,Standard,6,true,false,quality,382,,13,,1,954,4,0,170411,170411,0,0
 2026-01-25 14:01:43,2026-01-25_134911,sprint-5,US-005,Standard,7,true,false,quality,418,,14,,1,716,3,0,203202,203202,0,0
+2026-01-25 14:06:30,2026-01-25_134911,sprint-5,US-006,Standard,5,true,false,quality,287,,14,,1,642,3,0,56922,56922,170766,0
