@@ -88,5 +88,76 @@ function Get-ExistingContext {
     }
 }
 
+function Show-ResumePrompt {
+    <#
+    .SYNOPSIS
+        Displays resume prompt for interrupted interview sessions
+    .PARAMETER ExistingContext
+        The context hashtable from Get-ExistingContext
+    .RETURNS
+        $true if user wants to resume, $false for new interview
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$ExistingContext
+    )
+
+    Write-Host "  Found interrupted session:" -ForegroundColor Yellow
+    Write-Host ""
+
+    # Display context (truncate if too long)
+    $contextText = $ExistingContext.Context
+    if ($contextText.Length -gt 200) {
+        $contextText = $contextText.Substring(0, 197) + "..."
+    }
+    Write-Host "  Context: $contextText" -ForegroundColor Gray
+    Write-Host ""
+
+    # Show progress
+    $completed = $ExistingContext.Completed
+    $total = $ExistingContext.Total
+    Write-Host "  Progress: $completed/$total focus areas complete" -ForegroundColor Cyan
+    Write-Host ""
+
+    # List remaining focus areas
+    $remaining = $ExistingContext.FocusAreas | Where-Object { -not $_.completed }
+    if ($remaining.Count -gt 0) {
+        Write-Host "  Remaining focus areas:" -ForegroundColor White
+        foreach ($area in $remaining) {
+            $areaName = if ($area.name) { $area.name } else { $area.area }
+            Write-Host "    - $areaName" -ForegroundColor Gray
+        }
+        Write-Host ""
+    }
+
+    # Prompt user
+    Write-Host "  Resume this session? [Y]es / [N]ew interview" -ForegroundColor Yellow -NoNewline
+    $response = Read-Host " "
+
+    return ($response -match "^[Yy]")
+}
+
 # Entry point
 Write-RalphHeader
+
+# Check for existing session to resume
+$existing = Get-ExistingContext
+if ($existing.HasContext -and -not $Resume) {
+    $shouldResume = Show-ResumePrompt -ExistingContext $existing
+    if ($shouldResume) {
+        Write-Host "  Resuming previous session..." -ForegroundColor Green
+        $script:ResumeMode = $true
+        $script:FocusAreas = $existing.FocusAreas | Where-Object { -not $_.completed }
+    } else {
+        Write-Host "  Starting new interview..." -ForegroundColor Cyan
+        $script:ResumeMode = $false
+    }
+} elseif ($Resume -and $existing.HasContext) {
+    # -Resume flag was passed explicitly
+    Write-Host "  Resuming previous session (via -Resume flag)..." -ForegroundColor Green
+    $script:ResumeMode = $true
+    $script:FocusAreas = $existing.FocusAreas | Where-Object { -not $_.completed }
+} else {
+    # No existing context or starting fresh
+    $script:ResumeMode = $false
+}
