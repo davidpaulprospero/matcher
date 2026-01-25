@@ -1,165 +1,165 @@
 {
-  "branchName": "ralph/sprint-6",
-  "sprintNumber": 6,
+  "branchName": "ralph/sprint-7",
+  "sprintNumber": 7,
   "focusArea": "caption",
-  "projectContext": "Sprint 6 focuses on caption system hardening, observability, and integration. Sprint 5 delivered parallel fetching, live stream detection, language fallback chains, coverage metrics, partial recovery, format preferences, timestamp validation, pre-check, streaming progress, and fixture health checks. Sprint 6 advances: (1) Thread safety under high concurrency, (2) Per-video timeout tracking and batch resilience, (3) Language selection audit trails, (4) Format success rate telemetry, (5) Configuration validation at startup, (6) Caption quality impact on match confidence, (7) Timing validation precision, (8) Cross-project cache validation, (9) Normalizer edge case handling, (10) Integration test coverage for end-to-end quality flow.",
+  "projectContext": "Sprint 7 focuses on caption system resilience, adaptive intelligence, and operational tooling. Sprint 6 delivered thread safety, per-video timing, language audit trails, format telemetry, config validation, quality-weighted matching, timing epsilon, cache validation, normalizer edge cases, and integration tests. Sprint 7 advances: (1) Segment-level parsing error recovery for partial caption success, (2) Adaptive format ordering based on historical success rates, (3) Error categorization with circuit breaker patterns, (4) Metrics export and structured reporting, (5) Standalone validation CLI for testing configurations, (6) Batch pre-check optimization with channel-aware caching, (7) Network error pattern detection and early abort, (8) Caption timing integration into match confidence, (9) Channel-level caption availability patterns, (10) Stress tests for high-concurrency caption fetching.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add thread-safe locking to streaming progress callback",
-      "description": "With 8+ parallel workers calling the progress callback simultaneously, concurrent updates to TTY output can produce garbled lines. Add thread synchronization to ensure clean output under high concurrency.",
+      "title": "Add segment-level error recovery to caption parsers",
+      "description": "Caption parsers (VTT, SRT, JSON3) currently fail the entire video if one segment is malformed. Implement graceful degradation that skips invalid segments while preserving valid ones, improving success rate for videos with partially corrupted caption data.",
       "priority": 1,
       "acceptanceCriteria": [
-        "Add threading.Lock to CaptionStage progress callback protecting TTY writes",
-        "Protect last_line_length state variable with the same lock",
-        "Create test simulating 8 concurrent workers calling on_progress simultaneously",
-        "Verify output remains readable without garbled lines or character overlaps",
-        "Add docstring documenting thread-safety guarantees for progress_callback",
-        "Performance test confirms lock adds <5ms overhead per callback"
+        "Modify _parse_vtt() to wrap each segment in try/except, logging skipped segment index",
+        "Modify _parse_srt() to continue parsing after malformed segment block",
+        "Modify _parse_json3() to skip events with missing required fields (tStartMs, segs)",
+        "Track skipped_segments in CaptionResult with list of (index, reason) tuples",
+        "Add partial_recovery flag to CaptionResult when segments were skipped but result is usable",
+        "Tests verify: video with 100 segments and 5 corrupted still returns 95 valid segments"
       ],
       "passes": true,
-      "notes": "Implemented threading.Lock (progress_lock) in on_progress callback. All TTY writes and last_line_length state are now protected under 'with progress_lock:'. Added TestProgressCallbackThreadSafety class with 4 tests: concurrent callbacks (16 vids, 8 workers), state protection, <5ms overhead verification, TTY serialization. Tests verify no garbled output, no deadlocks, avg timing well under 5ms. Files: src/stages/caption_stage.py, tests/test_stage_caption.py"
+      "notes": "Implemented ParseResult dataclass to return both segments and skipped_segments. Added partial_recovery flag to CaptionResult. All three parsers (VTT, SRT, JSON3) now wrap segment parsing in try/except and log skipped segments. Tests verify 100 segments with 5 corrupted returns 95 valid (283 tests pass)."
     },
     {
       "id": "US-002",
-      "title": "Implement per-video timeout tracking in batch fetch",
-      "description": "Currently batch fetch has a single timeout; no visibility into which specific video caused a timeout or how long each video took. Add granular timing data for debugging slow fetches.",
+      "title": "Implement adaptive format ordering from historical success rates",
+      "description": "The preferred_formats order is currently static. Use format_success_counts metrics from previous runs to dynamically reorder formats, trying historically successful formats first to reduce latency.",
       "priority": 2,
       "acceptanceCriteria": [
-        "Track start_time and elapsed_seconds for each video in fetch_single()",
-        "Add elapsed_seconds to progress_callback details dict",
-        "Log warning if individual video takes >80% of timeout threshold",
-        "Add CaptionMetrics method get_slowest_videos(n=5) returning video_ids by fetch time",
-        "Print summary in CaptionStage: 'Slowest fetches: abc123=8.2s, def456=7.1s'",
-        "Tests verify timing data captured correctly for 10+ video batch"
+        "Add CaptionMetrics.get_optimal_format_order() returning formats sorted by success rate",
+        "Persist format success rates in caption cache metadata for cross-run learning",
+        "CaptionFetcher.fetch_single() uses adaptive order when config.adaptive_format_order=true",
+        "Log format reordering: 'Adaptive format order: vtt (95%), json3 (80%), srt (60%)'",
+        "Config option caption_first.adaptive_format_order (default: true)",
+        "Tests verify format with 90% success rate tried before format with 50% success rate"
       ],
-      "passes": true,
-      "notes": "Implemented per-video timing in fetch_single() with time.perf_counter(). Added video_fetch_times Dict to CaptionMetrics. Added get_slowest_videos(n=5) method. Warning logged when video takes >80% of timeout. elapsed_seconds added to all progress_callback details and error_result dicts. 12 new tests added in TestPerVideoTimeoutTracking class. Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_stage_caption.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add language selection audit trail to metrics",
-      "description": "When fallback_languages is configured, users have no visibility into why a specific language was selected for each video. Add detailed tracing to debug multilingual projects.",
+      "title": "Add error categorization with type-specific retry budgets",
+      "description": "All caption fetch errors currently share the same retry budget. Network errors should retry more aggressively than parse errors (which are unlikely to succeed on retry). Categorize errors and apply appropriate retry strategies.",
       "priority": 3,
       "acceptanceCriteria": [
-        "Add language_selection_trace: List[Dict] field to CaptionMetrics",
-        "Each trace entry includes: video_id, attempted_codes, selected_code, selection_reason",
-        "Print trace summary in CaptionStage: 'Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2'",
-        "Add method get_language_fallback_efficiency() returning % using preferred language",
-        "Trace entries include whether manual or auto captions were selected",
-        "Tests verify trace captures full decision chain for multi-fallback scenario"
+        "Create CaptionErrorCategory enum: NETWORK, TIMEOUT, PARSE, UNAVAILABLE, RATE_LIMIT",
+        "Map exception types to categories in fetch_single() error handling",
+        "Add per-category retry budgets to config: {network: 3, timeout: 2, parse: 1, unavailable: 0}",
+        "Track error_category_counts in CaptionMetrics for debugging",
+        "Log error category with retry decision: 'NETWORK error, retry 2/3' vs 'PARSE error, no retry'",
+        "Tests verify parse errors skip retries while network errors use full budget"
       ],
-      "passes": true,
-      "notes": "Added language_selection_trace: List[Dict] field to CaptionMetrics. Implemented record_language_selection() storing video_id, attempted_codes, selected_code, selection_reason, is_auto_generated. Added get_language_fallback_efficiency() returning % using preferred language. Added get_language_fallback_summary() for categorized counts. Updated summary() to print 'Language fallback: N preferred, M fallback-1...' breakdown. Updated to_dict/from_dict/merge/clear for serialization. Added 17 tests in TestLanguageSelectionTrace class covering all AC including thread safety. Files: src/caption_fetcher.py, tests/test_stage_caption.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Track format preference success rates in metrics",
-      "description": "Users configure preferred_formats but cannot see if their preference is actually being honored. Add telemetry showing which formats succeed most often.",
+      "title": "Create structured metrics export to JSON file",
+      "description": "CaptionMetrics.summary() only prints to console. Add structured export capability for historical tracking, dashboards, and cross-project analysis.",
       "priority": 4,
       "acceptanceCriteria": [
-        "Add format_success_counts: Dict[str, int] to CaptionMetrics tracking successes per format",
-        "Track format_fallback_count: number of videos that needed format != first preference",
-        "Add method get_format_statistics() returning success rate per format",
-        "Print in CaptionStage summary: 'Format success: json3 92% (92/100), vtt 8% (fallback)'",
-        "Track which format ultimately succeeded for each video in fetch result",
-        "Tests verify statistics calculated correctly across batch with mixed format results"
+        "Add CaptionMetrics.export_json(path) writing all metrics to timestamped JSON file",
+        "Include run metadata: timestamp, project_path, config snapshot, video_count",
+        "Add --export-caption-metrics flag to CLI writing to project/caption_metrics.json",
+        "Export includes all sub-metrics: timing, formats, languages, errors, cache validation",
+        "JSON schema documented in docstring with example output structure",
+        "Tests verify exported JSON is valid and contains all expected fields"
       ],
-      "passes": true,
-      "notes": "Added format_success_counts: Dict[str, int], format_fallback_count: int, video_format_used: Dict[str, str] to CaptionMetrics. Added format_source and preferred_format params to record_fetch_success(). Implemented get_format_statistics() returning format_counts, format_rates, fallback_count, fallback_rate, total_with_format. Updated summary() to print 'Format success: json3 92% (92/100)...' with fallback count. Added format_source to progress_callback details in fetch_single(). Updated to_dict/from_dict/merge/clear for serialization. Added 15 tests in TestFormatPreferenceTracking class covering all AC. Files: src/caption_fetcher.py, tests/test_stage_caption.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Validate language configuration at CaptionStage initialization",
-      "description": "Invalid language codes in fallback_languages or duplicates between preferred and fallback chain cause silent failures during fetch. Add startup validation for fail-fast behavior.",
+      "title": "Build standalone caption configuration validation CLI",
+      "description": "Users cannot test caption-first configuration without running the full pipeline. Create a lightweight validation command that checks config and tests fetching a few sample videos.",
       "priority": 5,
       "acceptanceCriteria": [
-        "Add validate_language_config() method checking all language codes are valid ISO 639-1",
-        "Detect and warn if preferred_language appears in fallback_languages chain",
-        "Detect and error on duplicate entries within fallback_languages",
-        "Call validation in CaptionStage.__init__() before first fetch",
-        "Invalid codes raise ConfigValidationError with clear message and suggestion",
-        "Tests verify validation catches: invalid codes, duplicates, preferred-in-fallback"
+        "Add 'python main.py --validate-captions' mode that runs config validation only",
+        "Validation checks: language codes, format preferences, timeout values, cache path writability",
+        "With --validate-captions --test-fetch N: fetch captions for N random sample videos",
+        "Print validation summary: 'Config valid. Test fetch: 3/3 success, avg 2.1s, json3 format'",
+        "Return exit code 0 for valid config, 1 for validation errors, 2 for test fetch failures",
+        "Tests verify CLI validates config correctly and reports test fetch results"
       ],
-      "passes": true,
-      "notes": "Added ConfigValidationError exception with field/value/reason/suggestion attributes. Added ISO_639_1_CODES frozenset (~180 codes). Added is_valid_language_code() and validate_language_config() functions in caption_fetcher.py. CaptionStage.__init__() accepts optional config param and calls _validate_language_config(). Validation also runs in run() if not done at init. Invalid codes and duplicates raise ConfigValidationError. Preferred in fallback logs warning but doesn't error (redundant but functional). 28 tests added: TestLanguageConfigValidation (17) and TestCaptionStageLanguageValidation (11). Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_caption_fetcher.py, tests/test_stage_caption.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Apply caption quality weights to match confidence scores",
-      "description": "Auto-generated captions have lower accuracy than manual captions but currently affect match confidence equally. Add configurable weights that reduce confidence for lower quality captions.",
+      "title": "Implement batch pre-check optimization with channel caching",
+      "description": "Pre-check availability runs separately for each video. Batch pre-checks by channel to reduce API calls, since channels typically either have captions for all videos or none.",
       "priority": 6,
       "acceptanceCriteria": [
-        "Add caption_quality_weights config to MatchConfig: {high: 1.0, medium: 0.9, low: 0.75}",
-        "MatchStage applies weight to raw confidence: adjusted = raw * quality_weight",
-        "Log confidence adjustments: 'Confidence adjusted 0.85 -> 0.64 (low quality caption)'",
-        "CaptionResult quality flows through text_metadata to MatchStage",
-        "Add config option matching.apply_caption_quality_weights (default: true)",
-        "Tests verify same match text produces different confidence with high vs low quality"
+        "Add channel_caption_pattern cache: {channel_id: {has_captions: bool, confidence: float}}",
+        "Group videos by channel_id before pre-check, check representative sample per channel",
+        "Skip individual pre-checks for channels with >90% confidence in pattern",
+        "Config option caption_first.batch_precheck_by_channel (default: true)",
+        "Track pre_check_batched_count in metrics showing API calls saved",
+        "Tests verify 50 videos from same channel use 5 sample checks instead of 50"
       ],
-      "passes": true,
-      "notes": "Added caption_quality_weights: Dict[str, float] config to MatchingConfig (supports multiplicative mode: high=1.0, medium=0.9, low=0.75). Updated apply_caption_quality_adjustment() in scoring.py to support both multiplicative weights (US-006) and legacy additive boost/penalty (US-007). Multiplicative mode uses: adjusted = raw * weight. Logging format: 'Confidence adjusted 0.85 -> 0.64 (low quality caption)'. Quality flows via caption_quality in text_metadata (already implemented US-007). Config uses caption_quality_adjustment_enabled for toggle. Added 11 new tests in TestCaptionQualityMultiplicativeWeights class covering all AC. Files: src/config/sections/matching.py, src/matching/scoring.py, tests/test_scoring.py, config.yaml"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Add timing epsilon tolerance to validate_timing method",
-      "description": "Floating-point precision can cause captions ending at 299.999s in a 300s video to be flagged as timing issues. Add configurable epsilon tolerance for boundary cases.",
+      "title": "Add network error pattern detection with early abort",
+      "description": "When 30%+ videos fail with the same network error (gateway timeout, geoblocking), the pipeline wastes time retrying. Detect error patterns early and offer to abort or switch strategies.",
       "priority": 7,
       "acceptanceCriteria": [
-        "Add timing_epsilon_ms parameter to validate_timing() (default: 100.0)",
-        "Captions ending within epsilon of video duration treated as valid, not exceeding",
-        "TimingValidationResult includes timing_epsilon_applied field showing value used",
-        "Config option caption_first.timing_epsilon_ms for project-level override",
-        "Document epsilon rationale in validate_timing docstring",
-        "Tests verify: 300.05s caption in 300s video valid with 100ms epsilon, invalid with 10ms"
+        "Track error patterns: {error_signature: [video_ids]} during batch fetch",
+        "Trigger pattern alert when same error affects >30% of first 10 videos",
+        "Log pattern detection: 'Pattern detected: 403 Forbidden (8/10 videos) - possible geoblocking'",
+        "Config option caption_first.abort_on_error_pattern (default: warn)",
+        "Modes: 'abort' (stop immediately), 'warn' (log and continue), 'skip' (no detection)",
+        "Tests verify pattern detection triggers at threshold with correct error signature"
       ],
-      "passes": true,
-      "notes": "Added timing_epsilon_ms parameter (default 100.0) to CaptionResult.validate_timing(). Epsilon snaps caption end times within tolerance to video duration before exceeds check. Added timing_epsilon_applied field to TimingValidationResult for traceability. Added caption_first.timing_epsilon_ms config option in CaptionFirstConfig and config.yaml. Comprehensive docstring explains rationale with examples. TestTimingEpsilonTolerance class contains 10 tests covering: valid within tolerance (300.05s@100ms), beyond tolerance, strict 10ms epsilon, boundary snapping, zero epsilon exact matching, serialization, combined with max_exceed_ratio, negative difference handling, and default value verification. Files: src/caption_fetcher.py, src/config/sections/download.py, config.yaml, tests/test_caption_fetcher.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add cross-project caption cache validation",
-      "description": "When caption_first.cache_captions=true, corrupted data from one project can silently propagate to others. Add validation that checks cached data integrity before use.",
+      "title": "Integrate caption timing validation into match confidence",
+      "description": "Caption timing validation (US-007 Sprint 6) currently only logs warnings. When timing issues are detected (exceeds duration, low coverage), apply confidence penalty in matching stage.",
       "priority": 8,
       "acceptanceCriteria": [
-        "Add cache entry validation checking (video_id, language, segment_count) consistency",
-        "Add config option caption_first.cache_validation: 'strict'|'warn'|'skip' (default: 'warn')",
-        "In strict mode: reject cache if segment_count differs >20% from expected",
-        "In warn mode: log warning and re-fetch on validation failure",
-        "Track cache_validation_results in metrics: {passed: N, rejected: M, refetched: K}",
-        "Tests verify cached captions rejected when language or count mismatch detected"
+        "Add timing_penalty_factor to CaptionResult based on validate_timing() results",
+        "Penalty formula: 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)",
+        "Pass timing_penalty through text_metadata to MatchStage",
+        "MatchStage applies: adjusted_confidence = raw * quality_weight * timing_penalty",
+        "Config option matching.apply_timing_penalty (default: true)",
+        "Tests verify poor timing (50% coverage, 20% exceeds) reduces confidence by ~25%"
       ],
-      "passes": true,
-      "notes": "Added CacheValidationResult dataclass with is_valid, video_id, language, reason, expected/actual segment counts, deviation. Added cache_validation config (modes: strict/warn/skip) and cache_validation_tolerance (0.2 = 20%) to CaptionFirstConfig. Added CaptionCache.validate_cache_entry() checking video_id match, language match, segment_count within tolerance (expected = duration/3). Added CaptionCache.get_validated_caption() handling modes: warn deletes+refetch, strict rejects without delete, skip bypasses validation. Added CaptionMetrics.record_cache_validation() and get_cache_validation_stats() returning {passed, rejected, refetched, total, pass_rate}. Added cache_validation_passed/rejected/refetched fields to CaptionMetrics with full serialization support. 18 tests in TestCacheValidation, TestCacheValidationResult, TestCaptionMetricsCacheValidation covering all AC. Files: src/config/sections/download.py, config.yaml, src/caption_fetcher.py, tests/test_caption_cache.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Handle normalizer edge cases for corrupted segments",
-      "description": "The CaptionNormalizer handles basic corruption but lacks tests for edge cases like negative durations, overlapping segments with text merge, and segment index conflicts.",
+      "title": "Track channel-level caption availability patterns",
+      "description": "Some YouTube channels consistently have captions while others never do. Track channel patterns to predict caption availability and prioritize fetch order.",
       "priority": 9,
       "acceptanceCriteria": [
-        "Add test: segment with start=-5, end=2 fixed to start=0, end>=min_duration",
-        "Add test: segment with negative duration (start > end) gets swapped or skipped",
-        "Add test: overlapping segments (0-5, 3-8) merged with concatenated text",
-        "Add test: duplicate segment indices re-indexed sequentially",
-        "Add test: gap > max_gap creates placeholder segment preserving timing",
-        "Document all edge case behaviors in CaptionNormalizer docstring with examples"
+        "Add ChannelCaptionPattern dataclass: channel_id, videos_checked, captions_found, success_rate",
+        "Persist channel patterns in caption cache for cross-project learning",
+        "Add CaptionMetrics.get_channel_statistics() returning top/bottom channels by success",
+        "Sort fetch order: high-success channels first when config.prioritize_by_channel=true",
+        "Print channel summary: 'Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)'",
+        "Tests verify channel patterns update correctly after batch fetch"
       ],
-      "passes": true,
-      "notes": "Added TestNormalizerEdgeCasesSprint6 class with 13 comprehensive tests covering all AC: test_negative_start_time_severe_fixed_to_zero (start=-5,end=2->0,2), test_negative_start_requiring_duration_extension, test_negative_duration_start_greater_than_end (start>end extended to start+min_duration), test_negative_duration_with_larger_min_duration, test_overlapping_segments_merged_with_text_concatenation (0-5,3-8 merged with 'First Second'), test_three_overlapping_segments_merged, test_duplicate_indices_reindexed_sequentially (5,5,5->0,1,2), test_non_sequential_indices_reindexed, test_large_gap_creates_placeholder_segment (gap>max_gap inserts placeholder with text=''), test_gap_exactly_at_threshold_extends_not_placeholder, test_gap_just_over_threshold_creates_placeholder, test_multiple_gaps_with_mixed_sizes, test_combined_edge_cases. Updated CaptionNormalizer docstring with comprehensive 'Edge Case Behaviors' section documenting: negative starts (clamped to 0), negative durations (end extended), overlapping segments (3 strategies), duplicate indices (re-indexed sequentially), gap handling (extend/placeholder), empty text filtering, partial recovery. Files: src/caption_fetcher.py, tests/test_caption_normalizer.py"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Create integration test for caption quality impact on matching",
-      "description": "No end-to-end test verifies that caption quality metadata flows through to match confidence. Add comprehensive integration test validating the full pipeline path.",
+      "title": "Create stress tests for high-concurrency caption fetching",
+      "description": "Caption fetching with 8+ parallel workers hasn't been stress-tested for edge cases: race conditions, resource exhaustion, error cascade. Add comprehensive stress test suite.",
       "priority": 10,
       "acceptanceCriteria": [
-        "Create TestCaptionQualityMatchIntegration class in tests/test_caption_match_integration.py",
-        "Test: mock low-quality auto-generated captions flow to MatchStage with quality='low'",
-        "Test: match confidence differs for same text when quality is 'high' vs 'low'",
-        "Test: final OTIO segments include caption_quality metadata for downstream filtering",
-        "Test verifies quality weights config correctly applied (if US-006 implemented)",
-        "Document test as integration smoke test for caption-to-match quality pipeline"
+        "Create TestCaptionStressSuite class in tests/test_caption_stress.py",
+        "Test: 100 videos with 16 workers completes without deadlock or memory leak",
+        "Test: 50% error rate doesn't cause cascade failure or worker starvation",
+        "Test: mixed slow/fast videos (0.1s to 5s latency) maintains fair scheduling",
+        "Test: abrupt cancellation during batch fetch cleans up all worker threads",
+        "Add pytest marker @pytest.mark.stress for selective execution"
       ],
       "passes": false,
       "notes": ""

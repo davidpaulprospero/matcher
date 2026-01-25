@@ -199,6 +199,46 @@ class ConfigValidationError(CaptionError):
         super().__init__(message)
 
 
+@dataclass
+class ParseResult:
+    """Result of parsing caption content with error recovery (US-001 Sprint 7).
+
+    This dataclass holds both successfully parsed segments and information about
+    segments that were skipped due to parse errors. This enables graceful degradation
+    where videos with partially corrupted caption data can still provide usable results.
+
+    Attributes:
+        segments: List of successfully parsed caption segments.
+        skipped_segments: List of (index, reason) tuples for segments that failed to parse.
+            The index is the position in the original content, and reason describes the error.
+        total_attempted: Total number of segments that parsing was attempted on.
+
+    Example:
+        >>> result = ParseResult(
+        ...     segments=[CaptionSegment(0, 1.0, 2.0, "Hello", "vid1")],
+        ...     skipped_segments=[(2, "Invalid timestamp format"), (5, "Missing text")],
+        ...     total_attempted=10
+        ... )
+        >>> result.success_rate
+        0.8
+    """
+    segments: List['CaptionSegment'] = field(default_factory=list)
+    skipped_segments: List[tuple] = field(default_factory=list)  # (index, reason)
+    total_attempted: int = 0
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate of parsing."""
+        if self.total_attempted == 0:
+            return 1.0
+        return len(self.segments) / self.total_attempted
+
+    @property
+    def has_skipped(self) -> bool:
+        """Check if any segments were skipped."""
+        return len(self.skipped_segments) > 0
+
+
 # ISO 639-1 language codes (US-005)
 # This is a comprehensive set of valid 2-letter language codes
 # Reference: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
@@ -407,7 +447,8 @@ class CaptionResult:
         is_auto_generated: True if auto-generated captions.
         format_source: Caption format ('vtt', 'srv3', 'json3', etc.).
         video_duration: Optional video duration for coverage calculation (US-004).
-        skipped_segments_count: Number of segments skipped due to parse errors (US-005).
+        skipped_segments: List of (index, reason) tuples for skipped segments (US-001 Sprint 7).
+        partial_recovery: True when segments were skipped but result is still usable (US-001 Sprint 7).
         timing_validated: Result of timing validation, or None if not validated (US-007).
     """
     video_id: str
@@ -416,8 +457,14 @@ class CaptionResult:
     is_auto_generated: bool = False
     format_source: str = ""  # 'vtt', 'srv3', 'json3', etc.
     video_duration: Optional[float] = None  # US-004: For coverage calculation
-    skipped_segments_count: int = 0  # US-005: Segments skipped due to parse errors
+    skipped_segments: List[tuple] = field(default_factory=list)  # US-001: (index, reason) tuples
+    partial_recovery: bool = False  # US-001: True when segments skipped but result usable
     timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
+
+    @property
+    def skipped_segments_count(self) -> int:
+        """Backwards-compatible property for number of skipped segments."""
+        return len(self.skipped_segments)
 
     @property
     def text(self) -> str:
@@ -1805,21 +1852,26 @@ class CaptionFetcher:
             sub_file = sub_files[0]
             logger.debug(f"Found subtitle file: {sub_file}")
 
-            # Parse the subtitle file
-            segments = self._parse_subtitle_file(sub_file, video_id)
+            # Parse the subtitle file with error recovery (US-001 Sprint 7)
+            parse_result = self._parse_subtitle_file(sub_file, video_id)
 
-            if not segments:
+            if not parse_result.segments:
                 return None
 
             # Determine format from filename
             format_source = sub_file.suffix.lstrip('.')
 
+            # Set partial_recovery flag if segments were skipped but we still have valid results
+            partial_recovery = parse_result.has_skipped and len(parse_result.segments) > 0
+
             return CaptionResult(
                 video_id=video_id,
-                segments=segments,
+                segments=parse_result.segments,
                 language=language,
                 is_auto_generated=auto_generated,
-                format_source=format_source
+                format_source=format_source,
+                skipped_segments=parse_result.skipped_segments,
+                partial_recovery=partial_recovery
             )
 
         except subprocess.TimeoutExpired:
@@ -1833,8 +1885,8 @@ class CaptionFetcher:
         self,
         file_path: Path,
         video_id: str
-    ) -> List[CaptionSegment]:
-        """Parse a subtitle file into segments.
+    ) -> ParseResult:
+        """Parse a subtitle file into segments with error recovery.
 
         Supports VTT, SRT, and JSON3/SRV3 formats.
 
@@ -1843,7 +1895,7 @@ class CaptionFetcher:
             video_id: Video ID for segment source_file field.
 
         Returns:
-            List of CaptionSegment objects.
+            ParseResult with segments and any skipped segment info (US-001 Sprint 7).
         """
         suffix = file_path.suffix.lower()
 
@@ -1862,8 +1914,8 @@ class CaptionFetcher:
             logger.warning(f"Unknown subtitle format: {suffix}, trying VTT parser")
             return self._parse_vtt(content, video_id)
 
-    def _parse_vtt(self, content: str, video_id: str) -> List[CaptionSegment]:
-        """Parse VTT (WebVTT) format captions.
+    def _parse_vtt(self, content: str, video_id: str) -> ParseResult:
+        """Parse VTT (WebVTT) format captions with segment-level error recovery.
 
         VTT format:
             WEBVTT
@@ -1873,13 +1925,22 @@ class CaptionFetcher:
 
             00:00:05.000 --> 00:00:08.000
             This is a test.
+
+        Error Recovery (US-001 Sprint 7):
+            Individual segment parsing errors are caught and logged, allowing
+            the parser to continue with remaining segments. Skipped segments
+            are recorded with their index and error reason.
+
+        Returns:
+            ParseResult with segments and any skipped segment info.
         """
         segments = []
+        skipped_segments = []
         lines = content.split('\n')
 
         # Skip header
         i = 0
-        while i < len(lines) and not '-->' in lines[i]:
+        while i < len(lines) and '-->' not in lines[i]:
             i += 1
 
         # VTT timestamp pattern: HH:MM:SS.mmm or MM:SS.mmm
@@ -1888,48 +1949,73 @@ class CaptionFetcher:
         )
 
         current_index = 0
+        segment_count = 0  # Track total segments attempted
         while i < len(lines):
             line = lines[i].strip()
 
             match = timestamp_pattern.search(line)
             if match:
-                # Parse timestamps
-                start_time = self._parse_timestamp(match.group(0).split('-->')[0].strip())
-                end_time = self._parse_timestamp(match.group(0).split('-->')[1].strip())
+                segment_count += 1
+                segment_start_line = i
+                try:
+                    # Parse timestamps
+                    start_time = self._parse_timestamp(match.group(0).split('-->')[0].strip())
+                    end_time = self._parse_timestamp(match.group(0).split('-->')[1].strip())
 
-                # Collect text lines until empty line or next timestamp
-                i += 1
-                text_lines = []
-                while i < len(lines):
-                    text_line = lines[i].strip()
-                    if not text_line:
-                        i += 1
-                        break
-                    if timestamp_pattern.search(text_line):
-                        break
-                    # Skip VTT style tags
-                    text_line = re.sub(r'<[^>]+>', '', text_line)
-                    if text_line:
-                        text_lines.append(text_line)
+                    if start_time is None or end_time is None:
+                        raise ValueError(f"Invalid timestamp at line {i + 1}")
+
+                    # Collect text lines until empty line or next timestamp
                     i += 1
+                    text_lines = []
+                    while i < len(lines):
+                        text_line = lines[i].strip()
+                        if not text_line:
+                            i += 1
+                            break
+                        if timestamp_pattern.search(text_line):
+                            break
+                        # Skip VTT style tags
+                        text_line = re.sub(r'<[^>]+>', '', text_line)
+                        if text_line:
+                            text_lines.append(text_line)
+                        i += 1
 
-                text = ' '.join(text_lines).strip()
-                if text:
-                    segments.append(CaptionSegment(
-                        index=current_index,
-                        start_time=start_time,
-                        end_time=end_time,
-                        text=text,
-                        source_file=video_id
-                    ))
-                    current_index += 1
+                    text = ' '.join(text_lines).strip()
+                    if text:
+                        segments.append(CaptionSegment(
+                            index=current_index,
+                            start_time=start_time,
+                            end_time=end_time,
+                            text=text,
+                            source_file=video_id
+                        ))
+                        current_index += 1
+                    # Empty text is not an error, just skip silently
+                except Exception as e:
+                    reason = f"Parse error: {str(e)}"
+                    skipped_segments.append((segment_count - 1, reason))
+                    logger.debug(f"[{video_id}] Skipped VTT segment {segment_count - 1}: {reason}")
+                    # Advance to next timestamp or empty line to continue parsing
+                    while i < len(lines) and lines[i].strip() and not timestamp_pattern.search(lines[i]):
+                        i += 1
             else:
                 i += 1
 
-        return segments
+        if skipped_segments:
+            logger.info(
+                f"[{video_id}] VTT parse: {len(segments)} segments parsed, "
+                f"{len(skipped_segments)} skipped"
+            )
 
-    def _parse_srt(self, content: str, video_id: str) -> List[CaptionSegment]:
-        """Parse SRT (SubRip) format captions.
+        return ParseResult(
+            segments=segments,
+            skipped_segments=skipped_segments,
+            total_attempted=segment_count
+        )
+
+    def _parse_srt(self, content: str, video_id: str) -> ParseResult:
+        """Parse SRT (SubRip) format captions with segment-level error recovery.
 
         SRT format:
             1
@@ -1939,90 +2025,161 @@ class CaptionFetcher:
             2
             00:00:05,000 --> 00:00:08,000
             This is a test.
+
+        Error Recovery (US-001 Sprint 7):
+            Individual block parsing errors are caught and logged, allowing
+            the parser to continue with remaining blocks. Skipped blocks
+            are recorded with their index and error reason.
+
+        Returns:
+            ParseResult with segments and any skipped segment info.
         """
         segments = []
+        skipped_segments = []
         blocks = re.split(r'\n\s*\n', content.strip())
 
-        for block in blocks:
-            lines = block.strip().split('\n')
-            if len(lines) < 2:
+        for block_idx, block in enumerate(blocks):
+            try:
+                lines = block.strip().split('\n')
+                if len(lines) < 2:
+                    continue
+
+                # Find timestamp line
+                timestamp_line = None
+                text_start_idx = 0
+                for idx, line in enumerate(lines):
+                    if '-->' in line:
+                        timestamp_line = line
+                        text_start_idx = idx + 1
+                        break
+
+                if not timestamp_line:
+                    continue
+
+                # Parse timestamps
+                parts = timestamp_line.split('-->')
+                if len(parts) != 2:
+                    raise ValueError(f"Invalid timestamp format: {timestamp_line}")
+
+                start_time = self._parse_timestamp(parts[0].strip())
+                end_time = self._parse_timestamp(parts[1].strip())
+
+                if start_time is None or end_time is None:
+                    raise ValueError(f"Could not parse timestamps: {timestamp_line}")
+
+                # Get text
+                text = ' '.join(lines[text_start_idx:]).strip()
+                text = re.sub(r'<[^>]+>', '', text)  # Remove tags
+
+                if text:
+                    segments.append(CaptionSegment(
+                        index=len(segments),
+                        start_time=start_time,
+                        end_time=end_time,
+                        text=text,
+                        source_file=video_id
+                    ))
+                # Empty text after timestamp is not an error, just skip
+            except Exception as e:
+                reason = f"Parse error: {str(e)}"
+                skipped_segments.append((block_idx, reason))
+                logger.debug(f"[{video_id}] Skipped SRT block {block_idx}: {reason}")
                 continue
 
-            # Find timestamp line
-            timestamp_line = None
-            text_start_idx = 0
-            for idx, line in enumerate(lines):
-                if '-->' in line:
-                    timestamp_line = line
-                    text_start_idx = idx + 1
-                    break
+        if skipped_segments:
+            logger.info(
+                f"[{video_id}] SRT parse: {len(segments)} segments parsed, "
+                f"{len(skipped_segments)} skipped"
+            )
 
-            if not timestamp_line:
-                continue
+        return ParseResult(
+            segments=segments,
+            skipped_segments=skipped_segments,
+            total_attempted=len(blocks)
+        )
 
-            # Parse timestamps
-            parts = timestamp_line.split('-->')
-            if len(parts) != 2:
-                continue
-
-            start_time = self._parse_timestamp(parts[0].strip())
-            end_time = self._parse_timestamp(parts[1].strip())
-
-            # Get text
-            text = ' '.join(lines[text_start_idx:]).strip()
-            text = re.sub(r'<[^>]+>', '', text)  # Remove tags
-
-            if text and start_time is not None and end_time is not None:
-                segments.append(CaptionSegment(
-                    index=len(segments),
-                    start_time=start_time,
-                    end_time=end_time,
-                    text=text,
-                    source_file=video_id
-                ))
-
-        return segments
-
-    def _parse_json3(self, content: str, video_id: str) -> List[CaptionSegment]:
-        """Parse JSON3/SRV3 format captions from YouTube.
+    def _parse_json3(self, content: str, video_id: str) -> ParseResult:
+        """Parse JSON3/SRV3 format captions from YouTube with error recovery.
 
         JSON3 format has 'events' array with 'segs' containing text segments.
+
+        Error Recovery (US-001 Sprint 7):
+            Events with missing required fields (tStartMs, segs) are skipped
+            and logged. Other events continue to be processed.
+
+        Returns:
+            ParseResult with segments and any skipped event info.
         """
+        skipped_segments = []
+
         try:
             data = json.loads(content)
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse JSON3 caption format")
-            return []
+        except json.JSONDecodeError as e:
+            logger.warning(f"[{video_id}] Failed to parse JSON3 caption format: {e}")
+            return ParseResult(
+                segments=[],
+                skipped_segments=[(0, f"JSON decode error: {str(e)}")],
+                total_attempted=1
+            )
 
         segments = []
         events = data.get('events', [])
 
-        for event in events:
-            if 'segs' not in event:
+        for event_idx, event in enumerate(events):
+            try:
+                # Check for required fields per acceptance criteria
+                if 'segs' not in event:
+                    skipped_segments.append((event_idx, "Missing 'segs' field"))
+                    logger.debug(f"[{video_id}] Skipped JSON3 event {event_idx}: Missing 'segs' field")
+                    continue
+
+                if 'tStartMs' not in event:
+                    skipped_segments.append((event_idx, "Missing 'tStartMs' field"))
+                    logger.debug(f"[{video_id}] Skipped JSON3 event {event_idx}: Missing 'tStartMs' field")
+                    continue
+
+                start_ms = event['tStartMs']
+                duration_ms = event.get('dDurationMs', 0)
+
+                # Validate numeric types
+                if not isinstance(start_ms, (int, float)):
+                    raise ValueError(f"tStartMs is not numeric: {type(start_ms)}")
+
+                # Combine all segs text
+                text_parts = []
+                for seg in event['segs']:
+                    if 'utf8' in seg:
+                        text_parts.append(seg['utf8'])
+
+                text = ''.join(text_parts).strip()
+                text = text.replace('\n', ' ')
+
+                if text:
+                    segments.append(CaptionSegment(
+                        index=len(segments),
+                        start_time=start_ms / 1000.0,
+                        end_time=(start_ms + duration_ms) / 1000.0,
+                        text=text,
+                        source_file=video_id
+                    ))
+                # Empty text events are not errors, just skip
+            except Exception as e:
+                reason = f"Parse error: {str(e)}"
+                skipped_segments.append((event_idx, reason))
+                logger.debug(f"[{video_id}] Skipped JSON3 event {event_idx}: {reason}")
                 continue
 
-            start_ms = event.get('tStartMs', 0)
-            duration_ms = event.get('dDurationMs', 0)
+        if skipped_segments:
+            logger.info(
+                f"[{video_id}] JSON3 parse: {len(segments)} segments parsed, "
+                f"{len(skipped_segments)} skipped"
+            )
 
-            # Combine all segs text
-            text_parts = []
-            for seg in event['segs']:
-                if 'utf8' in seg:
-                    text_parts.append(seg['utf8'])
-
-            text = ''.join(text_parts).strip()
-            text = text.replace('\n', ' ')
-
-            if text:
-                segments.append(CaptionSegment(
-                    index=len(segments),
-                    start_time=start_ms / 1000.0,
-                    end_time=(start_ms + duration_ms) / 1000.0,
-                    text=text,
-                    source_file=video_id
-                ))
-
-        return segments
+        return ParseResult(
+            segments=segments,
+            skipped_segments=skipped_segments,
+            total_attempted=len(events) if events else 1
+        )
 
     def _parse_timestamp(self, ts: str) -> Optional[float]:
         """Parse a timestamp string to seconds.

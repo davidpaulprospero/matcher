@@ -4061,3 +4061,108 @@ Added comprehensive test coverage for CaptionNormalizer edge cases and enhanced 
 - tests/test_caption_normalizer.py - Added TestNormalizerEdgeCasesSprint6 class with 13 tests
 - src/caption_fetcher.py - Enhanced CaptionNormalizer docstring with edge case documentation
 
+
+## Iteration - [US-010] Create integration test for caption quality impact on matching
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Created comprehensive integration test suite validating the full pipeline path from caption quality metadata through to match confidence scoring.
+
+**Tests Created (tests/test_caption_match_integration.py - 17 tests across 3 classes):**
+
+**TestCaptionQualityMatchIntegration (14 tests):**
+1. test_low_quality_caption_flows_to_match_stage - Verifies caption_quality='low' from CaptionStage propagates to video segments and produces lower confidence (0.85 -> 0.6375)
+2. test_auto_generated_flag_correlates_with_quality - Verifies auto-generated correlates with low/medium, human with high quality
+3. test_same_text_different_quality_different_confidence - Key US-006 AC: identical text yields different confidence (0.80 high vs 0.60 low)
+4. test_medium_quality_between_high_and_low - Verifies all three quality levels produce expected weights
+5. test_caption_quality_preserved_in_segment - Verifies quality transfers from text_metadata to SRTSegment
+6. test_caption_quality_in_match_result_metadata - Verifies match results can include quality for downstream filtering
+7. test_text_metadata_to_match_quality_flow - Complete integration flow: CaptionStage -> MatchStage -> scoring
+8. test_quality_weights_config_applied - Verifies US-006 multiplicative weights (0.90 * 0.9 = 0.81)
+9. test_custom_weights_override_defaults - Verifies custom weights in config override defaults
+10. test_additive_mode_when_weights_none - Verifies US-007 additive mode backward compatibility
+11. test_adjustment_disabled_no_change - Verifies disabled adjustment produces no change
+12. test_no_caption_quality_attribute_no_change - Verifies segments without quality attribute unchanged
+13. test_unknown_quality_value_defaults_to_1 - Verifies unknown quality values default to weight=1.0
+14. test_confidence_capped_at_1_and_0 - Verifies confidence clamped to [0.0, 1.0]
+
+**TestCaptionQualityDistributionLogging (2 tests):**
+1. test_quality_distribution_counting - Verifies distribution counting as done in MatchStage._prepare_segments
+2. test_empty_quality_distribution - Verifies empty distribution handled gracefully
+
+**TestCaptionQualityPipelineSmokeTest (1 test):**
+1. test_full_pipeline_smoke_test - Comprehensive end-to-end smoke test simulating CaptionStage output through MatchStage scoring
+
+### Acceptance Criteria Met
+- [x] Create TestCaptionQualityMatchIntegration class in tests/test_caption_match_integration.py
+- [x] Test: mock low-quality auto-generated captions flow to MatchStage with quality='low'
+- [x] Test: match confidence differs for same text when quality is 'high' vs 'low' (0.80 vs 0.60)
+- [x] Test: final OTIO segments include caption_quality metadata for downstream filtering
+- [x] Test verifies quality weights config correctly applied (US-006 integration)
+- [x] Document test as integration smoke test for caption-to-match quality pipeline
+
+### Verification
+- All 17 new tests pass
+- main.py --help: PASSED
+- Test file: 756 lines
+
+### Files Created
+- tests/test_caption_match_integration.py (new)
+
+## Focus Area: caption - 2026-01-26 03:37:30
+- Status: In Progress...
+
+
+## Iteration - [US-001] Add segment-level error recovery to caption parsers
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Implemented segment-level error recovery for all three caption parsers (VTT, SRT, JSON3) to handle partially corrupted caption data gracefully.
+
+**New Classes/Dataclasses (src/caption_fetcher.py):**
+- **ParseResult**: New dataclass holding segments list, skipped_segments list (index, reason tuples), and total_attempted count
+  - Properties: success_rate, has_skipped
+
+**Modified Classes (src/caption_fetcher.py):**
+- **CaptionResult**: 
+  - Changed `skipped_segments_count: int` to `skipped_segments: List[tuple]` for detailed tracking
+  - Added `partial_recovery: bool` flag for when segments skipped but result usable
+  - Added backwards-compatible `skipped_segments_count` property
+
+**Modified Methods (src/caption_fetcher.py):**
+- **_parse_vtt()**: Wraps each segment in try/except, logs skipped index, returns ParseResult
+- **_parse_srt()**: Continues after malformed blocks, logs skipped index with reason
+- **_parse_json3()**: Skips events missing tStartMs or segs fields, tracks in skipped_segments
+- **_parse_subtitle_file()**: Returns ParseResult instead of List[CaptionSegment]
+- **fetch_captions() caller**: Creates CaptionResult with skipped_segments and partial_recovery
+
+### Tests Added (tests/test_caption_fetcher.py)
+Created TestSegmentLevelErrorRecovery class with 9 tests:
+1. test_vtt_100_segments_5_corrupted_returns_95_valid - VTT with 95 valid out of 100
+2. test_srt_100_segments_5_corrupted_returns_95_valid - SRT with 95 valid, 5 skipped
+3. test_json3_100_events_5_missing_fields_returns_95_valid - JSON3 recovers from missing fields
+4. test_partial_recovery_flag_set_when_segments_skipped - Flag set correctly
+5. test_skipped_segments_include_index_and_reason - Tuple structure verified
+6. test_caption_result_skipped_segments_count_property - Backwards compatibility
+7. test_caption_result_partial_recovery_false_when_no_skips - No skips = no flag
+8. test_parse_result_success_rate - 95/100 = 0.95
+9. test_parse_result_success_rate_empty - Division by zero handled
+
+### Acceptance Criteria Met
+- [x] Modify _parse_vtt() to wrap each segment in try/except, logging skipped segment index
+- [x] Modify _parse_srt() to continue parsing after malformed segment block
+- [x] Modify _parse_json3() to skip events with missing required fields (tStartMs, segs)
+- [x] Track skipped_segments in CaptionResult with list of (index, reason) tuples
+- [x] Add partial_recovery flag to CaptionResult when segments were skipped but result is usable
+- [x] Tests verify: video with 100 segments and 5 corrupted still returns 95 valid segments
+
+### Verification
+- All 283 caption fetcher tests pass
+- main.py --help: PASSED
+- 9 new segment recovery tests pass
+
+### Files Modified
+- src/caption_fetcher.py (ParseResult class, modified parsers, updated CaptionResult)
+- tests/test_caption_fetcher.py (added TestSegmentLevelErrorRecovery, updated existing tests for ParseResult return type)
