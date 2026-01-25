@@ -390,6 +390,12 @@ class BatchRetryConfig:
       - Retry all queued videos together (pass 1)
       - If still failing, wait and retry again (pass 2)
       - After 2 passes, give up on remaining failures
+
+    Circuit breaker coordination:
+      When respect_circuit_breaker is enabled (default), the batch retry queue
+      will check the circuit breaker state before processing. If the circuit
+      breaker is tripped, the retry queue will wait for it to recover before
+      retrying. This prevents retries from being wasted during active rate limits.
     """
     # Enable/disable batch retry queue
     enabled: bool = True
@@ -401,6 +407,11 @@ class BatchRetryConfig:
     # Maximum retry passes per download session
     # After this many batch retries, give up on remaining failures
     max_passes: int = 2
+
+    # Respect circuit breaker state when processing retries
+    # If True, wait for circuit breaker to recover before retrying
+    # If False, retry immediately after delay_seconds regardless of circuit breaker
+    respect_circuit_breaker: bool = True
 
 
 @dataclass
