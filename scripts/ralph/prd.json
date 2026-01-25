@@ -113,8 +113,8 @@
         "Document epsilon rationale in validate_timing docstring",
         "Tests verify: 300.05s caption in 300s video valid with 100ms epsilon, invalid with 10ms"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added timing_epsilon_ms parameter (default 100.0) to CaptionResult.validate_timing(). Epsilon snaps caption end times within tolerance to video duration before exceeds check. Added timing_epsilon_applied field to TimingValidationResult for traceability. Added caption_first.timing_epsilon_ms config option in CaptionFirstConfig and config.yaml. Comprehensive docstring explains rationale with examples. TestTimingEpsilonTolerance class contains 10 tests covering: valid within tolerance (300.05s@100ms), beyond tolerance, strict 10ms epsilon, boundary snapping, zero epsilon exact matching, serialization, combined with max_exceed_ratio, negative difference handling, and default value verification. Files: src/caption_fetcher.py, src/config/sections/download.py, config.yaml, tests/test_caption_fetcher.py"
     },
     {
       "id": "US-008",

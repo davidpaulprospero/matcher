@@ -3954,3 +3954,29 @@ Implemented multiplicative caption quality weights for confidence scoring.
 - [x] CaptionResult quality flows through text_metadata to MatchStage (already done US-007)
 - [x] Config option matching.apply_caption_quality_weights (uses caption_quality_adjustment_enabled)
 - [x] Tests verify same match text produces different confidence with high vs low quality
+
+## Iteration 7 - [US-007] Add timing epsilon tolerance to validate_timing method
+
+**Implemented:**
+- Added `timing_epsilon_ms` parameter (default: 100.0) to `CaptionResult.validate_timing()`
+- Epsilon tolerance snaps caption end times within tolerance to video duration before the exceeds check
+- Added `timing_epsilon_applied` field to `TimingValidationResult` for traceability
+- Added `caption_first.timing_epsilon_ms` config option in `CaptionFirstConfig` dataclass
+- Added config entry in `config.yaml` with documentation
+
+**Key Design Decisions:**
+- Epsilon is applied using absolute difference (`abs(caption_end - duration) <= epsilon`)
+- This handles both captions slightly over AND slightly under duration (symmetric tolerance)
+- Original `caption_end_time` is preserved in result; only the exceeds check uses the snapped value
+- Coverage calculation still uses original value for accuracy
+
+**Files Modified:**
+- `src/caption_fetcher.py`: TimingValidationResult, validate_timing() method
+- `src/config/sections/download.py`: CaptionFirstConfig.timing_epsilon_ms
+- `config.yaml`: caption_first.timing_epsilon_ms entry
+- `tests/test_caption_fetcher.py`: TestTimingEpsilonTolerance (10 tests)
+
+**Test Results:**
+- All 10 new epsilon tolerance tests pass
+- All 14 existing timing validation tests pass
+- All 274 tests in test_caption_fetcher.py pass
