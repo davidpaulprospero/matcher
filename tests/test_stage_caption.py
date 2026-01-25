@@ -1907,3 +1907,467 @@ class TestPerVideoTimeoutTracking:
         metrics.clear()
 
         assert len(metrics.video_fetch_times) == 0
+
+
+# ============================================================================
+# Test Language Selection Audit Trail (US-003 Sprint 6)
+# ============================================================================
+
+class TestLanguageSelectionTrace:
+    """Test US-003 Sprint 6: Language selection audit trail in CaptionMetrics.
+
+    Verifies:
+    - language_selection_trace: List[Dict] field stores trace entries
+    - Each trace entry includes: video_id, attempted_codes, selected_code, selection_reason, is_auto_generated
+    - summary() prints: 'Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2'
+    - get_language_fallback_efficiency() returns % using preferred language
+    - Trace entries include whether manual or auto captions were selected
+    - Trace captures full decision chain for multi-fallback scenario
+    """
+
+    def test_record_language_selection_stores_trace_entry(self):
+        """Test record_language_selection() adds correct trace entry.
+
+        US-003 AC: Each trace entry includes video_id, attempted_codes, selected_code, selection_reason.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="dQw4w9WgXcQ",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
+
+        assert len(metrics.language_selection_trace) == 1
+        entry = metrics.language_selection_trace[0]
+        assert entry['video_id'] == "dQw4w9WgXcQ"
+        assert entry['attempted_codes'] == ['es', 'pt', 'en']
+        assert entry['selected_code'] == 'en'
+        assert entry['selection_reason'] == 'English fallback'
+        assert entry['is_auto_generated'] is True
+
+    def test_record_language_selection_multiple_entries(self):
+        """Test recording multiple language selection decisions.
+
+        US-003 AC: Trace captures full decision chain for multi-fallback scenario.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Preferred language found
+        metrics.record_language_selection(
+            video_id="video001__XYZ",
+            attempted_codes=['es'],
+            selected_code='es',
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        # Fallback position 1
+        metrics.record_language_selection(
+            video_id="video002__ABC",
+            attempted_codes=['es', 'pt'],
+            selected_code='pt',
+            selection_reason='fallback chain position 1',
+            is_auto_generated=False
+        )
+
+        # Fallback position 2
+        metrics.record_language_selection(
+            video_id="video003__DEF",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code='en',
+            selection_reason='fallback chain position 2',
+            is_auto_generated=True
+        )
+
+        # English fallback
+        metrics.record_language_selection(
+            video_id="video004__GHI",
+            attempted_codes=['es', 'pt', 'fr'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
+
+        assert len(metrics.language_selection_trace) == 4
+
+    def test_get_language_fallback_efficiency_preferred(self):
+        """Test get_language_fallback_efficiency() returns correct percentage.
+
+        US-003 AC: Method returns % using preferred language.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # 3 out of 4 videos used Spanish (75%)
+        for i in range(3):
+            metrics.record_language_selection(
+                video_id=f"video{i:03d}__ABC",
+                attempted_codes=['es'],
+                selected_code='es',
+                selection_reason='preferred language',
+                is_auto_generated=False
+            )
+
+        # 1 video fell back to English
+        metrics.record_language_selection(
+            video_id="video003__DEF",
+            attempted_codes=['es', 'en'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
+
+        efficiency = metrics.get_language_fallback_efficiency('es')
+        assert efficiency == 75.0
+
+    def test_get_language_fallback_efficiency_empty_trace(self):
+        """Test get_language_fallback_efficiency() returns 0.0 for empty trace."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        assert metrics.get_language_fallback_efficiency('en') == 0.0
+
+    def test_get_language_fallback_efficiency_case_insensitive(self):
+        """Test get_language_fallback_efficiency() is case-insensitive."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['EN'],
+            selected_code='EN',  # Uppercase
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        # Should match with lowercase search
+        assert metrics.get_language_fallback_efficiency('en') == 100.0
+        assert metrics.get_language_fallback_efficiency('EN') == 100.0
+
+    def test_get_language_fallback_summary_categories(self):
+        """Test get_language_fallback_summary() categorizes correctly.
+
+        US-003 AC: Summary shows preferred, fallback-1, fallback-2, etc.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # 15 preferred
+        for i in range(15):
+            metrics.record_language_selection(
+                video_id=f"pref{i:03d}__XYZ",
+                attempted_codes=['es'],
+                selected_code='es',
+                selection_reason='preferred language',
+                is_auto_generated=False
+            )
+
+        # 8 fallback-1
+        for i in range(8):
+            metrics.record_language_selection(
+                video_id=f"fb1_{i:03d}__XYZ",
+                attempted_codes=['es', 'pt'],
+                selected_code='pt',
+                selection_reason='fallback chain position 1',
+                is_auto_generated=False
+            )
+
+        # 2 fallback-2
+        for i in range(2):
+            metrics.record_language_selection(
+                video_id=f"fb2_{i:03d}__XYZ",
+                attempted_codes=['es', 'pt', 'fr'],
+                selected_code='fr',
+                selection_reason='fallback chain position 2',
+                is_auto_generated=True
+            )
+
+        summary = metrics.get_language_fallback_summary()
+
+        assert summary.get('preferred') == 15
+        assert summary.get('fallback_1') == 8
+        assert summary.get('fallback_2') == 2
+
+    def test_summary_includes_language_fallback_line(self):
+        """Test summary() includes language fallback breakdown.
+
+        US-003 AC: Print trace summary: 'Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2'.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Add a few trace entries
+        for i in range(15):
+            metrics.record_language_selection(
+                video_id=f"pref{i:03d}__XYZ",
+                attempted_codes=['es'],
+                selected_code='es',
+                selection_reason='preferred language',
+                is_auto_generated=False
+            )
+
+        for i in range(8):
+            metrics.record_language_selection(
+                video_id=f"fb1_{i:03d}__XYZ",
+                attempted_codes=['es', 'pt'],
+                selected_code='pt',
+                selection_reason='fallback chain position 1',
+                is_auto_generated=False
+            )
+
+        for i in range(2):
+            metrics.record_language_selection(
+                video_id=f"fb2_{i:03d}__XYZ",
+                attempted_codes=['es', 'pt', 'fr'],
+                selected_code='fr',
+                selection_reason='fallback chain position 2',
+                is_auto_generated=True
+            )
+
+        summary_text = metrics.summary()
+
+        assert "Language fallback:" in summary_text
+        assert "15 preferred" in summary_text
+        assert "8 fallback-1" in summary_text
+        assert "2 fallback-2" in summary_text
+
+    def test_trace_includes_auto_vs_manual(self):
+        """Test trace entries include whether manual or auto captions selected.
+
+        US-003 AC: Trace entries include whether manual or auto captions were selected.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Manual captions
+        metrics.record_language_selection(
+            video_id="manual01__ABC",
+            attempted_codes=['en'],
+            selected_code='en',
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        # Auto-generated captions
+        metrics.record_language_selection(
+            video_id="auto001__XYZ",
+            attempted_codes=['en'],
+            selected_code='en',
+            selection_reason='preferred language',
+            is_auto_generated=True
+        )
+
+        assert metrics.language_selection_trace[0]['is_auto_generated'] is False
+        assert metrics.language_selection_trace[1]['is_auto_generated'] is True
+
+    def test_to_dict_includes_language_selection_trace(self):
+        """Test to_dict() serializes language_selection_trace correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
+
+        data = metrics.to_dict()
+
+        assert 'language_selection_trace' in data
+        assert len(data['language_selection_trace']) == 1
+        assert data['language_selection_trace'][0]['video_id'] == "video001__ABC"
+
+    def test_from_dict_restores_language_selection_trace(self):
+        """Test from_dict() restores language_selection_trace correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {
+            'fetch_attempts': 5,
+            'successes': 4,
+            'failures': 1,
+            'language_selection_trace': [
+                {
+                    'video_id': 'video001__ABC',
+                    'attempted_codes': ['es', 'pt', 'en'],
+                    'selected_code': 'en',
+                    'selection_reason': 'English fallback',
+                    'is_auto_generated': True
+                }
+            ]
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert len(metrics.language_selection_trace) == 1
+        assert metrics.language_selection_trace[0]['video_id'] == 'video001__ABC'
+        assert metrics.language_selection_trace[0]['selected_code'] == 'en'
+
+    def test_merge_combines_language_selection_traces(self):
+        """Test merging metrics combines language selection traces."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['es'],
+            selected_code='es',
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        metrics2 = CaptionMetrics()
+        metrics2.record_language_selection(
+            video_id="video002__XYZ",
+            attempted_codes=['pt'],
+            selected_code='pt',
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        metrics1.merge(metrics2)
+
+        assert len(metrics1.language_selection_trace) == 2
+        video_ids = [e['video_id'] for e in metrics1.language_selection_trace]
+        assert "video001__ABC" in video_ids
+        assert "video002__XYZ" in video_ids
+
+    def test_clear_resets_language_selection_trace(self):
+        """Test clear() resets language_selection_trace."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['en'],
+            selected_code='en',
+            selection_reason='preferred language',
+            is_auto_generated=False
+        )
+
+        assert len(metrics.language_selection_trace) == 1
+
+        metrics.clear()
+
+        assert len(metrics.language_selection_trace) == 0
+
+    def test_get_language_fallback_summary_english_fallback(self):
+        """Test summary categorizes English fallback correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
+
+        summary = metrics.get_language_fallback_summary()
+        assert summary.get('english_fallback') == 1
+
+    def test_get_language_fallback_summary_any_available(self):
+        """Test summary categorizes any-available fallback correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['es', 'pt', 'en', 'fr'],
+            selected_code='de',
+            selection_reason='any available fallback',
+            is_auto_generated=True
+        )
+
+        summary = metrics.get_language_fallback_summary()
+        assert summary.get('any_available') == 1
+
+    def test_get_language_fallback_summary_none_available(self):
+        """Test summary categorizes none-available correctly."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_language_selection(
+            video_id="video001__ABC",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code=None,
+            selection_reason='none available',
+            is_auto_generated=False
+        )
+
+        summary = metrics.get_language_fallback_summary()
+        assert summary.get('none') == 1
+
+    def test_thread_safety_record_language_selection(self):
+        """Test record_language_selection() is thread-safe.
+
+        US-003: Thread-safe with Lock for parallel caption fetching.
+        """
+        from src.caption_fetcher import CaptionMetrics
+        import threading
+
+        metrics = CaptionMetrics()
+        num_threads = 16
+        entries_per_thread = 10
+
+        def record_selections(thread_id):
+            for i in range(entries_per_thread):
+                metrics.record_language_selection(
+                    video_id=f"t{thread_id:02d}_v{i:03d}",
+                    attempted_codes=['en'],
+                    selected_code='en',
+                    selection_reason='preferred language',
+                    is_auto_generated=False
+                )
+
+        threads = [
+            threading.Thread(target=record_selections, args=(i,))
+            for i in range(num_threads)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should have all entries without corruption
+        expected = num_threads * entries_per_thread
+        assert len(metrics.language_selection_trace) == expected
+
+    def test_summary_no_language_fallback_when_empty(self):
+        """Test summary() doesn't include language fallback line when no trace."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record a fetch but no language selection
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=50
+        )
+
+        summary_text = metrics.summary()
+
+        # Should NOT have language fallback line
+        assert "Language fallback:" not in summary_text

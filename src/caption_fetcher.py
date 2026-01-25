@@ -2905,6 +2905,7 @@ class CaptionMetrics:
     Updated US-002: Tracks skipped live streams separately.
     Updated US-004: Tracks coverage distribution (high/medium/low).
     Updated US-008: Tracks pre-check availability results.
+    Updated US-003 Sprint 6: Language selection audit trail for fallback debugging.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
@@ -2914,6 +2915,7 @@ class CaptionMetrics:
     - Quality distribution (human, auto, unavailable)
     - Coverage distribution (high >80%, medium 50-80%, low <50%) (US-004)
     - Total segments fetched
+    - Language selection audit trail (US-003 Sprint 6)
 
     Thread Safety:
         All mutation methods are protected by a Lock for concurrent access
@@ -2923,8 +2925,16 @@ class CaptionMetrics:
         metrics = CaptionMetrics()
         metrics.record_fetch_attempt("dQw4w9WgXcQ")
         metrics.record_fetch_success("dQw4w9WgXcQ", language="en", quality="high", coverage_ratio=0.85)
+        metrics.record_language_selection(
+            video_id="dQw4w9WgXcQ",
+            attempted_codes=['es', 'pt', 'en'],
+            selected_code='en',
+            selection_reason='English fallback',
+            is_auto_generated=True
+        )
         # ... later ...
         print(metrics.summary())
+        print(f"Efficiency: {metrics.get_language_fallback_efficiency('es')}%")
 
     Attributes:
         fetch_attempts: Total fetch attempts made
@@ -2937,6 +2947,7 @@ class CaptionMetrics:
         language_distribution: Dict mapping language code -> count
         quality_distribution: Dict mapping quality level -> count
         coverage_distribution: Dict mapping coverage level -> count (US-004)
+        language_selection_trace: List of language selection audit entries (US-003 Sprint 6)
         total_segments: Total caption segments fetched
     """
 
@@ -2971,6 +2982,10 @@ class CaptionMetrics:
     # Per-video timing tracking (US-002 Sprint 6)
     # Dict mapping video_id to elapsed_seconds for slowest videos analysis
     video_fetch_times: Dict[str, float] = field(default_factory=dict)
+
+    # Language selection audit trail (US-003 Sprint 6)
+    # Each entry: {video_id, attempted_codes, selected_code, selection_reason, is_auto_generated}
+    language_selection_trace: List[Dict[str, Any]] = field(default_factory=list)
 
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -3185,6 +3200,135 @@ class CaptionMetrics:
 
         logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
 
+    def record_language_selection(
+        self,
+        video_id: str,
+        attempted_codes: List[str],
+        selected_code: Optional[str],
+        selection_reason: str,
+        is_auto_generated: bool = False
+    ) -> None:
+        """Record a language selection decision for audit trail (US-003 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Each trace entry captures the full decision chain for debugging
+        multilingual projects with fallback_languages configured.
+
+        Args:
+            video_id: YouTube video ID.
+            attempted_codes: List of language codes tried in order (e.g., ['es', 'pt', 'en']).
+            selected_code: The language code that was selected, or None if no language available.
+            selection_reason: Human-readable reason for selection:
+                - 'preferred language' if first choice succeeded
+                - 'fallback chain position N' if fallback was used
+                - 'English fallback' if fell back to English
+                - 'any available fallback' if no preferred/fallback found
+                - 'none available' if no language could be selected
+            is_auto_generated: Whether the selected caption is auto-generated.
+
+        Example:
+            >>> metrics.record_language_selection(
+            ...     video_id="dQw4w9WgXcQ",
+            ...     attempted_codes=['es', 'pt', 'en'],
+            ...     selected_code='en',
+            ...     selection_reason='English fallback',
+            ...     is_auto_generated=True
+            ... )
+        """
+        with self._lock:
+            trace_entry = {
+                'video_id': video_id,
+                'attempted_codes': attempted_codes,
+                'selected_code': selected_code,
+                'selection_reason': selection_reason,
+                'is_auto_generated': is_auto_generated
+            }
+            self.language_selection_trace.append(trace_entry)
+
+        logger.debug(
+            f"Language selection for {video_id}: "
+            f"tried={attempted_codes}, selected={selected_code} "
+            f"({selection_reason}, auto={is_auto_generated})"
+        )
+
+    def get_language_fallback_efficiency(self, preferred_language: str = 'en') -> float:
+        """Calculate percentage of videos using preferred language (US-003 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            preferred_language: The language code to check as "preferred" (default: 'en').
+                                This is compared against selected_code in trace entries.
+
+        Returns:
+            Percentage (0.0-100.0) of videos that used the preferred language.
+            Returns 0.0 if no trace entries exist.
+
+        Example:
+            >>> metrics.get_language_fallback_efficiency('es')
+            75.0  # 75% of videos used Spanish as selected language
+        """
+        with self._lock:
+            if not self.language_selection_trace:
+                return 0.0
+
+            preferred_count = sum(
+                1 for entry in self.language_selection_trace
+                if entry.get('selected_code', '').lower() == preferred_language.lower()
+            )
+            total = len(self.language_selection_trace)
+
+            return round(100.0 * preferred_count / total, 1)
+
+    def get_language_fallback_summary(self) -> Dict[str, int]:
+        """Get summary of language selection by reason category (US-003 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict mapping selection_reason categories to counts:
+            - 'preferred': Videos that used preferred language
+            - 'fallback_1': Videos using first fallback position
+            - 'fallback_2': Videos using second fallback position
+            - 'fallback_N': Videos using Nth fallback position
+            - 'english_fallback': Videos that fell back to English
+            - 'any_available': Videos using any available fallback
+            - 'none': Videos with no language available
+
+        Example:
+            >>> metrics.get_language_fallback_summary()
+            {'preferred': 15, 'fallback_1': 8, 'fallback_2': 2, 'english_fallback': 3}
+        """
+        summary: Dict[str, int] = {}
+
+        with self._lock:
+            for entry in self.language_selection_trace:
+                reason = entry.get('selection_reason', 'unknown')
+
+                # Categorize the reason
+                if 'preferred' in reason.lower():
+                    key = 'preferred'
+                elif 'fallback chain position' in reason.lower():
+                    # Extract position number: "fallback chain position 1" -> "fallback_1"
+                    try:
+                        pos = reason.split()[-1]
+                        key = f'fallback_{pos}'
+                    except (IndexError, ValueError):
+                        key = 'fallback_other'
+                elif 'english fallback' in reason.lower():
+                    key = 'english_fallback'
+                elif 'any available' in reason.lower():
+                    key = 'any_available'
+                elif 'none' in reason.lower() or entry.get('selected_code') is None:
+                    key = 'none'
+                else:
+                    key = 'other'
+
+                summary[key] = summary.get(key, 0) + 1
+
+        return summary
+
     @property
     def total_processed(self) -> int:
         """Total videos processed (successes + failures + cache_hits + skipped_live_streams)."""
@@ -3290,6 +3434,34 @@ class CaptionMetrics:
             slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
             lines.append(f"  Slowest fetches: {slowest_str}")
 
+        # Language fallback summary (US-003 Sprint 6)
+        if self.language_selection_trace:
+            fallback_summary = self.get_language_fallback_summary()
+            # Format: "Language fallback: 15 preferred, 8 fallback-1, 2 fallback-2"
+            summary_parts = []
+            # Order: preferred first, then fallback positions, then english, then any/none
+            if 'preferred' in fallback_summary:
+                summary_parts.append(f"{fallback_summary['preferred']} preferred")
+            # Sort fallback positions numerically
+            fallback_keys = sorted(
+                [k for k in fallback_summary if k.startswith('fallback_')],
+                key=lambda x: int(x.split('_')[1]) if x.split('_')[1].isdigit() else 99
+            )
+            for key in fallback_keys:
+                pos = key.replace('fallback_', 'fallback-')
+                summary_parts.append(f"{fallback_summary[key]} {pos}")
+            if 'english_fallback' in fallback_summary:
+                summary_parts.append(f"{fallback_summary['english_fallback']} english-fallback")
+            if 'any_available' in fallback_summary:
+                summary_parts.append(f"{fallback_summary['any_available']} any-available")
+            if 'none' in fallback_summary:
+                summary_parts.append(f"{fallback_summary['none']} none")
+            if 'other' in fallback_summary:
+                summary_parts.append(f"{fallback_summary['other']} other")
+
+            if summary_parts:
+                lines.append(f"  Language fallback: {', '.join(summary_parts)}")
+
         return "\n".join(lines)
 
     def get_slowest_videos(self, n: int = 5) -> List[tuple]:
@@ -3338,6 +3510,7 @@ class CaptionMetrics:
             'coverage_distribution': dict(self.coverage_distribution),  # US-004
             'low_coverage_videos': list(self.low_coverage_videos),  # US-004
             'video_fetch_times': dict(self.video_fetch_times),  # US-002 Sprint 6
+            'language_selection_trace': list(self.language_selection_trace),  # US-003 Sprint 6
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
@@ -3369,6 +3542,7 @@ class CaptionMetrics:
             coverage_distribution=data.get('coverage_distribution', {}),  # US-004
             low_coverage_videos=data.get('low_coverage_videos', []),  # US-004
             video_fetch_times=data.get('video_fetch_times', {}),  # US-002 Sprint 6
+            language_selection_trace=data.get('language_selection_trace', []),  # US-003 Sprint 6
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
@@ -3419,6 +3593,9 @@ class CaptionMetrics:
                 if vid not in self.video_fetch_times or elapsed > self.video_fetch_times[vid]:
                     self.video_fetch_times[vid] = elapsed
 
+            # Merge language selection trace (US-003 Sprint 6)
+            self.language_selection_trace.extend(other.language_selection_trace)
+
         return self
 
     def clear(self) -> None:
@@ -3439,6 +3616,7 @@ class CaptionMetrics:
             self.coverage_distribution = {}  # US-004
             self.low_coverage_videos = []  # US-004
             self.video_fetch_times = {}  # US-002 Sprint 6
+            self.language_selection_trace = []  # US-003 Sprint 6
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0
