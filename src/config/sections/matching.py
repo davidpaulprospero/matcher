@@ -194,6 +194,12 @@ class MatchingConfig:
     prefer_broll_when_topic_matches: bool = True  # Enable B-roll preference
     broll_face_threshold: float = 0.3  # face_score < this = B-roll (no faces)
 
+    # Temporal coherence (adjacent segment scoring)
+    # Encourages visual continuity by scoring clips based on similarity to adjacent segments
+    temporal_coherence_enabled: bool = True  # Enable temporal coherence scoring
+    temporal_coherence_same_source_boost: float = 0.05  # Boost for clips from same source as adjacent
+    temporal_coherence_context_switch_penalty: float = 0.05  # Penalty for jarring context switches
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 

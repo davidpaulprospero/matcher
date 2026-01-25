@@ -80,6 +80,7 @@ llm_context.txt
 !*SUMMARY.md
 !*SESSION*.md
 !docs/*.md
+!docs/**/*.md
 matcher.code-workspace
 voiceover-matcher-v2.3.zip
 *.zip
