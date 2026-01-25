@@ -480,3 +480,32 @@ Added comprehensive docstrings to GlobalClipTracker class and all 5 methods:
 ### Files Modified
 - src/matching/tracking.py - Comprehensive docstrings for GlobalClipTracker class
 
+## Iteration 14 - US-012: Replace bare except blocks in deduplication.py and global_cache.py
+- Focus: quality
+- Status: COMPLETE (already fixed)
+
+### Analysis
+Both bare except blocks were already replaced with specific exception handling in earlier sprint work.
+
+### Existing Fixes Verified
+
+1. **deduplication.py line 225 (_hash_distance):**
+   - Uses: `except (ValueError, TypeError) as e:`
+   - Has: `logger.debug(f"Hash distance calculation failed: {e}")`
+   - Purpose: Handle invalid hash string format or None values
+
+2. **global_cache.py line 746 (evict_to_size):**
+   - Uses: `except (ValueError, OSError) as e:`
+   - Has: `logger.debug(f"Could not parse timestamp for {video_hash}: {e}")`
+   - Purpose: Handle invalid ISO date format or timestamp out of range
+
+### Verification
+- Grep for bare except: - 0 in deduplication.py
+- Grep for bare except: - 0 in global_cache.py
+- Syntax check: `python -m py_compile src/deduplication.py` - PASSED
+- Syntax check: `python -m py_compile src/global_cache.py` - PASSED
+
+### Files Modified
+- scripts/ralph/prd.json - Updated US-012 to passes: true with notes
+- (No code changes needed - already fixed)
+
