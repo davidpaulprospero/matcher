@@ -66,8 +66,8 @@
         "Add --cleanup-caption-cache CLI flag that removes stale entries and reports freed space",
         "Tests verify stale entries skipped in strict mode, returned with warning in warn mode"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation complete. Added is_stale(), get_entry_age_days(), and cleanup_stale_entries() methods to CaptionCache. Overrode _is_valid_entry() to prevent auto-deletion, allowing staleness handling in get_caption() with 3 modes: strict (returns None), warn (returns with warning), skip (no staleness check). Added --cleanup-caption-cache CLI flag with --cleanup-caption-cache-days and --cleanup-caption-cache-dry-run options. Created 16 new tests in 3 classes: TestCacheStaleness (8 tests), TestCleanupStaleEntries (6 tests), TestCacheStalenessIntegration (2 tests). All 81 test_caption_cache.py tests pass."
     },
     {
       "id": "US-005",
@@ -82,8 +82,8 @@
         "CaptionStage checks for checkpoint and skips already-fetched videos on resume",
         "Tests verify abort at video 50/100 saves 50 results, resume fetches remaining 50"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation complete. Created CaptionBatchCheckpoint dataclass with to_dict/from_dict, save/load, update(), mark_aborted() methods. Checkpoint saved to <project>/.cache/caption_checkpoint.json. Added batch_checkpoint and checkpoint_save_interval params to fetch_captions_batch(). CaptionStage loads existing checkpoint on resume, merges with pipeline checkpoint, and handles ErrorPatternAbortError gracefully. 21 new tests in test_caption_batch_checkpoint.py verify all acceptance criteria including abort at 50/100 scenario."
     },
     {
       "id": "US-006",
@@ -99,8 +99,8 @@
         "Combine into quality_score: 0.4*density + 0.3*precision + 0.3*completeness",
         "Tests verify sparse human captions score higher than dense auto-generated"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation complete. Added SegmentQualityMetrics dataclass and calculate_segment_metrics() function to src/caption_fetcher.py. Density score uses bell curve centered at 12 segments/min (optimal). Timing precision detects sub-100ms timestamps (auto-generated pattern). Text completeness scores 1.0 for 50-200 chars/segment avg. Combined quality_score uses weights: 0.4*density + 0.3*precision_quality + 0.3*completeness. Created 22 tests in tests/test_segment_quality_metrics.py in 3 classes: TestSegmentQualityMetrics (4 tests), TestCalculateSegmentMetrics (14 tests), TestSparseHumanVsDenseAuto (4 tests). Key test test_sparse_human_scores_higher_than_dense_auto verifies human captions score higher than auto-generated."
     },
     {
       "id": "US-007",
