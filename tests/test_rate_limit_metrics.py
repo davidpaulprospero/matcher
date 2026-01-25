@@ -694,3 +694,278 @@ class TestHealingOrchestratorIntegration:
 
         orchestrator.reset()
         assert orchestrator._rate_limit_metrics is None
+
+
+class TestKeywordRateLimitTracking:
+    """Test per-keyword rate limit event tracking (US-009)."""
+
+    def test_record_rate_limit_event_with_keyword(self):
+        """Test recording rate limit event with keyword parameter."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(keyword="sunset beach")
+        assert metrics.rate_limit_events == 1
+        assert metrics.keyword_rate_limit_events == {"sunset beach": 1}
+
+    def test_record_rate_limit_event_with_tier_and_keyword(self):
+        """Test recording rate limit event with both tier and keyword."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(tier="long", keyword="drone footage")
+        assert metrics.rate_limit_events == 1
+        assert metrics.tier_rate_limit_events == {"long": 1}
+        assert metrics.keyword_rate_limit_events == {"drone footage": 1}
+
+    def test_record_multiple_events_same_keyword(self):
+        """Test recording multiple events for the same keyword."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(keyword="nature documentary")
+        metrics.record_rate_limit_event(keyword="nature documentary")
+        metrics.record_rate_limit_event(keyword="nature documentary")
+        assert metrics.rate_limit_events == 3
+        assert metrics.keyword_rate_limit_events == {"nature documentary": 3}
+
+    def test_record_events_different_keywords(self):
+        """Test recording events for different keywords."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(keyword="sunset")
+        metrics.record_rate_limit_event(keyword="ocean waves")
+        metrics.record_rate_limit_event(keyword="sunset")
+        metrics.record_rate_limit_event(keyword="mountain landscape")
+        assert metrics.rate_limit_events == 4
+        assert metrics.keyword_rate_limit_events == {
+            "sunset": 2,
+            "ocean waves": 1,
+            "mountain landscape": 1
+        }
+
+    def test_record_event_without_keyword_does_not_add_to_dict(self):
+        """Test that events without keyword don't add to keyword dict."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event()
+        metrics.record_rate_limit_event(tier="short")
+        assert metrics.rate_limit_events == 2
+        assert metrics.keyword_rate_limit_events == {}
+
+    def test_keyword_events_in_to_dict(self):
+        """Test that keyword events are serialized to dict."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(keyword="test keyword")
+        data = metrics.to_dict()
+        assert data["keyword_rate_limit_events"] == {"test keyword": 1}
+
+    def test_keyword_events_from_dict(self):
+        """Test that keyword events are restored from dict."""
+        data = {
+            "rate_limit_events": 5,
+            "keyword_rate_limit_events": {"sunset": 3, "ocean": 2}
+        }
+        metrics = RateLimitMetrics.from_dict(data)
+        assert metrics.rate_limit_events == 5
+        assert metrics.keyword_rate_limit_events == {"sunset": 3, "ocean": 2}
+
+    def test_keyword_events_from_dict_missing(self):
+        """Test backward compatibility when keyword_rate_limit_events is missing."""
+        data = {"rate_limit_events": 5}
+        metrics = RateLimitMetrics.from_dict(data)
+        assert metrics.rate_limit_events == 5
+        assert metrics.keyword_rate_limit_events == {}
+
+    def test_keyword_events_cleared(self):
+        """Test that clear() resets keyword events."""
+        metrics = RateLimitMetrics()
+        metrics.record_rate_limit_event(keyword="test")
+        metrics.clear()
+        assert metrics.keyword_rate_limit_events == {}
+
+    def test_keyword_events_roundtrip(self):
+        """Test keyword events survive checkpoint roundtrip."""
+        original = RateLimitMetrics()
+        original.record_rate_limit_event(keyword="keyword1")
+        original.record_rate_limit_event(keyword="keyword1")
+        original.record_rate_limit_event(keyword="keyword2")
+
+        data = original.to_dict()
+        restored = RateLimitMetrics.from_dict(data)
+
+        assert restored.keyword_rate_limit_events == {"keyword1": 2, "keyword2": 1}
+
+
+class TestKeywordSummaryDisplay:
+    """Test keyword display in summary when > 10 total events (US-009)."""
+
+    def test_summary_no_keywords_shown_under_10_events(self):
+        """Test that keywords are not shown when <= 10 total events."""
+        metrics = RateLimitMetrics()
+        for i in range(10):
+            metrics.record_rate_limit_event(keyword=f"keyword{i}")
+        summary = metrics.summary()
+        assert "Top keywords:" not in summary
+
+    def test_summary_shows_keywords_over_10_events(self):
+        """Test that top keywords are shown when > 10 total events."""
+        metrics = RateLimitMetrics()
+        for _ in range(8):
+            metrics.record_rate_limit_event(keyword="problematic keyword")
+        for _ in range(4):
+            metrics.record_rate_limit_event(keyword="other keyword")
+        summary = metrics.summary()
+        assert "Top keywords:" in summary
+        assert '"problematic keyword": 8' in summary
+
+    def test_summary_shows_top_5_keywords_only(self):
+        """Test that only top 5 keywords are shown (sorted by count)."""
+        metrics = RateLimitMetrics()
+        # Create 7 keywords with different counts
+        keywords = [
+            ("kw1", 10), ("kw2", 8), ("kw3", 6), ("kw4", 5),
+            ("kw5", 4), ("kw6", 3), ("kw7", 2)
+        ]
+        for kw, count in keywords:
+            for _ in range(count):
+                metrics.record_rate_limit_event(keyword=kw)
+
+        summary = metrics.summary()
+        assert "Top keywords:" in summary
+        # Top 5 should be shown
+        assert '"kw1": 10' in summary
+        assert '"kw2": 8' in summary
+        assert '"kw3": 6' in summary
+        assert '"kw4": 5' in summary
+        assert '"kw5": 4' in summary
+        # Bottom 2 should not be shown
+        assert '"kw6": 3' not in summary
+        assert '"kw7": 2' not in summary
+
+    def test_summary_keywords_sorted_by_count_descending(self):
+        """Test that keywords are sorted by count in descending order."""
+        metrics = RateLimitMetrics()
+        # Add in random order
+        for _ in range(3):
+            metrics.record_rate_limit_event(keyword="low")
+        for _ in range(7):
+            metrics.record_rate_limit_event(keyword="high")
+        for _ in range(5):
+            metrics.record_rate_limit_event(keyword="medium")
+
+        summary = metrics.summary()
+        lines = summary.split('\n')
+        keyword_line = [l for l in lines if "Top keywords:" in l][0]
+        # "high" (7) should appear before "medium" (5) before "low" (3)
+        high_pos = keyword_line.find('"high"')
+        medium_pos = keyword_line.find('"medium"')
+        low_pos = keyword_line.find('"low"')
+        assert high_pos < medium_pos < low_pos
+
+
+class TestKeywordConfigRecommendations:
+    """Test config recommendations for high-rate-limit keywords (US-009)."""
+
+    def test_no_recommendation_under_10_events(self):
+        """Test no keyword recommendation when < 10 total events."""
+        metrics = RateLimitMetrics()
+        for _ in range(9):
+            metrics.record_rate_limit_event(keyword="problematic")
+        recommendations = metrics.get_config_recommendations()
+        assert not any("keyword" in r.lower() and "rate limit" in r.lower()
+                      for r in recommendations)
+
+    def test_no_recommendation_when_no_high_rate_keyword(self):
+        """Test no recommendation when no keyword exceeds 30% threshold."""
+        metrics = RateLimitMetrics()
+        # Distribute events evenly - no single keyword > 30%
+        for i in range(12):
+            metrics.record_rate_limit_event(keyword=f"kw{i % 6}")
+        # Each keyword has 2 events, total 12, so each is 16.6% < 30%
+        recommendations = metrics.get_config_recommendations()
+        keyword_recs = [r for r in recommendations
+                       if "keyword" in r.lower() and "rate limit" in r.lower()]
+        assert len(keyword_recs) == 0
+
+    def test_recommendation_for_high_rate_limit_keyword(self):
+        """Test recommendation when a keyword exceeds 30% threshold."""
+        metrics = RateLimitMetrics()
+        # 8 events for "problematic", 4 for others = 8/12 = 66% > 30%
+        for _ in range(8):
+            metrics.record_rate_limit_event(keyword="problematic keyword")
+        for _ in range(4):
+            metrics.record_rate_limit_event(keyword="other")
+
+        recommendations = metrics.get_config_recommendations()
+        keyword_recs = [r for r in recommendations
+                       if "problematic keyword" in r.lower()]
+        assert len(keyword_recs) == 1
+        assert "skip_keywords" in keyword_recs[0]
+
+    def test_recommendation_shows_multiple_high_rate_keywords(self):
+        """Test recommendation shows up to 3 high-rate-limit keywords."""
+        metrics = RateLimitMetrics()
+        # 10 events for "bad1", 8 for "bad2", 6 for "bad3", 2 for "ok"
+        # Total = 26, threshold = 7.8 (30%)
+        for _ in range(10):
+            metrics.record_rate_limit_event(keyword="bad1")
+        for _ in range(8):
+            metrics.record_rate_limit_event(keyword="bad2")
+        for _ in range(6):
+            metrics.record_rate_limit_event(keyword="bad3")
+        for _ in range(2):
+            metrics.record_rate_limit_event(keyword="ok")
+
+        recommendations = metrics.get_config_recommendations()
+        keyword_recs = [r for r in recommendations
+                       if "bad1" in r or "bad2" in r]
+        assert len(keyword_recs) >= 1
+        # Should mention bad1 and bad2 (both > 30%)
+        rec_text = keyword_recs[0]
+        assert '"bad1"' in rec_text
+        assert '"bad2"' in rec_text
+
+    def test_recommendation_suggests_skip_keywords_config(self):
+        """Test that recommendation suggests keyword.skip_keywords config."""
+        metrics = RateLimitMetrics()
+        for _ in range(15):
+            metrics.record_rate_limit_event(keyword="problematic")
+
+        recommendations = metrics.get_config_recommendations()
+        keyword_recs = [r for r in recommendations if "problematic" in r.lower()]
+        assert len(keyword_recs) == 1
+        assert "skip_keywords" in keyword_recs[0]
+
+
+class TestKeywordCrossSessionPersistence:
+    """Test keyword events are preserved across sessions (US-009)."""
+
+    def test_from_checkpoint_preserves_keyword_events(self):
+        """Test that from_checkpoint() preserves keyword events."""
+        data = {
+            "rate_limit_events": 15,
+            "keyword_rate_limit_events": {"sunset": 10, "ocean": 5},
+            "session_count": 1
+        }
+        metrics = RateLimitMetrics.from_checkpoint(data)
+
+        assert metrics.keyword_rate_limit_events == {"sunset": 10, "ocean": 5}
+        assert metrics.session_count == 2  # Incremented
+
+    def test_keyword_events_accumulate_across_sessions(self):
+        """Test that keyword events accumulate across multiple sessions."""
+        # Session 1: Record some events
+        session1 = RateLimitMetrics()
+        session1.record_rate_limit_event(keyword="sunrise")
+        session1.record_rate_limit_event(keyword="sunrise")
+        session1.record_rate_limit_event(keyword="sunset")
+
+        # Save to checkpoint
+        checkpoint_data = session1.to_dict()
+
+        # Session 2: Restore and continue
+        session2 = RateLimitMetrics.from_checkpoint(checkpoint_data)
+        session2.record_rate_limit_event(keyword="sunrise")
+        session2.record_rate_limit_event(keyword="mountain")
+
+        # Verify accumulation
+        assert session2.keyword_rate_limit_events == {
+            "sunrise": 3,  # 2 from session1 + 1 from session2
+            "sunset": 1,   # 1 from session1
+            "mountain": 1  # 1 from session2
+        }
+        assert session2.rate_limit_events == 5
+        assert session2.session_count == 2

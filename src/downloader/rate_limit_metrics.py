@@ -71,6 +71,7 @@ class RateLimitMetrics:
     # Rate limit handling
     rate_limit_events: int = 0
     tier_rate_limit_events: Dict[str, int] = field(default_factory=dict)  # US-001: per-tier tracking
+    keyword_rate_limit_events: Dict[str, int] = field(default_factory=dict)  # US-009: per-keyword tracking
     backoff_attempts: int = 0
     time_spent_backing_off: float = 0.0
     backoff_events_by_severity: Dict[str, int] = field(default_factory=dict)  # US-008: per-severity tracking
@@ -124,15 +125,18 @@ class RateLimitMetrics:
         """Record that max retries were reached for a download."""
         self.max_retry_count_reached += 1
 
-    def record_rate_limit_event(self, tier: str = None) -> None:
+    def record_rate_limit_event(self, tier: str = None, keyword: str = None) -> None:
         """Record a rate limit error occurrence.
 
         Args:
             tier: Duration tier (short, medium, long, longer) for per-tier tracking
+            keyword: Search keyword for per-keyword tracking (US-009)
         """
         self.rate_limit_events += 1
         if tier:
             self.tier_rate_limit_events[tier] = self.tier_rate_limit_events.get(tier, 0) + 1
+        if keyword:
+            self.keyword_rate_limit_events[keyword] = self.keyword_rate_limit_events.get(keyword, 0) + 1
 
     def record_backoff(self, seconds: float, severity: str = None) -> None:
         """Record a progressive backoff delay.
@@ -314,6 +318,26 @@ class RateLimitMetrics:
                     "Consider increasing download.batch_retry.delay_seconds."
                 )
 
+        # Check for high-rate-limit keywords (US-009)
+        # Recommend skipping keywords that cause > 30% of rate limit events
+        if self.keyword_rate_limit_events and self.rate_limit_events > 10:
+            # Find keywords with high event counts
+            high_rate_limit_keywords = []
+            threshold = self.rate_limit_events * 0.3  # 30% of total events
+            for keyword, count in self.keyword_rate_limit_events.items():
+                if count >= threshold:
+                    high_rate_limit_keywords.append((keyword, count))
+
+            if high_rate_limit_keywords:
+                # Sort by count descending
+                high_rate_limit_keywords.sort(key=lambda x: x[1], reverse=True)
+                keyword_list = ", ".join(f'"{k}"' for k, _ in high_rate_limit_keywords[:3])
+                recommendations.append(
+                    f"Keywords causing high rate limiting: {keyword_list}. "
+                    "Consider adding these to keyword.skip_keywords or using more "
+                    "specific search terms."
+                )
+
         return recommendations
 
     def summary(self) -> str:
@@ -361,6 +385,16 @@ class RateLimitMetrics:
             if self.backoff_events_by_severity:
                 severity_str = ", ".join(f"{k}: {v}" for k, v in sorted(self.backoff_events_by_severity.items()))
                 lines.append(f"  By severity: {severity_str}")
+            # Show top 5 keywords when > 10 total rate limit events (US-009)
+            if self.keyword_rate_limit_events and self.rate_limit_events > 10:
+                # Sort by count descending, take top 5
+                sorted_keywords = sorted(
+                    self.keyword_rate_limit_events.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
+                keyword_str = ", ".join(f'"{k}": {v}' for k, v in sorted_keywords)
+                lines.append(f"  Top keywords: {keyword_str}")
 
         # Escalation summary
         escalations = []
@@ -425,6 +459,7 @@ class RateLimitMetrics:
             max_retry_count_reached=data.get('max_retry_count_reached', 0),
             rate_limit_events=data.get('rate_limit_events', 0),
             tier_rate_limit_events=data.get('tier_rate_limit_events', {}),
+            keyword_rate_limit_events=data.get('keyword_rate_limit_events', {}),  # US-009
             backoff_attempts=data.get('backoff_attempts', 0),
             time_spent_backing_off=data.get('time_spent_backing_off', 0.0),
             backoff_events_by_severity=data.get('backoff_events_by_severity', {}),
@@ -493,6 +528,7 @@ class RateLimitMetrics:
         self.max_retry_count_reached = 0
         self.rate_limit_events = 0
         self.tier_rate_limit_events = {}
+        self.keyword_rate_limit_events = {}  # US-009
         self.backoff_attempts = 0
         self.time_spent_backing_off = 0.0
         self.backoff_events_by_severity = {}
