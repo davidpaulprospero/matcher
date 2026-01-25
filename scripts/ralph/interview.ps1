@@ -17,6 +17,33 @@ if (Test-Path $script:ConfigFile) {
     $config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
 }
 
+# ============================================================================
+# LOGGING FUNCTION
+# ============================================================================
+
+function Write-InterviewLog {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logLine = "[$timestamp] [$Level] $Message"
+
+    # Create logs directory if needed
+    $logsDir = Join-Path $script:RalphDir "logs"
+    if (-not (Test-Path $logsDir)) {
+        New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+    }
+
+    # Log to interview-specific log file
+    $logFile = Join-Path $logsDir "interview.log"
+    Add-Content -Path $logFile -Value $logLine
+
+    # Also write to verbose stream for debugging
+    Write-Verbose $logLine
+}
+
 function Write-RalphHeader {
     Write-Host ""
     Write-Host "=====================================================" -ForegroundColor Cyan
@@ -134,7 +161,11 @@ function Show-ResumePrompt {
     Write-Host "  Resume this session? [Y]es / [N]ew interview" -ForegroundColor Yellow -NoNewline
     $response = Read-Host " "
 
-    return ($response -match "^[Yy]")
+    $result = ($response -match "^[Yy]")
+    Write-InterviewLog "Resume prompt shown - Context: $($ExistingContext.Context)"
+    Write-InterviewLog "User chose to resume: $result"
+
+    return $result
 }
 
 # ============================================================================
@@ -331,25 +362,30 @@ function Start-Interview {
 
     # ---- ALWAYS ASK: Work Type ----
     $context.workType = Ask-WorkType
+    Write-InterviewLog "Work type selected: $($context.workType)"
 
     # ---- ALWAYS ASK: Details ----
     $context.details = Ask-Details -WorkType $context.workType
+    Write-InterviewLog "Details provided: $($context.details)"
 
     # ---- DYNAMIC: Area (if vague description) ----
     if ($context.details.Length -lt 20) {
         $context.area = Ask-Area -WorkType $context.workType -Details $context.details
+        Write-InterviewLog "Area specified: $($context.area)"
     }
 
     # ---- DYNAMIC: Client (if client work type or client-related keywords) ----
     $clientPattern = "client|theresa|stu|feedback"
     if ($context.workType -eq "client" -or $context.details -match $clientPattern) {
         $context.client = Ask-Client
+        Write-InterviewLog "Client specified: $($context.client)"
     }
 
     # ---- DYNAMIC: Priority (if bug or urgency keywords) ----
     $urgencyPattern = "urgent|critical|asap|broken"
     if ($context.workType -eq "bug" -or $context.details -match $urgencyPattern) {
         $context.priority = Ask-Priority
+        Write-InterviewLog "Priority set: $($context.priority)"
     }
 
     return $context
@@ -499,11 +535,13 @@ function Get-ApprovedAreas {
 
         # [A] Approve all
         if ($choice -match "^[Aa]$") {
+            Write-InterviewLog "User approved areas: $($approved -join ', ')"
             return $approved
         }
 
         # [R] Restart
         if ($choice -match "^[Rr]$") {
+            Write-InterviewLog "User chose to restart interview"
             return $null
         }
 
@@ -513,6 +551,7 @@ function Get-ApprovedAreas {
             if ($approved -notcontains $newArea) {
                 [void]$approved.Add($newArea)
                 Write-Host "  Added: $newArea" -ForegroundColor Green
+                Write-InterviewLog "User added area: $newArea"
             } else {
                 Write-Host "  Already in list: $newArea" -ForegroundColor Yellow
             }
@@ -526,6 +565,7 @@ function Get-ApprovedAreas {
                 $removed = $approved[$removeIndex]
                 $approved.RemoveAt($removeIndex)
                 Write-Host "  Removed: $removed" -ForegroundColor Yellow
+                Write-InterviewLog "User removed area: $removed"
             } else {
                 Write-Host "  Invalid index" -ForegroundColor Red
             }
@@ -582,6 +622,7 @@ function Save-InterviewQueue {
     $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
 
     Write-Host "  Saved queue with $($FocusAreas.Count) focus areas" -ForegroundColor Green
+    Write-InterviewLog "Queue saved - Session: $($queue.sessionId), Areas: $($FocusAreas.Count)"
 
     return $queue
 }
@@ -600,6 +641,7 @@ function Start-RalphWindows {
 
     Write-Host ""
     Write-Host "  Launching Ralph..." -ForegroundColor Cyan
+    Write-InterviewLog "Spawning Ralph windows for areas: $($FocusAreas -join ', ')"
 
     # Spawn Ralph loop in new window
     $ralphCmd = "Set-Location '$script:ProjectRoot'; .\scripts\ralph\ralph.ps1 -Queue -SkipPlanApproval"
@@ -614,6 +656,7 @@ function Start-RalphWindows {
     Write-Host ""
     Write-Host "  Ralph loop and watch windows launched!" -ForegroundColor Green
     Write-Host "  You can close this window now." -ForegroundColor Gray
+    Write-InterviewLog "Ralph loop and watch windows launched successfully"
 }
 
 # ============================================================================
@@ -622,6 +665,7 @@ function Start-RalphWindows {
 
 # Entry point
 Write-RalphHeader
+Write-InterviewLog "Interview session started"
 
 # Check for existing session to resume
 $existing = Get-ExistingContext
