@@ -115,7 +115,7 @@ Describe "Metrics CSV Parsing" -Tag "Unit", "Metrics" {
 
         New-TestMetricsFile -Path $script:metricsPath -Rows $rows
 
-        $metrics = Import-Csv $script:metricsPath
+        $metrics = @(Import-Csv $script:metricsPath)
         $metrics.Count | Should -Be 1
         $metrics[0].session | Should -Be "2026-01-25_120000"
         $metrics[0].success | Should -Be "true"
@@ -167,7 +167,7 @@ Describe "Metrics CSV Parsing" -Tag "Unit", "Metrics" {
         $groups = $metrics | Group-Object focus_area
 
         $groups.Count | Should -Be 2
-        ($groups | Where-Object { $_.Name -eq "testing" }).Count | Should -Be 1
+        @($groups | Where-Object { $_.Name -eq "testing" }).Count | Should -Be 1
         ($groups | Where-Object { $_.Name -eq "testing" }).Group.Count | Should -Be 2
     }
 }
@@ -178,7 +178,7 @@ Describe "Metrics CSV Parsing" -Tag "Unit", "Metrics" {
 
 Describe "Anomaly Detection Logic" -Tag "Unit", "Anomaly" {
     It "detects duration spike (3x+ average)" {
-        $durations = @(5, 5, 5, 5, 20)  # 20 is 4x the average of first 4
+        $durations = @(1, 1, 1, 1, 20)  # avg=4.8, max=20, 20 > 14.4 = true
         $avgDur = ($durations | Measure-Object -Average).Average
         $maxDur = ($durations | Measure-Object -Maximum).Maximum
 
@@ -337,7 +337,7 @@ Describe "Queue Parsing" -Tag "Unit", "Queue" {
         $queue = Get-Content $queuePath | ConvertFrom-Json
 
         $queue.focusAreas.Count | Should -Be 3
-        ($queue.focusAreas | Where-Object { $_.completed }).Count | Should -Be 1
+        @($queue.focusAreas | Where-Object { $_.completed }).Count | Should -Be 1
     }
 
     It "calculates queue progress correctly" {
@@ -393,18 +393,18 @@ Describe "Cost Calculations" -Tag "Unit", "Cost" {
 
     It "calculates cost breakdown by focus area" {
         $metrics = @(
-            @{ focus_area = "testing"; tokens_used = 20000 }
-            @{ focus_area = "testing"; tokens_used = 30000 }
-            @{ focus_area = "quality"; tokens_used = 50000 }
+            [PSCustomObject]@{ focus_area = "testing"; tokens_used = 20000 }
+            [PSCustomObject]@{ focus_area = "testing"; tokens_used = 30000 }
+            [PSCustomObject]@{ focus_area = "quality"; tokens_used = 50000 }
         )
 
         $totalTokens = ($metrics | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Sum).Sum
 
-        $byArea = $metrics | Group-Object focus_area | ForEach-Object {
+        $byArea = @($metrics | Group-Object focus_area | ForEach-Object {
             $areaTokens = ($_.Group | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Sum).Sum
             $pct = [math]::Round(($areaTokens / $totalTokens) * 100)
-            @{ Name = $_.Name; Pct = $pct }
-        }
+            [PSCustomObject]@{ Name = $_.Name; Pct = $pct }
+        })
 
         ($byArea | Where-Object { $_.Name -eq "testing" }).Pct | Should -Be 50
         ($byArea | Where-Object { $_.Name -eq "quality" }).Pct | Should -Be 50
@@ -464,7 +464,7 @@ Describe "Error Evolution Display" -Tag "Unit", "ErrorEvolution" {
         $byCategory = $errorEvents | Group-Object category
 
         $byCategory.Count | Should -Be 2
-        ($byCategory | Where-Object { $_.Name -eq "Timeout" }).Count | Should -Be 1
+        @($byCategory | Where-Object { $_.Name -eq "Timeout" }).Count | Should -Be 1
         ($byCategory | Where-Object { $_.Name -eq "Timeout" }).Group.Count | Should -Be 2
     }
 }
