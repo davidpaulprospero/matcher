@@ -106,6 +106,11 @@ transcription:
   cache_transcriptions: true
   cache_dir: transcriptions
 
+  # Audio extraction timeout (seconds)
+  # FFmpeg subprocess killed if extraction exceeds this limit
+  # Increase for very long videos or slow storage
+  audio_extraction_timeout: 60
+
 # -----------------------------------------------------------------------------
 # EMBEDDINGS
 # -----------------------------------------------------------------------------
