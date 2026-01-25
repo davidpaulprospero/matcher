@@ -111,6 +111,9 @@ class HealingOrchestrator:
         self.current_stage: Optional[str] = None
         self.escalation_callback: Optional[Callable[[EscalationRequest], str]] = None
 
+        # Rate limit metrics from download stage (set via set_rate_limit_metrics)
+        self._rate_limit_metrics: Optional[Any] = None
+
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
 
@@ -949,6 +952,14 @@ class HealingOrchestrator:
         """Get current healing metrics."""
         return self.metrics
 
+    def set_rate_limit_metrics(self, metrics) -> None:
+        """Set rate limit metrics from download stage for inclusion in report.
+
+        Args:
+            metrics: RateLimitMetrics instance from VideoDownloader
+        """
+        self._rate_limit_metrics = metrics
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)
@@ -965,6 +976,20 @@ class HealingOrchestrator:
             for err in self.metrics.errors_encountered[:5]:
                 print(f"  - {err[:80]}...")
 
+        # Print rate limiting section if metrics available (US-010)
+        if self._rate_limit_metrics:
+            print("\n" + "-" * 60)
+            print("RATE LIMITING")
+            print("-" * 60)
+            print(self._rate_limit_metrics.summary())
+
+            # Print config recommendations if rate limiting was significant
+            recommendations = self._rate_limit_metrics.get_config_recommendations()
+            if recommendations:
+                print("\nRecommendations:")
+                for rec in recommendations:
+                    print(f"  - {rec}")
+
         print("=" * 60 + "\n")
 
     def reset(self):
@@ -973,6 +998,7 @@ class HealingOrchestrator:
         self.config_snapshots = []
         self.current_stage = None
         self._healer_state = {}
+        self._rate_limit_metrics = None
 
         # Reset healers
         for healer in self.healers:
