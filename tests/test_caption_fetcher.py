@@ -5995,3 +5995,542 @@ class TestRunCaptionTestFetch:
         # Average time should be around 0.1s
         assert summary.avg_time >= 0.1
         assert summary.avg_time < 1.0  # Sanity check
+
+
+class TestErrorPatternDetector:
+    """Tests for ErrorPatternDetector class (US-007 Sprint 7)."""
+
+    def test_detector_initialization(self):
+        """Test ErrorPatternDetector initialization with defaults."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+
+        assert detector.threshold == 0.3
+        assert detector.sample_size == 10
+        assert detector._total_processed == 0
+        assert not detector._pattern_checked
+
+    def test_detector_custom_params(self):
+        """Test ErrorPatternDetector with custom threshold and sample size."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.5, sample_size=20)
+
+        assert detector.threshold == 0.5
+        assert detector.sample_size == 20
+
+    def test_record_error_tracks_video_id(self):
+        """Test that record_error tracks video IDs with error signatures."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+        detector.record_error("vid1", "403 Forbidden")
+        detector.record_error("vid2", "403 Forbidden")
+        detector.record_error("vid3", "Timeout")
+
+        stats = detector.get_stats()
+        assert stats['total_processed'] == 3
+        assert stats['error_counts'].get('403 Forbidden', 0) == 2
+        assert stats['error_counts'].get('Timeout', 0) == 1
+
+    def test_record_success_tracks_count(self):
+        """Test that record_success tracks successful videos."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+        detector.record_success("vid1")
+        detector.record_success("vid2")
+
+        stats = detector.get_stats()
+        assert stats['total_processed'] == 2
+        assert stats['success_count'] == 2
+
+    def test_should_check_pattern_after_sample_size(self):
+        """Test should_check_pattern returns True after sample_size videos."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=5)
+
+        # Before sample size reached
+        for i in range(4):
+            detector.record_error(f"vid{i}", "403 Forbidden")
+        assert not detector.should_check_pattern()
+
+        # After sample size reached
+        detector.record_success("vid4")
+        assert detector.should_check_pattern()
+
+    def test_pattern_detected_when_threshold_exceeded(self):
+        """Test pattern detection when 30%+ videos fail with same error."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=10)
+
+        # 4 errors, 6 successes = 40% error rate (exceeds 30% threshold)
+        for i in range(4):
+            detector.record_error(f"err{i}", "403 Forbidden")
+        for i in range(6):
+            detector.record_success(f"ok{i}")
+
+        result = detector.check_pattern()
+
+        assert result.detected is True
+        assert result.error_signature == "403 Forbidden"
+        assert len(result.affected_video_ids) == 4
+        assert result.sample_size == 10
+        assert result.ratio == 0.4
+        assert "geoblocking" in result.likely_cause.lower()
+
+    def test_pattern_not_detected_below_threshold(self):
+        """Test pattern NOT detected when below threshold."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=10)
+
+        # 2 errors, 8 successes = 20% error rate (below 30% threshold)
+        for i in range(2):
+            detector.record_error(f"err{i}", "403 Forbidden")
+        for i in range(8):
+            detector.record_success(f"ok{i}")
+
+        result = detector.check_pattern()
+
+        assert result.detected is False
+        assert result.ratio == 0.2
+
+    def test_signature_extraction_403(self):
+        """Test error signature extraction for 403 errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+
+        # Various 403 error messages should all become "403 Forbidden"
+        detector.record_error("v1", "HTTP Error 403: Forbidden")
+        detector.record_error("v2", "403 access denied")
+        detector.record_error("v3", "403 forbidden response")
+
+        stats = detector.get_stats()
+        assert stats['error_counts'].get('403 Forbidden', 0) == 3
+
+    def test_signature_extraction_429(self):
+        """Test error signature extraction for rate limit errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+
+        # 429 errors get "429 Too Many Requests" signature
+        detector.record_error("v1", "429 Too Many Requests")
+        detector.record_error("v2", "HTTP 429: Too many requests")
+
+        stats = detector.get_stats()
+        assert stats['error_counts'].get('429 Too Many Requests', 0) == 2
+
+    def test_signature_extraction_timeout(self):
+        """Test error signature extraction for timeout errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+
+        detector.record_error("v1", "Connection timed out")
+        detector.record_error("v2", "Request timeout after 30s")
+
+        stats = detector.get_stats()
+        assert stats['error_counts'].get('Timeout', 0) == 2
+
+    def test_50_videos_same_channel_uses_sample_checks(self):
+        """Test pattern detection with 50 videos from same channel (acceptance criteria)."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=10)
+
+        # First 10 videos: 8 fail with 403, 2 succeed = 80% error rate
+        for i in range(8):
+            detector.record_error(f"vid{i}", "403 Forbidden")
+        for i in range(8, 10):
+            detector.record_success(f"vid{i}")
+
+        # Check pattern after first 10
+        assert detector.should_check_pattern()
+        result = detector.check_pattern()
+
+        assert result.detected is True
+        assert len(result.affected_video_ids) == 8
+        assert result.sample_size == 10
+        assert result.ratio == 0.8
+        assert "403 Forbidden" in result.error_signature
+
+    def test_pattern_result_str_format(self):
+        """Test ErrorPatternResult string format matches acceptance criteria."""
+        from src.caption_fetcher import ErrorPatternResult
+
+        result = ErrorPatternResult(
+            detected=True,
+            error_signature="403 Forbidden",
+            affected_video_ids=["v1", "v2", "v3"],
+            sample_size=10,
+            ratio=0.3,
+            likely_cause="possible geoblocking"
+        )
+
+        result_str = str(result)
+
+        # Should match format: "Pattern detected: 403 Forbidden (3/10 videos) - possible geoblocking"
+        assert "Pattern detected:" in result_str
+        assert "403 Forbidden" in result_str
+        assert "3/10" in result_str
+        assert "30.0%" in result_str
+        assert "possible geoblocking" in result_str
+
+    def test_pattern_result_no_detection_str(self):
+        """Test ErrorPatternResult string when no pattern detected."""
+        from src.caption_fetcher import ErrorPatternResult
+
+        result = ErrorPatternResult(detected=False)
+        assert str(result) == "No error pattern detected"
+
+    def test_infer_cause_403(self):
+        """Test likely cause inference for 403 errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+        cause = detector._infer_cause("403 Forbidden")
+
+        assert "geoblocking" in cause.lower() or "restriction" in cause.lower()
+
+    def test_infer_cause_rate_limit(self):
+        """Test likely cause inference for rate limit errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+        cause = detector._infer_cause("429 Too Many Requests")
+
+        assert "rate limit" in cause.lower()
+
+    def test_infer_cause_timeout(self):
+        """Test likely cause inference for timeout errors."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector()
+        cause = detector._infer_cause("Timeout")
+
+        assert "network" in cause.lower() or "timeout" in cause.lower()
+
+    def test_check_pattern_cached_result(self):
+        """Test that check_pattern returns cached result on subsequent calls."""
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=5)
+
+        for i in range(3):
+            detector.record_error(f"err{i}", "403 Forbidden")
+        for i in range(2):
+            detector.record_success(f"ok{i}")
+
+        result1 = detector.check_pattern()
+        result2 = detector.check_pattern()
+
+        # Should be same object
+        assert result1 is result2
+
+    def test_thread_safety_with_concurrent_records(self):
+        """Test thread safety of record_error and record_success."""
+        import threading
+        from src.caption_fetcher import ErrorPatternDetector
+
+        detector = ErrorPatternDetector(threshold=0.3, sample_size=100)
+        errors_recorded = []
+        successes_recorded = []
+
+        def record_errors():
+            for i in range(50):
+                detector.record_error(f"err{i}", "403 Forbidden")
+                errors_recorded.append(i)
+
+        def record_successes():
+            for i in range(50):
+                detector.record_success(f"ok{i}")
+                successes_recorded.append(i)
+
+        t1 = threading.Thread(target=record_errors)
+        t2 = threading.Thread(target=record_successes)
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        stats = detector.get_stats()
+        assert stats['total_processed'] == 100
+        assert stats['success_count'] == 50
+        assert stats['error_counts'].get('403 Forbidden', 0) == 50
+
+
+class TestErrorPatternAbortError:
+    """Tests for ErrorPatternAbortError exception (US-007 Sprint 7)."""
+
+    def test_exception_creation(self):
+        """Test ErrorPatternAbortError creation with pattern result."""
+        from src.caption_fetcher import ErrorPatternAbortError, ErrorPatternResult
+
+        pattern_result = ErrorPatternResult(
+            detected=True,
+            error_signature="403 Forbidden",
+            affected_video_ids=["v1", "v2"],
+            sample_size=10,
+            ratio=0.2,
+            likely_cause="geoblocking"
+        )
+
+        error = ErrorPatternAbortError(
+            pattern_result=pattern_result,
+            partial_results={"v1": {"error": True}}
+        )
+
+        assert error.pattern_result is pattern_result
+        assert error.partial_results == {"v1": {"error": True}}
+        assert "403 Forbidden" in str(error)
+
+    def test_exception_default_partial_results(self):
+        """Test ErrorPatternAbortError with default empty partial results."""
+        from src.caption_fetcher import ErrorPatternAbortError, ErrorPatternResult
+
+        pattern_result = ErrorPatternResult(detected=True)
+        error = ErrorPatternAbortError(pattern_result=pattern_result)
+
+        assert error.partial_results == {}
+
+
+class TestFetchCaptionsBatchWithErrorPattern:
+    """Tests for fetch_captions_batch with error pattern detection (US-007 Sprint 7)."""
+
+    def test_batch_fetch_detects_pattern_and_warns(self):
+        """Test batch fetch logs warning when pattern detected in warn mode."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError
+
+        # Create mock config with warn mode
+        mock_config = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.max_parallel_fetches = 1  # Sequential for predictability
+        mock_config.download.caption_first.abort_on_error_pattern = "warn"
+        mock_config.download.caption_first.error_pattern_threshold = 0.3
+        mock_config.download.caption_first.error_pattern_sample_size = 10
+        mock_config.download.caption_first.timeout = 30  # Required for slow_threshold calculation
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        video_ids = [f"vid{i:0>10}x" for i in range(15)]
+
+        # Mock to fail 8/10 first videos with 403
+        call_count = [0]
+
+        def mock_fetch(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 8:
+                raise CaptionFetchError(f"vid{call_count[0]}", "403 Forbidden")
+            return CaptionResult(
+                video_id=f"vid{call_count[0]}",
+                segments=[],
+                language="en"
+            )
+
+        with patch.object(fetcher, 'fetch_captions_auto_language_with_retry', side_effect=mock_fetch):
+            # Should complete without raising (warn mode)
+            results = fetcher.fetch_captions_batch(video_ids)
+
+            # Should have processed all videos
+            assert len(results) == 15
+
+    def test_batch_fetch_aborts_on_pattern_in_abort_mode(self):
+        """Test batch fetch raises ErrorPatternAbortError in abort mode."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError, ErrorPatternAbortError
+
+        # Create mock config with abort mode
+        mock_config = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.max_parallel_fetches = 1
+        mock_config.download.caption_first.abort_on_error_pattern = "abort"
+        mock_config.download.caption_first.error_pattern_threshold = 0.3
+        mock_config.download.caption_first.error_pattern_sample_size = 10
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        video_ids = [f"vid{i:0>10}x" for i in range(20)]
+
+        # Mock to fail 8/10 first videos with 403
+        call_count = [0]
+
+        def mock_fetch(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 8:
+                raise CaptionFetchError(f"vid{call_count[0]}", "403 Forbidden")
+            return CaptionResult(
+                video_id=f"vid{call_count[0]}",
+                segments=[],
+                language="en"
+            )
+
+        with patch.object(fetcher, 'fetch_captions_auto_language_with_retry', side_effect=mock_fetch):
+            with pytest.raises(ErrorPatternAbortError) as exc_info:
+                fetcher.fetch_captions_batch(video_ids)
+
+            error = exc_info.value
+            assert error.pattern_result.detected is True
+            assert "403 Forbidden" in error.pattern_result.error_signature
+            assert error.pattern_result.ratio >= 0.3
+
+    def test_batch_fetch_skip_mode_disables_detection(self):
+        """Test batch fetch doesn't detect patterns in skip mode."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError
+
+        # Create mock config with skip mode
+        mock_config = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.max_parallel_fetches = 1
+        mock_config.download.caption_first.abort_on_error_pattern = "skip"
+        mock_config.download.caption_first.error_pattern_threshold = 0.3
+        mock_config.download.caption_first.error_pattern_sample_size = 10
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        video_ids = [f"vid{i:0>10}x" for i in range(15)]
+
+        # All videos fail with 403
+        def mock_fetch(*args, **kwargs):
+            raise CaptionFetchError("vid", "403 Forbidden")
+
+        with patch.object(fetcher, 'fetch_captions_auto_language_with_retry', side_effect=mock_fetch):
+            # Should complete without raising even with 100% errors
+            results = fetcher.fetch_captions_batch(video_ids)
+
+            # All should be errors
+            assert len(results) == 15
+            assert all(r.get('error') for r in results.values())
+
+    def test_batch_fetch_records_pattern_in_metrics(self):
+        """Test batch fetch records pattern detection in metrics."""
+        from src.caption_fetcher import CaptionFetcher, CaptionMetrics, CaptionFetchError
+
+        mock_config = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.max_parallel_fetches = 1
+        mock_config.download.caption_first.abort_on_error_pattern = "warn"
+        mock_config.download.caption_first.error_pattern_threshold = 0.3
+        mock_config.download.caption_first.error_pattern_sample_size = 10
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+        metrics = CaptionMetrics()
+
+        video_ids = [f"vid{i:0>10}x" for i in range(15)]
+
+        call_count = [0]
+
+        def mock_fetch(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 5:
+                raise CaptionFetchError(f"vid{call_count[0]}", "403 Forbidden")
+            return CaptionResult(
+                video_id=f"vid{call_count[0]}",
+                segments=[],
+                language="en"
+            )
+
+        with patch.object(fetcher, 'fetch_captions_auto_language_with_retry', side_effect=mock_fetch):
+            fetcher.fetch_captions_batch(video_ids, metrics=metrics)
+
+            # Check metrics has pattern recorded
+            assert hasattr(metrics, 'error_patterns_detected')
+            assert len(metrics.error_patterns_detected) > 0
+            pattern = metrics.error_patterns_detected[0]
+            assert pattern['error_signature'] == '403 Forbidden'
+
+    def test_batch_fetch_calls_progress_callback_on_pattern(self):
+        """Test batch fetch calls progress callback when pattern detected."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError
+
+        mock_config = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.max_parallel_fetches = 1
+        mock_config.download.caption_first.abort_on_error_pattern = "warn"
+        mock_config.download.caption_first.error_pattern_threshold = 0.3
+        mock_config.download.caption_first.error_pattern_sample_size = 10
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        video_ids = [f"vid{i:0>10}x" for i in range(15)]
+        callback_events = []
+
+        def progress_callback(video_id, status, details):
+            callback_events.append((video_id, status, details))
+
+        call_count = [0]
+
+        def mock_fetch(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 5:
+                raise CaptionFetchError(f"vid{call_count[0]}", "403 Forbidden")
+            return CaptionResult(
+                video_id=f"vid{call_count[0]}",
+                segments=[],
+                language="en"
+            )
+
+        with patch.object(fetcher, 'fetch_captions_auto_language_with_retry', side_effect=mock_fetch):
+            fetcher.fetch_captions_batch(
+                video_ids,
+                progress_callback=progress_callback
+            )
+
+            # Find pattern_detected event
+            pattern_events = [e for e in callback_events if e[1] == 'pattern_detected']
+            assert len(pattern_events) == 1
+
+            _, status, details = pattern_events[0]
+            assert details['error_signature'] == '403 Forbidden'
+            assert details['affected_count'] >= 3
+
+
+class TestErrorPatternConfigOptions:
+    """Tests for error pattern config options (US-007 Sprint 7)."""
+
+    def test_config_default_values(self):
+        """Test CaptionFirstConfig has correct default values for error pattern options."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig()
+
+        assert config.abort_on_error_pattern == "warn"
+        assert config.error_pattern_threshold == 0.3
+        assert config.error_pattern_sample_size == 10
+
+    def test_config_accepts_abort_mode(self):
+        """Test CaptionFirstConfig accepts abort mode."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig(abort_on_error_pattern="abort")
+        assert config.abort_on_error_pattern == "abort"
+
+    def test_config_accepts_skip_mode(self):
+        """Test CaptionFirstConfig accepts skip mode."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig(abort_on_error_pattern="skip")
+        assert config.abort_on_error_pattern == "skip"
+
+    def test_config_custom_threshold(self):
+        """Test CaptionFirstConfig accepts custom threshold."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig(error_pattern_threshold=0.5)
+        assert config.error_pattern_threshold == 0.5
+
+    def test_config_custom_sample_size(self):
+        """Test CaptionFirstConfig accepts custom sample size."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig(error_pattern_sample_size=20)
+        assert config.error_pattern_sample_size == 20

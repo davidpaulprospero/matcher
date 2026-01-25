@@ -972,6 +972,13 @@ download:
     batch_precheck_confidence: 0.9    # Min confidence to skip individual checks (0.0-1.0)
     batch_precheck_min_samples: 5     # Videos checked per channel before trusting pattern
     batch_precheck_sample_size: 5     # Videos to sample when building channel pattern
+    # Error pattern detection (US-007 Sprint 7)
+    # When 30%+ of first N videos fail with the same error (e.g., 403 Forbidden),
+    # detect the pattern and take action. Useful for early geoblocking detection.
+    # Modes: 'abort' (stop immediately), 'warn' (log and continue), 'skip' (disable)
+    abort_on_error_pattern: "warn"    # Action on error pattern detection (default: warn)
+    error_pattern_threshold: 0.3      # Ratio of failures to trigger (30% = 3/10 videos)
+    error_pattern_sample_size: 10     # Videos to check before evaluating patterns
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

@@ -289,6 +289,29 @@ class CaptionFirstConfig:
     # before applying the pattern to remaining videos in the batch.
     batch_precheck_sample_size: int = 5
 
+    # Error pattern detection and early abort (US-007 Sprint 7)
+    # When 30%+ of the first N videos fail with the same error, detect the pattern
+    # and take action based on this setting. Useful for detecting geoblocking,
+    # API restrictions, or other systemic issues early.
+    #
+    # Modes:
+    #   'abort': Stop batch fetch immediately with clear error message
+    #   'warn': Log warning with pattern details, continue fetching (default)
+    #   'skip': Disable pattern detection entirely
+    #
+    # Example log: "Pattern detected: 403 Forbidden (8/10 videos) - possible geoblocking"
+    abort_on_error_pattern: str = "warn"
+
+    # Threshold for triggering error pattern detection (US-007 Sprint 7)
+    # Ratio of videos that must fail with the same error to trigger detection.
+    # Default 0.3 = 30% of first sample_size videos must fail with same error.
+    error_pattern_threshold: float = 0.3
+
+    # Sample size for error pattern detection (US-007 Sprint 7)
+    # Number of videos to check before evaluating error patterns.
+    # Lower = faster detection, higher = more confidence in pattern.
+    error_pattern_sample_size: int = 10
+
 
 @dataclass
 class AudioFirstConfig:
