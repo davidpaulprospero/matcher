@@ -221,6 +221,12 @@ class MatchingConfig:
     # When enabled, reduces embedding weight by 20% for low-quality transcripts
     transcript_quality_weight: bool = True  # Enable transcript quality-based weight adjustment
 
+    # Pool size normalization (adjusts confidence based on candidate pool size)
+    # Small pools (<10): Boost confidence when top match is clear
+    # Large pools (>100): Reduce confidence when margins are tight
+    # Formula: sqrt(pool_size/50) capped at [0.8, 1.2]
+    pool_normalization_enabled: bool = True  # Enable confidence normalization by pool size
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 
