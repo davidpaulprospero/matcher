@@ -296,23 +296,33 @@ class RateLimitConfig:
 
 @dataclass
 class SpeedTrackingConfig:
-    """Download speed monitoring for adaptive timeouts.
+    """Download speed monitoring for adaptive timeouts and rate limit detection.
 
     Tracks actual download speeds and adjusts timeouts dynamically based on
     network conditions. On slow networks, timeouts can be extended up to
     max_timeout_multiplier to prevent unnecessary timeout failures.
+
+    Additionally, monitors for rate limit signals - sudden speed drops that
+    often precede hard rate limit failures. When detected, triggers preemptive
+    backoff via circuit breaker integration.
 
     How it works:
       1. After each download, records bytes downloaded and time taken
       2. Maintains a sliding window of the last N downloads (window_size)
       3. Calculates average speed across the window
       4. If speed < min_speed_mbps, extends timeouts proportionally
-      5. State is persisted in checkpoint for resume scenarios
+      5. If speed < rate_limit_signal_threshold for 3+ consecutive samples,
+         emit a rate limit signal for preemptive backoff
+      6. State is persisted in checkpoint for resume scenarios
 
     Example with defaults (min_speed_mbps=1.0, max_timeout_multiplier=2.0):
       - Network at 2.0 MB/s: no adjustment
       - Network at 0.5 MB/s: timeout extended 2x
       - Network at 0.25 MB/s: timeout extended 2x (capped)
+
+    Rate limit signal detection (rate_limit_signal_threshold=0.1):
+      - 3+ consecutive downloads below 0.1 MB/s suggests throttling
+      - Triggers preemptive backoff before hard rate limit error
     """
     # Enable/disable speed tracking
     enabled: bool = True
@@ -332,6 +342,15 @@ class SpeedTrackingConfig:
     # Enable adaptive timeout (use speed data to extend timeouts)
     # If False, speeds are tracked but timeouts are not adjusted
     enable_adaptive_timeout: bool = True
+
+    # Rate limit signal threshold in MB/s
+    # When speed drops below this for consecutive samples, signals potential rate limiting
+    # Default 0.1 MB/s (100 KB/s) - near-stalled downloads indicate throttling
+    rate_limit_signal_threshold: float = 0.1
+
+    # Consecutive slow samples before emitting rate limit signal
+    # Requires this many samples below threshold to trigger signal
+    consecutive_slow_samples: int = 3
 
 
 @dataclass
