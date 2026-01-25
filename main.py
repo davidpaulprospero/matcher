@@ -216,6 +216,19 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
 
+    # Apply caption-first mode CLI flags
+    if getattr(args, 'caption_first', False):
+        config.download.caption_first.enabled = True
+        print("  Caption-first mode enabled via --caption-first")
+
+    if getattr(args, 'caption_language', None):
+        config.download.caption_first.preferred_language = args.caption_language
+        print(f"  Caption language set to '{args.caption_language}' via --caption-language")
+
+    if getattr(args, 'no_caption_fallback', False):
+        config.download.caption_first.fallback_to_transcription = False
+        print("  Caption fallback disabled via --no-caption-fallback")
+
     # Setup logging with dual log files (normal + verbose)
     if hasattr(args, 'project') and args.project:
         log_output_dir = Path(args.project)

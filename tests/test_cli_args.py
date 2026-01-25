@@ -426,3 +426,117 @@ class TestParseArgumentsSpecialFlags:
         with patch.object(sys, 'argv', ['main.py', '--save-matching-fixtures', 'fixtures/test.json']):
             args = parse_arguments()
             assert args.save_matching_fixtures == 'fixtures/test.json'
+
+
+class TestParseArgumentsCaptionFirst:
+    """Tests for caption-first mode CLI flags (US-010)."""
+
+    def test_caption_first_flag_set(self):
+        """Test --caption-first sets flag to True."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--caption-first']):
+            args = parse_arguments()
+            assert args.caption_first is True
+
+    def test_caption_first_default_false(self):
+        """Test caption_first defaults to False when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.caption_first is False
+
+    def test_caption_language_flag(self):
+        """Test --caption-language stores language code."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--caption-language', 'es']):
+            args = parse_arguments()
+            assert args.caption_language == 'es'
+
+    def test_caption_language_default_none(self):
+        """Test caption_language defaults to None when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.caption_language is None
+
+    def test_no_caption_fallback_flag_set(self):
+        """Test --no-caption-fallback sets flag to True."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--no-caption-fallback']):
+            args = parse_arguments()
+            assert args.no_caption_fallback is True
+
+    def test_no_caption_fallback_default_false(self):
+        """Test no_caption_fallback defaults to False when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.no_caption_fallback is False
+
+    def test_caption_first_with_language(self):
+        """Test --caption-first combined with --caption-language."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--caption-first', '--caption-language', 'fr']):
+            args = parse_arguments()
+            assert args.caption_first is True
+            assert args.caption_language == 'fr'
+
+    def test_caption_first_with_no_fallback(self):
+        """Test --caption-first combined with --no-caption-fallback."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--caption-first', '--no-caption-fallback']):
+            args = parse_arguments()
+            assert args.caption_first is True
+            assert args.no_caption_fallback is True
+
+    def test_all_caption_flags_combined(self):
+        """Test all caption-first flags combined."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', [
+            'main.py',
+            '--caption-first',
+            '--caption-language', 'de',
+            '--no-caption-fallback'
+        ]):
+            args = parse_arguments()
+            assert args.caption_first is True
+            assert args.caption_language == 'de'
+            assert args.no_caption_fallback is True
+
+    def test_caption_first_with_project_and_voiceover(self):
+        """Test caption-first flags with typical workflow arguments."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', [
+            'main.py',
+            '--voiceover', 'script.srt',
+            '--project', '/path/to/project',
+            '--caption-first',
+            '--caption-language', 'en',
+            '--non-interactive'
+        ]):
+            args = parse_arguments()
+            assert args.voiceover == 'script.srt'
+            assert args.project == '/path/to/project'
+            assert args.caption_first is True
+            assert args.caption_language == 'en'
+            assert args.non_interactive is True
+
+    def test_caption_language_various_codes(self):
+        """Test --caption-language with various ISO 639-1 codes."""
+        from src.cli.args import parse_arguments
+
+        codes = ['en', 'es', 'fr', 'de', 'ja', 'zh', 'pt', 'ru']
+        for code in codes:
+            with patch.object(sys, 'argv', ['main.py', '--caption-language', code]):
+                args = parse_arguments()
+                assert args.caption_language == code, f"Failed for code: {code}"

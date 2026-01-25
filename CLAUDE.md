@@ -37,6 +37,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `--high-matches` | Enable iterative matching until target confidence achieved |
 | `--target-confidence SCORE` | Target confidence for high matches mode (default: 0.90) |
 | `--coverage-target RATIO` | Coverage target for high matches mode (default: 0.85) |
+| `--caption-first` | Enable caption-first mode (fetch YouTube captions before download) |
+| `--caption-language CODE` | Preferred caption language (ISO 639-1, e.g., "en", "es") |
+| `--no-caption-fallback` | Disable Whisper fallback when captions unavailable |
 
 ### Common Commands
 
@@ -48,6 +51,7 @@ python main.py --keyword-list "sunset,ocean" --keyword-mode montage --duration 6
 python main.py --project "E:\Edit Job\theresa\Project" --client theresa  # Cross-project learning
 python main.py --evolve-preset --client theresa  # Generate evolved preset from history
 python main.py --voiceover script.srt --high-matches  # Iterate until 90%+ confidence
+python main.py --voiceover script.srt --caption-first  # Use YouTube captions instead of Whisper
 
 # Standalone OTIO regeneration (bypasses checkpoint - works even when corrupted)
 python scripts/regenerate_otio.py "E:\Edit Job\client\project"
@@ -545,13 +549,62 @@ Location: `scripts/ralph/` - Autonomous development assistant.
 # Interview mode (give specific direction)
 .\scripts\ralph\7-hi-super-nintendo-chalmers.bat
 
+# Watch dashboard (separate terminal)
+.\scripts\ralph\watch.ps1 [-Interval 5]
+
 # Direct execution
 .\scripts\ralph\ralph.ps1 [-Queue] [-TrueAuto] [-Resume] [-FocusArea <area>]
 ```
 
+**Interview work types:** `[B]` Bug fix, `[F]` Feature, `[I]` Improvement, `[C]` Client feedback, `[Q]` Queue focus areas (direct selection)
+
 **Focus areas:** pipeline, testing, speed, quality, rate-limiting, otio, caption, config, client-learning, agents, compilation
 
+**Testing Ralph Loop:**
+```powershell
+# Run all 138 Pester tests
+Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
+
+# Run specific test file
+Invoke-Pester -Path 'scripts/ralph/tests/Ralph.Tests.ps1' -Output Detailed
+
+# Run by tag
+Invoke-Pester -Path 'scripts/ralph/tests' -Tag 'Unit' -Output Detailed
+```
+
 See `scripts/ralph/README.md` for full documentation.
+
+## Known Issues & Solutions
+
+Documented shortcomings encountered and how they were resolved:
+
+### Ralph Loop
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| Unicode arrows in PowerShell | Parse error: `The string is missing the terminator` | Use ASCII `->` instead of `→` in .ps1 files |
+| Queue mode skipped planning | Claude jumped into old stories without generating new PRD | Added `-GeneratePRD` flag to `Invoke-ClaudeForFocusArea` in queue loop |
+| Fresh queue reused old PRD | Same focus area name meant no new PRD generated | Added `$isFreshQueue` check - if 0 completed areas, always regenerate |
+| Standard mode ignored queue | PRD focus area matched queue, but old stories used | Check queue/PRD mismatch OR fresh queue at `Start-StandardLoop` entry |
+| Vague prompt in queue mode | "Focus on quality" gave Claude no direction | Added optional work description prompt after area selection |
+| Interview context not actionable | `details = "Direct queue: quality, agents..."` | Changed to user-provided description or sensible default |
+
+### Pipeline
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| Caption-first segment gaps | OTIO paths like `file:///DDi-Swd7Qcw` (no .mp4) | Rule 26: DOWNLOAD_SEGMENTS only covers `video_candidates`, not global cache |
+| V8 track empty | B-roll matching produced no results | Two detection methods: face_score < 0.3 OR word_count < threshold |
+| `--output-only` re-ran stages | Jumped to CAPTION instead of OUTPUT | Rule 25: Checkpoint needs populated `stages` dict, not just `last_completed_stage` |
+| Project config overwrote siblings | Setting `download.fallback.proxy` cleared `fallback.caption` | Deep merge via `_deep_merge_section()` preserves sibling keys |
+
+### General Patterns
+
+| Pattern | When It Happens | Prevention |
+|---------|-----------------|------------|
+| Config dict vs object | YAML loads as dict, dataclass as object | Always use `getattr(obj, 'field', default)` or check `isinstance` |
+| Numpy bool ambiguity | `if embeddings:` fails on numpy arrays | Use `is_embeddings_empty()` helper |
+| PowerShell falsy arrays | `@()` is falsy but `.Count` works | Check `.Count -gt 0` not just truthiness |
 
 ## Git Conventions
 
@@ -570,8 +623,9 @@ See `scripts/ralph/README.md` for full documentation.
 
 | Date | Changes |
 |------|---------|
-| 2026-01-25 | Ralph interview mode, metrics dashboard, queue advancement fix, CLI arg order fix, stdin piping for multiline prompts |
-| 2026-01-25 | Ralph startup improvements: Claude CLI path resolution, startup validation, -Resume flag |
+| 2026-01-25 | Ralph: Fresh queue auto-generates new sprint PRD; Standard mode checks queue/PRD focus area mismatch |
+| 2026-01-25 | Ralph: `[Q]` Queue mode with interactive area selection (toggle on/off), optional work description prompt |
+| 2026-01-25 | Ralph: auto-launch interview when queue empty, -NoLaunch flag, Pester test suite (138 tests) |
 | 2026-01-24 | Global cache segment download, caption-first segment gap fix (Rule 26), V10 spam fix |
 
 *Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
