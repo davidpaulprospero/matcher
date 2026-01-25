@@ -52,8 +52,8 @@
         "Add unit test in tests/test_negative_sampling.py verifying negative selection"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented select_negative_sample() and format_negative_sample_for_prompt() functions. Updated all 3 LLM providers (Gemini, Claude, Ollama) to include negative samples in prompts. Added negative_sampling_enabled config option. 26 unit tests all pass."
     },
     {
       "id": "US-004",
@@ -67,8 +67,8 @@
         "Add unit test in tests/test_fallback_matching.py covering all fallback levels"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented FallbackMatchStrategy with 3 levels: L1 keyword-only (ceiling 0.7), L2 visual-description (ceiling 0.5), L3 generic-broll (ceiling 0.3). Added fallback_matching_enabled and fallback_trigger_threshold config options. Created 31 unit tests covering all fallback levels and edge cases."
     },
     {
       "id": "US-005",
