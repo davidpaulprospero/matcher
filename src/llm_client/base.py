@@ -108,7 +108,7 @@ class LLMClient(ABC):
     - Error handling
     """
 
-    def __init__(self, api_key: str, model: str, cache_dir: str = ".cache/llm_responses"):
+    def __init__(self, api_key: str, model: str, cache_dir: str = ".cache/llm_responses", cache_ttl_hours: int = 24):
         """
         Initialize LLM client.
 
@@ -116,10 +116,12 @@ class LLMClient(ABC):
             api_key: API key for the provider (empty for local models)
             model: Model name/ID
             cache_dir: Base directory for caching responses
+            cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
         """
         self.api_key = api_key
         self.model = model
         self.cache_dir = cache_dir
+        self.cache_ttl_hours = cache_ttl_hours
         self._cache = None  # Lazy initialization
 
     @property
@@ -160,7 +162,7 @@ class LLMClient(ABC):
         """Lazy-load cache to avoid circular imports."""
         if self._cache is None:
             from .cache import LLMCache
-            self._cache = LLMCache(self.cache_dir, provider=self.provider_name)
+            self._cache = LLMCache(self.cache_dir, provider=self.provider_name, ttl_hours=self.cache_ttl_hours)
         return self._cache
 
     def generate(self, request: LLMRequest) -> LLMResponse:
