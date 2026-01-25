@@ -302,6 +302,60 @@ function Ask-Priority {
 }
 
 # ============================================================================
+# INTERVIEW FLOW CONTROLLER
+# ============================================================================
+
+function Start-Interview {
+    <#
+    .SYNOPSIS
+        Orchestrates the interview flow with dynamic questions
+    .DESCRIPTION
+        Always asks: work type and details
+        Dynamically asks based on context:
+        - Area: if details are vague (< 20 chars)
+        - Client: if work type is "client" OR details mention client patterns
+        - Priority: if work type is "bug" OR details mention urgency
+    .RETURNS
+        Hashtable with: workType, details, area, client, priority, timestamp
+    #>
+
+    # Initialize context with defaults
+    $context = @{
+        workType  = ""
+        details   = ""
+        area      = ""
+        client    = ""
+        priority  = "normal"
+        timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+    }
+
+    # ---- ALWAYS ASK: Work Type ----
+    $context.workType = Ask-WorkType
+
+    # ---- ALWAYS ASK: Details ----
+    $context.details = Ask-Details -WorkType $context.workType
+
+    # ---- DYNAMIC: Area (if vague description) ----
+    if ($context.details.Length -lt 20) {
+        $context.area = Ask-Area -WorkType $context.workType -Details $context.details
+    }
+
+    # ---- DYNAMIC: Client (if client work type or client-related keywords) ----
+    $clientPattern = "client|theresa|stu|feedback"
+    if ($context.workType -eq "client" -or $context.details -match $clientPattern) {
+        $context.client = Ask-Client
+    }
+
+    # ---- DYNAMIC: Priority (if bug or urgency keywords) ----
+    $urgencyPattern = "urgent|critical|asap|broken"
+    if ($context.workType -eq "bug" -or $context.details -match $urgencyPattern) {
+        $context.priority = Ask-Priority
+    }
+
+    return $context
+}
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 
@@ -328,4 +382,22 @@ if ($existing.HasContext -and -not $Resume) {
 } else {
     # No existing context or starting fresh
     $script:ResumeMode = $false
+}
+
+# ============================================================================
+# MAIN INTERVIEW FLOW
+# ============================================================================
+
+if (-not $script:ResumeMode) {
+    Write-Host "  Let's figure out what you need." -ForegroundColor White
+    Write-Host ""
+
+    $interviewContext = Start-Interview
+
+    Write-Host ""
+    Write-Host "  Got it. Let me suggest some focus areas..." -ForegroundColor Green
+    Write-Host ""
+
+    # Store context for later use (Task 5 will use this)
+    $script:InterviewContext = $interviewContext
 }
