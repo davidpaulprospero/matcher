@@ -7,6 +7,7 @@ Provides the public match_all_segments() API for voiceover-to-video matching.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional, Dict, Any
 from collections import defaultdict
 from pathlib import Path
@@ -442,4 +443,211 @@ def match_all_segments(
 
     logger.info("=" * 60)
 
+    # Analyze low confidence segments
+    analyze_low_confidence_segments(results)
+
     return results
+
+
+@dataclass
+class LowConfidencePattern:
+    """Pattern detected in low confidence segments."""
+    pattern_type: str  # e.g., "short_voiceover", "abstract_content", "missing_keywords"
+    count: int
+    segment_indices: List[int]
+    description: str
+
+
+@dataclass
+class LowConfidenceAnalysis:
+    """Analysis result for low confidence segments."""
+    low_confidence_count: int
+    total_segments: int
+    patterns: List[LowConfidencePattern]
+    suggestions: List[str]
+    avg_low_confidence: float
+    threshold: float
+
+
+def analyze_low_confidence_segments(
+    results: List[MatchResult],
+    threshold: float = 0.6
+) -> LowConfidenceAnalysis:
+    """
+    Analyze segments with confidence below threshold to identify common patterns.
+
+    Identifies patterns such as:
+    - Short voiceover segments (< 20 characters)
+    - Abstract content (lacking concrete nouns/keywords)
+    - Missing keywords (no keywords extracted)
+    - High confidence variance (uncertain matches)
+
+    Logs analysis and suggestions for improvement.
+
+    Args:
+        results: List of MatchResult objects from matching
+        threshold: Confidence threshold (default 0.6)
+
+    Returns:
+        LowConfidenceAnalysis with patterns and suggestions
+    """
+    if not results:
+        return LowConfidenceAnalysis(
+            low_confidence_count=0,
+            total_segments=0,
+            patterns=[],
+            suggestions=[],
+            avg_low_confidence=0.0,
+            threshold=threshold
+        )
+
+    # Identify low confidence segments
+    low_conf_segments = []
+    for i, r in enumerate(results):
+        if r.primary_match and r.primary_match.confidence < threshold:
+            low_conf_segments.append((i, r))
+
+    if not low_conf_segments:
+        logger.info(f"No low confidence segments (threshold: {threshold})")
+        return LowConfidenceAnalysis(
+            low_confidence_count=0,
+            total_segments=len(results),
+            patterns=[],
+            suggestions=[],
+            avg_low_confidence=0.0,
+            threshold=threshold
+        )
+
+    # Calculate average confidence of low segments
+    avg_low_conf = sum(r.primary_match.confidence for _, r in low_conf_segments) / len(low_conf_segments)
+
+    # Detect patterns
+    patterns = []
+    suggestions = []
+
+    # Pattern 1: Short voiceover (< 20 characters)
+    short_vo_indices = []
+    for i, r in low_conf_segments:
+        vo_seg = r.primary_match.voiceover_segment
+        if len(vo_seg.text.strip()) < 20:
+            short_vo_indices.append(i)
+
+    if short_vo_indices:
+        patterns.append(LowConfidencePattern(
+            pattern_type="short_voiceover",
+            count=len(short_vo_indices),
+            segment_indices=short_vo_indices,
+            description="Voiceover text too short (< 20 chars) - insufficient context for matching"
+        ))
+        suggestions.append("Consider merging short voiceover segments or adding more descriptive text")
+
+    # Pattern 2: Missing keywords
+    no_keywords_indices = []
+    for i, r in low_conf_segments:
+        vo_seg = r.primary_match.voiceover_segment
+        keywords = getattr(vo_seg, 'keywords', []) or []
+        if len(keywords) == 0:
+            no_keywords_indices.append(i)
+
+    if no_keywords_indices:
+        patterns.append(LowConfidencePattern(
+            pattern_type="missing_keywords",
+            count=len(no_keywords_indices),
+            segment_indices=no_keywords_indices,
+            description="No keywords extracted from voiceover - semantic matching limited"
+        ))
+        suggestions.append("Run keyword extraction stage or manually add keywords to voiceover segments")
+
+    # Pattern 3: Abstract content (few matched keywords with video)
+    abstract_indices = []
+    for i, r in low_conf_segments:
+        matched_kws = getattr(r, 'matched_keywords', []) or []
+        vo_seg = r.primary_match.voiceover_segment
+        # Check if voiceover has abstract words without concrete nouns
+        text_lower = vo_seg.text.lower()
+        abstract_words = ["thing", "stuff", "something", "everything", "nothing", "way", "kind", "sort"]
+        has_abstract = any(word in text_lower for word in abstract_words)
+        few_matches = len(matched_kws) < 2
+        if has_abstract and few_matches:
+            abstract_indices.append(i)
+
+    if abstract_indices:
+        patterns.append(LowConfidencePattern(
+            pattern_type="abstract_content",
+            count=len(abstract_indices),
+            segment_indices=abstract_indices,
+            description="Voiceover contains abstract language with few concrete keywords"
+        ))
+        suggestions.append("Add more specific terminology or entity names to improve matching")
+
+    # Pattern 4: High confidence variance (uncertain matches)
+    high_variance_indices = []
+    for i, r in low_conf_segments:
+        variance = getattr(r, 'confidence_variance', 0.0)
+        if variance > 0.15:
+            high_variance_indices.append(i)
+
+    if high_variance_indices:
+        patterns.append(LowConfidencePattern(
+            pattern_type="high_variance",
+            count=len(high_variance_indices),
+            segment_indices=high_variance_indices,
+            description="High variance among candidate scores - ambiguous matches"
+        ))
+        suggestions.append("Consider adding more specific video footage or adjusting matching parameters")
+
+    # Pattern 5: No matched keywords between VO and video
+    no_keyword_match_indices = []
+    for i, r in low_conf_segments:
+        matched_kws = getattr(r, 'matched_keywords', []) or []
+        if len(matched_kws) == 0:
+            # Don't double-count if already in missing_keywords
+            if i not in no_keywords_indices:
+                no_keyword_match_indices.append(i)
+
+    if no_keyword_match_indices:
+        patterns.append(LowConfidencePattern(
+            pattern_type="no_keyword_overlap",
+            count=len(no_keyword_match_indices),
+            segment_indices=no_keyword_match_indices,
+            description="No keyword overlap between voiceover and matched video"
+        ))
+        suggestions.append("Ensure video candidates have relevant transcripts or metadata")
+
+    # Log analysis
+    logger.info("=" * 60)
+    logger.info("LOW CONFIDENCE SEGMENT ANALYSIS")
+    logger.info("=" * 60)
+    logger.info(f"  Threshold: {threshold}")
+    logger.info(f"  Low confidence segments: {len(low_conf_segments)}/{len(results)} ({len(low_conf_segments)/len(results)*100:.1f}%)")
+    logger.info(f"  Average confidence (low segments): {avg_low_conf:.3f}")
+
+    if patterns:
+        logger.info(f"  Patterns detected:")
+        for p in patterns:
+            logger.info(f"    {p.pattern_type}: {p.count} segments")
+            logger.info(f"      {p.description}")
+
+    if suggestions:
+        logger.info(f"  Suggestions for improvement:")
+        for i, suggestion in enumerate(suggestions, 1):
+            logger.info(f"    {i}. {suggestion}")
+
+    # Log sample of low confidence segments
+    if low_conf_segments:
+        logger.info(f"  Sample low confidence segments (first 5):")
+        for idx, r in low_conf_segments[:5]:
+            vo_text = r.primary_match.voiceover_segment.text[:50]
+            conf = r.primary_match.confidence
+            logger.info(f"    Segment {idx}: \"{vo_text}...\" (conf: {conf:.2f})")
+
+    logger.info("=" * 60)
+
+    return LowConfidenceAnalysis(
+        low_confidence_count=len(low_conf_segments),
+        total_segments=len(results),
+        patterns=patterns,
+        suggestions=suggestions,
+        avg_low_confidence=avg_low_conf,
+        threshold=threshold
+    )
