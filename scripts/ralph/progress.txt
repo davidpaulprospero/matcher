@@ -1877,3 +1877,41 @@ Progress: 6/12 stories complete
   - tests/test_cot_reasoning.py (335 lines)
 
 Progress: 7/12 stories complete
+
+## Iteration 8 - [US-008] Add early termination for obvious high-confidence matches
+- Added early termination for obvious matches to skip expensive LLM calls
+- Implementation details:
+  - Added `check_obvious_match()` function in TieredMatcher (src/matching/tiered_matcher.py)
+  - Early termination requires ALL THREE conditions:
+    1. Embedding similarity > 0.9 (configurable via `obvious_match_min_similarity`)
+    2. At least 3 keywords match (configurable via `obvious_match_min_keywords`)
+    3. At least one named entity appears in both voiceover and video
+  - Returns boosted confidence (minimum 0.92, configurable via `obvious_match_min_confidence`)
+  - Reasoning string: "obvious_match_early_termination: sim=X, keywords=N, entities=[...]"
+  - Integrated into match_segment() before LLM call path
+  - Uses _extract_entity_texts() from scoring.py for entity comparison
+  - Entity matching is case-insensitive
+  - Logs info message when early termination triggered
+- Added config options in src/config/sections/matching.py:
+  - `obvious_match_enabled: bool = True` - Enable/disable feature
+  - `obvious_match_min_similarity: float = 0.9` - Minimum embedding similarity
+  - `obvious_match_min_keywords: int = 3` - Minimum matched keywords
+  - `obvious_match_min_confidence: float = 0.92` - Minimum boosted confidence
+- Added config documentation in config.yaml (lines 374-381)
+- Added 23 unit tests in 7 test classes:
+  - TestCheckObviousMatchFunction (7 tests): existence, disabled, similarity/keyword/entity thresholds
+  - TestObviousMatchDetection (5 tests): all conditions met, min confidence, reasoning details
+  - TestObviousMatchConfigOptions (3 tests): custom thresholds respected
+  - TestObviousMatchEntityMatching (3 tests): case-insensitive, string/dict entity formats
+  - TestObviousMatchLogging (1 test): info message logged
+  - TestMatchSegmentIntegration (2 tests): LLM skipped, disabled path
+  - TestDefaultConfigValues (2 tests): config defaults correct
+- All 23 tests pass, all 197 Sprint 5 quality tests pass
+- Files modified:
+  - src/matching/tiered_matcher.py (added check_obvious_match method, integrated in match_segment)
+  - src/config/sections/matching.py (added 4 config options)
+  - config.yaml (added config documentation)
+- Files created:
+  - tests/test_early_termination.py (690 lines)
+
+Progress: 8/12 stories complete
