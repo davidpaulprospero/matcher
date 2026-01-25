@@ -599,6 +599,134 @@ class TestTimingValidationResult:
         assert result.message == ""
 
 
+class TestTimingEpsilonTolerance:
+    """Test timing_epsilon_ms parameter in validate_timing (US-007 Sprint 6)"""
+
+    def test_epsilon_valid_within_tolerance(self):
+        """Caption at 300.05s in 300s video is valid with 100ms epsilon"""
+        segments = [CaptionSegment(0, 0.0, 300.05, "Full coverage", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=300.0)
+
+        # With 100ms epsilon (default), 300.05s should be treated as 300s (valid)
+        validation = result.validate_timing(timing_epsilon_ms=100.0)
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+        assert validation.timing_epsilon_applied == 100.0
+        assert validation.caption_end_time == 300.05  # Original value preserved
+
+    def test_epsilon_invalid_beyond_tolerance(self):
+        """Caption at 300.15s in 300s video is invalid with 100ms epsilon"""
+        segments = [CaptionSegment(0, 0.0, 300.15, "Slightly over", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=300.0)
+
+        # With 100ms epsilon, 300.15s (150ms over) is beyond tolerance
+        # But still within max_exceed_ratio=1.1 (10%), so valid
+        validation = result.validate_timing(timing_epsilon_ms=100.0)
+
+        assert validation.is_valid is True  # Within 10% ratio
+        assert validation.exceeds_duration is False
+        assert validation.timing_epsilon_applied == 100.0
+
+    def test_epsilon_strict_with_10ms(self):
+        """Caption at 300.05s in 300s video is outside 10ms epsilon"""
+        segments = [CaptionSegment(0, 0.0, 300.05, "Slightly over", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=300.0)
+
+        # With 10ms epsilon, 300.05s (50ms over) is beyond epsilon
+        # But still within max_exceed_ratio=1.1 (10%), so valid
+        validation = result.validate_timing(timing_epsilon_ms=10.0)
+
+        assert validation.is_valid is True  # Within 10% ratio
+        assert validation.exceeds_duration is False
+        assert validation.timing_epsilon_applied == 10.0
+
+    def test_epsilon_affects_exceeds_check_at_boundary(self):
+        """Epsilon snaps caption end to duration when within tolerance"""
+        # Caption exactly at 110% of 100s video = 110s (boundary of max_exceed_ratio)
+        # If epsilon snaps to 100s, it's valid. If not snapped, it's at boundary.
+        segments = [CaptionSegment(0, 0.0, 100.08, "Near boundary", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # With 100ms epsilon, 100.08s (80ms over duration) snaps to 100s
+        validation = result.validate_timing(timing_epsilon_ms=100.0)
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+
+    def test_epsilon_zero_exact_matching(self):
+        """With epsilon=0, exact matching is used (may cause false positives)"""
+        # 299.999s is technically less than 300s
+        segments = [CaptionSegment(0, 0.0, 299.999, "Almost exact", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=300.0)
+
+        validation = result.validate_timing(timing_epsilon_ms=0.0)
+
+        assert validation.is_valid is True  # Still valid (below duration)
+        assert validation.exceeds_duration is False
+        assert validation.timing_epsilon_applied == 0.0
+
+    def test_epsilon_stored_in_result_no_duration(self):
+        """Epsilon is stored in result even when video duration is unknown"""
+        result = CaptionResult(video_id="vid1", segments=[])
+
+        validation = result.validate_timing(timing_epsilon_ms=50.0)
+
+        assert validation.timing_epsilon_applied == 50.0
+        assert validation.message == "Cannot validate timing: video duration unknown"
+
+    def test_epsilon_serialized_in_to_dict(self):
+        """timing_epsilon_applied is included in serialized dict"""
+        segments = [CaptionSegment(0, 0.0, 90.0, "Normal", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing(timing_epsilon_ms=75.0)
+        data = validation.to_dict()
+
+        assert 'timing_epsilon_applied' in data
+        assert data['timing_epsilon_applied'] == 75.0
+
+    def test_epsilon_combined_with_max_exceed_ratio(self):
+        """Epsilon and max_exceed_ratio work together correctly"""
+        # Caption at 110.05s for 100s video
+        # With epsilon=100ms: 110.05 is 10.05s over duration (not within epsilon of 100s)
+        # With max_exceed_ratio=1.1: 110.05 > 110.0, so exceeds
+        segments = [CaptionSegment(0, 0.0, 110.05, "Just over", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing(
+            max_exceed_ratio=1.1,
+            timing_epsilon_ms=100.0
+        )
+
+        assert validation.is_valid is False
+        assert validation.exceeds_duration is True
+
+    def test_epsilon_negative_difference(self):
+        """Epsilon handles captions ending slightly before video duration"""
+        # Caption at 299.95s for 300s video (50ms before end)
+        # Epsilon should snap this to 300s for consistency
+        segments = [CaptionSegment(0, 0.0, 299.95, "Slightly early", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=300.0)
+
+        validation = result.validate_timing(timing_epsilon_ms=100.0)
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+        # Coverage should still use original value (299.95/300 = 99.98%)
+
+    def test_epsilon_default_value(self):
+        """Default epsilon is 100ms when not specified"""
+        segments = [CaptionSegment(0, 0.0, 100.05, "Slight float error", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # Call without specifying epsilon - should use default 100.0
+        validation = result.validate_timing()
+
+        assert validation.timing_epsilon_applied == 100.0
+        assert validation.is_valid is True  # 50ms within 100ms epsilon
+
+
 class TestDetermineCaptionQuality:
     """Test determine_caption_quality function (US-007)"""
 

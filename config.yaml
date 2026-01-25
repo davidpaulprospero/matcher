@@ -934,6 +934,11 @@ download:
     # This avoids wasted network calls for videos without captions
     # Uses --list-subs which is faster than downloading caption content
     pre_check_availability: true  # Pre-check caption availability before fetch
+    # Timing validation epsilon (US-007 Sprint 6): tolerance for floating-point precision
+    # Captions ending within this epsilon of video duration are treated as valid (not exceeding)
+    # Example: 299.999s caption in 300s video is valid with 100ms epsilon
+    # Set to 0 for exact matching (may cause false positives from float precision)
+    timing_epsilon_ms: 100.0      # Timing tolerance in milliseconds (default: 100ms)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

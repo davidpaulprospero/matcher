@@ -370,6 +370,10 @@ class TimingValidationResult:
         exceeds_duration: True if captions extend beyond video duration + tolerance.
         below_coverage: True if caption coverage is below minimum threshold.
         message: Human-readable description of validation result.
+        timing_epsilon_applied: Epsilon tolerance in milliseconds that was applied
+            during validation. When captions end within this epsilon of video
+            duration, they are treated as valid (not exceeding). Default 0.0
+            means no epsilon was applied.
     """
     is_valid: bool
     caption_end_time: float
@@ -377,6 +381,7 @@ class TimingValidationResult:
     exceeds_duration: bool = False
     below_coverage: bool = False
     message: str = ""
+    timing_epsilon_applied: float = 0.0  # US-007: Epsilon in milliseconds
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -387,6 +392,7 @@ class TimingValidationResult:
             'exceeds_duration': self.exceeds_duration,
             'below_coverage': self.below_coverage,
             'message': self.message,
+            'timing_epsilon_applied': self.timing_epsilon_applied,
         }
 
 
@@ -498,12 +504,27 @@ class CaptionResult:
         video_duration: Optional[float] = None,
         max_exceed_ratio: float = 1.1,
         min_coverage_ratio: float = 0.5,
+        timing_epsilon_ms: float = 100.0,
     ) -> TimingValidationResult:
         """Validate caption timestamps against video duration (US-007).
 
         Checks two conditions:
         1. Caption end time should not exceed video duration by more than 10% (default)
         2. Caption coverage should not be below 50% of video duration (default)
+
+        Epsilon Tolerance Rationale:
+            Floating-point precision in caption timestamps can cause false positives.
+            For example, a caption ending at 299.999s in a 300s video would be flagged
+            as exceeding if we use exact comparison. The timing_epsilon_ms parameter
+            provides a tolerance window to handle these boundary cases.
+
+            With timing_epsilon_ms=100.0 (default):
+            - Caption at 300.05s in 300s video -> treated as ending AT duration (valid)
+            - Caption at 300.15s in 300s video -> exceeds duration by 0.15s (invalid
+              unless within max_exceed_ratio)
+
+            The epsilon is applied BEFORE the max_exceed_ratio check, effectively
+            snapping caption end times that are "close enough" to the video duration.
 
         Args:
             video_duration: Video duration in seconds. If not provided, uses
@@ -512,16 +533,25 @@ class CaptionResult:
                 Default 1.1 means captions can extend up to 10% beyond video.
             min_coverage_ratio: Minimum required coverage ratio.
                 Default 0.5 means captions must cover at least 50% of video.
+            timing_epsilon_ms: Tolerance in milliseconds for floating-point precision
+                at video duration boundary. Captions ending within this epsilon of
+                video duration are treated as ending exactly at duration. Default
+                100.0ms handles typical floating-point rounding issues.
 
         Returns:
-            TimingValidationResult with validation details. Also stores result
-            in self.timing_validated.
+            TimingValidationResult with validation details, including
+            timing_epsilon_applied showing the epsilon value used. Also stores
+            result in self.timing_validated.
 
         Example:
             >>> result = CaptionResult(video_id="abc", segments=[...], video_duration=300.0)
             >>> validation = result.validate_timing()
             >>> if not validation.is_valid:
             ...     print(f"Warning: {validation.message}")
+
+            # With custom epsilon for stricter validation
+            >>> validation = result.validate_timing(timing_epsilon_ms=10.0)
+            >>> print(f"Epsilon applied: {validation.timing_epsilon_applied}ms")
         """
         duration = video_duration or self.video_duration
 
@@ -531,7 +561,8 @@ class CaptionResult:
                 is_valid=True,  # Can't fail validation without duration
                 caption_end_time=0.0,
                 video_duration=0.0,
-                message="Cannot validate timing: video duration unknown"
+                message="Cannot validate timing: video duration unknown",
+                timing_epsilon_applied=timing_epsilon_ms,
             )
             self.timing_validated = result
             return result
@@ -539,8 +570,18 @@ class CaptionResult:
         # Get caption end time from last segment
         caption_end_time = self.segments[-1].end_time if self.segments else 0.0
 
-        # Check if captions exceed video duration
-        exceeds_duration = caption_end_time > (duration * max_exceed_ratio)
+        # Convert epsilon from milliseconds to seconds
+        epsilon_seconds = timing_epsilon_ms / 1000.0
+
+        # Apply epsilon tolerance: if caption ends within epsilon of video duration,
+        # treat it as ending exactly at duration for the exceeds check
+        effective_caption_end = caption_end_time
+        if abs(caption_end_time - duration) <= epsilon_seconds:
+            # Caption is "close enough" to video duration - snap to duration
+            effective_caption_end = duration
+
+        # Check if captions exceed video duration (using effective end time)
+        exceeds_duration = effective_caption_end > (duration * max_exceed_ratio)
 
         # Check coverage (using last segment end time, not summed duration)
         # This is different from calculate_coverage which sums segment durations
@@ -574,7 +615,8 @@ class CaptionResult:
             video_duration=duration,
             exceeds_duration=exceeds_duration,
             below_coverage=below_coverage,
-            message="; ".join(messages)
+            message="; ".join(messages),
+            timing_epsilon_applied=timing_epsilon_ms,
         )
 
         self.timing_validated = result
