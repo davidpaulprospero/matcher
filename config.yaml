@@ -890,6 +890,53 @@ download:
       - "long"              # 10-25 min videos
       - "longer"            # 25-50 min videos
 
+  # Cookie rotation: rotate between multiple cookie files on rate limit
+  # When YouTube returns 429 or requires sign-in, automatically switch to a different
+  # cookie file. Each cookie should be exported from a different browser profile/account.
+  cookie_rotation:
+    enabled: false          # Enable cookie rotation (requires multiple cookie files)
+    cookie_files:           # List of cookie file paths to rotate through
+      - "cookies/main.txt"
+      - "cookies/backup1.txt"
+      - "cookies/backup2.txt"
+    rotation_strategy: "on_error"  # on_error, round_robin, or random
+    rotate_on_errors:       # Error patterns that trigger rotation
+      - "429"
+      - "rate limit"
+      - "too many requests"
+      - "sign in"
+      - "login required"
+      - "confirm your age"
+      - "bot detection"
+    cooldown_seconds: 300   # Wait 5 min before reusing a rotated-out cookie
+    max_rotations_per_session: 0  # 0 = unlimited
+
+  # Rate limit backoff: progressive delay before cookie rotation
+  # When rate limit errors occur, apply exponential backoff BEFORE escalating to
+  # cookie rotation. This handles brief rate-limit windows without exhausting cookies.
+  #
+  # Backoff sequence example (with defaults):
+  #   1st rate limit: wait 5s
+  #   2nd rate limit: wait 10s (total: 15s)
+  #   3rd rate limit: wait 20s (total: 35s)
+  #   4th rate limit: wait 25s (total: 60s) -> rotate cookie
+  rate_limit:
+    initial_backoff_seconds: 5.0   # Initial delay on first rate limit error
+    max_backoff_before_rotate: 60.0  # Max cumulative delay before rotating cookie
+    backoff_multiplier: 2.0        # Exponential backoff multiplier
+
+  # VPN integration: switch VPN servers when cookies are exhausted
+  # Requires a VPN client with CLI support (NordVPN, ExpressVPN, Mullvad, etc.)
+  vpn:
+    enabled: false          # Enable VPN switching
+    switch_command: ""      # Command to switch VPN server, e.g., "nordvpn connect random"
+    disconnect_command: ""  # Optional: command to disconnect, e.g., "nordvpn disconnect"
+    rotate_on_rate_limit: true  # Switch VPN on rate limit (after cookies exhausted)
+    switch_delay_seconds: 10    # Wait for VPN connection after switch
+    max_switches_per_session: 10  # Limit VPN rotations (0 = unlimited)
+    verify_connection: true     # Verify connectivity after switch
+    verify_timeout: 30          # Timeout for connection verification
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

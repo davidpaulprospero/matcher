@@ -15,6 +15,9 @@ __all__ = [
     'LLMTitleFilterConfig',
     'AudioFirstConfig',
     'SpeechScreeningConfig',
+    'CookieRotationConfig',
+    'RateLimitConfig',
+    'VPNConfig',
     'DownloadConfig',
     'DownloadingConfig',
 ]
@@ -193,6 +196,113 @@ class SpeechScreeningConfig:
 
 
 @dataclass
+class CookieRotationConfig:
+    """Cookie rotation for YouTube rate limit evasion.
+
+    When YouTube returns 429 (rate limit) or requires sign-in, rotate to
+    a different cookie file. Each cookie file should be exported from a
+    different browser profile or account.
+
+    Cookie files should be in Netscape format (cookies.txt).
+    Export using: "Get cookies.txt LOCALLY" extension or similar.
+    """
+    # Enable/disable cookie rotation
+    enabled: bool = False
+
+    # List of cookie file paths to rotate through
+    # Example: ["cookies/main.txt", "cookies/backup1.txt", "cookies/backup2.txt"]
+    cookie_files: List[str] = field(default_factory=list)
+
+    # Rotation strategy:
+    # - "on_error": Only rotate when hitting rate limit or sign-in errors
+    # - "round_robin": Rotate after each download batch (proactive)
+    # - "random": Randomly select cookie on each error
+    rotation_strategy: str = "on_error"
+
+    # Error patterns that trigger cookie rotation
+    rotate_on_errors: List[str] = field(default_factory=lambda: [
+        "429",
+        "rate limit",
+        "too many requests",
+        "sign in",
+        "login required",
+        "confirm your age",
+        "bot detection",
+    ])
+
+    # Cooldown before reusing a rotated-out cookie (seconds)
+    # Gives YouTube time to "forget" the rate limit
+    cooldown_seconds: int = 300  # 5 minutes
+
+    # Maximum rotations before giving up (0 = unlimited)
+    max_rotations_per_session: int = 0
+
+
+@dataclass
+class RateLimitConfig:
+    """Progressive backoff configuration for rate limit handling.
+
+    When rate limit errors occur, apply exponential backoff BEFORE
+    escalating to cookie rotation or VPN switching. This handles
+    brief rate-limit windows without exhausting cookies.
+
+    Backoff sequence example (with defaults):
+      1st rate limit: wait 5s
+      2nd rate limit: wait 10s
+      3rd rate limit: wait 20s
+      4th rate limit: wait 25s (capped at 60s total, rotate cookie)
+    """
+    # Initial backoff delay on first rate limit error (seconds)
+    initial_backoff_seconds: float = 5.0
+
+    # Maximum cumulative delay before rotating cookie (seconds)
+    # After this much total delay, escalate to cookie rotation
+    max_backoff_before_rotate: float = 60.0
+
+    # Backoff multiplier (exponential growth)
+    backoff_multiplier: float = 2.0
+
+
+@dataclass
+class VPNConfig:
+    """VPN integration for IP rotation on rate limits.
+
+    When cookie rotation is exhausted or unavailable, switch VPN servers
+    to get a new IP address. Requires a VPN client with CLI support.
+
+    Examples:
+    - NordVPN: "nordvpn connect random"
+    - ExpressVPN: "expressvpn connect random"
+    - Mullvad: "mullvad relay set location any && mullvad connect"
+    - WireGuard: "wg-quick down wg0 && wg-quick up wg1"
+    """
+    # Enable/disable VPN switching
+    enabled: bool = False
+
+    # Command to switch/rotate VPN server
+    # Should connect to a new server (ideally random location)
+    switch_command: str = ""  # e.g., "nordvpn connect random"
+
+    # Command to disconnect VPN (optional, for cleanup)
+    disconnect_command: str = ""  # e.g., "nordvpn disconnect"
+
+    # Trigger VPN switch on rate limit (after cookie rotation exhausted)
+    rotate_on_rate_limit: bool = True
+
+    # Wait time after VPN switch for connection to establish (seconds)
+    switch_delay_seconds: int = 10
+
+    # Maximum VPN switches per session (0 = unlimited)
+    max_switches_per_session: int = 10
+
+    # Verify connectivity after switch (ping test)
+    verify_connection: bool = True
+
+    # Timeout for connection verification (seconds)
+    verify_timeout: int = 30
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -271,6 +381,15 @@ class DownloadConfig:
     # Rejects videos with speech in intro to ensure only B-roll footage
     speech_screening: SpeechScreeningConfig = field(default_factory=SpeechScreeningConfig)
 
+    # Cookie rotation: rotate between multiple cookie files on rate limit
+    cookie_rotation: CookieRotationConfig = field(default_factory=CookieRotationConfig)
+
+    # Rate limit backoff: progressive delay before cookie rotation
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+
+    # VPN integration: switch VPN servers when cookies are exhausted
+    vpn: VPNConfig = field(default_factory=VPNConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -297,6 +416,12 @@ class DownloadConfig:
             self.zero_download_remix = ZeroDownloadRemixConfig(**self.zero_download_remix)
         if isinstance(self.speech_screening, dict):
             self.speech_screening = SpeechScreeningConfig(**self.speech_screening)
+        if isinstance(self.cookie_rotation, dict):
+            self.cookie_rotation = CookieRotationConfig(**self.cookie_rotation)
+        if isinstance(self.rate_limit, dict):
+            self.rate_limit = RateLimitConfig(**self.rate_limit)
+        if isinstance(self.vpn, dict):
+            self.vpn = VPNConfig(**self.vpn)
 
 
 @dataclass
