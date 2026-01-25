@@ -969,3 +969,408 @@ class TestKeywordCrossSessionPersistence:
         }
         assert session2.rate_limit_events == 5
         assert session2.session_count == 2
+
+
+class TestExportToJson:
+    """Test JSON export functionality (US-012)."""
+
+    def test_export_to_json_returns_dict(self):
+        """Test that export_to_json returns a dict."""
+        metrics = RateLimitMetrics()
+        export = metrics.export_to_json()
+        assert isinstance(export, dict)
+
+    def test_export_schema_version(self):
+        """Test that export includes schema version."""
+        metrics = RateLimitMetrics()
+        export = metrics.export_to_json()
+        assert export["schema_version"] == "1.0"
+
+    def test_export_timestamp(self):
+        """Test that export includes export timestamp."""
+        metrics = RateLimitMetrics()
+        export = metrics.export_to_json()
+        assert "export_timestamp" in export
+        # Should be ISO format
+        assert "T" in export["export_timestamp"]
+
+    def test_export_session_info(self):
+        """Test that export includes session information."""
+        metrics = RateLimitMetrics(session_count=3)
+        metrics.session_start_time = "2026-01-25T10:00:00Z"
+        metrics.session_end_time = "2026-01-25T12:00:00Z"
+
+        export = metrics.export_to_json()
+        assert "session" in export
+        assert export["session"]["session_count"] == 3
+        assert export["session"]["session_start_time"] == "2026-01-25T10:00:00Z"
+        assert export["session"]["session_end_time"] == "2026-01-25T12:00:00Z"
+
+    def test_export_downloads_section(self):
+        """Test that export includes download statistics."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            successful_downloads=90,
+            failed_downloads=10
+        )
+        export = metrics.export_to_json()
+
+        assert "downloads" in export
+        assert export["downloads"]["total"] == 100
+        assert export["downloads"]["successful"] == 90
+        assert export["downloads"]["failed"] == 10
+        assert export["downloads"]["success_rate_percent"] == 90.0
+
+    def test_export_retries_section(self):
+        """Test that export includes retry statistics."""
+        metrics = RateLimitMetrics(
+            retry_attempts=25,
+            total_downloads=50,
+            max_retry_count_reached=5,
+            retries_by_error_type={"timeout": 15, "transient": 10}
+        )
+        export = metrics.export_to_json()
+
+        assert "retries" in export
+        assert export["retries"]["total_attempts"] == 25
+        assert export["retries"]["avg_per_download"] == 0.5
+        assert export["retries"]["max_reached_count"] == 5
+        assert export["retries"]["by_error_type"] == {"timeout": 15, "transient": 10}
+
+    def test_export_rate_limiting_section(self):
+        """Test that export includes rate limiting statistics."""
+        metrics = RateLimitMetrics(
+            rate_limit_events=15,
+            total_downloads=100,
+            tier_rate_limit_events={"short": 5, "long": 10},
+            keyword_rate_limit_events={"sunset": 8, "ocean": 7},
+            backoff_attempts=10,
+            time_spent_backing_off=120.567,
+            backoff_events_by_severity={"low": 3, "medium": 5, "high": 2}
+        )
+        export = metrics.export_to_json()
+
+        assert "rate_limiting" in export
+        rl = export["rate_limiting"]
+        assert rl["total_events"] == 15
+        assert rl["percentage_of_downloads"] == 15.0
+        assert rl["by_tier"] == {"short": 5, "long": 10}
+        assert rl["by_keyword"] == {"sunset": 8, "ocean": 7}
+        assert rl["backoff"]["total_attempts"] == 10
+        assert rl["backoff"]["total_seconds"] == 120.57  # Rounded to 2 decimals
+        assert rl["backoff"]["by_severity"] == {"low": 3, "medium": 5, "high": 2}
+
+    def test_export_escalation_section(self):
+        """Test that export includes escalation statistics."""
+        metrics = RateLimitMetrics(
+            cookie_rotations=3,
+            vpn_switches=2
+        )
+        export = metrics.export_to_json()
+
+        assert "escalation" in export
+        assert export["escalation"]["cookie_rotations"] == 3
+        assert export["escalation"]["vpn_switches"] == 2
+
+    def test_export_circuit_breaker_section(self):
+        """Test that export includes circuit breaker statistics."""
+        metrics = RateLimitMetrics(
+            circuit_breaker_trips=2,
+            circuit_breaker_pause_seconds=120.5
+        )
+        export = metrics.export_to_json()
+
+        assert "circuit_breaker" in export
+        assert export["circuit_breaker"]["total_trips"] == 2
+        assert export["circuit_breaker"]["total_pause_seconds"] == 120.5
+
+    def test_export_batch_retry_section(self):
+        """Test that export includes batch retry statistics."""
+        metrics = RateLimitMetrics(
+            batch_retry_passes=3,
+            batch_retry_successes=10,
+            batch_retry_failures=2
+        )
+        export = metrics.export_to_json()
+
+        assert "batch_retry" in export
+        assert export["batch_retry"]["total_passes"] == 3
+        assert export["batch_retry"]["total_recovered"] == 10
+        assert export["batch_retry"]["total_failed"] == 2
+
+    def test_export_network_section(self):
+        """Test that export includes network statistics."""
+        metrics = RateLimitMetrics(
+            speed_samples=50,
+            avg_speed_mbps=5.5678,
+            timeout_extensions=3
+        )
+        export = metrics.export_to_json()
+
+        assert "network" in export
+        assert export["network"]["speed_samples"] == 50
+        assert export["network"]["avg_speed_mbps"] == 5.568  # Rounded to 3 decimals
+        assert export["network"]["timeout_extensions"] == 3
+
+    def test_export_includes_recommendations(self):
+        """Test that export includes recommendations."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            rate_limit_events=20,  # > 10% threshold
+            cookie_rotations=0
+        )
+        export = metrics.export_to_json()
+
+        assert "recommendations" in export
+        assert isinstance(export["recommendations"], list)
+        # Should have recommendation about high rate limiting
+        assert len(export["recommendations"]) > 0
+
+    def test_export_without_config(self):
+        """Test that export works without config."""
+        metrics = RateLimitMetrics()
+        export = metrics.export_to_json(config=None)
+
+        assert "config_snapshot" not in export
+
+    def test_export_with_config_includes_snapshot(self):
+        """Test that export includes config snapshot when config provided."""
+        metrics = RateLimitMetrics()
+
+        # Create mock config
+        mock_config = MagicMock()
+        mock_download = MagicMock()
+        mock_config.download = mock_download
+
+        mock_rate_limit = MagicMock()
+        mock_rate_limit.initial_backoff_seconds = 5.0
+        mock_rate_limit.max_backoff_before_rotate = 60.0
+        mock_rate_limit.backoff_multiplier = 2.0
+        mock_rate_limit.per_tier_isolation = True
+        mock_rate_limit.share_budget_across_keywords = True
+        mock_rate_limit.max_backoff_budget = 300.0
+        mock_rate_limit.adaptive_multiplier = True
+        mock_download.rate_limit = mock_rate_limit
+
+        mock_circuit_breaker = MagicMock()
+        mock_circuit_breaker.enabled = True
+        mock_circuit_breaker.consecutive_failures_threshold = 5
+        mock_circuit_breaker.pause_seconds = 60.0
+        mock_circuit_breaker.block_download_retries = True
+        mock_download.circuit_breaker = mock_circuit_breaker
+
+        mock_batch_retry = MagicMock()
+        mock_batch_retry.enabled = True
+        mock_batch_retry.delay_seconds = 120.0
+        mock_batch_retry.max_passes = 2
+        mock_batch_retry.respect_circuit_breaker = True
+        mock_batch_retry.wait_for_cookie_cooldown = True
+        mock_download.batch_retry = mock_batch_retry
+
+        mock_speed_tracking = MagicMock()
+        mock_speed_tracking.enabled = True
+        mock_speed_tracking.window_size = 5
+        mock_speed_tracking.min_speed_mbps = 1.0
+        mock_speed_tracking.max_timeout_multiplier = 2.0
+        mock_speed_tracking.rate_limit_signal_threshold = 0.1
+        mock_speed_tracking.consecutive_slow_samples = 3
+        mock_download.speed_tracking = mock_speed_tracking
+
+        mock_cookie_rotation = MagicMock()
+        mock_cookie_rotation.enabled = False
+        mock_cookie_rotation.rotation_strategy = "on_error"
+        mock_cookie_rotation.cooldown_seconds = 300
+        mock_cookie_rotation.max_rotations_per_session = 0
+        mock_download.cookie_rotation = mock_cookie_rotation
+
+        mock_vpn = MagicMock()
+        mock_vpn.enabled = False
+        mock_vpn.rotate_on_rate_limit = True
+        mock_vpn.switch_delay_seconds = 10
+        mock_vpn.max_switches_per_session = 10
+        mock_vpn.verify_connection = True
+        mock_download.vpn = mock_vpn
+
+        export = metrics.export_to_json(config=mock_config)
+
+        assert "config_snapshot" in export
+        cs = export["config_snapshot"]
+        assert "rate_limit" in cs
+        assert cs["rate_limit"]["initial_backoff_seconds"] == 5.0
+        assert cs["rate_limit"]["per_tier_isolation"] == True
+        assert "circuit_breaker" in cs
+        assert cs["circuit_breaker"]["enabled"] == True
+        assert "batch_retry" in cs
+        assert "speed_tracking" in cs
+        assert "cookie_rotation" in cs
+        assert "vpn" in cs
+
+    def test_export_json_serializable(self):
+        """Test that export is JSON serializable."""
+        import json
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            retries_by_error_type={"timeout": 5},
+            tier_rate_limit_events={"short": 3}
+        )
+        export = metrics.export_to_json()
+
+        # Should not raise
+        json_str = json.dumps(export)
+        assert isinstance(json_str, str)
+
+        # Should round-trip
+        parsed = json.loads(json_str)
+        assert parsed["downloads"]["total"] == 100
+
+
+class TestExportToJsonFile:
+    """Test JSON file export functionality (US-012)."""
+
+    def test_export_to_json_file(self, tmp_path):
+        """Test that export_to_json_file writes valid JSON file."""
+        import json
+        metrics = RateLimitMetrics(total_downloads=50)
+        output_path = tmp_path / "metrics.json"
+
+        metrics.export_to_json_file(str(output_path))
+
+        assert output_path.exists()
+        with open(output_path, 'r') as f:
+            data = json.load(f)
+        assert data["downloads"]["total"] == 50
+
+    def test_export_to_json_file_creates_parent_dirs(self, tmp_path):
+        """Test that export_to_json_file creates parent directories."""
+        import json
+        metrics = RateLimitMetrics()
+        output_path = tmp_path / "nested" / "dir" / "metrics.json"
+
+        metrics.export_to_json_file(str(output_path))
+
+        assert output_path.exists()
+        with open(output_path, 'r') as f:
+            data = json.load(f)
+        assert data["schema_version"] == "1.0"
+
+    def test_export_to_json_file_with_config(self, tmp_path):
+        """Test that export_to_json_file includes config when provided."""
+        import json
+        metrics = RateLimitMetrics()
+
+        # Create mock config with spec to prevent auto-creation of attributes
+        mock_config = MagicMock()
+        mock_download = MagicMock()
+        mock_config.download = mock_download
+
+        mock_rate_limit = MagicMock()
+        mock_rate_limit.initial_backoff_seconds = 10.0
+        mock_rate_limit.max_backoff_before_rotate = 60.0
+        mock_rate_limit.backoff_multiplier = 2.0
+        mock_rate_limit.per_tier_isolation = True
+        mock_rate_limit.share_budget_across_keywords = True
+        mock_rate_limit.max_backoff_budget = 300.0
+        mock_rate_limit.adaptive_multiplier = True
+        mock_download.rate_limit = mock_rate_limit
+
+        # Set other configs to proper None (using configure_mock to override MagicMock behavior)
+        mock_download.configure_mock(
+            circuit_breaker=None,
+            batch_retry=None,
+            speed_tracking=None,
+            cookie_rotation=None,
+            vpn=None
+        )
+
+        output_path = tmp_path / "metrics.json"
+        metrics.export_to_json_file(str(output_path), config=mock_config)
+
+        with open(output_path, 'r') as f:
+            data = json.load(f)
+        assert "config_snapshot" in data
+        assert data["config_snapshot"]["rate_limit"]["initial_backoff_seconds"] == 10.0
+
+    def test_export_to_json_file_utf8_encoding(self, tmp_path):
+        """Test that export uses UTF-8 encoding."""
+        metrics = RateLimitMetrics()
+        # Add a keyword with unicode characters
+        metrics.record_rate_limit_event(keyword="日本語キーワード")
+
+        output_path = tmp_path / "metrics.json"
+        metrics.export_to_json_file(str(output_path))
+
+        with open(output_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        assert "日本語キーワード" in content
+
+    def test_export_to_json_file_pretty_printed(self, tmp_path):
+        """Test that export is pretty-printed with indentation."""
+        metrics = RateLimitMetrics()
+        output_path = tmp_path / "metrics.json"
+        metrics.export_to_json_file(str(output_path))
+
+        with open(output_path, 'r') as f:
+            content = f.read()
+        # Pretty-printed JSON should have newlines and indentation
+        assert "\n" in content
+        assert "  " in content  # Indentation
+
+
+class TestExportCompleteSchema:
+    """Test complete export schema matches documentation (US-012)."""
+
+    def test_complete_export_structure(self):
+        """Test that export matches documented schema structure."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            successful_downloads=95,
+            failed_downloads=5,
+            retry_attempts=50,
+            retries_by_error_type={"timeout": 20, "rate_limit": 15, "network": 10, "transient": 5},
+            max_retry_count_reached=3,
+            rate_limit_events=15,
+            tier_rate_limit_events={"short": 5, "medium": 5, "long": 5},
+            keyword_rate_limit_events={"sunset": 10, "ocean": 5},
+            backoff_attempts=10,
+            time_spent_backing_off=120.5,
+            backoff_events_by_severity={"low": 3, "medium": 5, "high": 2},
+            cookie_rotations=3,
+            vpn_switches=1,
+            circuit_breaker_trips=2,
+            circuit_breaker_pause_seconds=120.0,
+            batch_retry_passes=2,
+            batch_retry_successes=10,
+            batch_retry_failures=2,
+            speed_samples=50,
+            avg_speed_mbps=5.5,
+            timeout_extensions=3,
+            session_count=1,
+            session_start_time="2026-01-25T10:00:00Z",
+            session_end_time="2026-01-25T12:34:56Z"
+        )
+
+        export = metrics.export_to_json()
+
+        # Verify top-level keys
+        required_keys = [
+            "schema_version", "export_timestamp", "session",
+            "downloads", "retries", "rate_limiting", "escalation",
+            "circuit_breaker", "batch_retry", "network", "recommendations"
+        ]
+        for key in required_keys:
+            assert key in export, f"Missing key: {key}"
+
+        # Verify nested structures
+        assert "session_count" in export["session"]
+        assert "total" in export["downloads"]
+        assert "success_rate_percent" in export["downloads"]
+        assert "by_error_type" in export["retries"]
+        assert "by_tier" in export["rate_limiting"]
+        assert "by_keyword" in export["rate_limiting"]
+        assert "backoff" in export["rate_limiting"]
+        assert "by_severity" in export["rate_limiting"]["backoff"]
+        assert "cookie_rotations" in export["escalation"]
+        assert "vpn_switches" in export["escalation"]
+        assert "total_trips" in export["circuit_breaker"]
+        assert "total_recovered" in export["batch_retry"]
+        assert "avg_speed_mbps" in export["network"]

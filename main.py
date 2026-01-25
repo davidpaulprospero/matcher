@@ -438,11 +438,75 @@ def main():
         )
         print(f"\n  ✓ Saved keyword preset: {save_keywords}")
 
+    # Handle --export-metrics flag (export rate limit metrics to JSON)
+    export_metrics_path = getattr(args, 'export_metrics', None)
+    if export_metrics_path:
+        _export_rate_limit_metrics(export_metrics_path, config, PROJECT_DIR)
+
     if not success:
         print("\n  ❌ Pipeline failed")
         sys.exit(1)
     else:
         print("\n  ✅ Pipeline completed successfully")
+
+
+def _export_rate_limit_metrics(path: str, config, project_dir: Path):
+    """Export rate limit metrics to JSON file.
+
+    Loads metrics from the download checkpoint and exports to the specified path.
+
+    Args:
+        path: Output file path for JSON export
+        config: Pipeline config
+        project_dir: Project directory
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from src.downloader.rate_limit_metrics import RateLimitMetrics
+
+        # Load download checkpoint to get rate limit metrics
+        cache_dir = Path(getattr(config.cache, 'cache_dir', '.cache'))
+        if not cache_dir.is_absolute():
+            cache_dir = project_dir / cache_dir
+
+        checkpoint_file = cache_dir / "download_checkpoint.json"
+
+        if not checkpoint_file.exists():
+            print(f"\n  ⚠ No download checkpoint found at {checkpoint_file}")
+            print("  Cannot export metrics - no download data available.")
+            return
+
+        import json
+        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+            checkpoint_data = json.load(f)
+
+        # Extract rate_limit_metrics from checkpoint
+        rate_limit_metrics_data = checkpoint_data.get('rate_limit_metrics')
+        if not rate_limit_metrics_data:
+            print("\n  ⚠ No rate limit metrics in checkpoint.")
+            print("  Run a download stage to collect metrics.")
+            return
+
+        # Reconstruct RateLimitMetrics from checkpoint data
+        metrics = RateLimitMetrics.from_dict(rate_limit_metrics_data)
+
+        # Resolve output path
+        output_path = Path(path)
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+
+        # Export to JSON with config snapshot
+        metrics.export_to_json_file(str(output_path), config)
+
+        print(f"\n  📊 Exported rate limit metrics to {output_path}")
+        print(f"     Downloads: {metrics.total_downloads} ({metrics.success_rate}% success)")
+        print(f"     Rate limits: {metrics.rate_limit_events} events")
+
+    except Exception as e:
+        logger.warning(f"Failed to export rate limit metrics: {e}")
+        print(f"\n  ⚠ Failed to export metrics: {e}")
 
 
 if __name__ == '__main__':
