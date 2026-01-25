@@ -640,55 +640,65 @@ def build_embedding_index(
     config: Any
 ) -> Any:
     """Build FAISS index for fast similarity search
-    
+
     Uses config.indexing settings:
         - use_faiss: Whether to use FAISS
         - index_type: 'flat' or 'ivf'
         - ivf_nlist: Number of clusters for IVF
         - ivf_nprobe: Clusters to search at query time
+
+    Logs build time in milliseconds with vector count, dimension, and index type.
     """
     if not getattr(config.indexing, 'use_faiss', True):
         return None
-    
+
     try:
         import numpy as np
         import faiss
-        
+
         # Convert to numpy array if needed
         if isinstance(embeddings, list):
             embeddings_np = np.array(embeddings, dtype='float32')
         else:
             embeddings_np = embeddings.astype('float32')
-        
+
         # Normalize for cosine similarity
         faiss.normalize_L2(embeddings_np)
-        
-        # Build index
+
+        # Build index with timing
         dimension = embeddings_np.shape[1]
+        vector_count = embeddings_np.shape[0]
         index_type = getattr(config.indexing, 'index_type', 'flat')
-        
+
+        build_start = time.perf_counter()
+
         if index_type == 'flat':
             index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
         elif index_type == 'ivf':
             # Get IVF settings from config
             config_nlist = getattr(config.indexing, 'ivf_nlist', 100)
             config_nprobe = getattr(config.indexing, 'ivf_nprobe', 10)
-            
+
             # nlist should not exceed data size / 10
             nlist = min(config_nlist, max(1, len(embeddings_np) // 10))
-            
+
             quantizer = faiss.IndexFlatIP(dimension)
             index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
             index.train(embeddings_np)
             index.nprobe = config_nprobe  # Set search-time clusters
         else:
             index = faiss.IndexFlatIP(dimension)
-        
+
         index.add(embeddings_np)
-        
-        logger.info(f"  ✓ Built FAISS index: {index.ntotal} vectors, dim={dimension}")
+
+        build_elapsed_ms = (time.perf_counter() - build_start) * 1000
+
+        logger.info(
+            f"  ✓ Built FAISS index ({index_type}): {vector_count} vectors, "
+            f"dim={dimension} in {build_elapsed_ms:.1f}ms"
+        )
         return index
-        
+
     except ImportError:
         logger.warning("FAISS not available, using brute-force search")
         return None

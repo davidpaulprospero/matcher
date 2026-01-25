@@ -127,7 +127,8 @@
         "Include vector dimension in log message"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added time.perf_counter() timing to build_embedding_index(). Log format: '✓ Built FAISS index ({index_type}): {vector_count} vectors, dim={dimension} in {elapsed}ms'. Created tests/test_faiss_timing.py with 19 tests across 9 test classes covering: flat index timing (6 tests), timing format (2 tests), 100+ vectors (3 tests), different dimensions (3 tests), FAISS disabled (1 test), list input (1 test), IVF timing (1 test), log message format (2 tests)."
     },
     {
       "id": "US-009",
