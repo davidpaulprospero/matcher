@@ -652,6 +652,61 @@ while ($true) {
                     }
                 }
             }
+
+            # Phase 3 - Task 3.3: Resource Usage Summary
+            $latestResource = Get-ChildItem $latestLogDir.FullName -Filter "resource_usage_*.json" | Sort-Object Name -Descending | Select-Object -First 1
+            if ($latestResource) {
+                try {
+                    $resource = Get-Content $latestResource.FullName -Raw | ConvertFrom-Json
+                    Write-Host ""
+                    Write-Host "  RESOURCE USAGE (latest):" -ForegroundColor Cyan
+                    $memColor = if ($resource.peaks.memoryMB -lt 500) { 'Green' } elseif ($resource.peaks.memoryMB -lt 1000) { 'Yellow' } else { 'Red' }
+                    Write-Host "    Avg Memory: $($resource.averages.memoryMB) MB | Peak: $($resource.peaks.memoryMB) MB | Samples: $($resource.sampleCount)" -ForegroundColor $memColor
+                }
+                catch {}
+            }
+
+            # Phase 3 - Task 3.4: Prompt Effectiveness Summary
+            $effectivenessFile = Join-Path $latestLogDir.FullName "prompt_effectiveness.jsonl"
+            if (Test-Path $effectivenessFile) {
+                $effLines = Get-Content $effectivenessFile -ErrorAction SilentlyContinue
+                if ($effLines -and $effLines.Count -gt 0) {
+                    $effEntries = @()
+                    foreach ($line in $effLines) {
+                        try { $effEntries += ($line | ConvertFrom-Json) } catch {}
+                    }
+                    if ($effEntries.Count -gt 0) {
+                        $avgEff = [math]::Round(($effEntries | ForEach-Object { $_.effectiveness } | Measure-Object -Average).Average, 2)
+                        $byType = $effEntries | Group-Object promptType
+                        Write-Host ""
+                        Write-Host "  PROMPT EFFECTIVENESS:" -ForegroundColor Cyan
+                        $effColor = if ($avgEff -ge 0.7) { 'Green' } elseif ($avgEff -ge 0.4) { 'Yellow' } else { 'Red' }
+                        Write-Host "    Overall: $avgEff (1.0=first try, 0.5=retried, 0.0=failed)" -ForegroundColor $effColor
+                        foreach ($typeGroup in $byType) {
+                            $typeAvg = [math]::Round(($typeGroup.Group | ForEach-Object { $_.effectiveness } | Measure-Object -Average).Average, 2)
+                            Write-Host "      $($typeGroup.Name): $typeAvg ($($typeGroup.Count) prompts)" -ForegroundColor Gray
+                        }
+                    }
+                }
+            }
+
+            # Phase 3 - Task 3.5: Skips/Blockers
+            $skipFile = Join-Path $latestLogDir.FullName "skips_blockers.jsonl"
+            if (Test-Path $skipFile) {
+                $skipLines = Get-Content $skipFile -ErrorAction SilentlyContinue
+                if ($skipLines -and $skipLines.Count -gt 0) {
+                    Write-Host ""
+                    Write-Host "  SKIPS/BLOCKERS:" -ForegroundColor Yellow
+                    foreach ($line in ($skipLines | Select-Object -Last 3)) {
+                        try {
+                            $skip = $line | ConvertFrom-Json
+                            $skipReason = if ($skip.reason.Length -gt 40) { $skip.reason.Substring(0, 37) + "..." } else { $skip.reason }
+                            Write-Host "    [$($skip.blockerType)] $($skip.itemId): $skipReason" -ForegroundColor Yellow
+                        }
+                        catch {}
+                    }
+                }
+            }
         }
     }
 
