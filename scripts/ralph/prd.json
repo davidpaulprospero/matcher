@@ -49,8 +49,8 @@
         "Trace entries include whether manual or auto captions were selected",
         "Tests verify trace captures full decision chain for multi-fallback scenario"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added language_selection_trace: List[Dict] field to CaptionMetrics. Implemented record_language_selection() storing video_id, attempted_codes, selected_code, selection_reason, is_auto_generated. Added get_language_fallback_efficiency() returning % using preferred language. Added get_language_fallback_summary() for categorized counts. Updated summary() to print 'Language fallback: N preferred, M fallback-1...' breakdown. Updated to_dict/from_dict/merge/clear for serialization. Added 17 tests in TestLanguageSelectionTrace class covering all AC including thread safety. Files: src/caption_fetcher.py, tests/test_stage_caption.py"
     },
     {
       "id": "US-004",
@@ -65,8 +65,8 @@
         "Track which format ultimately succeeded for each video in fetch result",
         "Tests verify statistics calculated correctly across batch with mixed format results"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added format_success_counts: Dict[str, int], format_fallback_count: int, video_format_used: Dict[str, str] to CaptionMetrics. Added format_source and preferred_format params to record_fetch_success(). Implemented get_format_statistics() returning format_counts, format_rates, fallback_count, fallback_rate, total_with_format. Updated summary() to print 'Format success: json3 92% (92/100)...' with fallback count. Added format_source to progress_callback details in fetch_single(). Updated to_dict/from_dict/merge/clear for serialization. Added 15 tests in TestFormatPreferenceTracking class covering all AC. Files: src/caption_fetcher.py, tests/test_stage_caption.py"
     },
     {
       "id": "US-005",

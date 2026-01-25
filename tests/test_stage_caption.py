@@ -2371,3 +2371,449 @@ class TestLanguageSelectionTrace:
 
         # Should NOT have language fallback line
         assert "Language fallback:" not in summary_text
+
+
+class TestFormatPreferenceTracking:
+    """Test US-004 Sprint 6: Format preference success rates in CaptionMetrics.
+
+    Verifies:
+    - format_success_counts: Dict[str, int] tracking successes per format
+    - format_fallback_count: number of videos that needed format != first preference
+    - get_format_statistics() returning success rate per format
+    - summary() prints: 'Format success: json3 92% (92/100), vtt 8% (fallback)'
+    - video_format_used tracks which format succeeded for each video
+    - Statistics calculated correctly across batch with mixed format results
+    """
+
+    def test_record_fetch_success_tracks_format(self):
+        """Test record_fetch_success() tracks format_source.
+
+        US-004 AC: Add format_success_counts to CaptionMetrics tracking successes per format.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_fetch_success(
+            video_id="dQw4w9WgXcQ",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="json3",
+            preferred_format="json3"
+        )
+
+        assert metrics.format_success_counts == {"json3": 1}
+        assert metrics.video_format_used == {"dQw4w9WgXcQ": "json3"}
+        assert metrics.format_fallback_count == 0
+
+    def test_record_fetch_success_tracks_fallback(self):
+        """Test record_fetch_success() increments fallback count when format != preferred.
+
+        US-004 AC: Track format_fallback_count: videos that needed format != first preference.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # First video uses preferred format
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="json3",
+            preferred_format="json3"
+        )
+
+        # Second video falls back to vtt
+        metrics.record_fetch_success(
+            video_id="video002__DEF",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="vtt",
+            preferred_format="json3"  # json3 was preferred but vtt was used
+        )
+
+        assert metrics.format_success_counts == {"json3": 1, "vtt": 1}
+        assert metrics.format_fallback_count == 1
+
+    def test_get_format_statistics_empty(self):
+        """Test get_format_statistics() returns empty stats when no format data."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        stats = metrics.get_format_statistics()
+
+        assert stats['format_counts'] == {}
+        assert stats['format_rates'] == {}
+        assert stats['fallback_count'] == 0
+        assert stats['fallback_rate'] == 0.0
+        assert stats['total_with_format'] == 0
+
+    def test_get_format_statistics_single_format(self):
+        """Test get_format_statistics() with single format (100% rate)."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        for i in range(10):
+            metrics.record_fetch_success(
+                video_id=f"video{i:03d}__ABC",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="json3",
+                preferred_format="json3"
+            )
+
+        stats = metrics.get_format_statistics()
+
+        assert stats['format_counts'] == {"json3": 10}
+        assert stats['format_rates'] == {"json3": 100.0}
+        assert stats['fallback_count'] == 0
+        assert stats['fallback_rate'] == 0.0
+        assert stats['total_with_format'] == 10
+
+    def test_get_format_statistics_mixed_formats(self):
+        """Test get_format_statistics() calculates rates across mixed formats.
+
+        US-004 AC: Add method get_format_statistics() returning success rate per format.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # 92 videos use json3 (preferred)
+        for i in range(92):
+            metrics.record_fetch_success(
+                video_id=f"json3_{i:03d}__ABC",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="json3",
+                preferred_format="json3"
+            )
+
+        # 8 videos fall back to vtt
+        for i in range(8):
+            metrics.record_fetch_success(
+                video_id=f"vtt_{i:03d}__DEF",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="vtt",
+                preferred_format="json3"
+            )
+
+        stats = metrics.get_format_statistics()
+
+        assert stats['format_counts'] == {"json3": 92, "vtt": 8}
+        assert stats['format_rates'] == {"json3": 92.0, "vtt": 8.0}
+        assert stats['fallback_count'] == 8
+        assert stats['fallback_rate'] == 8.0
+        assert stats['total_with_format'] == 100
+
+    def test_summary_includes_format_success_line(self):
+        """Test summary() includes format success breakdown.
+
+        US-004 AC: Print in CaptionStage summary: 'Format success: json3 92% (92/100), vtt 8% (fallback)'.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # 92 videos use json3
+        for i in range(92):
+            metrics.record_fetch_success(
+                video_id=f"json3_{i:03d}__ABC",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="json3",
+                preferred_format="json3"
+            )
+
+        # 8 videos fall back to vtt
+        for i in range(8):
+            metrics.record_fetch_success(
+                video_id=f"vtt_{i:03d}__DEF",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="vtt",
+                preferred_format="json3"
+            )
+
+        summary_text = metrics.summary()
+
+        # Should have format success line
+        assert "Format success:" in summary_text
+        assert "json3 92%" in summary_text
+        assert "vtt 8%" in summary_text
+        assert "8 fallback" in summary_text
+
+    def test_summary_no_format_when_not_tracked(self):
+        """Test summary() doesn't include format line when no format tracking."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record fetch without format tracking
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=100
+            # No format_source or preferred_format
+        )
+
+        summary_text = metrics.summary()
+
+        # Should NOT have format success line
+        assert "Format success:" not in summary_text
+
+    def test_video_format_used_tracks_per_video(self):
+        """Test video_format_used tracks format for each video.
+
+        US-004 AC: Track which format ultimately succeeded for each video in fetch result.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="json3",
+            preferred_format="json3"
+        )
+
+        metrics.record_fetch_success(
+            video_id="video002__DEF",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="vtt",
+            preferred_format="json3"
+        )
+
+        metrics.record_fetch_success(
+            video_id="video003__GHI",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="srt",
+            preferred_format="json3"
+        )
+
+        assert metrics.video_format_used == {
+            "video001__ABC": "json3",
+            "video002__DEF": "vtt",
+            "video003__GHI": "srt"
+        }
+
+    def test_to_dict_includes_format_fields(self):
+        """Test to_dict() serializes format tracking fields."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="json3",
+            preferred_format="json3"
+        )
+
+        metrics.record_fetch_success(
+            video_id="video002__DEF",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="vtt",
+            preferred_format="json3"
+        )
+
+        data = metrics.to_dict()
+
+        assert data['format_success_counts'] == {"json3": 1, "vtt": 1}
+        assert data['format_fallback_count'] == 1
+        assert data['video_format_used'] == {"video001__ABC": "json3", "video002__DEF": "vtt"}
+
+    def test_from_dict_restores_format_fields(self):
+        """Test from_dict() restores format tracking fields."""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {
+            'fetch_attempts': 10,
+            'successes': 10,
+            'format_success_counts': {"json3": 8, "vtt": 2},
+            'format_fallback_count': 2,
+            'video_format_used': {"vid1__ABC": "json3", "vid2__DEF": "vtt"},
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert metrics.format_success_counts == {"json3": 8, "vtt": 2}
+        assert metrics.format_fallback_count == 2
+        assert metrics.video_format_used == {"vid1__ABC": "json3", "vid2__DEF": "vtt"}
+
+    def test_merge_combines_format_counts(self):
+        """Test merge() combines format tracking fields."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.format_success_counts = {"json3": 10, "vtt": 2}
+        metrics1.format_fallback_count = 2
+        metrics1.video_format_used = {"vid1__ABC": "json3"}
+
+        metrics2 = CaptionMetrics()
+        metrics2.format_success_counts = {"json3": 5, "srt": 3}
+        metrics2.format_fallback_count = 3
+        metrics2.video_format_used = {"vid2__DEF": "srt"}
+
+        metrics1.merge(metrics2)
+
+        assert metrics1.format_success_counts == {"json3": 15, "vtt": 2, "srt": 3}
+        assert metrics1.format_fallback_count == 5
+        assert metrics1.video_format_used == {"vid1__ABC": "json3", "vid2__DEF": "srt"}
+
+    def test_clear_resets_format_fields(self):
+        """Test clear() resets format tracking fields."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.format_success_counts = {"json3": 10, "vtt": 2}
+        metrics.format_fallback_count = 2
+        metrics.video_format_used = {"vid1__ABC": "json3"}
+
+        metrics.clear()
+
+        assert metrics.format_success_counts == {}
+        assert metrics.format_fallback_count == 0
+        assert metrics.video_format_used == {}
+
+    def test_format_tracking_thread_safe(self):
+        """Test format tracking is thread-safe under concurrent access."""
+        import threading
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        num_threads = 8
+        entries_per_thread = 100
+
+        def record_formats(thread_id):
+            for i in range(entries_per_thread):
+                fmt = "json3" if i % 3 == 0 else "vtt"
+                preferred = "json3"
+                metrics.record_fetch_success(
+                    video_id=f"t{thread_id}_v{i:03d}__XYZ",
+                    language="en",
+                    quality="high",
+                    segment_count=50,
+                    format_source=fmt,
+                    preferred_format=preferred
+                )
+
+        threads = [
+            threading.Thread(target=record_formats, args=(i,))
+            for i in range(num_threads)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should have all entries without corruption
+        total = sum(metrics.format_success_counts.values())
+        assert total == num_threads * entries_per_thread
+
+        # Check video_format_used has correct count
+        assert len(metrics.video_format_used) == num_threads * entries_per_thread
+
+    def test_statistics_batch_mixed_results(self):
+        """Test format statistics across batch with mixed format results.
+
+        US-004 AC: Tests verify statistics calculated correctly across batch with mixed format results.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Simulate a realistic batch of 100 videos with various outcomes
+        # 70 use preferred format (json3)
+        for i in range(70):
+            metrics.record_fetch_success(
+                video_id=f"batch_json3_{i:03d}__ABC",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="json3",
+                preferred_format="json3"
+            )
+
+        # 20 fall back to vtt
+        for i in range(20):
+            metrics.record_fetch_success(
+                video_id=f"batch_vtt_{i:03d}__DEF",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="vtt",
+                preferred_format="json3"
+            )
+
+        # 10 fall back to srt
+        for i in range(10):
+            metrics.record_fetch_success(
+                video_id=f"batch_srt_{i:03d}__GHI",
+                language="en",
+                quality="high",
+                segment_count=100,
+                format_source="srt",
+                preferred_format="json3"
+            )
+
+        stats = metrics.get_format_statistics()
+
+        # Verify counts
+        assert stats['format_counts'] == {"json3": 70, "vtt": 20, "srt": 10}
+        assert stats['total_with_format'] == 100
+
+        # Verify rates
+        assert stats['format_rates']['json3'] == 70.0
+        assert stats['format_rates']['vtt'] == 20.0
+        assert stats['format_rates']['srt'] == 10.0
+
+        # Verify fallback tracking (20 vtt + 10 srt = 30 fallbacks)
+        assert stats['fallback_count'] == 30
+        assert stats['fallback_rate'] == 30.0
+
+        # Verify per-video tracking
+        assert len(metrics.video_format_used) == 100
+
+    def test_no_preferred_format_no_fallback_counted(self):
+        """Test that if preferred_format is None, no fallback is counted."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record with format_source but no preferred_format
+        metrics.record_fetch_success(
+            video_id="video001__ABC",
+            language="en",
+            quality="high",
+            segment_count=100,
+            format_source="vtt",
+            preferred_format=None  # No preferred format known
+        )
+
+        assert metrics.format_success_counts == {"vtt": 1}
+        assert metrics.format_fallback_count == 0  # No fallback counted since no preferred
