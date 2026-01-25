@@ -465,6 +465,11 @@ class VPNConfig:
     - ExpressVPN: "expressvpn connect random"
     - Mullvad: "mullvad relay set location any && mullvad connect"
     - WireGuard: "wg-quick down wg0 && wg-quick up wg1"
+
+    Connection verification:
+    - By default, verifies connection by pinging Google (8.8.8.8) or curl to google.com
+    - For privacy-conscious users, endpoints are configurable via verification_endpoint/verification_ip
+    - Set skip_verification=True to disable verification entirely
     """
     # Enable/disable VPN switching
     enabled: bool = False
@@ -490,6 +495,18 @@ class VPNConfig:
 
     # Timeout for connection verification (seconds)
     verify_timeout: int = 30
+
+    # Skip verification entirely (for privacy or when endpoints are blocked)
+    # When True, verification is skipped even if verify_connection=True
+    skip_verification: bool = False
+
+    # HTTPS endpoint for curl-based verification (default: Google)
+    # Example alternatives: "https://cloudflare.com", "https://1.1.1.1"
+    verification_endpoint: str = "https://www.google.com"
+
+    # IP address for ping-based verification (default: Google DNS)
+    # Example alternatives: "1.1.1.1" (Cloudflare), "208.67.222.222" (OpenDNS)
+    verification_ip: str = "8.8.8.8"
 
 
 @dataclass

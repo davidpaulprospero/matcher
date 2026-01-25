@@ -623,3 +623,284 @@ class TestVPNManagerIntegration:
         # The healer should have tried VPN (no cookies configured)
         if healer.vpn_manager and healer.vpn_manager.is_enabled:
             assert mock_run.called or "vpn_switched" in result.details or "backoff" in result.message.lower()
+
+
+@dataclass
+class MockVPNConfigWithVerification:
+    """Mock config for testing with verification options (US-010)."""
+    enabled: bool = True
+    switch_command: str = "echo 'VPN switched'"
+    disconnect_command: str = "echo 'VPN disconnected'"
+    rotate_on_rate_limit: bool = True
+    switch_delay_seconds: int = 0  # No delay for tests
+    max_switches_per_session: int = 10
+    verify_connection: bool = True
+    verify_timeout: int = 5
+    # New US-010 fields
+    skip_verification: bool = False
+    verification_endpoint: str = "https://www.google.com"
+    verification_ip: str = "8.8.8.8"
+
+
+class TestVPNVerificationEndpoints:
+    """Tests for configurable VPN verification endpoints (US-010)."""
+
+    @pytest.fixture
+    def config_default(self):
+        """Config with default verification endpoints."""
+        return MockVPNConfigWithVerification()
+
+    @pytest.fixture
+    def config_custom(self):
+        """Config with custom verification endpoints."""
+        return MockVPNConfigWithVerification(
+            verification_endpoint="https://cloudflare.com",
+            verification_ip="1.1.1.1"
+        )
+
+    @pytest.fixture
+    def config_skip_verification(self):
+        """Config with verification skipped entirely."""
+        return MockVPNConfigWithVerification(
+            skip_verification=True,
+            verify_connection=True  # Should still be skipped
+        )
+
+    def test_default_endpoints_used(self, config_default):
+        """Test that default Google endpoints are used when not configured."""
+        from src.downloader.vpn_manager import VPNManager
+
+        manager = VPNManager(config_default)
+
+        # Check config values
+        assert manager.config.verification_endpoint == "https://www.google.com"
+        assert manager.config.verification_ip == "8.8.8.8"
+
+    def test_custom_endpoints_used(self, config_custom):
+        """Test that custom endpoints are used when configured."""
+        from src.downloader.vpn_manager import VPNManager
+
+        manager = VPNManager(config_custom)
+
+        assert manager.config.verification_endpoint == "https://cloudflare.com"
+        assert manager.config.verification_ip == "1.1.1.1"
+
+    @patch('subprocess.run')
+    def test_verification_uses_custom_endpoint(self, mock_run, config_custom):
+        """Test that verification curl uses custom endpoint."""
+        from src.downloader.vpn_manager import VPNManager
+
+        manager = VPNManager(config_custom)
+        # Make first verification (curl) succeed
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = manager._verify_connection()
+
+        assert result is True
+        # Check that custom endpoint was used in curl command
+        call_args = mock_run.call_args_list[0][0][0]
+        assert "https://cloudflare.com" in call_args
+
+    @patch('subprocess.run')
+    def test_verification_uses_custom_ip_on_curl_failure(self, mock_run, config_custom):
+        """Test that ping uses custom IP when curl fails."""
+        from src.downloader.vpn_manager import VPNManager
+
+        manager = VPNManager(config_custom)
+
+        # First call (curl) fails, second call (ping) succeeds
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr=""),  # curl fails
+            MagicMock(returncode=0, stdout="", stderr=""),  # ping succeeds
+        ]
+
+        result = manager._verify_connection()
+
+        assert result is True
+        # Check that custom IP was used in ping command
+        assert mock_run.call_count == 2
+        ping_call = mock_run.call_args_list[1][0][0]
+        assert "1.1.1.1" in ping_call
+
+    @patch('subprocess.run')
+    def test_skip_verification_option(self, mock_run, config_skip_verification):
+        """Test that skip_verification=True skips verification entirely."""
+        from src.downloader.vpn_manager import VPNManager
+
+        manager = VPNManager(config_skip_verification)
+
+        # Switch command succeeds
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = manager.switch()
+
+        assert result is True
+        # Only switch command should be called, not verification
+        assert mock_run.call_count == 1
+
+    @patch('subprocess.run')
+    def test_verification_failure_logs_endpoints(self, mock_run, config_custom, caplog):
+        """Test that verification failure logs which endpoints were tried."""
+        from src.downloader.vpn_manager import VPNManager
+        import logging
+
+        manager = VPNManager(config_custom)
+
+        # Both verification methods fail
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr=""),  # curl fails
+            MagicMock(returncode=1, stdout="", stderr=""),  # ping fails
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            result = manager._verify_connection()
+
+        assert result is False
+        # Check log message includes endpoints
+        assert any("cloudflare.com" in msg for msg in caplog.messages)
+        assert any("1.1.1.1" in msg for msg in caplog.messages)
+
+    @patch('subprocess.run')
+    def test_switch_with_skip_verification_logs_skip(self, mock_run, config_skip_verification, caplog):
+        """Test that switch logs when verification is skipped."""
+        from src.downloader.vpn_manager import VPNManager
+        import logging
+
+        manager = VPNManager(config_skip_verification)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        with caplog.at_level(logging.DEBUG):
+            manager.switch()
+
+        assert any("skip_verification=True" in msg for msg in caplog.messages)
+
+    def test_config_dataclass_has_new_fields(self):
+        """Test that VPNConfig dataclass has new US-010 fields."""
+        from src.config.sections.download import VPNConfig
+
+        config = VPNConfig()
+
+        # Check default values
+        assert hasattr(config, 'skip_verification')
+        assert config.skip_verification is False
+
+        assert hasattr(config, 'verification_endpoint')
+        assert config.verification_endpoint == "https://www.google.com"
+
+        assert hasattr(config, 'verification_ip')
+        assert config.verification_ip == "8.8.8.8"
+
+    def test_config_dataclass_custom_values(self):
+        """Test that VPNConfig dataclass accepts custom values."""
+        from src.config.sections.download import VPNConfig
+
+        config = VPNConfig(
+            skip_verification=True,
+            verification_endpoint="https://example.com",
+            verification_ip="9.9.9.9"
+        )
+
+        assert config.skip_verification is True
+        assert config.verification_endpoint == "https://example.com"
+        assert config.verification_ip == "9.9.9.9"
+
+    @patch('subprocess.run')
+    def test_verification_with_opendns(self, mock_run):
+        """Test verification with OpenDNS endpoints."""
+        from src.downloader.vpn_manager import VPNManager
+
+        config = MockVPNConfigWithVerification(
+            verification_endpoint="https://www.opendns.com",
+            verification_ip="208.67.222.222"
+        )
+        manager = VPNManager(config)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = manager._verify_connection()
+
+        assert result is True
+        call_args = mock_run.call_args_list[0][0][0]
+        assert "opendns.com" in call_args
+
+    @patch('subprocess.run')
+    def test_verification_timeout_continues_to_next(self, mock_run, config_custom, caplog):
+        """Test that timeout on curl continues to ping."""
+        from src.downloader.vpn_manager import VPNManager
+        import logging
+
+        manager = VPNManager(config_custom)
+
+        # curl times out, ping succeeds
+        mock_run.side_effect = [
+            subprocess.TimeoutExpired("curl", 10),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        with caplog.at_level(logging.DEBUG):
+            result = manager._verify_connection()
+
+        assert result is True
+        assert mock_run.call_count == 2
+        assert any("timed out" in msg for msg in caplog.messages)
+
+    @patch('subprocess.run')
+    def test_backward_compatibility_no_new_fields(self, mock_run):
+        """Test backward compatibility when config lacks new fields."""
+        from src.downloader.vpn_manager import VPNManager
+
+        # Old-style config without new fields
+        old_config = MockVPNConfig(verify_connection=True)
+        manager = VPNManager(old_config)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Should use defaults and not crash
+        result = manager._verify_connection()
+
+        assert result is True
+        # Should have used default Google endpoint
+        call_args = mock_run.call_args_list[0][0][0]
+        assert "google.com" in call_args
+
+    @patch('subprocess.run')
+    def test_skip_verification_takes_precedence_over_verify_connection(self, mock_run):
+        """Test that skip_verification=True overrides verify_connection=True."""
+        from src.downloader.vpn_manager import VPNManager
+
+        config = MockVPNConfigWithVerification(
+            verify_connection=True,
+            skip_verification=True
+        )
+        manager = VPNManager(config)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = manager.switch()
+
+        assert result is True
+        # Only switch command, no verification
+        assert mock_run.call_count == 1
+
+    def test_verification_endpoint_examples_in_docstring(self):
+        """Test that docstring mentions alternative endpoints."""
+        from src.config.sections.download import VPNConfig
+
+        # Check docstring mentions privacy and alternatives
+        docstring = VPNConfig.__doc__
+        assert "privacy" in docstring.lower()
+        assert "cloudflare" in docstring.lower() or "verification_endpoint" in docstring
+
+    @patch('subprocess.run')
+    def test_verification_debug_logging(self, mock_run, config_custom, caplog):
+        """Test that verification logs endpoints at debug level."""
+        from src.downloader.vpn_manager import VPNManager
+        import logging
+
+        manager = VPNManager(config_custom)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        with caplog.at_level(logging.DEBUG):
+            manager._verify_connection()
+
+        # Should log the endpoints being used
+        assert any("endpoint=" in msg or "ip=" in msg for msg in caplog.messages)
