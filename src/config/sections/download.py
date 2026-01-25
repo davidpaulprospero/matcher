@@ -140,6 +140,12 @@ class CaptionFirstConfig:
     - Faster: No need to download/process audio for transcription
     - Lower bandwidth: Only downloads video segments after matching
     - Quality indicators: Tracks human vs auto-generated captions
+
+    Retry behavior (US-008):
+    - Network errors trigger exponential backoff retries
+    - CaptionUnavailableError (no captions exist) is NOT retried
+    - CaptionFetchError (temporary failure) IS retried
+    - After max_retries, video is marked for transcription fallback
     """
     # Enable/disable caption-first mode
     enabled: bool = False  # Disabled by default, enable per-project
@@ -167,6 +173,15 @@ class CaptionFirstConfig:
     # Maximum cache age in days (0 = no expiration)
     # Captions older than this will be re-fetched
     max_cache_age_days: int = 30
+
+    # Retry settings for caption fetch failures (US-008)
+    # Max retries on network/temporary errors (CaptionFetchError)
+    # CaptionUnavailableError (no captions exist) is NOT retried
+    max_retries: int = 3
+
+    # Base delay between retries in seconds (exponential backoff)
+    # Actual delays: retry_delay, retry_delay*2, retry_delay*4, ...
+    retry_delay: float = 2.0
 
 
 @dataclass

@@ -2601,3 +2601,86 @@ Modified src/stages/transcribe.py to check for existing caption data and skip tr
 - [x] Config option caption_first.fallback_to_transcription already existed (default: true)
 - [x] Log summary: 'X videos used captions, Y required transcription'
 - [x] Tests verify fallback triggers correctly and metadata is set
+
+
+## Iteration 30 - [US-008] Add caption fetch retry and error handling
+- Focus: caption
+- Status: COMPLETE
+
+### Implementation Summary
+Implemented retry logic with exponential backoff for caption fetching (US-008). The implementation distinguishes between temporary errors (CaptionFetchError - network issues) which ARE retried, and permanent errors (CaptionUnavailableError - no captions exist) which are NOT retried.
+
+### Changes Made
+
+**Config additions (src/config/sections/download.py):**
+- Added `max_retries: int = 3` to CaptionFirstConfig - max retry attempts on network errors
+- Added `retry_delay: float = 2.0` to CaptionFirstConfig - base delay with exponential backoff
+- Updated docstring to document retry behavior
+
+**Config additions (config.yaml):**
+- Added `max_retries: 3` and `retry_delay: 2.0` to download.caption_first section
+- Added comments explaining exponential backoff (delays: 2s, 4s, 8s)
+
+**CaptionFetcher enhancements (src/caption_fetcher.py):**
+- Updated `__init__` to read retry settings from config
+- Added `_with_retry()` internal method implementing exponential backoff:
+  - Backoff formula: `delay * (2 ^ attempt)` (e.g., 2s, 4s, 8s, 16s...)
+  - CaptionUnavailableError: NOT retried (permanent, no captions exist)
+  - CaptionFetchError: IS retried (temporary, network issues)
+  - Unexpected exceptions: wrapped in CaptionFetchError and retried
+- Added `fetch_captions_with_retry()` - main retry API
+- Added `fetch_captions_auto_language_with_retry()` - auto language + retry
+- Added `list_available_languages_with_retry()` - language listing + retry
+- Detailed logging includes: video_id, error_type, reason, retry attempt
+
+**CaptionCache enhancements (src/caption_fetcher.py):**
+- Added `get_or_fetch_with_retry()` - cache lookup with fetch retry
+- Accepts `max_retries` and `retry_delay` parameters to override config
+
+### Tests Added
+Created 19 new tests in tests/test_caption_fetcher.py:
+
+**TestCaptionFetcherRetry (14 tests):**
+- test_fetcher_init_default_retry_settings
+- test_fetcher_init_config_retry_settings
+- test_fetch_with_retry_success_first_attempt
+- test_fetch_with_retry_temporary_error_then_success
+- test_fetch_with_retry_exponential_backoff (verifies 2s, 4s delays)
+- test_fetch_with_retry_all_retries_exhausted
+- test_fetch_with_retry_unavailable_not_retried
+- test_fetch_with_retry_unexpected_error_wrapped
+- test_fetch_with_retry_override_params
+- test_list_languages_with_retry
+- test_fetch_auto_language_with_retry
+- test_retry_logs_context (verifies video_id, error_type in logs)
+- test_retry_logs_final_failure
+- test_with_retry_zero_retries
+
+**TestCaptionCacheRetry (5 tests):**
+- test_get_or_fetch_with_retry_cache_miss
+- test_get_or_fetch_with_retry_cache_hit
+- test_get_or_fetch_with_retry_passes_params
+- test_get_or_fetch_with_retry_propagates_unavailable
+- test_get_or_fetch_with_retry_propagates_fetch_error
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py` - PASSED
+- Syntax check: `python -m py_compile src/config/sections/download.py` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+- New retry tests: 14 passed in TestCaptionFetcherRetry
+- New cache tests: 5 passed in TestCaptionCacheRetry
+- All caption tests: 115 passed, 1 skipped (network test with API issue)
+
+### Files Modified
+- src/config/sections/download.py - Added retry fields to CaptionFirstConfig
+- config.yaml - Added retry settings documentation
+- src/caption_fetcher.py - Added retry methods and logic
+- tests/test_caption_fetcher.py - Added 19 retry tests
+
+### Acceptance Criteria Met
+- [x] CaptionFetcher retries on network errors with exponential backoff
+- [x] New config options: caption_first.max_retries (default: 3), caption_first.retry_delay (default: 2.0)
+- [x] Distinguish error types: CaptionUnavailableError (no captions) vs CaptionFetchError (temporary)
+- [x] Log detailed error context: video_id, error type, retry attempt
+- [x] After max_retries, video available for transcription fallback (raises CaptionFetchError)
+- [x] Tests verify retry behavior and error classification
