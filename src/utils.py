@@ -453,6 +453,7 @@ class AlternativeMatch:
     video_scene: Optional[SceneInfo]
     confidence: float
     reasoning: str
+    diversity_score: float = 0.0  # Source diversity score (0.0-1.0) for V4-V6 tracks
 
 
 @dataclass
