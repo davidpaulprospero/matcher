@@ -1493,3 +1493,116 @@ Progress: 10/12 stories complete
 - Files created:
   - tests/test_low_confidence_analysis.py (new file, 53 tests)
 
+Progress: 11/12 stories complete
+
+## Iteration 11 - [US-011] Add match confidence histogram logging
+- Added log_confidence_histogram() function to src/matching/metrics.py:
+  - Generates ASCII histogram of confidence distribution
+  - 6 buckets: 0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0
+  - Uses █ characters for bars, scaled to max bucket count
+  - Shows count and percentage for each bucket
+  - Includes header "=== Confidence Distribution ===" and total segments footer
+  - Logs each line at INFO level
+  - Returns histogram string for testing
+  - Accepts optional bar_width parameter (default: 30)
+- Integrated into MatchStage.run() after log_quality_summary():
+  - Imports log_confidence_histogram from metrics module
+  - Calls with confidences list extracted from matches
+  - Only logs if confidences list is non-empty
+- Exported from src/matching/__init__.py:
+  - Added to imports from .metrics module
+  - Added to __all__ list
+- Created tests/test_confidence_histogram.py with 31 tests across 11 test classes:
+  - TestHistogramFunctionExists (3 tests): importable from metrics, package, in __all__
+  - TestHistogramBuckets (2 tests): 6 buckets defined, correct ranges
+  - TestBucketCounting (5 tests): low/medium/high confidence, boundary values 0.5 and 1.0
+  - TestHistogramFormatting (5 tests): bar chars, counts, percentages, total, header/footer
+  - TestHistogramLogging (2 tests): logs at INFO level, all bucket lines logged
+  - TestHistogramEdgeCases (5 tests): empty, single, many, all same, zero confidence
+  - TestHistogramBarScaling (3 tests): max bucket full bar, empty no bar, custom width
+  - TestHistogramReturnValue (2 tests): returns string, matches logged
+  - TestMatchStageIntegration (2 tests): import in match stage, called after quality summary
+  - TestDistributionVerification (2 tests): uniform and skewed distributions
+- All 31 new tests pass, all 30 quality metrics tests pass (no regressions)
+- Files modified:
+  - src/matching/metrics.py (added log_confidence_histogram function, ~70 lines)
+  - src/matching/__init__.py (added export)
+  - src/stages/match.py (added histogram logging call)
+- Files created:
+  - tests/test_confidence_histogram.py (new file, 31 tests)
+
+
+## Iteration 12 - [US-012] Add match quality summary to OUTPUT stage
+- Added quality_report_enabled config option to OutputConfig (default: true)
+  - Added to src/config/sections/output.py
+  - Added to config.yaml with comment
+- Added quality_summary metadata to OTIO timeline:
+  - Extended create_timeline() signature with quality_metrics: Optional[Dict] parameter
+  - Added quality_summary to timeline.metadata when metrics provided
+- Implemented _calculate_quality_metrics() in OutputStage:
+  - Uses existing MatchQualityMetrics from src/matching/metrics.py
+  - Adds source_variety calculation (unique sources / total matches)
+  - Adds unique_sources count
+- Implemented _generate_quality_report() in OutputStage:
+  - Creates quality_report.json alongside OTIO file
+  - Includes: total_segments, matched_segments, avg_confidence, min_confidence, max_confidence
+  - Includes: confidence_std, gaps_count, match_rate, source_variety, unique_sources
+  - Rounds floating-point values to 4 decimal places
+- Integrated quality metrics into OUTPUT stage run():
+  - Calculates metrics before create_timeline
+  - Passes metrics to create_timeline for OTIO metadata
+  - Generates quality_report.json when quality_report_enabled is true
+  - Adds quality_report path to outputs dict
+- Created tests/test_quality_report.py with 26 tests across 9 test classes:
+  - TestQualityReportEnabledConfig (3 tests): option exists, default true, can disable
+  - TestOTIOQualityMetadata (3 tests): parameter exists, metadata added, none handling
+  - TestCalculateQualityMetrics (6 tests): returns object, empty, avg/min/max, source variety
+  - TestGenerateQualityReport (5 tests): generates file, contains fields, values, none, valid JSON
+  - TestQualityReportIntegration (1 test): report in outputs
+  - TestQualityReportEdgeCases (4 tests): single, same confidence, same source, rounding
+  - TestQualityReportDisabled (1 test): disabled skips
+  - TestQualityReportRealWorldScenarios (3 tests): mixed, high, low quality
+- All 26 new tests pass, all 54 output stage tests pass (no regressions)
+- Files modified:
+  - src/config/sections/output.py (added quality_report_enabled field)
+  - src/otio/timeline.py (added quality_metrics parameter, metadata population)
+  - src/stages/output.py (added _calculate_quality_metrics, _generate_quality_report)
+  - config.yaml (added quality_report_enabled option)
+- Files created:
+  - tests/test_quality_report.py (new file, 26 tests)
+
+## Iteration 7 - 2026-01-25 13:26:57
+- Focus: quality
+- Status: In Progress...
+
+
+---
+# Sprint 5 - Quality Focus (Advanced)
+---
+
+## Sprint 5 Planning - 2026-01-25
+Generated new sprint for quality focus area with 12 user stories:
+
+### Stories:
+1. US-001: Sprint 5 quality verification test
+2. US-002: Adaptive embedding similarity thresholds
+3. US-003: Negative sampling for LLM reranking
+4. US-004: Fallback matching strategy for edge cases
+5. US-005: Transcript quality scoring
+6. US-006: Confidence normalization by candidate pool size
+7. US-007: LLM prompt chain-of-thought for match reasoning
+8. US-008: Early termination for obvious high-confidence matches
+9. US-009: Cache quality tier tracking
+10. US-010: Multi-modal similarity weighting
+11. US-011: Semantic coherence between adjacent segments
+12. US-012: Match explanation confidence validation
+
+### Focus areas:
+- Adaptive thresholds and confidence calibration
+- LLM reasoning improvements (negative sampling, chain-of-thought)
+- Fallback strategies for edge cases
+- Multi-modal scoring and semantic coherence
+- Transcript and explanation quality validation
+
+Progress: 0/12 stories complete
+

@@ -1,41 +1,31 @@
-﻿{
-    "apiRetries":  {
-                       "lastError":  null,
-                       "maxRetries":  5,
-                       "currentRetryCount":  0,
-                       "lastRetryAt":  null,
-                       "backoffSeconds":  30
-                   },
-    "createdAt":  "2026-01-25T06:09:46",
-    "queue":  [
-                  "pipeline",
-                  "testing",
-                  "speed",
-                  "quality",
-                  "rate-limiting"
-              ],
-    "retryCount":  0,
-    "skippedAreas":  [
-
-                     ],
-    "currentIndex":  3,
-    "completedAreas":  [
-                           "pipeline",
-                           "testing",
-                           "speed"
-                       ],
-    "session":  {
-                    "startedAt":  "2026-01-25T08:00:00",
-                    "currentStoryId":  "US-012",
-                    "id":  "2026-01-25_080000",
-                    "iterationCount":  17,
-                    "lastActivityAt":  "2026-01-25T08:32:55"
-                },
-    "networkRetries":  {
-                           "lastError":  null,
-                           "maxRetries":  10,
-                           "currentRetryCount":  0,
-                           "lastRetryAt":  null,
-                           "backoffSeconds":  60
-                       }
+{
+    "apiRetries": {
+        "lastError": null,
+        "maxRetries": 5,
+        "currentRetryCount": 0,
+        "lastRetryAt": null,
+        "backoffSeconds": 30
+    },
+    "createdAt": "2026-01-25T06:09:46",
+    "queue": [
+        "quality"
+    ],
+    "retryCount": 0,
+    "skippedAreas": [],
+    "currentIndex": 0,
+    "completedAreas": [],
+    "session": {
+        "startedAt": null,
+        "currentStoryId": null,
+        "id": null,
+        "iterationCount": 0,
+        "lastActivityAt": null
+    },
+    "networkRetries": {
+        "lastError": null,
+        "maxRetries": 10,
+        "currentRetryCount": 0,
+        "lastRetryAt": null,
+        "backoffSeconds": 60
+    }
 }
