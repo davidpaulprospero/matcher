@@ -9,16 +9,164 @@ Providers:
 - GeminiMatcher: Google Gemini Flash (primary provider)
 - ClaudeMatcher: Anthropic Claude Haiku (secondary/ambiguous)
 - LocalLLMMatcher: Ollama (local LLM, one-at-a-time processing)
+
+Utilities:
+- validate_llm_reasoning: Check if LLM reasoning is specific (not generic)
 """
 
 import logging
+import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Set
 
 from ..utils import SRTSegment
 
 logger = logging.getLogger(__name__)
+
+
+# Generic reasoning phrases that indicate low-quality LLM output
+GENERIC_REASONING_PHRASES = frozenset([
+    "good match",
+    "best match",
+    "matches well",
+    "relevant",
+    "related",
+    "similar",
+    "appropriate",
+    "suitable",
+    "fits well",
+    "works well",
+    "topic match",
+    "content match",
+    "good fit",
+    "nice match",
+    "matched",
+    "aligns",
+    "corresponds",
+])
+
+
+@dataclass
+class ReasoningValidation:
+    """Result of LLM reasoning validation."""
+    is_valid: bool
+    specific_references: int
+    matched_keywords: List[str]
+    warning_message: Optional[str] = None
+
+
+def _extract_keywords(text: str, min_length: int = 3) -> Set[str]:
+    """
+    Extract significant keywords from text.
+
+    Args:
+        text: Input text to extract keywords from
+        min_length: Minimum word length to consider
+
+    Returns:
+        Set of lowercase keywords
+    """
+    if not text:
+        return set()
+
+    # Remove punctuation and split into words
+    words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+
+    # Filter by length and common stopwords
+    stopwords = {
+        'the', 'and', 'for', 'that', 'this', 'with', 'are', 'was', 'were',
+        'has', 'have', 'had', 'been', 'being', 'will', 'would', 'could',
+        'should', 'may', 'might', 'can', 'into', 'from', 'about', 'which',
+        'when', 'where', 'who', 'what', 'how', 'why', 'its', 'also', 'but',
+        'not', 'than', 'then', 'these', 'those', 'some', 'any', 'all', 'each',
+        'every', 'both', 'few', 'more', 'most', 'other', 'such', 'only', 'own',
+        'same', 'very', 'just', 'because', 'before', 'after', 'during', 'while',
+    }
+
+    return {w for w in words if len(w) >= min_length and w not in stopwords}
+
+
+def validate_llm_reasoning(
+    reasoning: str,
+    voiceover_text: str,
+    video_text: Optional[str] = None,
+    min_specific_references: int = 3
+) -> ReasoningValidation:
+    """
+    Validate that LLM reasoning mentions specific keywords from voiceover or video.
+
+    Flags low-quality reasoning that is generic (< 3 specific references).
+    Logs warning when LLM provides generic reasoning.
+
+    Args:
+        reasoning: The LLM-generated reasoning string
+        voiceover_text: Text from the voiceover segment
+        video_text: Optional text from the matched video segment
+        min_specific_references: Minimum keyword matches for valid reasoning (default: 3)
+
+    Returns:
+        ReasoningValidation with is_valid, specific_references count, and matched keywords
+    """
+    if not reasoning:
+        warning = "Empty reasoning provided by LLM"
+        logger.warning(warning)
+        return ReasoningValidation(
+            is_valid=False,
+            specific_references=0,
+            matched_keywords=[],
+            warning_message=warning
+        )
+
+    reasoning_lower = reasoning.lower()
+
+    # Check for generic phrases
+    for phrase in GENERIC_REASONING_PHRASES:
+        if phrase in reasoning_lower and len(reasoning_lower.strip()) < 30:
+            # Very short reasoning with generic phrase
+            warning = f"Generic LLM reasoning detected: '{reasoning[:50]}'"
+            logger.warning(warning)
+            return ReasoningValidation(
+                is_valid=False,
+                specific_references=0,
+                matched_keywords=[],
+                warning_message=warning
+            )
+
+    # Extract keywords from voiceover and video
+    vo_keywords = _extract_keywords(voiceover_text)
+    video_keywords = _extract_keywords(video_text) if video_text else set()
+    all_source_keywords = vo_keywords | video_keywords
+
+    # Extract keywords from reasoning
+    reasoning_keywords = _extract_keywords(reasoning)
+
+    # Find matches
+    matched_keywords = list(reasoning_keywords & all_source_keywords)
+    specific_references = len(matched_keywords)
+
+    is_valid = specific_references >= min_specific_references
+
+    if not is_valid:
+        warning = (
+            f"Low-quality LLM reasoning: only {specific_references} specific references "
+            f"(need {min_specific_references}). Reasoning: '{reasoning[:50]}...'"
+        )
+        logger.warning(warning)
+        return ReasoningValidation(
+            is_valid=is_valid,
+            specific_references=specific_references,
+            matched_keywords=matched_keywords,
+            warning_message=warning
+        )
+
+    return ReasoningValidation(
+        is_valid=True,
+        specific_references=specific_references,
+        matched_keywords=matched_keywords,
+        warning_message=None
+    )
 
 
 class LLMProvider(ABC):
