@@ -474,11 +474,27 @@ function Invoke-ClaudeForFocusArea {
     # Build the prompt
     if ($GeneratePRD) {
         # Generate a new PRD for this focus area
-        $prompt = "Generate a new sprint PRD for focus area: $FocusAreaId`n`n"
-        if ($Context) {
-            $prompt += "Context: $Context`n`n"
-        }
-        $prompt += "Read scripts/ralph/prompt.md for instructions. Create 8-12 user stories in prd.json for this focus area. Set focusArea to '$FocusAreaId'. Mark all stories with passes: false."
+        $prompt = @"
+You are generating a new sprint PRD for focus area: $FocusAreaId
+
+INSTRUCTIONS:
+1. Read scripts/ralph/ralph-config.json to understand the focus area
+2. Read scripts/ralph/prompt.md for context about the project
+3. Read CLAUDE.md for project conventions
+4. Analyze the codebase to find improvement opportunities for '$FocusAreaId'
+5. Update scripts/ralph/prd.json with:
+   - focusArea: "$FocusAreaId"
+   - sprintNumber: increment from current
+   - branchName: "ralph/sprint-N" (matching sprintNumber)
+   - 8-12 specific user stories with:
+     - Clear acceptance criteria (4-6 items each)
+     - passes: false for all stories
+     - Action verbs in titles (Add, Create, Update, Fix, etc.)
+
+$(if ($Context) { "Context from user: $Context" } else { "" })
+
+Start by reading the config and prompt files, then generate the PRD.
+"@
     }
     else {
         # Work on existing stories
@@ -507,7 +523,9 @@ function Invoke-ClaudeForFocusArea {
         $prompt
     )
 
-    if ($SkipPlanApproval) {
+    # Always allow tools for PRD generation (needs write access to prd.json)
+    # Also allow if -SkipPlanApproval was passed
+    if ($GeneratePRD -or $SkipPlanApproval) {
         $claudeArgs += "--allowedTools"
         $claudeArgs += "Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
