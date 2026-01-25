@@ -37,8 +37,8 @@
         "Add unit test in tests/test_adaptive_threshold.py covering all adjustment factors"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented calculate_adaptive_threshold() with short voiceover (+0.05) and low variance (-0.05) adjustments. Integrated in TieredMatcher.match_segment(). 15 unit tests all pass."
     },
     {
       "id": "US-003",
