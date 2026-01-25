@@ -1037,5 +1037,174 @@ Progress: 8/12 stories complete
 - Files created:
   - tests/test_download_progress.py (new file, 13 tests)
 
-Progress: 9/12 stories complete
+Progress: 10/12 stories complete
+
+## Iteration 10 - [US-010] Add cache warm-up utility function
+- Added `warm_cache()` method to BaseCache in src/cache/base.py:
+  - Returns dict with: entries_loaded, entries_removed, elapsed_ms
+  - Iterates all index entries, deserializes, validates (TTL check)
+  - Removes expired/invalid entries and saves index if auto_save=True
+  - Uses time.perf_counter() for accurate timing measurement
+- Added `pre_warm` parameter to BaseCache.__init__():
+  - Default: False (no warm-up on init)
+  - When True: calls warm_cache() immediately after _load_index()
+- Logging behavior:
+  - INFO level: "Cache warm-up complete: N entries loaded in X.Xms"
+  - DEBUG level: "Removed N expired/invalid entries during warm-up" (when entries removed)
+- Created tests/test_cache_warmup.py with 25 tests across 10 test classes:
+  - TestWarmCacheFunctionExists (3 tests): method exists, returns dict, required keys
+  - TestPreWarmParameter (4 tests): accepted, default False, True calls warm_cache, False doesn't
+  - TestWarmCacheWithEntries (3 tests): valid entries, empty cache, single entry
+  - TestWarmCacheWithExpiredEntries (3 tests): removes expired, keeps non-expired, mixed
+  - TestWarmCacheLogging (4 tests): logs completion, time in ms, removal at DEBUG, no removal log when none removed
+  - TestWarmCacheTiming (2 tests): elapsed_ms positive, tends to increase with more entries
+  - TestWarmCacheWithInvalidEntries (2 tests): handles deserialization failure, removes corrupted entries
+  - TestPreWarmOnInit (2 tests): pre_warm=True loads on init, pre_warm=False doesn't
+  - TestWarmCacheIndexSaving (2 tests): saves after removal, respects auto_save=False
+- All 25 new tests pass
+- All 141 cache-related tests pass (no regressions)
+- All 35 sprint 3 verification tests pass
+- Files modified:
+  - src/cache/base.py (added pre_warm parameter, warm_cache method ~55 lines)
+- Files created:
+  - tests/test_cache_warmup.py (new file, 25 tests)
+
+Progress: 11/12 stories complete
+
+## Iteration 11 - [US-011] Add parallel embedding generation for multiple providers
+- Added max_workers field to EmbeddingConfig in src/config/sections/core.py:
+  - Type: int, default: 4
+  - Comment: "ThreadPoolExecutor workers for batch processing"
+- Created parallel_embed_batch() function in src/embeddings.py:
+  - Uses ThreadPoolExecutor with max_workers from config.embedding.max_workers
+  - Splits input texts into batches based on batch_size
+  - Processes batches in parallel using executor.submit()
+  - Aggregates results maintaining original order via batch_idx tracking
+  - Includes retry logic with exponential backoff (max_retries, retry_delay from config)
+  - Returns zero embeddings on batch failure to maintain alignment
+  - Logs progress: "Parallel embedding: N texts, M batches, K workers"
+  - Logs completion with rate: "Parallel embedding complete: N embeddings in X.Xs (Y/sec)"
+- Added max_workers to config.yaml under embedding section with documentation
+- Created tests/test_parallel_embedding.py with 26 tests across 10 test classes:
+  - TestParallelEmbedBatchFunction (4 tests): exists, required args, config arg, returns list
+  - TestParallelEmbedBatchWithConfig (3 tests): uses max_workers, uses batch_size, default without config
+  - TestParallelEmbedBatchResultOrder (3 tests): single batch, multiple batches, parallel processing
+  - TestParallelEmbedBatchErrorHandling (2 tests): returns zeros on failure, successful batches unaffected
+  - TestParallelEmbedBatchEmptyInput (3 tests): empty list, single text, cleans empty strings
+  - TestParallelEmbedBatchPerformance (2 tests): faster for 200+ texts, processes all batches
+  - TestParallelEmbedBatchLogging (3 tests): progress logs, no logs when disabled, rate in completion
+  - TestMaxWorkersConfiguration (2 tests): 1 worker sequential, 8 workers
+  - TestEmbeddingConfigMaxWorkers (4 tests): field exists, default 4, settable, int type
+- All 26 new tests pass
+- All 87 sprint 3 related tests pass (no regressions)
+- Files modified:
+  - src/config/sections/core.py (added max_workers field)
+  - src/embeddings.py (added parallel_embed_batch function ~115 lines, ThreadPoolExecutor import)
+  - config.yaml (added max_workers setting with docs)
+- Files created:
+  - tests/test_parallel_embedding.py (new file, 26 tests)
+
+## Iteration 12 - [US-012] Add LLM response cache TTL configuration
+- Note: LLMCacheConfig already had ttl_hours: int = 24 field in src/config/sections/llm.py
+- Note: config.yaml already had llm.cache.ttl_hours: 24 documented
+- Issue was that LLMClient.cache property created LLMCache without passing ttl_hours
+- Implementation:
+  - Added cache_ttl_hours parameter to LLMClient.__init__() (default: 24)
+  - Updated cache property (line 165) to pass ttl_hours to LLMCache
+  - Updated GeminiClient, AnthropicClient, OllamaClient to accept and pass cache_ttl_hours
+  - Updated factory create_client() to accept cache_ttl_hours parameter
+  - Updated create_client_from_config() to extract TTL from config.llm.cache.ttl_hours
+- Created tests/test_llm_cache_ttl.py with 26 tests across 10 test classes:
+  - TestLLMCacheConfigField (5 tests): has field, default 24, set to 1, set to 0, type is int
+  - TestLLMConfigCacheSection (3 tests): has cache section, has ttl_hours, default 24
+  - TestLLMCacheTTLHandling (4 tests): accepts param, default 24, 0 disables, 1h expiration
+  - TestLLMClientCacheTTL (3 tests): accepts param, default 24, passes to cache
+  - TestProviderClientsTTL (3 tests): Gemini, Anthropic, Ollama accept cache_ttl_hours
+  - TestFactoryCacheTTL (3 tests): create_client accepts, default 24, from_config uses TTL
+  - TestTTL1HourExpiration (2 tests): expires after 1h, valid at 59min
+  - TestCacheTTLDocumentation (1 test): config.yaml has ttl_hours setting
+  - TestCacheTTLIntegration (2 tests): end-to-end flow, ttl=0 never expires
+- All 26 new tests pass
+- All 131 LLM-related tests pass (no regressions)
+- All 35 sprint 3 verification tests pass
+- Files modified:
+  - src/llm_client/base.py (added cache_ttl_hours param, updated cache property)
+  - src/llm_client/factory.py (added cache_ttl_hours param, updated create_client_from_config)
+  - src/llm_client/providers/gemini.py (added cache_ttl_hours param)
+  - src/llm_client/providers/anthropic.py (added cache_ttl_hours param)
+  - src/llm_client/providers/ollama.py (added cache_ttl_hours param)
+- Files created:
+  - tests/test_llm_cache_ttl.py (new file, 26 tests)
+
+Progress: 12/12 stories complete
+
+---
+# Sprint 3 Complete (Speed Focus)
+---
+
+All acceptance criteria met for all 12 stories:
+- US-001: Sprint 3 speed verification test ✓
+- US-002: Parallel download worker count configuration ✓
+- US-003: Cache statistics tracking ✓
+- US-004: Embedding batch size validation ✓
+- US-005: Checkpoint load time logging ✓
+- US-006: Transcription audio extraction timeout ✓
+- US-007: skip_if_cached flag for transcription ✓
+- US-008: FAISS index build time logging ✓
+- US-009: Download progress percentage logging ✓
+- US-010: Cache warm-up utility function ✓
+- US-011: Parallel embedding generation ✓
+- US-012: LLM response cache TTL configuration ✓
+
+
+## Iteration 1 - 2026-01-25 10:50:48
+- Focus: quality
+- Status: In Progress...
+
+
+## Iteration 1 - 2026-01-25 10:58:40
+- Focus: quality
+- Status: In Progress...
+
+
+## Iteration 1 - 2026-01-25 11:03:57
+- Focus: quality
+- Status: In Progress...
+
+
+---
+# Sprint 4 Started (Quality Focus)
+---
+
+## Sprint 4 Overview
+Focus: Match quality metrics, confidence scoring, and quality reporting
+Branch: ralph/sprint-2 (continuing on same branch)
+
+### Stories (12 total)
+[x] US-001: Create sprint 4 quality verification test (high)
+[ ] US-002: Add confidence variance tracking to MatchResult (high)
+[ ] US-003: Add semantic distance-based topic penalty (high)
+[ ] US-004: Add match quality metrics logging (high)
+[ ] US-005: Add LLM reasoning quality validation (medium)
+[ ] US-006: Add temporal coherence scoring for adjacent segments (medium)
+[ ] US-007: Add source diversity scoring for V4-V6 tracks (medium)
+[ ] US-008: Add keyword match highlighting in match reasoning (medium)
+[ ] US-009: Add entity match scoring boost (medium)
+[ ] US-010: Add low confidence segment analysis logging (low)
+[ ] US-011: Add match confidence histogram logging (low)
+[ ] US-012: Add match quality summary to OUTPUT stage (low)
+
+## Iteration 1 - [US-001] Create sprint 4 quality verification test
+- Created tests/test_sprint_4_quality_verification.py with 18 tests across 6 test classes
+- TestScoringModuleImports (5 tests): module import, apply_duration_penalty, apply_topic_penalty, apply_broll_boost, apply_current_project_boost
+- TestTieredMatcherModuleImports (4 tests): module import, TieredMatcher class exists, is class, has match method
+- TestStrategiesModuleImports (3 tests): module import, StrategyMatcher class exists, is class
+- TestMatchingPackageImports (2 tests): package import, import from init
+- TestQualityRelatedImports (3 tests): Match classes, SRTSegment, SceneInfo
+- TestVerificationComplete (1 test): all modules load verification marker
+- All 18 tests pass
+- Files created:
+  - tests/test_sprint_4_quality_verification.py (new file, ~140 lines)
+
+Progress: 1/12 stories complete
 
