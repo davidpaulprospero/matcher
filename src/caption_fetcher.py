@@ -636,6 +636,36 @@ class CaptionFetcher:
         logger.debug(f"Found {len(languages)} available caption languages")
         return languages
 
+    def has_captions(self, video_id: str) -> bool:
+        """Check if a video has any captions available (US-008).
+
+        This is a lightweight check that queries subtitle availability without
+        downloading caption content. Uses list_available_languages() internally.
+
+        Use this for pre-filtering video candidates before full caption fetch,
+        which avoids wasted network calls for videos without captions.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+
+        Returns:
+            True if at least one caption language is available (manual or auto),
+            False if no captions are available.
+
+        Raises:
+            CaptionFetchError: If unable to query video metadata.
+
+        Example:
+            if fetcher.has_captions("dQw4w9WgXcQ"):
+                result = fetcher.fetch_captions("dQw4w9WgXcQ")
+            else:
+                print("No captions available, will use transcription fallback")
+        """
+        languages = self.list_available_languages(video_id)
+        has_any = len(languages) > 0
+        logger.debug(f"Caption availability check for {video_id}: {'available' if has_any else 'unavailable'}")
+        return has_any
+
     def select_best_language(
         self,
         available: List[AvailableLanguage],
@@ -2823,10 +2853,12 @@ class CaptionMetrics:
     Updated US-001: Thread-safe with Lock for parallel caption fetching.
     Updated US-002: Tracks skipped live streams separately.
     Updated US-004: Tracks coverage distribution (high/medium/low).
+    Updated US-008: Tracks pre-check availability results.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
     - Skipped live streams (US-002)
+    - Pre-check results: available/unavailable counts (US-008)
     - Language distribution
     - Quality distribution (human, auto, unavailable)
     - Coverage distribution (high >80%, medium 50-80%, low <50%) (US-004)
@@ -2849,6 +2881,8 @@ class CaptionMetrics:
         failures: Number of failed caption fetches (unavailable/error)
         cache_hits: Number of cache hits (captions loaded from cache)
         skipped_live_streams: Number of live streams skipped (US-002)
+        pre_check_available: Number of videos with captions (pre-check) (US-008)
+        pre_check_unavailable: Number of videos without captions (pre-check) (US-008)
         language_distribution: Dict mapping language code -> count
         quality_distribution: Dict mapping quality level -> count
         coverage_distribution: Dict mapping coverage level -> count (US-004)
@@ -2863,6 +2897,10 @@ class CaptionMetrics:
 
     # Skipped live streams (US-002)
     skipped_live_streams: int = 0
+
+    # Pre-check results (US-008)
+    pre_check_available: int = 0
+    pre_check_unavailable: int = 0
 
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
@@ -3008,6 +3046,27 @@ class CaptionMetrics:
 
         logger.debug(f"Caption fetch skipped for live stream: {video_id or 'unknown'}")
 
+    def record_pre_check(self, video_id: str, has_captions: bool) -> None:
+        """Record a caption availability pre-check result (US-008).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Pre-checks use has_captions() to verify caption availability before
+        attempting full fetch. This avoids wasted network calls.
+
+        Args:
+            video_id: Video ID that was checked.
+            has_captions: True if captions are available, False if unavailable.
+        """
+        with self._lock:
+            if has_captions:
+                self.pre_check_available += 1
+            else:
+                self.pre_check_unavailable += 1
+
+        status = "available" if has_captions else "unavailable"
+        logger.debug(f"Caption pre-check for {video_id}: {status}")
+
     def record_cache_hit(
         self,
         video_id: str = "",
@@ -3107,6 +3166,14 @@ class CaptionMetrics:
             basic_stats += f", {self.skipped_live_streams} live streams skipped"
         lines.append(basic_stats)
 
+        # Pre-check stats (US-008)
+        pre_check_total = self.pre_check_available + self.pre_check_unavailable
+        if pre_check_total > 0:
+            lines.append(
+                f"  Pre-check: {self.pre_check_available} available, "
+                f"{self.pre_check_unavailable} unavailable"
+            )
+
         if self.total_processed > 0:
             lines.append(
                 f"  Success rate: {self.success_rate}%, "
@@ -3164,6 +3231,8 @@ class CaptionMetrics:
             'failures': self.failures,
             'cache_hits': self.cache_hits,
             'skipped_live_streams': self.skipped_live_streams,  # US-002
+            'pre_check_available': self.pre_check_available,  # US-008
+            'pre_check_unavailable': self.pre_check_unavailable,  # US-008
             'language_distribution': dict(self.language_distribution),
             'quality_distribution': dict(self.quality_distribution),
             'coverage_distribution': dict(self.coverage_distribution),  # US-004
@@ -3192,6 +3261,8 @@ class CaptionMetrics:
             failures=data.get('failures', 0),
             cache_hits=data.get('cache_hits', 0),
             skipped_live_streams=data.get('skipped_live_streams', 0),  # US-002
+            pre_check_available=data.get('pre_check_available', 0),  # US-008
+            pre_check_unavailable=data.get('pre_check_unavailable', 0),  # US-008
             language_distribution=data.get('language_distribution', {}),
             quality_distribution=data.get('quality_distribution', {}),
             coverage_distribution=data.get('coverage_distribution', {}),  # US-004
@@ -3220,6 +3291,8 @@ class CaptionMetrics:
             self.failures += other.failures
             self.cache_hits += other.cache_hits
             self.skipped_live_streams += other.skipped_live_streams  # US-002
+            self.pre_check_available += other.pre_check_available  # US-008
+            self.pre_check_unavailable += other.pre_check_unavailable  # US-008
             self.total_segments += other.total_segments
             self.auto_generated_count += other.auto_generated_count
             self.human_caption_count += other.human_caption_count
@@ -3252,6 +3325,8 @@ class CaptionMetrics:
             self.failures = 0
             self.cache_hits = 0
             self.skipped_live_streams = 0  # US-002
+            self.pre_check_available = 0  # US-008
+            self.pre_check_unavailable = 0  # US-008
             self.language_distribution = {}
             self.quality_distribution = {}
             self.coverage_distribution = {}  # US-004

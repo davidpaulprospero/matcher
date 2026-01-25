@@ -1494,6 +1494,110 @@ zh-Hans   Chinese (Simplified) vtt, ttml, srv3, srv2, srv1, json3
         assert languages[2].code == "zh-hans"
 
 
+class TestHasCaptions:
+    """Test has_captions method (US-008)"""
+
+    @patch('subprocess.run')
+    def test_has_captions_returns_true_when_manual_available(self, mock_run):
+        """Test has_captions returns True when manual captions exist"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available subtitles for dQw4w9WgXcQ:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        result = fetcher.has_captions("dQw4w9WgXcQ")
+
+        assert result is True
+
+    @patch('subprocess.run')
+    def test_has_captions_returns_true_when_auto_available(self, mock_run):
+        """Test has_captions returns True when only auto captions exist"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available automatic captions for dQw4w9WgXcQ:
+Language  Name                              Formats
+en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        result = fetcher.has_captions("dQw4w9WgXcQ")
+
+        assert result is True
+
+    @patch('subprocess.run')
+    def test_has_captions_returns_false_when_none_available(self, mock_run):
+        """Test has_captions returns False when no captions exist"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] dQw4w9WgXcQ: Downloading webpage
+[info] dQw4w9WgXcQ: Downloading ios player API JSON
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        result = fetcher.has_captions("dQw4w9WgXcQ")
+
+        assert result is False
+
+    @patch('subprocess.run')
+    def test_has_captions_raises_on_invalid_id(self, mock_run):
+        """Test has_captions raises CaptionFetchError for invalid video ID"""
+        fetcher = CaptionFetcher()
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.has_captions("invalid")
+
+        assert "Invalid video ID" in str(exc_info.value)
+        mock_run.assert_not_called()
+
+    @patch('subprocess.run')
+    def test_has_captions_raises_on_timeout(self, mock_run):
+        """Test has_captions raises CaptionFetchError on timeout"""
+        fetcher = CaptionFetcher()
+
+        mock_run.side_effect = subprocess.TimeoutExpired('yt-dlp', 30)
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.has_captions("dQw4w9WgXcQ")
+
+        assert "Timeout" in str(exc_info.value)
+
+    @patch('subprocess.run')
+    def test_has_captions_with_multiple_languages(self, mock_run):
+        """Test has_captions returns True when multiple languages available"""
+        fetcher = CaptionFetcher()
+
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """[info] Available subtitles for dQw4w9WgXcQ:
+Language  Name                 Formats
+en        English              vtt, ttml, srv3, srv2, srv1, json3
+es        Spanish              vtt, ttml, srv3, srv2, srv1, json3
+fr        French               vtt, ttml, srv3, srv2, srv1, json3
+
+[info] Available automatic captions for dQw4w9WgXcQ:
+Language  Name                              Formats
+en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
+"""
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        result = fetcher.has_captions("dQw4w9WgXcQ")
+
+        assert result is True
+
+
 class TestSelectBestLanguage:
     """Test select_best_language method"""
 
@@ -2834,6 +2938,141 @@ class TestCaptionMetrics:
         assert restored.quality_distribution == original.quality_distribution
         assert restored.auto_generated_count == original.auto_generated_count
         assert restored.human_caption_count == original.human_caption_count
+
+
+# =============================================================================
+# US-008: Pre-Check Metrics Tests
+# =============================================================================
+
+class TestCaptionMetricsPreCheck:
+    """Test CaptionMetrics pre-check tracking (US-008)"""
+
+    def test_pre_check_defaults(self):
+        """Test default pre-check counts are zero (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        assert metrics.pre_check_available == 0
+        assert metrics.pre_check_unavailable == 0
+
+    def test_record_pre_check_available(self):
+        """Test recording pre-check with captions available (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=True)
+        metrics.record_pre_check("vid2", has_captions=True)
+        metrics.record_pre_check("vid3", has_captions=True)
+
+        assert metrics.pre_check_available == 3
+        assert metrics.pre_check_unavailable == 0
+
+    def test_record_pre_check_unavailable(self):
+        """Test recording pre-check with captions unavailable (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=False)
+        metrics.record_pre_check("vid2", has_captions=False)
+
+        assert metrics.pre_check_available == 0
+        assert metrics.pre_check_unavailable == 2
+
+    def test_record_pre_check_mixed(self):
+        """Test recording mixed pre-check results (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=True)
+        metrics.record_pre_check("vid2", has_captions=False)
+        metrics.record_pre_check("vid3", has_captions=True)
+        metrics.record_pre_check("vid4", has_captions=False)
+        metrics.record_pre_check("vid5", has_captions=True)
+
+        assert metrics.pre_check_available == 3
+        assert metrics.pre_check_unavailable == 2
+
+    def test_pre_check_in_summary(self):
+        """Test pre-check stats appear in summary (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=True)
+        metrics.record_pre_check("vid2", has_captions=False)
+        metrics.record_pre_check("vid3", has_captions=True)
+
+        summary = metrics.summary()
+
+        assert "Pre-check: 2 available, 1 unavailable" in summary
+
+    def test_pre_check_not_in_summary_when_zero(self):
+        """Test pre-check stats not shown in summary when all zero (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        summary = metrics.summary()
+
+        assert "Pre-check" not in summary
+
+    def test_pre_check_in_to_dict(self):
+        """Test pre-check stats serialized to dict (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=True)
+        metrics.record_pre_check("vid2", has_captions=False)
+
+        data = metrics.to_dict()
+
+        assert data['pre_check_available'] == 1
+        assert data['pre_check_unavailable'] == 1
+
+    def test_pre_check_restored_from_dict(self):
+        """Test pre-check stats restored from dict (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        original = CaptionMetrics()
+        original.record_pre_check("vid1", has_captions=True)
+        original.record_pre_check("vid2", has_captions=True)
+        original.record_pre_check("vid3", has_captions=False)
+
+        data = original.to_dict()
+        restored = CaptionMetrics.from_dict(data)
+
+        assert restored.pre_check_available == 2
+        assert restored.pre_check_unavailable == 1
+
+    def test_pre_check_merge(self):
+        """Test pre-check stats merged correctly (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_pre_check("vid1", has_captions=True)
+        metrics1.record_pre_check("vid2", has_captions=False)
+
+        metrics2 = CaptionMetrics()
+        metrics2.record_pre_check("vid3", has_captions=True)
+        metrics2.record_pre_check("vid4", has_captions=True)
+        metrics2.record_pre_check("vid5", has_captions=False)
+
+        metrics1.merge(metrics2)
+
+        assert metrics1.pre_check_available == 3  # 1 + 2
+        assert metrics1.pre_check_unavailable == 2  # 1 + 1
+
+    def test_pre_check_clear(self):
+        """Test pre-check stats cleared correctly (US-008)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("vid1", has_captions=True)
+        metrics.record_pre_check("vid2", has_captions=False)
+
+        metrics.clear()
+
+        assert metrics.pre_check_available == 0
+        assert metrics.pre_check_unavailable == 0
 
 
 # =============================================================================

@@ -217,6 +217,12 @@ class CaptionFirstConfig:
     # Falls back to next format on parse error or unavailability
     preferred_formats: List[str] = field(default_factory=lambda: ["json3", "vtt", "srt"])
 
+    # Caption availability pre-check (US-008)
+    # When enabled, checks if captions exist before attempting fetch
+    # This avoids wasted network calls for videos without captions
+    # The check uses --list-subs which is faster than downloading captions
+    pre_check_availability: bool = True
+
 
 @dataclass
 class AudioFirstConfig:

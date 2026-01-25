@@ -170,6 +170,35 @@ class CaptionStage(Stage):
                     ids_to_fetch = [vid for vid in ids_to_fetch if vid not in live_stream_ids]
                     print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
 
+            # US-008: Pre-check caption availability to filter out videos without captions
+            pre_check_enabled = getattr(caption_config, 'pre_check_availability', True)
+            no_caption_ids = []
+            if ids_to_fetch and pre_check_enabled:
+                print(f"  Pre-checking caption availability for {len(ids_to_fetch)} videos...")
+                for video_id in ids_to_fetch:
+                    try:
+                        has_caps = self._fetcher.has_captions(video_id)
+                        metrics.record_pre_check(video_id, has_caps)
+                        if not has_caps:
+                            no_caption_ids.append(video_id)
+                            # Store as unavailable in caption results
+                            caption_results[video_id] = {
+                                'video_id': video_id,
+                                'unavailable': True,
+                                'reason': 'no_captions_available',
+                                'caption_quality': 'low',
+                            }
+                            logger.info(f"Pre-check: No captions for {video_id}")
+                    except CaptionFetchError as e:
+                        # Pre-check failed, but we'll still try to fetch later
+                        logger.warning(f"Pre-check error for {video_id}: {e}")
+                        metrics.record_pre_check(video_id, True)  # Assume available, try fetch
+
+                # Remove videos without captions from fetch list
+                if no_caption_ids:
+                    ids_to_fetch = [vid for vid in ids_to_fetch if vid not in no_caption_ids]
+                    print(f"  ! Pre-check: {len(no_caption_ids)} videos have no captions (will use transcription fallback)")
+
             if ids_to_fetch:
                 print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
@@ -248,6 +277,12 @@ class CaptionStage(Stage):
                 if r.get('skipped') and r.get('reason') == 'live_stream'
             )
 
+            # US-008: Count pre-check filtered videos (no captions available)
+            pre_check_unavailable_count = sum(
+                1 for r in caption_results.values()
+                if r.get('unavailable') and r.get('reason') == 'no_captions_available'
+            )
+
             # Store caption data in state.text_metadata for matching
             self._populate_text_metadata(state, caption_results)
 
@@ -267,6 +302,9 @@ class CaptionStage(Stage):
             # US-002: Report skipped live streams
             if skipped_live_count > 0:
                 print(f"    - Skipped live streams: {skipped_live_count} videos")
+            # US-008: Report pre-check filtered videos
+            if pre_check_unavailable_count > 0:
+                print(f"    - Pre-check filtered: {pre_check_unavailable_count} videos (no captions)")
             # US-007: Report caption quality distribution
             print(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
             print(f"    - Quality distribution: {quality_distribution['high']} high, "
@@ -309,6 +347,7 @@ class CaptionStage(Stage):
                 'skip_count': skip_count,
                 'fail_count': fail_count,
                 'skipped_live_count': skipped_live_count,  # US-002
+                'pre_check_unavailable_count': pre_check_unavailable_count,  # US-008
                 'total_segments': sum(
                     r.get('segment_count', 0) for r in caption_results.values()
                 ),
