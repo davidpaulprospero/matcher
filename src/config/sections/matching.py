@@ -264,6 +264,12 @@ class MatchingConfig:
     # - Neutral (0.3 - 0.6): no adjustment
     semantic_coherence_enabled: bool = True  # Enable semantic coherence scoring
 
+    # Explanation confidence validation
+    # When enabled, cross-checks that LLM explanation keywords appear in actual
+    # voiceover/video text. When less than 50% of keywords are verifiable,
+    # confidence is downgraded by 0.1 to penalize "hallucinated" explanations.
+    explanation_validation_enabled: bool = True  # Enable explanation keyword verification
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 

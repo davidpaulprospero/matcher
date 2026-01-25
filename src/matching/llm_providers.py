@@ -61,6 +61,25 @@ class ReasoningValidation:
     warning_message: Optional[str] = None
 
 
+@dataclass
+class ExplanationValidation:
+    """Result of LLM explanation confidence validation.
+
+    Cross-checks that keywords mentioned in the LLM's explanation
+    actually appear in the source content (voiceover/video text).
+
+    Used to detect and penalize "hallucinated" explanations where
+    the LLM references content that doesn't exist.
+    """
+    is_valid: bool
+    verification_ratio: float  # Ratio of verifiable keywords (0.0-1.0)
+    explanation_keywords: List[str]  # Keywords extracted from explanation
+    verified_keywords: List[str]  # Keywords found in source content
+    unverified_keywords: List[str]  # Keywords NOT found in source content
+    confidence_penalty: float  # Amount to reduce confidence (0.0 or 0.1)
+    warning_message: Optional[str] = None
+
+
 # Chain-of-thought scoring rubric weights
 COT_RUBRIC_WEIGHTS = {
     'visual_relevance': 0.30,  # How well video visuals match voiceover content
@@ -220,6 +239,120 @@ def validate_llm_reasoning(
         specific_references=specific_references,
         matched_keywords=matched_keywords,
         warning_message=None
+    )
+
+
+# Confidence penalty when explanation verification fails
+EXPLANATION_VERIFICATION_THRESHOLD = 0.5  # Minimum ratio of verifiable keywords
+EXPLANATION_CONFIDENCE_PENALTY = 0.1  # Penalty when below threshold
+
+
+def validate_explanation_confidence(
+    explanation: str,
+    voiceover_text: str,
+    video_text: Optional[str] = None,
+    verification_threshold: float = EXPLANATION_VERIFICATION_THRESHOLD,
+    confidence_penalty: float = EXPLANATION_CONFIDENCE_PENALTY
+) -> ExplanationValidation:
+    """
+    Validate that LLM explanation keywords appear in actual voiceover/video text.
+
+    Cross-checks keywords mentioned in the LLM's explanation against the source
+    content to detect "hallucinated" explanations that reference non-existent
+    content. When less than 50% of explanation keywords can be verified in the
+    source content, confidence is downgraded by 0.1.
+
+    Args:
+        explanation: The LLM-generated explanation/reasoning string
+        voiceover_text: Text from the voiceover segment
+        video_text: Optional text from the matched video segment (transcript)
+        verification_threshold: Minimum ratio of verifiable keywords (default: 0.5)
+        confidence_penalty: Amount to reduce confidence when below threshold (default: 0.1)
+
+    Returns:
+        ExplanationValidation with verification results and confidence penalty
+
+    Example:
+        >>> result = validate_explanation_confidence(
+        ...     explanation="The sunset imagery matches the peaceful narration",
+        ...     voiceover_text="A peaceful evening by the ocean",
+        ...     video_text="sunset over the water with waves"
+        ... )
+        >>> result.is_valid
+        True
+        >>> result.verification_ratio
+        0.75  # "sunset", "peaceful" found; "imagery" not found
+    """
+    if not explanation:
+        warning = "Empty explanation provided by LLM"
+        logger.warning(warning)
+        return ExplanationValidation(
+            is_valid=False,
+            verification_ratio=0.0,
+            explanation_keywords=[],
+            verified_keywords=[],
+            unverified_keywords=[],
+            confidence_penalty=confidence_penalty,
+            warning_message=warning
+        )
+
+    # Extract keywords from explanation
+    explanation_keywords = _extract_keywords(explanation)
+
+    if not explanation_keywords:
+        # No meaningful keywords to verify
+        logger.debug("validate_explanation_confidence: No keywords extracted from explanation")
+        return ExplanationValidation(
+            is_valid=True,
+            verification_ratio=1.0,  # Nothing to verify, assume valid
+            explanation_keywords=[],
+            verified_keywords=[],
+            unverified_keywords=[],
+            confidence_penalty=0.0,
+            warning_message=None
+        )
+
+    # Extract keywords from source content (voiceover and video)
+    vo_keywords = _extract_keywords(voiceover_text)
+    video_keywords = _extract_keywords(video_text) if video_text else set()
+    source_keywords = vo_keywords | video_keywords
+
+    # Find which explanation keywords are verifiable in source
+    verified_keywords = explanation_keywords & source_keywords
+    unverified_keywords = explanation_keywords - source_keywords
+
+    # Calculate verification ratio
+    verification_ratio = len(verified_keywords) / len(explanation_keywords)
+
+    # Determine if validation passes
+    is_valid = verification_ratio >= verification_threshold
+    applied_penalty = 0.0 if is_valid else confidence_penalty
+
+    # Log warning when explanation references non-existent content
+    warning_message = None
+    if not is_valid:
+        unverified_list = sorted(unverified_keywords)[:5]  # Limit to 5 for readability
+        warning_message = (
+            f"LLM explanation references non-existent content: "
+            f"only {len(verified_keywords)}/{len(explanation_keywords)} keywords verifiable "
+            f"({verification_ratio:.1%}). Unverified: {unverified_list}. "
+            f"Applying -{applied_penalty} confidence penalty."
+        )
+        logger.warning(warning_message)
+    else:
+        logger.debug(
+            f"validate_explanation_confidence: {len(verified_keywords)}/{len(explanation_keywords)} "
+            f"keywords verified ({verification_ratio:.1%})"
+        )
+
+    return ExplanationValidation(
+        is_valid=is_valid,
+        verification_ratio=verification_ratio,
+        explanation_keywords=sorted(explanation_keywords),
+        verified_keywords=sorted(verified_keywords),
+        unverified_keywords=sorted(unverified_keywords),
+        confidence_penalty=applied_penalty,
+        warning_message=warning_message
     )
 
 

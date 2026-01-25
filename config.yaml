@@ -397,6 +397,12 @@ matching:
   # Decision: Boost smooth flow (+0.03 when sim>0.6), penalize abrupt (-0.05 when sim<0.3)
   semantic_coherence_enabled: true  # Enable semantic coherence scoring for topic flow
 
+  # Explanation confidence validation
+  # Chain-of-thought: LLM explanations should reference actual content
+  # Reasoning: Detects "hallucinated" explanations that mention non-existent keywords
+  # Decision: Downgrade confidence by 0.1 when <50% of explanation keywords are verifiable
+  explanation_validation_enabled: true  # Enable LLM explanation keyword verification
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
