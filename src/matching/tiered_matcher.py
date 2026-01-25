@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import statistics
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -179,6 +180,35 @@ class TieredMatcher:
             logger.info(f"Set locations for {len(video_locations)} videos")
 
     # Utility methods
+    def _calculate_confidence_variance(self, candidates: List[Tuple[SRTSegment, float]], top_n: int = 5) -> float:
+        """
+        Calculate standard deviation of top-N candidate similarity scores.
+
+        High variance (> 0.1) indicates uncertain match - multiple candidates have
+        similar scores, making the selection less definitive.
+        Low variance indicates clear winner with others scoring much lower.
+
+        Args:
+            candidates: List of (video_segment, similarity) tuples
+            top_n: Number of top candidates to consider (default: 5)
+
+        Returns:
+            Standard deviation of top-N similarity scores (0.0 if < 2 candidates)
+        """
+        if len(candidates) < 2:
+            return 0.0
+
+        # Get top-N similarity scores
+        top_scores = [sim for _, sim in candidates[:top_n]]
+
+        if len(top_scores) < 2:
+            return 0.0
+
+        try:
+            return statistics.stdev(top_scores)
+        except statistics.StatisticsError:
+            return 0.0
+
     def _should_skip_llm(self, similarity: float) -> bool:
         """Skip LLM if embedding similarity is high enough"""
         return similarity >= self.config.matching.high_confidence_threshold
@@ -408,7 +438,15 @@ class TieredMatcher:
                 primary_segment=best_seg, alt_segments=alt_segments
             )
 
-            return MatchResult(primary_match=match, alternatives=alternatives, secondary_matches=secondary_matches)
+            # Calculate confidence variance for top candidates
+            confidence_variance = self._calculate_confidence_variance(valid_candidates)
+
+            return MatchResult(
+                primary_match=match,
+                alternatives=alternatives,
+                secondary_matches=secondary_matches,
+                confidence_variance=confidence_variance
+            )
 
         # Check cache
         cache_key = self._get_cache_key(vo_segment.text, valid_candidates)
@@ -473,7 +511,15 @@ class TieredMatcher:
                     primary_segment=cached_seg, alt_segments=alt_segments
                 )
 
-                return MatchResult(primary_match=match, alternatives=alternatives, secondary_matches=secondary_matches)
+                # Calculate confidence variance for top candidates
+                confidence_variance = self._calculate_confidence_variance(valid_candidates)
+
+                return MatchResult(
+                    primary_match=match,
+                    alternatives=alternatives,
+                    secondary_matches=secondary_matches,
+                    confidence_variance=confidence_variance
+                )
 
         # Build context and use LLM
         context = self._build_context(context_before, context_after)
@@ -619,12 +665,16 @@ class TieredMatcher:
         logger.debug(f"  Reason: {reasoning[:100]}...")
         logger.debug(f"  Alternatives: {len(alternatives)}, Has gap: {has_gap}")
 
+        # Calculate confidence variance for top candidates
+        confidence_variance = self._calculate_confidence_variance(valid_candidates)
+
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,
             secondary_matches=secondary_matches,
             has_gap=has_gap,
-            gap_reason=gap_reason
+            gap_reason=gap_reason,
+            confidence_variance=confidence_variance
         )
 
     def _get_alternatives(
