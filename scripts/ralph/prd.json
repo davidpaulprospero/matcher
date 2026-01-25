@@ -1,6 +1,6 @@
 {
-  "branchName": "ralph/sprint-5",
-  "sprintNumber": 5,
+  "branchName": "ralph/sprint-1",
+  "sprintNumber": 1,
   "focusArea": "quality",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -12,183 +12,162 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint 5 quality verification test",
-      "acceptanceCriteria": [
-        "Create tests/test_sprint_5_quality_verification.py with import checks for quality modules",
-        "Test that src/matching/scoring.py imports cleanly",
-        "Test that src/matching/tiered_matcher.py imports cleanly",
-        "Test that src/matching/llm_providers.py imports cleanly",
-        "All verification tests pass with pytest tests/test_sprint_5_quality_verification.py -v --non-interactive",
-        "Mark story as passed by setting passes: true in prd.json"
-      ],
-      "priority": "high",
+      "title": "Replace bare except blocks with specific exception handling in checkpoint.py",
+      "priority": 1,
       "passes": true,
-      "notes": "Created tests/test_sprint_5_quality_verification.py with 8 tests verifying quality module imports and structure. All 3 modules (scoring, tiered_matcher, llm_providers) import cleanly."
+      "acceptanceCriteria": [
+        "Replace bare except: at line 444 with specific exception types (OSError, json.JSONDecodeError)",
+        "Replace bare except: at line 680 with specific exception types",
+        "Add proper logging for caught exceptions using self.logger or module logger",
+        "Add brief comment explaining why exception is caught/ignored where applicable",
+        "All existing tests in tests/test_checkpoint*.py continue to pass"
+      ],
+      "notes": "Replaced both bare except: blocks with (OSError, IOError) and added logger.debug() calls with explanatory comments. All 135 checkpoint tests pass."
     },
     {
       "id": "US-002",
-      "title": "Add adaptive embedding similarity thresholds",
+      "title": "Replace bare except blocks with specific exception handling in face_detection.py",
+      "priority": 2,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add calculate_adaptive_threshold() function in src/matching/scoring.py",
-        "Base threshold adapts based on voiceover length (short <20 chars = +0.05 threshold)",
-        "Base threshold adapts based on candidate variance (low variance <0.05 = -0.05 threshold)",
-        "Add adaptive_threshold_enabled config option in MatchingConfig (default: true)",
-        "Integrate adaptive threshold in TieredMatcher for skip_llm_threshold decision",
-        "Add unit test in tests/test_adaptive_threshold.py covering all adjustment factors"
-      ],
-      "priority": "high",
-      "passes": true,
-      "notes": "Implemented calculate_adaptive_threshold() with short voiceover (+0.05) and low variance (-0.05) adjustments. Integrated in TieredMatcher.match_segment(). 15 unit tests all pass."
+        "Replace bare except: at lines 132, 154, 211, 240 with specific exception types",
+        "Use appropriate exceptions: cv2.error, OSError, ValueError for OpenCV operations",
+        "Add logger.debug() calls for caught exceptions to aid troubleshooting",
+        "Ensure face detection continues to work gracefully when one frame fails",
+        "Syntax check passes: python -m py_compile src/face_detection.py"
+      ]
     },
     {
       "id": "US-003",
-      "title": "Add negative sampling for LLM reranking",
+      "title": "Replace bare except blocks with specific exception handling in parallel_processor.py",
+      "priority": 3,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add select_negative_sample() function in src/matching/llm_providers.py",
-        "Select a negative sample from bottom 25% of candidates by embedding similarity",
-        "Include negative sample in LLM prompt with label 'unlikely match' for comparison",
-        "Update MATCH_PROMPT template to include negative sample comparison",
-        "Add negative_sampling_enabled config option (default: true)",
-        "Add unit test in tests/test_negative_sampling.py verifying negative selection"
-      ],
-      "priority": "high",
-      "passes": true,
-      "notes": "Implemented select_negative_sample() and format_negative_sample_for_prompt() functions. Updated all 3 LLM providers (Gemini, Claude, Ollama) to include negative samples in prompts. Added negative_sampling_enabled config option. 26 unit tests all pass."
+        "Replace bare except: at lines 219, 232, 304, 415 with specific exception types",
+        "Use Exception as fallback but log full traceback with logger.exception()",
+        "Ensure thread safety is maintained in exception handling",
+        "Add test for parallel processing error recovery in tests/test_transcription/",
+        "All transcription tests continue to pass"
+      ]
     },
     {
       "id": "US-004",
-      "title": "Add fallback matching strategy for edge cases",
+      "title": "Add comprehensive tests for DiskHealer, PathHealer, and CheckpointHealer",
+      "priority": 4,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add FallbackMatchStrategy class in src/matching/strategies.py",
-        "Implement 3 fallback levels: keyword-only, visual-description, generic-broll",
-        "Each level has confidence ceiling (0.7, 0.5, 0.3 respectively)",
-        "Trigger fallback when primary matching returns confidence <0.4",
-        "Add fallback_matching_enabled config option (default: true)",
-        "Add unit test in tests/test_fallback_matching.py covering all fallback levels"
-      ],
-      "priority": "high",
-      "passes": true,
-      "notes": "Implemented FallbackMatchStrategy with 3 levels: L1 keyword-only (ceiling 0.7), L2 visual-description (ceiling 0.5), L3 generic-broll (ceiling 0.3). Added fallback_matching_enabled and fallback_trigger_threshold config options. Created 31 unit tests covering all fallback levels and edge cases."
+        "Create tests/test_agents/test_disk_healer.py with 10+ test cases covering disk space detection and cleanup",
+        "Create tests/test_agents/test_path_healer.py with 10+ test cases covering path validation and fixing",
+        "Create tests/test_agents/test_checkpoint_healer.py with 10+ test cases covering checkpoint corruption recovery",
+        "Follow existing test patterns from test_api_healer.py and test_healer_base.py",
+        "All new tests pass with pytest tests/test_agents/test_*_healer.py -v"
+      ]
     },
     {
       "id": "US-005",
-      "title": "Add transcript quality scoring",
+      "title": "Add return type hints to core matching module functions",
+      "priority": 5,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add calculate_transcript_quality() function in src/matching/scoring.py",
-        "Score based on: word count (>50 = good), sentence coherence, language consistency",
-        "Return quality tier: high (>0.8), medium (0.5-0.8), low (<0.5)",
-        "Reduce embedding weight by 20% when transcript quality is low",
-        "Add transcript_quality_weight config option (default: true)",
-        "Add unit test in tests/test_transcript_quality.py for quality scoring"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Implemented calculate_transcript_quality() with 3 scoring factors: word count (0-0.4), sentence coherence (0-0.35), language consistency (0-0.25). Added adjust_embedding_weight_for_transcript_quality() to reduce embedding weight by 20% for low-quality transcripts. Added transcript_quality_weight config option. Created 32 unit tests in tests/test_transcript_quality.py covering all quality tiers and edge cases."
+        "Add return type hints to all public methods in src/matching/strategies.py",
+        "Add return type hints to all public methods in src/matching/location_matching.py",
+        "Add return type hints to all public methods in src/matching/tracking.py",
+        "Use Optional[], List[], Dict[], etc. from typing module appropriately",
+        "Syntax check passes for all modified files"
+      ]
     },
     {
       "id": "US-006",
-      "title": "Add confidence normalization by candidate pool size",
+      "title": "Add docstrings to StrategyMatcher class methods",
+      "priority": 6,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add normalize_confidence_by_pool() function in src/matching/scoring.py",
-        "Boost confidence when pool is small (<10 candidates) and top match is clear",
-        "Reduce confidence when pool is large (>100 candidates) with tight margins",
-        "Apply normalization factor: sqrt(pool_size/50) capped at [0.8, 1.2]",
-        "Add pool_normalization_enabled config option (default: true)",
-        "Add unit test in tests/test_pool_normalization.py for pool size effects"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Implemented normalize_confidence_by_pool() with sqrt(pool_size/50) formula capped at [0.8, 1.2]. Small pools (<10) with clear winner (margin >=0.1) get +0.05 boost. Large pools (>100) with tight margin (<0.05) get -0.05 penalty. Added pool_normalization_enabled config option. Created 34 unit tests covering basic cases, small/medium/large pools, factor capping, edge cases, and formula verification. All tests pass."
+        "Add docstrings to all public methods in src/matching/strategies.py StrategyMatcher class",
+        "Docstrings include description, Args, Returns, and Raises sections where applicable",
+        "Document the different matching strategies (visual_first, different_source, embedding_diversity, broll_only)",
+        "Document scoring weights and how alternatives are selected",
+        "No syntax errors: python -m py_compile src/matching/strategies.py"
+      ]
     },
     {
       "id": "US-007",
-      "title": "Add LLM prompt chain-of-thought for match reasoning",
+      "title": "Replace bare except blocks in media source modules",
+      "priority": 7,
+      "passes": false,
       "acceptanceCriteria": [
-        "Update MATCH_PROMPT in src/matching/llm_providers.py with chain-of-thought structure",
-        "Prompt structure: 1) Identify key voiceover themes, 2) List matching elements in video, 3) Evaluate fit, 4) Score",
-        "Add explicit rubric: visual relevance (30%), topic match (40%), keyword overlap (20%), flow (10%)",
-        "Parse structured reasoning response into components",
-        "Add chain_of_thought_enabled config option (default: true)",
-        "Add unit test in tests/test_cot_reasoning.py for structured reasoning parsing"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Implemented chain-of-thought prompting with COT_RUBRIC_WEIGHTS (visual 30%, topic 40%, keyword 20%, flow 10%), CotReasoning dataclass for structured parsing, build_cot_prompt/build_cot_batch_prompt functions, parse_cot_reasoning parser, and use_cot parameter on all 3 LLM providers. Added chain_of_thought_enabled config option. Created 28 unit tests in tests/test_cot_reasoning.py covering all components."
+        "Replace bare except: in src/media_sources/images/google_bing.py line 383",
+        "Replace bare except: in src/media_sources/images/pexels.py line 167",
+        "Replace bare except: in src/media_sources/images/pixabay.py line 177",
+        "Replace bare except: in src/media_sources/images/unsplash.py line 167",
+        "Use requests.RequestException, json.JSONDecodeError, or other specific types",
+        "Syntax check passes for all modified files"
+      ]
     },
     {
       "id": "US-008",
-      "title": "Add early termination for obvious high-confidence matches",
+      "title": "Replace bare except blocks in downloader modules",
+      "priority": 8,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add check_obvious_match() function in src/matching/tiered_matcher.py",
-        "Skip LLM when embedding sim >0.9 AND matched_keywords >=3 AND same entity found",
-        "Return boosted confidence (min 0.92) with reason 'obvious_match_early_termination'",
-        "Log when early termination is triggered with match details",
-        "Add obvious_match_enabled config option (default: true)",
-        "Add unit test in tests/test_early_termination.py for obvious match detection"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Implemented check_obvious_match() function with 3 conditions: sim>0.9, keywords>=3, matching entity. Integrated into match_segment() to bypass LLM when all conditions met. Added config options: obvious_match_enabled (default true), obvious_match_min_similarity (0.9), obvious_match_min_keywords (3), obvious_match_min_confidence (0.92). Created 23 unit tests in tests/test_early_termination.py covering all acceptance criteria."
+        "Replace bare except: in src/downloader/core.py line 903",
+        "Replace bare except: in src/downloader/transcoding.py line 163",
+        "Use subprocess.SubprocessError, OSError, or other specific exception types",
+        "Log exception details with logger.warning() or logger.exception()",
+        "All download-related tests continue to pass"
+      ]
     },
     {
       "id": "US-009",
-      "title": "Add cache quality tier tracking",
+      "title": "Add tests for matching strategy selection logic",
+      "priority": 9,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add quality_tier field to LLM cache entries (high/medium/low based on confidence)",
-        "Update cache lookup to return quality_tier alongside cached response",
-        "Add cache_expire_low_quality config option (default: false)",
-        "When enabled, skip cache for entries with quality_tier='low' forcing re-evaluation",
-        "Log cache quality tier on hit with confidence range",
-        "Add unit test in tests/test_cache_quality_tier.py for tier tracking and expiration"
-      ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Implemented quality tier tracking in src/llm_client/cache.py with compute_quality_tier() and extract_confidence_from_response() functions. Quality tiers: high (>=0.8), medium (0.5-0.8), low (<0.5). Added skip_low_quality param to LLMCache, all providers, and factory. Added expire_low_quality config option in LLMCacheConfig. Created 41 unit tests in tests/test_cache_quality_tier.py covering tier computation, cache storage, skip behavior, logging, config integration, provider integration, and legacy compatibility."
+        "Create tests/test_matching/test_strategies.py with tests for StrategyMatcher class",
+        "Test visual_first strategy returns clips with highest visual scores",
+        "Test different_source strategy excludes already-used sources",
+        "Test embedding_diversity strategy maximizes embedding variance",
+        "Test broll_only strategy only returns B-roll clips",
+        "Minimum 15 test cases covering all strategy branches"
+      ]
     },
     {
       "id": "US-010",
-      "title": "Add multi-modal similarity weighting",
+      "title": "Replace bare except blocks in scene_detection.py",
+      "priority": 10,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add compute_multimodal_score() function in src/matching/scoring.py",
-        "Weight contributions: text_embedding (40%), keyword_overlap (25%), entity_match (20%), visual_description (15%)",
-        "Each component normalized to 0-1 before weighting",
-        "Add multimodal_weights config option as dict with default weights",
-        "Replace simple additive boosting in TieredMatcher with multimodal score",
-        "Add unit test in tests/test_multimodal_scoring.py for weighted fusion"
-      ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Implemented compute_multimodal_score() with DEFAULT_MULTIMODAL_WEIGHTS (text_embedding 40%, keyword_overlap 25%, entity_match 20%, visual_description 15%). Added helper functions: calculate_keyword_overlap_score(), calculate_entity_match_score(), calculate_visual_description_score(). Added _compute_multimodal_confidence() to TieredMatcher that replaces simple additive boosting with weighted multimodal fusion. Added multimodal_enabled and multimodal_weights config options. Created 50 unit tests in tests/test_multimodal_scoring.py covering all components."
+        "Replace bare except: at lines 290, 492, 676 with specific exception types",
+        "Use OSError, cv2.error, subprocess.SubprocessError as appropriate",
+        "Add debug logging for exceptions to aid troubleshooting scene detection issues",
+        "Ensure scene detection gracefully handles corrupt video files",
+        "All existing tests continue to pass"
+      ]
     },
     {
       "id": "US-011",
-      "title": "Add semantic coherence between adjacent segments",
+      "title": "Add type hints and docstrings to GlobalClipTracker class",
+      "priority": 11,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add compute_semantic_coherence() function in src/matching/scoring.py",
-        "Compute topic flow: embedding similarity between current and previous match",
-        "Apply boost (+0.03) when topic flow is smooth (similarity >0.6)",
-        "Apply penalty (-0.05) when topic flow is abrupt (similarity <0.3)",
-        "Add semantic_coherence_enabled config option (default: true)",
-        "Add unit test in tests/test_semantic_coherence.py for topic flow scoring"
-      ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Implemented compute_semantic_coherence() function using cosine_similarity from embeddings module. Constants defined: SMOOTH_THRESHOLD=0.6, ABRUPT_THRESHOLD=0.3, SMOOTH_BOOST=+0.03, ABRUPT_PENALTY=-0.05. Added semantic_coherence_enabled config option to MatchingConfig (default: true) and config.yaml. Created 34 unit tests in tests/test_semantic_coherence.py covering all thresholds, edge cases, config integration, and high-dimensional embeddings."
+        "Add return type hints to all methods in GlobalClipTracker (src/matching/tracking.py)",
+        "Add comprehensive docstrings explaining clip tracking across segments",
+        "Document the get_clip_id() logic for audio-first segment ID calculation",
+        "Document the used_clips tracking and how it prevents duplicate selections",
+        "Syntax check passes: python -m py_compile src/matching/tracking.py"
+      ]
     },
     {
       "id": "US-012",
-      "title": "Add match explanation confidence validation",
+      "title": "Replace bare except blocks in deduplication.py and global_cache.py",
+      "priority": 12,
+      "passes": false,
       "acceptanceCriteria": [
-        "Add validate_explanation_confidence() function in src/matching/llm_providers.py",
-        "Cross-check that LLM explanation keywords appear in actual voiceover/video text",
-        "Downgrade confidence by 0.1 when <50% of explanation keywords are verifiable",
-        "Log warning when explanation appears to reference non-existent content",
-        "Add explanation_validation_enabled config option (default: true)",
-        "Add unit test in tests/test_explanation_validation.py for keyword verification"
-      ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Implemented validate_explanation_confidence() function with ExplanationValidation dataclass. Cross-checks LLM explanation keywords against voiceover/video text using _extract_keywords() helper. When <50% of keywords are verifiable, applies 0.1 confidence penalty and logs warning. Added explanation_validation_enabled config option to MatchingConfig and config.yaml. Created 42 unit tests in tests/test_explanation_validation.py covering all acceptance criteria, edge cases, logging behavior, and real-world scenarios."
+        "Replace bare except: in src/deduplication.py lines 209, 224",
+        "Replace bare except: in src/global_cache.py line 746",
+        "Use OSError, shutil.Error, or other specific exception types",
+        "Log caught exceptions with appropriate log level",
+        "Syntax check passes for both files"
+      ]
     }
   ]
 }

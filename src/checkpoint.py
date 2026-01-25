@@ -441,7 +441,9 @@ class CheckpointManager:
         try:
             with open(filepath, 'rb') as f:
                 return hashlib.md5(f.read()).hexdigest()[:16]
-        except:
+        except (OSError, IOError) as e:
+            # File not found, permission denied, or I/O error - return empty hash
+            logger.debug(f"Could not hash file {filepath}: {e}")
             return ""
     
     def validate(self, voiceover_path: str = None) -> Dict[str, Any]:
@@ -677,8 +679,9 @@ class KeywordManager:
             try:
                 with open(voiceover_path, 'rb') as f:
                     voiceover_hash = hashlib.md5(f.read()).hexdigest()[:16]
-            except:
-                pass
+            except (OSError, IOError) as e:
+                # File not accessible - proceed without hash
+                logger.debug(f"Could not hash voiceover file {voiceover_path}: {e}")
         
         preset = SavedKeywords(
             name=name,
