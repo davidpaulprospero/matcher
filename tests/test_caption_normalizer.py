@@ -1022,3 +1022,330 @@ class TestCaptionResultSkippedCount:
 
         assert "skipped_segments_count" in data
         assert data["skipped_segments_count"] == 0
+
+
+class TestNormalizerEdgeCasesSprint6:
+    """Test normalizer edge cases for corrupted segments (US-009 Sprint 6).
+
+    These tests verify the CaptionNormalizer handles edge cases like:
+    - Negative start times (clipped to 0)
+    - Negative durations (start > end) - extended to min_duration
+    - Overlapping segments with text merge
+    - Duplicate segment indices re-indexed
+    - Large gaps creating placeholder segments
+    """
+
+    def test_negative_start_time_severe_fixed_to_zero(self):
+        """Test segment with start=-5, end=2 is fixed to start=0.
+
+        AC: segment with start=-5, end=2 fixed to start=0, end>=min_duration
+
+        Expected behavior:
+        - start_time < 0 is clamped to 0
+        - If duration becomes too short, end is extended to min_segment_duration
+        """
+        config = NormalizationConfig(min_segment_duration=0.5)
+        normalizer = CaptionNormalizer(config)
+        # start=-5 should become 0, end=2 remains (duration 2s > min 0.5s)
+        segments = [CaptionSegment(0, -5.0, 2.0, "Negative start text", "vid1")]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 0.0  # Fixed from -5 to 0
+        assert result[0].end_time == 2.0  # Unchanged (duration 2s is valid)
+        assert result[0].text == "Negative start text"
+        assert skipped == 0
+
+    def test_negative_start_requiring_duration_extension(self):
+        """Test negative start where fixing creates short duration.
+
+        When start=-5, end=0.01, clamping start to 0 creates 0.01s duration.
+        If min_segment_duration is 0.5s, end should be extended to 0.5s.
+        """
+        config = NormalizationConfig(min_segment_duration=0.5)
+        normalizer = CaptionNormalizer(config)
+        # start=-5 becomes 0, end=0.01 creates 0.01s duration < 0.5s min
+        segments = [CaptionSegment(0, -5.0, 0.01, "Short after fix", "vid1")]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 0.0  # Clamped from -5
+        assert result[0].end_time >= 0.5  # Extended to meet min duration
+        assert result[0].text == "Short after fix"
+
+    def test_negative_duration_start_greater_than_end(self):
+        """Test segment with negative duration (start > end) gets fixed.
+
+        AC: segment with negative duration (start > end) gets swapped or skipped
+
+        When start=8, end=3 (negative 5s duration), the normalizer:
+        - Detects end <= start condition
+        - Extends end to start + min_segment_duration
+        """
+        config = NormalizationConfig(min_segment_duration=0.5)
+        normalizer = CaptionNormalizer(config)
+        # start=8, end=3 -> negative duration, end should be extended
+        segments = [CaptionSegment(0, 8.0, 3.0, "Inverted times", "vid1")]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 8.0
+        # end < start condition triggers fix: end = start + min_segment_duration
+        assert result[0].end_time == 8.5
+        assert result[0].text == "Inverted times"
+
+    def test_negative_duration_with_larger_min_duration(self):
+        """Test negative duration fixed to larger minimum duration.
+
+        Verifies the end time extension uses the configured min_segment_duration.
+        """
+        config = NormalizationConfig(min_segment_duration=2.0)
+        normalizer = CaptionNormalizer(config)
+        segments = [CaptionSegment(0, 10.0, 5.0, "Inverted 5s", "vid1")]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 10.0
+        assert result[0].end_time == 12.0  # 10 + 2.0 min duration
+        assert skipped == 0
+
+    def test_overlapping_segments_merged_with_text_concatenation(self):
+        """Test overlapping segments (0-5, 3-8) merged with concatenated text.
+
+        AC: overlapping segments (0-5, 3-8) merged with concatenated text
+
+        With merge strategy:
+        - Segments (0-5) and (3-8) overlap from 3-5
+        - Result should be single segment (0-8) with "First Second" text
+        """
+        config = NormalizationConfig(overlap_strategy="merge")
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "First", "vid1"),
+            CaptionSegment(1, 3.0, 8.0, "Second", "vid1"),
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 0.0
+        assert result[0].end_time == 8.0
+        # Text should be concatenated
+        assert "First" in result[0].text
+        assert "Second" in result[0].text
+        assert result[0].text == "First Second"
+        assert skipped == 0
+
+    def test_three_overlapping_segments_merged(self):
+        """Test chain of three overlapping segments all merged.
+
+        Segments (0-5), (4-9), (8-12) should merge into single (0-12).
+        """
+        config = NormalizationConfig(overlap_strategy="merge")
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "One", "vid1"),
+            CaptionSegment(1, 4.0, 9.0, "Two", "vid1"),
+            CaptionSegment(2, 8.0, 12.0, "Three", "vid1"),
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 1
+        assert result[0].start_time == 0.0
+        assert result[0].end_time == 12.0
+        assert "One" in result[0].text
+        assert "Two" in result[0].text
+        assert "Three" in result[0].text
+
+    def test_duplicate_indices_reindexed_sequentially(self):
+        """Test duplicate segment indices are re-indexed sequentially.
+
+        AC: duplicate segment indices re-indexed sequentially
+
+        All segments have index=5, after normalization they should be 0, 1, 2.
+        """
+        normalizer = CaptionNormalizer()
+        segments = [
+            CaptionSegment(5, 0.0, 3.0, "All", "vid1"),
+            CaptionSegment(5, 4.0, 7.0, "have", "vid1"),
+            CaptionSegment(5, 8.0, 11.0, "same index", "vid1"),
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 3
+        assert result[0].index == 0
+        assert result[1].index == 1
+        assert result[2].index == 2
+        # Text preserved correctly
+        assert result[0].text == "All"
+        assert result[1].text == "have"
+        assert result[2].text == "same index"
+        assert skipped == 0
+
+    def test_non_sequential_indices_reindexed(self):
+        """Test non-sequential indices (100, 50, 200) become (0, 1, 2)."""
+        normalizer = CaptionNormalizer()
+        segments = [
+            CaptionSegment(100, 0.0, 5.0, "A", "vid1"),
+            CaptionSegment(50, 6.0, 10.0, "B", "vid1"),
+            CaptionSegment(200, 11.0, 15.0, "C", "vid1"),
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        assert len(result) == 3
+        assert [s.index for s in result] == [0, 1, 2]
+
+    def test_large_gap_creates_placeholder_segment(self):
+        """Test gap > max_gap creates placeholder segment preserving timing.
+
+        AC: gap > max_gap creates placeholder segment preserving timing
+
+        With extend strategy and max_gap_to_extend=2.0:
+        - Gap of 10s (5-15) exceeds threshold
+        - Placeholder segment should fill 5.0-15.0
+        """
+        config = NormalizationConfig(
+            gap_strategy="extend",
+            max_gap_to_extend=2.0
+        )
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "Before gap", "vid1"),
+            CaptionSegment(1, 15.0, 20.0, "After gap", "vid1"),  # 10s gap
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        # Should have 3 segments: original + placeholder + original
+        assert len(result) == 3
+
+        # First segment unchanged
+        assert result[0].start_time == 0.0
+        assert result[0].end_time == 5.0
+        assert result[0].text == "Before gap"
+
+        # Placeholder segment fills the gap
+        assert result[1].start_time == 5.0
+        assert result[1].end_time == 15.0
+        assert result[1].text == ""  # Placeholder has empty text
+
+        # Last segment unchanged
+        assert result[2].start_time == 15.0
+        assert result[2].end_time == 20.0
+        assert result[2].text == "After gap"
+
+        # Indices should be sequential
+        assert result[0].index == 0
+        assert result[1].index == 1
+        assert result[2].index == 2
+
+    def test_gap_exactly_at_threshold_extends_not_placeholder(self):
+        """Test gap exactly at max_gap_to_extend extends, doesn't create placeholder."""
+        config = NormalizationConfig(
+            gap_strategy="extend",
+            max_gap_to_extend=2.0
+        )
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "First", "vid1"),
+            CaptionSegment(1, 7.0, 10.0, "Second", "vid1"),  # 2s gap (exactly at threshold)
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        # Gap <= threshold means extend, not placeholder
+        assert len(result) == 2
+        assert result[0].end_time == 7.0  # Extended to fill gap
+        assert result[1].start_time == 7.0
+
+    def test_gap_just_over_threshold_creates_placeholder(self):
+        """Test gap just over max_gap_to_extend creates placeholder."""
+        config = NormalizationConfig(
+            gap_strategy="extend",
+            max_gap_to_extend=2.0
+        )
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "First", "vid1"),
+            CaptionSegment(1, 7.01, 10.0, "Second", "vid1"),  # 2.01s gap (just over)
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        # Gap > threshold means placeholder
+        assert len(result) == 3
+        assert result[1].text == ""  # Placeholder
+        assert result[1].start_time == 5.0
+        assert result[1].end_time == 7.01
+
+    def test_multiple_gaps_with_mixed_sizes(self):
+        """Test multiple gaps with some under and some over threshold."""
+        config = NormalizationConfig(
+            gap_strategy="extend",
+            max_gap_to_extend=2.0
+        )
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(0, 0.0, 5.0, "A", "vid1"),
+            CaptionSegment(1, 6.0, 10.0, "B", "vid1"),  # 1s gap (extend)
+            CaptionSegment(2, 20.0, 25.0, "C", "vid1"),  # 10s gap (placeholder)
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        # First gap extended, second gap placeholder
+        assert len(result) == 4  # A, B, placeholder, C
+        assert result[0].end_time == 6.0  # Extended
+        assert result[2].text == ""  # Placeholder
+        assert result[2].start_time == 10.0
+        assert result[2].end_time == 20.0
+
+    def test_combined_edge_cases(self):
+        """Test combined edge cases: negative start, overlap, gap.
+
+        Comprehensive test combining multiple edge cases in one scenario.
+        """
+        config = NormalizationConfig(
+            overlap_strategy="truncate",
+            gap_strategy="extend",
+            max_gap_to_extend=1.0,
+            min_segment_duration=0.5
+        )
+        normalizer = CaptionNormalizer(config)
+        segments = [
+            CaptionSegment(99, -2.0, 3.0, "Negative start", "vid1"),  # Fix start to 0
+            CaptionSegment(99, 2.0, 6.0, "Overlaps prev", "vid1"),  # Overlap, truncate
+            CaptionSegment(99, 10.0, 15.0, "After gap", "vid1"),  # 4s gap > 1s threshold
+        ]
+
+        result, skipped = normalizer.normalize(segments)
+
+        # Should have: fixed segment, truncated segment, placeholder, last segment
+        assert len(result) == 4
+
+        # First segment: start fixed from -2 to 0, end truncated to 2.0
+        assert result[0].start_time == 0.0
+        assert result[0].end_time == 2.0  # Truncated due to overlap
+
+        # Second segment starts at 2.0
+        assert result[1].start_time == 2.0
+        assert result[1].end_time == 6.0
+
+        # Placeholder for gap
+        assert result[2].text == ""
+        assert result[2].start_time == 6.0
+        assert result[2].end_time == 10.0
+
+        # Last segment unchanged
+        assert result[3].start_time == 10.0
+        assert result[3].end_time == 15.0
+
+        # All re-indexed sequentially
+        assert [s.index for s in result] == [0, 1, 2, 3]

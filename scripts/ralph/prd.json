@@ -129,8 +129,8 @@
         "Track cache_validation_results in metrics: {passed: N, rejected: M, refetched: K}",
         "Tests verify cached captions rejected when language or count mismatch detected"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added CacheValidationResult dataclass with is_valid, video_id, language, reason, expected/actual segment counts, deviation. Added cache_validation config (modes: strict/warn/skip) and cache_validation_tolerance (0.2 = 20%) to CaptionFirstConfig. Added CaptionCache.validate_cache_entry() checking video_id match, language match, segment_count within tolerance (expected = duration/3). Added CaptionCache.get_validated_caption() handling modes: warn deletes+refetch, strict rejects without delete, skip bypasses validation. Added CaptionMetrics.record_cache_validation() and get_cache_validation_stats() returning {passed, rejected, refetched, total, pass_rate}. Added cache_validation_passed/rejected/refetched fields to CaptionMetrics with full serialization support. 18 tests in TestCacheValidation, TestCacheValidationResult, TestCaptionMetricsCacheValidation covering all AC. Files: src/config/sections/download.py, config.yaml, src/caption_fetcher.py, tests/test_caption_cache.py"
     },
     {
       "id": "US-009",
@@ -145,8 +145,8 @@
         "Add test: gap > max_gap creates placeholder segment preserving timing",
         "Document all edge case behaviors in CaptionNormalizer docstring with examples"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added TestNormalizerEdgeCasesSprint6 class with 13 comprehensive tests covering all AC: test_negative_start_time_severe_fixed_to_zero (start=-5,end=2->0,2), test_negative_start_requiring_duration_extension, test_negative_duration_start_greater_than_end (start>end extended to start+min_duration), test_negative_duration_with_larger_min_duration, test_overlapping_segments_merged_with_text_concatenation (0-5,3-8 merged with 'First Second'), test_three_overlapping_segments_merged, test_duplicate_indices_reindexed_sequentially (5,5,5->0,1,2), test_non_sequential_indices_reindexed, test_large_gap_creates_placeholder_segment (gap>max_gap inserts placeholder with text=''), test_gap_exactly_at_threshold_extends_not_placeholder, test_gap_just_over_threshold_creates_placeholder, test_multiple_gaps_with_mixed_sizes, test_combined_edge_cases. Updated CaptionNormalizer docstring with comprehensive 'Edge Case Behaviors' section documenting: negative starts (clamped to 0), negative durations (end extended), overlapping segments (3 strategies), duplicate indices (re-indexed sequentially), gap handling (extend/placeholder), empty text filtering, partial recovery. Files: src/caption_fetcher.py, tests/test_caption_normalizer.py"
     },
     {
       "id": "US-010",
