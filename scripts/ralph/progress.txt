@@ -4362,3 +4362,199 @@ UNAVAILABLE error, no retry (budget: 0)
 ### Verification
 - 301 tests in test_caption_fetcher.py pass
 - main.py --help works correctly
+
+## Iteration N - [US-004] Create structured metrics export to JSON file
+- Focus: caption
+- Status: COMPLETE
+
+### What was implemented
+
+**1. CaptionMetrics.export_json() method (src/caption_fetcher.py):**
+   - Full JSON export with schema version 1.0
+   - Export timestamp in ISO format
+   - Run metadata: project_path, video_count, export_path
+   - Config snapshot: caption_first settings (enabled, preferred_language, fallback_languages, etc.)
+   - Summary statistics: total_processed, success_rate, cache_hit_rate, fetch_attempts, successes, failures
+   - Timing metrics: video_fetch_times, slowest_videos
+   - Format statistics: success_counts, success_rates, fallback_count, video_format_used
+   - Language statistics: distribution, selection_trace, fallback_summary
+   - Error statistics: category_counts, category_rates, top_category
+   - Coverage statistics: distribution, low_coverage_videos
+   - Quality statistics: distribution, human_caption_count, auto_generated_count
+   - Cache validation: passed, rejected, refetched
+   - Pre-check: available, unavailable
+   - Raw metrics: complete to_dict() output
+
+**2. --export-caption-metrics CLI flag (src/cli/args.py):**
+   - New argument that writes to project directory by default
+   - Resolves relative paths to project directory
+
+**3. _export_caption_metrics() handler (main.py):**
+   - Loads caption metrics from checkpoint stages data
+   - Falls back to checkpoint file if checkpoint manager unavailable
+   - Prints summary: fetch attempts, successes, success rate, cache hit rate
+
+**4. Bug fix: error_category_counts serialization:**
+   - Added error_category_counts to to_dict() method
+   - Added error_category_counts to from_dict() method
+   - Ensures error tracking persists across checkpoint saves
+
+**5. Tests (tests/test_caption_fetcher.py):**
+   - TestCaptionMetricsExportJson class with 18 tests
+   - TestCaptionMetricsErrorCategorySerialization class with 3 tests
+
+### Test Classes Added
+
+**TestCaptionMetricsExportJson (18 tests):**
+- test_export_json_creates_valid_file
+- test_export_json_contains_schema_version
+- test_export_json_contains_timestamp
+- test_export_json_contains_run_metadata
+- test_export_json_contains_summary_statistics
+- test_export_json_contains_timing_metrics
+- test_export_json_contains_format_statistics
+- test_export_json_contains_language_statistics
+- test_export_json_contains_error_statistics
+- test_export_json_contains_coverage_statistics
+- test_export_json_contains_quality_statistics
+- test_export_json_contains_cache_validation
+- test_export_json_contains_pre_check_statistics
+- test_export_json_contains_raw_metrics
+- test_export_json_with_config_snapshot
+- test_export_json_creates_parent_directories
+- test_export_json_handles_empty_metrics
+- test_export_json_all_expected_fields
+
+**TestCaptionMetricsErrorCategorySerialization (3 tests):**
+- test_error_category_counts_in_to_dict
+- test_error_category_counts_in_from_dict
+- test_error_category_counts_roundtrip
+
+### Acceptance Criteria Met
+- [x] Add CaptionMetrics.export_json(path) writing all metrics to timestamped JSON file
+- [x] Include run metadata: timestamp, project_path, config snapshot, video_count
+- [x] Add --export-caption-metrics flag to CLI writing to project/caption_metrics.json
+- [x] Export includes all sub-metrics: timing, formats, languages, errors, cache validation
+- [x] JSON schema documented in docstring with example output structure
+- [x] Tests verify exported JSON is valid and contains all expected fields
+
+### Files Modified
+- src/caption_fetcher.py (added export_json method, fixed error_category_counts serialization)
+- src/cli/args.py (added --export-caption-metrics argument)
+- main.py (added _export_caption_metrics handler)
+- tests/test_caption_fetcher.py (added 21 tests)
+
+### Verification
+- 322 tests in test_caption_fetcher.py pass
+- main.py --help shows new --export-caption-metrics flag
+- Syntax checks pass for all modified files
+
+## Iteration 5 - [US-005] Build standalone caption configuration validation CLI
+- Focus: caption
+- Status: COMPLETE
+
+### Summary
+Implemented standalone caption configuration validation CLI that allows users to test caption-first configuration without running the full pipeline.
+
+### Changes Made
+
+**1. CLI Arguments (src/cli/args.py):**
+- Added `--validate-captions` flag to run config validation only
+- Added `--test-fetch N` option to fetch captions for N sample videos
+
+**2. Validation Dataclasses (src/caption_fetcher.py):**
+- `CaptionConfigValidationResult`: Tracks validation status, errors, warnings, checks performed
+- `TestFetchResult`: Individual test fetch result (video_id, success, format, timing, errors)
+- `TestFetchSummary`: Aggregated results (total, successes, failures, avg_time, dominant_format)
+
+**3. Validation Function (validate_caption_config):**
+Performs comprehensive checks:
+- Language codes: preferred_language and fallback_languages are valid ISO 639-1
+- Format preferences: preferred_formats contains valid format names (json3, vtt, srt, srv3, ttml)
+- Timeout values: timeout > 0, retry_delay > 0, max_retries >= 0
+- Cache path writability: cache_dir exists or can be created, is writable
+- Retry budgets: Valid category names, non-negative values
+
+**4. Test Fetch Function (run_caption_test_fetch):**
+- Fetches captions for sample videos from checkpoint
+- Calculates avg fetch time, identifies dominant format
+- Returns detailed results for each video
+
+**5. main.py Integration:**
+- Displays validation results with status icons (✓, ⚠, ✗, ○)
+- Shows individual test fetch results
+- Exit codes: 0=valid, 1=validation errors, 2=test fetch failures
+
+### CLI Output Example
+```
+  Caption Configuration Validation
+  ========================================
+    ✓ config_exists: passed
+    ✓ language_codes: passed
+    ✓ format_preferences: passed
+    ✓ timeout_values: passed
+    ✓ cache_path: passed
+    ✓ retry_budgets: passed
+
+  ✓ Config valid.
+```
+
+### Test Classes Added (29 tests)
+
+**TestCaptionConfigValidationResult (5 tests):**
+- test_valid_result_creation
+- test_invalid_result_with_errors
+- test_result_with_warnings
+- test_str_representation_valid
+- test_str_representation_invalid
+
+**TestValidateCaptionConfig (13 tests):**
+- test_valid_config
+- test_invalid_language_code
+- test_invalid_format_preference
+- test_empty_format_preference
+- test_negative_timeout
+- test_negative_retry_delay
+- test_low_timeout_warning
+- test_cache_path_writability
+- test_cache_disabled_skips_check
+- test_negative_retry_budget
+- test_unknown_retry_budget_category_warning
+- test_no_config_returns_error
+- test_extracts_caption_first_from_config
+
+**TestTestFetchResult (2 tests):**
+- test_successful_fetch_result
+- test_failed_fetch_result
+
+**TestTestFetchSummary (3 tests):**
+- test_summary_creation
+- test_summary_str_with_results
+- test_summary_str_empty
+
+**TestRunCaptionTestFetch (6 tests):**
+- test_successful_fetches
+- test_mixed_success_and_failure
+- test_empty_video_list
+- test_respects_max_videos
+- test_tracks_dominant_format
+- test_calculates_avg_time
+
+### Acceptance Criteria Met
+- [x] Add 'python main.py --validate-captions' mode that runs config validation only
+- [x] Validation checks: language codes, format preferences, timeout values, cache path writability
+- [x] With --validate-captions --test-fetch N: fetch captions for N random sample videos
+- [x] Print validation summary: 'Config valid. Test fetch: 3/3 success, avg 2.1s, json3 format'
+- [x] Return exit code 0 for valid config, 1 for validation errors, 2 for test fetch failures
+- [x] Tests verify CLI validates config correctly and reports test fetch results
+
+### Files Modified
+- src/caption_fetcher.py (added validation dataclasses and functions)
+- src/cli/args.py (added --validate-captions and --test-fetch arguments)
+- main.py (added validation CLI handler)
+- tests/test_caption_fetcher.py (added 29 tests)
+
+### Verification
+- 586 tests pass (caption_fetcher + config tests)
+- main.py --validate-captions works correctly
+- Syntax checks pass for all modified files

@@ -5377,3 +5377,621 @@ class TestCaptionMetricsErrorCategorySerialization:
         restored = CaptionMetrics.from_dict(data)
 
         assert restored.error_category_counts == {"NETWORK": 2, "PARSE": 1, "RATE_LIMIT": 1}
+
+
+# =============================================================================
+# US-005 Sprint 7: Caption Configuration Validation CLI Tests
+# =============================================================================
+
+
+class TestCaptionConfigValidationResult:
+    """Tests for CaptionConfigValidationResult dataclass (US-005 Sprint 7)."""
+
+    def test_valid_result_creation(self):
+        """Test creating a valid result."""
+        from src.caption_fetcher import CaptionConfigValidationResult
+
+        result = CaptionConfigValidationResult(
+            is_valid=True,
+            errors=[],
+            warnings=[],
+            checks_performed={"language_codes": "passed", "cache_path": "passed"}
+        )
+
+        assert result.is_valid is True
+        assert result.errors == []
+        assert result.warnings == []
+        assert len(result.checks_performed) == 2
+
+    def test_invalid_result_with_errors(self):
+        """Test creating an invalid result with errors."""
+        from src.caption_fetcher import CaptionConfigValidationResult
+
+        result = CaptionConfigValidationResult(
+            is_valid=False,
+            errors=["Invalid language code: xyz", "Timeout must be positive"],
+            warnings=[],
+            checks_performed={"language_codes": "failed", "timeout_values": "failed"}
+        )
+
+        assert result.is_valid is False
+        assert len(result.errors) == 2
+        assert "xyz" in result.errors[0]
+
+    def test_result_with_warnings(self):
+        """Test result with warnings but still valid."""
+        from src.caption_fetcher import CaptionConfigValidationResult
+
+        result = CaptionConfigValidationResult(
+            is_valid=True,
+            errors=[],
+            warnings=["timeout=3s is very low"],
+            checks_performed={"timeout_values": "warning"}
+        )
+
+        assert result.is_valid is True
+        assert len(result.warnings) == 1
+
+    def test_str_representation_valid(self):
+        """Test string representation for valid config."""
+        from src.caption_fetcher import CaptionConfigValidationResult
+
+        result = CaptionConfigValidationResult(
+            is_valid=True,
+            errors=[],
+            warnings=[],
+            checks_performed={}
+        )
+
+        output = str(result)
+        assert "VALID" in output
+
+    def test_str_representation_invalid(self):
+        """Test string representation for invalid config."""
+        from src.caption_fetcher import CaptionConfigValidationResult
+
+        result = CaptionConfigValidationResult(
+            is_valid=False,
+            errors=["Test error"],
+            warnings=["Test warning"],
+            checks_performed={}
+        )
+
+        output = str(result)
+        assert "INVALID" in output
+        assert "Errors:" in output
+        assert "Test error" in output
+        assert "Warnings:" in output
+        assert "Test warning" in output
+
+
+class TestValidateCaptionConfig:
+    """Tests for validate_caption_config() function (US-005 Sprint 7)."""
+
+    def test_valid_config(self):
+        """Test validation with a valid config."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        # Create mock config
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = ["es", "fr"]
+        mock_caption_first.preferred_formats = ["json3", "vtt", "srt"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False  # Skip cache check for simplicity
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is True
+        assert result.checks_performed["language_codes"] == "passed"
+        assert result.checks_performed["format_preferences"] == "passed"
+        assert result.checks_performed["timeout_values"] == "passed"
+
+    def test_invalid_language_code(self):
+        """Test validation catches invalid language code."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "xyz"  # Invalid
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+        assert result.checks_performed["language_codes"] == "failed"
+        assert any("xyz" in e for e in result.errors)
+
+    def test_invalid_format_preference(self):
+        """Test validation catches invalid format."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["invalid_format"]  # Invalid
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+        assert result.checks_performed["format_preferences"] == "failed"
+        assert any("invalid_format" in e for e in result.errors)
+
+    def test_empty_format_preference(self):
+        """Test validation catches empty format list."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = []  # Empty
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+        assert any("empty" in e.lower() for e in result.errors)
+
+    def test_negative_timeout(self):
+        """Test validation catches negative timeout."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = -5  # Invalid
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+        assert result.checks_performed["timeout_values"] == "failed"
+
+    def test_negative_retry_delay(self):
+        """Test validation catches negative retry_delay."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = -1.0  # Invalid
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+
+    def test_low_timeout_warning(self):
+        """Test validation warns about low timeout."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 3  # Very low, should warn
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        # Still valid but should have warning
+        assert result.is_valid is True
+        assert result.checks_performed["timeout_values"] == "warning"
+        assert len(result.warnings) > 0
+
+    def test_cache_path_writability(self, tmp_path):
+        """Test validation checks cache path writability."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        # Create writable temp directory
+        cache_dir = tmp_path / "test_cache"
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = True  # Enable caching
+        mock_caption_first.cache_dir = str(cache_dir)
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is True
+        assert result.checks_performed["cache_path"] == "passed"
+        # Verify directory was created
+        assert cache_dir.exists()
+
+    def test_cache_disabled_skips_check(self):
+        """Test validation skips cache check when disabled."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False  # Disabled
+        mock_caption_first.retry_budgets = {}
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.checks_performed["cache_path"] == "skipped"
+
+    def test_negative_retry_budget(self):
+        """Test validation catches negative retry budget."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {"network": -1}  # Invalid
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        assert result.is_valid is False
+        assert any("negative" in e.lower() for e in result.errors)
+
+    def test_unknown_retry_budget_category_warning(self):
+        """Test validation warns about unknown retry budget categories."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {"unknown_category": 3}  # Unknown
+
+        result = validate_caption_config(caption_first_config=mock_caption_first)
+
+        # Still valid but should have warning
+        assert result.is_valid is True
+        assert result.checks_performed["retry_budgets"] == "warning"
+        assert any("unknown" in w.lower() for w in result.warnings)
+
+    def test_no_config_returns_error(self):
+        """Test validation fails when no config is provided."""
+        from src.caption_fetcher import validate_caption_config
+
+        result = validate_caption_config(config=None, caption_first_config=None)
+
+        assert result.is_valid is False
+        assert any("no caption_first" in e.lower() for e in result.errors)
+
+    def test_extracts_caption_first_from_config(self):
+        """Test validation extracts caption_first from full config."""
+        from src.caption_fetcher import validate_caption_config
+        from unittest.mock import MagicMock
+
+        # Create mock caption_first
+        mock_caption_first = MagicMock()
+        mock_caption_first.preferred_language = "en"
+        mock_caption_first.fallback_languages = []
+        mock_caption_first.preferred_formats = ["json3"]
+        mock_caption_first.timeout = 30
+        mock_caption_first.retry_delay = 2.0
+        mock_caption_first.max_retries = 3
+        mock_caption_first.cache_captions = False
+        mock_caption_first.retry_budgets = {}
+
+        # Create mock config structure
+        mock_download = MagicMock()
+        mock_download.caption_first = mock_caption_first
+
+        mock_config = MagicMock()
+        mock_config.download = mock_download
+
+        result = validate_caption_config(config=mock_config)
+
+        assert result.is_valid is True
+
+
+class TestTestFetchResult:
+    """Tests for TestFetchResult dataclass (US-005 Sprint 7)."""
+
+    def test_successful_fetch_result(self):
+        """Test creating a successful fetch result."""
+        from src.caption_fetcher import TestFetchResult
+
+        result = TestFetchResult(
+            video_id="abc123xyz",
+            success=True,
+            format_used="json3",
+            elapsed_seconds=1.5,
+            segment_count=100
+        )
+
+        assert result.video_id == "abc123xyz"
+        assert result.success is True
+        assert result.format_used == "json3"
+        assert result.elapsed_seconds == 1.5
+        assert result.segment_count == 100
+        assert result.error == ""
+
+    def test_failed_fetch_result(self):
+        """Test creating a failed fetch result."""
+        from src.caption_fetcher import TestFetchResult
+
+        result = TestFetchResult(
+            video_id="def456uvw",
+            success=False,
+            elapsed_seconds=2.0,
+            error="No captions available"
+        )
+
+        assert result.success is False
+        assert result.error == "No captions available"
+        assert result.segment_count == 0
+        assert result.format_used == ""
+
+
+class TestTestFetchSummary:
+    """Tests for TestFetchSummary dataclass (US-005 Sprint 7)."""
+
+    def test_summary_creation(self):
+        """Test creating a fetch summary."""
+        from src.caption_fetcher import TestFetchSummary, TestFetchResult
+
+        results = [
+            TestFetchResult("vid1", True, "json3", 1.0, segment_count=50),
+            TestFetchResult("vid2", True, "vtt", 2.0, segment_count=75),
+            TestFetchResult("vid3", False, elapsed_seconds=0.5, error="Failed"),
+        ]
+
+        summary = TestFetchSummary(
+            total=3,
+            successes=2,
+            failures=1,
+            results=results,
+            avg_time=1.5,
+            dominant_format="json3"
+        )
+
+        assert summary.total == 3
+        assert summary.successes == 2
+        assert summary.failures == 1
+        assert summary.avg_time == 1.5
+        assert summary.dominant_format == "json3"
+
+    def test_summary_str_with_results(self):
+        """Test string representation with results."""
+        from src.caption_fetcher import TestFetchSummary
+
+        summary = TestFetchSummary(
+            total=3,
+            successes=3,
+            failures=0,
+            avg_time=2.1,
+            dominant_format="json3"
+        )
+
+        output = str(summary)
+        assert "3/3 success" in output
+        assert "2.1s" in output
+        assert "json3" in output
+
+    def test_summary_str_empty(self):
+        """Test string representation with no videos."""
+        from src.caption_fetcher import TestFetchSummary
+
+        summary = TestFetchSummary(total=0)
+
+        output = str(summary)
+        assert "No videos tested" in output
+
+
+class TestRunCaptionTestFetch:
+    """Tests for run_caption_test_fetch() function (US-005 Sprint 7)."""
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_successful_fetches(self, mock_fetcher_class):
+        """Test running successful test fetches."""
+        from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
+
+        # Create mock fetcher
+        mock_fetcher = MagicMock()
+
+        # Create mock caption result
+        segments = [CaptionSegment(0, 0.0, 1.0, "Test", "vid")]
+        mock_result = CaptionResult(
+            video_id="abc123xyz",
+            segments=segments,
+            language="en",
+            format_source="json3"
+        )
+        mock_fetcher.fetch_captions.return_value = mock_result
+
+        mock_fetcher_class.return_value = mock_fetcher
+
+        # Run test fetch
+        summary = run_caption_test_fetch(
+            ["abc123xyz", "def456uvw"],
+            config=None,
+            max_videos=2
+        )
+
+        assert summary.total == 2
+        assert summary.successes == 2
+        assert summary.failures == 0
+        assert mock_fetcher.fetch_captions.call_count == 2
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_mixed_success_and_failure(self, mock_fetcher_class):
+        """Test handling mix of successful and failed fetches."""
+        from src.caption_fetcher import (
+            run_caption_test_fetch, CaptionResult, CaptionSegment,
+            CaptionUnavailableError
+        )
+
+        mock_fetcher = MagicMock()
+
+        # First call succeeds, second fails
+        segments = [CaptionSegment(0, 0.0, 1.0, "Test", "vid")]
+        mock_result = CaptionResult(
+            video_id="abc123xyz",
+            segments=segments,
+            format_source="json3"
+        )
+        mock_fetcher.fetch_captions.side_effect = [
+            mock_result,
+            CaptionUnavailableError("def456uvw", "No captions")
+        ]
+
+        mock_fetcher_class.return_value = mock_fetcher
+
+        summary = run_caption_test_fetch(
+            ["abc123xyz", "def456uvw"],
+            config=None,
+            max_videos=2
+        )
+
+        assert summary.total == 2
+        assert summary.successes == 1
+        assert summary.failures == 1
+
+    def test_empty_video_list(self):
+        """Test handling empty video list."""
+        from src.caption_fetcher import run_caption_test_fetch
+
+        summary = run_caption_test_fetch([], config=None)
+
+        assert summary.total == 0
+        assert summary.successes == 0
+        assert summary.failures == 0
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_respects_max_videos(self, mock_fetcher_class):
+        """Test that max_videos limits the number of test fetches."""
+        from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
+
+        mock_fetcher = MagicMock()
+        segments = [CaptionSegment(0, 0.0, 1.0, "Test", "vid")]
+        mock_result = CaptionResult(video_id="vid", segments=segments, format_source="json3")
+        mock_fetcher.fetch_captions.return_value = mock_result
+
+        mock_fetcher_class.return_value = mock_fetcher
+
+        # Pass 10 video IDs but limit to 3
+        video_ids = [f"vid{i:08d}x" for i in range(10)]  # 11-char IDs
+        summary = run_caption_test_fetch(video_ids, config=None, max_videos=3)
+
+        assert summary.total == 3
+        assert mock_fetcher.fetch_captions.call_count == 3
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_tracks_dominant_format(self, mock_fetcher_class):
+        """Test that dominant format is correctly identified."""
+        from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
+
+        mock_fetcher = MagicMock()
+
+        # Create results with different formats
+        def make_result(vid, fmt):
+            return CaptionResult(
+                video_id=vid,
+                segments=[CaptionSegment(0, 0.0, 1.0, "Test", vid)],
+                format_source=fmt
+            )
+
+        # 2 vtt, 1 json3 - vtt should be dominant
+        mock_fetcher.fetch_captions.side_effect = [
+            make_result("vid1", "vtt"),
+            make_result("vid2", "vtt"),
+            make_result("vid3", "json3"),
+        ]
+
+        mock_fetcher_class.return_value = mock_fetcher
+
+        summary = run_caption_test_fetch(
+            ["vid1xxxxxxx", "vid2xxxxxxx", "vid3xxxxxxx"],
+            config=None,
+            max_videos=3
+        )
+
+        assert summary.dominant_format == "vtt"
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_calculates_avg_time(self, mock_fetcher_class):
+        """Test that average time is calculated correctly."""
+        import time
+        from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
+
+        mock_fetcher = MagicMock()
+
+        segments = [CaptionSegment(0, 0.0, 1.0, "Test", "vid")]
+
+        # Simulate different fetch times
+        call_count = [0]
+        def slow_fetch(*args, **kwargs):
+            call_count[0] += 1
+            time.sleep(0.1)  # 100ms delay
+            return CaptionResult(
+                video_id=f"vid{call_count[0]}",
+                segments=segments,
+                format_source="json3"
+            )
+
+        mock_fetcher.fetch_captions.side_effect = slow_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        summary = run_caption_test_fetch(
+            ["vid1xxxxxxx", "vid2xxxxxxx"],
+            config=None,
+            max_videos=2
+        )
+
+        # Average time should be around 0.1s
+        assert summary.avg_time >= 0.1
+        assert summary.avg_time < 1.0  # Sanity check
