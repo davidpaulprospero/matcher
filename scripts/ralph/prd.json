@@ -1,184 +1,168 @@
 {
-  "branchName": "ralph/sprint-1",
-  "sprintNumber": 1,
-  "focusArea": "quality",
-  "projectContext": {
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short",
-    "sourceDir": "src/",
-    "testsDir": "tests/"
-  },
+  "branchName": "ralph/sprint-2",
+  "sprintNumber": 2,
+  "focusArea": "rate-limiting",
+  "projectContext": "Improve YouTube download resilience through retry mechanisms, progressive backoff, and configurable rate-limit handling. Key gap: config.yaml has max_retries/retry_delay/retry_backoff settings that are NOT used in VideoDownloader._run_download_cmd(). Cookie rotator and VPN manager exist but escalation is too aggressive.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Replace bare except blocks with specific exception handling in checkpoint.py",
+      "title": "Implement exponential backoff retry in _run_download_cmd",
+      "description": "The download config defines max_retries (3), retry_delay (2s), and retry_backoff (2.0) but these are NOT used in VideoDownloader._run_download_cmd(). Implement retry logic with exponential backoff for transient failures.",
       "priority": 1,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: at line 444 with specific exception types (OSError, json.JSONDecodeError)",
-        "Replace bare except: at line 680 with specific exception types",
-        "Add proper logging for caught exceptions using self.logger or module logger",
-        "Add brief comment explaining why exception is caught/ignored where applicable",
-        "All existing tests in tests/test_checkpoint*.py continue to pass"
+        "VideoDownloader._run_download_cmd uses config.download.max_retries for retry attempts",
+        "Delay between retries follows exponential backoff: retry_delay * (retry_backoff ^ attempt)",
+        "Retries only occur for transient errors (timeout, connection reset, 429 rate limit)",
+        "Permanent errors (video unavailable, private, age-restricted) fail immediately without retry",
+        "Each retry attempt is logged with attempt number and delay duration",
+        "Unit tests verify retry behavior with mocked subprocess calls"
       ],
-      "notes": "Replaced both bare except: blocks with (OSError, IOError) and added logger.debug() calls with explanatory comments. All 135 checkpoint tests pass."
+      "passes": true,
+      "notes": "Implemented retry loop in _run_download_cmd with TRANSIENT_ERROR_PATTERNS and PERMANENT_ERROR_PATTERNS class variables. 21 new unit tests in tests/test_downloader_retry.py. All 68 related tests pass."
     },
     {
       "id": "US-002",
-      "title": "Replace bare except blocks with specific exception handling in face_detection.py",
+      "title": "Add progressive backoff before cookie rotation",
+      "description": "Currently rate limit errors immediately trigger cookie rotation. Add a progressive delay phase before escalating to cookie rotation to handle brief rate-limit windows.",
       "priority": 2,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: at lines 132, 154, 211, 240 with specific exception types",
-        "Use appropriate exceptions: cv2.error, OSError, ValueError for OpenCV operations",
-        "Add logger.debug() calls for caught exceptions to aid troubleshooting",
-        "Ensure face detection continues to work gracefully when one frame fails",
-        "Syntax check passes: python -m py_compile src/face_detection.py"
+        "New config option download.rate_limit.initial_backoff_seconds (default: 5)",
+        "New config option download.rate_limit.max_backoff_before_rotate (default: 60)",
+        "Rate limit errors trigger exponential backoff BEFORE rotating cookies",
+        "After max_backoff_before_rotate seconds total delay, then rotate cookie",
+        "Backoff progress is logged for debugging",
+        "Tests verify backoff occurs before rotation"
       ],
-      "notes": "Replaced 4 bare except: blocks with specific exception handling: (OSError, IOError, json.JSONDecodeError) for cache reads, (OSError, IOError) for cache writes. Added logger.debug() calls for troubleshooting. Syntax check passes."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Replace bare except blocks with specific exception handling in parallel_processor.py",
+      "title": "Make cookie rotator error patterns configurable",
+      "description": "Cookie rotator has hard-coded error patterns (429, rate limit, etc.) at line 222. Move patterns to config.yaml so users can add new YouTube error formats without code changes.",
       "priority": 3,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: at lines 219, 232, 304, 415 with specific exception types",
-        "Use Exception as fallback but log full traceback with logger.exception()",
-        "Ensure thread safety is maintained in exception handling",
-        "Add test for parallel processing error recovery in tests/test_transcription/",
-        "All transcription tests continue to pass"
+        "New config section download.cookie_rotation.error_patterns as list of strings",
+        "Default patterns include: 429, rate limit, too many requests, sign in, login required, bot detection",
+        "CookieRotator.rotate_on_errors() reads from config instead of hard-coded list",
+        "Patterns support case-insensitive matching",
+        "Config validation ensures error_patterns is a non-empty list",
+        "Tests verify custom patterns trigger rotation"
       ],
-      "notes": "Replaced 4 bare except: blocks with (OSError, IOError) for file cleanup. Changed logger.error() to logger.exception() for traceback in audio extraction and transcription errors. Added TestParallelErrorRecovery class with 3 tests. All 27 transcription tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add comprehensive tests for DiskHealer, PathHealer, and CheckpointHealer",
+      "title": "Add search timeout fallback with keyword remix",
+      "description": "Search queries that timeout (yt-dlp search hangs) currently kill the entire keyword. Add fallback to try remixed keyword when search times out.",
       "priority": 4,
-      "passes": true,
       "acceptanceCriteria": [
-        "Create tests/test_agents/test_disk_healer.py with 10+ test cases covering disk space detection and cleanup",
-        "Create tests/test_agents/test_path_healer.py with 10+ test cases covering path validation and fixing",
-        "Create tests/test_agents/test_checkpoint_healer.py with 10+ test cases covering checkpoint corruption recovery",
-        "Follow existing test patterns from test_api_healer.py and test_healer_base.py",
-        "All new tests pass with pytest tests/test_agents/test_*_healer.py -v"
+        "Search timeout (default: 30s) is detected separately from download timeout",
+        "On search timeout, try LLM keyword remix before giving up",
+        "New config option download.search_timeout_seconds (default: 30)",
+        "Maximum 2 remix attempts per original keyword on timeout",
+        "Timeout is logged with original keyword and remix attempts",
+        "Tests verify remix is tried after search timeout"
       ],
-      "notes": "Created 100 tests across 3 test files: test_disk_healer.py (33 tests), test_path_healer.py (36 tests), test_checkpoint_healer.py (31 tests). Tests cover initialization, can_handle routing, fix methods, helper functions, and integration scenarios. All 100 tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add return type hints to core matching module functions",
+      "title": "Implement download speed monitoring for adaptive timeouts",
+      "description": "Current tier-based timeouts are fixed. Track actual download speeds per session to dynamically adjust timeouts based on network conditions.",
       "priority": 5,
-      "passes": true,
       "acceptanceCriteria": [
-        "Add return type hints to all public methods in src/matching/strategies.py",
-        "Add return type hints to all public methods in src/matching/location_matching.py",
-        "Add return type hints to all public methods in src/matching/tracking.py",
-        "Use Optional[], List[], Dict[], etc. from typing module appropriately",
-        "Syntax check passes for all modified files"
+        "New DownloadSpeedTracker class tracks bytes downloaded and time per video",
+        "Average speed calculated across last 5 downloads (sliding window)",
+        "Timeout can be extended by up to 2x if speed is below expected threshold",
+        "Speed stats exposed via get_speed_stats() for debugging",
+        "Tracker state persisted in checkpoint for resume scenarios",
+        "Tests verify timeout extension on slow networks"
       ],
-      "notes": "Added return type hints to all public methods in strategies.py (StrategyMatcher, FallbackMatchStrategy classes), location_matching.py (LocationMatcher class), and tracking.py (TimelineVarietyTracker, GlobalClipTracker classes). Used Optional[] for nullable parameters and return types. All 101 matching tests pass. Syntax check passes for all files."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Add docstrings to StrategyMatcher class methods",
+      "title": "Add circuit breaker for repeated search failures",
+      "description": "If multiple keywords in a row fail to return results, pause searching briefly instead of hammering YouTube. Implement circuit breaker pattern.",
       "priority": 6,
-      "passes": true,
       "acceptanceCriteria": [
-        "Add docstrings to all public methods in src/matching/strategies.py StrategyMatcher class",
-        "Docstrings include description, Args, Returns, and Raises sections where applicable",
-        "Document the different matching strategies (visual_first, different_source, embedding_diversity, broll_only)",
-        "Document scoring weights and how alternatives are selected",
-        "No syntax errors: python -m py_compile src/matching/strategies.py"
+        "New config option download.circuit_breaker.consecutive_failures_threshold (default: 5)",
+        "New config option download.circuit_breaker.pause_seconds (default: 60)",
+        "After threshold consecutive search failures, pause for pause_seconds",
+        "Circuit breaker resets on first successful search",
+        "Pause duration is logged clearly (not hidden in debug)",
+        "Tests verify circuit breaker triggers and resets correctly"
       ],
-      "notes": "Added comprehensive docstrings to all 12 public methods in StrategyMatcher class: __init__, get_clip_id, is_clip_excluded, match_visual_first, match_different_source, match_keyword_only, match_embedding_diversity, match_broll_only, get_secondary_matches_diversity, _get_scene_for_segment, match_source_rotation, get_strategy_matches. Each docstring includes description, Args, Returns, and Notes sections. Documented scoring weights (e.g., 70% visual/30% text for visual_first, 40% relevance/60% diversity for embedding_diversity). All 118 strategy tests pass. Syntax check passes."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Replace bare except blocks in media source modules",
+      "title": "Add batch-level retry queue for rate-limited videos",
+      "description": "Currently each video retries independently. If rate limiting affects a batch, collect failed videos and retry the entire batch after a delay.",
       "priority": 7,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: in src/media_sources/images/google_bing.py line 383",
-        "Replace bare except: in src/media_sources/images/pexels.py line 167",
-        "Replace bare except: in src/media_sources/images/pixabay.py line 177",
-        "Replace bare except: in src/media_sources/images/unsplash.py line 167",
-        "Use requests.RequestException, json.JSONDecodeError, or other specific types",
-        "Syntax check passes for all modified files"
+        "New RetryQueue class collects rate-limited video IDs with their keywords",
+        "After batch completes, retry queue is processed with backoff",
+        "New config option download.batch_retry.enabled (default: true)",
+        "New config option download.batch_retry.delay_seconds (default: 120)",
+        "Maximum 2 batch retry passes per download session",
+        "Tests verify batch retry with multiple failed videos"
       ],
-      "notes": "Replaced 4 bare except: blocks with specific exception handling. google_bing.py: (OSError, IOError) for file deletion. pexels.py, pixabay.py, unsplash.py: (requests.RequestException, ValueError) for HEAD request size pre-check. Added logger.debug() calls for troubleshooting. Syntax check passes for all files."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Replace bare except blocks in downloader modules",
+      "title": "Add rate limit cooldown tracking across sessions",
+      "description": "Rate limit history is lost between pipeline runs. Persist rate limit events to avoid aggressive retries when resuming after rate limiting.",
       "priority": 8,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: in src/downloader/core.py line 903",
-        "Replace bare except: in src/downloader/transcoding.py line 163",
-        "Use subprocess.SubprocessError, OSError, or other specific exception types",
-        "Log exception details with logger.warning() or logger.exception()",
-        "All download-related tests continue to pass"
+        "Rate limit events saved to checkpoint with timestamp",
+        "On resume, check if last rate limit was within cooldown period",
+        "New config option download.rate_limit.resume_cooldown_minutes (default: 15)",
+        "If within cooldown, start with longer delays and skip to VPN/cookie rotation faster",
+        "Cooldown status logged on pipeline resume",
+        "Tests verify cooldown applied on resume"
       ],
-      "notes": "Replaced 2 bare except: blocks with specific exception handling. core.py: (OSError, IOError, json.JSONDecodeError) for info.json metadata loading with logger.debug(). transcoding.py: (FileNotFoundError, subprocess.SubprocessError, OSError) for GPU encoder detection with logger.debug(). All 339 download tests pass. Syntax check passes for both files."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add tests for matching strategy selection logic",
+      "title": "Add download healer integration with retry mechanism",
+      "description": "DownloadHealer in src/agents/healers/download.py has backoff logic but it's not integrated with the new retry mechanism. Ensure healers and retry work together.",
       "priority": 9,
-      "passes": true,
       "acceptanceCriteria": [
-        "Create tests/test_matching/test_strategies.py with tests for StrategyMatcher class",
-        "Test visual_first strategy returns clips with highest visual scores",
-        "Test different_source strategy excludes already-used sources",
-        "Test embedding_diversity strategy maximizes embedding variance",
-        "Test broll_only strategy only returns B-roll clips",
-        "Minimum 15 test cases covering all strategy branches"
+        "DownloadHealer checks if _run_download_cmd already retried before applying its own backoff",
+        "New flag passed to healer: already_retried_count",
+        "Healer skips exponential backoff if retries already exhausted",
+        "Healer proceeds directly to cookie/VPN rotation after retries exhausted",
+        "Clear logging shows retry handoff between core and healer",
+        "Tests verify healer skips redundant retries"
       ],
-      "notes": "Tests exist at tests/test_matching_strategies.py (flat structure). 45 tests covering all strategies: TestVisualFirstStrategySelection (2 tests), TestDifferentSourceStrategyExclusion (2 tests), TestEmbeddingDiversityMaximization (2 tests), TestBRollOnlyExclusivity (3 tests), plus 36 other tests. All 45 tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Replace bare except blocks in scene_detection.py",
+      "title": "Add rate limiting metrics to pipeline report",
+      "description": "After pipeline completes, show rate limiting statistics so users can tune their config. Add metrics to the healing report.",
       "priority": 10,
-      "passes": true,
       "acceptanceCriteria": [
-        "Replace bare except: at lines 290, 492, 676 with specific exception types",
-        "Use OSError, cv2.error, subprocess.SubprocessError as appropriate",
-        "Add debug logging for exceptions to aid troubleshooting scene detection issues",
-        "Ensure scene detection gracefully handles corrupt video files",
-        "All existing tests continue to pass"
+        "New RateLimitMetrics class tracks: retries, backoffs, cookie rotations, VPN switches",
+        "Metrics include: total_downloads, rate_limit_events, avg_retry_count, time_spent_backing_off",
+        "Metrics printed in healing report under 'Rate Limiting' section",
+        "Metrics saved to checkpoint for cross-session analysis",
+        "Config recommendations printed if rate_limit_events > 10% of downloads",
+        "Tests verify metrics collection and report output"
       ],
-      "notes": "Replaced 3 bare except: blocks with specific exception handling. Line 290: cv2.error for CUDA device selection failures. Line 492: (ValueError, AttributeError) for OTIO timecode parsing. Line 679: (OSError, IOError, cv2.error) for video duration checks. Added logger.debug() calls. All 77 scene detection tests pass."
-    },
-    {
-      "id": "US-011",
-      "title": "Add type hints and docstrings to GlobalClipTracker class",
-      "priority": 11,
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add return type hints to all methods in GlobalClipTracker (src/matching/tracking.py)",
-        "Add comprehensive docstrings explaining clip tracking across segments",
-        "Document the get_clip_id() logic for audio-first segment ID calculation",
-        "Document the used_clips tracking and how it prevents duplicate selections",
-        "Syntax check passes: python -m py_compile src/matching/tracking.py"
-      ],
-      "notes": "Return type hints already present from US-005. Added comprehensive docstrings to GlobalClipTracker class and all 5 methods: __init__, get_clip_id (detailed audio-first segment ID calculation with examples), is_used (usage patterns and performance), record_usage (location format and idempotency), get_used_clips (copy semantics), get_stats (interpretation guide). Syntax check passes."
-    },
-    {
-      "id": "US-012",
-      "title": "Replace bare except blocks in deduplication.py and global_cache.py",
-      "priority": 12,
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace bare except: in src/deduplication.py lines 209, 224",
-        "Replace bare except: in src/global_cache.py line 746",
-        "Use OSError, shutil.Error, or other specific exception types",
-        "Log caught exceptions with appropriate log level",
-        "Syntax check passes for both files"
-      ],
-      "notes": "Both files already fixed (likely during earlier sprint work): deduplication.py uses (ValueError, TypeError) for hash comparison, global_cache.py uses (ValueError, OSError) for timestamp parsing. Both have logger.debug() calls. Syntax checks pass."
+      "passes": false,
+      "notes": ""
     }
   ]
 }
