@@ -1273,6 +1273,274 @@ class TestSelectBestLanguage:
         assert result.code == "en"
 
 
+class TestFallbackLanguageChain:
+    """Test configurable fallback language chain (US-003)"""
+
+    def test_fallback_chain_first_available(self):
+        """Test fallback chain stops at first available language"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("pt", "Portuguese", False),
+            AvailableLanguage("de", "German", False),
+        ]
+
+        # es not available, pt is first in fallback chain and is available
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr", "de"]
+        )
+
+        assert result.code == "pt"
+        assert result.is_auto_generated is False
+
+    def test_fallback_chain_second_available(self):
+        """Test fallback chain moves to second when first unavailable"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("fr", "French", False),
+            AvailableLanguage("de", "German", False),
+        ]
+
+        # es not available, pt not available, fr is available
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr", "de"]
+        )
+
+        assert result.code == "fr"
+        assert result.is_auto_generated is False
+
+    def test_fallback_chain_skips_to_english(self):
+        """Test fallback chain falls through to English when chain exhausted"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("de", "German", False),
+        ]
+
+        # es, pt, fr all unavailable -> should fall back to English
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"]
+        )
+
+        assert result.code == "en"
+        assert result.is_auto_generated is False
+
+    def test_fallback_chain_includes_english_no_double_check(self):
+        """Test English in fallback chain doesn't cause double-checking"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("de", "German", False),
+        ]
+
+        # If en is in fallback chain, it should be checked once (in the chain)
+        # and the English fallback step should be skipped
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "en", "fr"]
+        )
+
+        assert result.code == "en"
+
+    def test_fallback_chain_empty_preserves_default_behavior(self):
+        """Test empty fallback_languages preserves default behavior"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("en", "English", False),
+            AvailableLanguage("de", "German", False),
+        ]
+
+        # Empty fallback_languages should behave like before: es -> en -> any
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=[]
+        )
+
+        assert result.code == "en"  # Default English fallback
+
+    def test_fallback_chain_to_any_when_all_fail(self):
+        """Test falls back to any available when chain + English fail"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("de", "German", False),
+            AvailableLanguage("ja", "Japanese", False),
+        ]
+
+        # es, pt, fr, en all unavailable -> should fall back to first available
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"]
+        )
+
+        assert result.code == "de"  # First in sorted list
+
+    def test_fallback_chain_prefers_manual_at_each_step(self):
+        """Test prefer_manual tries manual first, then auto, before moving to next language"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("pt", "Portuguese (auto)", True),
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        # pt is auto-generated only, fr is manual
+        # With prefer_manual=True:
+        # 1. Try pt manual -> not found
+        # 2. Try pt auto -> found, use it (same-language auto is preferred over next-language manual)
+        # This behavior is intentional: stay in the same language even if only auto is available
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"],
+            prefer_manual=True
+        )
+
+        assert result.code == "pt"
+        assert result.is_auto_generated is True
+
+    def test_fallback_chain_manual_available_in_chain(self):
+        """Test prefer_manual selects manual when available at same position"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("pt", "Portuguese", False),  # Manual
+            AvailableLanguage("pt", "Portuguese (auto)", True),  # Auto
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        # With prefer_manual=True, should select pt manual over pt auto
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"],
+            prefer_manual=True
+        )
+
+        assert result.code == "pt"
+        assert result.is_auto_generated is False
+
+    def test_fallback_chain_accepts_auto_when_only_option(self):
+        """Test auto captions selected when no manual available in chain"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("pt", "Portuguese (auto)", True),
+        ]
+
+        # pt auto is the only option in chain
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"],
+            prefer_manual=True
+        )
+
+        assert result.code == "pt"
+        assert result.is_auto_generated is True
+
+    def test_fallback_chain_skips_duplicates(self):
+        """Test fallback chain skips already-tried languages"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("fr", "French", False),
+        ]
+
+        # 'es' is both preferred and in fallback chain - should only try once
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["es", "pt", "fr"]
+        )
+
+        assert result.code == "fr"
+
+    def test_fallback_chain_case_insensitive(self):
+        """Test fallback chain handles case variations"""
+        fetcher = CaptionFetcher()
+
+        available = [
+            AvailableLanguage("PT", "Portuguese", False),
+        ]
+
+        # Lowercase in config, uppercase in available
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr"]
+        )
+
+        assert result.code == "PT"
+
+    def test_fallback_chain_multilingual_project(self):
+        """Test realistic multilingual project scenario"""
+        fetcher = CaptionFetcher()
+
+        # Spanish project with Portuguese and French fallbacks
+        available = [
+            AvailableLanguage("en", "English (auto)", True),
+            AvailableLanguage("pt", "Portuguese", False),
+            AvailableLanguage("de", "German (auto)", True),
+        ]
+
+        # Preferred es not available, fallback to pt
+        result = fetcher.select_best_language(
+            available, preferred="es", fallback_languages=["pt", "fr", "en"]
+        )
+
+        assert result.code == "pt"
+        assert result.is_auto_generated is False
+
+
+class TestGetFallbackLanguagesFromConfig:
+    """Test _get_fallback_languages_from_config method (US-003)"""
+
+    def test_no_config_returns_empty_list(self):
+        """Test default is empty list when no config"""
+        fetcher = CaptionFetcher()
+
+        result = fetcher._get_fallback_languages_from_config()
+
+        assert result == []
+
+    def test_reads_fallback_languages_from_config(self):
+        """Test reading fallback_languages from config"""
+        mock_config = Mock()
+        mock_config.download.caption_first.fallback_languages = ["es", "pt", "fr"]
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_fallback_languages_from_config()
+
+        assert result == ["es", "pt", "fr"]
+
+    def test_returns_empty_for_none(self):
+        """Test returns empty list when config value is None"""
+        mock_config = Mock()
+        mock_config.download.caption_first.fallback_languages = None
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_fallback_languages_from_config()
+
+        assert result == []
+
+    def test_returns_empty_for_non_list(self):
+        """Test returns empty list when config value is not a list"""
+        mock_config = Mock()
+        mock_config.download.caption_first.fallback_languages = "es"  # String, not list
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_fallback_languages_from_config()
+
+        assert result == []
+
+    def test_handles_attribute_error(self):
+        """Test handles missing config attributes gracefully"""
+        mock_config = Mock()
+        # Make download raise AttributeError
+        del mock_config.download
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        result = fetcher._get_fallback_languages_from_config()
+
+        assert result == []
+
+
 class TestGetPreferredLanguageFromConfig:
     """Test _get_preferred_language_from_config method"""
 

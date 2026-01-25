@@ -433,14 +433,16 @@ class CaptionFetcher:
         available: List[AvailableLanguage],
         preferred: Optional[str] = None,
         fallback_to_english: bool = True,
-        prefer_manual: bool = True
+        prefer_manual: bool = True,
+        fallback_languages: Optional[List[str]] = None
     ) -> Optional[AvailableLanguage]:
         """Select the best language from available options using fallback chain.
 
-        Implements the fallback chain:
+        Implements the fallback chain (US-003):
         1. Preferred language (manual if prefer_manual, else any)
-        2. English 'en' (manual if prefer_manual, else any)
-        3. Any available language (manual if prefer_manual, else any)
+        2. Configured fallback_languages in order (from config or param)
+        3. English 'en' (if fallback_to_english and not already tried)
+        4. Any available language (manual if prefer_manual, else any)
 
         Args:
             available: List of available languages from list_available_languages().
@@ -449,13 +451,16 @@ class CaptionFetcher:
                        config.transcription.language.
             fallback_to_english: If True, fall back to English if preferred unavailable.
             prefer_manual: If True, prefer manual captions over auto-generated.
+            fallback_languages: Optional list of fallback language codes. If None,
+                               uses config.download.caption_first.fallback_languages.
 
         Returns:
             Selected AvailableLanguage, or None if no languages available.
 
         Example:
             languages = fetcher.list_available_languages("dQw4w9WgXcQ")
-            best = fetcher.select_best_language(languages, preferred='es')
+            best = fetcher.select_best_language(languages, preferred='es',
+                                                fallback_languages=['pt', 'en', 'fr'])
             if best:
                 result = fetcher.fetch_captions("dQw4w9WgXcQ", language=best.code)
         """
@@ -467,7 +472,12 @@ class CaptionFetcher:
         if preferred is None:
             preferred = self._get_preferred_language_from_config()
 
+        # Get fallback chain from args or config
+        if fallback_languages is None:
+            fallback_languages = self._get_fallback_languages_from_config()
+
         logger.debug(f"Selecting caption language: preferred={preferred}, "
+                    f"fallback_chain={fallback_languages}, "
                     f"fallback_english={fallback_to_english}, prefer_manual={prefer_manual}")
 
         def find_language(code: str, manual_only: bool = False) -> Optional[AvailableLanguage]:
@@ -479,52 +489,66 @@ class CaptionFetcher:
                     return lang
             return None
 
+        def try_language(code: str, position: str) -> Optional[AvailableLanguage]:
+            """Try to find a language, preferring manual if configured.
+
+            Returns the language if found, logging which position in the chain.
+            """
+            if prefer_manual:
+                result = find_language(code, manual_only=True)
+                if result:
+                    logger.info(f"Selected '{result.code}' (manual) from {position}")
+                    return result
+
+            result = find_language(code, manual_only=False)
+            if result:
+                auto_str = 'auto' if result.is_auto_generated else 'manual'
+                logger.info(f"Selected '{result.code}' ({auto_str}) from {position}")
+                return result
+            return None
+
+        # Build the complete fallback chain with positions tracked
+        languages_tried: set = set()
+
         # Step 1: Try preferred language
         if preferred:
-            # Try manual first if preferred
-            if prefer_manual:
-                result = find_language(preferred, manual_only=True)
-                if result:
-                    logger.info(f"Selected preferred language: {result.code} (manual)")
-                    return result
-
-            # Try auto if manual not found
-            result = find_language(preferred, manual_only=False)
+            result = try_language(preferred, "preferred language")
             if result:
-                logger.info(f"Selected preferred language: {result.code} "
-                           f"({'auto' if result.is_auto_generated else 'manual'})")
                 return result
-
+            languages_tried.add(preferred.lower())
             logger.debug(f"Preferred language '{preferred}' not available")
 
-        # Step 2: Fall back to English
-        if fallback_to_english and (preferred is None or preferred.lower() != 'en'):
-            if prefer_manual:
-                result = find_language('en', manual_only=True)
+        # Step 2: Try configured fallback languages in order
+        if fallback_languages:
+            for idx, fallback_code in enumerate(fallback_languages, start=1):
+                if fallback_code.lower() in languages_tried:
+                    continue  # Skip already-tried languages
+                result = try_language(fallback_code, f"fallback chain position {idx}")
                 if result:
-                    logger.info("Falling back to English (manual)")
                     return result
+                languages_tried.add(fallback_code.lower())
+                logger.debug(f"Fallback language '{fallback_code}' (position {idx}) not available")
 
-            result = find_language('en', manual_only=False)
+        # Step 3: Fall back to English (if not already tried and enabled)
+        if fallback_to_english and 'en' not in languages_tried:
+            result = try_language('en', "English fallback")
             if result:
-                logger.info(f"Falling back to English "
-                           f"({'auto' if result.is_auto_generated else 'manual'})")
                 return result
-
+            languages_tried.add('en')
             logger.debug("English not available")
 
-        # Step 3: Fall back to any available language
+        # Step 4: Fall back to any available language
         if prefer_manual:
             manual_langs = [l for l in available if not l.is_auto_generated]
             if manual_langs:
                 result = manual_langs[0]  # Already sorted by code
-                logger.info(f"Falling back to any available: {result.code} (manual)")
+                logger.info(f"Selected '{result.code}' (manual) from any available fallback")
                 return result
 
         if available:
             result = available[0]  # Already sorted: manual first, then auto
-            logger.info(f"Falling back to any available: {result.code} "
-                       f"({'auto' if result.is_auto_generated else 'manual'})")
+            auto_str = 'auto' if result.is_auto_generated else 'manual'
+            logger.info(f"Selected '{result.code}' ({auto_str}) from any available fallback")
             return result
 
         logger.warning("No suitable caption language found")
@@ -562,6 +586,26 @@ class CaptionFetcher:
             pass
 
         return 'en'
+
+    def _get_fallback_languages_from_config(self) -> List[str]:
+        """Get fallback language chain from config (US-003).
+
+        Returns:
+            List of language codes (ISO 639-1), empty if not configured.
+        """
+        if not self.config:
+            return []
+
+        try:
+            caption_first = getattr(self.config.download, 'caption_first', None)
+            if caption_first:
+                fallback_langs = getattr(caption_first, 'fallback_languages', None)
+                if fallback_langs and isinstance(fallback_langs, list):
+                    return fallback_langs
+        except AttributeError:
+            pass
+
+        return []
 
     def fetch_captions_auto_language(
         self,
