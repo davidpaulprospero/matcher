@@ -57,3 +57,38 @@ Replaced 2 bare `except:` blocks with specific exception handling:
 ### Files Modified
 - src/checkpoint.py - Exception handling improvements
 
+## Iteration 3 - US-002: Replace bare except blocks in face_detection.py
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Replaced 4 bare `except:` blocks with specific exception handling in FaceDetector cache operations:
+
+1. **Line 132 (get_face_score - cache read):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError, json.JSONDecodeError) as e:` with logger.debug()
+   - Purpose: Handle corrupt cache file, permission issues, or invalid JSON
+
+2. **Line 154 (get_face_score - cache write):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle disk full, permission issues when caching face scores
+
+3. **Line 211 (get_scene_face_score - segment cache read):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError, json.JSONDecodeError) as e:` with logger.debug()
+   - Purpose: Handle segment face cache read errors
+
+4. **Line 240 (get_scene_face_score - segment cache write):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle segment face cache write errors
+
+### Verification
+- Syntax check: `python -m py_compile src/face_detection.py` - PASSED
+- Grep for bare except: - 0 remaining
+- main.py --help: PASSED
+
+### Files Modified
+- src/face_detection.py - Exception handling improvements
+
