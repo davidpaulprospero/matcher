@@ -886,3 +886,88 @@ Created `tests/test_speed_tracker.py` with 28 tests in 9 test classes:
 - src/downloader/checkpoint.py - speed_tracker_state field
 - src/downloader/__init__.py - Exports
 
+
+## Iteration 20 - US-006: Add circuit breaker for repeated search failures
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented circuit breaker pattern to pause searches after consecutive failures, preventing hammering YouTube during rate limit windows.
+
+**New CircuitBreaker class (src/downloader/circuit_breaker.py):**
+- `CircuitBreakerConfig` dataclass with:
+  - `enabled: bool = True` - Enable/disable circuit breaker
+  - `consecutive_failures_threshold: int = 5` - Failures before tripping
+  - `pause_seconds: float = 60.0` - Duration to pause after tripping
+- `CircuitBreakerState` dataclass tracking:
+  - `consecutive_failures` - Current failure count
+  - `is_open` - Whether circuit is tripped
+  - `opened_at` - Timestamp when circuit tripped
+  - `total_trips` - Session-wide trip count
+  - `total_paused_seconds` - Session-wide pause time
+- `CircuitBreaker` class with:
+  - `check_and_wait()` - Check state, wait if open, return when ready
+  - `record_success()` - Reset failure counter on successful search
+  - `record_failure()` - Increment counter, trip if threshold reached
+  - `reset()` - Manual reset for external events (VPN/cookie changes)
+  - `get_stats()` - Return stats for reporting
+  - `to_checkpoint_dict()` / `from_checkpoint_dict()` - Checkpoint persistence
+
+**Config additions (src/config/sections/download.py):**
+- New `CircuitBreakerConfig` dataclass
+- Added `circuit_breaker: CircuitBreakerConfig` field to `DownloadConfig`
+- Added `__post_init__` handling for dict-to-dataclass conversion
+
+**Config additions (config.yaml):**
+- New `download.circuit_breaker` section with all settings
+- Documented how it works in comments
+
+**Integration (src/downloader/core.py):**
+- Initialize `CircuitBreaker` in `VideoDownloader.__init__`
+- Before each search: call `circuit_breaker.check_and_wait()`
+- After search with results: call `circuit_breaker.record_success()`
+- After search timeout or no results: call `circuit_breaker.record_failure()`
+- Applied to both LLM filter and direct yt-dlp search flows
+
+**Exports (src/downloader/__init__.py):**
+- Added `CircuitBreaker`, `CircuitBreakerConfig` to exports
+
+### Logging
+- **INFO level**: Circuit trip announcement with failure count and pause duration
+- **INFO level**: Pause duration remaining when check_and_wait() called on open circuit
+- **INFO level**: "pause complete, allowing search (half-open)" message
+- **DEBUG level**: Individual failure counts and success resets
+
+### Tests Added
+Created `tests/test_circuit_breaker.py` with 33 tests in 12 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestCircuitBreakerConfig | 2 | Default and custom config values |
+| TestCircuitBreakerInitialization | 3 | Default, custom config, disabled |
+| TestFailureRecording | 3 | Single, multiple, disabled noop |
+| TestCircuitTrip | 3 | Threshold trip, logging, timestamp |
+| TestSuccessRecording | 3 | Reset count, close circuit, disabled noop |
+| TestCheckAndWait | 7 | Closed/disabled returns, wait, close, logging, tracking |
+| TestManualReset | 2 | Clear failures, close circuit |
+| TestGetStats | 2 | Empty state, after trips |
+| TestCheckpointPersistence | 3 | Save, restore, empty handling |
+| TestIntegrationWithVideoDownloader | 2 | Config enabled/disabled init |
+| TestCircuitBreakerInDownloadFlow | 3 | Check called, failure/success recording |
+
+### Verification
+- Syntax check: All new/modified files pass `python -m py_compile`
+- All 33 new tests: `pytest tests/test_circuit_breaker.py -v` - PASSED
+- All 363 download tests: `pytest tests/test_download*.py -v` - 356 PASSED, 4 pre-existing failures
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- src/downloader/circuit_breaker.py - CircuitBreaker class
+- tests/test_circuit_breaker.py (33 tests)
+
+### Files Modified
+- src/config/sections/download.py - CircuitBreakerConfig dataclass
+- config.yaml - download.circuit_breaker section
+- src/downloader/core.py - Circuit breaker integration
+- src/downloader/__init__.py - Exports
+

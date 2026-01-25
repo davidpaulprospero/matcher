@@ -18,6 +18,7 @@ __all__ = [
     'CookieRotationConfig',
     'RateLimitConfig',
     'SpeedTrackingConfig',
+    'CircuitBreakerConfig',
     'VPNConfig',
     'DownloadConfig',
     'DownloadingConfig',
@@ -315,6 +316,29 @@ class SpeedTrackingConfig:
 
 
 @dataclass
+class CircuitBreakerConfig:
+    """Circuit breaker for repeated search failures.
+
+    Implements the circuit breaker pattern: after a threshold of consecutive
+    search failures, pauses all searches for a duration. This prevents
+    hammering YouTube during rate limit windows or outages.
+
+    Example with defaults:
+      - 5 searches fail in a row → circuit trips
+      - Wait 60 seconds before allowing new searches
+      - On next successful search → circuit resets to closed state
+    """
+    # Enable/disable circuit breaker
+    enabled: bool = True
+
+    # Number of consecutive failures before circuit trips (opens)
+    consecutive_failures_threshold: int = 5
+
+    # Duration to pause after circuit trips (seconds)
+    pause_seconds: float = 60.0
+
+
+@dataclass
 class VPNConfig:
     """VPN integration for IP rotation on rate limits.
 
@@ -445,6 +469,9 @@ class DownloadConfig:
     # Speed tracking: monitor download speeds for adaptive timeouts
     speed_tracking: SpeedTrackingConfig = field(default_factory=SpeedTrackingConfig)
 
+    # Circuit breaker: pause searches after consecutive failures
+    circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -479,6 +506,8 @@ class DownloadConfig:
             self.vpn = VPNConfig(**self.vpn)
         if isinstance(self.speed_tracking, dict):
             self.speed_tracking = SpeedTrackingConfig(**self.speed_tracking)
+        if isinstance(self.circuit_breaker, dict):
+            self.circuit_breaker = CircuitBreakerConfig(**self.circuit_breaker)
 
 
 @dataclass

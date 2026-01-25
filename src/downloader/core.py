@@ -41,6 +41,7 @@ from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,41 @@ class VideoDownloader:
             logger.debug("Speed tracker enabled for adaptive timeouts")
         else:
             self.speed_tracker = DownloadSpeedTracker(DownloadSpeedConfig(enabled=False))
+
+        # Circuit breaker (for search failure protection)
+        circuit_breaker_config = getattr(self.download_config, 'circuit_breaker', None)
+        circuit_breaker_enabled = False
+        if circuit_breaker_config:
+            try:
+                enabled_val = getattr(circuit_breaker_config, 'enabled', False)
+                circuit_breaker_enabled = enabled_val is True
+            except (TypeError, ValueError):
+                circuit_breaker_enabled = False
+
+        if circuit_breaker_enabled:
+            # Get config values with safe defaults
+            try:
+                threshold = int(getattr(circuit_breaker_config, 'consecutive_failures_threshold', 5))
+            except (TypeError, ValueError):
+                threshold = 5
+            try:
+                pause_secs = float(getattr(circuit_breaker_config, 'pause_seconds', 60.0))
+            except (TypeError, ValueError):
+                pause_secs = 60.0
+
+            self.circuit_breaker = CircuitBreaker(
+                CircuitBreakerConfig(
+                    enabled=True,
+                    consecutive_failures_threshold=threshold,
+                    pause_seconds=pause_secs
+                )
+            )
+            logger.debug(
+                f"Circuit breaker enabled: trips after {threshold} failures, "
+                f"pauses for {pause_secs:.0f}s"
+            )
+        else:
+            self.circuit_breaker = CircuitBreaker(CircuitBreakerConfig(enabled=False))
 
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
@@ -811,6 +847,9 @@ class VideoDownloader:
             # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
             logger.debug(f"    Searching {search_pool} videos for LLM filtering...")
 
+            # Check circuit breaker before searching (may pause if tripped)
+            self.circuit_breaker.check_and_wait()
+
             # Search with timeout-based remix fallback (max 2 remix attempts)
             search_result = self._search_video_metadata(keyword, tier, search_pool)
             current_keyword = keyword
@@ -834,13 +873,17 @@ class VideoDownloader:
             # Final check after all remix attempts
             if search_result.timed_out:
                 logger.warning(f"    Search timeout for '{keyword}' after {remix_attempts} remix attempts")
+                self.circuit_breaker.record_failure()
                 return []
 
             videos = search_result.videos
             if not videos:
                 logger.debug(f"    No videos found for '{keyword}'")
+                self.circuit_breaker.record_failure()
                 return []
 
+            # Search returned results - record success to reset circuit breaker
+            self.circuit_breaker.record_success()
             logger.debug(f"    Found {len(videos)} candidate videos")
 
             # Apply blacklist filter first (fast, no API cost)
@@ -887,6 +930,10 @@ class VideoDownloader:
 
         else:
             # ORIGINAL FLOW: Direct search and download with yt-dlp filters
+
+            # Check circuit breaker before searching (may pause if tripped)
+            self.circuit_breaker.check_and_wait()
+
             cmd = [
                 'yt-dlp',
                 f'ytsearch{search_pool}:{keyword}',
@@ -910,7 +957,15 @@ class VideoDownloader:
 
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
 
-            return self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+            downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+
+            # Update circuit breaker based on search results
+            if downloaded:
+                self.circuit_breaker.record_success()
+            else:
+                self.circuit_breaker.record_failure()
+
+            return downloaded
 
     def _download_by_ids(
         self,
