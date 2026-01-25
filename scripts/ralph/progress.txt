@@ -1450,3 +1450,46 @@ Progress: 9/12 stories complete
 - Files created:
   - tests/test_entity_match_boost.py (new file, 37 tests)
 
+Progress: 10/12 stories complete
+
+## Iteration 10 - [US-010] Add low confidence segment analysis logging
+- Added analyze_low_confidence_segments() function to src/matching/main.py:
+  - Identifies segments with confidence < threshold (default 0.6)
+  - Returns LowConfidenceAnalysis dataclass with patterns and suggestions
+  - Logs analysis header, threshold, segment counts, patterns, and sample segments
+  - Integrated at end of match_all_segments() function
+- Created LowConfidencePattern dataclass:
+  - pattern_type: string identifier (short_voiceover, missing_keywords, etc.)
+  - count: number of segments matching pattern
+  - segment_indices: list of affected segment indices
+  - description: human-readable explanation
+- Created LowConfidenceAnalysis dataclass:
+  - low_confidence_count, total_segments, patterns, suggestions
+  - avg_low_confidence, threshold
+- Pattern detection (5 patterns):
+  - short_voiceover: voiceover text < 20 characters
+  - missing_keywords: no keywords extracted from voiceover
+  - abstract_content: abstract words (thing, stuff, etc.) with few matched keywords
+  - high_variance: confidence_variance > 0.15 (uncertain matches)
+  - no_keyword_overlap: no common keywords between VO and video (excludes missing_keywords)
+- Contextual suggestions generated for each detected pattern
+- Created tests/test_low_confidence_analysis.py with 53 tests across 14 test classes:
+  - TestAnalyzeLowConfidenceSegmentsFunction (5 tests): function existence, callable, args, threshold
+  - TestLowConfidenceAnalysisDataclass (5 tests): fields
+  - TestLowConfidencePatternDataclass (5 tests): fields
+  - TestIdentifyLowConfidenceSegments (5 tests): threshold, empty, no low conf, avg calculation
+  - TestShortVoiceoverPattern (3 tests): detection, count, suggestion
+  - TestMissingKeywordsPattern (3 tests): detection, no flag with keywords, suggestion
+  - TestAbstractContentPattern (3 tests): detection, no flag concrete, suggestion
+  - TestHighVariancePattern (3 tests): detection, no flag low variance, threshold
+  - TestNoKeywordOverlapPattern (2 tests): detection, no double-count
+  - TestLogging (7 tests): header, threshold, count, patterns, suggestions, samples, no-low-conf
+  - TestSuggestions (4 tests): short, missing keywords, abstract, multiple
+  - TestEdgeCases (6 tests): all low, custom threshold, at threshold, long text, None keywords, mixed
+  - TestIntegrationWithMatchAllSegments (2 tests): function available, returns analysis
+- All 53 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/matching/main.py (added dataclass import, analyze_low_confidence_segments function, ~200 lines)
+- Files created:
+  - tests/test_low_confidence_analysis.py (new file, 53 tests)
+
