@@ -129,8 +129,8 @@
         "Config option matching.apply_timing_penalty (default: true)",
         "Tests verify poor timing (50% coverage, 20% exceeds) reduces confidence by ~25%"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented timing_penalty_factor property on CaptionResult using validate_timing() results. Added exceeds_ratio and coverage_ratio to TimingValidationResult. CaptionStage now validates timing and stores timing_penalty in caption_results and text_metadata. Added apply_timing_penalty() in scoring.py, integrated in TieredMatcher at all 4 scoring locations. Config option matching.apply_timing_penalty (default: true) added to config.py and config.yaml. 19 new tests added: 10 in test_caption_fetcher.py (timing_penalty_factor) and 9 in test_scoring.py (apply_timing_penalty). All 454 tests pass."
     },
     {
       "id": "US-009",
