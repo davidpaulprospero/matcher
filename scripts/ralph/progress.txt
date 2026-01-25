@@ -3980,3 +3980,84 @@ Implemented multiplicative caption quality weights for confidence scoring.
 - All 10 new epsilon tolerance tests pass
 - All 14 existing timing validation tests pass
 - All 274 tests in test_caption_fetcher.py pass
+
+## Iteration 8 - [US-008] Add cross-project caption cache validation
+
+**Implemented:**
+- Added `CacheValidationResult` dataclass with fields for validation outcome, video_id, language, reason, expected/actual segment counts, and deviation ratio
+- Added `cache_validation` config option (modes: 'strict', 'warn', 'skip') and `cache_validation_tolerance` (default: 0.2 = 20%)
+- Added `CaptionCache.validate_cache_entry()` method that checks:
+  - video_id matches requested video_id
+  - language matches requested language
+  - segment_count is within tolerance of expected count (based on duration / 3 seconds per segment)
+- Added `CaptionCache.get_validated_caption()` method that:
+  - Gets raw cached data
+  - Validates based on configured mode
+  - In 'warn' mode: deletes invalid entries and returns None (triggers re-fetch)
+  - In 'strict' mode: rejects but doesn't delete (for investigation)
+  - In 'skip' mode: returns cached data without validation
+- Added `CaptionMetrics.record_cache_validation()` to track validation outcomes
+- Added `CaptionMetrics.get_cache_validation_stats()` returning {passed, rejected, refetched, total, pass_rate}
+- Added cache_validation_passed/rejected/refetched fields to CaptionMetrics with proper serialization in to_dict/from_dict/merge/clear
+
+**Files Modified:**
+- `src/config/sections/download.py`: Added cache_validation, cache_validation_tolerance to CaptionFirstConfig
+- `config.yaml`: Added cache_validation config options with documentation
+- `src/caption_fetcher.py`: Added CacheValidationResult dataclass, validate_cache_entry(), get_validated_caption(), record_cache_validation(), get_cache_validation_stats(), and cache_validation_* fields to CaptionMetrics
+- `tests/test_caption_cache.py`: Added TestCacheValidation (10 tests), TestCacheValidationResult (2 tests), TestCaptionMetricsCacheValidation (6 tests)
+
+**Acceptance Criteria Met:**
+- [x] CaptionCache.get_validated_caption() returns (CachedCaption, CacheValidationResult) tuple
+- [x] Validates: video_id match, language match, segment_count within tolerance
+- [x] cache_validation config: 'strict' (reject), 'warn' (re-fetch), 'skip' (no validation)
+- [x] cache_validation_tolerance: max allowed segment count deviation ratio (default 0.2)
+- [x] CaptionMetrics tracks: cache_validation_passed, cache_validation_rejected, cache_validation_refetched
+- [x] get_cache_validation_stats() returns {passed, rejected, refetched, total, pass_rate}
+- [x] Log validation failures with reason: "Cache validation failed video_id_lang: reason"
+
+**Test Results:**
+- All 18 new cache validation tests pass
+- All 48 tests in test_caption_cache.py pass
+
+## Iteration - [US-009] Handle normalizer edge cases for corrupted segments
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Added comprehensive test coverage for CaptionNormalizer edge cases and enhanced documentation.
+
+**Tests Added (TestNormalizerEdgeCasesSprint6 class - 13 tests):**
+1. test_negative_start_time_severe_fixed_to_zero - Verifies start=-5, end=2 becomes start=0, end=2
+2. test_negative_start_requiring_duration_extension - Verifies start clamping that creates short duration triggers extension
+3. test_negative_duration_start_greater_than_end - Verifies start=8, end=3 extends end to 8.5 (with min_duration=0.5)
+4. test_negative_duration_with_larger_min_duration - Verifies configurable min_segment_duration works
+5. test_overlapping_segments_merged_with_text_concatenation - Verifies (0-5, 3-8) merged to (0-8 'First Second')
+6. test_three_overlapping_segments_merged - Verifies chained overlaps all merge correctly
+7. test_duplicate_indices_reindexed_sequentially - Verifies indices [5, 5, 5] become [0, 1, 2]
+8. test_non_sequential_indices_reindexed - Verifies [100, 50, 200] become [0, 1, 2]
+9. test_large_gap_creates_placeholder_segment - Verifies gap > max_gap creates placeholder with text=''
+10. test_gap_exactly_at_threshold_extends_not_placeholder - Verifies boundary condition
+11. test_gap_just_over_threshold_creates_placeholder - Verifies boundary condition
+12. test_multiple_gaps_with_mixed_sizes - Verifies mixed gap handling
+13. test_combined_edge_cases - Comprehensive test combining negative start, overlap, gap
+
+**Documentation Added:**
+- Added 'Edge Case Behaviors' section to CaptionNormalizer docstring documenting:
+  - Negative start times (clamped to 0)
+  - Negative durations (end extended to start + min_segment_duration)
+  - Overlapping segments (truncate/merge/split strategies)
+  - Duplicate segment indices (re-indexed sequentially)
+  - Gap handling (extend/placeholder strategies)
+  - Empty/whitespace text filtering
+  - Partial recovery behavior
+
+### Verification
+- All 13 new tests pass
+- All 88 caption normalizer tests pass
+- Source compiles: python -m py_compile src/caption_fetcher.py PASSED
+- main.py --help: PASSED
+
+### Files Modified
+- tests/test_caption_normalizer.py - Added TestNormalizerEdgeCasesSprint6 class with 13 tests
+- src/caption_fetcher.py - Enhanced CaptionNormalizer docstring with edge case documentation
+

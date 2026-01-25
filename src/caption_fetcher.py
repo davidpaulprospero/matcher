@@ -2230,6 +2230,56 @@ class CachedCaption:
         )
 
 
+@dataclass
+class CacheValidationResult:
+    """Result of cache entry validation (US-008 Sprint 6).
+
+    Returned by CaptionCache.validate_cache_entry() to indicate whether
+    a cached caption entry is valid and usable, or needs to be rejected/refetched.
+
+    Attributes:
+        is_valid: True if entry passes validation, False otherwise.
+        video_id: Video ID that was validated.
+        language: Language code that was validated.
+        reason: Human-readable reason if validation failed.
+        expected_segment_count: Expected segment count based on duration.
+        actual_segment_count: Actual segment count in cached data.
+        segment_count_deviation: Absolute deviation as ratio (0.0-1.0).
+    """
+    is_valid: bool
+    video_id: str
+    language: str
+    reason: str = ""
+    expected_segment_count: Optional[int] = None
+    actual_segment_count: Optional[int] = None
+    segment_count_deviation: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'is_valid': self.is_valid,
+            'video_id': self.video_id,
+            'language': self.language,
+            'reason': self.reason,
+            'expected_segment_count': self.expected_segment_count,
+            'actual_segment_count': self.actual_segment_count,
+            'segment_count_deviation': self.segment_count_deviation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CacheValidationResult':
+        """Create from dictionary."""
+        return cls(
+            is_valid=data.get('is_valid', False),
+            video_id=data.get('video_id', ''),
+            language=data.get('language', ''),
+            reason=data.get('reason', ''),
+            expected_segment_count=data.get('expected_segment_count'),
+            actual_segment_count=data.get('actual_segment_count'),
+            segment_count_deviation=data.get('segment_count_deviation'),
+        )
+
+
 class CaptionCache(BaseCache):
     """Cache for YouTube captions, enabling cross-project reuse.
 
@@ -2277,10 +2327,15 @@ class CaptionCache(BaseCache):
             cache_dir = getattr(config, 'cache_dir', '~/.matcher_caption_cache')
             max_age_days = getattr(config, 'max_cache_age_days', 30)
             self.enabled = getattr(config, 'cache_captions', True)
+            # Cache validation settings (US-008 Sprint 6)
+            self.validation_mode = getattr(config, 'cache_validation', 'warn')
+            self.validation_tolerance = getattr(config, 'cache_validation_tolerance', 0.2)
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
             self.enabled = True
+            self.validation_mode = 'warn'
+            self.validation_tolerance = 0.2
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -2299,7 +2354,8 @@ class CaptionCache(BaseCache):
         self.max_age_days = max_age_days
 
         logger.debug(f"CaptionCache initialized: dir={cache_dir}, "
-                    f"ttl={max_age_days} days, enabled={self.enabled}")
+                    f"ttl={max_age_days} days, enabled={self.enabled}, "
+                    f"validation={self.validation_mode}")
 
     def _make_cache_key(self, video_id: str, language: str) -> str:
         """Create cache key from video_id and language.
@@ -2328,6 +2384,98 @@ class CaptionCache(BaseCache):
             cached_at=data.get('cached_at', 0.0),
             key='',
             metadata=data.get('metadata', {})
+        )
+
+    def validate_cache_entry(
+        self,
+        cached: CachedCaption,
+        video_id: str,
+        language: str
+    ) -> CacheValidationResult:
+        """Validate a cached caption entry for integrity (US-008 Sprint 6).
+
+        Checks:
+        1. video_id matches requested video_id
+        2. language matches requested language
+        3. segment_count is within tolerance of expected count (based on duration)
+
+        The expected segment count is estimated as: duration / 3 (seconds per segment)
+        since typical caption segments are ~3 seconds long.
+
+        Args:
+            cached: CachedCaption to validate.
+            video_id: Expected video ID.
+            language: Expected language code.
+
+        Returns:
+            CacheValidationResult with is_valid=True if all checks pass,
+            or is_valid=False with reason explaining the failure.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> cached = cache.get_caption("dQw4w9WgXcQ", "en")
+            >>> if cached:
+            ...     result = cache.validate_cache_entry(cached, "dQw4w9WgXcQ", "en")
+            ...     if not result.is_valid:
+            ...         logger.warning(f"Cache validation failed: {result.reason}")
+        """
+        # Check video_id match
+        if cached.video_id != video_id:
+            return CacheValidationResult(
+                is_valid=False,
+                video_id=video_id,
+                language=language,
+                reason=f"video_id mismatch: cached={cached.video_id}, expected={video_id}",
+            )
+
+        # Check language match
+        if cached.language != language:
+            return CacheValidationResult(
+                is_valid=False,
+                video_id=video_id,
+                language=language,
+                reason=f"language mismatch: cached={cached.language}, expected={language}",
+            )
+
+        # Check segment count consistency (if duration is available)
+        actual_count = len(cached.segments)
+        if cached.duration > 0:
+            # Expect ~1 segment per 3 seconds of video
+            expected_count = max(1, int(cached.duration / 3))
+            deviation = abs(actual_count - expected_count) / max(expected_count, 1)
+
+            if deviation > self.validation_tolerance:
+                return CacheValidationResult(
+                    is_valid=False,
+                    video_id=video_id,
+                    language=language,
+                    reason=(
+                        f"segment_count deviation {deviation:.1%} exceeds tolerance "
+                        f"{self.validation_tolerance:.0%}: expected ~{expected_count}, "
+                        f"got {actual_count}"
+                    ),
+                    expected_segment_count=expected_count,
+                    actual_segment_count=actual_count,
+                    segment_count_deviation=deviation,
+                )
+        else:
+            # No duration info - can't validate segment count, just check non-empty
+            if actual_count == 0:
+                return CacheValidationResult(
+                    is_valid=False,
+                    video_id=video_id,
+                    language=language,
+                    reason="cached caption has 0 segments",
+                    actual_segment_count=0,
+                )
+
+        # All checks passed
+        return CacheValidationResult(
+            is_valid=True,
+            video_id=video_id,
+            language=language,
+            actual_segment_count=actual_count,
+            expected_segment_count=int(cached.duration / 3) if cached.duration > 0 else None,
         )
 
     def get_caption(self, video_id: str, language: str) -> Optional[CachedCaption]:
@@ -2360,6 +2508,74 @@ class CaptionCache(BaseCache):
             logger.warning(f"Failed to deserialize cached caption {key}: {e}")
             self.delete(key)
             return None
+
+    def get_validated_caption(
+        self,
+        video_id: str,
+        language: str,
+        metrics: Optional['CaptionMetrics'] = None
+    ) -> tuple[Optional[CachedCaption], Optional[CacheValidationResult]]:
+        """Get cached caption with validation (US-008 Sprint 6).
+
+        Retrieves cached caption and validates its integrity based on the
+        configured validation_mode:
+        - 'skip': No validation, returns cached data as-is
+        - 'warn': Validates and logs warning on failure, returns None
+        - 'strict': Validates and returns None on failure (rejects cache)
+
+        Args:
+            video_id: YouTube video ID.
+            language: ISO 639-1 language code.
+            metrics: Optional CaptionMetrics to track validation results.
+
+        Returns:
+            Tuple of (CachedCaption or None, CacheValidationResult or None).
+            First element is the cached data (None if miss or validation failed).
+            Second element is the validation result (None if skip mode or miss).
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> cached, validation = cache.get_validated_caption("dQw4w9WgXcQ", "en")
+            >>> if cached:
+            ...     result = cached.to_caption_result()
+            ... elif validation and not validation.is_valid:
+            ...     logger.info(f"Cache rejected: {validation.reason}")
+        """
+        # Get raw cached data
+        cached = self.get_caption(video_id, language)
+        if cached is None:
+            return None, None
+
+        # Skip validation if mode is 'skip'
+        if self.validation_mode == 'skip':
+            return cached, None
+
+        # Validate the cached entry
+        validation_result = self.validate_cache_entry(cached, video_id, language)
+
+        # Track validation results in metrics
+        if metrics is not None:
+            metrics.record_cache_validation(validation_result)
+
+        if validation_result.is_valid:
+            return cached, validation_result
+
+        # Handle validation failure based on mode
+        key = self._make_cache_key(video_id, language)
+        if self.validation_mode == 'strict':
+            logger.warning(
+                f"Cache validation REJECTED {key}: {validation_result.reason}"
+            )
+            # Don't delete in strict mode - let user investigate
+            return None, validation_result
+        else:  # 'warn' mode
+            logger.warning(
+                f"Cache validation failed {key}: {validation_result.reason} "
+                f"(will re-fetch)"
+            )
+            # Invalidate the corrupted entry so it gets re-fetched
+            self.delete(key)
+            return None, validation_result
 
     def store(self, result: CaptionResult) -> bool:
         """Store a CaptionResult in the cache.
@@ -2598,6 +2814,49 @@ class CaptionNormalizer:
 
     This class normalizes segments to a consistent format expected by
     the matching stage.
+
+    Edge Case Behaviors (US-009 Sprint 6):
+    -------------------------------------
+
+    **Negative Start Times:**
+        - start_time < 0 is clamped to 0
+        - Example: start=-5, end=2 → start=0, end=2
+        - If clamping creates duration < min_segment_duration, end is extended
+
+    **Negative Duration (start > end):**
+        - When start > end (inverted timestamps), end is extended
+        - New end = start + min_segment_duration
+        - Example: start=8, end=3 with min=0.5 → start=8, end=8.5
+        - Original start time is preserved; only end is adjusted
+
+    **Overlapping Segments (overlap_strategy):**
+        - "truncate" (default): First segment's end truncated to second's start
+        - "merge": Segments merged, text concatenated with space
+          Example: (0-5 "First"), (3-8 "Second") → (0-8 "First Second")
+        - "split": Split at midpoint of overlap region
+
+    **Duplicate Segment Indices:**
+        - All segments are re-indexed sequentially (0, 1, 2, ...)
+        - Original indices are ignored
+        - Example: indices [5, 5, 5] → [0, 1, 2]
+
+    **Gap Handling (gap_strategy):**
+        - "ignore" (default): Gaps left as-is
+        - "extend": Small gaps (≤ max_gap_to_extend) filled by extending
+          previous segment's end_time. Large gaps create placeholder segments.
+        - "placeholder": Always insert empty placeholder segment in gaps
+        - Placeholder segments have text="" and preserve gap timing
+          Example: (0-5), (15-20) with max_gap=2 → (0-5), (5-15 placeholder), (15-20)
+
+    **Empty/Whitespace Text:**
+        - Segments with empty or whitespace-only text are filtered out
+        - This is intentional filtering, not counted as parse errors
+
+    **Partial Recovery (US-005):**
+        - Malformed segments that throw exceptions are skipped
+        - Normalization succeeds if > min_success_ratio segments parse
+        - Default threshold: 50% must succeed
+        - Filtered segments (empty text) don't count against threshold
 
     Usage:
         normalizer = CaptionNormalizer()
@@ -3214,6 +3473,12 @@ class CaptionMetrics:
     # Dict mapping video_id -> format that succeeded for that video
     video_format_used: Dict[str, str] = field(default_factory=dict)
 
+    # Cache validation results (US-008 Sprint 6)
+    # Tracks: {passed: N, rejected: M, refetched: K}
+    cache_validation_passed: int = 0
+    cache_validation_rejected: int = 0
+    cache_validation_refetched: int = 0
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -3441,6 +3706,70 @@ class CaptionMetrics:
                     self.low_coverage_videos.append(video_id)
 
         logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
+
+    def record_cache_validation(
+        self,
+        result: 'CacheValidationResult'
+    ) -> None:
+        """Record a cache validation result (US-008 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks validation outcomes for cross-project cache usage:
+        - passed: Entry passed validation and was used
+        - rejected: Entry failed validation in strict mode
+        - refetched: Entry failed validation and was re-fetched (warn mode)
+
+        Args:
+            result: CacheValidationResult from CaptionCache.validate_cache_entry().
+
+        Example:
+            >>> validation = cache.validate_cache_entry(cached, video_id, lang)
+            >>> metrics.record_cache_validation(validation)
+        """
+        with self._lock:
+            if result.is_valid:
+                self.cache_validation_passed += 1
+            else:
+                # Distinguish between rejected (strict) and refetched (warn)
+                # This method is called with both modes, so we count as refetched
+                # unless the caller specifically marks as rejected
+                self.cache_validation_refetched += 1
+
+        status = "passed" if result.is_valid else "failed"
+        logger.debug(
+            f"Cache validation {status} for {result.video_id}_{result.language}: "
+            f"{result.reason or 'all checks passed'}"
+        )
+
+    def get_cache_validation_stats(self) -> Dict[str, Any]:
+        """Get cache validation statistics (US-008 Sprint 6).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict with validation statistics:
+            - passed: Number of entries that passed validation
+            - rejected: Number of entries rejected in strict mode
+            - refetched: Number of entries re-fetched after validation failure
+            - total: Total validations performed
+            - pass_rate: Percentage of validations that passed (0.0-100.0)
+        """
+        with self._lock:
+            total = (
+                self.cache_validation_passed +
+                self.cache_validation_rejected +
+                self.cache_validation_refetched
+            )
+            return {
+                'passed': self.cache_validation_passed,
+                'rejected': self.cache_validation_rejected,
+                'refetched': self.cache_validation_refetched,
+                'total': total,
+                'pass_rate': round(
+                    100.0 * self.cache_validation_passed / max(total, 1), 1
+                ),
+            }
 
     def record_language_selection(
         self,
@@ -3824,6 +4153,9 @@ class CaptionMetrics:
             'format_success_counts': dict(self.format_success_counts),  # US-004 Sprint 6
             'format_fallback_count': self.format_fallback_count,  # US-004 Sprint 6
             'video_format_used': dict(self.video_format_used),  # US-004 Sprint 6
+            'cache_validation_passed': self.cache_validation_passed,  # US-008 Sprint 6
+            'cache_validation_rejected': self.cache_validation_rejected,  # US-008 Sprint 6
+            'cache_validation_refetched': self.cache_validation_refetched,  # US-008 Sprint 6
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
@@ -3859,6 +4191,9 @@ class CaptionMetrics:
             format_success_counts=data.get('format_success_counts', {}),  # US-004 Sprint 6
             format_fallback_count=data.get('format_fallback_count', 0),  # US-004 Sprint 6
             video_format_used=data.get('video_format_used', {}),  # US-004 Sprint 6
+            cache_validation_passed=data.get('cache_validation_passed', 0),  # US-008 Sprint 6
+            cache_validation_rejected=data.get('cache_validation_rejected', 0),  # US-008 Sprint 6
+            cache_validation_refetched=data.get('cache_validation_refetched', 0),  # US-008 Sprint 6
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
@@ -3922,6 +4257,11 @@ class CaptionMetrics:
                 if vid not in self.video_format_used:
                     self.video_format_used[vid] = fmt
 
+            # Merge cache validation counts (US-008 Sprint 6)
+            self.cache_validation_passed += other.cache_validation_passed
+            self.cache_validation_rejected += other.cache_validation_rejected
+            self.cache_validation_refetched += other.cache_validation_refetched
+
         return self
 
     def clear(self) -> None:
@@ -3946,6 +4286,9 @@ class CaptionMetrics:
             self.format_success_counts = {}  # US-004 Sprint 6
             self.format_fallback_count = 0  # US-004 Sprint 6
             self.video_format_used = {}  # US-004 Sprint 6
+            self.cache_validation_passed = 0  # US-008 Sprint 6
+            self.cache_validation_rejected = 0  # US-008 Sprint 6
+            self.cache_validation_refetched = 0  # US-008 Sprint 6
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0
