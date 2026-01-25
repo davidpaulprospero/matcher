@@ -138,6 +138,11 @@ embedding:
   batch_size: 100
   <<: *api_retry
 
+  # Parallel processing (for large text sets)
+  # ThreadPoolExecutor workers for parallel batch processing (1-8 recommended)
+  # More workers = faster for large batches, but more API connections
+  max_workers: 4
+
   # Caching
   cache_embeddings: true
   cache_batch_results: true
