@@ -920,6 +920,10 @@ download:
     # Falls back to next format on parse error or unavailability
     # Available formats: json3, srv3, vtt, srt
     preferred_formats: ["json3", "vtt", "srt"]
+    # Caption availability pre-check (US-008): check if captions exist before fetching
+    # This avoids wasted network calls for videos without captions
+    # Uses --list-subs which is faster than downloading caption content
+    pre_check_availability: true  # Pre-check caption availability before fetch
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
