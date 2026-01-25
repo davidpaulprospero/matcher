@@ -162,3 +162,74 @@ def log_quality_summary(metrics: MatchQualityMetrics) -> None:
     logger.info(f"  Max confidence: {metrics.max_confidence:.3f}")
     logger.info(f"  Confidence std: {metrics.confidence_std:.3f}")
     logger.info("=============================")
+
+
+def log_confidence_histogram(confidences: List[float], bar_width: int = 30) -> str:
+    """
+    Generate and log an ASCII histogram of confidence distribution.
+
+    Buckets: 0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0
+
+    Args:
+        confidences: List of confidence scores (0.0-1.0)
+        bar_width: Maximum width of histogram bars (default: 30)
+
+    Returns:
+        The histogram string (for testing purposes)
+    """
+    # Define buckets with labels
+    buckets = [
+        (0.0, 0.5, "0.0-0.5"),
+        (0.5, 0.6, "0.5-0.6"),
+        (0.6, 0.7, "0.6-0.7"),
+        (0.7, 0.8, "0.7-0.8"),
+        (0.8, 0.9, "0.8-0.9"),
+        (0.9, 1.0, "0.9-1.0"),
+    ]
+
+    # Count confidences per bucket
+    counts = {label: 0 for _, _, label in buckets}
+    for conf in confidences:
+        for low, high, label in buckets:
+            # Include upper bound for last bucket (0.9-1.0)
+            if label == "0.9-1.0":
+                if low <= conf <= high:
+                    counts[label] += 1
+                    break
+            else:
+                if low <= conf < high:
+                    counts[label] += 1
+                    break
+
+    # Find max count for scaling
+    max_count = max(counts.values()) if counts.values() else 1
+    total = len(confidences)
+
+    # Build histogram lines
+    lines = []
+    lines.append("=== Confidence Distribution ===")
+    lines.append("")
+
+    for _, _, label in buckets:
+        count = counts[label]
+        # Scale bar length proportionally
+        if max_count > 0:
+            bar_len = int((count / max_count) * bar_width)
+        else:
+            bar_len = 0
+        bar = "█" * bar_len
+        # Calculate percentage
+        pct = (count / total * 100) if total > 0 else 0
+        # Format: "0.5-0.6 |████████████████     |  12 ( 24.0%)"
+        lines.append(f"  {label} |{bar:<{bar_width}}| {count:4d} ({pct:5.1f}%)")
+
+    lines.append("")
+    lines.append(f"  Total segments: {total}")
+    lines.append("===============================")
+
+    # Log each line at INFO level
+    histogram_str = "\n".join(lines)
+    for line in lines:
+        logger.info(line)
+
+    return histogram_str
