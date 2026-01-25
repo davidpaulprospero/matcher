@@ -380,6 +380,17 @@ matching:
   obvious_match_min_keywords: 3  # Minimum matched keywords for obvious match
   obvious_match_min_confidence: 0.92  # Minimum confidence for obvious matches
 
+  # Multi-modal similarity weighting
+  # Chain-of-thought: Multiple signals (embedding, keywords, entities, visual) should contribute to match
+  # Reasoning: Simple additive boosting doesn't properly weight different signal strengths
+  # Decision: Weighted fusion with configurable weights that sum to 1.0
+  multimodal_enabled: true  # Enable multi-modal similarity weighting
+  multimodal_weights:  # Weights for each similarity component (must sum to 1.0)
+    text_embedding: 0.40     # Semantic similarity from text embeddings (40%)
+    keyword_overlap: 0.25    # Matched keywords between voiceover and video (25%)
+    entity_match: 0.20       # Named entity overlap - people, places, organizations (20%)
+    visual_description: 0.15 # Visual scene description similarity (15%)
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas

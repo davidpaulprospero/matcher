@@ -28,6 +28,11 @@ from .scoring import (
     apply_current_project_boost,
     calculate_adaptive_threshold,
     _extract_entity_texts,
+    compute_multimodal_score,
+    calculate_keyword_overlap_score,
+    calculate_entity_match_score,
+    calculate_visual_description_score,
+    DEFAULT_MULTIMODAL_WEIGHTS,
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
@@ -269,6 +274,91 @@ class TieredMatcher:
         result = sorted([kw for kw in matched if len(kw) >= 3])
 
         return result
+
+    def _compute_multimodal_confidence(
+        self,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment,
+        embedding_similarity: float,
+        scene: Optional['SceneInfo'] = None
+    ) -> Tuple[float, str, dict]:
+        """
+        Compute multimodal confidence score combining multiple similarity signals.
+
+        Instead of simple additive boosting, this method uses weighted fusion:
+        - text_embedding: Raw embedding similarity (40%)
+        - keyword_overlap: Matched keywords (25%)
+        - entity_match: Named entity overlap (20%)
+        - visual_description: Scene description similarity (15%)
+
+        Args:
+            vo_segment: Voiceover segment
+            video_segment: Video segment candidate
+            embedding_similarity: Raw embedding similarity score
+            scene: Optional scene info with visual keywords
+
+        Returns:
+            Tuple of (multimodal_confidence, reason_string, component_scores)
+        """
+        mc = self.config.matching
+
+        # Check if multimodal scoring is enabled
+        multimodal_enabled = getattr(mc, 'multimodal_enabled', True)
+        multimodal_weights = getattr(mc, 'multimodal_weights', None)
+
+        # If disabled, return embedding similarity as-is
+        if not multimodal_enabled:
+            return embedding_similarity, "multimodal_disabled", {
+                'embedding_similarity': embedding_similarity
+            }
+
+        # Get voiceover keywords and entities
+        vo_keywords = getattr(vo_segment, 'keywords', []) or []
+        vo_entities = _extract_entity_texts(vo_segment)
+
+        # Get video keywords and entities
+        video_keywords = getattr(video_segment, 'keywords', []) or []
+        video_entities = _extract_entity_texts(video_segment)
+
+        # Calculate keyword overlap score (normalized 0-1)
+        keyword_score, matched_keywords = calculate_keyword_overlap_score(
+            vo_keywords, video_keywords
+        )
+
+        # Calculate entity match score (normalized 0-1)
+        entity_score, matched_entities = calculate_entity_match_score(
+            vo_entities, video_entities
+        )
+
+        # Calculate visual description score
+        video_description = video_segment.text if video_segment.text else ""
+        visual_keywords = scene.visual_keywords if scene and hasattr(scene, 'visual_keywords') else []
+        visual_score = calculate_visual_description_score(
+            vo_segment.text,
+            video_description,
+            visual_keywords
+        )
+
+        # Compute multimodal score
+        multimodal_conf, reason, components = compute_multimodal_score(
+            embedding_similarity=embedding_similarity,
+            keyword_overlap_score=keyword_score,
+            entity_match_score=entity_score,
+            visual_description_score=visual_score,
+            weights=multimodal_weights,
+            multimodal_enabled=True
+        )
+
+        # Add matched items to components for logging
+        components['matched_keywords'] = matched_keywords
+        components['matched_entities'] = matched_entities
+
+        logger.debug(
+            f"Multimodal confidence: emb={embedding_similarity:.3f} -> mm={multimodal_conf:.3f} "
+            f"(kw={keyword_score:.2f}, ent={entity_score:.2f}, vis={visual_score:.2f})"
+        )
+
+        return multimodal_conf, reason, components
 
     def check_obvious_match(
         self,
@@ -811,7 +901,7 @@ class TieredMatcher:
 
         scene = self._get_scene_for_segment(best_seg, scenes)
 
-        # Check for keyword/visual matches
+        # Check for keyword/visual matches (for is_kw_match/is_vis_match flags)
         vo_keywords = getattr(vo_segment, 'keywords', []) or []
         seg_keywords = getattr(best_seg, 'keywords', []) or []
         keyword_boost, is_kw_match, is_vis_match = find_keyword_matches(
@@ -820,8 +910,25 @@ class TieredMatcher:
             scene.visual_keywords if scene else None
         )
 
-        # Apply scoring adjustments
-        base_confidence = min(1.0, confidence + keyword_boost)
+        # Use multimodal scoring instead of simple additive boosting
+        # This replaces: base_confidence = min(1.0, confidence + keyword_boost)
+        embedding_sim = valid_candidates[selected_idx][1]
+        multimodal_conf, multimodal_reason, mm_components = self._compute_multimodal_confidence(
+            vo_segment, best_seg, embedding_sim, scene
+        )
+
+        # Use multimodal confidence as the base, but blend with LLM confidence
+        # LLM provides contextual understanding, multimodal provides signal fusion
+        mc = self.config.matching
+        multimodal_enabled = getattr(mc, 'multimodal_enabled', True)
+        if multimodal_enabled:
+            # Blend: 60% multimodal + 40% LLM confidence for semantic understanding
+            base_confidence = multimodal_conf * 0.6 + confidence * 0.4
+        else:
+            # Fall back to original additive boosting
+            base_confidence = min(1.0, confidence + keyword_boost)
+
+        # Apply remaining scoring adjustments (penalties/boosts not captured by multimodal)
         adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
             base_confidence, vo_segment, best_seg,
             video_topics=self.video_topics,
@@ -838,6 +945,8 @@ class TieredMatcher:
         )
 
         final_reasoning = reasoning
+        if multimodal_enabled:
+            final_reasoning += f" [{multimodal_reason}]"
         if topic_penalty_reason:
             final_reasoning += f" [{topic_penalty_reason}]"
         if broll_reason:
