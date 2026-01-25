@@ -2817,3 +2817,193 @@ class TestFormatPreferenceTracking:
 
         assert metrics.format_success_counts == {"vtt": 1}
         assert metrics.format_fallback_count == 0  # No fallback counted since no preferred
+
+
+# ============================================================================
+# US-005: CaptionStage Language Config Validation Tests
+# ============================================================================
+
+
+class TestCaptionStageLanguageValidation:
+    """Tests for CaptionStage language config validation (US-005 Sprint 6).
+
+    Validates:
+    1. Validation runs at __init__ when config provided
+    2. Validation runs at run() if not done at init
+    3. Invalid config raises ConfigValidationError
+    4. Disabled mode skips validation
+    """
+
+    def test_validation_runs_at_init_with_config(self):
+        """Test that language validation runs at __init__ when config provided."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "xyz"  # Invalid
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert exc_info.value.field == 'preferred_language'
+        assert 'xyz' in str(exc_info.value.value)
+
+    def test_validation_skipped_when_disabled(self):
+        """Test that validation is skipped when caption-first mode is disabled."""
+        from src.stages.caption_stage import CaptionStage
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = False
+        config.download.caption_first.preferred_language = "xyz"  # Invalid but ignored
+
+        # Should not raise because mode is disabled
+        stage = CaptionStage(config=config)
+        assert stage._config_validated
+
+    def test_validation_runs_at_run_if_not_at_init(self, mock_config, mock_checkpoint,
+                                                     mock_state_with_audio):
+        """Test that validation runs at start of run() if no config at init."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock, patch
+
+        # Create stage without config
+        stage = CaptionStage()
+        assert not stage._config_validated
+
+        # Use invalid config
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "invalid_code"
+        config.download.caption_first.fallback_languages = []
+
+        # run() catches exception and returns failed result
+        result = stage.run(mock_state_with_audio, config, mock_checkpoint)
+
+        # Should fail with validation error message
+        assert not result.success
+        assert 'Invalid language configuration' in result.error
+        assert 'invalid_code' in result.error
+
+    def test_valid_config_passes_validation(self):
+        """Test that valid language config passes validation."""
+        from src.stages.caption_stage import CaptionStage
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = ["es", "pt", "fr"]
+
+        # Should not raise
+        stage = CaptionStage(config=config)
+        assert stage._config_validated
+
+    def test_invalid_fallback_language(self):
+        """Test that invalid code in fallback_languages raises error."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = ["es", "invalid", "fr"]
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert exc_info.value.field == 'fallback_languages'
+        assert 'invalid' in str(exc_info.value.value)
+
+    def test_duplicate_fallback_language(self):
+        """Test that duplicate in fallback_languages raises error."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = ["es", "pt", "es"]
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert exc_info.value.field == 'fallback_languages'
+        assert 'multiple times' in exc_info.value.reason
+
+    def test_preferred_in_fallback_logs_warning(self, caplog):
+        """Test that preferred_language in fallback logs warning but doesn't raise."""
+        from src.stages.caption_stage import CaptionStage
+        from unittest.mock import MagicMock
+        import logging
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = ["en", "es", "pt"]  # en is redundant
+
+        with caplog.at_level(logging.WARNING):
+            # Should not raise, but log warning
+            stage = CaptionStage(config=config)
+
+        assert stage._config_validated
+        # Warning should be logged
+        assert any('redundant' in record.message for record in caplog.records)
+
+    def test_none_fallback_languages_handled(self):
+        """Test that None fallback_languages is handled as empty list."""
+        from src.stages.caption_stage import CaptionStage
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = None
+
+        # Should not raise
+        stage = CaptionStage(config=config)
+        assert stage._config_validated
+
+    def test_no_config_at_init(self):
+        """Test that stage can be created without config, validation deferred."""
+        from src.stages.caption_stage import CaptionStage
+
+        stage = CaptionStage()
+        assert stage._fetcher is None
+        assert not stage._config_validated
+
+    def test_three_letter_code_rejected(self):
+        """Test that 3-letter codes (ISO 639-2) are rejected."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "eng"  # ISO 639-2
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert 'ISO 639-1' in exc_info.value.reason
+
+    def test_empty_string_code_rejected(self):
+        """Test that empty string language code is rejected."""
+        from src.stages.caption_stage import CaptionStage
+        from src.caption_fetcher import ConfigValidationError
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = ""
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError):
+            CaptionStage(config=config)

@@ -43,13 +43,33 @@ class CaptionStage(Stage):
 
     When caption-first mode is enabled, this stage fetches captions from YouTube
     before the TRANSCRIBE stage, enabling matching without downloading video content.
+
+    Language Configuration Validation (US-005 Sprint 6):
+        At initialization, validates that configured language codes are valid
+        ISO 639-1 codes, no duplicates exist in fallback_languages, and
+        preferred_language is not redundantly in fallback_languages.
     """
 
     name = "CAPTION"
     description = "Fetch YouTube captions for video candidates"
 
-    def __init__(self):
+    def __init__(self, config: 'Config' = None):
+        """Initialize CaptionStage.
+
+        Args:
+            config: Optional Config object for language validation (US-005).
+                   If provided, validates language configuration at startup.
+                   If not provided, validation runs during run() instead.
+
+        Raises:
+            ConfigValidationError: If language configuration is invalid.
+        """
         self._fetcher = None
+        self._config_validated = False
+
+        # US-005: Validate language config at init if config provided
+        if config is not None:
+            self._validate_language_config(config)
 
     def run(
         self,
@@ -61,6 +81,9 @@ class CaptionStage(Stage):
 
         US-001: Uses parallel batch fetching with ThreadPoolExecutor for faster
         processing of projects with 50+ videos.
+
+        US-005: Validates language configuration before first fetch if not
+        already validated at __init__.
         """
         warnings = []
 
@@ -71,6 +94,10 @@ class CaptionStage(Stage):
                 print("  >> Skipping caption fetch (caption-first mode disabled)")
                 logger.info("Skipping CAPTION stage (caption_first.enabled=false)")
                 return StageResult.ok({'skipped': True, 'reason': 'disabled'}, warnings)
+
+            # US-005: Validate language config if not done at init
+            if not self._config_validated:
+                self._validate_language_config(config)
 
             print(f"\n  --- Stage: CAPTION (Fetch YouTube Captions) ---")
 
@@ -698,3 +725,56 @@ class CaptionStage(Stage):
         state.text_metadata.extend(text_metadata)
 
         logger.info(f"Populated text_metadata with {len(text_metadata)} caption segments")
+
+    def _validate_language_config(self, config: 'Config') -> None:
+        """Validate language configuration at stage initialization (US-005).
+
+        Validates that all language codes in caption_first config are valid
+        ISO 639-1 codes and checks for configuration errors that would cause
+        silent failures during caption fetching.
+
+        This method should be called in __init__() to fail fast on invalid config,
+        or at the start of run() if config wasn't provided at init.
+
+        Args:
+            config: Pipeline Config object.
+
+        Raises:
+            ConfigValidationError: If invalid language codes or duplicates found.
+                Contains field name, invalid value, reason, and suggestion.
+
+        Example issues detected:
+            - Invalid code: "eng" instead of "en" (3 letters instead of 2)
+            - Duplicate: ["es", "pt", "es"] has "es" twice
+            - Redundant: preferred="en" with fallback=["en", "es"] has "en" twice
+        """
+        from ..caption_fetcher import validate_language_config, ConfigValidationError
+
+        # Get caption config
+        caption_config = getattr(config.download, 'caption_first', None)
+        if caption_config is None or not getattr(caption_config, 'enabled', False):
+            # Skip validation if caption-first mode is disabled
+            self._config_validated = True
+            return
+
+        # Extract language settings
+        preferred_lang = getattr(caption_config, 'preferred_language', 'en')
+        fallback_langs = getattr(caption_config, 'fallback_languages', [])
+
+        # Handle case where fallback_languages might be None
+        if fallback_langs is None:
+            fallback_langs = []
+
+        # Run validation (raises ConfigValidationError on failure)
+        logger.debug(
+            f"Validating language config: preferred={preferred_lang}, "
+            f"fallback={fallback_langs}"
+        )
+        validate_language_config(
+            preferred_language=preferred_lang,
+            fallback_languages=fallback_langs,
+            raise_on_error=True  # Fail fast on invalid config
+        )
+
+        self._config_validated = True
+        logger.debug("Language configuration validated successfully")
