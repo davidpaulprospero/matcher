@@ -4933,3 +4933,181 @@ the entire pipeline from CaptionResult to match confidence adjustment.
 - tests/test_caption_match_integration.py - Added 19 tests in 3 new test classes
 - scripts/ralph/prd.json - Marked US-002 as passes: true
 
+## US-005: Add pattern-based abort recovery with partial result checkpointing
+- Focus: caption
+- Status: COMPLETE
+
+### Summary
+Implemented CaptionBatchCheckpoint class for recovering partial results when batch caption fetching is aborted due to error patterns. This enables resuming from the last successful fetch instead of starting over.
+
+### Implementation Details
+
+**CaptionBatchCheckpoint class** (src/caption_fetcher.py:744-971):
+- Stores video_id -> serialized CaptionResult map
+- Tracks total_requested, success_count, error_count
+- Marks aborted state with reason and pattern info
+- Atomic save with temp file rename
+- Static get_checkpoint_path() for standard location
+
+**Key methods:**
+- `update(video_id, result)` - Add result and increment counters
+- `mark_aborted(reason, pattern_result, remaining_ids)` - Mark as aborted
+- `save(path)` / `load(path)` - JSON persistence
+- `get_remaining_ids(all_ids)` - Find unprocessed videos
+- `get_successful_results()` - Filter out errors
+
+**fetch_captions_batch() updates** (src/caption_fetcher.py:3018-3479):
+- Added `batch_checkpoint` and `checkpoint_save_interval` parameters
+- Updates checkpoint after each result with thread-safe locking
+- Logs checkpoint progress every N successful fetches
+- Saves checkpoint with abort info on ErrorPatternAbortError
+
+**resume_from_checkpoint()** (src/caption_fetcher.py:3481-3557):
+- Loads partial results from checkpoint
+- Skips already-fetched videos
+- Clears abort state for resuming
+- Returns merged results (checkpoint + new fetches)
+
+**CaptionStage integration** (src/stages/caption_stage.py:163-423):
+- Loads batch checkpoint from .cache/caption_checkpoint.json
+- Merges with pipeline checkpoint existing captions
+- Creates new checkpoint if none exists
+- Saves checkpoint on success or abort
+- Handles ErrorPatternAbortError gracefully
+
+### Tests Created
+21 new tests in tests/test_caption_batch_checkpoint.py:
+
+**TestCaptionBatchCheckpoint** (5 tests):
+- Empty checkpoint creation
+- Creation with initial values
+- Update with CaptionResult (success)
+- Update with error dict
+- Update with unavailable dict
+
+**TestCaptionBatchCheckpointAbort** (2 tests):
+- Basic abort marking
+- Abort with ErrorPatternResult details
+
+**TestCaptionBatchCheckpointSerialization** (2 tests):
+- to_dict() serialization
+- from_dict() deserialization
+
+**TestCaptionBatchCheckpointPersistence** (4 tests):
+- Save and load round-trip
+- Load nonexistent file returns None
+- Load corrupt JSON returns None
+- get_checkpoint_path() returns correct path
+
+**TestCaptionBatchCheckpointHelpers** (3 tests):
+- get_remaining_ids() filters processed
+- has_result() check
+- get_successful_results() filters errors
+
+**TestBatchFetchWithCheckpoint** (1 test):
+- Batch fetch updates checkpoint as results arrive
+
+**TestAbortSavesCheckpoint** (1 test):
+- Abort at 50/100 saves 50 results, marks remaining
+
+**TestResumeFromCheckpoint** (2 tests):
+- Resume skips already-fetched videos
+- Resume when all already fetched returns cached
+
+**TestEndToEndAbortResume** (1 test):
+- Complete abort -> save -> load -> resume -> complete scenario
+
+### Acceptance Criteria Verification
+
+1. **CaptionBatchCheckpoint class** - src/caption_fetcher.py:744-971
+2. **Checkpoint save every 10 fetches** - src/caption_fetcher.py:3369-3376
+3. **Save on ErrorPatternAbortError** - src/caption_fetcher.py:3431-3448
+4. **resume_from_checkpoint() method** - src/caption_fetcher.py:3481-3557
+5. **CaptionStage checkpoint integration** - src/stages/caption_stage.py:163-180, 390-423
+6. **Abort at 50/100 test** - test_caption_batch_checkpoint.py:380-409
+
+### Verification
+- `python -m py_compile src/caption_fetcher.py` - PASSED
+- `python -m py_compile src/stages/caption_stage.py` - PASSED
+- `python main.py --help` - PASSED
+- All 21 checkpoint tests pass
+- All 490 caption_cache + caption_fetcher tests pass
+
+### Files Modified
+- src/caption_fetcher.py - Added CaptionBatchCheckpoint class, updated fetch_captions_batch(), added resume_from_checkpoint()
+- src/stages/caption_stage.py - Added checkpoint loading, saving, and ErrorPatternAbortError handling
+- tests/test_caption_batch_checkpoint.py - New file with 21 tests
+- scripts/ralph/prd.json - Marked US-005 as passes: true
+
+
+## Iteration - US-006: Create sophisticated segment quality scoring heuristics
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Added sophisticated segment quality scoring to replace the simplistic low/medium/high classification.
+
+**SegmentQualityMetrics dataclass** (src/caption_fetcher.py:114-166):
+- density_score: Segments per minute normalized to 0-1 (optimal ~12/min)
+- timing_precision: Percentage with exact millisecond timestamps (0-1)
+- text_completeness: Average chars per segment vs expected 50-200 (0-1)
+- quality_score: Combined weighted score (0.4*density + 0.3*precision + 0.3*completeness)
+- Includes to_dict() and from_dict() methods for serialization
+
+**calculate_segment_metrics() function** (src/caption_fetcher.py:169-312):
+- Density score: Bell curve centered at 12 segments/minute (optimal for human captions)
+- Timing precision: Detects sub-100ms timestamp precision (auto-generated pattern)
+  - Human captions often use round numbers (1.0, 5.0, 10.0)
+  - Auto-captions have precise timestamps (1.234, 2.891)
+- Text completeness: Scores 1.0 for 50-200 chars/segment average
+  - Too short (<50 avg): Truncated or single-word segments
+  - Too long (>200 avg): May indicate missed segment breaks
+- Handles edge cases: empty segments, auto-calculated duration
+
+### Key Design Decisions
+1. **Density optimal at 12/min**: Based on typical human caption timing patterns
+2. **Precision quality inverted**: Lower millisecond precision (round numbers) indicates human curation
+3. **Weights 0.4/0.3/0.3**: Density weighted highest as it's the strongest quality indicator
+
+### Test Suite Created
+**tests/test_segment_quality_metrics.py** (22 tests in 3 classes):
+
+**TestSegmentQualityMetrics** (4 tests):
+- Dataclass creation
+- to_dict() serialization
+- from_dict() deserialization
+- from_dict() with missing fields uses defaults
+
+**TestCalculateSegmentMetrics** (14 tests):
+- Empty segments returns zero metrics
+- Single segment calculates metrics
+- Density score optimal at 12 segments/minute
+- Density score penalized for sparse (<5/min)
+- Density score penalized for dense (>25/min)
+- Timing precision for round timestamps
+- Timing precision for millisecond timestamps
+- Timing precision mixed
+- Text completeness optimal range (50-200 chars)
+- Text completeness too short (<50 chars)
+- Text completeness too long (>200 chars)
+- Quality score weights correct (0.4 + 0.3 + 0.3)
+- Quality score bounded 0-1
+- Auto-calculates duration from segments
+
+**TestSparseHumanVsDenseAuto** (4 tests):
+- Sparse human captions score higher than dense auto-generated (KEY ACCEPTANCE CRITERIA)
+- Human with round timestamps scores well
+- Optimal human captions score near perfect (>0.8)
+- Very dense auto-generated penalized (<0.5)
+
+### Verification
+- `python -m py_compile src/caption_fetcher.py` - PASSED
+- `python main.py --help` - PASSED
+- All 22 segment quality metrics tests pass
+- All 115 caption-related tests pass (including cache, multilingual, new metrics)
+
+### Files Modified
+- src/caption_fetcher.py - Added SegmentQualityMetrics dataclass and calculate_segment_metrics() function (201 lines added)
+- tests/test_segment_quality_metrics.py - New file with 22 comprehensive tests
+- scripts/ralph/prd.json - Marked US-006 as passes: true
+

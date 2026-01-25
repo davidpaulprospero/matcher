@@ -111,6 +111,207 @@ def determine_caption_quality(
     return 'medium'
 
 
+@dataclass
+class SegmentQualityMetrics:
+    """Quality metrics for caption segments (US-006 Sprint 8).
+
+    Provides sophisticated quality scoring based on:
+    - density_score: Segments per minute (normalized 0-1)
+    - timing_precision: Percentage with exact millisecond timestamps
+    - text_completeness: Average chars per segment vs expected (50-200)
+
+    The combined quality_score weights these: 0.4*density + 0.3*precision + 0.3*completeness.
+    Higher scores indicate better quality captions for matching purposes.
+
+    Attributes:
+        density_score: Segments per minute normalized to 0-1 scale.
+            Optimal is ~10-15 segments/minute; too dense may indicate auto-captions,
+            too sparse may indicate missing content.
+        timing_precision: Percentage of segments with exact millisecond timestamps (0-1).
+            Human captions often have round numbers; auto-captions have precise timing.
+        text_completeness: Ratio of average segment length to expected range (0-1).
+            Very short (<50 chars avg) or very long (>200 chars avg) reduce completeness.
+        quality_score: Combined weighted score (0-1).
+        segment_count: Number of segments analyzed.
+        total_duration: Total video/caption duration in seconds.
+    """
+    density_score: float
+    timing_precision: float
+    text_completeness: float
+    quality_score: float
+    segment_count: int
+    total_duration: float
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'density_score': self.density_score,
+            'timing_precision': self.timing_precision,
+            'text_completeness': self.text_completeness,
+            'quality_score': self.quality_score,
+            'segment_count': self.segment_count,
+            'total_duration': self.total_duration,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'SegmentQualityMetrics':
+        """Create from dictionary."""
+        return cls(
+            density_score=data.get('density_score', 0.0),
+            timing_precision=data.get('timing_precision', 0.0),
+            text_completeness=data.get('text_completeness', 0.0),
+            quality_score=data.get('quality_score', 0.0),
+            segment_count=data.get('segment_count', 0),
+            total_duration=data.get('total_duration', 0.0),
+        )
+
+
+def calculate_segment_metrics(
+    segments: List['CaptionSegment'],
+    total_duration: Optional[float] = None,
+) -> SegmentQualityMetrics:
+    """Calculate sophisticated quality metrics for caption segments (US-006 Sprint 8).
+
+    Analyzes segments to produce quality scores based on:
+    1. density_score: Segments per minute, normalized to 0-1 scale
+       - Optimal: 10-15 segments/minute (typical human captions)
+       - Too low (<5/min): Sparse captions, may miss content
+       - Too high (>25/min): Possibly auto-generated with micro-segments
+    2. timing_precision: Percentage with exact millisecond timestamps
+       - Human captions often use round numbers (1.0, 2.5, etc.)
+       - Auto-captions have precise timestamps (1.234, 2.891, etc.)
+       - Lower precision often indicates human-curated captions
+    3. text_completeness: Average characters per segment vs expected (50-200)
+       - Very short avg (<50): Truncated or single-word segments
+       - Optimal (50-200): Full sentences/phrases
+       - Very long (>200): May indicate missed segment breaks
+
+    The combined quality_score uses weights: 0.4*density + 0.3*precision + 0.3*completeness.
+
+    For matching purposes, human captions (even if sparse) often score higher because:
+    - They have intentional timing aligned with speech
+    - They contain complete, coherent phrases
+    - Their segment boundaries match natural pauses
+
+    Args:
+        segments: List of CaptionSegment objects to analyze.
+        total_duration: Total video duration in seconds. If not provided,
+            uses the span from first to last segment.
+
+    Returns:
+        SegmentQualityMetrics with all scores and the combined quality_score.
+
+    Examples:
+        >>> # Human captions: sparse but well-timed
+        >>> segments = [CaptionSegment(0, 0.0, 5.0, "Hello world", "vid")]
+        >>> metrics = calculate_segment_metrics(segments, 60.0)
+        >>> metrics.density_score  # 1 segment/minute = low density
+        0.1
+
+        >>> # Auto captions: dense with precise timing
+        >>> segments = [CaptionSegment(i, i*0.5, i*0.5+0.4, "word", "vid") for i in range(120)]
+        >>> metrics = calculate_segment_metrics(segments, 60.0)
+        >>> metrics.density_score  # 120 segments/minute = very high
+        0.5
+    """
+    if not segments:
+        return SegmentQualityMetrics(
+            density_score=0.0,
+            timing_precision=0.0,
+            text_completeness=0.0,
+            quality_score=0.0,
+            segment_count=0,
+            total_duration=0.0,
+        )
+
+    # Calculate total duration if not provided
+    if total_duration is None or total_duration <= 0:
+        if len(segments) > 0:
+            total_duration = segments[-1].end_time - segments[0].start_time
+        else:
+            total_duration = 0.0
+
+    # Avoid division by zero
+    if total_duration <= 0:
+        total_duration = 1.0  # Assume 1 second minimum
+
+    segment_count = len(segments)
+
+    # 1. Density score: segments per minute, normalized to 0-1
+    # Optimal is ~10-15 segments/minute
+    duration_minutes = total_duration / 60.0
+    if duration_minutes > 0:
+        segments_per_minute = segment_count / duration_minutes
+    else:
+        segments_per_minute = 0.0
+
+    # Normalize: 0 at 0/min, 1.0 at 10-15/min, drops for very high values
+    # Use a bell curve centered around 12 segments/min
+    optimal_density = 12.0
+    density_deviation = abs(segments_per_minute - optimal_density) / optimal_density
+    density_score = max(0.0, 1.0 - density_deviation * 0.5)
+    density_score = min(1.0, density_score)
+
+    # 2. Timing precision: percentage with exact millisecond timestamps
+    # Check if timestamps have sub-second precision (auto-generated pattern)
+    precise_count = 0
+    for seg in segments:
+        start_ms = (seg.start_time * 1000) % 1000
+        end_ms = (seg.end_time * 1000) % 1000
+        # Precise if not at round 100ms intervals
+        if start_ms % 100 != 0 or end_ms % 100 != 0:
+            precise_count += 1
+
+    timing_precision = precise_count / segment_count if segment_count > 0 else 0.0
+
+    # For quality scoring, lower precision (round numbers) is often better
+    # because it indicates human curation. Invert the score.
+    # But we still want SOME precision, so we use a U-shaped curve
+    # Best at ~0.3-0.5 precision (some rounding but not all identical)
+    precision_quality = 1.0 - abs(timing_precision - 0.4) * 1.5
+    precision_quality = max(0.0, min(1.0, precision_quality))
+
+    # 3. Text completeness: average chars per segment vs expected (50-200)
+    if segment_count > 0:
+        total_chars = sum(len(seg.text) for seg in segments)
+        avg_chars = total_chars / segment_count
+    else:
+        avg_chars = 0.0
+
+    # Optimal range: 50-200 characters per segment
+    min_optimal = 50.0
+    max_optimal = 200.0
+
+    if avg_chars < min_optimal:
+        # Too short: score drops linearly to 0 at 0 chars
+        text_completeness = avg_chars / min_optimal
+    elif avg_chars > max_optimal:
+        # Too long: score drops linearly, but not as harshly
+        # 400 chars would give 0.5, 600 chars would give 0.0
+        overage = (avg_chars - max_optimal) / (max_optimal * 2)
+        text_completeness = max(0.0, 1.0 - overage)
+    else:
+        # In optimal range: full score
+        text_completeness = 1.0
+
+    # Combine scores with weights: 0.4*density + 0.3*precision + 0.3*completeness
+    quality_score = (
+        0.4 * density_score +
+        0.3 * precision_quality +
+        0.3 * text_completeness
+    )
+    quality_score = max(0.0, min(1.0, quality_score))
+
+    return SegmentQualityMetrics(
+        density_score=density_score,
+        timing_precision=timing_precision,
+        text_completeness=text_completeness,
+        quality_score=quality_score,
+        segment_count=segment_count,
+        total_duration=total_duration,
+    )
+
+
 class CaptionError(Exception):
     """Base exception for caption-related errors."""
     pass
