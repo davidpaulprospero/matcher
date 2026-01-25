@@ -365,6 +365,12 @@ matching:
   # - Large pools (>100) + tight margins: Reduce confidence
   pool_normalization_enabled: true  # Enable confidence normalization by pool size
 
+  # Chain-of-thought prompting for LLM matching
+  # Chain-of-thought: Structured reasoning produces more reliable match decisions
+  # Reasoning: Explicit 4-step process: themes → elements → rubric → score
+  # Decision: Use rubric weights - visual (30%), topic (40%), keyword (20%), flow (10%)
+  chain_of_thought_enabled: true  # Enable structured reasoning prompts
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
