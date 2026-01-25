@@ -1829,3 +1829,51 @@ Progress: 3/12 stories complete
   - tests/test_pool_normalization.py (345 lines)
 
 Progress: 6/12 stories complete
+
+## Iteration 7 - [US-007] Add LLM prompt chain-of-thought for match reasoning
+- Added chain-of-thought (CoT) structured prompting to LLM providers
+- Implementation details:
+  - Added `COT_RUBRIC_WEIGHTS` constant with scoring rubric:
+    - visual_relevance: 30% (video visuals match voiceover content)
+    - topic_match: 40% (video topic aligns with voiceover theme)
+    - keyword_overlap: 20% (specific keywords shared)
+    - flow: 10% (narrative pacing maintained)
+  - Added `CotReasoning` dataclass for parsed CoT responses:
+    - voiceover_themes: List of identified themes
+    - video_elements: List of matching video elements
+    - rubric_scores: Dict of dimension scores
+    - final_score: Computed confidence
+    - is_complete property validates all components present
+    - compute_weighted_score() applies rubric weights
+  - Added `build_cot_prompt()` for single voiceover CoT prompts
+  - Added `build_cot_batch_prompt()` for batched CoT prompts
+  - Added `parse_cot_reasoning()` to parse LLM responses into CotReasoning
+  - Updated all LLM providers (Gemini, Claude, Ollama) with:
+    - New `use_cot: bool = False` parameter
+    - Return type now includes Optional[CotReasoning]
+    - When CoT enabled: blends weighted score (70%) with LLM confidence (30%)
+- Added `chain_of_thought_enabled` config option (default: true) in:
+  - src/config/sections/matching.py (lines 230-236)
+  - config.yaml (lines 368-372)
+- CoT prompt structure (4-step reasoning):
+  1. VOICEOVER THEMES: List 2-3 key themes
+  2. VIDEO ELEMENTS: List matching visual elements
+  3. RUBRIC EVALUATION: Score each dimension (0.0-1.0)
+  4. FINAL SCORE: Compute weighted average
+- Added 28 unit tests in 7 test classes:
+  - TestCotReasoningDataclass (6 tests): completeness checks, weighted scoring
+  - TestCotRubricWeights (3 tests): weight values, sum to 1.0
+  - TestBuildCotPrompt (6 tests): basic, context, negative sample/rules, escaping
+  - TestBuildCotBatchPrompt (2 tests): multiple items, negative samples
+  - TestParseCotReasoning (7 tests): complete/empty response, clamping, validation
+  - TestCotIntegration (2 tests): matcher flag, score blending
+  - TestCotConfigOption (2 tests): config exists, can be disabled
+- All 28 tests pass
+- Files modified:
+  - src/matching/llm_providers.py (added ~250 lines of CoT code)
+  - src/config/sections/matching.py (added chain_of_thought_enabled option)
+  - config.yaml (added CoT config documentation)
+- Files created:
+  - tests/test_cot_reasoning.py (335 lines)
+
+Progress: 7/12 stories complete
