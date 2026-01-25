@@ -3313,3 +3313,165 @@ Implemented configurable caption format preference with format fallback on parse
 - src/caption_fetcher.py: Refactored _fetch_subtitle(), added _fetch_subtitle_with_format(), format loop with fallback
 - config.yaml: Added preferred_formats option under caption_first
 - tests/test_caption_fetcher.py: Added TestCaptionFormatPreference class with 11 tests
+
+## Iteration N - [US-007] Validate caption timestamps against video duration
+- Focus: caption
+- Status: COMPLETE
+
+### What was implemented
+Added `validate_timing()` method to `CaptionResult` that checks caption timestamps against video duration:
+
+1. **TimingValidationResult dataclass** (lines 194-221 in caption_fetcher.py):
+   - `is_valid`: Overall validation result
+   - `caption_end_time`: End time of last caption segment
+   - `video_duration`: Video duration used for comparison
+   - `exceeds_duration`: True if captions extend beyond video + 10% tolerance
+   - `below_coverage`: True if caption coverage < 50%
+   - `message`: Human-readable validation description
+   - `to_dict()`: Serialization method
+
+2. **validate_timing() method** (lines 327-412):
+   - Takes optional `video_duration`, `max_exceed_ratio` (default 1.1), `min_coverage_ratio` (default 0.5)
+   - Compares `segments[-1].end_time` to video duration
+   - Sets `exceeds_duration` flag when captions extend > 110% of video
+   - Sets `below_coverage` flag when captions cover < 50% of video
+   - Stores result in `timing_validated` field
+   - Generates human-readable message explaining any issues
+
+3. **timing_validated field** added to CaptionResult (line 245)
+
+4. **to_dict() updated** to include `timing_validated` serialization (line 426)
+
+### Tests added (17 tests)
+- `test_validate_timing_valid` - Normal valid captions
+- `test_validate_timing_exceeds_duration` - 20% over threshold
+- `test_validate_timing_within_tolerance` - Within 10% tolerance
+- `test_validate_timing_at_tolerance_boundary` - Exactly at 110%
+- `test_validate_timing_just_over_tolerance` - Just over 110.1%
+- `test_validate_timing_below_coverage` - Below 50% coverage
+- `test_validate_timing_both_issues` - Multiple issues
+- `test_validate_timing_no_duration` - Missing video duration
+- `test_validate_timing_empty_segments` - No segments
+- `test_validate_timing_stores_result` - Result stored in field
+- `test_validate_timing_custom_thresholds` - Custom max_exceed_ratio
+- `test_validate_timing_custom_min_coverage` - Custom min_coverage_ratio
+- `test_validate_timing_with_explicit_duration` - Override stored duration
+- `test_to_dict_includes_timing_validated` - Serialization test
+- `TestTimingValidationResult` class (3 tests) - Dataclass tests
+
+### Files modified
+- `src/caption_fetcher.py` - Added TimingValidationResult, timing_validated field, validate_timing() method
+- `tests/test_caption_fetcher.py` - Added 17 tests, imported TimingValidationResult
+
+### Test results
+All 231 tests pass (17 new timing validation tests + 214 existing tests)
+
+## Iteration N - [US-008] Implement caption availability pre-check
+- Focus: caption
+- Status: COMPLETE
+
+### What was implemented
+Implemented caption availability pre-check to avoid wasted network calls for videos without captions.
+
+**New has_captions() method:**
+- Added to CaptionFetcher using list_available_languages() internally
+- Returns boolean without downloading actual caption content
+- Uses yt-dlp --list-subs which is faster than fetching captions
+
+**Config option:**
+- Added `caption_first.pre_check_availability` (default: true)
+- Added to CaptionFirstConfig dataclass and config.yaml
+
+**CaptionStage integration:**
+- Pre-filters candidates after live stream check but before batch fetch
+- Videos without captions marked as unavailable with reason='no_captions_available'
+- Displays pre-check filtered count in summary output
+
+**Metrics tracking (CaptionMetrics):**
+- Added pre_check_available and pre_check_unavailable fields
+- Added record_pre_check() method with thread-safe locking
+- Updated summary(), to_dict(), from_dict(), merge(), clear() methods
+- Pre-check stats shown in metrics summary when non-zero
+
+### Tests added
+16 new tests in two classes:
+
+**TestHasCaptions (6 tests):**
+- test_has_captions_returns_true_when_manual_available
+- test_has_captions_returns_true_when_auto_available
+- test_has_captions_returns_false_when_none_available
+- test_has_captions_raises_on_invalid_id
+- test_has_captions_raises_on_timeout
+- test_has_captions_with_multiple_languages
+
+**TestCaptionMetricsPreCheck (10 tests):**
+- test_pre_check_defaults
+- test_record_pre_check_available
+- test_record_pre_check_unavailable
+- test_record_pre_check_mixed
+- test_pre_check_in_summary
+- test_pre_check_not_in_summary_when_zero
+- test_pre_check_in_to_dict
+- test_pre_check_restored_from_dict
+- test_pre_check_merge
+- test_pre_check_clear
+
+### Files modified
+- src/caption_fetcher.py - Added has_captions() method and pre-check metrics
+- src/config/sections/download.py - Added pre_check_availability config option
+- src/stages/caption_stage.py - Added pre-check phase and reporting
+- config.yaml - Added pre_check_availability option
+- tests/test_caption_fetcher.py - Added 16 new tests
+
+### Test results
+All 352 caption tests pass (16 new + 336 existing)
+
+
+## Iteration 56 - [US-009] Add streaming progress output for caption fetch
+- Focus: caption
+- Status: COMPLETE (already implemented)
+
+### What was verified
+US-009 was already implemented in previous work. All 6 acceptance criteria verified:
+
+**1. Progress callback parameter for fetch_captions_batch()**
+- Found at caption_fetcher.py:1116
+- Type: `Optional[Callable[[str, str, Dict[str, Any]], None]]`
+
+**2. Callback receives: video_id, status, details dict**
+- 'fetching' status: lines 1189-1196
+- 'success' status: lines 1219-1230 (includes language, quality, segment_count, is_auto_generated)
+- 'failed' status: lines 1247-1311 (includes reason, error message)
+
+**3. CaptionStage uses callback to print real-time progress**
+- on_progress() callback defined at lines 205-271 in caption_stage.py
+- Passed to fetch_captions_batch() at line 279
+
+**4. Format: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)**
+- Implementation at line 239: `f"  [{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"`
+- Matches spec exactly
+
+**5. Support both TTY and non-TTY output modes**
+- TTY detection: `is_tty = sys.stdout.isatty()` (line 207)
+- TTY mode: uses `\r` for line overwrite, skips intermediate 'fetching' noise
+- Non-TTY mode: uses newlines for final status only
+
+**6. Tests verify callback is invoked with correct parameters**
+- TestBatchCaptionFetch::test_batch_fetch_progress_callback (test_caption_fetcher.py)
+- TestStreamingProgressOutput: 7 tests (test_stage_caption.py)
+  - test_progress_callback_format_success
+  - test_progress_callback_format_failed
+  - test_tty_mode_uses_carriage_return
+  - test_non_tty_mode_uses_newlines
+  - test_progress_callback_invoked_by_batch_fetch
+  - test_progress_format_matches_spec
+  - test_progress_format_human_captions
+
+### Test results
+All 8 US-009 related tests pass.
+
+### Files verified (no changes needed)
+- src/caption_fetcher.py - fetch_captions_batch() with progress_callback
+- src/stages/caption_stage.py - on_progress() callback implementation
+- tests/test_caption_fetcher.py - 1 test
+- tests/test_stage_caption.py - 7 tests
