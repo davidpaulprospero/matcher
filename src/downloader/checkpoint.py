@@ -39,6 +39,8 @@ class DownloadCheckpoint:
     last_rate_limit_timestamp: Optional[str] = None
     # Count of rate limit events in current/last session
     rate_limit_event_count: int = 0
+    # Rate limit metrics for cross-session analysis (US-010)
+    rate_limit_metrics: Optional[Dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -53,6 +55,9 @@ class DownloadCheckpoint:
             data['last_rate_limit_timestamp'] = None
         if 'rate_limit_event_count' not in data:
             data['rate_limit_event_count'] = 0
+        # Handle checkpoints created before rate limit metrics was added (US-010)
+        if 'rate_limit_metrics' not in data:
+            data['rate_limit_metrics'] = None
         return cls(**data)
 
 

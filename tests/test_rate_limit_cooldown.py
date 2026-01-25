@@ -371,6 +371,10 @@ class TestRecoveryModeBehavior:
             downloader.cookie_rotator = None
             downloader.vpn_manager = None
 
+            # Rate limit metrics (US-010)
+            from src.downloader.rate_limit_metrics import RateLimitMetrics
+            downloader.rate_limit_metrics = RateLimitMetrics()
+
             return downloader
 
     @patch('time.sleep')
@@ -580,6 +584,10 @@ class TestCooldownIntegration:
 
             downloader.cookie_rotator = None
             downloader.vpn_manager = None
+
+            # Rate limit metrics (US-010)
+            from src.downloader.rate_limit_metrics import RateLimitMetrics
+            downloader.rate_limit_metrics = RateLimitMetrics()
 
             # Simulate multiple rate limit errors
             with patch('time.sleep'):

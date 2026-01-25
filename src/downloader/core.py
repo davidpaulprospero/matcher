@@ -43,6 +43,7 @@ from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig
+from .rate_limit_metrics import RateLimitMetrics
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,9 @@ class VideoDownloader:
         else:
             self.retry_queue = RetryQueue(BatchRetryConfig(enabled=False))
 
+        # Rate limiting metrics tracking (US-010)
+        self.rate_limit_metrics = RateLimitMetrics()
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -292,10 +296,12 @@ class VideoDownloader:
         return self.checkpoint_mgr.load_checkpoint()
 
     def _save_checkpoint(self):
-        """Delegate to CheckpointManager, including speed tracker state."""
+        """Delegate to CheckpointManager, including speed tracker state and metrics."""
         if self.checkpoint:
             # Include speed tracker state in checkpoint for resume
             self.checkpoint.speed_tracker_state = self.speed_tracker.to_checkpoint_dict()
+            # Include rate limit metrics in checkpoint for cross-session analysis (US-010)
+            self.checkpoint.rate_limit_metrics = self.rate_limit_metrics.to_dict()
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -342,6 +348,35 @@ class VideoDownloader:
     def log_source_diversity_report(self):
         """Delegate to SearchOptimizer."""
         self.search_optimizer.log_source_diversity_report()
+
+    def get_rate_limit_metrics(self) -> RateLimitMetrics:
+        """
+        Get aggregated rate limiting metrics for reporting.
+
+        Combines metrics from the internal tracker with stats from subsystems
+        (circuit breaker, retry queue, speed tracker).
+
+        Returns:
+            RateLimitMetrics with all aggregated statistics.
+        """
+        # Update metrics from subsystems
+        self.rate_limit_metrics.update_from_circuit_breaker(self.circuit_breaker.get_stats())
+        self.rate_limit_metrics.update_from_retry_queue(self.retry_queue.get_stats())
+        self.rate_limit_metrics.update_from_speed_tracker(self.speed_tracker.get_speed_stats())
+
+        # Get cookie rotation and VPN counts from rotators if available
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            status = self.cookie_rotator.get_status()
+            self.rate_limit_metrics.cookie_rotations = status.get('rotations', 0)
+        if self.vpn_manager and self.vpn_manager.is_enabled:
+            status = self.vpn_manager.get_status()
+            self.rate_limit_metrics.vpn_switches = status.get('switches', 0)
+
+        return self.rate_limit_metrics
+
+    def get_speed_stats(self) -> dict:
+        """Get download speed statistics for reporting."""
+        return self.speed_tracker.get_speed_stats()
 
     def _build_format_string(self):
         """Delegate to TranscodingManager."""
@@ -489,6 +524,7 @@ class VideoDownloader:
             new_cookie = self.cookie_rotator.rotate()
             if new_cookie:
                 logger.info(f"Rotated to new cookie: {Path(new_cookie).name}")
+                self.rate_limit_metrics.record_cookie_rotation()
                 return True
             else:
                 logger.warning("Cookie rotation exhausted")
@@ -513,6 +549,7 @@ class VideoDownloader:
                 # Reset cookie rotator after VPN switch (new IP = fresh start)
                 if self.cookie_rotator:
                     self.cookie_rotator.reset()
+                self.rate_limit_metrics.record_vpn_switch()
                 return True
 
         return False
@@ -538,9 +575,10 @@ class VideoDownloader:
         Returns:
             True if recovery was attempted (backoff or rotation), False if no options left
         """
-        # Record rate limit event for cross-session tracking
+        # Record rate limit event for cross-session tracking and metrics
         self._rate_limit_event_count += 1
         self._record_rate_limit_event()
+        self.rate_limit_metrics.record_rate_limit_event()
 
         # Get rate limit config settings
         rate_limit_config = getattr(self.download_config, 'rate_limit', None)
@@ -570,6 +608,7 @@ class VideoDownloader:
             if delay > 0:
                 self._rate_limit_backoff_count += 1
                 self._rate_limit_total_delay += delay
+                self.rate_limit_metrics.record_backoff(delay)
 
                 recovery_note = " (recovery mode)" if self._in_cooldown_recovery_mode else ""
                 logger.info(
@@ -708,6 +747,10 @@ class VideoDownloader:
                 self._in_cooldown_recovery_mode = self._check_rate_limit_cooldown(self.checkpoint)
                 # Restore rate limit event count for continued tracking
                 self._rate_limit_event_count = self.checkpoint.rate_limit_event_count
+                # Restore rate limit metrics for cross-session analysis (US-010)
+                if self.checkpoint.rate_limit_metrics:
+                    self.rate_limit_metrics = RateLimitMetrics.from_dict(self.checkpoint.rate_limit_metrics)
+                    logger.debug(f"Restored rate limit metrics: {self.rate_limit_metrics.total_downloads} downloads")
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(
@@ -1374,6 +1417,8 @@ class VideoDownloader:
 
         # Apply adaptive timeout based on network speed
         download_timeout = self.speed_tracker.get_adjusted_timeout(base_timeout)
+        if download_timeout > base_timeout:
+            self.rate_limit_metrics.record_timeout_extension()
 
         # Track download timing for speed measurement
         download_start_time = time.time()
@@ -1388,6 +1433,9 @@ class VideoDownloader:
         self._last_download_rate_limited = False
         process = None
         last_stderr = ""
+
+        # Record download attempt for metrics
+        self.rate_limit_metrics.record_download_attempt()
 
         # Retry loop with exponential backoff
         for attempt in range(max_retries + 1):  # +1 for initial attempt
@@ -1410,11 +1458,14 @@ class VideoDownloader:
                     if attempt < max_retries:
                         delay = retry_delay * (retry_backoff ** attempt)
                         logger.info(f"Timeout downloading '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                        self.rate_limit_metrics.record_retry('timeout')
                         time.sleep(delay)
                         continue
                     else:
                         logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s - all {max_retries} retries exhausted")
                         self._last_download_timed_out = True
+                        self.rate_limit_metrics.record_retries_exhausted()
+                        self.rate_limit_metrics.record_download_failure()
                         return []
                 finally:
                     # Ensure process is cleaned up
@@ -1430,6 +1481,7 @@ class VideoDownloader:
                     # Check for permanent errors - fail immediately
                     if self._is_permanent_error(stderr):
                         logger.debug(f"Permanent error for '{keyword}' ({tier}): {stderr[:200]}")
+                        self.rate_limit_metrics.record_download_failure()
                         return []
 
                     # Check for transient errors - retry with backoff
@@ -1438,12 +1490,15 @@ class VideoDownloader:
                             delay = retry_delay * (retry_backoff ** attempt)
                             logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
                             logger.debug(f"  Error: {stderr[:200]}")
+                            self.rate_limit_metrics.record_retry('transient')
                             time.sleep(delay)
                             continue
                         else:
                             # Exhausted retries on transient error - mark for batch retry
                             logger.warning(f"Rate limit error for '{keyword}' ({tier}) after {max_retries} retries - added to batch retry queue")
                             self._last_download_rate_limited = True
+                            self.rate_limit_metrics.record_retries_exhausted()
+                            self.rate_limit_metrics.record_download_failure()
                             return []
 
                 # Only log actual errors (not retried)
@@ -1460,10 +1515,13 @@ class VideoDownloader:
                 if attempt < max_retries:
                     delay = retry_delay * (retry_backoff ** attempt)
                     logger.info(f"Error downloading '{keyword}' ({tier}): {e} - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                    self.rate_limit_metrics.record_retry('network')
                     time.sleep(delay)
                     continue
                 else:
                     logger.error(f"Error downloading '{keyword}' ({tier}): {e} - all {max_retries} retries exhausted")
+                    self.rate_limit_metrics.record_retries_exhausted()
+                    self.rate_limit_metrics.record_download_failure()
                     return []
 
         # After retry loop - process downloaded files
@@ -1479,6 +1537,8 @@ class VideoDownloader:
             logger.debug(f"    Downloaded {len(new_videos)} video(s)")
             # Reset rate limit backoff on successful download
             self._reset_rate_limit_backoff()
+            # Record successful download for metrics
+            self.rate_limit_metrics.record_download_success()
 
             # Record download speed for adaptive timeout tracking
             download_duration = time.time() - download_start_time
@@ -1503,6 +1563,9 @@ class VideoDownloader:
                             duration_seconds=video_duration,
                             tier=tier
                         )
+                        # Record speed sample for metrics
+                        speed_mbps = (file_size / 1024 / 1024) / video_duration if video_duration > 0 else 0
+                        self.rate_limit_metrics.record_speed_sample(speed_mbps)
 
         downloaded = []
 

@@ -22,11 +22,12 @@ Original VideoDownloader (~2,388 lines) → streamlined core (~1,100 lines) = 54
 # Core class (NEW - Phase 9 complete)
 from .core import VideoDownloader
 
-# Dataclasses (from types.py)
+# Dataclasses and exceptions (from types.py)
 from .types import (
     MatchedSegment,
     MergedSegment,
-    DownloadedSegment
+    DownloadedSegment,
+    DownloadError
 )
 
 # Checkpoint management
@@ -45,6 +46,8 @@ from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
+from .rate_limit_metrics import RateLimitMetrics
 
 # Segment utilities (public helpers)
 from . import segment_utils
@@ -67,11 +70,12 @@ __all__ = [
     # Core class
     'VideoDownloader',
 
-    # Dataclasses
+    # Dataclasses and exceptions
     'MatchedSegment',
     'MergedSegment',
     'DownloadedSegment',
     'DownloadCheckpoint',
+    'DownloadError',
 
     # Managers
     'CheckpointManager',
@@ -87,6 +91,10 @@ __all__ = [
     'DownloadRecord',
     'CircuitBreaker',
     'CircuitBreakerConfig',
+    'RetryQueue',
+    'BatchRetryConfig',
+    'RetryItem',
+    'RateLimitMetrics',
 
     # Segment utilities
     'collect_matched_segments',
