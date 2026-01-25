@@ -357,6 +357,14 @@ matching:
   # Decision: Reduce embedding weight by 20% for low-quality transcripts
   transcript_quality_weight: true  # Enable transcript quality-based weight adjustment
 
+  # Pool size normalization
+  # Chain-of-thought: Confidence is relative to pool size - small pools have different dynamics
+  # Reasoning: Top match in 5-video pool is more meaningful than top in 500-video pool
+  # Decision: Normalize using sqrt(pool_size/50), capped at [0.8, 1.2]
+  # - Small pools (<10) + clear winner: Boost confidence
+  # - Large pools (>100) + tight margins: Reduce confidence
+  pool_normalization_enabled: true  # Enable confidence normalization by pool size
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas

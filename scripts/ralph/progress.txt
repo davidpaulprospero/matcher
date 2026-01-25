@@ -1790,4 +1790,42 @@ Progress: 3/12 stories complete
 - Files created:
   - tests/test_transcript_quality.py (280 lines)
 
-Progress: 5/12 stories complete
+## Iteration 6 - [US-006] Add confidence normalization by candidate pool size
+- Added `normalize_confidence_by_pool()` function in src/matching/scoring.py (lines 854-952)
+- Implementation details:
+  - Normalization formula: sqrt(pool_size/50) capped at [0.8, 1.2]
+  - Small pools (<10): inverse factor boosts confidence (1/0.8 = 1.25x)
+  - Large pools (>100): inverse factor reduces confidence (1/1.2 = 0.83x)
+  - Small pool with clear winner (margin >= 0.1): additional +0.05 boost
+  - Large pool with tight margin (< 0.05): additional -0.05 penalty
+  - Medium pools (10-100): factor-based adjustment only
+  - Results clamped to [0.0, 1.0] range
+- Added module constants:
+  - POOL_NORMALIZATION_REFERENCE_SIZE = 50
+  - POOL_NORMALIZATION_MIN_FACTOR = 0.8
+  - POOL_NORMALIZATION_MAX_FACTOR = 1.2
+  - POOL_SMALL_THRESHOLD = 10
+  - POOL_LARGE_THRESHOLD = 100
+  - POOL_TIGHT_MARGIN_THRESHOLD = 0.05
+- Added `pool_normalization_enabled` config option (default: true) in:
+  - src/config/sections/matching.py (lines 224-228)
+  - config.yaml (lines 360-366)
+- Added 34 unit tests in 8 test classes:
+  - TestPoolNormalizationBasic (4 tests): disabled, empty pool, reference size
+  - TestSmallPoolNormalization (4 tests): boost, clear winner, no clear winner, single candidate
+  - TestLargePoolNormalization (4 tests): reduction, tight margin, no tight margin, very large capped
+  - TestMediumPoolNormalization (3 tests): moderate, lower range, upper range
+  - TestFactorCapping (2 tests): min/max factor capping
+  - TestEdgeCases (5 tests): confidence bounds, zero/one confidence, no candidates
+  - TestConfigIntegration (2 tests): default enabled, can be disabled
+  - TestConstants (6 tests): constant values verification
+  - TestNormalizationFormula (4 tests): formula verification at key pool sizes
+- All 34 tests pass
+- Files modified:
+  - src/matching/scoring.py (added ~100 lines)
+  - src/config/sections/matching.py (added config option)
+  - config.yaml (added config documentation)
+- Files created:
+  - tests/test_pool_normalization.py (345 lines)
+
+Progress: 6/12 stories complete
