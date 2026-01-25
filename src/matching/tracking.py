@@ -28,7 +28,7 @@ class TimelineVarietyTracker:
     where k is the number of items in the window (typically small).
     """
 
-    def __init__(self, timeline_window: float = 600.0, max_repeats: int = 1):
+    def __init__(self, timeline_window: float = 600.0, max_repeats: int = 1) -> None:
         """
         Args:
             timeline_window: Time window in seconds (default 600 = 10 minutes)
@@ -83,7 +83,7 @@ class TimelineVarietyTracker:
         # Exclude sources that have reached max_repeats
         return {src for src, count in source_counts.items() if count >= self.max_repeats}
 
-    def record_usage(self, track: str, source_file: str, timeline_pos: float):
+    def record_usage(self, track: str, source_file: str, timeline_pos: float) -> None:
         """
         Record that a source file was used on a track at a timeline position.
 
@@ -113,7 +113,13 @@ class TimelineVarietyTracker:
             usages.insert(left, entry)
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get statistics about source usage per track."""
+        """
+        Get statistics about source usage per track.
+
+        Returns:
+            Dict mapping track names to statistics including total_clips,
+            unique_sources, and top_sources list.
+        """
         stats = {}
         for track, usages in self.track_usage.items():
             source_counts = defaultdict(int)
@@ -140,7 +146,7 @@ class GlobalClipTracker:
     overlapping segments from the same source video.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.used_clips: Set[str] = set()
         self.clip_track_map: Dict[str, str] = {}  # clip_id -> "V1@S003"
 
@@ -171,21 +177,46 @@ class GlobalClipTracker:
         return f"{path}:{segment.start_time:.2f}-{segment.end_time:.2f}"
 
     def is_used(self, segment: SRTSegment) -> bool:
-        """Check if this exact clip has been used anywhere in the timeline."""
+        """
+        Check if this exact clip has been used anywhere in the timeline.
+
+        Args:
+            segment: The SRT segment to check.
+
+        Returns:
+            True if the clip has been used, False otherwise.
+        """
         return self.get_clip_id(segment) in self.used_clips
 
-    def record_usage(self, segment: SRTSegment, track: str, segment_idx: int):
-        """Record that a clip was used on a specific track."""
+    def record_usage(self, segment: SRTSegment, track: str, segment_idx: int) -> None:
+        """
+        Record that a clip was used on a specific track.
+
+        Args:
+            segment: The SRT segment that was used.
+            track: Track name (e.g., "V1", "V2").
+            segment_idx: Index of the voiceover segment.
+        """
         clip_id = self.get_clip_id(segment)
         self.used_clips.add(clip_id)
         self.clip_track_map[clip_id] = f"{track}@S{segment_idx:03d}"
 
     def get_used_clips(self) -> Set[str]:
-        """Get all used clip IDs for filtering."""
+        """
+        Get all used clip IDs for filtering.
+
+        Returns:
+            Copy of the set of used clip IDs.
+        """
         return self.used_clips.copy()
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get statistics for logging."""
+        """
+        Get statistics for logging.
+
+        Returns:
+            Dict with total_clips_used and tracks_used counts.
+        """
         return {
             "total_clips_used": len(self.used_clips),
             "tracks_used": len(set(v.split('@')[0] for v in self.clip_track_map.values()))
