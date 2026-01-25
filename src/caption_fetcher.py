@@ -167,6 +167,175 @@ class CaptionParseWarning(CaptionError):
         super().__init__(message)
 
 
+class ConfigValidationError(CaptionError):
+    """Raised when language configuration is invalid (US-005 Sprint 6).
+
+    This indicates a configuration error that should be fixed before
+    running the pipeline. Invalid configurations will cause silent failures
+    during fetch.
+
+    Attributes:
+        field: The config field with the issue (e.g., 'fallback_languages').
+        value: The invalid value.
+        reason: Description of why validation failed.
+        suggestion: Suggested fix for the issue.
+    """
+    def __init__(
+        self,
+        field: str,
+        value: Any,
+        reason: str = "",
+        suggestion: str = ""
+    ):
+        self.field = field
+        self.value = value
+        self.reason = reason
+        self.suggestion = suggestion
+        message = f"Invalid language configuration for '{field}': {value}"
+        if reason:
+            message += f" - {reason}"
+        if suggestion:
+            message += f". Suggestion: {suggestion}"
+        super().__init__(message)
+
+
+# ISO 639-1 language codes (US-005)
+# This is a comprehensive set of valid 2-letter language codes
+# Reference: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
+ISO_639_1_CODES = frozenset({
+    'aa', 'ab', 'ae', 'af', 'ak', 'am', 'an', 'ar', 'as', 'av',
+    'ay', 'az', 'ba', 'be', 'bg', 'bh', 'bi', 'bm', 'bn', 'bo',
+    'br', 'bs', 'ca', 'ce', 'ch', 'co', 'cr', 'cs', 'cu', 'cv',
+    'cy', 'da', 'de', 'dv', 'dz', 'ee', 'el', 'en', 'eo', 'es',
+    'et', 'eu', 'fa', 'ff', 'fi', 'fj', 'fo', 'fr', 'fy', 'ga',
+    'gd', 'gl', 'gn', 'gu', 'gv', 'ha', 'he', 'hi', 'ho', 'hr',
+    'ht', 'hu', 'hy', 'hz', 'ia', 'id', 'ie', 'ig', 'ii', 'ik',
+    'io', 'is', 'it', 'iu', 'ja', 'jv', 'ka', 'kg', 'ki', 'kj',
+    'kk', 'kl', 'km', 'kn', 'ko', 'kr', 'ks', 'ku', 'kv', 'kw',
+    'ky', 'la', 'lb', 'lg', 'li', 'ln', 'lo', 'lt', 'lu', 'lv',
+    'mg', 'mh', 'mi', 'mk', 'ml', 'mn', 'mr', 'ms', 'mt', 'my',
+    'na', 'nb', 'nd', 'ne', 'ng', 'nl', 'nn', 'no', 'nr', 'nv',
+    'ny', 'oc', 'oj', 'om', 'or', 'os', 'pa', 'pi', 'pl', 'ps',
+    'pt', 'qu', 'rm', 'rn', 'ro', 'ru', 'rw', 'sa', 'sc', 'sd',
+    'se', 'sg', 'si', 'sk', 'sl', 'sm', 'sn', 'so', 'sq', 'sr',
+    'ss', 'st', 'su', 'sv', 'sw', 'ta', 'te', 'tg', 'th', 'ti',
+    'tk', 'tl', 'tn', 'to', 'tr', 'ts', 'tt', 'tw', 'ty', 'ug',
+    'uk', 'ur', 'uz', 've', 'vi', 'vo', 'wa', 'wo', 'xh', 'yi',
+    'yo', 'za', 'zh', 'zu',
+})
+
+
+def is_valid_language_code(code: str) -> bool:
+    """Check if a language code is a valid ISO 639-1 code (US-005).
+
+    Args:
+        code: Language code to validate.
+
+    Returns:
+        True if valid, False otherwise.
+
+    Examples:
+        >>> is_valid_language_code('en')
+        True
+        >>> is_valid_language_code('xyz')
+        False
+        >>> is_valid_language_code('ENG')
+        False
+    """
+    if not isinstance(code, str):
+        return False
+    # ISO 639-1 codes are exactly 2 lowercase letters
+    return code.lower() in ISO_639_1_CODES
+
+
+def validate_language_config(
+    preferred_language: str,
+    fallback_languages: List[str],
+    raise_on_error: bool = True
+) -> List[str]:
+    """Validate language configuration for caption fetching (US-005).
+
+    Checks:
+    1. All language codes are valid ISO 639-1 (2-letter codes)
+    2. No duplicates in fallback_languages
+    3. preferred_language is not repeated in fallback_languages (redundant)
+
+    Args:
+        preferred_language: Primary language code (e.g., 'en').
+        fallback_languages: List of fallback language codes.
+        raise_on_error: If True, raise ConfigValidationError on first error.
+                       If False, return list of warning messages.
+
+    Returns:
+        Empty list if valid, or list of warning/error messages.
+
+    Raises:
+        ConfigValidationError: If raise_on_error=True and validation fails.
+
+    Examples:
+        >>> validate_language_config('en', ['es', 'pt', 'fr'])
+        []
+        >>> validate_language_config('xyz', [])  # Invalid code
+        ConfigValidationError: Invalid language configuration for 'preferred_language': xyz
+        >>> validate_language_config('en', ['en', 'es'])  # Redundant
+        ['Warning: preferred_language "en" also in fallback_languages (redundant)']
+    """
+    issues = []
+
+    # Check preferred_language
+    if not is_valid_language_code(preferred_language):
+        msg = f'"{preferred_language}" is not a valid ISO 639-1 language code'
+        suggestion = 'Use a 2-letter code like "en", "es", "fr", "de", "pt", "zh", "ja"'
+        if raise_on_error:
+            raise ConfigValidationError(
+                field='preferred_language',
+                value=preferred_language,
+                reason=msg,
+                suggestion=suggestion
+            )
+        issues.append(f"Error: {msg}. {suggestion}")
+
+    # Check fallback_languages
+    seen = set()
+    for i, lang in enumerate(fallback_languages):
+        # Check validity
+        if not is_valid_language_code(lang):
+            msg = f'"{lang}" at position {i} is not a valid ISO 639-1 language code'
+            suggestion = 'Use 2-letter codes like "en", "es", "fr", "de", "pt", "zh", "ja"'
+            if raise_on_error:
+                raise ConfigValidationError(
+                    field='fallback_languages',
+                    value=lang,
+                    reason=msg,
+                    suggestion=suggestion
+                )
+            issues.append(f"Error: {msg}. {suggestion}")
+
+        # Check for duplicates within fallback_languages
+        lang_lower = lang.lower()
+        if lang_lower in seen:
+            msg = f'"{lang}" appears multiple times in fallback_languages'
+            suggestion = 'Remove duplicate entries'
+            if raise_on_error:
+                raise ConfigValidationError(
+                    field='fallback_languages',
+                    value=lang,
+                    reason=msg,
+                    suggestion=suggestion
+                )
+            issues.append(f"Error: {msg}. {suggestion}")
+        seen.add(lang_lower)
+
+    # Check if preferred_language is in fallback_languages (warn, not error)
+    if preferred_language.lower() in {lang.lower() for lang in fallback_languages}:
+        msg = (f'preferred_language "{preferred_language}" also in '
+               f'fallback_languages (redundant, will be tried twice)')
+        logger.warning(msg)
+        issues.append(f"Warning: {msg}")
+
+    return issues
+
+
 @dataclass
 class CaptionSegment:
     """A single caption segment with timing information.

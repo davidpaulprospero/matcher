@@ -4148,3 +4148,209 @@ class TestCaptionFormatPreference:
         # Should have tried both formats
         assert call_count[0] == 2
         assert result.format_source == "vtt"
+
+
+# ============================================================================
+# US-005: Language Configuration Validation Tests
+# ============================================================================
+
+
+class TestLanguageConfigValidation:
+    """Tests for language config validation (US-005 Sprint 6).
+
+    Validates:
+    1. ISO 639-1 language code validation
+    2. Duplicate detection in fallback_languages
+    3. Warning when preferred_language in fallback_languages
+    4. ConfigValidationError exception with suggestions
+    """
+
+    def test_is_valid_language_code_valid_codes(self):
+        """Test that valid ISO 639-1 codes are accepted."""
+        from src.caption_fetcher import is_valid_language_code
+
+        valid_codes = ['en', 'es', 'fr', 'de', 'pt', 'zh', 'ja', 'ko', 'ru', 'ar']
+        for code in valid_codes:
+            assert is_valid_language_code(code), f"{code} should be valid"
+
+    def test_is_valid_language_code_case_insensitive(self):
+        """Test that language codes are validated case-insensitively."""
+        from src.caption_fetcher import is_valid_language_code
+
+        assert is_valid_language_code('EN')
+        assert is_valid_language_code('En')
+        assert is_valid_language_code('eN')
+        assert is_valid_language_code('es')
+        assert is_valid_language_code('ES')
+
+    def test_is_valid_language_code_invalid_codes(self):
+        """Test that invalid codes are rejected."""
+        from src.caption_fetcher import is_valid_language_code
+
+        invalid_codes = [
+            'eng',      # 3 letters (ISO 639-2)
+            'english',  # Full word
+            'e',        # Too short
+            'xyz',      # Not a valid code
+            '12',       # Numbers
+            '',         # Empty
+        ]
+        for code in invalid_codes:
+            assert not is_valid_language_code(code), f"{code} should be invalid"
+
+    def test_is_valid_language_code_non_strings(self):
+        """Test that non-string inputs return False."""
+        from src.caption_fetcher import is_valid_language_code
+
+        assert not is_valid_language_code(None)
+        assert not is_valid_language_code(123)
+        assert not is_valid_language_code(['en'])
+        assert not is_valid_language_code({'code': 'en'})
+
+    def test_validate_language_config_valid(self):
+        """Test that valid config passes validation."""
+        from src.caption_fetcher import validate_language_config
+
+        # Should not raise
+        issues = validate_language_config('en', ['es', 'pt', 'fr'])
+        assert issues == []
+
+    def test_validate_language_config_empty_fallback(self):
+        """Test that empty fallback list is valid."""
+        from src.caption_fetcher import validate_language_config
+
+        issues = validate_language_config('en', [])
+        assert issues == []
+
+    def test_validate_language_config_invalid_preferred(self):
+        """Test that invalid preferred_language raises ConfigValidationError."""
+        from src.caption_fetcher import validate_language_config, ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_language_config('xyz', [])
+
+        error = exc_info.value
+        assert error.field == 'preferred_language'
+        assert error.value == 'xyz'
+        assert 'ISO 639-1' in error.reason
+        assert error.suggestion  # Has a suggestion
+
+    def test_validate_language_config_invalid_preferred_three_letter(self):
+        """Test that 3-letter codes (ISO 639-2) are rejected."""
+        from src.caption_fetcher import validate_language_config, ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_language_config('eng', [])  # 'eng' is ISO 639-2, not 639-1
+
+        error = exc_info.value
+        assert error.field == 'preferred_language'
+        assert 'eng' in str(error.value)
+
+    def test_validate_language_config_invalid_fallback_code(self):
+        """Test that invalid fallback language raises ConfigValidationError."""
+        from src.caption_fetcher import validate_language_config, ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_language_config('en', ['es', 'invalid', 'fr'])
+
+        error = exc_info.value
+        assert error.field == 'fallback_languages'
+        assert error.value == 'invalid'
+        assert 'position 1' in error.reason
+
+    def test_validate_language_config_duplicate_in_fallback(self):
+        """Test that duplicate fallback languages raises ConfigValidationError."""
+        from src.caption_fetcher import validate_language_config, ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_language_config('en', ['es', 'pt', 'es'])
+
+        error = exc_info.value
+        assert error.field == 'fallback_languages'
+        assert 'es' in str(error.value)
+        assert 'multiple times' in error.reason
+
+    def test_validate_language_config_duplicate_case_insensitive(self):
+        """Test that duplicates are detected case-insensitively."""
+        from src.caption_fetcher import validate_language_config, ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_language_config('en', ['ES', 'pt', 'es'])
+
+        error = exc_info.value
+        assert 'multiple times' in error.reason
+
+    def test_validate_language_config_preferred_in_fallback_warns(self):
+        """Test that preferred_language in fallback produces warning, not error."""
+        from src.caption_fetcher import validate_language_config
+
+        # Should not raise, but return warning
+        issues = validate_language_config('en', ['en', 'es', 'pt'])
+
+        assert len(issues) == 1
+        assert 'Warning' in issues[0]
+        assert 'redundant' in issues[0]
+
+    def test_validate_language_config_no_raise_mode(self):
+        """Test validation with raise_on_error=False returns all issues."""
+        from src.caption_fetcher import validate_language_config
+
+        issues = validate_language_config('xyz', ['invalid', 'es', 'es'], raise_on_error=False)
+
+        # Should collect all issues instead of raising
+        assert len(issues) >= 2  # Invalid preferred + invalid fallback (+ maybe duplicate)
+        assert any('xyz' in issue for issue in issues)
+        assert any('invalid' in issue for issue in issues)
+
+    def test_config_validation_error_message_format(self):
+        """Test that ConfigValidationError has well-formatted message."""
+        from src.caption_fetcher import ConfigValidationError
+
+        error = ConfigValidationError(
+            field='test_field',
+            value='bad_value',
+            reason='not valid',
+            suggestion='try something else'
+        )
+
+        message = str(error)
+        assert 'test_field' in message
+        assert 'bad_value' in message
+        assert 'not valid' in message
+        assert 'try something else' in message
+
+    def test_config_validation_error_attributes(self):
+        """Test ConfigValidationError has expected attributes."""
+        from src.caption_fetcher import ConfigValidationError
+
+        error = ConfigValidationError(
+            field='fallback_languages',
+            value='xyz',
+            reason='invalid code',
+            suggestion='use en, es, fr'
+        )
+
+        assert error.field == 'fallback_languages'
+        assert error.value == 'xyz'
+        assert error.reason == 'invalid code'
+        assert error.suggestion == 'use en, es, fr'
+
+    def test_iso_639_1_codes_coverage(self):
+        """Test that ISO 639-1 code set includes common languages."""
+        from src.caption_fetcher import ISO_639_1_CODES
+
+        # Common language codes that must be present
+        common_codes = [
+            'en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh',
+            'ar', 'hi', 'nl', 'pl', 'sv', 'tr', 'vi', 'th', 'id', 'he'
+        ]
+        for code in common_codes:
+            assert code in ISO_639_1_CODES, f"Common code {code} missing from set"
+
+    def test_iso_639_1_codes_count(self):
+        """Test that we have approximately the right number of ISO 639-1 codes."""
+        from src.caption_fetcher import ISO_639_1_CODES
+
+        # ISO 639-1 has around 180 codes
+        assert 170 <= len(ISO_639_1_CODES) <= 190, \
+            f"Expected ~180 ISO 639-1 codes, got {len(ISO_639_1_CODES)}"
