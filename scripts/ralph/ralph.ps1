@@ -1022,6 +1022,292 @@ function Log-ErrorEvolution {
 }
 
 # ============================================================================
+# PHASE 3: DETAILED TRACKING
+# ============================================================================
+
+# Task 3.1: Configuration Change Audit Trail
+function Log-ConfigChange {
+    <#
+    .SYNOPSIS
+        Log configuration changes for audit trail
+    .PARAMETER Field
+        Configuration field that changed
+    .PARAMETER OldValue
+        Previous value
+    .PARAMETER NewValue
+        New value
+    .PARAMETER Reason
+        Reason for change
+    #>
+    param(
+        [string]$Field,
+        $OldValue,
+        $NewValue,
+        [string]$Reason = "manual"
+    )
+
+    $configAuditFile = Join-Path $script:RalphDir "config_audit.jsonl"
+
+    $entry = @{
+        ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        session = $script:SessionId
+        field = $Field
+        old = $OldValue
+        new = $NewValue
+        reason = $Reason
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $configAuditFile -Encoding UTF8
+}
+
+# Task 3.2: Test Failure Detail Logging
+function Log-TestDetails {
+    <#
+    .SYNOPSIS
+        Parse and log detailed test results from Claude output
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER Output
+        Claude's output containing test results
+    #>
+    param(
+        [int]$Iteration,
+        [string]$Output
+    )
+
+    $testDetailsFile = Join-Path $script:SessionLogDir "test_details_$Iteration.json"
+
+    # Parse pytest output for individual test results
+    $testResults = @()
+    $passed = 0
+    $failed = 0
+    $skipped = 0
+    $errors = 0
+
+    # Match pytest verbose output: test_file.py::test_name PASSED/FAILED
+    $testMatches = [regex]::Matches($Output, '([\w\/]+\.py::\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)(?:\s+\[\s*(\d+)%\])?')
+    foreach ($match in $testMatches) {
+        $testName = $match.Groups[1].Value
+        $status = $match.Groups[2].Value.ToLower()
+
+        $testResults += @{
+            name = $testName
+            status = $status
+        }
+
+        switch ($status) {
+            "passed" { $passed++ }
+            "failed" { $failed++ }
+            "skipped" { $skipped++ }
+            "error" { $errors++ }
+        }
+    }
+
+    # Extract duration if present
+    $duration = 0
+    if ($Output -match "passed.*in\s+([\d.]+)s") {
+        $duration = [double]$Matches[1]
+    }
+
+    $testDetails = @{
+        iteration = $Iteration
+        testRun = @{
+            command = "pytest"
+            duration = $duration
+            exitCode = if ($failed -eq 0 -and $errors -eq 0) { 0 } else { 1 }
+        }
+        results = $testResults
+        summary = @{
+            passed = $passed
+            failed = $failed
+            skipped = $skipped
+            errors = $errors
+            total = $passed + $failed + $skipped + $errors
+        }
+    }
+
+    $testDetails | ConvertTo-Json -Depth 5 | Set-Content -Path $testDetailsFile -Encoding UTF8
+    return $testDetails
+}
+
+# Task 3.3: Resource Usage Monitoring
+function Get-ProcessMetrics {
+    <#
+    .SYNOPSIS
+        Get resource usage metrics for a process
+    .PARAMETER ProcessId
+        Process ID to monitor
+    .RETURNS
+        Hashtable with CPU, memory, handles, threads
+    #>
+    param([int]$ProcessId)
+
+    try {
+        $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($proc) {
+            return @{
+                cpu = [math]::Round($proc.CPU, 2)
+                memoryMB = [math]::Round($proc.WorkingSet64 / 1MB, 2)
+                handles = $proc.HandleCount
+                threads = $proc.Threads.Count
+                timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+            }
+        }
+    }
+    catch {}
+
+    return @{ cpu = 0; memoryMB = 0; handles = 0; threads = 0; timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ") }
+}
+
+function Log-ResourceUsage {
+    <#
+    .SYNOPSIS
+        Log resource usage for an iteration
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER ProcessId
+        Process ID that was monitored
+    .PARAMETER Samples
+        Array of resource samples
+    #>
+    param(
+        [int]$Iteration,
+        [int]$ProcessId,
+        [array]$Samples
+    )
+
+    $resourceFile = Join-Path $script:SessionLogDir "resource_usage_$Iteration.json"
+
+    # Calculate averages and peaks
+    $avgCpu = if ($Samples.Count -gt 0) { [math]::Round(($Samples | ForEach-Object { $_.cpu } | Measure-Object -Average).Average, 2) } else { 0 }
+    $avgMem = if ($Samples.Count -gt 0) { [math]::Round(($Samples | ForEach-Object { $_.memoryMB } | Measure-Object -Average).Average, 2) } else { 0 }
+    $peakMem = if ($Samples.Count -gt 0) { ($Samples | ForEach-Object { $_.memoryMB } | Measure-Object -Maximum).Maximum } else { 0 }
+
+    $usage = @{
+        iteration = $Iteration
+        processId = $ProcessId
+        sampleCount = $Samples.Count
+        averages = @{
+            cpuSeconds = $avgCpu
+            memoryMB = $avgMem
+        }
+        peaks = @{
+            memoryMB = $peakMem
+        }
+        samples = $Samples
+    }
+
+    $usage | ConvertTo-Json -Depth 5 | Set-Content -Path $resourceFile -Encoding UTF8
+}
+
+# Task 3.4: Prompt Effectiveness Scoring
+function Get-PromptEffectiveness {
+    <#
+    .SYNOPSIS
+        Calculate prompt effectiveness score
+    .PARAMETER Success
+        Whether iteration succeeded
+    .PARAMETER RetryCount
+        Number of retries attempted
+    .RETURNS
+        Effectiveness score (0.0 to 1.0)
+    #>
+    param(
+        [bool]$Success,
+        [int]$RetryCount
+    )
+
+    if (-not $Success) {
+        return 0.0
+    }
+
+    if ($RetryCount -le 1) {
+        return 1.0  # First try success
+    }
+    elseif ($RetryCount -le 3) {
+        return 0.5  # Success after few retries
+    }
+    else {
+        return 0.25  # Success after many retries
+    }
+}
+
+function Log-PromptEffectiveness {
+    <#
+    .SYNOPSIS
+        Log prompt effectiveness for analysis
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER PromptType
+        Type of prompt (prd_generation, story_work, etc.)
+    .PARAMETER Effectiveness
+        Effectiveness score
+    .PARAMETER PromptHash
+        Hash of the prompt content
+    #>
+    param(
+        [int]$Iteration,
+        [string]$PromptType,
+        [double]$Effectiveness,
+        [string]$PromptHash
+    )
+
+    $effectivenessFile = Join-Path $script:SessionLogDir "prompt_effectiveness.jsonl"
+
+    $entry = @{
+        ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        iteration = $Iteration
+        promptType = $PromptType
+        effectiveness = $Effectiveness
+        promptHash = $PromptHash
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $effectivenessFile -Encoding UTF8
+}
+
+# Task 3.5: Skip/Blocker Tracking
+function Log-Skip {
+    <#
+    .SYNOPSIS
+        Log when a story/focus area is skipped
+    .PARAMETER ItemId
+        Story or focus area ID
+    .PARAMETER ItemType
+        Type (story, focus_area)
+    .PARAMETER Reason
+        Reason for skip
+    .PARAMETER BlockerType
+        Type of blocker (dependency, error, manual)
+    #>
+    param(
+        [string]$ItemId,
+        [string]$ItemType = "story",
+        [string]$Reason,
+        [string]$BlockerType = "manual"
+    )
+
+    $skipFile = Join-Path $script:SessionLogDir "skips_blockers.jsonl"
+
+    $entry = @{
+        ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        session = $script:SessionId
+        itemId = $ItemId
+        itemType = $ItemType
+        reason = $Reason
+        blockerType = $BlockerType
+        resolved = $false
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $skipFile -Encoding UTF8
+
+    # Also log to timeline
+    Append-SessionTimeline -Event "item_skipped" -Data @{
+        itemId = $ItemId
+        reason = $Reason
+    }
+}
+
+# ============================================================================
 # CLAUDE INVOCATION
 # ============================================================================
 
@@ -1211,7 +1497,22 @@ Start by reading the config and prompt files, then generate the PRD.
             -RedirectStandardOutput $outFile `
             -RedirectStandardError $errFile
 
-        $exited = $process.WaitForExit($timeout * 1000)
+        # Phase 3 - Task 3.3: Sample resource usage during execution
+        $resourceSamples = @()
+        $sampleIntervalMs = 5000  # Sample every 5 seconds
+        $waitedMs = 0
+        $timeoutMs = $timeout * 1000
+
+        while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
+            Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
+            $waitedMs += $sampleIntervalMs
+            if (-not $process.HasExited) {
+                $sample = Get-ProcessMetrics -ProcessId $process.Id
+                $resourceSamples += $sample
+            }
+        }
+
+        $exited = $process.HasExited  # True if process finished within timeout
         $executionEnd = Get-Date
 
         $iterationDuration = (Get-Date) - $iterationStart
@@ -1348,6 +1649,30 @@ Start by reading the config and prompt files, then generate the PRD.
             durationSec = [int]$iterationDuration.TotalSeconds
         }
 
+        # === PHASE 3: DETAILED TRACKING ===
+
+        # 6. Log test details (Task 3.2)
+        if ($claudeOutput) {
+            Log-TestDetails -Iteration $script:IterationCount -Output $claudeOutput
+        }
+
+        # 7. Log resource usage (Task 3.3)
+        if ($resourceSamples.Count -gt 0) {
+            Log-ResourceUsage -Iteration $script:IterationCount -ProcessId $process.Id -Samples $resourceSamples
+        }
+
+        # 8. Log prompt effectiveness (Task 3.4)
+        $effectiveness = Get-PromptEffectiveness -Success $success -RetryCount $script:CurrentRetryCount
+        $promptContent = Get-Content $promptFile -Raw -ErrorAction SilentlyContinue
+        $promptHashShort = ""
+        if ($promptContent) {
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($promptContent)
+            $hashBytes = $md5.ComputeHash($bytes)
+            $promptHashShort = ([BitConverter]::ToString($hashBytes) -replace '-', '').Substring(0, 16)
+        }
+        Log-PromptEffectiveness -Iteration $script:IterationCount -PromptType $promptType -Effectiveness $effectiveness -PromptHash $promptHashShort
+
         return $success
     }
     catch {
@@ -1478,7 +1803,22 @@ function Invoke-ClaudeForStory {
             -RedirectStandardOutput $outFile `
             -RedirectStandardError $errFile
 
-        $exited = $process.WaitForExit($timeout * 1000)
+        # Phase 3 - Task 3.3: Sample resource usage during execution
+        $resourceSamples = @()
+        $sampleIntervalMs = 5000  # Sample every 5 seconds
+        $waitedMs = 0
+        $timeoutMs = $timeout * 1000
+
+        while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
+            Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
+            $waitedMs += $sampleIntervalMs
+            if (-not $process.HasExited) {
+                $sample = Get-ProcessMetrics -ProcessId $process.Id
+                $resourceSamples += $sample
+            }
+        }
+
+        $exited = $process.HasExited  # True if process finished within timeout
         $executionEnd = Get-Date
         $iterationDuration = (Get-Date) - $iterationStart
 
@@ -1615,6 +1955,30 @@ function Invoke-ClaudeForStory {
             success = $success
             durationSec = [int]$iterationDuration.TotalSeconds
         }
+
+        # === PHASE 3: DETAILED TRACKING ===
+
+        # 6. Log test details (Task 3.2)
+        if ($claudeOutput) {
+            Log-TestDetails -Iteration $script:IterationCount -Output $claudeOutput
+        }
+
+        # 7. Log resource usage (Task 3.3)
+        if ($resourceSamples.Count -gt 0) {
+            Log-ResourceUsage -Iteration $script:IterationCount -ProcessId $process.Id -Samples $resourceSamples
+        }
+
+        # 8. Log prompt effectiveness (Task 3.4)
+        $effectiveness = Get-PromptEffectiveness -Success $success -RetryCount $script:CurrentRetryCount
+        $promptContent = Get-Content $promptFile -Raw -ErrorAction SilentlyContinue
+        $promptHashShort = ""
+        if ($promptContent) {
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($promptContent)
+            $hashBytes = $md5.ComputeHash($bytes)
+            $promptHashShort = ([BitConverter]::ToString($hashBytes) -replace '-', '').Substring(0, 16)
+        }
+        Log-PromptEffectiveness -Iteration $script:IterationCount -PromptType "story_work" -Effectiveness $effectiveness -PromptHash $promptHashShort
 
         return $success
     }
