@@ -145,7 +145,8 @@
         "Keyword events saved to checkpoint for cross-session analysis",
         "Tests verify per-keyword tracking and report output"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Added keyword_rate_limit_events dict to RateLimitMetrics dataclass. Updated record_rate_limit_event() to accept optional keyword parameter. Modified summary() to show top 5 keywords (sorted by count descending) when total rate limit events > 10. Added get_config_recommendations() logic to suggest skipping keywords causing > 30% of rate limit events. Updated from_dict() and clear() for keyword events persistence. Modified core.py handle_rate_limit_error() to pass keyword through. 27 new tests verify all acceptance criteria."
     },
     {
       "id": "US-010",
@@ -160,7 +161,8 @@
         "Verification failure logged with endpoint used",
         "Tests verify custom endpoints are used for verification"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Added skip_verification, verification_endpoint, and verification_ip config options to VPNConfig. Updated VpnManager._verify_connection() to use configured endpoints with getattr() for backward compatibility. Verification failure logs which endpoints were tried. Added skip logic in switch() that checks skip_verification. 15 new tests verify custom endpoints (Cloudflare, OpenDNS), skip option, backward compatibility, logging, and precedence rules."
     },
     {
       "id": "US-011",
