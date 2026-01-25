@@ -41,6 +41,9 @@ from .speech_screening import SpeechScreener
 from .title_filter import TitleFilter
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
+from .cookie_rotator import CookieRotator
+from .vpn_manager import VPNManager
+from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord
 
 # Segment utilities (public helpers)
 from . import segment_utils
@@ -76,6 +79,11 @@ __all__ = [
     'TitleFilter',
     'SearchOptimizer',
     'AudioFirstPipeline',
+    'CookieRotator',
+    'VPNManager',
+    'DownloadSpeedTracker',
+    'DownloadSpeedConfig',
+    'DownloadRecord',
 
     # Segment utilities
     'collect_matched_segments',

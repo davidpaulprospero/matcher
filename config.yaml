@@ -843,7 +843,9 @@ download:
   # Adaptive pool: automatically expands pool for low-pass-rate keywords
 
   # Timeout settings (seconds)
-  search_timeout: 60         # Timeout for search metadata subprocess
+  # Search timeout: If YouTube search takes longer than this, try keyword remix
+  # (max 2 remix attempts before giving up). Keep low to avoid blocking pipeline.
+  search_timeout: 30         # Timeout for search metadata subprocess (triggers remix on timeout)
   download_timeout: 120      # Default timeout per video download (used for 'short' tier)
 
   # Tier-specific download timeouts (longer videos need more time)
@@ -936,6 +938,22 @@ download:
     max_switches_per_session: 10  # Limit VPN rotations (0 = unlimited)
     verify_connection: true     # Verify connectivity after switch
     verify_timeout: 30          # Timeout for connection verification
+
+  # Speed tracking: monitor download speeds for adaptive timeouts
+  # Tracks actual download speeds and adjusts timeouts dynamically based on
+  # network conditions. On slow networks, timeouts can be extended up to 2x.
+  #
+  # How it works:
+  #   1. Records bytes downloaded and time for each video
+  #   2. Tracks sliding window of last 5 downloads
+  #   3. If avg speed < min_speed_mbps, extends timeout proportionally
+  #   4. State is persisted in checkpoint for resume scenarios
+  speed_tracking:
+    enabled: true              # Enable speed monitoring
+    window_size: 5             # Number of downloads to track (sliding window)
+    min_speed_mbps: 1.0        # Below this, timeout gets extended (MB/s)
+    max_timeout_multiplier: 2.0  # Maximum timeout extension (2x)
+    enable_adaptive_timeout: true  # Auto-extend timeouts on slow networks
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
