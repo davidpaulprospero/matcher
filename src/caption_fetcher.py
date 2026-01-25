@@ -3008,6 +3008,277 @@ class CaptionFetcher:
             logger.debug(f"Error checking live stream status for {video_id}: {e}")
             return False
 
+    def get_video_metadata(
+        self,
+        video_id: str,
+        timeout: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Get video metadata including channel_id (US-006 Sprint 7).
+
+        Uses yt-dlp --dump-json to fetch video metadata. The channel_id field
+        is used for batch pre-check grouping by channel.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            timeout: Timeout for metadata fetch in seconds. If None, uses self._timeout.
+
+        Returns:
+            Dict with video metadata including 'channel_id', 'channel', 'title', etc.
+            Empty dict on error.
+
+        Example:
+            >>> fetcher = CaptionFetcher()
+            >>> meta = fetcher.get_video_metadata("dQw4w9WgXcQ")
+            >>> print(f"Channel ID: {meta.get('channel_id')}")
+        """
+        if not self._is_valid_video_id(video_id):
+            logger.debug(f"Invalid video ID for metadata fetch: {video_id}")
+            return {}
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        fetch_timeout = timeout if timeout is not None else self._timeout
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '--skip-download',
+            '--dump-json',
+            '--no-playlist',
+            '--no-warnings',
+        ]
+
+        # Add cookies if configured
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=fetch_timeout
+            )
+
+            if result.returncode != 0:
+                logger.debug(
+                    f"Could not fetch metadata for {video_id}: {result.stderr[:100]}"
+                )
+                return {}
+
+            try:
+                metadata = json.loads(result.stdout)
+                return metadata
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse metadata JSON for {video_id}: {e}")
+                return {}
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout fetching metadata for {video_id}")
+            return {}
+        except Exception as e:
+            logger.debug(f"Error fetching metadata for {video_id}: {e}")
+            return {}
+
+    def batch_precheck_by_channel(
+        self,
+        video_ids: List[str],
+        channel_info: Optional[Dict[str, str]] = None,
+        cache: Optional['CaptionCache'] = None,
+        metrics: Optional['CaptionMetrics'] = None,
+        confidence_threshold: float = 0.9,
+        min_samples_for_confidence: int = 5,
+        sample_size_per_channel: int = 5
+    ) -> 'BatchPreCheckResult':
+        """Pre-check caption availability with channel-based batching (US-006 Sprint 7).
+
+        Groups videos by channel and uses representative samples to determine
+        caption availability for the entire channel, reducing API calls.
+
+        Algorithm:
+        1. Group videos by channel_id (from channel_info or metadata lookup)
+        2. Load historical channel patterns from cache
+        3. For each channel:
+           a. If pattern has >90% confidence and >=5 samples, use pattern for all videos
+           b. Otherwise, check sample_size_per_channel representative videos
+        4. Update patterns with new observations
+        5. Track API calls saved in result
+
+        Args:
+            video_ids: List of YouTube video IDs to check.
+            channel_info: Optional pre-computed mapping of video_id -> channel_id.
+                         If not provided, fetches metadata for each video.
+            cache: CaptionCache for loading/saving channel patterns.
+            metrics: CaptionMetrics for recording pre-check results.
+            confidence_threshold: Minimum success rate to skip individual checks (default: 0.9).
+            min_samples_for_confidence: Minimum videos checked before trusting pattern (default: 5).
+            sample_size_per_channel: Videos to check per channel when building pattern (default: 5).
+
+        Returns:
+            BatchPreCheckResult with video-level results and API call savings.
+
+        Example:
+            >>> fetcher = CaptionFetcher(config)
+            >>> cache = CaptionCache(config.download.caption_first)
+            >>> # 50 videos from same channel, only 5 actually checked
+            >>> result = fetcher.batch_precheck_by_channel(video_ids, cache=cache)
+            >>> print(f"Checked {result.actual_checks}/{result.total_videos}, saved {result.api_calls_saved}")
+        """
+        result = BatchPreCheckResult(total_videos=len(video_ids))
+
+        if not video_ids:
+            return result
+
+        # Step 1: Group videos by channel
+        channel_videos: Dict[str, List[str]] = {}  # channel_id -> [video_ids]
+        video_to_channel: Dict[str, str] = {}  # video_id -> channel_id
+        unknown_channel_videos: List[str] = []  # Videos we couldn't get channel for
+
+        for video_id in video_ids:
+            # Get channel_id from provided info or fetch metadata
+            channel_id = None
+            if channel_info and video_id in channel_info:
+                channel_id = channel_info[video_id]
+            else:
+                # Fetch metadata to get channel_id
+                metadata = self.get_video_metadata(video_id)
+                channel_id = metadata.get('channel_id')
+                result.actual_checks += 1  # Metadata fetch counts as an API call
+
+            if channel_id:
+                video_to_channel[video_id] = channel_id
+                if channel_id not in channel_videos:
+                    channel_videos[channel_id] = []
+                channel_videos[channel_id].append(video_id)
+            else:
+                unknown_channel_videos.append(video_id)
+
+        logger.debug(
+            f"Batch pre-check: {len(video_ids)} videos across {len(channel_videos)} channels, "
+            f"{len(unknown_channel_videos)} unknown"
+        )
+
+        # Step 2: Load historical channel patterns
+        patterns: Dict[str, ChannelCaptionPattern] = {}
+        if cache:
+            patterns = cache.load_channel_patterns()
+
+        # Step 3: Process each channel
+        for channel_id, videos in channel_videos.items():
+            pattern = patterns.get(channel_id)
+
+            # Check if we have high-confidence pattern
+            high_confidence = (
+                pattern is not None and
+                pattern.videos_checked >= min_samples_for_confidence and
+                (pattern.success_rate >= confidence_threshold or pattern.success_rate <= (1 - confidence_threshold))
+            )
+
+            if high_confidence:
+                # Use pattern for all videos in this channel
+                has_captions = pattern.success_rate >= confidence_threshold
+                for vid in videos:
+                    result.video_results[vid] = has_captions
+                    result.skipped_by_pattern += 1
+                    if metrics:
+                        metrics.record_pre_check(vid, has_captions)
+                        metrics.record_pre_check_batched(vid, skipped=True)
+                logger.debug(
+                    f"Channel {channel_id}: Using pattern ({pattern.success_rate:.0%} success) "
+                    f"for {len(videos)} videos"
+                )
+            else:
+                # Need to check samples for this channel
+                if pattern is None:
+                    pattern = ChannelCaptionPattern(channel_id=channel_id)
+                    patterns[channel_id] = pattern
+
+                # Check up to sample_size_per_channel videos
+                to_check = videos[:sample_size_per_channel]
+                rest = videos[sample_size_per_channel:]
+
+                for vid in to_check:
+                    try:
+                        has_captions = self.has_captions(vid)
+                        result.actual_checks += 1
+                        result.video_results[vid] = has_captions
+                        pattern.update(has_captions)
+                        if metrics:
+                            metrics.record_pre_check(vid, has_captions)
+                            metrics.record_pre_check_batched(vid, skipped=False)
+                    except CaptionFetchError as e:
+                        logger.warning(f"Pre-check error for {vid}: {e}")
+                        # On error, assume available to avoid false negatives
+                        result.video_results[vid] = True
+                        result.actual_checks += 1
+                        if metrics:
+                            metrics.record_pre_check(vid, True)
+                            metrics.record_pre_check_batched(vid, skipped=False)
+
+                # After sampling, apply pattern to remaining videos
+                if rest and pattern.videos_checked >= min_samples_for_confidence:
+                    inferred_has_captions = pattern.success_rate >= 0.5  # Use majority
+                    for vid in rest:
+                        result.video_results[vid] = inferred_has_captions
+                        result.skipped_by_pattern += 1
+                        if metrics:
+                            metrics.record_pre_check(vid, inferred_has_captions)
+                            metrics.record_pre_check_batched(vid, skipped=True)
+                    logger.debug(
+                        f"Channel {channel_id}: Sampled {len(to_check)}, "
+                        f"inferred {len(rest)} ({pattern.success_rate:.0%} success)"
+                    )
+                elif rest:
+                    # Not enough samples yet, check all
+                    for vid in rest:
+                        try:
+                            has_captions = self.has_captions(vid)
+                            result.actual_checks += 1
+                            result.video_results[vid] = has_captions
+                            pattern.update(has_captions)
+                            if metrics:
+                                metrics.record_pre_check(vid, has_captions)
+                                metrics.record_pre_check_batched(vid, skipped=False)
+                        except CaptionFetchError as e:
+                            logger.warning(f"Pre-check error for {vid}: {e}")
+                            result.video_results[vid] = True
+                            result.actual_checks += 1
+                            if metrics:
+                                metrics.record_pre_check(vid, True)
+                                metrics.record_pre_check_batched(vid, skipped=False)
+
+        # Step 4: Process videos with unknown channel (check individually)
+        for vid in unknown_channel_videos:
+            try:
+                has_captions = self.has_captions(vid)
+                result.actual_checks += 1
+                result.video_results[vid] = has_captions
+                if metrics:
+                    metrics.record_pre_check(vid, has_captions)
+                    metrics.record_pre_check_batched(vid, skipped=False)
+            except CaptionFetchError as e:
+                logger.warning(f"Pre-check error for {vid}: {e}")
+                result.video_results[vid] = True
+                result.actual_checks += 1
+                if metrics:
+                    metrics.record_pre_check(vid, True)
+                    metrics.record_pre_check_batched(vid, skipped=False)
+
+        # Step 5: Save updated patterns
+        result.channel_patterns = patterns
+        if cache and patterns:
+            cache.save_channel_patterns(patterns)
+
+        # Calculate API calls saved
+        result.api_calls_saved = result.total_videos - result.actual_checks
+        if result.api_calls_saved < 0:
+            result.api_calls_saved = 0  # Can happen if metadata fetches counted
+
+        logger.info(
+            f"Batch pre-check complete: {result.actual_checks}/{result.total_videos} API calls "
+            f"(saved {result.api_calls_saved}, {result.skipped_by_pattern} skipped by pattern)"
+        )
+
+        return result
+
 
 @dataclass
 class CachedCaption:
@@ -3109,6 +3380,109 @@ class CacheValidationResult:
             actual_segment_count=data.get('actual_segment_count'),
             segment_count_deviation=data.get('segment_count_deviation'),
         )
+
+
+@dataclass
+class ChannelCaptionPattern:
+    """Channel-level caption availability pattern (US-006 Sprint 7).
+
+    Tracks whether a YouTube channel typically has captions available.
+    Used for batch pre-check optimization: if a channel has >90% confidence,
+    skip individual pre-checks for remaining videos from that channel.
+
+    Attributes:
+        channel_id: YouTube channel ID (UCxxxx format).
+        videos_checked: Number of videos checked for this channel.
+        captions_found: Number of videos that had captions available.
+        success_rate: Ratio of captions_found / videos_checked (0.0-1.0).
+        last_updated: Unix timestamp when pattern was last updated.
+
+    Example:
+        >>> pattern = ChannelCaptionPattern(
+        ...     channel_id="UCuAXFkgsw1L7xaCfnd5JJOw",
+        ...     videos_checked=10,
+        ...     captions_found=9,
+        ...     success_rate=0.9,
+        ...     last_updated=time.time()
+        ... )
+        >>> if pattern.success_rate > 0.9 and pattern.videos_checked >= 5:
+        ...     print("High confidence - skip pre-checks")
+    """
+    channel_id: str
+    videos_checked: int = 0
+    captions_found: int = 0
+    success_rate: float = 0.0
+    last_updated: float = 0.0
+
+    def update(self, has_captions: bool) -> None:
+        """Update pattern with a new video check result.
+
+        Args:
+            has_captions: Whether the video had captions available.
+        """
+        self.videos_checked += 1
+        if has_captions:
+            self.captions_found += 1
+        self.success_rate = self.captions_found / self.videos_checked if self.videos_checked > 0 else 0.0
+        self.last_updated = time.time()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'channel_id': self.channel_id,
+            'videos_checked': self.videos_checked,
+            'captions_found': self.captions_found,
+            'success_rate': self.success_rate,
+            'last_updated': self.last_updated,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ChannelCaptionPattern':
+        """Create from dictionary."""
+        return cls(
+            channel_id=data.get('channel_id', ''),
+            videos_checked=data.get('videos_checked', 0),
+            captions_found=data.get('captions_found', 0),
+            success_rate=data.get('success_rate', 0.0),
+            last_updated=data.get('last_updated', 0.0),
+        )
+
+
+@dataclass
+class BatchPreCheckResult:
+    """Result of batch pre-check by channel (US-006 Sprint 7).
+
+    Contains the results of checking caption availability for a batch of videos
+    grouped by channel, including metrics on API calls saved.
+
+    Attributes:
+        video_results: Dict mapping video_id -> has_captions (bool).
+        channel_patterns: Updated channel patterns after checks.
+        total_videos: Total number of videos processed.
+        actual_checks: Number of actual API calls made.
+        skipped_by_pattern: Number of videos skipped due to high-confidence pattern.
+        api_calls_saved: Estimated API calls saved (total_videos - actual_checks).
+    """
+    video_results: Dict[str, bool] = field(default_factory=dict)
+    channel_patterns: Dict[str, ChannelCaptionPattern] = field(default_factory=dict)
+    total_videos: int = 0
+    actual_checks: int = 0
+    skipped_by_pattern: int = 0
+    api_calls_saved: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'video_results': self.video_results,
+            'channel_patterns': {
+                cid: pattern.to_dict()
+                for cid, pattern in self.channel_patterns.items()
+            },
+            'total_videos': self.total_videos,
+            'actual_checks': self.actual_checks,
+            'skipped_by_pattern': self.skipped_by_pattern,
+            'api_calls_saved': self.api_calls_saved,
+        }
 
 
 class CaptionCache(BaseCache):
@@ -3637,6 +4011,138 @@ class CaptionCache(BaseCache):
         except Exception as e:
             logger.warning(f"Failed to load format statistics: {e}")
             return {}
+
+    def save_channel_patterns(
+        self,
+        patterns: Dict[str, 'ChannelCaptionPattern']
+    ) -> bool:
+        """Save channel caption patterns to cache metadata (US-006 Sprint 7).
+
+        Persists channel-level caption availability patterns for cross-run
+        optimization. These patterns enable batch pre-check grouping where
+        channels with high confidence patterns skip individual pre-checks.
+
+        Args:
+            patterns: Dict mapping channel_id -> ChannelCaptionPattern.
+
+        Returns:
+            True if saved successfully, False otherwise.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> patterns = {
+            ...     "UCabc": ChannelCaptionPattern("UCabc", 10, 9, 0.9, time.time()),
+            ...     "UCdef": ChannelCaptionPattern("UCdef", 5, 0, 0.0, time.time()),
+            ... }
+            >>> cache.save_channel_patterns(patterns)
+            True
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            metadata_key = "__channel_patterns__"
+            self.index[metadata_key] = {
+                'patterns': {
+                    cid: pattern.to_dict()
+                    for cid, pattern in patterns.items()
+                },
+                'updated_at': time.time(),
+                'total_channels': len(patterns),
+            }
+            if self.auto_save:
+                self._save_index()
+
+            logger.debug(f"Saved {len(patterns)} channel caption patterns")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to save channel patterns: {e}")
+            return False
+
+    def load_channel_patterns(self) -> Dict[str, 'ChannelCaptionPattern']:
+        """Load channel caption patterns from cache metadata (US-006 Sprint 7).
+
+        Retrieves persisted channel-level caption availability patterns for
+        batch pre-check optimization. Channels with >90% confidence and
+        sufficient samples can skip individual pre-checks.
+
+        Returns:
+            Dict mapping channel_id -> ChannelCaptionPattern.
+            Empty dict if no historical data exists.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> patterns = cache.load_channel_patterns()
+            >>> for cid, pattern in patterns.items():
+            ...     if pattern.success_rate > 0.9 and pattern.videos_checked >= 5:
+            ...         print(f"Channel {cid}: high confidence ({pattern.success_rate:.0%})")
+        """
+        if not self.enabled:
+            return {}
+
+        try:
+            metadata_key = "__channel_patterns__"
+            metadata = self.index.get(metadata_key, {})
+            patterns_data = metadata.get('patterns', {})
+
+            patterns = {}
+            for cid, data in patterns_data.items():
+                patterns[cid] = ChannelCaptionPattern.from_dict(data)
+
+            if patterns:
+                total_channels = metadata.get('total_channels', len(patterns))
+                logger.debug(f"Loaded {total_channels} channel caption patterns")
+
+            return patterns
+        except Exception as e:
+            logger.warning(f"Failed to load channel patterns: {e}")
+            return {}
+
+    def get_channel_pattern(self, channel_id: str) -> Optional['ChannelCaptionPattern']:
+        """Get a single channel's caption pattern (US-006 Sprint 7).
+
+        Convenience method to retrieve pattern for a specific channel.
+
+        Args:
+            channel_id: YouTube channel ID (UCxxxx format).
+
+        Returns:
+            ChannelCaptionPattern if found, None otherwise.
+        """
+        patterns = self.load_channel_patterns()
+        return patterns.get(channel_id)
+
+    def update_channel_pattern(
+        self,
+        channel_id: str,
+        has_captions: bool
+    ) -> 'ChannelCaptionPattern':
+        """Update a channel's caption pattern with a new observation (US-006 Sprint 7).
+
+        Atomically loads existing patterns, updates the specified channel,
+        and saves back to cache.
+
+        Args:
+            channel_id: YouTube channel ID (UCxxxx format).
+            has_captions: Whether the checked video had captions.
+
+        Returns:
+            Updated ChannelCaptionPattern for the channel.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> pattern = cache.update_channel_pattern("UCabc", has_captions=True)
+            >>> print(f"Channel {pattern.channel_id}: {pattern.success_rate:.0%} success")
+        """
+        patterns = self.load_channel_patterns()
+
+        if channel_id not in patterns:
+            patterns[channel_id] = ChannelCaptionPattern(channel_id=channel_id)
+
+        patterns[channel_id].update(has_captions)
+        self.save_channel_patterns(patterns)
+
+        return patterns[channel_id]
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics.
@@ -4353,6 +4859,13 @@ class CaptionMetrics:
     pre_check_available: int = 0
     pre_check_unavailable: int = 0
 
+    # Batch pre-check tracking (US-006 Sprint 7)
+    # Tracks API calls saved through channel-based batch pre-checking
+    pre_check_batched_total: int = 0  # Total videos in batch pre-check
+    pre_check_batched_skipped: int = 0  # Videos skipped due to channel pattern
+    pre_check_batched_checked: int = 0  # Videos actually checked
+    pre_check_api_calls_saved: int = 0  # API calls saved vs individual checks
+
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
     quality_distribution: Dict[str, int] = field(default_factory=dict)
@@ -4645,6 +5158,58 @@ class CaptionMetrics:
 
         status = "available" if has_captions else "unavailable"
         logger.debug(f"Caption pre-check for {video_id}: {status}")
+
+    def record_pre_check_batched(
+        self,
+        video_id: str,
+        skipped: bool
+    ) -> None:
+        """Record a batch pre-check result (US-006 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks whether a video's pre-check was actually performed or skipped
+        due to channel pattern confidence. Used to calculate API calls saved.
+
+        Args:
+            video_id: Video ID that was processed.
+            skipped: True if pre-check was skipped (used channel pattern),
+                    False if individual API call was made.
+
+        Example:
+            >>> metrics.record_pre_check_batched("dQw4w9WgXcQ", skipped=False)
+            >>> metrics.record_pre_check_batched("abc123XYZ", skipped=True)
+        """
+        with self._lock:
+            self.pre_check_batched_total += 1
+            if skipped:
+                self.pre_check_batched_skipped += 1
+            else:
+                self.pre_check_batched_checked += 1
+
+        logger.debug(
+            f"Batch pre-check for {video_id}: {'skipped' if skipped else 'checked'}"
+        )
+
+    def set_batch_precheck_savings(self, api_calls_saved: int) -> None:
+        """Set the total API calls saved by batch pre-check (US-006 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called after batch_precheck_by_channel completes to record the
+        total API calls saved vs individual pre-checks.
+
+        Args:
+            api_calls_saved: Number of API calls saved.
+
+        Example:
+            >>> result = fetcher.batch_precheck_by_channel(video_ids)
+            >>> metrics.set_batch_precheck_savings(result.api_calls_saved)
+        """
+        with self._lock:
+            self.pre_check_api_calls_saved = api_calls_saved
+
+        logger.debug(f"Batch pre-check saved {api_calls_saved} API calls")
 
     def record_cache_hit(
         self,
@@ -5045,6 +5610,14 @@ class CaptionMetrics:
                 f"{self.pre_check_unavailable} unavailable"
             )
 
+        # Batch pre-check stats (US-006 Sprint 7)
+        if self.pre_check_batched_total > 0:
+            lines.append(
+                f"  Batch pre-check: {self.pre_check_batched_checked} checked, "
+                f"{self.pre_check_batched_skipped} skipped by pattern, "
+                f"{self.pre_check_api_calls_saved} API calls saved"
+            )
+
         if self.total_processed > 0:
             lines.append(
                 f"  Success rate: {self.success_rate}%, "
@@ -5188,6 +5761,10 @@ class CaptionMetrics:
             'skipped_live_streams': self.skipped_live_streams,  # US-002
             'pre_check_available': self.pre_check_available,  # US-008
             'pre_check_unavailable': self.pre_check_unavailable,  # US-008
+            'pre_check_batched_total': self.pre_check_batched_total,  # US-006 Sprint 7
+            'pre_check_batched_skipped': self.pre_check_batched_skipped,  # US-006 Sprint 7
+            'pre_check_batched_checked': self.pre_check_batched_checked,  # US-006 Sprint 7
+            'pre_check_api_calls_saved': self.pre_check_api_calls_saved,  # US-006 Sprint 7
             'language_distribution': dict(self.language_distribution),
             'quality_distribution': dict(self.quality_distribution),
             'coverage_distribution': dict(self.coverage_distribution),  # US-004
@@ -5227,6 +5804,10 @@ class CaptionMetrics:
             skipped_live_streams=data.get('skipped_live_streams', 0),  # US-002
             pre_check_available=data.get('pre_check_available', 0),  # US-008
             pre_check_unavailable=data.get('pre_check_unavailable', 0),  # US-008
+            pre_check_batched_total=data.get('pre_check_batched_total', 0),  # US-006 Sprint 7
+            pre_check_batched_skipped=data.get('pre_check_batched_skipped', 0),  # US-006 Sprint 7
+            pre_check_batched_checked=data.get('pre_check_batched_checked', 0),  # US-006 Sprint 7
+            pre_check_api_calls_saved=data.get('pre_check_api_calls_saved', 0),  # US-006 Sprint 7
             language_distribution=data.get('language_distribution', {}),
             quality_distribution=data.get('quality_distribution', {}),
             coverage_distribution=data.get('coverage_distribution', {}),  # US-004
@@ -5500,6 +6081,10 @@ class CaptionMetrics:
             self.skipped_live_streams += other.skipped_live_streams  # US-002
             self.pre_check_available += other.pre_check_available  # US-008
             self.pre_check_unavailable += other.pre_check_unavailable  # US-008
+            self.pre_check_batched_total += other.pre_check_batched_total  # US-006 Sprint 7
+            self.pre_check_batched_skipped += other.pre_check_batched_skipped  # US-006 Sprint 7
+            self.pre_check_batched_checked += other.pre_check_batched_checked  # US-006 Sprint 7
+            self.pre_check_api_calls_saved += other.pre_check_api_calls_saved  # US-006 Sprint 7
             self.total_segments += other.total_segments
             self.auto_generated_count += other.auto_generated_count
             self.human_caption_count += other.human_caption_count
@@ -5557,6 +6142,10 @@ class CaptionMetrics:
             self.skipped_live_streams = 0  # US-002
             self.pre_check_available = 0  # US-008
             self.pre_check_unavailable = 0  # US-008
+            self.pre_check_batched_total = 0  # US-006 Sprint 7
+            self.pre_check_batched_skipped = 0  # US-006 Sprint 7
+            self.pre_check_batched_checked = 0  # US-006 Sprint 7
+            self.pre_check_api_calls_saved = 0  # US-006 Sprint 7
             self.language_distribution = {}
             self.quality_distribution = {}
             self.coverage_distribution = {}  # US-004

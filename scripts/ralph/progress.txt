@@ -4558,3 +4558,84 @@ Performs comprehensive checks:
 - 586 tests pass (caption_fetcher + config tests)
 - main.py --validate-captions works correctly
 - Syntax checks pass for all modified files
+
+
+## US-006: Batch Pre-check by Channel (Sprint 7) - 2026-01-26
+
+### Summary
+Implemented channel-based batch pre-checking optimization that reduces API calls
+by grouping videos by YouTube channel and using representative samples.
+
+### Implementation
+
+1. **ChannelCaptionPattern dataclass** (caption_fetcher.py)
+   - Tracks per-channel caption availability patterns
+   - Fields: channel_id, videos_checked, captions_found, success_rate, last_updated
+   - update() method to record new observations
+   - to_dict()/from_dict() for serialization
+
+2. **BatchPreCheckResult dataclass** (caption_fetcher.py)
+   - Holds batch pre-check results with video_results, channel_patterns
+   - Tracks: total_videos, actual_checks, skipped_by_pattern, api_calls_saved
+
+3. **CaptionCache channel pattern methods** (caption_fetcher.py)
+   - save_channel_patterns(): Persist patterns to cache metadata
+   - load_channel_patterns(): Load historical patterns for cross-run learning
+   - get_channel_pattern(): Get single channel's pattern
+   - update_channel_pattern(): Atomically update and persist pattern
+
+4. **CaptionFetcher.get_video_metadata()** (caption_fetcher.py)
+   - New method to fetch video metadata including channel_id via yt-dlp
+
+5. **CaptionFetcher.batch_precheck_by_channel()** (caption_fetcher.py)
+   - Groups videos by channel_id
+   - Uses representative samples (default 5) per channel
+   - For channels with >90% confidence and >=5 samples, skips individual checks
+   - Updates channel patterns with new observations
+   - Returns BatchPreCheckResult with API calls saved
+
+6. **CaptionMetrics tracking** (caption_fetcher.py)
+   - New fields: pre_check_batched_total, pre_check_batched_skipped,
+     pre_check_batched_checked, pre_check_api_calls_saved
+   - record_pre_check_batched(): Track individual batch pre-check results
+   - set_batch_precheck_savings(): Record total API calls saved
+   - Summary includes batch pre-check stats
+
+7. **CaptionStage integration** (stages/caption_stage.py)
+   - Conditionally uses batch_precheck_by_channel when enabled
+   - Reads config: batch_precheck_by_channel, batch_precheck_confidence,
+     batch_precheck_min_samples, batch_precheck_sample_size
+   - Prints API calls saved message
+
+8. **Config options** (config/sections/download.py, config.yaml)
+   - batch_precheck_by_channel: bool (default True)
+   - batch_precheck_confidence: float (default 0.9)
+   - batch_precheck_min_samples: int (default 5)
+   - batch_precheck_sample_size: int (default 5)
+
+### Test Classes (31 tests in test_batch_precheck.py)
+- TestChannelCaptionPattern (7 tests)
+- TestBatchPreCheckResult (3 tests)
+- TestCaptionCacheChannelPatterns (4 tests)
+- TestCaptionMetricsBatchPrecheck (6 tests)
+- TestBatchPrecheckByChannel (10 tests)
+- TestBatchPrecheckIntegration (1 test)
+
+### Acceptance Criteria Met
+- [x] Batch pre-check groups by channel_id with 5 sample checks default
+- [x] cache_channel_patterns in CaptionCache tracks patterns per channel_id
+- [x] Config option caption_first.batch_precheck_by_channel to enable/disable
+- [x] Track pre_check_batched_count in CaptionMetrics
+- [x] 50 videos from same channel only make 5 sample checks (test verified)
+
+### Files Modified
+- src/caption_fetcher.py (ChannelCaptionPattern, BatchPreCheckResult, cache methods, fetcher methods, metrics tracking)
+- src/stages/caption_stage.py (batch pre-check integration)
+- src/config/sections/download.py (config options)
+- config.yaml (config documentation)
+- tests/test_batch_precheck.py (31 new tests)
+
+### Verification
+- 382 tests pass (test_caption_fetcher.py + test_batch_precheck.py)
+- Syntax checks pass for all modified files
+
