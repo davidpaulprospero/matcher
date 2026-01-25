@@ -23,7 +23,8 @@ class AnthropicClient(LLMClient):
         self,
         api_key: str,
         model: str = "claude-3-haiku-20240307",
-        cache_dir: str = ".cache/llm_responses"
+        cache_dir: str = ".cache/llm_responses",
+        cache_ttl_hours: int = 24
     ):
         """
         Initialize Anthropic client.
@@ -32,8 +33,9 @@ class AnthropicClient(LLMClient):
             api_key: Anthropic API key
             model: Model name (e.g., "claude-3-haiku-20240307", "claude-3-5-sonnet-20241022")
             cache_dir: Cache directory
+            cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
         """
-        super().__init__(api_key, model, cache_dir)
+        super().__init__(api_key, model, cache_dir, cache_ttl_hours)
 
         try:
             import anthropic
