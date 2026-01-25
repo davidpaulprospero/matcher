@@ -254,6 +254,95 @@ function Get-InterviewContext {
     }
 }
 
+function Get-NextQueuedFocusArea {
+    <#
+    .SYNOPSIS
+        Get the next incomplete focus area from the legacy queue
+    .RETURNS
+        Focus area ID string, or $null if none remaining
+    #>
+
+    if (-not (Test-Path $script:QueueFile)) {
+        return $null
+    }
+
+    try {
+        $queue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+
+        # Legacy format: queue array + completedAreas
+        if ($queue.queue -and $queue.completedAreas) {
+            foreach ($area in $queue.queue) {
+                if ($queue.completedAreas -notcontains $area) {
+                    return $area
+                }
+            }
+        }
+
+        # Interview format: focusAreas with completed flag
+        if ($queue.focusAreas) {
+            $next = $queue.focusAreas | Where-Object { -not $_.completed } | Select-Object -First 1
+            if ($next) {
+                return $next.id
+            }
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Update-LegacyQueueProgress {
+    <#
+    .SYNOPSIS
+        Mark a focus area as completed in the legacy queue format
+    .PARAMETER CompletedArea
+        The focus area ID to mark as completed
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$CompletedArea
+    )
+
+    if (-not (Test-Path $script:QueueFile)) {
+        return
+    }
+
+    try {
+        $queue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+
+        # Legacy format: add to completedAreas if not already present
+        if ($queue.completedAreas -and $queue.completedAreas -notcontains $CompletedArea) {
+            $queue.completedAreas += $CompletedArea
+        }
+
+        # Update currentIndex if queue array exists
+        if ($queue.queue) {
+            $idx = [array]::IndexOf($queue.queue, $CompletedArea)
+            if ($idx -ge 0) {
+                $queue.currentIndex = $idx + 1
+            }
+        }
+
+        # Also update interview format if present
+        if ($queue.focusAreas) {
+            foreach ($area in $queue.focusAreas) {
+                if ($area.id -eq $CompletedArea) {
+                    $area.completed = $true
+                    $area.completedAt = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+                }
+            }
+        }
+
+        $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
+        Write-Host "  Updated queue progress: $CompletedArea completed" -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host "  Warning: Could not update queue progress" -ForegroundColor Yellow
+    }
+}
+
 # ============================================================================
 # COMPLETION CHOICE
 # ============================================================================
@@ -358,13 +447,16 @@ function Invoke-ClaudeForFocusArea {
         The focus area ID to work on
     .PARAMETER Context
         Additional context from interview (optional)
+    .PARAMETER GeneratePRD
+        If specified, generate a new PRD for this focus area instead of working on stories
     .RETURNS
         $true if iteration succeeded, $false otherwise
     #>
     param(
         [Parameter(Mandatory=$true)]
         [string]$FocusAreaId,
-        [string]$Context = ""
+        [string]$Context = "",
+        [switch]$GeneratePRD
     )
 
     # Track retries per focus area
@@ -380,11 +472,22 @@ function Invoke-ClaudeForFocusArea {
     Write-IterationBanner -Iteration $script:IterationCount -FocusArea $FocusAreaId
 
     # Build the prompt
-    $prompt = "Focus on: $FocusAreaId`n`n"
-    if ($Context) {
-        $prompt += "Context: $Context`n`n"
+    if ($GeneratePRD) {
+        # Generate a new PRD for this focus area
+        $prompt = "Generate a new sprint PRD for focus area: $FocusAreaId`n`n"
+        if ($Context) {
+            $prompt += "Context: $Context`n`n"
+        }
+        $prompt += "Read scripts/ralph/prompt.md for instructions. Create 8-12 user stories in prd.json for this focus area. Set focusArea to '$FocusAreaId'. Mark all stories with passes: false."
     }
-    $prompt += "Read scripts/ralph/prompt.md for instructions. Work on ONE user story from prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
+    else {
+        # Work on existing stories
+        $prompt = "Focus on: $FocusAreaId`n`n"
+        if ($Context) {
+            $prompt += "Context: $Context`n`n"
+        }
+        $prompt += "Read scripts/ralph/prompt.md for instructions. Work on ONE user story from prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
+    }
 
     # Log iteration start
     $iterationLog = Join-Path $script:SessionLogDir "iteration_$($script:IterationCount).log"
@@ -1044,6 +1147,7 @@ function Start-StandardLoop {
     <#
     .SYNOPSIS
         Standard mode - work through stories until sprint complete
+        After sprint complete, checks queue.json for pending focus areas and advances
     #>
 
     $script:CurrentMode = "Standard"
@@ -1059,7 +1163,38 @@ function Start-StandardLoop {
             Write-Host "  All $($status.total) stories passed" -ForegroundColor Green
             Write-Host "  Focus area: $($status.focusArea)" -ForegroundColor Cyan
             Write-Host ""
-            break
+
+            # Check for pending queue items (legacy format)
+            $nextArea = Get-NextQueuedFocusArea
+            if ($nextArea) {
+                Write-Host "  Queue has more focus areas. Next: $nextArea" -ForegroundColor Cyan
+                Write-Host ""
+
+                # Update queue to mark current area as complete
+                if ($status.focusArea) {
+                    Update-LegacyQueueProgress -CompletedArea $status.focusArea
+                }
+
+                # Generate new PRD for next focus area
+                Write-Host "  Generating PRD for focus area: $nextArea..." -ForegroundColor Yellow
+                $context = Get-InterviewContext
+                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $nextArea -Context $context -GeneratePRD
+
+                if ($prdGenerated) {
+                    Write-Host "  PRD generated. Continuing with $nextArea" -ForegroundColor Green
+                    # Continue the loop - don't break
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+                else {
+                    Write-Host "  Failed to generate PRD for $nextArea" -ForegroundColor Red
+                    break
+                }
+            }
+            else {
+                Write-Host "  Queue complete! All focus areas done." -ForegroundColor Green
+                break
+            }
         }
 
         if ($status.nextStory) {
