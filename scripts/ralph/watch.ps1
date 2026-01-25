@@ -215,24 +215,202 @@ while ($true) {
         Write-Host ""
     }
 
-    # Metrics summary
+    # Get current session ID
+    $currentSession = ""
+    if (Test-Path $QueuePath) {
+        try {
+            $queueData = Get-Content $QueuePath -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($queueData.session.id) { $currentSession = $queueData.session.id }
+            elseif ($queueData.sessionId) { $currentSession = $queueData.sessionId }
+        } catch {}
+    }
+    if (-not $currentSession -and (Test-Path $MetricsPath)) {
+        try {
+            $lastMetric = Import-Csv $MetricsPath | Select-Object -Last 1
+            if ($lastMetric) { $currentSession = $lastMetric.session }
+        } catch {}
+    }
+
+    # Metrics Dashboard
+    Write-Host ""
+    Write-Host "  METRICS DASHBOARD" -ForegroundColor Yellow
+    Write-Host "  ---------------------------------------------------------------------" -ForegroundColor DarkGray
+
     if (Test-Path $MetricsPath) {
         try {
             $metrics = Import-Csv $MetricsPath
-            # Get latest session
-            $sessions = $metrics | Group-Object session | Sort-Object { $_.Group[0].timestamp } -Descending
-            if ($sessions.Count -gt 0) {
-                $latestSession = $sessions[0].Group
-                $successes = @($latestSession | Where-Object { $_.success -eq 'true' }).Count
-                $timeouts = @($latestSession | Where-Object { $_.timeout -eq 'true' }).Count
-                $totalMetrics = $latestSession.Count
 
-                Write-Host ""
-                Write-Host "  Session: $($sessions[0].Name)" -ForegroundColor DarkGray
-                Write-Host "  Stats: $successes/$totalMetrics successful, $timeouts timeouts" -ForegroundColor DarkGray
+            # Get session metrics - use current session or latest
+            if ($currentSession) {
+                $sessionMetrics = @($metrics | Where-Object { $_.session -eq $currentSession })
+            } else {
+                # Fallback to latest session
+                $sessions = $metrics | Group-Object session | Sort-Object { $_.Group[0].timestamp } -Descending
+                if ($sessions.Count -gt 0) {
+                    $sessionMetrics = @($sessions[0].Group)
+                    $currentSession = $sessions[0].Name
+                } else {
+                    $sessionMetrics = @()
+                }
             }
-        } catch {}
+
+            if ($sessionMetrics.Count -gt 0) {
+                # Session Stats
+                $totalIterations = $sessionMetrics.Count
+                $successes = @($sessionMetrics | Where-Object { $_.success -eq 'true' }).Count
+                $timeouts = @($sessionMetrics | Where-Object { $_.timeout -eq 'true' }).Count
+                $successRate = if ($totalIterations -gt 0) { [math]::Round(($successes / $totalIterations) * 100) } else { 0 }
+
+                Write-Host "  Session: $currentSession" -ForegroundColor White
+                $successColor = if ($successRate -ge 80) { 'Green' } elseif ($successRate -ge 50) { 'Yellow' } else { 'Red' }
+                Write-Host "  Iterations: $totalIterations | Success: $successRate% | Timeouts: $timeouts" -ForegroundColor $successColor
+                Write-Host ""
+
+                # Check if we have the extended metrics columns
+                $hasTokens = $null -ne $sessionMetrics[0].PSObject.Properties['tokens_used']
+                $hasErrors = $null -ne $sessionMetrics[0].PSObject.Properties['error_category']
+                $hasTests = $null -ne $sessionMetrics[0].PSObject.Properties['test_results']
+                $hasLines = $null -ne $sessionMetrics[0].PSObject.Properties['lines_added']
+                $hasRetries = $null -ne $sessionMetrics[0].PSObject.Properties['retry_count']
+                $hasHour = $null -ne $sessionMetrics[0].PSObject.Properties['hour_of_day']
+
+                # Token Usage (Cost Tracking)
+                if ($hasTokens) {
+                    $tokensWithValues = @($sessionMetrics | Where-Object { $_.tokens_used -and $_.tokens_used -ne '' })
+                    if ($tokensWithValues.Count -gt 0) {
+                        $totalTokens = ($tokensWithValues | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Sum).Sum
+                        $avgTokens = [math]::Round(($tokensWithValues | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Average).Average)
+                        $estimatedCost = [math]::Round($totalTokens * 0.000003, 2)  # ~$3/1M tokens
+
+                        Write-Host "  COST:" -ForegroundColor Cyan
+                        Write-Host "    Total tokens: $($totalTokens.ToString('N0'))" -ForegroundColor White
+                        Write-Host "    Avg/iteration: $($avgTokens.ToString('N0'))" -ForegroundColor White
+                        $costColor = if ($estimatedCost -lt 1) { 'Green' } else { 'Yellow' }
+                        Write-Host "    Est. cost: `$$estimatedCost" -ForegroundColor $costColor
+                        Write-Host ""
+                    }
+                }
+
+                # Error Breakdown
+                if ($hasErrors) {
+                    $errors = @($sessionMetrics | Where-Object { $_.success -eq 'false' -and $_.error_category -and $_.error_category -ne '' })
+                    if ($errors.Count -gt 0) {
+                        Write-Host "  ERRORS:" -ForegroundColor Red
+                        $errorGroups = $errors | Group-Object error_category | Sort-Object Count -Descending
+                        foreach ($eg in $errorGroups) {
+                            Write-Host "    $($eg.Name): $($eg.Count)" -ForegroundColor Yellow
+                        }
+                        Write-Host ""
+                    }
+                }
+
+                # Test Results Summary
+                if ($hasTests) {
+                    $withTests = @($sessionMetrics | Where-Object { $_.test_results -and $_.test_results -ne '' })
+                    if ($withTests.Count -gt 0) {
+                        Write-Host "  TESTS:" -ForegroundColor Cyan
+                        $passOnly = @($withTests | Where-Object { $_.test_results -notmatch 'fail' }).Count
+                        Write-Host "    Iterations with tests: $($withTests.Count)" -ForegroundColor White
+                        $testColor = if ($passOnly -eq $withTests.Count) { 'Green' } else { 'Yellow' }
+                        Write-Host "    All tests passing: $passOnly/$($withTests.Count)" -ForegroundColor $testColor
+
+                        # Show last test result
+                        $lastTest = $withTests | Select-Object -Last 1
+                        $truncatedResult = if ($lastTest.test_results.Length -gt 50) { $lastTest.test_results.Substring(0, 47) + "..." } else { $lastTest.test_results }
+                        Write-Host "    Latest: $truncatedResult" -ForegroundColor Gray
+                        Write-Host ""
+                    }
+                }
+
+                # Productivity (Lines Changed)
+                if ($hasLines) {
+                    $withLines = @($sessionMetrics | Where-Object { $_.lines_added -or $_.lines_deleted })
+                    if ($withLines.Count -gt 0) {
+                        $linesAdded = ($withLines | ForEach-Object { if ($_.lines_added) { [int]$_.lines_added } else { 0 } } | Measure-Object -Sum).Sum
+                        $linesDeleted = ($withLines | ForEach-Object { if ($_.lines_deleted) { [int]$_.lines_deleted } else { 0 } } | Measure-Object -Sum).Sum
+                        $netLines = $linesAdded - $linesDeleted
+
+                        Write-Host "  PRODUCTIVITY:" -ForegroundColor Cyan
+                        Write-Host "    Lines added: +$linesAdded" -ForegroundColor Green
+                        Write-Host "    Lines deleted: -$linesDeleted" -ForegroundColor Red
+                        $netPrefix = if ($netLines -ge 0) { '+' } else { '' }
+                        Write-Host "    Net change: $netPrefix$netLines" -ForegroundColor White
+                        Write-Host ""
+                    }
+                }
+
+                # Retry Analysis
+                if ($hasRetries) {
+                    $withRetries = @($sessionMetrics | Where-Object { $_.retry_count -and $_.retry_count -ne '' })
+                    if ($withRetries.Count -gt 0) {
+                        $retryValues = $withRetries | ForEach-Object { [int]$_.retry_count }
+                        $maxRetries = ($retryValues | Measure-Object -Maximum).Maximum
+                        $avgRetries = [math]::Round(($retryValues | Measure-Object -Average).Average, 1)
+
+                        Write-Host "  RESILIENCE:" -ForegroundColor Cyan
+                        $avgColor = if ($avgRetries -le 1.5) { 'Green' } elseif ($avgRetries -le 3) { 'Yellow' } else { 'Red' }
+                        Write-Host "    Avg retries: $avgRetries" -ForegroundColor $avgColor
+                        $maxColor = if ($maxRetries -le 3) { 'Green' } else { 'Yellow' }
+                        Write-Host "    Max retries: $maxRetries" -ForegroundColor $maxColor
+                        Write-Host ""
+                    }
+                }
+
+                # Hour of Day Pattern (mini histogram)
+                if ($hasHour) {
+                    $withHour = @($sessionMetrics | Where-Object { $_.hour_of_day -and $_.hour_of_day -ne '' })
+                    if ($withHour.Count -gt 0) {
+                        Write-Host "  TIME PATTERN:" -ForegroundColor Cyan
+                        $hourGroups = $withHour | Group-Object hour_of_day | Sort-Object { [int]$_.Name }
+                        $maxHourCount = ($hourGroups | Measure-Object -Property Count -Maximum).Maximum
+                        foreach ($hg in $hourGroups) {
+                            $barLength = if ($maxHourCount -gt 0) { [math]::Round(($hg.Count / $maxHourCount) * 20) } else { 0 }
+                            $bar = [string]::new([char]0x2588, $barLength)  # Unicode block character
+                            $hour = $hg.Name.PadLeft(2, '0')
+                            Write-Host "    ${hour}h: $bar $($hg.Count)" -ForegroundColor Gray
+                        }
+                        Write-Host ""
+                    }
+                }
+
+                # Duration Stats (always available in current schema)
+                $withDuration = @($sessionMetrics | Where-Object { $_.duration_min -and $_.duration_min -ne '' })
+                if ($withDuration.Count -gt 0) {
+                    $durations = $withDuration | ForEach-Object { [double]$_.duration_min }
+                    $totalDuration = ($durations | Measure-Object -Sum).Sum
+                    $avgDuration = [math]::Round(($durations | Measure-Object -Average).Average, 1)
+                    $maxDuration = ($durations | Measure-Object -Maximum).Maximum
+
+                    Write-Host "  TIMING:" -ForegroundColor Cyan
+                    Write-Host "    Total time: $([math]::Round($totalDuration, 0)) min" -ForegroundColor White
+                    Write-Host "    Avg/story: $avgDuration min" -ForegroundColor White
+                    Write-Host "    Longest: $maxDuration min" -ForegroundColor $(if ($maxDuration -le 15) { 'Green' } elseif ($maxDuration -le 30) { 'Yellow' } else { 'Red' })
+                }
+
+                # Focus Area Summary (always available)
+                $focusGroups = $sessionMetrics | Group-Object focus_area | Sort-Object Count -Descending
+                if ($focusGroups.Count -gt 0) {
+                    Write-Host ""
+                    Write-Host "  FOCUS AREAS:" -ForegroundColor Cyan
+                    foreach ($fg in $focusGroups | Select-Object -First 5) {
+                        $areaSuccesses = @($fg.Group | Where-Object { $_.success -eq 'true' }).Count
+                        $areaTotal = $fg.Group.Count
+                        $areaRate = [math]::Round(($areaSuccesses / $areaTotal) * 100)
+                        $areaColor = if ($areaRate -ge 80) { 'Green' } elseif ($areaRate -ge 50) { 'Yellow' } else { 'Red' }
+                        Write-Host "    $($fg.Name): $areaRate% ($areaSuccesses/$areaTotal)" -ForegroundColor $areaColor
+                    }
+                }
+            } else {
+                Write-Host "  No metrics data for current session" -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host "  Error loading metrics: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  No metrics file found" -ForegroundColor DarkGray
     }
+    Write-Host ""
+    Write-Host "  ---------------------------------------------------------------------" -ForegroundColor DarkGray
 
     # Recent progress.txt
     if (Test-Path $ProgressPath) {
