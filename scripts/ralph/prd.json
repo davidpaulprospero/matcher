@@ -145,8 +145,8 @@
         "Validate segment continuity: no negative durations, start < end",
         "Tests verify normalization with edge cases (overlaps, gaps, malformed timestamps)"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created CaptionNormalizer class with NormalizationConfig dataclass. Overlap strategies: 'merge' (combine overlapping segments), 'split' (divide at midpoint), 'truncate' (trim earlier segment). Gap strategies: 'extend' (expand previous segment), 'placeholder' (insert empty segments), 'ignore'. Validation fixes negative timestamps, end <= start, short durations, empty text. Static methods convert_timestamp_to_seconds() and seconds_to_vtt_timestamp/seconds_to_srt_timestamp. validate_continuity() method for diagnostics. 60 new tests in tests/test_caption_normalizer.py covering all strategies and edge cases. All tests pass."
     },
     {
       "id": "US-010",
