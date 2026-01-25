@@ -440,6 +440,48 @@ while ($true) {
                     }
                 }
             }
+
+            # Show latest prompt (prompts are saved as prompt_N.txt)
+            $latestPrompt = Get-ChildItem $latestLogDir.FullName -Filter "prompt_*.txt" | Sort-Object Name -Descending | Select-Object -First 1
+            if ($latestPrompt) {
+                $promptAge = [math]::Round(((Get-Date) - $latestPrompt.LastWriteTime).TotalMinutes, 1)
+                Write-Host ""
+                Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
+                Write-Host "  CURRENT PROMPT ($($latestPrompt.Name), ${promptAge} min ago)" -ForegroundColor Magenta
+                Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
+
+                # Read and display prompt content (truncated)
+                $promptContent = Get-Content $latestPrompt.FullName -Raw 2>$null
+                if ($promptContent) {
+                    $promptLines = $promptContent -split "`n"
+                    $lineCount = $promptLines.Count
+                    $maxLines = 12  # Show up to 12 lines
+
+                    Write-Host ""
+                    for ($i = 0; $i -lt [math]::Min($lineCount, $maxLines); $i++) {
+                        $line = $promptLines[$i].TrimEnd()
+                        if ($line.Length -gt 72) {
+                            $line = $line.Substring(0, 69) + "..."
+                        }
+                        # Highlight key parts
+                        if ($line -match '^(INSTRUCTIONS|CONTEXT|Context from user|Start by)') {
+                            Write-Host "    $line" -ForegroundColor Yellow
+                        } elseif ($line -match '^\d+\.') {
+                            Write-Host "    $line" -ForegroundColor Cyan
+                        } elseif ($line -match '^You are') {
+                            Write-Host "    $line" -ForegroundColor Green
+                        } else {
+                            Write-Host "    $line" -ForegroundColor Gray
+                        }
+                    }
+
+                    if ($lineCount -gt $maxLines) {
+                        Write-Host "    ... (+$($lineCount - $maxLines) more lines)" -ForegroundColor DarkGray
+                    }
+                    Write-Host ""
+                    Write-Host "    Full prompt: $($latestPrompt.FullName)" -ForegroundColor DarkGray
+                }
+            }
         }
     }
 
