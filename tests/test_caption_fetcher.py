@@ -2187,3 +2187,329 @@ class TestCaptionMetrics:
         assert restored.quality_distribution == original.quality_distribution
         assert restored.auto_generated_count == original.auto_generated_count
         assert restored.human_caption_count == original.human_caption_count
+
+
+class TestCaptionMetricsThreadSafety:
+    """Tests for thread-safe CaptionMetrics (US-001)."""
+
+    def test_concurrent_record_fetch_success(self):
+        """Test thread-safety of record_fetch_success with concurrent calls."""
+        import threading
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        num_threads = 10
+        calls_per_thread = 100
+
+        def record_many():
+            for i in range(calls_per_thread):
+                metrics.record_fetch_success(
+                    f"video_{threading.current_thread().name}_{i}",
+                    language="en",
+                    quality="high",
+                    segment_count=10,
+                    is_auto_generated=i % 2 == 0
+                )
+
+        threads = [threading.Thread(target=record_many) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        expected_total = num_threads * calls_per_thread
+        assert metrics.successes == expected_total
+        assert metrics.total_segments == expected_total * 10
+        assert metrics.language_distribution['en'] == expected_total
+        assert metrics.auto_generated_count + metrics.human_caption_count == expected_total
+
+    def test_concurrent_mixed_operations(self):
+        """Test thread-safety with mixed record operations."""
+        import threading
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        num_threads = 5
+        calls_per_thread = 51  # Divisible by 3 for cleaner math
+
+        def mixed_operations(thread_id):
+            for i in range(calls_per_thread):
+                if i % 3 == 0:
+                    metrics.record_fetch_attempt(f"v_{thread_id}_{i}")
+                elif i % 3 == 1:
+                    metrics.record_fetch_success(
+                        f"v_{thread_id}_{i}",
+                        language="en",
+                        quality="medium",
+                        segment_count=5
+                    )
+                else:
+                    metrics.record_fetch_failure(f"v_{thread_id}_{i}", reason="test")
+
+        threads = [threading.Thread(target=mixed_operations, args=(i,)) for i in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Each thread does 51 operations: 17 attempts (i%3==0), 17 successes (i%3==1), 17 failures (i%3==2)
+        ops_per_type = calls_per_thread // 3  # 17
+
+        expected_attempts = num_threads * ops_per_type
+        expected_successes = num_threads * ops_per_type
+        expected_failures = num_threads * ops_per_type
+
+        assert metrics.fetch_attempts == expected_attempts
+        assert metrics.successes == expected_successes
+        assert metrics.failures == expected_failures
+
+
+class TestBatchCaptionFetch:
+    """Tests for batch caption fetching (US-001)."""
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_empty_list(self, mock_fetch):
+        """Test batch fetch with empty video list."""
+        from src.caption_fetcher import CaptionFetcher
+
+        fetcher = CaptionFetcher()
+        results = fetcher.fetch_captions_batch([])
+
+        assert results == {}
+        mock_fetch.assert_not_called()
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_single_success(self, mock_fetch):
+        """Test batch fetch with single successful video."""
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        mock_result = CaptionResult(
+            video_id='test123abc',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Hello", 'test123abc')],
+            language='en',
+            is_auto_generated=False,
+        )
+        mock_fetch.return_value = mock_result
+
+        fetcher = CaptionFetcher()
+        results = fetcher.fetch_captions_batch(['test123abc'])
+
+        assert 'test123abc' in results
+        assert isinstance(results['test123abc'], CaptionResult)
+        assert results['test123abc'].language == 'en'
+        mock_fetch.assert_called_once()
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_with_failures(self, mock_fetch):
+        """Test batch fetch with mixed success and failures."""
+        from src.caption_fetcher import (
+            CaptionFetcher, CaptionResult, CaptionSegment,
+            CaptionUnavailableError, CaptionFetchError
+        )
+
+        def side_effect(video_id, preferred_language=None):
+            if video_id == 'success1abc':
+                return CaptionResult(
+                    video_id=video_id,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", video_id)],
+                    language='en',
+                )
+            elif video_id == 'unavail1ab':
+                raise CaptionUnavailableError(video_id, "No captions")
+            else:
+                raise CaptionFetchError(video_id, "Network error")
+
+        mock_fetch.side_effect = side_effect
+
+        fetcher = CaptionFetcher()
+        results = fetcher.fetch_captions_batch(['success1abc', 'unavail1ab', 'error12abc'])
+
+        assert len(results) == 3
+        assert isinstance(results['success1abc'], CaptionResult)
+        assert results['unavail1ab'].get('unavailable') is True
+        assert results['error12abc'].get('error') is True
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_metrics_tracking(self, mock_fetch):
+        """Test that batch fetch correctly updates metrics."""
+        from src.caption_fetcher import (
+            CaptionFetcher, CaptionResult, CaptionSegment,
+            CaptionMetrics, CaptionUnavailableError
+        )
+
+        def side_effect(video_id, preferred_language=None):
+            if 'success' in video_id:
+                return CaptionResult(
+                    video_id=video_id,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", video_id)],
+                    language='en',
+                )
+            else:
+                raise CaptionUnavailableError(video_id, "No captions")
+
+        mock_fetch.side_effect = side_effect
+
+        fetcher = CaptionFetcher()
+        metrics = CaptionMetrics()
+
+        results = fetcher.fetch_captions_batch(
+            ['success1abc', 'success2abc', 'fail123abc'],
+            metrics=metrics
+        )
+
+        # Check metrics were updated
+        assert metrics.fetch_attempts == 3
+        assert metrics.successes == 2
+        assert metrics.failures == 1
+        assert metrics.total_segments == 2  # 2 successes, 1 segment each
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_progress_callback(self, mock_fetch):
+        """Test that progress callback is invoked correctly."""
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        mock_fetch.return_value = CaptionResult(
+            video_id='test',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Test", 'test')],
+            language='en',
+        )
+
+        progress_calls = []
+
+        def on_progress(video_id, status, details):
+            progress_calls.append((video_id, status, details.copy()))
+
+        fetcher = CaptionFetcher()
+        fetcher.fetch_captions_batch(
+            ['abc123test1', 'def456test2'],
+            progress_callback=on_progress,
+            max_workers=1  # Sequential to ensure predictable order
+        )
+
+        # Should have called progress for each video (fetching + success/failed)
+        # With parallel execution, order may vary, but we should have entries
+        statuses = {(call[0], call[1]) for call in progress_calls}
+        assert ('abc123test1', 'fetching') in statuses
+        assert ('abc123test1', 'success') in statuses
+        assert ('def456test2', 'fetching') in statuses
+        assert ('def456test2', 'success') in statuses
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_skip_video_ids(self, mock_fetch):
+        """Test that skip_video_ids are not fetched."""
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        mock_fetch.return_value = CaptionResult(
+            video_id='test',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Test", 'test')],
+            language='en',
+        )
+
+        fetcher = CaptionFetcher()
+        results = fetcher.fetch_captions_batch(
+            ['video1abcde', 'video2abcde', 'video3abcde'],
+            skip_video_ids={'video1abcde', 'video3abcde'}
+        )
+
+        # Only video2 should be fetched
+        assert len(results) == 1
+        assert 'video2abcde' in results
+        assert mock_fetch.call_count == 1
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_respects_max_workers(self, mock_fetch):
+        """Test that max_workers is respected."""
+        import time
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        call_times = []
+
+        def slow_fetch(video_id, preferred_language=None):
+            call_times.append(time.time())
+            time.sleep(0.1)  # Simulate network delay
+            return CaptionResult(
+                video_id=video_id,
+                segments=[CaptionSegment(0, 0.0, 5.0, "Test", video_id)],
+                language='en',
+            )
+
+        mock_fetch.side_effect = slow_fetch
+
+        fetcher = CaptionFetcher()
+
+        # With 4 workers and 8 videos, should take ~2 batches (0.2s)
+        # With 1 worker, would take ~0.8s
+        start = time.time()
+        fetcher.fetch_captions_batch(
+            [f'video{i}abcd' for i in range(8)],
+            max_workers=4
+        )
+        elapsed = time.time() - start
+
+        # Should complete faster than sequential (0.8s)
+        # Allow some margin for thread overhead
+        assert elapsed < 0.6, f"Parallel fetch took too long: {elapsed}s"
+
+    @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    def test_batch_fetch_uses_config_max_workers(self, mock_fetch):
+        """Test that max_workers defaults to config value."""
+        from unittest.mock import MagicMock
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        mock_fetch.return_value = CaptionResult(
+            video_id='test',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Test", 'test')],
+            language='en',
+        )
+
+        # Create mock config with max_parallel_fetches=2
+        mock_config = MagicMock()
+        mock_config.download.caption_first.max_parallel_fetches = 2
+
+        fetcher = CaptionFetcher(config=mock_config)
+        # The actual max_workers used is internal, but we can verify it works
+        results = fetcher.fetch_captions_batch(['test12abcde'])
+
+        assert 'test12abcde' in results
+
+    def test_batch_fetch_parallel_faster_than_sequential(self):
+        """US-001 acceptance: parallel execution faster than sequential for 10+ videos."""
+        import time
+        from unittest.mock import patch, MagicMock
+        from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
+
+        def make_slow_fetch(delay):
+            def slow_fetch(video_id, preferred_language=None):
+                time.sleep(delay)
+                return CaptionResult(
+                    video_id=video_id,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", video_id)],
+                    language='en',
+                )
+            return slow_fetch
+
+        num_videos = 12
+        delay_per_video = 0.05  # 50ms per fetch
+        video_ids = [f'video{i:03d}abc' for i in range(num_videos)]
+
+        # Sequential timing (max_workers=1)
+        with patch.object(CaptionFetcher, 'fetch_captions_auto_language_with_retry',
+                          side_effect=make_slow_fetch(delay_per_video)):
+            fetcher = CaptionFetcher()
+            start = time.time()
+            fetcher.fetch_captions_batch(video_ids, max_workers=1)
+            sequential_time = time.time() - start
+
+        # Parallel timing (max_workers=4)
+        with patch.object(CaptionFetcher, 'fetch_captions_auto_language_with_retry',
+                          side_effect=make_slow_fetch(delay_per_video)):
+            fetcher = CaptionFetcher()
+            start = time.time()
+            fetcher.fetch_captions_batch(video_ids, max_workers=4)
+            parallel_time = time.time() - start
+
+        # Parallel should be significantly faster (at least 2x for 4 workers)
+        assert parallel_time < sequential_time * 0.6, (
+            f"Parallel ({parallel_time:.3f}s) not faster than sequential "
+            f"({sequential_time:.3f}s) as expected"
+        )

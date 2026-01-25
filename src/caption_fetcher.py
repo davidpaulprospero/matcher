@@ -29,10 +29,12 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from .cache import BaseCache, CacheEntry
 
@@ -822,6 +824,240 @@ class CaptionFetcher:
 
         # All retries exhausted
         raise last_error
+
+    def fetch_captions_batch(
+        self,
+        video_ids: List[str],
+        preferred_language: Optional[str] = None,
+        max_workers: Optional[int] = None,
+        metrics: Optional['CaptionMetrics'] = None,
+        progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+        skip_video_ids: Optional[set] = None,
+    ) -> Dict[str, Union[CaptionResult, Dict[str, Any]]]:
+        """Fetch captions for multiple videos in parallel using ThreadPoolExecutor.
+
+        Implements US-001: Parallel caption fetching for faster processing of
+        projects with 50+ videos. Uses ThreadPoolExecutor with configurable
+        max_workers (default: 4).
+
+        Args:
+            video_ids: List of YouTube video IDs to fetch captions for.
+            preferred_language: Preferred caption language (ISO 639-1 code).
+                If None, uses config setting.
+            max_workers: Number of parallel workers. If None, uses config setting
+                (caption_first.max_parallel_fetches, default: 4).
+            metrics: Optional CaptionMetrics instance for thread-safe tracking.
+                If provided, metrics are updated as fetches complete.
+            progress_callback: Optional callback for real-time progress updates.
+                Called with (video_id, status, details) where:
+                - status: 'fetching', 'success', 'failed', 'skipped'
+                - details: Dict with language, quality, segment_count, error, etc.
+            skip_video_ids: Set of video IDs to skip (already cached).
+
+        Returns:
+            Dict mapping video_id to either:
+            - CaptionResult on success
+            - Dict with 'error': True or 'unavailable': True on failure
+
+        Example:
+            fetcher = CaptionFetcher(config)
+            metrics = CaptionMetrics()
+
+            def on_progress(video_id, status, details):
+                print(f"[{details.get('index', 0)}/{details.get('total', 0)}] "
+                      f"{video_id}: {status}")
+
+            results = fetcher.fetch_captions_batch(
+                video_ids=['abc123XYZ01', 'def456ABC02'],
+                metrics=metrics,
+                progress_callback=on_progress
+            )
+        """
+        if not video_ids:
+            return {}
+
+        # Get max_workers from config or parameter
+        workers = max_workers
+        if workers is None:
+            if self.config:
+                caption_config = getattr(self.config.download, 'caption_first', None)
+                if caption_config:
+                    workers = getattr(caption_config, 'max_parallel_fetches', 4)
+            if workers is None:
+                workers = 4
+
+        # Ensure at least 1 worker
+        workers = max(1, workers)
+
+        # Filter out skipped video IDs
+        skip_set = skip_video_ids or set()
+        videos_to_fetch = [vid for vid in video_ids if vid not in skip_set]
+
+        logger.info(
+            f"Batch caption fetch: {len(videos_to_fetch)} videos with {workers} workers "
+            f"({len(skip_set)} skipped)"
+        )
+
+        results: Dict[str, Union[CaptionResult, Dict[str, Any]]] = {}
+        total_videos = len(videos_to_fetch)
+
+        def fetch_single(video_id: str, index: int) -> tuple:
+            """Fetch captions for a single video (runs in thread)."""
+            # Notify progress callback: fetching
+            if progress_callback:
+                try:
+                    progress_callback(video_id, 'fetching', {
+                        'index': index + 1,
+                        'total': total_videos,
+                    })
+                except Exception as e:
+                    logger.debug(f"Progress callback error: {e}")
+
+            # Record fetch attempt in metrics (thread-safe)
+            if metrics:
+                metrics.record_fetch_attempt(video_id)
+
+            try:
+                result = self.fetch_captions_auto_language_with_retry(
+                    video_id,
+                    preferred_language=preferred_language
+                )
+
+                # Record success in metrics (thread-safe)
+                if metrics:
+                    metrics.record_fetch_success(
+                        video_id=video_id,
+                        language=result.language,
+                        quality=result.caption_quality,
+                        segment_count=len(result.segments),
+                        is_auto_generated=result.is_auto_generated
+                    )
+
+                # Notify progress callback: success
+                if progress_callback:
+                    try:
+                        progress_callback(video_id, 'success', {
+                            'index': index + 1,
+                            'total': total_videos,
+                            'language': result.language,
+                            'quality': result.caption_quality,
+                            'segment_count': len(result.segments),
+                            'is_auto_generated': result.is_auto_generated,
+                        })
+                    except Exception as e:
+                        logger.debug(f"Progress callback error: {e}")
+
+                return video_id, result
+
+            except CaptionUnavailableError as e:
+                error_result = {
+                    'video_id': video_id,
+                    'unavailable': True,
+                    'reason': str(e.reason),
+                    'caption_quality': 'low',
+                }
+
+                # Record failure in metrics (thread-safe)
+                if metrics:
+                    metrics.record_fetch_failure(video_id=video_id, reason='unavailable')
+
+                # Notify progress callback: failed
+                if progress_callback:
+                    try:
+                        progress_callback(video_id, 'failed', {
+                            'index': index + 1,
+                            'total': total_videos,
+                            'reason': 'unavailable',
+                            'error': str(e.reason),
+                        })
+                    except Exception as cb_err:
+                        logger.debug(f"Progress callback error: {cb_err}")
+
+                return video_id, error_result
+
+            except CaptionFetchError as e:
+                error_result = {
+                    'video_id': video_id,
+                    'error': True,
+                    'reason': str(e.reason),
+                    'caption_quality': 'low',
+                }
+
+                # Record failure in metrics (thread-safe)
+                if metrics:
+                    metrics.record_fetch_failure(video_id=video_id, reason='error')
+
+                # Notify progress callback: failed
+                if progress_callback:
+                    try:
+                        progress_callback(video_id, 'failed', {
+                            'index': index + 1,
+                            'total': total_videos,
+                            'reason': 'error',
+                            'error': str(e.reason),
+                        })
+                    except Exception as cb_err:
+                        logger.debug(f"Progress callback error: {cb_err}")
+
+                return video_id, error_result
+
+            except Exception as e:
+                # Unexpected error
+                error_result = {
+                    'video_id': video_id,
+                    'error': True,
+                    'reason': str(e),
+                    'caption_quality': 'low',
+                }
+
+                # Record failure in metrics (thread-safe)
+                if metrics:
+                    metrics.record_fetch_failure(video_id=video_id, reason='error')
+
+                logger.exception(f"Unexpected error fetching captions for {video_id}")
+
+                # Notify progress callback: failed
+                if progress_callback:
+                    try:
+                        progress_callback(video_id, 'failed', {
+                            'index': index + 1,
+                            'total': total_videos,
+                            'reason': 'error',
+                            'error': str(e),
+                        })
+                    except Exception as cb_err:
+                        logger.debug(f"Progress callback error: {cb_err}")
+
+                return video_id, error_result
+
+        # Execute fetches in parallel
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(fetch_single, video_id, idx): video_id
+                for idx, video_id in enumerate(videos_to_fetch)
+            }
+
+            for future in as_completed(futures):
+                video_id = futures[future]
+                try:
+                    vid, result = future.result()
+                    results[vid] = result
+                except Exception as e:
+                    # Should not happen as fetch_single catches all exceptions
+                    logger.error(f"Batch fetch future error for {video_id}: {e}")
+                    results[video_id] = {
+                        'video_id': video_id,
+                        'error': True,
+                        'reason': str(e),
+                        'caption_quality': 'low',
+                    }
+
+        logger.info(
+            f"Batch caption fetch complete: {len(results)} processed, "
+            f"{sum(1 for r in results.values() if isinstance(r, CaptionResult))} succeeded"
+        )
+
+        return results
 
     def fetch_captions(
         self,
@@ -2131,12 +2367,17 @@ class CaptionMetrics:
     Tracks caption fetch statistics for pipeline reporting.
 
     Implements US-011: Add caption fetch metrics and reporting.
+    Updated US-001: Thread-safe with Lock for parallel caption fetching.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
     - Language distribution
     - Quality distribution (human, auto, unavailable)
     - Total segments fetched
+
+    Thread Safety:
+        All mutation methods are protected by a Lock for concurrent access
+        during parallel caption fetching with ThreadPoolExecutor.
 
     Usage:
         metrics = CaptionMetrics()
@@ -2170,13 +2411,19 @@ class CaptionMetrics:
     auto_generated_count: int = 0
     human_caption_count: int = 0
 
+    # Thread-safety lock (US-001) - not serialized
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
     def record_fetch_attempt(self, video_id: str = "") -> None:
         """Record a caption fetch attempt.
+
+        Thread-safe: Protected by lock for parallel fetching.
 
         Args:
             video_id: Optional video ID for logging context.
         """
-        self.fetch_attempts += 1
+        with self._lock:
+            self.fetch_attempts += 1
         logger.debug(f"Caption fetch attempt recorded for {video_id or 'unknown'}")
 
     def record_fetch_success(
@@ -2189,6 +2436,8 @@ class CaptionMetrics:
     ) -> None:
         """Record a successful caption fetch.
 
+        Thread-safe: Protected by lock for parallel fetching.
+
         Args:
             video_id: Video ID for logging.
             language: ISO 639-1 language code (e.g., 'en').
@@ -2196,20 +2445,21 @@ class CaptionMetrics:
             segment_count: Number of caption segments fetched.
             is_auto_generated: Whether captions are auto-generated.
         """
-        self.successes += 1
-        self.total_segments += segment_count
+        with self._lock:
+            self.successes += 1
+            self.total_segments += segment_count
 
-        # Track language distribution
-        self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
+            # Track language distribution
+            self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
 
-        # Track quality distribution
-        self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
+            # Track quality distribution
+            self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
 
-        # Track auto vs human
-        if is_auto_generated:
-            self.auto_generated_count += 1
-        else:
-            self.human_caption_count += 1
+            # Track auto vs human
+            if is_auto_generated:
+                self.auto_generated_count += 1
+            else:
+                self.human_caption_count += 1
 
         logger.debug(
             f"Caption fetch success for {video_id or 'unknown'}: "
@@ -2223,14 +2473,17 @@ class CaptionMetrics:
     ) -> None:
         """Record a failed caption fetch.
 
+        Thread-safe: Protected by lock for parallel fetching.
+
         Args:
             video_id: Video ID for logging.
             reason: Reason for failure (e.g., 'unavailable', 'error', 'timeout').
         """
-        self.failures += 1
+        with self._lock:
+            self.failures += 1
 
-        # Track as 'unavailable' quality
-        self.quality_distribution['unavailable'] = self.quality_distribution.get('unavailable', 0) + 1
+            # Track as 'unavailable' quality
+            self.quality_distribution['unavailable'] = self.quality_distribution.get('unavailable', 0) + 1
 
         logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
 
@@ -2244,6 +2497,8 @@ class CaptionMetrics:
     ) -> None:
         """Record a cache hit (captions loaded from cache).
 
+        Thread-safe: Protected by lock for parallel fetching.
+
         Args:
             video_id: Video ID for logging.
             language: ISO 639-1 language code.
@@ -2251,20 +2506,21 @@ class CaptionMetrics:
             segment_count: Number of segments in cached captions.
             is_auto_generated: Whether cached captions are auto-generated.
         """
-        self.cache_hits += 1
-        self.total_segments += segment_count
+        with self._lock:
+            self.cache_hits += 1
+            self.total_segments += segment_count
 
-        # Track language distribution
-        self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
+            # Track language distribution
+            self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
 
-        # Track quality distribution
-        self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
+            # Track quality distribution
+            self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
 
-        # Track auto vs human
-        if is_auto_generated:
-            self.auto_generated_count += 1
-        else:
-            self.human_caption_count += 1
+            # Track auto vs human
+            if is_auto_generated:
+                self.auto_generated_count += 1
+            else:
+                self.human_caption_count += 1
 
         logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
 
@@ -2392,6 +2648,7 @@ class CaptionMetrics:
     def merge(self, other: 'CaptionMetrics') -> 'CaptionMetrics':
         """Merge another CaptionMetrics into this one.
 
+        Thread-safe: Protected by lock for parallel fetching.
         Useful for cross-session aggregation. Modifies self in-place
         and returns self for chaining.
 
@@ -2401,32 +2658,37 @@ class CaptionMetrics:
         Returns:
             Self after merging.
         """
-        self.fetch_attempts += other.fetch_attempts
-        self.successes += other.successes
-        self.failures += other.failures
-        self.cache_hits += other.cache_hits
-        self.total_segments += other.total_segments
-        self.auto_generated_count += other.auto_generated_count
-        self.human_caption_count += other.human_caption_count
+        with self._lock:
+            self.fetch_attempts += other.fetch_attempts
+            self.successes += other.successes
+            self.failures += other.failures
+            self.cache_hits += other.cache_hits
+            self.total_segments += other.total_segments
+            self.auto_generated_count += other.auto_generated_count
+            self.human_caption_count += other.human_caption_count
 
-        # Merge language distribution
-        for lang, count in other.language_distribution.items():
-            self.language_distribution[lang] = self.language_distribution.get(lang, 0) + count
+            # Merge language distribution
+            for lang, count in other.language_distribution.items():
+                self.language_distribution[lang] = self.language_distribution.get(lang, 0) + count
 
-        # Merge quality distribution
-        for quality, count in other.quality_distribution.items():
-            self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + count
+            # Merge quality distribution
+            for quality, count in other.quality_distribution.items():
+                self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + count
 
         return self
 
     def clear(self) -> None:
-        """Reset all metrics."""
-        self.fetch_attempts = 0
-        self.successes = 0
-        self.failures = 0
-        self.cache_hits = 0
-        self.language_distribution = {}
-        self.quality_distribution = {}
-        self.total_segments = 0
-        self.auto_generated_count = 0
-        self.human_caption_count = 0
+        """Reset all metrics.
+
+        Thread-safe: Protected by lock for parallel fetching.
+        """
+        with self._lock:
+            self.fetch_attempts = 0
+            self.successes = 0
+            self.failures = 0
+            self.cache_hits = 0
+            self.language_distribution = {}
+            self.quality_distribution = {}
+            self.total_segments = 0
+            self.auto_generated_count = 0
+            self.human_caption_count = 0
