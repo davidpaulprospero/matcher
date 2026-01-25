@@ -66,11 +66,12 @@ echo   What's next?
 echo   -----------------------------------------------------
 echo     1. Continue Ralph (interactive)
 echo     2. Start TrueAuto mode
-echo     3. View detailed logs
-echo     4. Just exit
+echo     3. Interview mode (give specific direction)
+echo     4. View detailed logs
+echo     5. Just exit
 echo.
 
-set /p NEXT="   Choose (1-4): "
+set /p NEXT="   Choose (1-5): "
 
 if "%NEXT%"=="1" (
     start "Ralph Loop" powershell -NoExit -Command "& {Set-Location 'D:\_Projects\voiceover-matcher-subtitle'; .\scripts\ralph\ralph.ps1}"
@@ -81,5 +82,8 @@ if "%NEXT%"=="2" (
     start "Ralph Watch" powershell -NoExit -Command "& {Set-Location 'D:\_Projects\voiceover-matcher-subtitle'; .\scripts\ralph\watch.ps1}"
 )
 if "%NEXT%"=="3" (
-    call 4-tastes-like-burning.bat
+    call "%~dp07-hi-super-nintendo-chalmers.bat"
+)
+if "%NEXT%"=="4" (
+    call "%~dp04-tastes-like-burning.bat"
 )
