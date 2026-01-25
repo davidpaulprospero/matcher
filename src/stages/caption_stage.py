@@ -404,6 +404,12 @@ class CaptionStage(Stage):
                 if low_coverage_count > 5:
                     logger.warning(f"... and {low_coverage_count - 5} more videos with low coverage")
 
+            # US-002 Sprint 6: Print slowest fetches summary
+            slowest = metrics.get_slowest_videos(5)
+            if slowest:
+                slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
+                print(f"    - Slowest fetches: {slowest_str}")
+
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
                 'caption_results': caption_results,

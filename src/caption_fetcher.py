@@ -1183,8 +1183,20 @@ class CaptionFetcher:
         results: Dict[str, Union[CaptionResult, Dict[str, Any]]] = {}
         total_videos = len(videos_to_fetch)
 
+        # US-002 Sprint 6: Get timeout threshold for slow fetch warning
+        timeout_threshold = self._timeout if self._timeout else 30.0
+        slow_threshold = timeout_threshold * 0.8  # 80% of timeout
+
         def fetch_single(video_id: str, index: int) -> tuple:
-            """Fetch captions for a single video (runs in thread)."""
+            """Fetch captions for a single video (runs in thread).
+
+            US-002 Sprint 6: Tracks start_time and elapsed_seconds for each video.
+            Adds elapsed_seconds to progress_callback details dict.
+            Logs warning if video takes >80% of timeout threshold.
+            """
+            import time
+            start_time = time.perf_counter()
+
             # Notify progress callback: fetching
             if progress_callback:
                 try:
@@ -1205,6 +1217,16 @@ class CaptionFetcher:
                     preferred_language=preferred_language
                 )
 
+                # US-002 Sprint 6: Calculate elapsed time
+                elapsed_seconds = time.perf_counter() - start_time
+
+                # US-002 Sprint 6: Warn if video took >80% of timeout
+                if elapsed_seconds > slow_threshold:
+                    logger.warning(
+                        f"Slow caption fetch for {video_id}: {elapsed_seconds:.1f}s "
+                        f"(>{slow_threshold:.1f}s threshold, {int(elapsed_seconds/timeout_threshold*100)}% of timeout)"
+                    )
+
                 # Record success in metrics (thread-safe)
                 if metrics:
                     metrics.record_fetch_success(
@@ -1212,7 +1234,8 @@ class CaptionFetcher:
                         language=result.language,
                         quality=result.caption_quality,
                         segment_count=len(result.segments),
-                        is_auto_generated=result.is_auto_generated
+                        is_auto_generated=result.is_auto_generated,
+                        elapsed_seconds=elapsed_seconds  # US-002 Sprint 6
                     )
 
                 # Notify progress callback: success
@@ -1225,6 +1248,7 @@ class CaptionFetcher:
                             'quality': result.caption_quality,
                             'segment_count': len(result.segments),
                             'is_auto_generated': result.is_auto_generated,
+                            'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                         })
                     except Exception as e:
                         logger.debug(f"Progress callback error: {e}")
@@ -1232,16 +1256,24 @@ class CaptionFetcher:
                 return video_id, result
 
             except CaptionUnavailableError as e:
+                # US-002 Sprint 6: Calculate elapsed time even for failures
+                elapsed_seconds = time.perf_counter() - start_time
+
                 error_result = {
                     'video_id': video_id,
                     'unavailable': True,
                     'reason': str(e.reason),
                     'caption_quality': 'low',
+                    'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
-                    metrics.record_fetch_failure(video_id=video_id, reason='unavailable')
+                    metrics.record_fetch_failure(
+                        video_id=video_id,
+                        reason='unavailable',
+                        elapsed_seconds=elapsed_seconds  # US-002 Sprint 6
+                    )
 
                 # Notify progress callback: failed
                 if progress_callback:
@@ -1251,6 +1283,7 @@ class CaptionFetcher:
                             'total': total_videos,
                             'reason': 'unavailable',
                             'error': str(e.reason),
+                            'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                         })
                     except Exception as cb_err:
                         logger.debug(f"Progress callback error: {cb_err}")
@@ -1258,16 +1291,24 @@ class CaptionFetcher:
                 return video_id, error_result
 
             except CaptionFetchError as e:
+                # US-002 Sprint 6: Calculate elapsed time even for failures
+                elapsed_seconds = time.perf_counter() - start_time
+
                 error_result = {
                     'video_id': video_id,
                     'error': True,
                     'reason': str(e.reason),
                     'caption_quality': 'low',
+                    'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
-                    metrics.record_fetch_failure(video_id=video_id, reason='error')
+                    metrics.record_fetch_failure(
+                        video_id=video_id,
+                        reason='error',
+                        elapsed_seconds=elapsed_seconds  # US-002 Sprint 6
+                    )
 
                 # Notify progress callback: failed
                 if progress_callback:
@@ -1277,6 +1318,7 @@ class CaptionFetcher:
                             'total': total_videos,
                             'reason': 'error',
                             'error': str(e.reason),
+                            'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                         })
                     except Exception as cb_err:
                         logger.debug(f"Progress callback error: {cb_err}")
@@ -1284,17 +1326,25 @@ class CaptionFetcher:
                 return video_id, error_result
 
             except Exception as e:
+                # US-002 Sprint 6: Calculate elapsed time even for failures
+                elapsed_seconds = time.perf_counter() - start_time
+
                 # Unexpected error
                 error_result = {
                     'video_id': video_id,
                     'error': True,
                     'reason': str(e),
                     'caption_quality': 'low',
+                    'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
-                    metrics.record_fetch_failure(video_id=video_id, reason='error')
+                    metrics.record_fetch_failure(
+                        video_id=video_id,
+                        reason='error',
+                        elapsed_seconds=elapsed_seconds  # US-002 Sprint 6
+                    )
 
                 logger.exception(f"Unexpected error fetching captions for {video_id}")
 
@@ -1306,6 +1356,7 @@ class CaptionFetcher:
                             'total': total_videos,
                             'reason': 'error',
                             'error': str(e),
+                            'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                         })
                     except Exception as cb_err:
                         logger.debug(f"Progress callback error: {cb_err}")
@@ -2917,6 +2968,10 @@ class CaptionMetrics:
     auto_generated_count: int = 0
     human_caption_count: int = 0
 
+    # Per-video timing tracking (US-002 Sprint 6)
+    # Dict mapping video_id to elapsed_seconds for slowest videos analysis
+    video_fetch_times: Dict[str, float] = field(default_factory=dict)
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -2940,7 +2995,8 @@ class CaptionMetrics:
         segment_count: int = 0,
         is_auto_generated: bool = False,
         coverage_ratio: Optional[float] = None,
-        min_coverage_threshold: float = 0.5
+        min_coverage_threshold: float = 0.5,
+        elapsed_seconds: Optional[float] = None
     ) -> None:
         """Record a successful caption fetch.
 
@@ -2954,6 +3010,7 @@ class CaptionMetrics:
             is_auto_generated: Whether captions are auto-generated.
             coverage_ratio: Caption coverage ratio 0.0-1.0 (US-004).
             min_coverage_threshold: Threshold for low coverage warning (US-004).
+            elapsed_seconds: Time taken for this fetch in seconds (US-002 Sprint 6).
         """
         with self._lock:
             self.successes += 1
@@ -2980,6 +3037,10 @@ class CaptionMetrics:
                 # Track low coverage videos for warning
                 if coverage_ratio < min_coverage_threshold and video_id:
                     self.low_coverage_videos.append(video_id)
+
+            # Track per-video fetch time (US-002 Sprint 6)
+            if elapsed_seconds is not None and video_id:
+                self.video_fetch_times[video_id] = elapsed_seconds
 
         logger.debug(
             f"Caption fetch success for {video_id or 'unknown'}: "
@@ -3009,7 +3070,8 @@ class CaptionMetrics:
     def record_fetch_failure(
         self,
         video_id: str = "",
-        reason: str = "unknown"
+        reason: str = "unknown",
+        elapsed_seconds: Optional[float] = None
     ) -> None:
         """Record a failed caption fetch.
 
@@ -3018,12 +3080,17 @@ class CaptionMetrics:
         Args:
             video_id: Video ID for logging.
             reason: Reason for failure (e.g., 'unavailable', 'error', 'timeout').
+            elapsed_seconds: Time taken before failure in seconds (US-002 Sprint 6).
         """
         with self._lock:
             self.failures += 1
 
             # Track as 'unavailable' quality
             self.quality_distribution['unavailable'] = self.quality_distribution.get('unavailable', 0) + 1
+
+            # Track per-video fetch time even for failures (US-002 Sprint 6)
+            if elapsed_seconds is not None and video_id:
+                self.video_fetch_times[video_id] = elapsed_seconds
 
         logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
 
@@ -3217,7 +3284,40 @@ class CaptionMetrics:
         if self.low_coverage_videos:
             lines.append(f"  Low coverage: {len(self.low_coverage_videos)} videos below threshold")
 
+        # Slowest fetches (US-002 Sprint 6)
+        slowest = self.get_slowest_videos(5)
+        if slowest:
+            slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
+            lines.append(f"  Slowest fetches: {slowest_str}")
+
         return "\n".join(lines)
+
+    def get_slowest_videos(self, n: int = 5) -> List[tuple]:
+        """Get the n slowest video fetches by elapsed time.
+
+        US-002 Sprint 6: Returns video_ids and their fetch times sorted by
+        slowest first for debugging slow fetches.
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            n: Number of slowest videos to return (default: 5).
+
+        Returns:
+            List of (video_id, elapsed_seconds) tuples sorted by time descending.
+            Returns up to n entries or fewer if less data available.
+
+        Example:
+            >>> metrics.get_slowest_videos(3)
+            [('abc123XYZ01', 8.2), ('def456ABC02', 7.1), ('ghi789JKL03', 5.5)]
+        """
+        with self._lock:
+            sorted_times = sorted(
+                self.video_fetch_times.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            return sorted_times[:n]
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint/JSON.
@@ -3237,6 +3337,7 @@ class CaptionMetrics:
             'quality_distribution': dict(self.quality_distribution),
             'coverage_distribution': dict(self.coverage_distribution),  # US-004
             'low_coverage_videos': list(self.low_coverage_videos),  # US-004
+            'video_fetch_times': dict(self.video_fetch_times),  # US-002 Sprint 6
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
@@ -3267,6 +3368,7 @@ class CaptionMetrics:
             quality_distribution=data.get('quality_distribution', {}),
             coverage_distribution=data.get('coverage_distribution', {}),  # US-004
             low_coverage_videos=data.get('low_coverage_videos', []),  # US-004
+            video_fetch_times=data.get('video_fetch_times', {}),  # US-002 Sprint 6
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
@@ -3312,6 +3414,11 @@ class CaptionMetrics:
             # Merge low coverage videos (US-004)
             self.low_coverage_videos.extend(other.low_coverage_videos)
 
+            # Merge video fetch times (US-002 Sprint 6) - keep slower time if duplicate
+            for vid, elapsed in other.video_fetch_times.items():
+                if vid not in self.video_fetch_times or elapsed > self.video_fetch_times[vid]:
+                    self.video_fetch_times[vid] = elapsed
+
         return self
 
     def clear(self) -> None:
@@ -3331,6 +3438,7 @@ class CaptionMetrics:
             self.quality_distribution = {}
             self.coverage_distribution = {}  # US-004
             self.low_coverage_videos = []  # US-004
+            self.video_fetch_times = {}  # US-002 Sprint 6
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0

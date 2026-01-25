@@ -33,8 +33,8 @@
         "Print summary in CaptionStage: 'Slowest fetches: abc123=8.2s, def456=7.1s'",
         "Tests verify timing data captured correctly for 10+ video batch"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented per-video timing in fetch_single() with time.perf_counter(). Added video_fetch_times Dict to CaptionMetrics. Added get_slowest_videos(n=5) method. Warning logged when video takes >80% of timeout. elapsed_seconds added to all progress_callback details and error_result dicts. 12 new tests added in TestPerVideoTimeoutTracking class. Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_stage_caption.py"
     },
     {
       "id": "US-003",

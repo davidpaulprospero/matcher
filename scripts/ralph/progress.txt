@@ -3625,3 +3625,63 @@ Added thread-safe locking to the streaming progress callback in CaptionStage to 
 - [x] Add docstring documenting thread-safety guarantees for progress_callback
 - [x] Performance test confirms lock adds <5ms overhead per callback
 
+
+## Iteration - [US-002] Implement per-video timeout tracking in batch fetch
+- Focus: caption (Sprint 6)
+- Status: COMPLETE
+
+### Changes Made
+Implemented per-video timeout tracking to provide granular timing data for debugging slow caption fetches.
+
+**CaptionMetrics Changes (src/caption_fetcher.py):**
+1. Added `video_fetch_times: Dict[str, float]` field to track elapsed time per video
+2. Updated `record_fetch_success()` to accept `elapsed_seconds` parameter
+3. Updated `record_fetch_failure()` to accept `elapsed_seconds` parameter
+4. Added `get_slowest_videos(n=5)` method returning (video_id, elapsed_seconds) sorted by time
+5. Updated `summary()` to include "Slowest fetches: abc123=8.2s, def456=7.1s"
+6. Updated `to_dict()` / `from_dict()` for serialization
+7. Updated `merge()` to keep slower time for duplicates
+8. Updated `clear()` to reset timing data
+
+**fetch_single() Changes (src/caption_fetcher.py:1186-1364):**
+1. Added `import time` and `start_time = time.perf_counter()` at function start
+2. Calculate `elapsed_seconds = time.perf_counter() - start_time` after fetch
+3. Log warning if `elapsed_seconds > timeout * 0.8` (80% threshold)
+4. Pass `elapsed_seconds` to `record_fetch_success()` / `record_fetch_failure()`
+5. Include `elapsed_seconds` in all `progress_callback()` details dicts
+6. Include `elapsed_seconds` in error_result dicts for failed fetches
+
+**CaptionStage Changes (src/stages/caption_stage.py):**
+1. Added slowest fetches print after low coverage warnings (line 407-411)
+
+### Tests Added (TestPerVideoTimeoutTracking class - 12 tests)
+1. `test_caption_metrics_tracks_fetch_times` - Verify timing stored for successes
+2. `test_caption_metrics_tracks_failure_times` - Verify timing stored for failures
+3. `test_get_slowest_videos_returns_sorted_list` - Verify correct sort order
+4. `test_get_slowest_videos_handles_empty_data` - Empty list when no data
+5. `test_get_slowest_videos_handles_fewer_than_n` - Returns all if < n videos
+6. `test_metrics_summary_includes_slowest_fetches` - Verify summary format
+7. `test_metrics_to_dict_includes_video_fetch_times` - Serialization test
+8. `test_metrics_from_dict_restores_video_fetch_times` - Deserialization test
+9. `test_elapsed_seconds_in_progress_callback` - Verify callback includes timing
+10. `test_timing_captured_for_10_plus_video_batch` - 12-video batch test
+11. `test_metrics_merge_preserves_slowest_times` - Merge keeps slower time
+12. `test_metrics_clear_resets_fetch_times` - Clear resets timing dict
+
+### Verification
+- Syntax check: All modified files compile cleanly
+- All 53 caption stage tests pass (41 existing + 12 new)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/caption_fetcher.py - CaptionMetrics timing fields, fetch_single() timing
+- src/stages/caption_stage.py - Slowest fetches summary output
+- tests/test_stage_caption.py - TestPerVideoTimeoutTracking class (12 tests)
+
+### Acceptance Criteria Met
+- [x] Track start_time and elapsed_seconds for each video in fetch_single()
+- [x] Add elapsed_seconds to progress_callback details dict
+- [x] Log warning if individual video takes >80% of timeout threshold
+- [x] Add CaptionMetrics method get_slowest_videos(n=5) returning video_ids by fetch time
+- [x] Print summary in CaptionStage: "Slowest fetches: abc123=8.2s, def456=7.1s"
+- [x] Tests verify timing data captured correctly for 10+ video batch
