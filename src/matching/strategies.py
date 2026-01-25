@@ -27,6 +27,51 @@ from ..keyword_extractor import find_keyword_matches
 logger = logging.getLogger(__name__)
 
 
+def calculate_source_diversity_score(
+    candidate_source: str,
+    candidate_keywords: Set[str],
+    v1_v3_sources: Set[str],
+    v1_v3_keywords: Set[str]
+) -> float:
+    """
+    Calculate source diversity score for V4-V6 tracks.
+
+    Scores how different the candidate is from V1-V3 matches based on:
+    - Unique source file (different video = higher score)
+    - Unique keywords (different content = higher score)
+
+    Args:
+        candidate_source: Source file path of the candidate
+        candidate_keywords: Keywords from the candidate video segment
+        v1_v3_sources: Set of source files used in V1-V3
+        v1_v3_keywords: Set of keywords from V1-V3 matches
+
+    Returns:
+        Diversity score from 0.0 (same source/keywords) to 1.0 (completely different)
+    """
+    # Source diversity: 0.6 weight (most important for V4-V6)
+    source_score = 1.0 if candidate_source not in v1_v3_sources else 0.0
+
+    # Keyword diversity: 0.4 weight
+    if not candidate_keywords:
+        # No keywords to compare - neutral score
+        keyword_score = 0.5
+    elif not v1_v3_keywords:
+        # No V1-V3 keywords - full diversity
+        keyword_score = 1.0
+    else:
+        # Calculate keyword overlap ratio
+        overlap = candidate_keywords & v1_v3_keywords
+        overlap_ratio = len(overlap) / len(candidate_keywords) if candidate_keywords else 0.0
+        # Invert: high overlap = low diversity
+        keyword_score = 1.0 - overlap_ratio
+
+    # Combined score: 60% source, 40% keywords
+    diversity_score = source_score * 0.6 + keyword_score * 0.4
+
+    return round(diversity_score, 2)
+
+
 class StrategyMatcher:
     """
     Provides alternative matching strategies for variety tracks V4-V10.
@@ -525,22 +570,27 @@ class StrategyMatcher:
         if not candidate_embeddings:
             return []
 
-        # Collect V1-V3 source files and embeddings
+        # Collect V1-V3 source files, embeddings, and keywords
         v1_v3_sources = {primary_match.source_file}
         v1_v3_embeddings = []
+        v1_v3_keywords: Set[str] = set()
 
-        # Get V1 embedding
+        # Get V1 embedding and keywords
         v1_id = self.get_clip_id(primary_match)
         if v1_id in candidate_embeddings:
             v1_v3_embeddings.append(candidate_embeddings[v1_id])
+        v1_kw = getattr(primary_match, 'keywords', None) or []
+        v1_v3_keywords.update(k.lower() for k in v1_kw)
 
-        # Get V2-V3 embeddings
+        # Get V2-V3 embeddings and keywords
         for alt_seg in alternatives:
             if alt_seg:
                 v1_v3_sources.add(alt_seg.source_file)
                 alt_id = self.get_clip_id(alt_seg)
                 if alt_id in candidate_embeddings:
                     v1_v3_embeddings.append(candidate_embeddings[alt_id])
+                alt_kw = getattr(alt_seg, 'keywords', None) or []
+                v1_v3_keywords.update(k.lower() for k in alt_kw)
 
         secondary_matches = []
         used_sources = set(v1_v3_sources)  # Start with V1-V3 sources excluded
@@ -645,11 +695,30 @@ class StrategyMatcher:
 
             if best_candidate:
                 scene = self._get_scene_for_segment(best_candidate)
+
+                # Calculate source diversity score
+                cand_kw = getattr(best_candidate, 'keywords', None) or []
+                cand_keywords = set(k.lower() for k in cand_kw)
+                source_diversity = calculate_source_diversity_score(
+                    candidate_source=best_candidate.source_file,
+                    candidate_keywords=cand_keywords,
+                    v1_v3_sources=v1_v3_sources,
+                    v1_v3_keywords=v1_v3_keywords
+                )
+
+                # Log diversity score for this segment
+                logger.debug(
+                    f"V{4 + track_idx} source diversity: {source_diversity:.2f} "
+                    f"(source: {Path(best_candidate.source_file).stem}, "
+                    f"unique_file: {best_candidate.source_file not in v1_v3_sources})"
+                )
+
                 secondary_matches.append(AlternativeMatch(
                     video_segment=best_candidate,
                     video_scene=scene,
                     confidence=best_score,
-                    reasoning=f"{labels[track_idx]} (diversity={best_diversity:.2f}, source: {Path(best_candidate.source_file).stem})"
+                    reasoning=f"{labels[track_idx]} (diversity={best_diversity:.2f}, source: {Path(best_candidate.source_file).stem})",
+                    diversity_score=source_diversity
                 ))
 
                 # Add to exclusion for next track
