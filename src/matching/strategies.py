@@ -86,6 +86,21 @@ class StrategyMatcher:
     """
 
     def __init__(self, config: Config, scenes: Optional[Dict[str, List[SceneInfo]]]) -> None:
+        """
+        Initialize the StrategyMatcher with configuration and scene data.
+
+        Args:
+            config: Configuration object containing output.variety settings
+                that control clip exclusion rules (same_clip, different_source,
+                time_distance, embedding_distance, timeline_variety).
+            scenes: Dictionary mapping video file paths to lists of SceneInfo
+                objects from scene detection. Used for visual matching strategies
+                and B-roll detection.
+
+        Notes:
+            The variety_config is extracted from config.output.variety and
+            handles both dict and object access patterns for flexibility.
+        """
         self.config = config
         self.scenes = scenes or {}
 
@@ -107,7 +122,20 @@ class StrategyMatcher:
             self.variety_config = vc
 
     def get_clip_id(self, segment: SRTSegment) -> str:
-        """Generate unique clip ID."""
+        """
+        Generate a unique identifier for a video clip.
+
+        The clip ID combines the source file path with the time range,
+        creating a unique key that can identify duplicate clips across
+        different matching operations.
+
+        Args:
+            segment: Video segment to generate ID for.
+
+        Returns:
+            String in format "source_file:start_time-end_time" with times
+            formatted to 2 decimal places (e.g., "video.mp4:10.50-15.75").
+        """
         return f"{segment.source_file}:{segment.start_time:.2f}-{segment.end_time:.2f}"
 
     def is_clip_excluded(
@@ -119,12 +147,36 @@ class StrategyMatcher:
         force_different_source: bool = False
     ) -> Tuple[bool, str]:
         """
-        Check if candidate violates variety enforcement rules.
-        Returns (is_excluded, reason)
+        Check if a candidate clip violates variety enforcement rules.
+
+        Applies four exclusion rules in order:
+        1. Same clip exclusion - prevents exact clip reuse
+        2. Same source exclusion - optionally prevents clips from same video
+        3. Time window exclusion - prevents clips too close in time
+        4. Embedding distance - prevents semantically similar clips
 
         Args:
-            force_different_source: If True, always require different source file
-                                   (used for alternative tracks)
+            candidate: Video segment to check for exclusion.
+            existing_matches: List of already-selected video segments to
+                compare against.
+            existing_embeddings: Optional list of embeddings for existing
+                matches, used for semantic similarity checking.
+            candidate_embedding: Optional embedding for the candidate clip.
+            force_different_source: If True, always reject clips from the
+                same source file as any existing match. Used for alternative
+                tracks (V4-V10) to ensure variety.
+
+        Returns:
+            Tuple of (is_excluded, reason):
+            - is_excluded: True if the candidate should be excluded
+            - reason: Human-readable explanation of why (empty if not excluded)
+
+        Notes:
+            Variety rules are controlled by config.output.variety settings:
+            - exclude_same_clip: Prevent exact clip reuse
+            - require_different_source: Require different video files
+            - min_time_distance: Minimum seconds between clips from same source
+            - min_embedding_distance: Minimum cosine distance (0.0-2.0 range)
         """
         vc = self.variety_config
 
@@ -179,9 +231,39 @@ class StrategyMatcher:
         candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
-        Strategy A: Visual-First
-        Prioritize scene descriptions and visual keywords over transcript text.
-        Falls back to filename/path matching if no scene data.
+        Strategy A: Visual-First matching.
+
+        Prioritizes scene descriptions and visual keywords over transcript text,
+        finding clips that visually match the voiceover content. Falls back to
+        filename/path matching when scene data is unavailable.
+
+        Scoring weights:
+        - Visual score (70% weight):
+            - Scene description word overlap: up to 0.30 (0.05 per word)
+            - Visual keyword overlap: 0.15 per keyword match
+            - Filename term matches: 0.10 per term (fallback)
+            - Text visual hints: 0.08 per match (fallback)
+        - Text similarity (30% weight): Original embedding similarity * 0.3
+
+        Args:
+            vo_segment: Voiceover segment to match.
+            all_candidates: List of (video_segment, text_similarity) tuples,
+                pre-sorted by embedding similarity.
+            existing_matches: Already-selected clips for this voiceover
+                (used for variety exclusion).
+            existing_embeddings: Embeddings of existing matches for
+                similarity-based exclusion.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+
+        Returns:
+            StrategyMatch with strategy="visual_first" and confidence score,
+            or None if no suitable match found.
+
+        Notes:
+            Visual terms checked: earthquake, tsunami, flood, storm, fire,
+            volcano, disaster, building, city, water, wave, destruction,
+            damage, rescue, people, crowd, evacuation, explosion, collapse,
+            rubble.
         """
         vo_text = vo_segment.text.lower()
         vo_kw = getattr(vo_segment, 'keywords', None)
@@ -263,8 +345,35 @@ class StrategyMatcher:
         candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
-        Strategy B: Different Source Video
-        Force selection from a different video file than existing matches.
+        Strategy B: Different Source Video matching.
+
+        Forces selection from a different video file than existing matches,
+        ensuring visual variety by using footage from different source videos.
+        This is useful when multiple YouTube videos cover similar content.
+
+        Scoring:
+        - Primary: Returns first candidate from unused source with highest
+            embedding similarity (confidence = original similarity).
+        - Fallback: If no different source available, returns best match
+            from any source with 0.8x confidence penalty.
+
+        Args:
+            vo_segment: Voiceover segment to match.
+            all_candidates: List of (video_segment, text_similarity) tuples,
+                pre-sorted by embedding similarity.
+            existing_matches: Already-selected clips; their source files
+                are excluded from selection.
+            existing_embeddings: Embeddings of existing matches (used for
+                variety exclusion checks).
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+
+        Returns:
+            StrategyMatch with strategy="different_source", or None if no
+            candidates available. Fallback matches have reduced confidence.
+
+        Notes:
+            Source file uniqueness is enforced strictly first. Only if no
+            unique source exists does it fall back to allowing same sources.
         """
         used_sources = set(seg.source_file for seg in existing_matches)
 
@@ -311,9 +420,37 @@ class StrategyMatcher:
         candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
-        Strategy C: Keyword-Only
-        Match purely based on keyword and entity overlap, ignore embeddings.
-        Falls back to text word overlap if keywords aren't populated.
+        Strategy C: Keyword-Only matching.
+
+        Matches purely based on keyword and entity overlap, ignoring embedding
+        similarity. Useful when semantic embeddings miss domain-specific terms
+        or proper nouns. Falls back to significant word overlap if keywords
+        aren't populated.
+
+        Scoring weights:
+        - Keyword/entity overlap: 0.2 per matching term
+        - Text word matches: 0.1 per voiceover keyword found in video text
+
+        Args:
+            vo_segment: Voiceover segment to match. Uses .keywords and
+                .entities attributes if available.
+            all_candidates: List of (video_segment, text_similarity) tuples.
+                Similarity score is ignored in favor of keyword matching.
+            existing_matches: Already-selected clips (used for variety
+                exclusion with force_different_source=True).
+            existing_embeddings: Embeddings of existing matches for
+                variety checking.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+
+        Returns:
+            StrategyMatch with strategy="keyword_only" and reasoning showing
+            matched keywords, or None if no overlap found.
+
+        Notes:
+            - Entities are handled as either strings or dicts with 'text' key.
+            - Stop words (this, that, with, from, etc.) are excluded.
+            - Minimum word length is 4 characters.
+            - Force_different_source=True ensures variety from previous tracks.
         """
         vo_kw = getattr(vo_segment, 'keywords', None) or []
         vo_ent = getattr(vo_segment, 'entities', None) or []
@@ -406,8 +543,37 @@ class StrategyMatcher:
         vo_embedding: List[float]
     ) -> Optional[StrategyMatch]:
         """
-        Strategy D: Embedding Diversity
-        Find clips that are semantically relevant but maximally DIFFERENT from V1-V3.
+        Strategy D: Embedding Diversity matching (V7 track).
+
+        Finds clips that are semantically relevant to the voiceover but
+        maximally DIFFERENT from V1-V3 matches. Creates variety by selecting
+        clips that cover similar topics from different perspectives.
+
+        Scoring weights:
+        - Voiceover relevance (40% weight): Cosine similarity to vo_embedding.
+            Minimum threshold of 0.3 required.
+        - Diversity from existing (60% weight): Average cosine distance from
+            all existing match embeddings. Higher = more different.
+
+        Combined score = (vo_relevance * 0.4) + (avg_diversity * 0.6)
+
+        Args:
+            vo_segment: Voiceover segment to match.
+            all_candidates: List of (video_segment, text_similarity) tuples.
+            existing_matches: V1-V3 matches whose embeddings define what
+                to be different from.
+            existing_embeddings: Embedding vectors of V1-V3 matches.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+            vo_embedding: Embedding vector of the voiceover segment.
+
+        Returns:
+            StrategyMatch with strategy="embedding_diversity" and diversity
+            score in reasoning, or None if no candidates with embeddings.
+
+        Notes:
+            - Requires existing_embeddings and candidate_embeddings.
+            - Enforces different source from V1-V3.
+            - Minimum relevance threshold (0.3) prevents returning irrelevant clips.
         """
         def _has_emb(e):
             return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
@@ -478,12 +644,40 @@ class StrategyMatcher:
         vo_embedding: List[float]
     ) -> Optional[StrategyMatch]:
         """
-        Strategy: B-roll Only
-        Find clips that are EXCLUSIVELY B-roll (no speech/faces).
-        Provides editors with a guaranteed silent footage option.
+        Strategy: B-roll Only matching (V8 track).
 
-        B-roll is detected during scene analysis via face_score < threshold.
-        This track only considers candidates with is_broll=True.
+        Finds clips that are EXCLUSIVELY B-roll (silent footage with no
+        speech/faces). Provides editors with a guaranteed silent footage
+        option that won't have audio conflicts with the voiceover.
+
+        B-roll detection sources:
+        1. Face detection: face_score < 0.3 during SceneDetectionStage
+        2. Silent detection: word_count < broll.min_words_threshold (default: 10)
+           during BrollMatchStage
+
+        Scoring:
+        - Returns highest-relevance B-roll clip (embedding similarity to
+            voiceover or original text_similarity as fallback).
+        - Enforces different source from existing matches for variety.
+
+        Args:
+            vo_segment: Voiceover segment to match.
+            all_candidates: List of (video_segment, text_similarity) tuples.
+                Only candidates with is_broll=True are considered.
+            existing_matches: Already-selected clips (excluded for variety).
+            existing_embeddings: Embeddings of existing matches.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+            vo_embedding: Embedding vector of the voiceover segment.
+
+        Returns:
+            StrategyMatch with strategy="broll_only", or None if no B-roll
+            candidates available.
+
+        Notes:
+            - Requires is_broll=True attribute on video segments.
+            - B-roll flag is set by SceneDetectionStage and BrollMatchStage.
+            - Config: broll.enabled must be true for B-roll detection.
+            - Logs count of B-roll candidates for debugging.
         """
         def _has_emb(e):
             return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
@@ -549,20 +743,43 @@ class StrategyMatcher:
         """
         Get secondary matches (V4-V6) using diversity scoring.
 
-        STRICT enforcement: Each track MUST use a different source video.
-        Uses same diversity algorithm as V7 (embedding_diversity).
+        Provides three additional alternative matches beyond V1-V3, each
+        strictly from a different source video. Uses the same diversity
+        algorithm as match_embedding_diversity (V7) but applied iteratively.
+
+        STRICT enforcement: Each track MUST use a different source video
+        from V1-V3 AND from each other.
+
+        Scoring weights (same as embedding_diversity):
+        - Voiceover relevance (40%): Cosine similarity to vo_embedding.
+        - Diversity from existing (60%): Average cosine distance from ALL
+            previously selected clips (V1-V3 + previous V4-V6).
+
+        Combined score = (vo_relevance * 0.4) + (avg_diversity * 0.6)
+
+        Relevance thresholds:
+        - Primary: 0.3 minimum (same as V7)
+        - Fallback: 0.2 if no candidates meet primary threshold
 
         Args:
-            vo_segment: The voiceover segment
-            all_candidates: All candidate clips with similarity scores
-            primary_match: V1 match segment
-            alternatives: V2-V3 match segments
-            vo_embedding: Voiceover embedding
-            candidate_embeddings: Dict of clip_id -> embedding
-            global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
+            vo_segment: The voiceover segment being matched.
+            all_candidates: All candidate clips with (segment, similarity) tuples.
+            primary_match: V1 match segment (excluded from selection).
+            alternatives: V2-V3 match segments (excluded from selection).
+            vo_embedding: Embedding vector of the voiceover segment.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+            global_used_clips: Set of clip IDs already used in previous
+                voiceover segments (cross-segment deduplication).
 
         Returns:
-            List of up to 3 AlternativeMatch objects for V4, V5, V6
+            List of up to 3 AlternativeMatch objects for V4, V5, V6.
+            Each includes diversity_score calculated via
+            calculate_source_diversity_score().
+
+        Notes:
+            - Labels: "Secondary Primary", "Secondary Alt 1", "Secondary Alt 2"
+            - Source exclusion is cumulative (V5 excludes V1-V4 sources, etc.)
+            - Falls back to relaxed threshold if strict matching fails.
         """
         def _has_emb(e):
             return e is not None and (len(e) > 0 if hasattr(e, '__len__') else bool(e))
@@ -729,7 +946,20 @@ class StrategyMatcher:
         return secondary_matches
 
     def _get_scene_for_segment(self, segment: SRTSegment) -> Optional[SceneInfo]:
-        """Find the scene containing this segment"""
+        """
+        Find the scene containing a video segment.
+
+        Looks up the scene from scene detection that contains the segment's
+        start time. Used to retrieve scene descriptions, visual keywords,
+        and B-roll flags for matching.
+
+        Args:
+            segment: Video segment to find the scene for.
+
+        Returns:
+            SceneInfo object if found, None if no scene contains this segment.
+            Scenes are matched by: scene.start_time <= segment.start_time < scene.end_time
+        """
         video_scenes = self.scenes.get(segment.source_file, [])
 
         for scene in video_scenes:
@@ -748,11 +978,40 @@ class StrategyMatcher:
         segment_index: int = 0
     ) -> Optional[StrategyMatch]:
         """
-        Strategy: Source Rotation
-        Cycles through all source videos systematically for maximum variety.
+        Strategy: Source Rotation matching.
 
-        For segment N, picks the best matching clip from source video (N % num_sources).
-        This ensures every source gets used and creates visual variety.
+        Cycles through all source videos systematically using round-robin
+        assignment for maximum variety. Ensures every downloaded video gets
+        used across the timeline.
+
+        Assignment logic:
+        - For segment N with S source videos: assigned_source = sources[N % S]
+        - Sources are sorted alphabetically for consistent ordering.
+        - Falls back to next source in rotation if assigned source fails.
+
+        Scoring:
+        - Returns highest embedding similarity clip from assigned source.
+        - Full confidence if from assigned source.
+        - Falls back through rotation order if assigned source unavailable.
+
+        Args:
+            vo_segment: Voiceover segment to match.
+            all_candidates: List of (video_segment, text_similarity) tuples.
+            existing_matches: Already-selected clips (used for variety
+                exclusion, but source requirement may override).
+            existing_embeddings: Embeddings of existing matches.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+            segment_index: Index of the voiceover segment in the timeline.
+                Used for round-robin source assignment (segment_index % num_sources).
+
+        Returns:
+            StrategyMatch with strategy="source_rotation" and reasoning
+            showing assigned source name and index, or None if no sources.
+
+        Notes:
+            - Creates predictable variety across long timelines.
+            - Useful when you have many source videos covering similar content.
+            - Fallback tries each source in rotation order until one works.
         """
         # Get all unique source videos from candidates
         source_videos = list(set(seg.source_file for seg, _ in all_candidates))
@@ -835,10 +1094,40 @@ class StrategyMatcher:
     ) -> List[StrategyMatch]:
         """
         Get all strategy matches for a voiceover segment.
-        Ensures variety across all tracks.
+
+        Orchestrates the configured strategy tracks (V7+), applying each
+        strategy in sequence while maintaining variety across all tracks.
+        Each strategy adds its match to the exclusion list before the next
+        strategy runs.
+
+        Strategy execution order (from config.output.strategy_tracks):
+        - visual_first: Scene descriptions over transcript
+        - different_source: Force unique video file
+        - keyword_only: Keyword/entity overlap only
+        - embedding_diversity: Maximize semantic distance from V1-V3
+        - source_rotation: Round-robin through sources
+        - broll_only: Silent footage only
 
         Args:
-            global_used_clips: Set of clip IDs already used globally (cross-segment dedup)
+            vo_segment: Voiceover segment being matched.
+            all_candidates: List of (video_segment, text_similarity) tuples.
+            primary_match: V1 match segment.
+            alternatives: V2-V3 match segments.
+            vo_embedding: Embedding vector of the voiceover segment.
+            candidate_embeddings: Dict mapping clip_id to embedding vectors.
+            segment_index: Index for source_rotation strategy.
+            global_used_clips: Set of clip IDs already used in previous
+                segments. These are pre-filtered from candidates.
+
+        Returns:
+            List of StrategyMatch objects, one per configured strategy that
+            found a match. List may be shorter than strategy_tracks if some
+            strategies found no candidates.
+
+        Notes:
+            - Requires config.output.include_strategy_tracks=True.
+            - Each strategy match is added to exclusion before next strategy.
+            - Empty embeddings are filtered safely (handles numpy arrays).
         """
         # Pre-filter candidates by global used clips
         if global_used_clips:
