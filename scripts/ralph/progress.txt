@@ -2531,3 +2531,73 @@ Added comprehensive language detection and selection capabilities to CaptionFetc
 - [x] Configurable cache location via caption_first.cache_dir (default: ~/.matcher_caption_cache/)
 - [x] Cache validation: check caption age, invalidate if older than configurable days
 - [x] Tests verify cache hits, misses, and invalidation
+
+## Iteration 7 - US-006: Implement caption-to-transcription fallback logic
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Modified src/stages/transcribe.py to check for existing caption data and skip transcription:
+
+**1. Added _get_videos_with_captions() method:**
+- Scans state.text_metadata for entries with caption_source='youtube'
+- Returns set of video IDs that have captions + stats dict
+- Only active when caption-first mode is enabled
+
+**2. Added _filter_videos_with_captions() method:**
+- Filters video files list to exclude those with existing YouTube captions
+- Extracts video IDs from file paths for matching
+- Respects fallback_to_transcription config option
+
+**3. Added _extract_video_id_from_path() method:**
+- Extracts 11-char YouTube video ID from file path
+- Handles various filename formats (with/without prefix/suffix)
+
+**4. Added _mark_transcription_source() method:**
+- Marks transcribed segments with caption_source='whisper'
+- Updates text_metadata entries for transcribed videos
+- Preserves existing caption_source values (youtube, manual)
+
+**5. Updated run() method:**
+- Checks for existing caption data before transcribing
+- Filters video files to skip those with YouTube captions
+- Logs summary: 'X videos used captions, Y required transcription'
+- Includes caption_count, transcription_count, caption_source_stats in checkpoint
+
+### Tests Added (16 new tests in test_stage_transcribe.py)
+**TestCaptionFirstFallback class (13 tests):**
+- test_get_videos_with_captions_caption_disabled
+- test_get_videos_with_captions_finds_youtube
+- test_get_videos_with_captions_counts_sources
+- test_filter_videos_with_captions_skips_captioned
+- test_filter_videos_with_captions_all_when_disabled
+- test_filter_videos_with_captions_empty_set
+- test_extract_video_id_from_path
+- test_mark_transcription_source_dict_segments
+- test_mark_transcription_source_updates_text_metadata
+- test_mark_transcription_source_preserves_existing
+- test_run_with_caption_data_skips_transcription
+- test_run_logs_caption_vs_transcription_summary
+- test_fallback_disabled_logs_warning
+
+**TestCaptionSourceTracking class (3 tests):**
+- test_youtube_source_preserved_in_metadata
+- test_whisper_source_added_to_transcripts
+- test_manual_source_supported
+
+### Test Results
+- 55 tests in test_stage_transcribe.py - all passing
+- 142 tests in caption-related tests - 141 passing (1 network test with API issue)
+- main.py --help works correctly
+
+### Files Modified
+- src/stages/transcribe.py (added 4 helper methods, modified run())
+- tests/test_stage_transcribe.py (added 16 tests in 2 new test classes)
+
+### Acceptance Criteria Met
+- [x] TranscribeStage checks for existing caption data in state before transcribing
+- [x] Skip transcription for videos with valid captions (caption_source='youtube')
+- [x] Track source in text_metadata: caption_source field ('youtube', 'whisper', 'manual')
+- [x] Config option caption_first.fallback_to_transcription already existed (default: true)
+- [x] Log summary: 'X videos used captions, Y required transcription'
+- [x] Tests verify fallback triggers correctly and metadata is set

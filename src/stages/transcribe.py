@@ -7,6 +7,13 @@ Stage 3 of the video matching pipeline:
 - Builds embedding index for matching
 - Pre-detects faces if face preference is set
 - Extracts video topics for chapter matching
+
+Caption-first fallback (US-006):
+- Checks for existing caption data in state.text_metadata before transcribing
+- Skips transcription for videos with caption_source='youtube'
+- Falls back to Whisper transcription when captions are unavailable
+- Tracks source in text_metadata: 'youtube', 'whisper', 'manual'
+- Logs summary: 'X videos used captions, Y required transcription'
 """
 
 from __future__ import annotations
@@ -74,6 +81,14 @@ class TranscribeStage(Stage):
 
             print(f"\n  --- Stage 3: TRANSCRIBE & INDEX ---")
 
+            # Check for existing caption data (caption-first mode)
+            # US-006: Skip transcription for videos with existing YouTube captions
+            videos_with_captions, caption_stats = self._get_videos_with_captions(state, config)
+            if caption_stats['total'] > 0:
+                print(f"  Found {caption_stats['total']} videos with existing captions")
+                logger.info(f"Caption-first fallback: {caption_stats['youtube']} YouTube captions, "
+                           f"{caption_stats['needs_transcription']} need transcription")
+
             # Determine video files to transcribe
             video_files = self._get_video_files(state, config)
 
@@ -82,15 +97,35 @@ class TranscribeStage(Stage):
                 warnings.append("No video files to transcribe")
                 return StageResult.ok({'transcripts': {}}, warnings)
 
-            print(f"  Found {len(video_files)} files to process")
+            # Filter out videos that already have caption data (US-006)
+            files_needing_transcription = self._filter_videos_with_captions(
+                video_files, videos_with_captions, config
+            )
+            caption_count = len(video_files) - len(files_needing_transcription)
 
-            # Transcription
-            transcripts = self._transcribe_videos(video_files, config)
+            print(f"  Found {len(video_files)} files to process")
+            if caption_count > 0:
+                print(f"  Skipping {caption_count} files (already have YouTube captions)")
+
+            # Transcription - only transcribe files that don't have captions
+            transcripts = self._transcribe_videos(files_needing_transcription, config)
             state.transcripts = transcripts
+
+            # Add caption_source='whisper' to transcribed segments (US-006)
+            self._mark_transcription_source(transcripts, state, 'whisper')
+
+            # Log caption vs transcription summary (US-006)
+            transcription_count = len(files_needing_transcription)
+            if caption_count > 0 or transcription_count > 0:
+                print(f"  + Source summary: {caption_count} videos used captions, "
+                      f"{transcription_count} required transcription")
+                logger.info(f"Caption-first summary: {caption_count} captions, "
+                           f"{transcription_count} transcriptions")
+
             print(f"  + Transcribed {len(transcripts)} videos")
 
             # Handle silent videos
-            self._handle_silent_videos(video_files, transcripts, config)
+            self._handle_silent_videos(files_needing_transcription, transcripts, config)
 
             # Compute embeddings
             embeddings_result = self._compute_embeddings(transcripts, state, config)
@@ -110,6 +145,10 @@ class TranscribeStage(Stage):
                 'transcript_count': len(transcripts),
                 'embedding_count': 0 if is_embeddings_empty(state.embeddings) else len(state.embeddings),
                 'video_files': [str(vf) for vf in video_files],
+                # US-006: Caption-first statistics
+                'caption_count': caption_count,
+                'transcription_count': transcription_count,
+                'caption_source_stats': caption_stats,
             }
 
             return StageResult.ok(checkpoint_data, warnings)
@@ -196,6 +235,183 @@ class TranscribeStage(Stage):
             list(videos_dir.rglob('*.mp3'))
         )
         return video_files
+
+    def _get_videos_with_captions(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> tuple[set, Dict[str, int]]:
+        """
+        Get set of video IDs/paths that already have caption data.
+
+        US-006: Check state.text_metadata for entries with caption_source='youtube'.
+        These videos don't need Whisper transcription.
+
+        Returns:
+            Tuple of (set of video identifiers with captions, stats dict)
+        """
+        videos_with_captions = set()
+        stats = {
+            'total': 0,
+            'youtube': 0,
+            'whisper': 0,
+            'manual': 0,
+            'needs_transcription': 0,
+        }
+
+        # Check if caption-first mode is enabled
+        caption_config = getattr(config.download, 'caption_first', None)
+        if not caption_config or not getattr(caption_config, 'enabled', False):
+            # Caption-first not enabled, no captions to check
+            return videos_with_captions, stats
+
+        # Check if fallback to transcription is disabled
+        fallback_enabled = getattr(caption_config, 'fallback_to_transcription', True)
+        if not fallback_enabled:
+            logger.info("Caption-first fallback disabled, will not transcribe missing captions")
+
+        # Scan text_metadata for entries with caption_source
+        for entry in state.text_metadata:
+            if not isinstance(entry, dict):
+                continue
+
+            caption_source = entry.get('caption_source')
+            video_id = entry.get('video_path') or entry.get('source_file')
+
+            if caption_source == 'youtube':
+                if video_id:
+                    videos_with_captions.add(video_id)
+                stats['youtube'] += 1
+            elif caption_source == 'whisper':
+                stats['whisper'] += 1
+            elif caption_source == 'manual':
+                stats['manual'] += 1
+
+        stats['total'] = len(videos_with_captions)
+        # Count unique video IDs in text_metadata that don't have YouTube captions
+        all_video_ids = set()
+        for entry in state.text_metadata:
+            if isinstance(entry, dict):
+                video_id = entry.get('video_path') or entry.get('source_file')
+                if video_id:
+                    all_video_ids.add(video_id)
+
+        stats['needs_transcription'] = len(all_video_ids - videos_with_captions)
+
+        return videos_with_captions, stats
+
+    def _filter_videos_with_captions(
+        self,
+        video_files: List[Path],
+        videos_with_captions: set,
+        config: 'Config'
+    ) -> List[Path]:
+        """
+        Filter out video files that already have caption data.
+
+        US-006: Skip transcription for videos with valid YouTube captions.
+
+        Args:
+            video_files: List of video file paths to potentially transcribe
+            videos_with_captions: Set of video IDs that have captions
+            config: Configuration object
+
+        Returns:
+            Filtered list of video files that need transcription
+        """
+        import re
+
+        # Check if caption-first mode is enabled
+        caption_config = getattr(config.download, 'caption_first', None)
+        if not caption_config or not getattr(caption_config, 'enabled', False):
+            # Caption-first not enabled, transcribe everything
+            return video_files
+
+        # Check if fallback to transcription is enabled
+        if not getattr(caption_config, 'fallback_to_transcription', True):
+            # Fallback disabled, still filter but log differently
+            logger.info("Fallback disabled - videos without captions will have no transcript")
+
+        if not videos_with_captions:
+            return video_files
+
+        filtered = []
+        for vf in video_files:
+            # Extract video ID from path
+            video_id = self._extract_video_id_from_path(str(vf))
+
+            # Check if this video has captions
+            if video_id and video_id in videos_with_captions:
+                logger.debug(f"Skipping transcription for {vf.name} (has YouTube captions)")
+                continue
+
+            # Also check full path match
+            if str(vf) in videos_with_captions:
+                logger.debug(f"Skipping transcription for {vf.name} (has YouTube captions)")
+                continue
+
+            filtered.append(vf)
+
+        skipped = len(video_files) - len(filtered)
+        if skipped > 0:
+            logger.info(f"Skipped {skipped} videos with existing captions")
+
+        return filtered
+
+    def _extract_video_id_from_path(self, path: str) -> Optional[str]:
+        """
+        Extract YouTube video ID from a file path.
+
+        Args:
+            path: File path (may contain video ID in filename)
+
+        Returns:
+            11-character video ID if found, None otherwise
+        """
+        import re
+        from pathlib import Path
+
+        filename = Path(path).stem
+
+        # YouTube IDs are exactly 11 alphanumeric chars with _-
+        match = re.search(r'([A-Za-z0-9_-]{11})', filename)
+        if match:
+            return match.group(1)
+
+        return None
+
+    def _mark_transcription_source(
+        self,
+        transcripts: Dict[str, List[Any]],
+        state: 'PipelineState',
+        source: str
+    ):
+        """
+        Mark transcribed segments with their source type.
+
+        US-006: Track caption_source in text_metadata.
+
+        Args:
+            transcripts: Dict of video_path -> segments
+            state: Pipeline state
+            source: Source type ('whisper', 'youtube', 'manual')
+        """
+        # Mark segments in transcripts dict
+        for video_path, segments in transcripts.items():
+            for seg in segments:
+                if isinstance(seg, dict):
+                    seg['caption_source'] = source
+                elif hasattr(seg, '__dict__'):
+                    seg.caption_source = source
+
+        # Also update any matching entries in text_metadata
+        for entry in state.text_metadata:
+            if isinstance(entry, dict):
+                # If entry doesn't have caption_source, check if it's from a transcribed video
+                if 'caption_source' not in entry:
+                    video_path = entry.get('video_path')
+                    if video_path and video_path in transcripts:
+                        entry['caption_source'] = source
 
     def _transcribe_videos(
         self,

@@ -738,3 +738,328 @@ class TestTranscribeEdgeCases:
         result = stage._compute_embeddings(transcripts, state, mock_config)
 
         assert isinstance(result, bool)
+
+
+# ============================================================================
+# Test Caption-First Fallback (US-006)
+# ============================================================================
+
+class TestCaptionFirstFallback:
+    """Test caption-to-transcription fallback logic (US-006)"""
+
+    @pytest.fixture
+    def caption_enabled_config(self, mock_config):
+        """Config with caption-first mode enabled"""
+        mock_config.download.caption_first = MagicMock()
+        mock_config.download.caption_first.enabled = True
+        mock_config.download.caption_first.fallback_to_transcription = True
+        return mock_config
+
+    @pytest.fixture
+    def caption_disabled_config(self, mock_config):
+        """Config with caption-first mode disabled"""
+        mock_config.download.caption_first = MagicMock()
+        mock_config.download.caption_first.enabled = False
+        return mock_config
+
+    def test_get_videos_with_captions_caption_disabled(self, caption_disabled_config):
+        """Test _get_videos_with_captions returns empty when caption-first disabled"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'Hello', 'video_path': 'vid1', 'caption_source': 'youtube'},
+        ]
+
+        videos, stats = stage._get_videos_with_captions(state, caption_disabled_config)
+
+        assert len(videos) == 0
+        assert stats['total'] == 0
+
+    def test_get_videos_with_captions_finds_youtube(self, caption_enabled_config):
+        """Test _get_videos_with_captions identifies YouTube captions"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'Hello', 'video_path': 'abc123xyz01', 'caption_source': 'youtube'},
+            {'text': 'World', 'video_path': 'abc123xyz01', 'caption_source': 'youtube'},
+            {'text': 'Test', 'video_path': 'def456ghi02', 'caption_source': 'whisper'},
+        ]
+
+        videos, stats = stage._get_videos_with_captions(state, caption_enabled_config)
+
+        assert 'abc123xyz01' in videos
+        assert 'def456ghi02' not in videos
+        assert stats['youtube'] == 2
+        assert stats['whisper'] == 1
+        assert stats['total'] == 1  # Unique video IDs with captions
+
+    def test_get_videos_with_captions_counts_sources(self, caption_enabled_config):
+        """Test _get_videos_with_captions counts all source types"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'A', 'video_path': 'vid1', 'caption_source': 'youtube'},
+            {'text': 'B', 'video_path': 'vid2', 'caption_source': 'whisper'},
+            {'text': 'C', 'video_path': 'vid3', 'caption_source': 'manual'},
+            {'text': 'D', 'video_path': 'vid4'},  # No source
+        ]
+
+        videos, stats = stage._get_videos_with_captions(state, caption_enabled_config)
+
+        assert stats['youtube'] == 1
+        assert stats['whisper'] == 1
+        assert stats['manual'] == 1
+        assert stats['needs_transcription'] == 3  # vid2, vid3, vid4 need transcription
+
+    def test_filter_videos_with_captions_skips_captioned(self, caption_enabled_config):
+        """Test _filter_videos_with_captions skips videos with YouTube captions"""
+        stage = TranscribeStage()
+        video_files = [
+            Path("path/to/abc123xyz01.mp4"),
+            Path("path/to/def456ghi02.mp4"),
+            Path("path/to/jkl789mno03.mp4"),
+        ]
+        videos_with_captions = {'abc123xyz01', 'def456ghi02'}
+
+        filtered = stage._filter_videos_with_captions(
+            video_files, videos_with_captions, caption_enabled_config
+        )
+
+        assert len(filtered) == 1
+        assert filtered[0].stem == "jkl789mno03"
+
+    def test_filter_videos_with_captions_all_when_disabled(self, caption_disabled_config):
+        """Test _filter_videos_with_captions returns all when caption-first disabled"""
+        stage = TranscribeStage()
+        video_files = [Path("video1.mp4"), Path("video2.mp4")]
+        videos_with_captions = {'video1', 'video2'}
+
+        filtered = stage._filter_videos_with_captions(
+            video_files, videos_with_captions, caption_disabled_config
+        )
+
+        assert len(filtered) == 2
+
+    def test_filter_videos_with_captions_empty_set(self, caption_enabled_config):
+        """Test _filter_videos_with_captions returns all when no captions"""
+        stage = TranscribeStage()
+        video_files = [Path("video1.mp4"), Path("video2.mp4")]
+
+        filtered = stage._filter_videos_with_captions(
+            video_files, set(), caption_enabled_config
+        )
+
+        assert len(filtered) == 2
+
+    def test_extract_video_id_from_path(self):
+        """Test _extract_video_id_from_path extracts 11-char video ID"""
+        stage = TranscribeStage()
+
+        # Standard filename with video ID
+        assert stage._extract_video_id_from_path("abc123xyz01.mp4") == "abc123xyz01"
+
+        # Path with directory
+        assert stage._extract_video_id_from_path("/path/to/abc123xyz01.mp4") == "abc123xyz01"
+
+        # Filename with video ID (extracts first 11-char sequence)
+        result = stage._extract_video_id_from_path("dQw4w9WgXcQ_720p.mp4")
+        assert result == "dQw4w9WgXcQ"
+
+        # No valid video ID (too short)
+        assert stage._extract_video_id_from_path("short.mp4") is None
+
+        # Video ID at end of filename
+        result = stage._extract_video_id_from_path("video_dQw4w9WgXcQ.mp4")
+        assert len(result) == 11  # Should find an 11-char sequence
+
+    def test_mark_transcription_source_dict_segments(self):
+        """Test _mark_transcription_source marks dict segments"""
+        stage = TranscribeStage()
+        state = PipelineState()
+
+        transcripts = {
+            "video1.mp4": [
+                {"text": "Hello", "start_time": 0, "end_time": 2},
+                {"text": "World", "start_time": 2, "end_time": 4},
+            ]
+        }
+
+        stage._mark_transcription_source(transcripts, state, 'whisper')
+
+        for seg in transcripts["video1.mp4"]:
+            assert seg['caption_source'] == 'whisper'
+
+    def test_mark_transcription_source_updates_text_metadata(self):
+        """Test _mark_transcription_source updates text_metadata entries"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'Hello', 'video_path': 'video1.mp4'},
+        ]
+
+        transcripts = {"video1.mp4": [{"text": "Hello"}]}
+
+        stage._mark_transcription_source(transcripts, state, 'whisper')
+
+        assert state.text_metadata[0]['caption_source'] == 'whisper'
+
+    def test_mark_transcription_source_preserves_existing(self):
+        """Test _mark_transcription_source preserves existing caption_source"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'Caption', 'video_path': 'video1.mp4', 'caption_source': 'youtube'},
+        ]
+
+        transcripts = {"video2.mp4": [{"text": "Transcribed"}]}
+
+        stage._mark_transcription_source(transcripts, state, 'whisper')
+
+        # youtube source should be preserved
+        assert state.text_metadata[0]['caption_source'] == 'youtube'
+
+    @patch('src.transcription.transcribe_videos_parallel')
+    @patch('src.transcription.DeltaAwareIndex')
+    def test_run_with_caption_data_skips_transcription(
+        self, mock_delta_class, mock_transcribe, caption_enabled_config, mock_checkpoint
+    ):
+        """Test run method skips transcription for videos with captions"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.downloaded_videos = [
+            DownloadedVideo(file="abc123xyz01.mp4", url="url1", source="download"),
+            DownloadedVideo(file="def456ghi02.mp4", url="url2", source="download"),
+        ]
+        state.face_preference = 'neutral'
+        state.text_metadata = [
+            {'text': 'Caption', 'video_path': 'abc123xyz01', 'caption_source': 'youtube'},
+        ]
+
+        mock_delta = Mock()
+        mock_delta.get_new_videos.return_value = ["def456ghi02.mp4"]
+        mock_delta_class.return_value = mock_delta
+
+        mock_transcribe.return_value = {
+            "def456ghi02.mp4": [{"text": "Transcribed", "start_time": 0, "end_time": 2}]
+        }
+
+        caption_enabled_config.pipeline.parallel_embedding = False
+
+        result = stage.run(state, caption_enabled_config, mock_checkpoint)
+
+        assert result.success is True
+        # Check checkpoint data includes caption stats
+        assert 'caption_count' in result.data
+        assert 'transcription_count' in result.data
+
+    def test_run_logs_caption_vs_transcription_summary(
+        self, caption_enabled_config, mock_checkpoint, capsys
+    ):
+        """Test run method logs summary of captions vs transcriptions"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.downloaded_videos = []
+        state.downloaded_audio = []
+        state.face_preference = 'neutral'
+        state.text_metadata = [
+            {'text': 'Caption1', 'video_path': 'vid1', 'caption_source': 'youtube'},
+            {'text': 'Caption2', 'video_path': 'vid2', 'caption_source': 'youtube'},
+        ]
+
+        caption_enabled_config.downloaded_videos_dir = "/nonexistent"
+
+        # Run the stage (will fail due to no videos, but will still log)
+        stage.run(state, caption_enabled_config, mock_checkpoint)
+
+        captured = capsys.readouterr()
+        assert "2 videos with existing captions" in captured.out or "Found 2 videos" in captured.out
+
+    def test_fallback_disabled_logs_warning(self, caption_enabled_config):
+        """Test that disabling fallback logs appropriate message"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        caption_enabled_config.download.caption_first.fallback_to_transcription = False
+
+        video_files = [Path("video1.mp4")]
+        videos_with_captions = set()
+
+        # Should still return all files, but logs differently
+        with patch('src.stages.transcribe.logger') as mock_logger:
+            filtered = stage._filter_videos_with_captions(
+                video_files, videos_with_captions, caption_enabled_config
+            )
+
+            assert len(filtered) == 1
+            mock_logger.info.assert_called()
+
+
+class TestCaptionSourceTracking:
+    """Test caption_source field tracking (US-006)"""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Create mock config"""
+        config = MagicMock()
+        config.pipeline.skip_transcription = False
+        config.pipeline.parallel_transcription = False
+        config.pipeline.parallel_embedding = False
+        config.downloaded_videos_dir = "videos"
+        config.transcription.model = "base"
+        config.transcription.language = "auto"
+        config.cache.cache_dir = ".cache"
+        config.download.caption_first = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.fallback_to_transcription = True
+        return config
+
+    def test_youtube_source_preserved_in_metadata(self):
+        """Test that caption_source='youtube' is preserved in text_metadata"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'YouTube caption', 'video_path': 'vid1', 'caption_source': 'youtube'},
+        ]
+
+        transcripts = {'vid2': [{'text': 'New transcript'}]}
+
+        stage._mark_transcription_source(transcripts, state, 'whisper')
+
+        # YouTube source should remain unchanged
+        assert state.text_metadata[0]['caption_source'] == 'youtube'
+
+    def test_whisper_source_added_to_transcripts(self):
+        """Test that caption_source='whisper' is added to new transcripts"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = []
+
+        transcripts = {
+            'video1.mp4': [
+                {'text': 'Hello', 'start_time': 0, 'end_time': 2},
+                {'text': 'World', 'start_time': 2, 'end_time': 4},
+            ]
+        }
+
+        stage._mark_transcription_source(transcripts, state, 'whisper')
+
+        # All transcript segments should have whisper source
+        for seg in transcripts['video1.mp4']:
+            assert seg['caption_source'] == 'whisper'
+
+    def test_manual_source_supported(self):
+        """Test that caption_source='manual' is recognized"""
+        stage = TranscribeStage()
+        state = PipelineState()
+        state.text_metadata = [
+            {'text': 'Manual transcript', 'video_path': 'vid1', 'caption_source': 'manual'},
+        ]
+
+        config = MagicMock()
+        config.download.caption_first = MagicMock()
+        config.download.caption_first.enabled = True
+
+        videos, stats = stage._get_videos_with_captions(state, config)
+
+        assert stats['manual'] == 1
+        # Manual source doesn't count as "youtube" caption
+        assert 'vid1' not in videos

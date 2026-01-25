@@ -97,8 +97,8 @@
         "Log summary: 'X videos used captions, Y required transcription'",
         "Tests verify fallback triggers correctly and metadata is set"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added _get_videos_with_captions(), _filter_videos_with_captions(), _extract_video_id_from_path(), and _mark_transcription_source() methods to TranscribeStage. Logs caption vs transcription summary. Checkpoint includes caption_count, transcription_count, caption_source_stats. 16 new tests in test_stage_transcribe.py. All 55 transcribe tests passing."
     },
     {
       "id": "US-007",
