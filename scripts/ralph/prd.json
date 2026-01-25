@@ -65,8 +65,8 @@
         "Checkpoint integration: saves fetched captions, resumes from partial completion",
         "Tests verify stage execution and checkpoint behavior"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created src/stages/caption_stage.py with CaptionStage class. Stage runs AFTER REMIX and BEFORE TRANSCRIBE (between download and transcription). Extracts video IDs from downloaded_videos and downloaded_audio. Fetches captions using CaptionFetcher with config-driven language/timeout. Populates state.text_metadata with caption segments for matching. Checkpoint integration with partial resume support. Added CAPTION to STAGE_ORDER in checkpoint.py. 27 tests in tests/test_stage_caption.py all passing."
     },
     {
       "id": "US-005",

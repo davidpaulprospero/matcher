@@ -2405,3 +2405,55 @@ Added comprehensive language detection and selection capabilities to CaptionFetc
 - [x] Fallback chain: preferred_language -> 'en' -> any available language
 - [x] Log which language was selected and why
 - [x] Tests verify language selection logic with various availability scenarios
+
+## Sprint 4 - US-004: Create CAPTION pipeline stage
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+
+**1. Created src/stages/caption_stage.py**
+- New CaptionStage class following the standard stage pattern
+- Extracts video IDs from state.downloaded_videos and state.downloaded_audio
+- Fetches captions using CaptionFetcher with config-driven settings
+- Populates state.text_metadata with caption segments compatible with matching
+- Checkpoint integration for partial resume support
+- Skips gracefully when caption-first mode is disabled
+
+**2. Updated src/state.py**
+- Added caption_results field to PipelineState for storing caption data
+
+**3. Updated src/checkpoint.py**
+- Added CAPTION to STAGE_ORDER (after REMIX, before TRANSCRIBE)
+- Added caption field to CheckpointData dataclass
+
+**4. Updated src/pipeline.py**
+- Added CaptionStage import and registration to create_default_pipeline()
+- Added CaptionStage to create_match_only_pipeline()
+
+**5. Created tests/test_stage_caption.py**
+- 27 comprehensive tests covering:
+  - Stage initialization and registration
+  - Input validation (no videos/audio scenarios)
+  - Disabled mode behavior
+  - Video ID extraction from URL, filename, direct attribute
+  - Caption fetching with mocked API
+  - Unavailable/error caption handling
+  - Text metadata population
+  - Checkpoint save/restore
+  - Partial resume functionality
+  - Configuration handling
+  - STAGE_ORDER integration
+
+**Test Results:**
+- All 27 new tests passing
+- All 86 caption_fetcher tests still passing
+- Pipeline imports working correctly
+
+**Acceptance Criteria Met:**
+- [x] New src/stages/caption_stage.py with CaptionStage class following stage pattern
+- [x] Stage runs AFTER REMIX and BEFORE TRANSCRIBE in pipeline order
+- [x] Fetches captions for each video in video_candidates list (via downloaded_videos/audio)
+- [x] Stores caption data in state.text_metadata compatible with existing matching
+- [x] Checkpoint integration: saves fetched captions, resumes from partial completion
+- [x] Tests verify stage execution and checkpoint behavior (27 tests)

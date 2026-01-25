@@ -138,6 +138,9 @@ class PipelineState:
     entity_images: Dict[str, EntityImage] = field(default_factory=dict)
     entity_videos: Dict[str, EntityVideo] = field(default_factory=dict)
 
+    # === CAPTION STATE ===
+    caption_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # video_id -> caption data
+
     # === TRANSCRIPTION STATE ===
     transcripts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     embeddings: List[Any] = field(default_factory=list)  # numpy arrays
