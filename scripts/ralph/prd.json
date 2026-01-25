@@ -113,8 +113,8 @@
         "Validation result stored in CaptionResult.timing_validated field",
         "Tests verify timing validation with edge cases"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in commit 688992e. All 6 acceptance criteria verified: (1) validate_timing(video_duration) method added to CaptionResult (lines 327-412), (2) Compares segments[-1].end_time to video duration, (3) exceeds_duration flag set when caption_end > video_duration * 1.1, (4) below_coverage flag set when caption_end < video_duration * 0.5, (5) Result stored in timing_validated field (TimingValidationResult dataclass), (6) 17 new tests in TestCaptionResult and TestTimingValidationResult classes covering: valid timing, exceeds duration, tolerance boundaries, low coverage, empty segments, custom thresholds, serialization."
     },
     {
       "id": "US-008",
@@ -129,8 +129,8 @@
         "Metrics track pre-check results (available/unavailable counts)",
         "Tests verify pre-check correctly identifies caption availability"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in commit b162d7a. All 6 acceptance criteria verified: (1) has_captions(video_id) method added to CaptionFetcher using list_available_languages(), (2) Returns boolean without downloading content, (3) CaptionStage pre-filters via pre_check_availability config, (4) pre_check_availability=true config option added to CaptionFirstConfig and config.yaml, (5) CaptionMetrics tracks pre_check_available/pre_check_unavailable with record_pre_check() method, (6) 16 new tests in TestHasCaptions (6 tests) and TestCaptionMetricsPreCheck (10 tests) classes."
     },
     {
       "id": "US-009",
@@ -145,8 +145,8 @@
         "Support both TTY (overwrite line) and non-TTY (newline per video) output",
         "Tests verify callback is invoked with correct parameters"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented. All 6 acceptance criteria verified: (1) progress_callback parameter added to fetch_captions_batch() in caption_fetcher.py:1116, (2) Callback receives video_id, status ('fetching'/'success'/'failed'), details dict with index, total, language, quality, segment_count, is_auto_generated (lines 1188-1311), (3) CaptionStage.run() defines on_progress callback and passes to batch fetch (lines 205-280 in caption_stage.py), (4) Format matches spec: '[32/100] abc123XYZ: en (auto, 45 segments, quality=medium)' (line 239), (5) TTY mode uses carriage return (\\r) for line overwrite, non-TTY skips fetching status and uses newlines for final status (lines 206-271), (6) 8 tests pass: TestBatchCaptionFetch::test_batch_fetch_progress_callback + 7 TestStreamingProgressOutput tests in test_stage_caption.py."
     },
     {
       "id": "US-010",
