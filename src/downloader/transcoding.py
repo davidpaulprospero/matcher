@@ -160,8 +160,9 @@ class TranscodingManager:
                 return 'intel'
             elif 'h264_videotoolbox' in encoders:
                 return 'mac'
-        except:
-            pass
+        except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
+            # FFmpeg not installed or failed to run - fall back to no hardware acceleration
+            logger.debug(f"Could not detect GPU encoder (ffmpeg unavailable): {e}")
 
         return 'none'
 
