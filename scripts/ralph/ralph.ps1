@@ -2582,6 +2582,11 @@ function Start-InterviewQueueLoop {
 
     if ($focusAreas.Count -eq 0) {
         Write-Host "  No pending focus areas in queue" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Run the interview first to add focus areas:" -ForegroundColor Cyan
+        Write-Host "    .\scripts\ralph\7-hi-super-nintendo-chalmers.bat" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Or add areas directly to queue.json" -ForegroundColor DarkGray
         return
     }
 
