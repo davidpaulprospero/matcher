@@ -97,7 +97,8 @@
         "Test that extraction exceeding timeout raises TimeoutError"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added audio_extraction_timeout field to TranscriptionConfig (default: 60s). Updated extract_audio() to accept timeout parameter, raise TimeoutError on subprocess.TimeoutExpired, log warning with video path, and clean up partial files. Created tests/test_audio_extraction_timeout.py with 21 tests across 7 test classes covering: config field (4 tests), timeout parameter (3 tests), TimeoutError behavior (4 tests), warning logging (3 tests), extraction success (2 tests), config integration (2 tests), edge cases (3 tests). All tests pass."
     },
     {
       "id": "US-007",
@@ -111,7 +112,8 @@
         "Test that cached videos are not reprocessed when skip_if_cached=True"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added skip_if_cached parameter to transcribe_videos_parallel() with default=True. Parameter provides clearer semantics than force_reprocess (which is now deprecated). Logic: should_skip_cached = skip_if_cached and not force_reprocess. Added logging 'Skipped N cached videos (skip_if_cached=True)' when cached videos are found. Created tests/test_transcription_skip_cached.py with 17 tests across 7 test classes covering: parameter existence (3), skip_if_cached=True behavior (3), skip_if_cached=False behavior (2), force_reprocess interaction (2), logging (3), result correctness (2), edge cases (2). All 17 new tests pass, all 24 existing parallel_processor tests pass."
     },
     {
       "id": "US-008",

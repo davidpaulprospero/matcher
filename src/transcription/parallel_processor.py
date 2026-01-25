@@ -30,7 +30,8 @@ def transcribe_videos_parallel(
     config: Any = None,
     max_workers: int = 4,
     force_reprocess: bool = False,
-    show_progress: bool = True
+    show_progress: bool = True,
+    skip_if_cached: bool = True
 ) -> Dict[str, List[TranscriptSegment]]:
     """
     Transcribe multiple videos with parallel audio extraction but sequential GPU.
@@ -44,8 +45,10 @@ def transcribe_videos_parallel(
         cache: CacheManager or similar with cache_dir attribute
         config: Configuration object with transcription settings
         max_workers: Number of parallel workers for audio extraction
-        force_reprocess: If True, ignore cache and reprocess all
+        force_reprocess: If True, ignore cache and reprocess all (deprecated, use skip_if_cached=False)
         show_progress: Whether to show progress
+        skip_if_cached: If True (default), skip videos already in cache.
+                       If False, reprocess all videos ignoring cache.
 
     Returns:
         Dict mapping video path to list of TranscriptSegments
@@ -79,14 +82,20 @@ def transcribe_videos_parallel(
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
 
+    # Determine whether to skip cached videos
+    # skip_if_cached takes precedence; force_reprocess is deprecated but still honored
+    should_skip_cached = skip_if_cached and not force_reprocess
+
     # Separate cached vs uncached
     cached_videos = []
     uncached_videos = []
 
     for video_path in video_paths:
-        if force_reprocess:
+        if not should_skip_cached:
+            # Reprocess all videos (skip_if_cached=False or force_reprocess=True)
             uncached_videos.append(video_path)
         else:
+            # Check cache when skip_if_cached=True
             cached = transcript_cache.get(video_path)
             if cached:
                 cached_videos.append((video_path, cached))
@@ -105,6 +114,10 @@ def transcribe_videos_parallel(
             )
             for i, seg in enumerate(segments)
         ]
+
+    # Log skipped videos count when skip_if_cached=True
+    if should_skip_cached and cached_videos:
+        logger.info(f"Skipped {len(cached_videos)} cached videos (skip_if_cached=True)")
 
     if show_progress:
         print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
