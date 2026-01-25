@@ -2072,3 +2072,48 @@ Progress: 10/12 stories complete
   - tests/test_semantic_coherence.py (new file, 410+ lines)
 
 Progress: 11/12 stories complete
+
+## Iteration 12 - [US-012] Add match explanation confidence validation
+- Implemented validate_explanation_confidence() function in src/matching/llm_providers.py:
+  - Cross-checks LLM explanation keywords against actual voiceover/video text
+  - Uses existing _extract_keywords() helper for consistent keyword extraction
+  - Calculates verification_ratio: number of keywords found in source / total keywords
+  - Returns ExplanationValidation dataclass with all verification details
+- Added ExplanationValidation dataclass:
+  - is_valid: True when verification_ratio >= 50%
+  - verification_ratio: 0.0-1.0 ratio of verifiable keywords
+  - explanation_keywords: all keywords extracted from explanation
+  - verified_keywords: keywords found in voiceover/video text
+  - unverified_keywords: keywords NOT found in source content
+  - confidence_penalty: 0.0 if valid, 0.1 if invalid
+  - warning_message: human-readable warning when invalid
+- Added constants:
+  - EXPLANATION_VERIFICATION_THRESHOLD = 0.5 (50% minimum)
+  - EXPLANATION_CONFIDENCE_PENALTY = 0.1 (penalty amount)
+- Logging behavior:
+  - WARNING logged when explanation references non-existent content
+  - Lists up to 5 unverified keywords in warning message
+  - DEBUG logged when validation passes
+- Added explanation_validation_enabled config option to MatchingConfig (default: true)
+- Added config.yaml documentation with chain-of-thought reasoning
+- Created tests/test_explanation_validation.py with 42 tests in 11 test classes:
+  - TestExplanationValidationDataclass (2 tests): structure and warning format
+  - TestValidateExplanationConfidenceBasic (4 tests): empty/none/no keywords/verifiable
+  - TestVerificationRatioCalculation (4 tests): 100%/0%/50% exact/below threshold
+  - TestVideoTextIntegration (3 tests): video contribution, combined sources, None handling
+  - TestVerifiedUnverifiedKeywords (3 tests): population and sorting
+  - TestConfidencePenalty (6 tests): default values, applied/no penalty, custom values
+  - TestLogging (5 tests): warning logged/includes keywords/limited/no warning/debug
+  - TestWarningMessage (3 tests): format, penalty included, None when valid
+  - TestEdgeCases (6 tests): case insensitive, punctuation, short words, stopwords, empty/whitespace
+  - TestConfigIntegration (2 tests): default true, can disable
+  - TestRealWorldScenarios (4 tests): good/hallucinated/partial/technical jargon
+- All 42 tests pass
+- Files modified:
+  - src/matching/llm_providers.py (added ExplanationValidation dataclass, ~120 lines)
+  - src/config/sections/matching.py (added explanation_validation_enabled option)
+  - config.yaml (added explanation_validation documentation)
+- Files created:
+  - tests/test_explanation_validation.py (new file, 420+ lines)
+
+Progress: 12/12 stories complete - SPRINT 5 COMPLETE!
