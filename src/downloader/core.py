@@ -45,6 +45,7 @@ from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig
 from .rate_limit_metrics import RateLimitMetrics
+from .rate_limit_budget import RateLimitBudget
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -363,6 +364,35 @@ class VideoDownloader:
         # Rate limiting metrics tracking (US-010)
         self.rate_limit_metrics = RateLimitMetrics()
 
+        # Cross-keyword rate limit budget tracking (US-004)
+        # Check if budget sharing is enabled in config
+        self._share_budget_across_keywords = getattr(
+            rate_limit_config, 'share_budget_across_keywords', True
+        ) if rate_limit_config else True
+
+        # Initialize budget with limits from config
+        self.rate_limit_budget = RateLimitBudget()
+        if rate_limit_config:
+            # Get max backoff budget from config
+            try:
+                max_backoff_budget = float(getattr(rate_limit_config, 'max_backoff_budget', 300.0))
+            except (TypeError, ValueError):
+                max_backoff_budget = 300.0
+            self.rate_limit_budget.max_backoff_time = max_backoff_budget
+
+        # Get rotation limit from cookie rotator config
+        if cookie_rotation_config:
+            max_rotations = getattr(cookie_rotation_config, 'max_rotations_per_session', 0)
+            self.rate_limit_budget.max_rotations = max_rotations
+
+        # Get VPN switch limit from vpn config
+        if vpn_config:
+            max_vpn_switches = getattr(vpn_config, 'max_switches_per_session', 10)
+            self.rate_limit_budget.max_vpn_switches = max_vpn_switches
+
+        if self._share_budget_across_keywords:
+            logger.debug("Cross-keyword rate limit budget sharing enabled")
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -382,6 +412,12 @@ class VideoDownloader:
             self.checkpoint.speed_tracker_state = self.speed_tracker.to_checkpoint_dict()
             # Include rate limit metrics in checkpoint for cross-session analysis (US-010)
             self.checkpoint.rate_limit_metrics = self.rate_limit_metrics.to_dict()
+            # Include cross-keyword rate limit budget in checkpoint (US-004)
+            if self._share_budget_across_keywords:
+                self.checkpoint.rate_limit_budget = self.rate_limit_budget.to_dict()
+            # Include VPN manager state for switch count persistence (US-005)
+            if self.vpn_manager and self.vpn_manager.is_enabled:
+                self.checkpoint.vpn_manager_state = self.vpn_manager.to_checkpoint_state()
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -587,12 +623,13 @@ class VideoDownloader:
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
 
-    def rotate_cookie_on_error(self, error_message: str) -> bool:
+    def rotate_cookie_on_error(self, error_message: str, keyword: str = None) -> bool:
         """
         Attempt to rotate cookie based on error message.
 
         Args:
             error_message: Error string from yt-dlp
+            keyword: Search keyword for budget tracking (optional)
 
         Returns:
             True if cookie was rotated, False otherwise
@@ -605,23 +642,39 @@ class VideoDownloader:
             if new_cookie:
                 logger.info(f"Rotated to new cookie: {Path(new_cookie).name}")
                 self.rate_limit_metrics.record_cookie_rotation()
+                # Record in cross-keyword budget (US-004)
+                if self._share_budget_across_keywords:
+                    self.rate_limit_budget.record_rotation(keyword=keyword)
                 return True
             else:
                 logger.warning("Cookie rotation exhausted")
 
         return False
 
-    def switch_vpn_on_error(self) -> bool:
+    def switch_vpn_on_error(self, keyword: str = None) -> bool:
         """
         Attempt to switch VPN server.
 
         Should be called after cookie rotation is exhausted.
+
+        Args:
+            keyword: Search keyword for budget tracking (optional)
 
         Returns:
             True if VPN was switched, False otherwise
         """
         if not self.vpn_manager:
             return False
+
+        # Check cross-keyword budget if enabled (US-004)
+        if self._share_budget_across_keywords:
+            if not self.rate_limit_budget.can_switch_vpn():
+                remaining = self.rate_limit_budget.vpn_switches_remaining()
+                logger.warning(
+                    f"VPN switch budget exhausted ({self.rate_limit_budget.vpn_switches_used} used, "
+                    f"{remaining or 0} remaining)"
+                )
+                return False
 
         if self.vpn_manager.can_switch():
             success = self.vpn_manager.switch()
@@ -630,11 +683,16 @@ class VideoDownloader:
                 if self.cookie_rotator:
                     self.cookie_rotator.reset()
                 self.rate_limit_metrics.record_vpn_switch()
+                # Record in cross-keyword budget (US-004)
+                if self._share_budget_across_keywords:
+                    self.rate_limit_budget.record_vpn_switch(keyword=keyword)
                 return True
 
         return False
 
-    def handle_rate_limit_error(self, error_message: str, tier: str = None) -> bool:
+    def handle_rate_limit_error(
+        self, error_message: str, tier: str = None, keyword: str = None
+    ) -> bool:
         """
         Handle rate limit or authentication error with progressive backoff.
 
@@ -652,9 +710,14 @@ class VideoDownloader:
         When per_tier_isolation is enabled, each tier maintains independent
         backoff state. Rate limiting on 'long' tier won't affect 'short' tier.
 
+        When share_budget_across_keywords is enabled (default), uses shared budget
+        to skip exhausted escalation levels. If keyword A exhausted all cookie
+        rotations, keyword B skips directly to VPN switching.
+
         Args:
             error_message: Error string from yt-dlp
             tier: Duration tier (short, medium, long, longer) for tier-specific tracking
+            keyword: Search keyword for budget tracking (optional)
 
         Returns:
             True if recovery was attempted (backoff or rotation), False if no options left
@@ -695,14 +758,43 @@ class VideoDownloader:
                 f"max_backoff={max_backoff:.1f}s"
             )
 
+        # Check cross-keyword budget if enabled (US-004)
+        # If budget sharing enabled and budget exhausted, skip lower-level escalations
+        skip_backoff = False
+        skip_rotation = False
+
+        if self._share_budget_across_keywords:
+            # Check if backoff budget is exhausted across keywords
+            if not self.rate_limit_budget.can_backoff(initial_backoff):
+                skip_backoff = True
+                logger.info(
+                    f"Backoff budget exhausted (spent: {self.rate_limit_budget.backoff_time_spent:.1f}s / "
+                    f"{self.rate_limit_budget.max_backoff_time:.0f}s max), skipping backoff"
+                )
+
+            # Check if rotation budget is exhausted across keywords
+            if not self.rate_limit_budget.can_rotate():
+                skip_rotation = True
+                remaining = self.rate_limit_budget.rotations_remaining()
+                logger.info(
+                    f"Cookie rotation budget exhausted ({self.rate_limit_budget.rotations_used} used, "
+                    f"{remaining or 0} remaining), skipping to VPN"
+                )
+
         # Check if we should try backoff first (before cookie rotation)
-        if total_delay < max_backoff:
+        if not skip_backoff and total_delay < max_backoff:
             # Calculate next backoff delay: initial * (multiplier ^ attempt)
             delay = initial_backoff * (backoff_multiplier ** backoff_count)
 
             # Cap delay so we don't exceed max_backoff total
             remaining = max_backoff - total_delay
             delay = min(delay, remaining)
+
+            # Also cap based on cross-keyword budget if enabled
+            if self._share_budget_across_keywords:
+                budget_remaining = self.rate_limit_budget.backoff_time_remaining()
+                if budget_remaining is not None:
+                    delay = min(delay, budget_remaining)
 
             if delay > 0:
                 # Update tier-specific or global state
@@ -715,6 +807,10 @@ class VideoDownloader:
                     self._rate_limit_total_delay += delay
 
                 self.rate_limit_metrics.record_backoff(delay)
+
+                # Record in cross-keyword budget (US-004)
+                if self._share_budget_across_keywords:
+                    self.rate_limit_budget.record_backoff(delay, keyword=keyword)
 
                 recovery_note = " (recovery mode)" if in_recovery else ""
                 new_count = tier_state.backoff_count if tier_state else self._rate_limit_backoff_count
@@ -734,12 +830,12 @@ class VideoDownloader:
             )
             self._reset_rate_limit_backoff(tier=tier)
 
-        # Try cookie rotation
-        if self.rotate_cookie_on_error(error_message):
+        # Try cookie rotation (unless budget exhausted)
+        if not skip_rotation and self.rotate_cookie_on_error(error_message, keyword=keyword):
             return True
 
         # Try VPN switch if cookies exhausted
-        if self.switch_vpn_on_error():
+        if self.switch_vpn_on_error(keyword=keyword):
             return True
 
         return False
@@ -871,6 +967,18 @@ class VideoDownloader:
                 if self.checkpoint.rate_limit_metrics:
                     self.rate_limit_metrics = RateLimitMetrics.from_dict(self.checkpoint.rate_limit_metrics)
                     logger.debug(f"Restored rate limit metrics: {self.rate_limit_metrics.total_downloads} downloads")
+                # Restore cross-keyword rate limit budget (US-004)
+                if self._share_budget_across_keywords and self.checkpoint.rate_limit_budget:
+                    self.rate_limit_budget = RateLimitBudget.from_dict(self.checkpoint.rate_limit_budget)
+                    logger.debug(
+                        f"Restored rate limit budget: "
+                        f"rotations={self.rate_limit_budget.rotations_used}, "
+                        f"vpn_switches={self.rate_limit_budget.vpn_switches_used}, "
+                        f"backoff={self.rate_limit_budget.backoff_time_spent:.1f}s"
+                    )
+                # Restore VPN manager state for switch count persistence (US-005)
+                if self.vpn_manager and self.checkpoint.vpn_manager_state:
+                    self.vpn_manager.restore_from_checkpoint(self.checkpoint.vpn_manager_state)
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(
