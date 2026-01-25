@@ -107,6 +107,10 @@ class EmbeddingConfig:
     max_retries: int = 3
     retry_delay: float = 2.0
 
+    # Parallel processing (for large text sets)
+    # ThreadPoolExecutor workers for batch processing
+    max_workers: int = 4
+
     # Caching
     cache_embeddings: bool = True
     cache_batch_results: bool = True
