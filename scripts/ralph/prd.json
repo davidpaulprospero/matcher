@@ -97,8 +97,8 @@
         "Add unit test in tests/test_pool_normalization.py for pool size effects"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented normalize_confidence_by_pool() with sqrt(pool_size/50) formula capped at [0.8, 1.2]. Small pools (<10) with clear winner (margin >=0.1) get +0.05 boost. Large pools (>100) with tight margin (<0.05) get -0.05 penalty. Added pool_normalization_enabled config option. Created 34 unit tests covering basic cases, small/medium/large pools, factor capping, edge cases, and formula verification. All tests pass."
     },
     {
       "id": "US-007",

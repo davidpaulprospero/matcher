@@ -840,3 +840,113 @@ def adjust_embedding_weight_for_transcript_quality(
 
     else:  # high quality
         return base_weight, "high_quality_transcript"
+
+
+# Pool normalization constants
+POOL_NORMALIZATION_REFERENCE_SIZE = 50  # Reference pool size for normalization
+POOL_NORMALIZATION_MIN_FACTOR = 0.8  # Minimum normalization factor (caps boost)
+POOL_NORMALIZATION_MAX_FACTOR = 1.2  # Maximum normalization factor (caps reduction)
+POOL_SMALL_THRESHOLD = 10  # Pool considered "small" below this
+POOL_LARGE_THRESHOLD = 100  # Pool considered "large" above this
+POOL_TIGHT_MARGIN_THRESHOLD = 0.05  # Top-2 score difference threshold for "tight margin"
+
+
+def normalize_confidence_by_pool(
+    confidence: float,
+    pool_size: int,
+    candidates: Optional[List[Tuple[SRTSegment, float]]] = None,
+    pool_normalization_enabled: bool = True
+) -> Tuple[float, str]:
+    """
+    Normalize confidence score based on candidate pool size.
+
+    Confidence scores are inherently relative to the pool size:
+    - Small pools (<10): High confidence is meaningful when top match is clear
+    - Medium pools (10-100): Standard interpretation
+    - Large pools (>100): High confidence may be overfit, tight margins are concerning
+
+    Normalization formula: sqrt(pool_size / 50), capped to [0.8, 1.2]
+
+    Additional adjustments:
+    - Small pool with clear winner (top > 2nd by 0.1+): Boost confidence
+    - Large pool with tight margin (top-2nd < 0.05): Reduce confidence
+
+    Args:
+        confidence: Original confidence score (0.0 - 1.0)
+        pool_size: Number of candidates in the pool
+        candidates: Optional list of (segment, similarity) tuples sorted by similarity descending
+                   Used to determine if top match is clear vs tight margins
+        pool_normalization_enabled: Whether to apply pool normalization (config option)
+
+    Returns:
+        Tuple of (normalized_confidence, reason_string)
+    """
+    if not pool_normalization_enabled:
+        return confidence, "pool_normalization_disabled"
+
+    if pool_size <= 0:
+        return confidence, "empty_pool"
+
+    reasons = []
+    adjustment = 0.0
+
+    # Calculate base normalization factor: sqrt(pool_size / 50)
+    # Small pools: factor < 1.0 (confidence preserved/boosted)
+    # Large pools: factor > 1.0 (confidence reduced)
+    raw_factor = (pool_size / POOL_NORMALIZATION_REFERENCE_SIZE) ** 0.5
+
+    # Clamp factor to [0.8, 1.2] range
+    clamped_factor = max(POOL_NORMALIZATION_MIN_FACTOR,
+                         min(POOL_NORMALIZATION_MAX_FACTOR, raw_factor))
+
+    # Determine margin characteristics if candidates provided
+    top_margin = None
+    if candidates and len(candidates) >= 2:
+        top_score = candidates[0][1]
+        second_score = candidates[1][1]
+        top_margin = top_score - second_score
+
+    # Apply pool-specific adjustments
+    if pool_size < POOL_SMALL_THRESHOLD:
+        # Small pool: boost confidence if there's a clear winner
+        if top_margin is not None and top_margin >= 0.1:
+            # Clear winner in small pool - this is a strong signal
+            adjustment = 0.05
+            reasons.append(f"small_pool({pool_size})+clear_winner({top_margin:.2f}):+0.05")
+        else:
+            reasons.append(f"small_pool({pool_size}):factor={clamped_factor:.2f}")
+
+    elif pool_size > POOL_LARGE_THRESHOLD:
+        # Large pool: reduce confidence if margins are tight
+        if top_margin is not None and top_margin < POOL_TIGHT_MARGIN_THRESHOLD:
+            # Tight margin in large pool - confidence may be inflated
+            adjustment = -0.05
+            reasons.append(f"large_pool({pool_size})+tight_margin({top_margin:.2f}):-0.05")
+        else:
+            reasons.append(f"large_pool({pool_size}):factor={clamped_factor:.2f}")
+
+    else:
+        # Medium pool - use factor-based adjustment
+        reasons.append(f"medium_pool({pool_size}):factor={clamped_factor:.2f}")
+
+    # Apply normalization: higher factor = lower confidence
+    # Invert the factor logic: use 1/factor for confidence adjustment
+    # Small pool (factor 0.8) -> 1/0.8 = 1.25 multiplier (boost)
+    # Large pool (factor 1.2) -> 1/1.2 = 0.83 multiplier (reduce)
+    inverse_factor = 1.0 / clamped_factor
+
+    # Calculate normalized confidence
+    normalized = confidence * inverse_factor + adjustment
+
+    # Clamp to valid range [0.0, 1.0]
+    normalized = max(0.0, min(1.0, normalized))
+
+    reason = "; ".join(reasons)
+
+    logger.debug(
+        f"Pool normalization: pool={pool_size}, factor={clamped_factor:.2f}, "
+        f"inverse={inverse_factor:.2f}, adj={adjustment:+.2f}, "
+        f"{confidence:.3f} -> {normalized:.3f} ({reason})"
+    )
+
+    return normalized, reason
