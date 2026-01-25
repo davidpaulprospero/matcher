@@ -1182,8 +1182,8 @@ Branch: ralph/sprint-2 (continuing on same branch)
 
 ### Stories (12 total)
 [x] US-001: Create sprint 4 quality verification test (high)
-[ ] US-002: Add confidence variance tracking to MatchResult (high)
-[ ] US-003: Add semantic distance-based topic penalty (high)
+[x] US-002: Add confidence variance tracking to MatchResult (high)
+[x] US-003: Add semantic distance-based topic penalty (high)
 [ ] US-004: Add match quality metrics logging (high)
 [ ] US-005: Add LLM reasoning quality validation (medium)
 [ ] US-006: Add temporal coherence scoring for adjacent segments (medium)
@@ -1206,5 +1206,74 @@ Branch: ralph/sprint-2 (continuing on same branch)
 - Files created:
   - tests/test_sprint_4_quality_verification.py (new file, ~140 lines)
 
-Progress: 1/12 stories complete
+Progress: 2/12 stories complete
+
+## Iteration 2 - [US-002] Add confidence variance tracking to MatchResult
+- Added confidence_variance field to MatchResult dataclass in src/utils.py
+  - Type: float, default: 0.0
+  - Comment documents high variance (>0.1) indicates uncertain match
+- Implemented _calculate_confidence_variance() method in TieredMatcher:
+  - Uses statistics.stdev() on top-5 candidate similarities
+  - Returns 0.0 if < 2 candidates (avoids StatisticsError)
+  - Added import for statistics module
+- Updated all MatchResult return points in match_segment():
+  - High-confidence embedding match path
+  - Cached response path
+  - Main LLM match path (includes gap detection)
+- Added variance to checkpoint JSON serialization in MatchStage.run():
+  - MatchResult structure: extracts from m.confidence_variance
+  - Direct Match structure: defaults to 0.0 (not available)
+- Created tests/test_confidence_variance.py with 21 tests across 6 test classes:
+  - TestMatchResultConfidenceVariance (4 tests): field exists, default, setter, type
+  - TestTieredMatcherVarianceCalculation (5 tests): 5/2/1/0 candidates, identical scores
+  - TestHighVarianceIndicatesUncertainty (3 tests): threshold, examples, zero variance
+  - TestCheckpointSerialization (3 tests): includes variance, serializes, default
+  - TestVarianceCalculationEdgeCases (4 tests): 3 candidates, 10 candidates, custom top_n, negative
+  - TestMatchResultWithVariance (2 tests): all fields, gap detection
+- All 21 new tests pass, all 50 match stage tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/utils.py (added confidence_variance field)
+  - src/matching/tiered_matcher.py (added statistics import, _calculate_confidence_variance method, updated all MatchResult returns)
+  - src/stages/match.py (added confidence_variance to checkpoint serialization)
+- Files created:
+  - tests/test_confidence_variance.py (new file, 21 tests)
+
+Progress: 3/12 stories complete
+
+## Iteration 3 - [US-003] Add semantic distance-based topic penalty
+- Updated compute_topic_penalty() in src/topic_extraction.py:
+  - Added optional embedding_provider parameter (default: None)
+  - Fast path: exact keyword overlap returns 0 penalty immediately
+  - Semantic path: uses _compute_semantic_topic_penalty() when provider available
+  - Fallback: uses _compute_keyword_topic_penalty() when embeddings unavailable
+- Implemented _compute_semantic_topic_penalty() helper:
+  - Combines topic lists into single text for embedding
+  - Uses cosine_similarity from src/embeddings.py
+  - Threshold-based penalty scaling:
+    - >= 0.8 similarity: 0 penalty (very similar)
+    - 0.6-0.8: small penalty (0-30% of max)
+    - 0.4-0.6: medium penalty (30-60% of max)
+    - < 0.4: high penalty (60-100% of max)
+  - Returns None on error to trigger fallback
+- Implemented _compute_keyword_topic_penalty() helper:
+  - Original keyword overlap logic extracted for reuse
+  - Partial match (ratio > 0.3): 30% max penalty
+  - Weak match (ratio > 0): 60% max penalty
+  - No match: 100% max penalty
+- Created tests/test_topic_penalty_semantic.py with 33 tests across 11 test classes:
+  - TestComputeTopicPenaltySignature (3 tests): parameter, default, backward compat
+  - TestSemanticPenaltyHelper (4 tests): return types, failure handling, edge cases
+  - TestSemanticSimilarityScaling (6 tests): threshold-based penalty scaling
+  - TestRelatedVsUnrelatedTopics (2 tests): earthquake/disaster vs earthquake/cooking
+  - TestKeywordFallback (5 tests): fallback scenarios
+  - TestExactOverlapFastPath (2 tests): fast path for exact matches
+  - TestEmptyAndEdgeCases (5 tests): empty inputs, custom max_penalty
+  - TestIntegrationWithEmbeddingProvider (2 tests): full flow
+  - TestSemanticPenaltyHelperExported (2 tests): importability
+  - TestHighVarianceIndicatesUncertainty (2 tests): penalty thresholds
+- All 33 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/topic_extraction.py (added embedding_provider param, 2 helper functions)
+- Files created:
+  - tests/test_topic_penalty_semantic.py (new file, 33 tests)
 

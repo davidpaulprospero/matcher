@@ -37,8 +37,8 @@
         "Test that high variance (> 0.1) indicates uncertain match"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added confidence_variance field to MatchResult dataclass. Implemented _calculate_confidence_variance() in TieredMatcher using statistics.stdev() on top-5 candidates. Added variance to checkpoint JSON serialization in MatchStage. Created 21 comprehensive tests in 6 test classes. High variance (>0.1) indicates uncertain match; low variance indicates clear winner."
     },
     {
       "id": "US-003",
@@ -52,8 +52,8 @@
         "Test that related topics (earthquake/disaster) get lower penalty than unrelated (earthquake/cooking)"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added embedding_provider parameter to compute_topic_penalty(). Created _compute_semantic_topic_penalty() that uses cosine_similarity from embeddings module with threshold-based penalty scaling (>=0.8: 0, 0.6-0.8: small, 0.4-0.6: medium, <0.4: high penalty). Created _compute_keyword_topic_penalty() for fallback. Added 33 comprehensive tests in 11 test classes covering signature, semantic scaling, related vs unrelated topics, keyword fallback, and edge cases. All tests pass."
     },
     {
       "id": "US-004",
