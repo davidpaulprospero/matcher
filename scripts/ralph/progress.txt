@@ -1745,4 +1745,49 @@ Progress: 3/12 stories complete
 - Files created:
   - tests/test_fallback_matching.py (520 lines)
 
-Progress: 4/12 stories complete
+## Iteration 5 - [US-005] Add transcript quality scoring
+- Implemented calculate_transcript_quality() function in src/matching/scoring.py (lines 609-692)
+  - Takes transcript_text and optional config as input
+  - Returns tuple of (quality_score, quality_tier, reason)
+  - 3 scoring factors with weights:
+    - Word count (0.0-0.4): >50 words = full score, 20-50 = interpolated, <20 = low
+    - Sentence coherence (0.0-0.35): punctuation, capitalization, word length
+    - Language consistency (0.0-0.25): repetition, short words, filler detection
+- Implemented _calculate_sentence_coherence() helper (lines 695-738)
+  - Checks for sentence-ending punctuation (. ! ?)
+  - Checks for capitalized words at sentence beginnings
+  - Checks for reasonable average word length (>=4 chars good)
+- Implemented _calculate_language_consistency() helper (lines 741-798)
+  - Detects excessive word repetition (ASR stuttering)
+  - Detects too many short words (potential gibberish)
+  - Detects filler word overload (um, uh, like, basically)
+  - Detects non-ASCII characters (mixed scripts)
+- Implemented adjust_embedding_weight_for_transcript_quality() (lines 801-842)
+  - Reduces embedding weight by 20% for low quality transcripts
+  - Reduces embedding weight by 10% for medium quality transcripts
+  - No reduction for high quality transcripts
+  - quality_weight_enabled parameter to disable adjustment
+- Added config option in src/config/sections/matching.py:
+  - transcript_quality_weight (default: true)
+- Added config entry in config.yaml with chain-of-thought documentation
+- Added constants for thresholds:
+  - TRANSCRIPT_QUALITY_HIGH_THRESHOLD = 0.8
+  - TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD = 0.5
+  - TRANSCRIPT_MIN_WORD_COUNT_GOOD = 50
+  - TRANSCRIPT_MIN_WORD_COUNT_MEDIUM = 20
+- Created tests/test_transcript_quality.py with 32 tests across 6 test classes:
+  - TestCalculateTranscriptQuality (10 tests): empty, short, medium, long, thresholds
+  - TestSentenceCoherence (5 tests): punctuation, capitalization, word length
+  - TestLanguageConsistency (5 tests): normal, repetition, short words, fillers
+  - TestAdjustEmbeddingWeight (6 tests): low/medium/high quality, disabled, custom reduction
+  - TestQualityTierClassification (3 tests): gibberish, well-structured, edge cases
+  - TestIntegration (3 tests): end-to-end workflow with weight adjustment
+- All 32 tests pass
+- Files modified:
+  - src/matching/scoring.py (added ~245 lines of quality scoring code)
+  - src/config/sections/matching.py (added transcript_quality_weight option)
+  - config.yaml (added transcript quality config with documentation)
+- Files created:
+  - tests/test_transcript_quality.py (280 lines)
+
+Progress: 5/12 stories complete

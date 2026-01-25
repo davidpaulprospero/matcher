@@ -597,3 +597,246 @@ def _looks_like_entity(text: str) -> bool:
     }
 
     return text not in common_words
+
+
+# Transcript quality scoring thresholds
+TRANSCRIPT_QUALITY_HIGH_THRESHOLD = 0.8
+TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD = 0.5
+TRANSCRIPT_MIN_WORD_COUNT_GOOD = 50
+TRANSCRIPT_MIN_WORD_COUNT_MEDIUM = 20
+
+
+def calculate_transcript_quality(
+    transcript_text: str,
+    config=None
+) -> Tuple[float, str, str]:
+    """
+    Calculate the quality score for a video transcript.
+
+    Quality is assessed based on:
+    - Word count (>50 = good, 20-50 = medium, <20 = low)
+    - Sentence coherence (proper sentence structure with punctuation)
+    - Language consistency (mixed languages or gibberish detection)
+
+    Args:
+        transcript_text: The transcript text to evaluate
+        config: Optional config for additional settings
+
+    Returns:
+        Tuple of (quality_score, quality_tier, reason)
+        - quality_score: Float between 0.0 and 1.0
+        - quality_tier: "high" (>0.8), "medium" (0.5-0.8), or "low" (<0.5)
+        - reason: String explaining the quality assessment
+    """
+    if not transcript_text or not transcript_text.strip():
+        return 0.0, "low", "empty_transcript"
+
+    text = transcript_text.strip()
+    reasons = []
+
+    # Factor 1: Word count scoring (0.0 - 0.4)
+    # More words generally means better quality transcription
+    words = text.split()
+    word_count = len(words)
+
+    if word_count >= TRANSCRIPT_MIN_WORD_COUNT_GOOD:
+        word_score = 0.4
+    elif word_count >= TRANSCRIPT_MIN_WORD_COUNT_MEDIUM:
+        # Linear interpolation between 20 and 50 words
+        word_score = 0.2 + 0.2 * ((word_count - TRANSCRIPT_MIN_WORD_COUNT_MEDIUM) /
+                                   (TRANSCRIPT_MIN_WORD_COUNT_GOOD - TRANSCRIPT_MIN_WORD_COUNT_MEDIUM))
+    else:
+        # Linear interpolation between 0 and 20 words
+        word_score = 0.2 * (word_count / TRANSCRIPT_MIN_WORD_COUNT_MEDIUM) if word_count > 0 else 0.0
+
+    reasons.append(f"words:{word_count}")
+
+    # Factor 2: Sentence coherence scoring (0.0 - 0.35)
+    # Check for proper sentence structure with punctuation
+    coherence_score = _calculate_sentence_coherence(text, words)
+    if coherence_score < 0.2:
+        reasons.append("low_coherence")
+    elif coherence_score >= 0.3:
+        reasons.append("good_coherence")
+
+    # Factor 3: Language consistency scoring (0.0 - 0.25)
+    # Check for mixed languages, gibberish, or ASR errors
+    consistency_score = _calculate_language_consistency(text, words)
+    if consistency_score < 0.15:
+        reasons.append("inconsistent_language")
+    elif consistency_score >= 0.22:
+        reasons.append("consistent_language")
+
+    # Calculate total quality score
+    quality_score = word_score + coherence_score + consistency_score
+
+    # Clamp to valid range
+    quality_score = max(0.0, min(1.0, quality_score))
+
+    # Determine quality tier
+    if quality_score >= TRANSCRIPT_QUALITY_HIGH_THRESHOLD:
+        quality_tier = "high"
+    elif quality_score >= TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD:
+        quality_tier = "medium"
+    else:
+        quality_tier = "low"
+
+    reason = "; ".join(reasons)
+
+    logger.debug(
+        f"Transcript quality: score={quality_score:.2f}, tier={quality_tier}, "
+        f"word={word_score:.2f}, coherence={coherence_score:.2f}, "
+        f"consistency={consistency_score:.2f} ({reason})"
+    )
+
+    return quality_score, quality_tier, reason
+
+
+def _calculate_sentence_coherence(text: str, words: List[str]) -> float:
+    """
+    Calculate sentence coherence score based on punctuation and structure.
+
+    Good transcripts have:
+    - Proper sentence-ending punctuation (. ! ?)
+    - Reasonable sentence lengths
+    - Capitalized sentence beginnings
+
+    Args:
+        text: The full transcript text
+        words: Pre-split list of words
+
+    Returns:
+        Coherence score between 0.0 and 0.35
+    """
+    if not text or len(words) < 3:
+        return 0.0
+
+    score = 0.0
+
+    # Check for sentence-ending punctuation
+    sentence_endings = text.count('.') + text.count('!') + text.count('?')
+    if sentence_endings > 0:
+        # Expect roughly 1 sentence per 10-15 words
+        expected_sentences = max(1, len(words) // 12)
+        punctuation_ratio = min(1.0, sentence_endings / expected_sentences)
+        score += 0.15 * punctuation_ratio
+
+    # Check for capitalized words (sentence beginnings)
+    capitalized = sum(1 for w in words if w and w[0].isupper())
+    if capitalized > 0:
+        # At least some capitalization indicates structure
+        cap_ratio = min(1.0, capitalized / max(1, sentence_endings + 1))
+        score += 0.10 * min(1.0, cap_ratio)
+
+    # Check for reasonable word lengths (not all short gibberish)
+    avg_word_len = sum(len(w) for w in words) / len(words)
+    if avg_word_len >= 4.0:
+        score += 0.10
+    elif avg_word_len >= 3.0:
+        score += 0.05
+
+    return min(0.35, score)
+
+
+def _calculate_language_consistency(text: str, words: List[str]) -> float:
+    """
+    Calculate language consistency score to detect mixed languages or ASR errors.
+
+    Detects:
+    - Excessive repetition (ASR stuttering)
+    - Too many short words (gibberish)
+    - Mixed script detection (latin + other)
+    - Filler word overload
+
+    Args:
+        text: The full transcript text
+        words: Pre-split list of words
+
+    Returns:
+        Consistency score between 0.0 and 0.25
+    """
+    if not words or len(words) < 2:
+        return 0.0
+
+    score = 0.25  # Start with full score, deduct for issues
+
+    # Check for excessive word repetition (ASR stuttering)
+    if len(words) >= 5:
+        unique_words = set(w.lower() for w in words)
+        repetition_ratio = len(unique_words) / len(words)
+        if repetition_ratio < 0.3:
+            score -= 0.15  # Heavy repetition
+        elif repetition_ratio < 0.5:
+            score -= 0.08  # Moderate repetition
+
+    # Check for too many very short words (potential gibberish)
+    short_words = sum(1 for w in words if len(w) <= 2)
+    short_ratio = short_words / len(words)
+    if short_ratio > 0.5:
+        score -= 0.10
+    elif short_ratio > 0.35:
+        score -= 0.05
+
+    # Check for filler word overload
+    filler_words = {'um', 'uh', 'er', 'ah', 'like', 'you know', 'basically'}
+    filler_count = sum(1 for w in words if w.lower() in filler_words)
+    if len(words) > 5:
+        filler_ratio = filler_count / len(words)
+        if filler_ratio > 0.2:
+            score -= 0.08
+        elif filler_ratio > 0.1:
+            score -= 0.04
+
+    # Check for non-ASCII characters indicating mixed scripts
+    # (not necessarily bad, but can indicate ASR confusion)
+    ascii_chars = sum(1 for c in text if ord(c) < 128)
+    if len(text) > 0:
+        ascii_ratio = ascii_chars / len(text)
+        if ascii_ratio < 0.7:
+            score -= 0.05  # Significant non-ASCII content
+
+    return max(0.0, score)
+
+
+def adjust_embedding_weight_for_transcript_quality(
+    base_weight: float,
+    quality_tier: str,
+    quality_weight_enabled: bool = True,
+    low_quality_reduction: float = 0.20
+) -> Tuple[float, str]:
+    """
+    Adjust embedding weight based on transcript quality tier.
+
+    When transcript quality is low, embedding similarity is less reliable
+    because the transcript text doesn't accurately represent video content.
+    This function reduces embedding weight for low-quality transcripts.
+
+    Args:
+        base_weight: The base embedding weight (e.g., 0.4 for 40%)
+        quality_tier: Quality tier from calculate_transcript_quality ("high", "medium", "low")
+        quality_weight_enabled: Whether to apply the adjustment (config option)
+        low_quality_reduction: Fraction to reduce weight by for low quality (default: 0.20 = 20%)
+
+    Returns:
+        Tuple of (adjusted_weight, reason)
+    """
+    if not quality_weight_enabled:
+        return base_weight, "quality_adjustment_disabled"
+
+    if quality_tier == "low":
+        # Reduce embedding weight by the specified reduction factor (default 20%)
+        reduction = base_weight * low_quality_reduction
+        adjusted = base_weight - reduction
+        reason = f"low_quality_transcript:-{low_quality_reduction:.0%}"
+        logger.debug(f"Embedding weight reduced for low quality transcript: {base_weight:.2f} -> {adjusted:.2f}")
+        return adjusted, reason
+
+    elif quality_tier == "medium":
+        # Small reduction for medium quality (half of low quality reduction)
+        reduction = base_weight * (low_quality_reduction / 2)
+        adjusted = base_weight - reduction
+        reason = f"medium_quality_transcript:-{low_quality_reduction/2:.0%}"
+        return adjusted, reason
+
+    else:  # high quality
+        return base_weight, "high_quality_transcript"
