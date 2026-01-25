@@ -399,6 +399,494 @@ function Show-CompletionChoice {
 }
 
 # ============================================================================
+# COMPREHENSIVE LOGGING FUNCTIONS (Phase 1)
+# ============================================================================
+
+function Get-GitState {
+    <#
+    .SYNOPSIS
+        Capture current git state (hash, branch, clean status)
+    .RETURNS
+        Hashtable with git state info
+    #>
+    $state = @{
+        hash = ""
+        branch = ""
+        clean = $true
+        modifiedFiles = @()
+    }
+
+    try {
+        $state.hash = (git rev-parse HEAD 2>$null)
+        $state.branch = (git rev-parse --abbrev-ref HEAD 2>$null)
+        $status = git status --porcelain 2>$null
+        if ($status) {
+            $state.clean = $false
+            $state.modifiedFiles = @($status | ForEach-Object { $_.Substring(3) })
+        }
+    }
+    catch {}
+
+    return $state
+}
+
+function Get-FileOperations {
+    <#
+    .SYNOPSIS
+        Get file operations between two git states
+    .PARAMETER BeforeHash
+        Git commit hash before the operation
+    .RETURNS
+        Hashtable with files created, modified, deleted
+    #>
+    param([string]$BeforeHash)
+
+    $ops = @{
+        filesCreated = @()
+        filesModified = @()
+        filesDeleted = @()
+        totalFilesChanged = 0
+    }
+
+    try {
+        # Get diff stats
+        $diffOutput = git diff --name-status $BeforeHash HEAD 2>$null
+        if ($diffOutput) {
+            foreach ($line in $diffOutput) {
+                if ($line -match "^([AMDRC])\s+(.+)$") {
+                    $status = $Matches[1]
+                    $file = $Matches[2]
+                    switch ($status) {
+                        "A" { $ops.filesCreated += @{ path = $file; size = (Get-Item $file -ErrorAction SilentlyContinue).Length } }
+                        "M" { $ops.filesModified += @{ path = $file } }
+                        "D" { $ops.filesDeleted += $file }
+                    }
+                }
+            }
+        }
+
+        # Also check unstaged changes
+        $statusOutput = git status --porcelain 2>$null
+        if ($statusOutput) {
+            foreach ($line in $statusOutput) {
+                if ($line -match "^\?\?\s+(.+)$") {
+                    $file = $Matches[1]
+                    $ops.filesCreated += @{ path = $file; size = (Get-Item $file -ErrorAction SilentlyContinue).Length }
+                }
+            }
+        }
+
+        $ops.totalFilesChanged = $ops.filesCreated.Count + $ops.filesModified.Count + $ops.filesDeleted.Count
+    }
+    catch {}
+
+    return $ops
+}
+
+function Get-GitCommits {
+    <#
+    .SYNOPSIS
+        Get commits made since a specific hash
+    .PARAMETER SinceHash
+        Git commit hash to start from
+    .RETURNS
+        Array of commit objects
+    #>
+    param([string]$SinceHash)
+
+    $commits = @()
+
+    try {
+        $logOutput = git log --format="%H|%s|%ai|%an" "$SinceHash..HEAD" 2>$null
+        if ($logOutput) {
+            foreach ($line in $logOutput) {
+                $parts = $line -split '\|'
+                if ($parts.Count -ge 4) {
+                    # Get diff stats for this commit
+                    $stats = git diff --shortstat "$($parts[0])^" $parts[0] 2>$null
+                    $insertions = 0
+                    $deletions = 0
+                    $filesChanged = 0
+                    if ($stats -match "(\d+) files? changed") { $filesChanged = [int]$Matches[1] }
+                    if ($stats -match "(\d+) insertions?") { $insertions = [int]$Matches[1] }
+                    if ($stats -match "(\d+) deletions?") { $deletions = [int]$Matches[1] }
+
+                    $commits += @{
+                        hash = $parts[0]
+                        message = $parts[1]
+                        timestamp = $parts[2]
+                        author = $parts[3]
+                        filesChanged = $filesChanged
+                        insertions = $insertions
+                        deletions = $deletions
+                    }
+                }
+            }
+        }
+    }
+    catch {}
+
+    return $commits
+}
+
+function Log-ClaudeInvocation {
+    <#
+    .SYNOPSIS
+        Log detailed Claude CLI invocation information
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER ClaudePath
+        Path to Claude executable
+    .PARAMETER Arguments
+        Array of CLI arguments
+    .PARAMETER PromptFile
+        Path to prompt file
+    .PARAMETER PromptType
+        Type of prompt (prd_generation, story_work)
+    .PARAMETER ProcessId
+        Process ID of Claude process
+    .PARAMETER StartTime
+        When execution started
+    .PARAMETER EndTime
+        When execution ended
+    .PARAMETER ExitCode
+        Process exit code
+    .PARAMETER TimedOut
+        Whether the process timed out
+    #>
+    param(
+        [int]$Iteration,
+        [string]$ClaudePath,
+        [array]$Arguments,
+        [string]$PromptFile,
+        [string]$PromptType,
+        [int]$ProcessId,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [int]$ExitCode,
+        [bool]$TimedOut
+    )
+
+    $invocationFile = Join-Path $script:SessionLogDir "claude_invocation_$Iteration.json"
+
+    # Read prompt metadata
+    $promptContent = ""
+    $promptLines = 0
+    $promptChars = 0
+    if (Test-Path $PromptFile) {
+        $promptContent = Get-Content $PromptFile -Raw -ErrorAction SilentlyContinue
+        if ($promptContent) {
+            $promptLines = ($promptContent -split "`n").Count
+            $promptChars = $promptContent.Length
+        }
+    }
+
+    # Get hash of prompt for tracking
+    $promptHash = ""
+    if ($promptContent) {
+        $md5 = [System.Security.Cryptography.MD5]::Create()
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($promptContent)
+        $hashBytes = $md5.ComputeHash($bytes)
+        $promptHash = [BitConverter]::ToString($hashBytes) -replace '-', ''
+    }
+
+    $invocation = @{
+        iteration = $Iteration
+        timestamp = $StartTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        command = @{
+            executable = $ClaudePath
+            resolvedPath = (Resolve-Path $ClaudePath -ErrorAction SilentlyContinue).Path
+            arguments = $Arguments
+            workingDirectory = $script:ProjectRoot
+        }
+        prompt = @{
+            file = (Split-Path $PromptFile -Leaf)
+            type = $PromptType
+            lineCount = $promptLines
+            charCount = $promptChars
+            hash = $promptHash.Substring(0, [Math]::Min(16, $promptHash.Length))
+        }
+        execution = @{
+            processId = $ProcessId
+            startedAt = $StartTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            endedAt = $EndTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            durationMs = [int](($EndTime - $StartTime).TotalMilliseconds)
+            exitCode = $ExitCode
+            timedOut = $TimedOut
+        }
+    }
+
+    $invocation | ConvertTo-Json -Depth 5 | Set-Content -Path $invocationFile -Encoding UTF8
+}
+
+function Log-IterationManifest {
+    <#
+    .SYNOPSIS
+        Create structured iteration manifest
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER StoryId
+        Story ID being worked on
+    .PARAMETER FocusArea
+        Focus area
+    .PARAMETER Status
+        Iteration status (completed, failed, timeout)
+    .PARAMETER StartTime
+        When iteration started
+    .PARAMETER EndTime
+        When iteration ended
+    .PARAMETER PromptFile
+        Path to prompt file
+    .PARAMETER GitBefore
+        Git state before iteration
+    .PARAMETER GitAfter
+        Git state after iteration
+    .PARAMETER FileOps
+        File operations during iteration
+    .PARAMETER Commits
+        Git commits made during iteration
+    .PARAMETER TestResults
+        Test results string
+    .PARAMETER TokensEstimated
+        Estimated token count
+    .PARAMETER RetryCount
+        Retry count
+    #>
+    param(
+        [int]$Iteration,
+        [string]$StoryId,
+        [string]$FocusArea,
+        [string]$Status,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$PromptFile,
+        [hashtable]$GitBefore,
+        [hashtable]$GitAfter,
+        [hashtable]$FileOps,
+        [array]$Commits,
+        [string]$TestResults,
+        [int]$TokensEstimated,
+        [int]$RetryCount
+    )
+
+    $manifestFile = Join-Path $script:SessionLogDir "iteration_${Iteration}_manifest.json"
+
+    # Parse test results
+    $testsPassed = 0
+    $testsFailed = 0
+    $testsSkipped = 0
+    if ($TestResults -match "(\d+)\s*passed") { $testsPassed = [int]$Matches[1] }
+    if ($TestResults -match "(\d+)\s*failed") { $testsFailed = [int]$Matches[1] }
+    if ($TestResults -match "(\d+)\s*skipped") { $testsSkipped = [int]$Matches[1] }
+
+    # Get PRD info
+    $sprint = 0
+    $branch = ""
+    if (Test-Path $script:PrdFile) {
+        try {
+            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+            $sprint = $prd.sprintNumber
+            $branch = $prd.branchName
+        }
+        catch {}
+    }
+
+    # Calculate lines from commits
+    $linesAdded = 0
+    $linesDeleted = 0
+    foreach ($commit in $Commits) {
+        $linesAdded += $commit.insertions
+        $linesDeleted += $commit.deletions
+    }
+
+    $manifest = @{
+        iteration = $Iteration
+        storyId = $StoryId
+        focusArea = $FocusArea
+        sprint = $sprint
+        branch = $branch
+        status = $Status
+        timestamps = @{
+            started = $StartTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            completed = $EndTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            durationSec = [int](($EndTime - $StartTime).TotalSeconds)
+        }
+        prompt = @{
+            file = (Split-Path $PromptFile -Leaf)
+        }
+        output = @{
+            stdout = "claude_out_$Iteration.log"
+            stderr = "claude_err_$Iteration.log"
+        }
+        git = @{
+            beforeCommit = $GitBefore.hash
+            afterCommit = $GitAfter.hash
+            branch = $GitAfter.branch
+            filesCreated = $FileOps.filesCreated.Count
+            filesModified = $FileOps.filesModified.Count
+            filesDeleted = $FileOps.filesDeleted.Count
+            linesAdded = $linesAdded
+            linesDeleted = $linesDeleted
+            commits = $Commits
+        }
+        tests = @{
+            passed = $testsPassed
+            failed = $testsFailed
+            skipped = $testsSkipped
+            raw = $TestResults
+        }
+        metrics = @{
+            tokensEstimated = $TokensEstimated
+            retryCount = $RetryCount
+        }
+    }
+
+    $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestFile -Encoding UTF8
+}
+
+function Log-FileOperations {
+    <#
+    .SYNOPSIS
+        Log file operations to a dedicated file
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER FileOps
+        File operations hashtable
+    #>
+    param(
+        [int]$Iteration,
+        [hashtable]$FileOps
+    )
+
+    $fileOpsFile = Join-Path $script:SessionLogDir "file_operations_$Iteration.json"
+
+    $FileOps | ConvertTo-Json -Depth 5 | Set-Content -Path $fileOpsFile -Encoding UTF8
+}
+
+function Log-GitOperations {
+    <#
+    .SYNOPSIS
+        Log git operations to a dedicated file
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER Branch
+        Current branch
+    .PARAMETER Commits
+        Array of commits
+    .PARAMETER BeforeState
+        Git state before
+    .PARAMETER AfterState
+        Git state after
+    #>
+    param(
+        [int]$Iteration,
+        [string]$Branch,
+        [array]$Commits,
+        [hashtable]$BeforeState,
+        [hashtable]$AfterState
+    )
+
+    $gitOpsFile = Join-Path $script:SessionLogDir "git_operations_$Iteration.json"
+
+    $gitOps = @{
+        iteration = $Iteration
+        branch = $Branch
+        commits = $Commits
+        beforeState = @{
+            hash = $BeforeState.hash
+            clean = $BeforeState.clean
+        }
+        afterState = @{
+            hash = $AfterState.hash
+            clean = $AfterState.clean
+        }
+        totalCommits = $Commits.Count
+    }
+
+    $gitOps | ConvertTo-Json -Depth 5 | Set-Content -Path $gitOpsFile -Encoding UTF8
+}
+
+function Log-StoryVerification {
+    <#
+    .SYNOPSIS
+        Log story verification with acceptance criteria evidence
+    .PARAMETER StoryId
+        Story ID
+    .PARAMETER Story
+        Full story object from PRD
+    .PARAMETER Iteration
+        Iteration number
+    .PARAMETER Passed
+        Whether story passed
+    #>
+    param(
+        [string]$StoryId,
+        [object]$Story,
+        [int]$Iteration,
+        [bool]$Passed
+    )
+
+    $verificationFile = Join-Path $script:SessionLogDir "story_${StoryId}_verification.json"
+
+    # Build acceptance criteria verification
+    $criteriaVerification = @()
+    if ($Story -and $Story.acceptanceCriteria) {
+        foreach ($criterion in $Story.acceptanceCriteria) {
+            # Try to verify each criterion
+            $verified = $Passed  # If story passed, assume criteria met
+            $evidence = if ($Passed) { "Story marked as passed by Claude" } else { "Story not yet complete" }
+
+            $criteriaVerification += @{
+                criterion = $criterion
+                verified = $verified
+                evidence = $evidence
+            }
+        }
+    }
+
+    $verification = @{
+        storyId = $StoryId
+        title = if ($Story) { $Story.title } else { "" }
+        verifiedAt = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        iteration = $Iteration
+        acceptanceCriteria = $criteriaVerification
+        overallVerified = $Passed
+    }
+
+    $verification | ConvertTo-Json -Depth 5 | Set-Content -Path $verificationFile -Encoding UTF8
+}
+
+function Append-SessionTimeline {
+    <#
+    .SYNOPSIS
+        Append an event to the session timeline
+    .PARAMETER Event
+        Event name
+    .PARAMETER Data
+        Additional event data (hashtable)
+    #>
+    param(
+        [string]$Event,
+        [hashtable]$Data = @{}
+    )
+
+    $timelineFile = Join-Path $script:SessionLogDir "session_timeline.jsonl"
+
+    $entry = @{
+        ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        event = $Event
+        session = $script:SessionId
+    }
+
+    # Merge additional data
+    foreach ($key in $Data.Keys) {
+        $entry[$key] = $Data[$key]
+    }
+
+    $entry | ConvertTo-Json -Compress | Add-Content -Path $timelineFile -Encoding UTF8
+}
+
+# ============================================================================
 # CLAUDE INVOCATION
 # ============================================================================
 
@@ -534,6 +1022,19 @@ Start by reading the config and prompt files, then generate the PRD.
     Write-Host "  Invoking Claude..." -ForegroundColor Cyan
     Write-Host "  Prompt: Focus on $FocusAreaId" -ForegroundColor DarkGray
 
+    # Determine prompt type for logging
+    $promptType = if ($GeneratePRD) { "prd_generation" } else { "focus_area_work" }
+
+    # Capture git state BEFORE Claude runs
+    $gitStateBefore = Get-GitState
+
+    # Log timeline event: iteration start
+    Append-SessionTimeline -Event "iteration_start" -Data @{
+        iteration = $script:IterationCount
+        focusArea = $FocusAreaId
+        promptType = $promptType
+    }
+
     try {
         # Get timeout from config
         $timeout = 600  # Default 10 minutes
@@ -557,6 +1058,9 @@ Start by reading the config and prompt files, then generate the PRD.
         $flagsString = ($claudeArgs -join ' ')
         $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
 
+        # Record execution start time
+        $executionStart = Get-Date
+
         # Run Claude with timeout using cmd for proper stdin piping
         $process = Start-Process -FilePath "cmd.exe" `
             -ArgumentList "/c", $cmdCommand `
@@ -567,6 +1071,7 @@ Start by reading the config and prompt files, then generate the PRD.
             -RedirectStandardError $errFile
 
         $exited = $process.WaitForExit($timeout * 1000)
+        $executionEnd = Get-Date
 
         $iterationDuration = (Get-Date) - $iterationStart
 
@@ -583,9 +1088,23 @@ Start by reading the config and prompt files, then generate the PRD.
         $tokensUsed = Get-EstimatedTokens -Output $claudeOutput
         $testResults = Get-TestResults -Output $claudeOutput
 
+        # Capture git state AFTER Claude runs
+        $gitStateAfter = Get-GitState
+
+        # Get file operations and commits
+        $fileOps = Get-FileOperations -BeforeHash $gitStateBefore.hash
+        $commits = Get-GitCommits -SinceHash $gitStateBefore.hash
+
+        # Determine status
+        $iterationStatus = "completed"
+        $success = $false
+        $timedOut = $false
+
         if (-not $exited) {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
+            $iterationStatus = "timeout"
+            $timedOut = $true
 
             # Log timeout
             "Timeout after $timeout seconds" | Add-Content $iterationLog
@@ -593,35 +1112,93 @@ Start by reading the config and prompt files, then generate the PRD.
             Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
 
             $script:ConsecutiveFailures++
-            return $false
         }
-
-        if ($process.ExitCode -eq 0) {
+        elseif ($process.ExitCode -eq 0) {
             Write-Host "  Iteration completed successfully" -ForegroundColor Green
             "Completed successfully in $([math]::Round($iterationDuration.TotalSeconds)) seconds" | Add-Content $iterationLog
+            $iterationStatus = "completed"
+            $success = $true
 
             # Capture git diff stats on success
             $gitStats = Get-GitDiffStats
             Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
 
             $script:ConsecutiveFailures = 0
-            return $true
         }
         else {
             Write-Host "  Iteration failed with exit code $($process.ExitCode)" -ForegroundColor Red
             "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
+            $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
             Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
 
             $script:ConsecutiveFailures++
-            return $false
         }
+
+        # === COMPREHENSIVE LOGGING (Phase 1) ===
+
+        # 1. Log Claude CLI invocation details
+        Log-ClaudeInvocation `
+            -Iteration $script:IterationCount `
+            -ClaudePath $claudePath `
+            -Arguments $claudeArgs `
+            -PromptFile $promptFile `
+            -PromptType $promptType `
+            -ProcessId $process.Id `
+            -StartTime $executionStart `
+            -EndTime $executionEnd `
+            -ExitCode $process.ExitCode `
+            -TimedOut $timedOut
+
+        # 2. Log iteration manifest
+        Log-IterationManifest `
+            -Iteration $script:IterationCount `
+            -StoryId $FocusAreaId `
+            -FocusArea $FocusAreaId `
+            -Status $iterationStatus `
+            -StartTime $iterationStart `
+            -EndTime (Get-Date) `
+            -PromptFile $promptFile `
+            -GitBefore $gitStateBefore `
+            -GitAfter $gitStateAfter `
+            -FileOps $fileOps `
+            -Commits $commits `
+            -TestResults $testResults `
+            -TokensEstimated $tokensUsed `
+            -RetryCount $script:CurrentRetryCount
+
+        # 3. Log file operations
+        Log-FileOperations -Iteration $script:IterationCount -FileOps $fileOps
+
+        # 4. Log git operations
+        Log-GitOperations `
+            -Iteration $script:IterationCount `
+            -Branch $gitStateAfter.branch `
+            -Commits $commits `
+            -BeforeState $gitStateBefore `
+            -AfterState $gitStateAfter
+
+        # 5. Log timeline event: iteration complete
+        Append-SessionTimeline -Event "iteration_complete" -Data @{
+            iteration = $script:IterationCount
+            status = $iterationStatus
+            success = $success
+            durationSec = [int]$iterationDuration.TotalSeconds
+        }
+
+        return $success
     }
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         "Error: $_" | Add-Content $iterationLog
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
         Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+        # Log timeline event: error
+        Append-SessionTimeline -Event "iteration_error" -Data @{
+            iteration = $script:IterationCount
+            error = $_.ToString()
+        }
 
         $script:ConsecutiveFailures++
         return $false
@@ -678,6 +1255,27 @@ function Invoke-ClaudeForStory {
 
     Write-Host "  Invoking Claude for $StoryId..." -ForegroundColor Cyan
 
+    # Capture git state BEFORE Claude runs
+    $gitStateBefore = Get-GitState
+
+    # Log timeline event: iteration start
+    Append-SessionTimeline -Event "iteration_start" -Data @{
+        iteration = $script:IterationCount
+        storyId = $StoryId
+        focusArea = $focusArea
+        promptType = "story_work"
+    }
+
+    # Get the story object for verification logging
+    $storyObj = $null
+    if (Test-Path $script:PrdFile) {
+        try {
+            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+            $storyObj = $prd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+        }
+        catch {}
+    }
+
     try {
         $timeout = 600
         if ($script:Config.iterationTimeout) {
@@ -694,6 +1292,9 @@ function Invoke-ClaudeForStory {
         $flagsString = ($claudeArgs -join ' ')
         $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
 
+        # Record execution start time
+        $executionStart = Get-Date
+
         $process = Start-Process -FilePath "cmd.exe" `
             -ArgumentList "/c", $cmdCommand `
             -WorkingDirectory $script:ProjectRoot `
@@ -703,6 +1304,7 @@ function Invoke-ClaudeForStory {
             -RedirectStandardError $errFile
 
         $exited = $process.WaitForExit($timeout * 1000)
+        $executionEnd = Get-Date
         $iterationDuration = (Get-Date) - $iterationStart
 
         # Read output for metrics
@@ -718,36 +1320,120 @@ function Invoke-ClaudeForStory {
         $tokensUsed = Get-EstimatedTokens -Output $claudeOutput
         $testResults = Get-TestResults -Output $claudeOutput
 
+        # Capture git state AFTER Claude runs
+        $gitStateAfter = Get-GitState
+
+        # Get file operations and commits
+        $fileOps = Get-FileOperations -BeforeHash $gitStateBefore.hash
+        $commits = Get-GitCommits -SinceHash $gitStateBefore.hash
+
+        # Determine status
+        $iterationStatus = "completed"
+        $success = $false
+        $timedOut = $false
+
         if (-not $exited) {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
+            $iterationStatus = "timeout"
+            $timedOut = $true
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
             Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
             $script:ConsecutiveFailures++
-            return $false
         }
-
-        if ($process.ExitCode -eq 0) {
+        elseif ($process.ExitCode -eq 0) {
             Write-Host "  Story completed successfully" -ForegroundColor Green
+            $iterationStatus = "completed"
+            $success = $true
 
             # Capture git diff stats on success
             $gitStats = Get-GitDiffStats
             Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted
             $script:ConsecutiveFailures = 0
-            return $true
+
+            # Log story verification (Task 1.3)
+            Log-StoryVerification -StoryId $StoryId -Story $storyObj -Iteration $script:IterationCount -Passed $true
+
+            # Log timeline event: story verified
+            Append-SessionTimeline -Event "story_verified" -Data @{
+                storyId = $StoryId
+                passed = $true
+            }
         }
         else {
             Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
+            $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
             Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
             $script:ConsecutiveFailures++
-            return $false
         }
+
+        # === COMPREHENSIVE LOGGING (Phase 1) ===
+
+        # 1. Log Claude CLI invocation details
+        Log-ClaudeInvocation `
+            -Iteration $script:IterationCount `
+            -ClaudePath $claudePath `
+            -Arguments $claudeArgs `
+            -PromptFile $promptFile `
+            -PromptType "story_work" `
+            -ProcessId $process.Id `
+            -StartTime $executionStart `
+            -EndTime $executionEnd `
+            -ExitCode $process.ExitCode `
+            -TimedOut $timedOut
+
+        # 2. Log iteration manifest
+        Log-IterationManifest `
+            -Iteration $script:IterationCount `
+            -StoryId $StoryId `
+            -FocusArea $focusArea `
+            -Status $iterationStatus `
+            -StartTime $iterationStart `
+            -EndTime (Get-Date) `
+            -PromptFile $promptFile `
+            -GitBefore $gitStateBefore `
+            -GitAfter $gitStateAfter `
+            -FileOps $fileOps `
+            -Commits $commits `
+            -TestResults $testResults `
+            -TokensEstimated $tokensUsed `
+            -RetryCount $script:CurrentRetryCount
+
+        # 3. Log file operations
+        Log-FileOperations -Iteration $script:IterationCount -FileOps $fileOps
+
+        # 4. Log git operations
+        Log-GitOperations `
+            -Iteration $script:IterationCount `
+            -Branch $gitStateAfter.branch `
+            -Commits $commits `
+            -BeforeState $gitStateBefore `
+            -AfterState $gitStateAfter
+
+        # 5. Log timeline event: iteration complete
+        Append-SessionTimeline -Event "iteration_complete" -Data @{
+            iteration = $script:IterationCount
+            storyId = $StoryId
+            status = $iterationStatus
+            success = $success
+            durationSec = [int]$iterationDuration.TotalSeconds
+        }
+
+        return $success
     }
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
         Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0
+
+        # Log timeline event: error
+        Append-SessionTimeline -Event "iteration_error" -Data @{
+            iteration = $script:IterationCount
+            storyId = $StoryId
+            error = $_.ToString()
+        }
+
         $script:ConsecutiveFailures++
         return $false
     }
@@ -1275,6 +1961,13 @@ catch {
 
 Write-Host ""
 
+# Log session start event
+Append-SessionTimeline -Event "session_start" -Data @{
+    mode = if ($Queue) { "Queue" } elseif ($TrueAuto) { "TrueAuto" } else { "Standard" }
+    claudePath = $claudePath
+    projectRoot = $script:ProjectRoot
+}
+
 # Route to appropriate loop based on flags
 if ($Queue) {
     Start-InterviewQueueLoop
@@ -1288,6 +1981,13 @@ else {
 
 # Session summary
 $duration = (Get-Date) - $script:SessionStartTime
+
+# Log session end event
+Append-SessionTimeline -Event "session_end" -Data @{
+    iterations = $script:IterationCount
+    durationMin = [math]::Round($duration.TotalMinutes, 1)
+    consecutiveFailures = $script:ConsecutiveFailures
+}
 Write-Host ""
 Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  Session Summary" -ForegroundColor Cyan

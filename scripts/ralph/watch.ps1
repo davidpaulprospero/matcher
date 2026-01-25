@@ -485,6 +485,65 @@ while ($true) {
         }
     }
 
+    # Show latest iteration manifest (Phase 1 logging)
+    if (Test-Path $LogsDir) {
+        $latestLogDir = Get-ChildItem $LogsDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
+        if ($latestLogDir) {
+            # Show latest manifest
+            $latestManifest = Get-ChildItem $latestLogDir.FullName -Filter "iteration_*_manifest.json" | Sort-Object Name -Descending | Select-Object -First 1
+            if ($latestManifest) {
+                Write-Host ""
+                Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
+                Write-Host "  LATEST ITERATION MANIFEST" -ForegroundColor Yellow
+                Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
+                try {
+                    $manifest = Get-Content $latestManifest.FullName -Raw | ConvertFrom-Json
+                    Write-Host "    Iteration: $($manifest.iteration) | Story: $($manifest.storyId) | Status: $($manifest.status)" -ForegroundColor $(if ($manifest.status -eq 'completed') { 'Green' } else { 'Red' })
+                    Write-Host "    Duration: $($manifest.timestamps.durationSec)s | Tokens: $($manifest.metrics.tokensEstimated)" -ForegroundColor Gray
+                    Write-Host "    Git: +$($manifest.git.linesAdded)/-$($manifest.git.linesDeleted) lines | $($manifest.git.commits.Count) commit(s)" -ForegroundColor Gray
+                    Write-Host "    Tests: $($manifest.tests.passed) passed, $($manifest.tests.failed) failed" -ForegroundColor $(if ($manifest.tests.failed -eq 0) { 'Green' } else { 'Red' })
+                }
+                catch {
+                    Write-Host "    (manifest loading...)" -ForegroundColor DarkGray
+                }
+            }
+
+            # Show timeline (last 5 events)
+            $timelineFile = Join-Path $latestLogDir.FullName "session_timeline.jsonl"
+            if (Test-Path $timelineFile) {
+                Write-Host ""
+                Write-Host "  TIMELINE (last 5 events):" -ForegroundColor Cyan
+                $timelineLines = Get-Content $timelineFile -Tail 5 -ErrorAction SilentlyContinue
+                if ($timelineLines) {
+                    foreach ($line in $timelineLines) {
+                        try {
+                            $event = $line | ConvertFrom-Json
+                            $eventTime = ([datetime]$event.ts).ToString("HH:mm:ss")
+                            $eventName = $event.event
+                            # Build event details
+                            $details = @()
+                            if ($event.iteration) { $details += "iter=$($event.iteration)" }
+                            if ($event.storyId) { $details += "story=$($event.storyId)" }
+                            if ($event.status) { $details += "$($event.status)" }
+                            if ($event.success -ne $null) { $details += "success=$($event.success)" }
+                            $detailStr = if ($details.Count -gt 0) { " ($($details -join ', '))" } else { "" }
+
+                            $color = switch -Regex ($eventName) {
+                                "complete" { "Green" }
+                                "start" { "Cyan" }
+                                "error|fail" { "Red" }
+                                "verified" { "Green" }
+                                default { "Gray" }
+                            }
+                            Write-Host "    $eventTime $eventName$detailStr" -ForegroundColor $color
+                        }
+                        catch {}
+                    }
+                }
+            }
+        }
+    }
+
     Write-Host ""
     Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
     Write-Host "  Git status:" -ForegroundColor DarkGray
