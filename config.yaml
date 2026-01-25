@@ -351,6 +351,12 @@ matching:
   fallback_matching_enabled: true  # Enable fallback matching for edge cases
   fallback_trigger_threshold: 0.4  # Trigger fallback when primary confidence below this
 
+  # Transcript quality scoring
+  # Chain-of-thought: Low-quality transcripts make embedding matching unreliable
+  # Reasoning: Short, incoherent, or repetitive transcripts don't represent video content well
+  # Decision: Reduce embedding weight by 20% for low-quality transcripts
+  transcript_quality_weight: true  # Enable transcript quality-based weight adjustment
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
