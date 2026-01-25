@@ -284,6 +284,7 @@ def create_default_pipeline(
     from .stages.stock import StockVideoStage
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
+    from .stages.caption_stage import CaptionStage
     from .stages.transcribe import TranscribeStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
@@ -298,6 +299,7 @@ def create_default_pipeline(
     pipeline.add_stage(StockVideoStage())
     pipeline.add_stage(BrollDownloadStage())  # B-roll specific downloads
     pipeline.add_stage(RemixStage())
+    pipeline.add_stage(CaptionStage())  # Fetch YouTube captions before transcription
     pipeline.add_stage(TranscribeStage())
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
@@ -338,6 +340,7 @@ def create_match_only_pipeline(
     from .stages.stock import StockVideoStage
     from .stages.broll_download import BrollDownloadStage
     from .stages.remix import RemixStage
+    from .stages.caption_stage import CaptionStage
     from .stages.transcribe import TranscribeStage
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
@@ -352,6 +355,7 @@ def create_match_only_pipeline(
     pipeline.add_stage(StockVideoStage())    # For general B-roll
     pipeline.add_stage(BrollDownloadStage()) # B-roll specific downloads
     pipeline.add_stage(RemixStage())         # Filter videos by relevance
+    pipeline.add_stage(CaptionStage())       # Fetch YouTube captions
     pipeline.add_stage(TranscribeStage())
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
 
