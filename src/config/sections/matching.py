@@ -235,6 +235,17 @@ class MatchingConfig:
     # Produces more reliable and explainable match decisions
     chain_of_thought_enabled: bool = True  # Enable chain-of-thought structured prompting
 
+    # Early termination for obvious high-confidence matches
+    # When enabled, skips LLM when match is obviously good:
+    # - Embedding similarity > 0.9
+    # - At least 3 keywords match
+    # - Same named entity found in both voiceover and video
+    # Returns boosted confidence (min 0.92) with reason 'obvious_match_early_termination'
+    obvious_match_enabled: bool = True  # Enable early termination for obvious matches
+    obvious_match_min_similarity: float = 0.9  # Minimum embedding similarity for obvious match
+    obvious_match_min_keywords: int = 3  # Minimum matched keywords for obvious match
+    obvious_match_min_confidence: float = 0.92  # Minimum confidence for obvious matches
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 

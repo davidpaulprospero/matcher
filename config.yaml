@@ -371,6 +371,15 @@ matching:
   # Decision: Use rubric weights - visual (30%), topic (40%), keyword (20%), flow (10%)
   chain_of_thought_enabled: true  # Enable structured reasoning prompts
 
+  # Early termination for obvious high-confidence matches
+  # Chain-of-thought: Skip expensive LLM call when match is obviously good
+  # Reasoning: Embedding sim >0.9 + 3+ keywords + same entity = very high confidence
+  # Decision: Return min 0.92 confidence to ensure consistent high-quality matches
+  obvious_match_enabled: true  # Enable early termination for obvious matches
+  obvious_match_min_similarity: 0.9  # Minimum embedding similarity for obvious match
+  obvious_match_min_keywords: 3  # Minimum matched keywords for obvious match
+  obvious_match_min_confidence: 0.92  # Minimum confidence for obvious matches
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
