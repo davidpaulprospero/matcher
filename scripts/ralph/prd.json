@@ -161,8 +161,8 @@
         "Test: abrupt cancellation during batch fetch cleans up all worker threads",
         "Add pytest marker @pytest.mark.stress for selective execution"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created TestCaptionStressSuite class with 8 stress tests covering all acceptance criteria plus additional thread safety scenarios. Tests use tracemalloc for memory leak detection, threading.active_count() for thread leak detection, and time-based assertions for deadlock detection. All tests use @pytest.mark.stress marker for selective execution. Tests include: 100 videos/16 workers (memory/deadlock), 50% error rate (cascade/starvation), mixed latency (fair scheduling), abrupt cancellation (thread cleanup), concurrent metrics updates (lock correctness), progress callback safety (exception handling), worker isolation (batch independence), rapid sequential batches (resource accumulation). All 8 tests pass in 3.98s."
     }
   ]
 }
