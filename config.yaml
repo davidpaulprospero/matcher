@@ -391,6 +391,12 @@ matching:
     entity_match: 0.20       # Named entity overlap - people, places, organizations (20%)
     visual_description: 0.15 # Visual scene description similarity (15%)
 
+  # Semantic coherence (topic flow between adjacent segments)
+  # Chain-of-thought: Adjacent segments should have related content for smooth timeline
+  # Reasoning: Embedding similarity between current and previous match indicates topic flow
+  # Decision: Boost smooth flow (+0.03 when sim>0.6), penalize abrupt (-0.05 when sim<0.3)
+  semantic_coherence_enabled: true  # Enable semantic coherence scoring for topic flow
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
