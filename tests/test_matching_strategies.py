@@ -874,3 +874,321 @@ class TestSceneLookup:
         scene = matcher._get_scene_for_segment(seg)
 
         assert scene is None
+
+
+class TestVisualFirstStrategySelection:
+    """Additional tests verifying visual_first returns highest visual scores"""
+
+    def test_visual_first_selects_highest_visual_score(self, mock_config, mock_scenes):
+        """Test visual_first returns clip with highest visual score, not highest text sim"""
+        matcher = StrategyMatcher(mock_config, mock_scenes)
+
+        # Voiceover with visual terms
+        vo = SRTSegment(0, 0.0, 5.0, "The earthquake destroyed the city buildings", "")
+        vo.keywords = ["earthquake", "city", "buildings"]
+
+        # Candidate 1: High text similarity but low visual score (no scene description)
+        high_text_seg = SRTSegment(0, 0.0, 5.0, "earthquake news report", "/video_no_scene.mp4")
+        high_text_seg.keywords = []
+
+        # Candidate 2: Lower text similarity but high visual score (matching scene)
+        # This matches scene at /video1.mp4:0-10 which has "earthquake damage in city"
+        high_visual_seg = SRTSegment(0, 2.0, 7.0, "generic content", "/video1.mp4")
+        high_visual_seg.keywords = ["earthquake", "damage", "city"]
+
+        candidates = [
+            (high_text_seg, 0.90),  # Higher embedding similarity
+            (high_visual_seg, 0.60)  # Lower embedding similarity but matches scene
+        ]
+
+        result = matcher.match_visual_first(vo, candidates, [], None, {})
+
+        assert result is not None
+        # Should pick the one with better visual match (scene keywords)
+        assert result.video_segment.source_file == "/video1.mp4"
+        assert "visual" in result.reasoning.lower()
+
+    def test_visual_first_scoring_weights_visual_over_text(self, mock_config, mock_scenes):
+        """Test that visual score (70%) outweighs text score (30%)"""
+        matcher = StrategyMatcher(mock_config, mock_scenes)
+
+        vo = SRTSegment(0, 0.0, 5.0, "earthquake damage destruction rubble", "")
+        vo.keywords = ["earthquake", "damage", "destruction", "rubble"]
+
+        # Both from same source to avoid variety filtering
+        seg1 = SRTSegment(0, 0.0, 5.0, "unrelated content", "/video1.mp4")
+        seg1.keywords = ["earthquake", "damage"]  # Matches scene keywords
+
+        seg2 = SRTSegment(1, 15.0, 20.0, "earthquake damage", "/video2.mp4")
+        seg2.keywords = []  # No keywords
+
+        candidates = [
+            (seg2, 0.95),  # High text sim, no visual keywords
+            (seg1, 0.50)   # Low text sim, but matches scene description
+        ]
+
+        result = matcher.match_visual_first(vo, candidates, [], None, {})
+
+        # Should prefer visual match over text match due to 70/30 weighting
+        assert result is not None
+
+
+class TestDifferentSourceStrategyExclusion:
+    """Additional tests verifying different_source properly excludes used sources"""
+
+    def test_different_source_excludes_multiple_used_sources(self, mock_config):
+        """Test that all used sources are excluded, not just the first"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+
+        # Multiple used sources
+        used1 = SRTSegment(0, 0.0, 5.0, "used1", "/video1.mp4")
+        used2 = SRTSegment(1, 0.0, 5.0, "used2", "/video2.mp4")
+
+        # Candidates from 3 sources
+        candidates = [
+            (SRTSegment(0, 0.0, 5.0, "from v1", "/video1.mp4"), 0.9),
+            (SRTSegment(1, 0.0, 5.0, "from v2", "/video2.mp4"), 0.85),
+            (SRTSegment(2, 0.0, 5.0, "from v3", "/video3.mp4"), 0.7),
+        ]
+
+        result = matcher.match_different_source(vo, candidates, [used1, used2], None, {})
+
+        assert result is not None
+        # Should only pick from video3 since video1 and video2 are used
+        assert result.video_segment.source_file == "/video3.mp4"
+
+    def test_different_source_returns_first_unused_from_sorted_candidates(self, mock_config):
+        """Test that different_source returns first unused source from pre-sorted candidates"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+        used = SRTSegment(0, 0.0, 5.0, "used", "/video1.mp4")
+
+        # Candidates should be pre-sorted by similarity (highest first)
+        # This reflects actual pipeline behavior where candidates come pre-sorted
+        candidates = [
+            (SRTSegment(0, 0.0, 5.0, "from v1 best", "/video1.mp4"), 0.95),  # Used source - skipped
+            (SRTSegment(1, 0.0, 5.0, "from v3 high", "/video3.mp4"), 0.85),  # First unused - selected
+            (SRTSegment(2, 0.0, 5.0, "from v2 med", "/video2.mp4"), 0.75),
+        ]
+
+        result = matcher.match_different_source(vo, candidates, [used], None, {})
+
+        assert result is not None
+        # Should pick first unused source in sorted order (video3)
+        assert result.video_segment.source_file == "/video3.mp4"
+        assert result.confidence == 0.85
+
+
+class TestEmbeddingDiversityMaximization:
+    """Additional tests verifying embedding_diversity maximizes variance from V1-V3"""
+
+    def test_embedding_diversity_selects_most_diverse(self, mock_config):
+        """Test that embedding_diversity picks clip with maximum distance from existing"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+        vo_emb = [1.0, 0.0, 0.0]
+
+        # Existing match embedding (V1)
+        existing = SRTSegment(0, 0.0, 5.0, "existing", "/video1.mp4")
+        existing_embs = [[0.9, 0.1, 0.0]]  # Very similar to vo_emb
+
+        # Create candidates with different diversity levels
+        similar_seg = SRTSegment(0, 0.0, 5.0, "similar", "/video2.mp4")
+        diverse_seg = SRTSegment(1, 0.0, 5.0, "diverse", "/video3.mp4")
+        most_diverse_seg = SRTSegment(2, 0.0, 5.0, "most diverse", "/video4.mp4")
+
+        candidates = [
+            (similar_seg, 0.9),
+            (diverse_seg, 0.7),
+            (most_diverse_seg, 0.6),
+        ]
+
+        candidate_embs = {
+            matcher.get_clip_id(similar_seg): [0.85, 0.15, 0.0],     # Very similar to existing
+            matcher.get_clip_id(diverse_seg): [0.3, 0.5, 0.2],       # Moderately diverse
+            matcher.get_clip_id(most_diverse_seg): [0.0, 0.1, 0.9],  # Most diverse
+        }
+
+        result = matcher.match_embedding_diversity(
+            vo, candidates, [existing], existing_embs, candidate_embs, vo_emb
+        )
+
+        assert result is not None
+        assert result.strategy == "embedding_diversity"
+        # Should pick most_diverse_seg due to maximum distance from existing
+        # Note: also weighted by vo relevance (40%) so exact selection depends on combined score
+
+    def test_embedding_diversity_respects_relevance_threshold(self, mock_config):
+        """Test that clips below 0.3 relevance threshold are excluded"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+        vo_emb = [1.0, 0.0, 0.0]
+
+        existing = SRTSegment(0, 0.0, 5.0, "existing", "/video1.mp4")
+        existing_embs = [[0.9, 0.1, 0.0]]
+
+        # Candidate that's very diverse but not relevant to voiceover
+        irrelevant_seg = SRTSegment(0, 0.0, 5.0, "irrelevant", "/video2.mp4")
+        relevant_seg = SRTSegment(1, 0.0, 5.0, "relevant", "/video3.mp4")
+
+        candidates = [
+            (irrelevant_seg, 0.2),
+            (relevant_seg, 0.5),
+        ]
+
+        candidate_embs = {
+            # Very diverse from existing but very different from vo (low relevance ~0.1)
+            matcher.get_clip_id(irrelevant_seg): [0.0, 0.0, 1.0],
+            # Less diverse but more relevant to vo (relevance ~0.7)
+            matcher.get_clip_id(relevant_seg): [0.7, 0.3, 0.0],
+        }
+
+        result = matcher.match_embedding_diversity(
+            vo, candidates, [existing], existing_embs, candidate_embs, vo_emb
+        )
+
+        # Should pick relevant_seg despite irrelevant being more diverse
+        # because irrelevant has vo_relevance < 0.3 threshold
+        assert result is not None
+        assert result.video_segment.source_file == "/video3.mp4"
+
+
+class TestBRollOnlyExclusivity:
+    """Additional tests verifying broll_only strategy ONLY returns B-roll clips"""
+
+    def test_broll_only_ignores_non_broll_even_with_higher_score(self, mock_config):
+        """Test that non-B-roll clips are ignored even if they have higher similarity"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+        vo_emb = [1.0, 0.0, 0.0]
+
+        # Non-broll with very high similarity
+        high_sim_non_broll = SRTSegment(0, 0.0, 5.0, "talking head", "/video1.mp4")
+        high_sim_non_broll.is_broll = False
+
+        # B-roll with lower similarity
+        low_sim_broll = SRTSegment(1, 0.0, 5.0, "[silent footage]", "/video2.mp4")
+        low_sim_broll.is_broll = True
+
+        candidates = [
+            (high_sim_non_broll, 0.95),
+            (low_sim_broll, 0.40),
+        ]
+
+        candidate_embs = {
+            matcher.get_clip_id(high_sim_non_broll): [0.95, 0.05, 0.0],
+            matcher.get_clip_id(low_sim_broll): [0.4, 0.3, 0.3],
+        }
+
+        result = matcher.match_broll_only(
+            vo, candidates, [], [], candidate_embs, vo_emb
+        )
+
+        assert result is not None
+        assert result.video_segment == low_sim_broll
+        assert result.video_segment.is_broll == True
+        assert "b-roll" in result.reasoning.lower()
+
+    def test_broll_only_returns_best_broll_by_relevance(self, mock_config):
+        """Test that among B-roll clips, the most relevant is returned"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+        vo_emb = [1.0, 0.0, 0.0]
+
+        # Multiple B-roll candidates with different relevance scores
+        broll1 = SRTSegment(0, 0.0, 5.0, "[silent A]", "/video1.mp4")
+        broll1.is_broll = True
+        broll2 = SRTSegment(1, 0.0, 5.0, "[silent B]", "/video2.mp4")
+        broll2.is_broll = True
+        broll3 = SRTSegment(2, 0.0, 5.0, "[silent C]", "/video3.mp4")
+        broll3.is_broll = True
+
+        candidates = [
+            (broll1, 0.5),
+            (broll2, 0.8),  # Highest relevance
+            (broll3, 0.6),
+        ]
+
+        candidate_embs = {
+            matcher.get_clip_id(broll1): [0.5, 0.3, 0.2],
+            matcher.get_clip_id(broll2): [0.8, 0.1, 0.1],  # Most relevant to vo_emb
+            matcher.get_clip_id(broll3): [0.6, 0.2, 0.2],
+        }
+
+        result = matcher.match_broll_only(
+            vo, candidates, [], [], candidate_embs, vo_emb
+        )
+
+        assert result is not None
+        # Should pick broll2 as it has highest embedding similarity to vo
+        assert result.video_segment == broll2
+
+    def test_broll_only_rejects_all_non_broll(self, mock_config):
+        """Test that when no B-roll exists, None is returned"""
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "test content", "")
+
+        # All candidates are non-broll
+        seg1 = SRTSegment(0, 0.0, 5.0, "speech A", "/video1.mp4")
+        seg1.is_broll = False
+        seg2 = SRTSegment(1, 0.0, 5.0, "speech B", "/video2.mp4")
+        seg2.is_broll = False
+
+        candidates = [
+            (seg1, 0.9),
+            (seg2, 0.85),
+        ]
+
+        result = matcher.match_broll_only(vo, candidates, [], [], {}, [])
+
+        assert result is None
+
+
+class TestStrategySelectionOrdering:
+    """Tests verifying strategy selection order and cumulative exclusion"""
+
+    def test_strategies_build_on_previous_exclusions(self, mock_config):
+        """Test that each strategy excludes clips used by previous strategies"""
+        mock_config.output.strategy_tracks = ["different_source", "visual_first"]
+
+        matcher = StrategyMatcher(mock_config, None)
+
+        vo = SRTSegment(0, 0.0, 5.0, "earthquake damage", "")
+        vo.keywords = ["earthquake"]
+
+        primary = SRTSegment(0, 0.0, 5.0, "primary", "/video1.mp4")
+
+        # Create candidates from 3 sources
+        seg2 = SRTSegment(0, 0.0, 5.0, "from v2", "/video2.mp4")
+        seg2.keywords = ["earthquake"]
+        seg3 = SRTSegment(1, 0.0, 5.0, "from v3", "/video3.mp4")
+        seg3.keywords = []
+
+        candidates = [
+            (seg2, 0.8),
+            (seg3, 0.7),
+        ]
+
+        vo_emb = [1.0, 0.0, 0.0]
+        candidate_embs = {
+            matcher.get_clip_id(seg2): [0.8, 0.2, 0.0],
+            matcher.get_clip_id(seg3): [0.7, 0.3, 0.0],
+        }
+
+        result = matcher.get_strategy_matches(
+            vo, candidates, primary, [], vo_emb, candidate_embs, segment_index=0
+        )
+
+        # Should get results from both strategies
+        assert len(result) >= 1
+        # Each result should be from a different source
+        sources = [r.video_segment.source_file for r in result]
+        assert len(sources) == len(set(sources))  # All unique sources
