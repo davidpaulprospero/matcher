@@ -266,6 +266,29 @@ class CaptionFirstConfig:
         "rate_limit": 2,   # API rate limiting, retry with backoff
     })
 
+    # Batch pre-check by channel (US-006 Sprint 7)
+    # Groups videos by YouTube channel and uses representative samples to determine
+    # caption availability for the entire channel, reducing API calls.
+    # For example, 50 videos from the same channel might only need 5 actual checks
+    # if the channel pattern indicates >90% confidence.
+    # Disable for maximum accuracy at the cost of more API calls.
+    batch_precheck_by_channel: bool = True
+
+    # Minimum confidence (0.0-1.0) for channel pattern to skip individual checks (US-006 Sprint 7)
+    # When a channel has >= confidence_threshold success rate (or <= 1-threshold failure rate)
+    # after min_samples_for_confidence videos, remaining videos skip pre-check.
+    # Higher = more conservative (fewer skips), lower = more aggressive (more skips)
+    batch_precheck_confidence: float = 0.9
+
+    # Minimum videos checked per channel before trusting the pattern (US-006 Sprint 7)
+    # Until this many videos have been checked for a channel, all are individually checked.
+    batch_precheck_min_samples: int = 5
+
+    # Sample size per channel when building the pattern (US-006 Sprint 7)
+    # When a channel doesn't have high confidence yet, check this many videos
+    # before applying the pattern to remaining videos in the batch.
+    batch_precheck_sample_size: int = 5
+
 
 @dataclass
 class AudioFirstConfig:

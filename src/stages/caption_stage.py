@@ -210,14 +210,34 @@ class CaptionStage(Stage):
                     print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
 
             # US-008: Pre-check caption availability to filter out videos without captions
+            # US-006 Sprint 7: Use batch pre-check by channel when enabled
             pre_check_enabled = getattr(caption_config, 'pre_check_availability', True)
+            batch_precheck_enabled = getattr(caption_config, 'batch_precheck_by_channel', True)
             no_caption_ids = []
+
             if ids_to_fetch and pre_check_enabled:
-                print(f"  Pre-checking caption availability for {len(ids_to_fetch)} videos...")
-                for video_id in ids_to_fetch:
-                    try:
-                        has_caps = self._fetcher.has_captions(video_id)
-                        metrics.record_pre_check(video_id, has_caps)
+                if batch_precheck_enabled and len(ids_to_fetch) > 1:
+                    # US-006: Use batch pre-check with channel grouping
+                    # This reduces API calls by grouping videos by channel and using
+                    # representative samples when channel patterns have high confidence
+                    from ..caption_fetcher import BatchPreCheckResult
+
+                    confidence = getattr(caption_config, 'batch_precheck_confidence', 0.9)
+                    min_samples = getattr(caption_config, 'batch_precheck_min_samples', 5)
+                    sample_size = getattr(caption_config, 'batch_precheck_sample_size', 5)
+
+                    print(f"  Batch pre-checking {len(ids_to_fetch)} videos (channel grouping)...")
+                    batch_result = self._fetcher.batch_precheck_by_channel(
+                        video_ids=ids_to_fetch,
+                        cache=caption_cache,
+                        metrics=metrics,
+                        confidence_threshold=confidence,
+                        min_samples_for_confidence=min_samples,
+                        sample_size_per_channel=sample_size,
+                    )
+
+                    # Process batch results
+                    for video_id, has_caps in batch_result.video_results.items():
                         if not has_caps:
                             no_caption_ids.append(video_id)
                             # Store as unavailable in caption results
@@ -228,10 +248,35 @@ class CaptionStage(Stage):
                                 'caption_quality': 'low',
                             }
                             logger.info(f"Pre-check: No captions for {video_id}")
-                    except CaptionFetchError as e:
-                        # Pre-check failed, but we'll still try to fetch later
-                        logger.warning(f"Pre-check error for {video_id}: {e}")
-                        metrics.record_pre_check(video_id, True)  # Assume available, try fetch
+
+                    # Record API calls saved
+                    metrics.set_batch_precheck_savings(batch_result.api_calls_saved)
+
+                    if batch_result.api_calls_saved > 0:
+                        print(f"  + Batch pre-check saved {batch_result.api_calls_saved} API calls "
+                              f"({batch_result.skipped_by_pattern} skipped by channel pattern)")
+
+                else:
+                    # Original individual pre-check (US-008)
+                    print(f"  Pre-checking caption availability for {len(ids_to_fetch)} videos...")
+                    for video_id in ids_to_fetch:
+                        try:
+                            has_caps = self._fetcher.has_captions(video_id)
+                            metrics.record_pre_check(video_id, has_caps)
+                            if not has_caps:
+                                no_caption_ids.append(video_id)
+                                # Store as unavailable in caption results
+                                caption_results[video_id] = {
+                                    'video_id': video_id,
+                                    'unavailable': True,
+                                    'reason': 'no_captions_available',
+                                    'caption_quality': 'low',
+                                }
+                                logger.info(f"Pre-check: No captions for {video_id}")
+                        except CaptionFetchError as e:
+                            # Pre-check failed, but we'll still try to fetch later
+                            logger.warning(f"Pre-check error for {video_id}: {e}")
+                            metrics.record_pre_check(video_id, True)  # Assume available, try fetch
 
                 # Remove videos without captions from fetch list
                 if no_caption_ids:
