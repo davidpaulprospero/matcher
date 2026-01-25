@@ -32,6 +32,9 @@ from .strategies import StrategyMatcher
 # Phase 4: Scoring (functions, not classes)
 from . import scoring
 
+# Phase 4b: Quality Metrics
+from .metrics import MatchQualityMetrics, calculate_match_quality_metrics, log_quality_summary
+
 # Phase 5: Location Matching
 from .location_matching import LocationMatcher
 
@@ -60,4 +63,9 @@ __all__ = [
 
     # Location Matching
     'LocationMatcher',
+
+    # Quality Metrics
+    'MatchQualityMetrics',
+    'calculate_match_quality_metrics',
+    'log_quality_summary',
 ]
