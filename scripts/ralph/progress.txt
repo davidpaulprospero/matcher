@@ -343,3 +343,7 @@ Replaced 2 bare `except:` blocks with specific exception handling in downloader 
 - src/downloader/core.py - Exception handling for JSON metadata loading
 - src/downloader/transcoding.py - Exception handling for GPU encoder detection
 
+## Iteration 10 - US-009: Add tests for matching strategy selection logic
+- Focus: quality
+- Status: IN PROGRESS - Testing US-009...
+
