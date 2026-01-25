@@ -17,6 +17,7 @@ def create_client(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
     cache_dir: str = ".cache/llm_responses",
+    cache_ttl_hours: int = 24,
     **kwargs
 ) -> LLMClient:
     """
@@ -27,6 +28,7 @@ def create_client(
         api_key: API key (optional, will check env vars if not provided)
         model: Model name (optional, uses provider default if not provided)
         cache_dir: Cache directory
+        cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
         **kwargs: Additional provider-specific arguments (e.g., host for Ollama)
 
     Returns:
@@ -72,7 +74,8 @@ def create_client(
         return GeminiClient(
             api_key=api_key,
             model=model,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            cache_ttl_hours=cache_ttl_hours
         )
 
     elif provider == "anthropic":
@@ -93,7 +96,8 @@ def create_client(
         return AnthropicClient(
             api_key=api_key,
             model=model,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            cache_ttl_hours=cache_ttl_hours
         )
 
     elif provider == "ollama":
@@ -107,7 +111,8 @@ def create_client(
         return OllamaClient(
             model=model,
             host=host,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            cache_ttl_hours=cache_ttl_hours
         )
 
     else:
@@ -152,10 +157,18 @@ def create_client_from_config(config: "Config", cache_dir: Optional[str] = None)
     # Determine model
     model = getattr(llm_config, 'model', None)
 
+    # Determine cache TTL (from config.llm.cache.ttl_hours)
+    cache_config = getattr(llm_config, 'cache', None)
+    if cache_config:
+        cache_ttl_hours = getattr(cache_config, 'ttl_hours', 24)
+    else:
+        cache_ttl_hours = 24
+
     # Create client
     return create_client(
         provider=provider,
         api_key=api_key,
         model=model,
-        cache_dir=cache_dir
+        cache_dir=cache_dir,
+        cache_ttl_hours=cache_ttl_hours
     )
