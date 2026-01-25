@@ -206,8 +206,9 @@ class VideoDeduplicator:
             # Clean up temp frame
             try:
                 Path(frame_path).unlink()
-            except:
-                pass
+            except (OSError, FileNotFoundError) as e:
+                # Temp file cleanup is non-critical - file may already be gone
+                logger.debug(f"Could not remove temp frame {frame_path}: {e}")
     
     def _hash_distance(self, hash1: str, hash2: str) -> int:
         """
@@ -221,7 +222,9 @@ class VideoDeduplicator:
             h1 = self.imagehash.hex_to_hash(hash1)
             h2 = self.imagehash.hex_to_hash(hash2)
             return h1 - h2
-        except:
+        except (ValueError, TypeError) as e:
+            # Invalid hash string format or type - return max distance
+            logger.debug(f"Hash distance calculation failed: {e}")
             return 999
     
     def find_duplicates(
