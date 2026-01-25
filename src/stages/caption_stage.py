@@ -203,9 +203,12 @@ class CaptionStage(Stage):
                 print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
                 # US-009: TTY-aware progress callback for real-time streaming output
+                # US-001 (Sprint 6): Thread-safe with lock for concurrent access
                 import sys
+                import threading
                 is_tty = sys.stdout.isatty()
                 last_line_length = 0  # Track for clearing overwritten lines
+                progress_lock = threading.Lock()  # US-001: Protect TTY writes and state
 
                 def on_progress(video_id: str, status: str, details: Dict) -> None:
                     """Print progress for each video fetch with TTY-aware formatting.
@@ -215,60 +218,69 @@ class CaptionStage(Stage):
 
                     In TTY mode: overwrites line for 'fetching', newline for final status
                     In non-TTY mode: newline for each status update
+
+                    Thread-safety (US-001 Sprint 6):
+                        This callback is invoked from multiple threads in the
+                        ThreadPoolExecutor used by fetch_captions_batch(). A threading.Lock
+                        protects both TTY writes and the last_line_length state variable
+                        to prevent garbled output when 8+ workers call simultaneously.
+                        Typical lock overhead is <1ms per callback invocation.
                     """
                     nonlocal last_line_length
                     idx = details.get('index', 0)
                     total = details.get('total', 0)
 
-                    if status == 'fetching':
-                        # Show in-progress indicator
-                        line = f"  [{idx}/{total}] {video_id}: fetching..."
-                        if is_tty:
-                            # Overwrite line in TTY mode
-                            padding = max(0, last_line_length - len(line))
-                            print(f"\r{line}{' ' * padding}", end='', flush=True)
-                            last_line_length = len(line)
-                        # In non-TTY mode, skip 'fetching' status to reduce noise
+                    # US-001: Acquire lock to protect TTY writes and last_line_length
+                    with progress_lock:
+                        if status == 'fetching':
+                            # Show in-progress indicator
+                            line = f"  [{idx}/{total}] {video_id}: fetching..."
+                            if is_tty:
+                                # Overwrite line in TTY mode
+                                padding = max(0, last_line_length - len(line))
+                                print(f"\r{line}{' ' * padding}", end='', flush=True)
+                                last_line_length = len(line)
+                            # In non-TTY mode, skip 'fetching' status to reduce noise
 
-                    elif status == 'success':
-                        lang = details.get('language', '?')
-                        quality = details.get('quality', '?')
-                        segs = details.get('segment_count', 0)
-                        auto_label = 'auto' if details.get('is_auto_generated') else 'human'
-                        # Format: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)
-                        line = f"  [{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"
-                        if is_tty:
-                            # Clear fetching line and print final status
-                            padding = max(0, last_line_length - len(line))
-                            print(f"\r{line}{' ' * padding}")
-                            last_line_length = 0
-                        else:
-                            print(line)
+                        elif status == 'success':
+                            lang = details.get('language', '?')
+                            quality = details.get('quality', '?')
+                            segs = details.get('segment_count', 0)
+                            auto_label = 'auto' if details.get('is_auto_generated') else 'human'
+                            # Format: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)
+                            line = f"  [{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"
+                            if is_tty:
+                                # Clear fetching line and print final status
+                                padding = max(0, last_line_length - len(line))
+                                print(f"\r{line}{' ' * padding}")
+                                last_line_length = 0
+                            else:
+                                print(line)
 
-                    elif status == 'failed':
-                        reason = details.get('reason', 'unknown')
-                        error_msg = details.get('error', reason)
-                        # Truncate error message if too long
-                        if len(str(error_msg)) > 50:
-                            error_msg = str(error_msg)[:47] + '...'
-                        line = f"  [{idx}/{total}] {video_id}: FAILED ({error_msg})"
-                        if is_tty:
-                            # Clear fetching line and print final status
-                            padding = max(0, last_line_length - len(line))
-                            print(f"\r{line}{' ' * padding}")
-                            last_line_length = 0
-                        else:
-                            print(line)
+                        elif status == 'failed':
+                            reason = details.get('reason', 'unknown')
+                            error_msg = details.get('error', reason)
+                            # Truncate error message if too long
+                            if len(str(error_msg)) > 50:
+                                error_msg = str(error_msg)[:47] + '...'
+                            line = f"  [{idx}/{total}] {video_id}: FAILED ({error_msg})"
+                            if is_tty:
+                                # Clear fetching line and print final status
+                                padding = max(0, last_line_length - len(line))
+                                print(f"\r{line}{' ' * padding}")
+                                last_line_length = 0
+                            else:
+                                print(line)
 
-                    elif status == 'skipped':
-                        reason = details.get('reason', 'unknown')
-                        line = f"  [{idx}/{total}] {video_id}: skipped ({reason})"
-                        if is_tty:
-                            padding = max(0, last_line_length - len(line))
-                            print(f"\r{line}{' ' * padding}")
-                            last_line_length = 0
-                        else:
-                            print(line)
+                        elif status == 'skipped':
+                            reason = details.get('reason', 'unknown')
+                            line = f"  [{idx}/{total}] {video_id}: skipped ({reason})"
+                            if is_tty:
+                                padding = max(0, last_line_length - len(line))
+                                print(f"\r{line}{' ' * padding}")
+                                last_line_length = 0
+                            else:
+                                print(line)
 
                 # US-001: Use batch fetch for parallel processing
                 batch_results = self._fetcher.fetch_captions_batch(
