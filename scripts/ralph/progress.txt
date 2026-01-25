@@ -1532,3 +1532,313 @@ Added 20 tests to `tests/test_speed_tracker.py` in 6 new test classes:
 - src/downloader/__init__.py - RateLimitSignal export
 - tests/test_speed_tracker.py - 20 new tests
 
+
+## Iteration 27 - US-003: Coordinate circuit breaker pause with batch retry scheduling
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented coordination between circuit breaker pause and batch retry queue to prevent wasting retry attempts during active rate limits.
+
+**RetryQueue circuit breaker integration (src/downloader/retry_queue.py):**
+- Added `set_circuit_breaker()` method to link CircuitBreaker instance
+- Added `_wait_for_circuit_breaker()` private method:
+  - Checks if circuit breaker is open (tripped)
+  - If tripped, waits for remaining pause duration before returning
+  - Tracks cumulative wait time in `_circuit_breaker_wait_time`
+- Modified `start_retry_pass()` to check circuit breaker before applying delay:
+  - Calls `_wait_for_circuit_breaker()` first
+  - If CB was tripped, logs both CB wait and additional retry delay
+  - Retry delay is always applied after CB recovery (additive)
+- Updated `get_stats()` to include `respect_circuit_breaker` and `circuit_breaker_wait_time`
+- Updated `clear()` to reset `_circuit_breaker_wait_time`
+- Updated checkpoint serialization for circuit breaker wait time
+
+**Config additions (src/config/sections/download.py):**
+- Added `respect_circuit_breaker: bool = True` to `BatchRetryConfig`
+- When True, batch retry waits for circuit breaker recovery before processing
+- When False, processes immediately after delay_seconds regardless of circuit breaker
+
+**Config additions (config.yaml):**
+- Added `respect_circuit_breaker: true` with explanatory comment
+
+**Core integration (src/downloader/core.py):**
+- Links circuit breaker to retry queue after initialization:
+  `self.retry_queue.set_circuit_breaker(self.circuit_breaker)`
+- Reads `respect_circuit_breaker` from config when initializing retry queue
+
+### Example Behavior
+With respect_circuit_breaker=True (default):
+```
+# Circuit breaker trips (5 consecutive failures)
+Circuit breaker tripped after 5 failures. Pausing for 60s.
+
+# Batch retry starts - waits for CB first
+Batch retry: waiting 45.0s for circuit breaker to recover before processing retry queue
+Batch retry pass 1/2: 3 videos queued. Circuit breaker wait: 45.0s, additional delay: 120.0s...
+```
+
+### Tests Added
+Created `tests/test_circuit_breaker_retry_coordination.py` with 30 tests in 12 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestBatchRetryConfigRespectCircuitBreaker | 3 | Default true, can disable, in config section |
+| TestRetryQueueSetCircuitBreaker | 3 | Links instance, logs debug, None without set |
+| TestWaitForCircuitBreaker | 7 | No CB, respect disabled, CB disabled, closed, waits when open, tracks time, logs |
+| TestStartRetryPassWithCircuitBreaker | 3 | Checks CB before delay, logs CB wait+delay, standard message |
+| TestRetryQueueStats | 3 | Includes respect_circuit_breaker, wait_time, rounded |
+| TestRetryQueueClear | 1 | Resets circuit_breaker_wait_time |
+| TestRetryQueueCheckpoint | 4 | Includes wait_time, restores, defaults, roundtrip |
+| TestVideoDownloaderIntegration | 2 | Linked to CB, respect_circuit_breaker config read |
+| TestIntegrationScenario | 3 | Waits when tripped, no wait when closed, no wait when respect disabled |
+| TestConfigYamlIntegration | 1 | Config section has respect_circuit_breaker |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 30 new tests: `pytest tests/test_circuit_breaker_retry_coordination.py -v` - PASSED
+- All 68 existing batch retry + circuit breaker tests: PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_circuit_breaker_retry_coordination.py (30 tests)
+
+### Files Modified
+- src/downloader/retry_queue.py - set_circuit_breaker(), _wait_for_circuit_breaker(), updated start_retry_pass()
+- src/config/sections/download.py - respect_circuit_breaker field in BatchRetryConfig
+- config.yaml - respect_circuit_breaker setting
+- src/downloader/core.py - Links circuit breaker to retry queue
+
+
+## Iteration 28 - US-004: Add cross-keyword rate limit budget tracking
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented cross-keyword rate limit budget tracking to prevent wasting resources when multiple keywords are processed in a session.
+
+**New RateLimitBudget class (src/downloader/rate_limit_budget.py):**
+- Created `RateLimitBudget` dataclass with comprehensive tracking:
+  - `rotations_used: int` - Cookie rotations used this session
+  - `vpn_switches_used: int` - VPN switches used this session
+  - `backoff_time_spent: float` - Total backoff delay accumulated
+  - `keywords_rate_limited: List[str]` - Keywords that triggered rate limits
+  - `last_escalation_level: str` - Current escalation level (none, backoff, cookie, vpn)
+  - `max_rotations`, `max_vpn_switches`, `max_backoff_time` - Budget limits
+- Recording methods: `record_rotation()`, `record_vpn_switch()`, `record_backoff()`
+- Limit checking: `can_rotate()`, `can_switch_vpn()`, `can_backoff()`
+- Remaining calculations: `rotations_remaining()`, `vpn_switches_remaining()`, `backoff_time_remaining()`
+- Escalation recommendations: `get_recommended_escalation()`, `is_exhausted()`
+- Checkpoint persistence: `to_dict()`, `from_dict()`
+- Summary reporting: `get_summary()`
+
+**Config additions (src/config/sections/download.py):**
+- Added `share_budget_across_keywords: bool = True` to `RateLimitConfig`
+- Added `max_backoff_budget: float = 300.0` to `RateLimitConfig` (5 minutes default)
+- Documented cross-keyword budget sharing behavior in docstring
+
+**Config additions (config.yaml):**
+- Added `share_budget_across_keywords: true` with explanatory comment
+- Added `max_backoff_budget: 300.0` (5 minutes)
+
+**Core implementation (src/downloader/core.py):**
+- Initialize `rate_limit_budget` in `VideoDownloader.__init__`
+- Set budget limits from config (max_rotations from cookie config, max_vpn_switches from vpn config, max_backoff_time from rate_limit config)
+- Modified `handle_rate_limit_error(error_message, tier=None, keyword=None)`:
+  - Added `keyword` parameter for budget tracking
+  - When budget sharing enabled, checks budget before backoff and rotation
+  - Skips exhausted escalation levels (logs clear message why)
+  - Caps backoff delay to remaining budget
+  - Records all actions in budget
+- Modified `rotate_cookie_on_error(error_message, keyword=None)`:
+  - Records rotation in budget when sharing enabled
+- Modified `switch_vpn_on_error(keyword=None)`:
+  - Checks VPN budget before attempting switch
+  - Records switch in budget when sharing enabled
+
+**Checkpoint persistence (src/downloader/checkpoint.py):**
+- Added `rate_limit_budget: Optional[Dict]` field to `DownloadCheckpoint`
+- Updated `from_dict()` for backward compatibility
+- Budget state saved/restored in `_save_checkpoint()` and `download_all()`
+
+### Example Behavior
+With share_budget_across_keywords=True (default):
+```
+# Keyword A exhausts all cookie rotations
+Processing: keyword_a
+Cookie rotation budget exhausted (5 used, 0 remaining), skipping to VPN
+Switched VPN (1): vpn_server_1 -> vpn_server_2
+
+# Keyword B sees no rotations available, goes directly to VPN
+Processing: keyword_b
+Cookie rotation budget exhausted (5 used, 0 remaining), skipping to VPN
+```
+
+### Tests Added
+Created `tests/test_rate_limit_budget.py` with 47 tests in 10 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestRecording | 7 | record_rotation, record_vpn_switch, record_backoff with keywords |
+| TestLimitChecking | 9 | can_rotate, can_switch_vpn, can_backoff at/within/unlimited limits |
+| TestRemainingCalculations | 6 | rotations/vpn/backoff remaining, unlimited returns None |
+| TestEscalationRecommendations | 6 | get_recommended_escalation, is_exhausted |
+| TestSerialization | 5 | to_dict, from_dict, roundtrip, None/empty handling |
+| TestClear | 2 | Clear resets counters but preserves limits |
+| TestSummary | 2 | get_summary includes usage and exhausted state |
+| TestCrossKeywordBudgetSharing | 5 | Key scenario: A exhausts rotations, B skips; B sees reduced budget |
+| TestEdgeCases | 5 | Zero backoff, negative remaining, empty/None keyword |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 47 new tests: `pytest tests/test_rate_limit_budget.py -v` - PASSED
+- All 67 downloader checkpoint + core tests: `pytest tests/test_downloader_checkpoint.py tests/test_downloader_core.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- src/downloader/rate_limit_budget.py - RateLimitBudget class
+- tests/test_rate_limit_budget.py (47 tests)
+
+### Files Modified
+- src/config/sections/download.py - share_budget_across_keywords, max_backoff_budget fields
+- config.yaml - New config options in rate_limit section
+- src/downloader/core.py - Budget tracking integration, modified rate limit handling methods
+- src/downloader/checkpoint.py - rate_limit_budget field
+
+
+## Iteration 29 - US-005: Add VPN manager checkpoint persistence
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented VPN manager checkpoint persistence to enforce max_switches_per_session across resume boundaries.
+
+**VPNManager checkpoint methods (src/downloader/vpn_manager.py):**
+- `to_checkpoint_state()`: Serializes switch_count and last_switch_timestamp to dict
+- `from_checkpoint_state()`: Class method to create VPNManager from checkpoint data
+- `restore_from_checkpoint()`: Updates existing instance with checkpoint state
+- `_format_timestamp()`: Converts epoch time to ISO format string
+- `_parse_timestamp()`: Parses ISO timestamp to epoch time (handles invalid values)
+- Added `switches` alias in `get_status()` for rate_limit_metrics compatibility
+
+**Checkpoint additions (src/downloader/checkpoint.py):**
+- Added `vpn_manager_state: Optional[Dict]` field to DownloadCheckpoint
+- Updated `from_dict()` for backward compatibility with old checkpoints
+
+**Core integration (src/downloader/core.py):**
+- `_save_checkpoint()`: Saves VPN manager state when vpn_manager is enabled
+- `download_all()`: Restores VPN state from checkpoint on resume
+- Logs "Resuming VPN manager: X/Y switches used" on restore
+
+### Example Behavior
+```
+# Session 1: Make 3 VPN switches
+Switching VPN server (attempt 1)...
+VPN switch successful (total: 1)
+...
+VPN switch successful (total: 3)
+# Session interrupted, checkpoint saved with vpn_manager_state: {switch_count: 3, ...}
+
+# Session 2: Resume
+Resuming VPN manager: 3/5 switches used
+# Can only switch 2 more times before hitting max_switches_per_session=5
+```
+
+### Tests Added
+Added 24 tests to `tests/test_vpn_manager.py` in 5 new test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestVPNCheckpointPersistence | 12 | to_checkpoint_state, from_checkpoint_state, restore_from_checkpoint, roundtrip, max_switches enforcement |
+| TestVPNCheckpointTimestampHelpers | 4 | _format_timestamp, _parse_timestamp (valid, invalid, None) |
+| TestDownloadCheckpointVPNState | 5 | Field exists, to_dict, from_dict, backward compat, roundtrip |
+| TestVideoDownloaderVPNCheckpointIntegration | 2 | Save/restore integration |
+
+Also updated `tests/test_rate_limit_cooldown.py` fixtures to include `_share_budget_across_keywords` attribute.
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 41 VPN manager tests: `pytest tests/test_vpn_manager.py -v` - PASSED
+- All 338 sprint tests: `pytest tests/test_vpn_manager.py tests/test_rate_limit*.py tests/test_circuit_breaker*.py tests/test_batch_retry.py tests/test_speed_tracker.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/downloader/vpn_manager.py - Checkpoint methods, timestamp helpers
+- src/downloader/checkpoint.py - vpn_manager_state field
+- src/downloader/core.py - Save/restore VPN state in checkpoint
+- tests/test_vpn_manager.py - 24 new tests
+- tests/test_rate_limit_cooldown.py - Updated fixtures with _share_budget_across_keywords
+
+
+## Iteration 30 - US-006: Implement rate limit metrics aggregation on resume
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented rate limit metrics aggregation to track cumulative metrics across session boundaries for multi-day downloads.
+
+**New session_count field (src/downloader/rate_limit_metrics.py):**
+- Added `session_count: int = 1` field to RateLimitMetrics dataclass
+- Tracks how many download sessions have contributed to cumulative metrics
+
+**New from_checkpoint() classmethod (src/downloader/rate_limit_metrics.py):**
+- Created `from_checkpoint()` to load metrics on resume with session count increment
+- Logs restoration at INFO level: "Restored rate limit metrics from checkpoint (session N): X downloads, Y rate limits"
+- Unlike `from_dict()`, this specifically handles resume aggregation
+
+**Updated from_dict() (src/downloader/rate_limit_metrics.py):**
+- Now preserves session_count field during deserialization
+- Defaults to 1 for backward compatibility with old checkpoints
+
+**Updated summary() (src/downloader/rate_limit_metrics.py):**
+- When session_count > 1, shows "Total across N sessions:" prefix in report
+- Single-session reports unchanged
+
+**Updated clear() (src/downloader/rate_limit_metrics.py):**
+- Now also resets session_count to 1
+
+**Core integration (src/downloader/core.py):**
+- Changed from `RateLimitMetrics.from_dict()` to `RateLimitMetrics.from_checkpoint()` on resume
+- Removed redundant debug log (from_checkpoint logs at INFO level)
+
+### Example Report Output
+```
+============================================================
+RATE LIMITING
+------------------------------------------------------------
+Total across 3 sessions:
+Downloads: 150 total (135 successful, 15 failed)
+Success rate: 90.0%
+Retries: 45 total, avg 0.30/download
+...
+============================================================
+```
+
+### Tests Added
+Created `tests/test_rate_limit_metrics_aggregation.py` with 24 tests in 10 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestSessionCount | 3 | Default value, custom value, serialization |
+| TestFromCheckpoint | 6 | Increment, empty/None data, preservation, logging, vs from_dict |
+| TestFromDictSessionCount | 2 | Preservation, missing field default |
+| TestSummaryCrossSessions | 3 | Single session, multiple sessions, two sessions |
+| TestClearSessionCount | 2 | Reset to 1, reset all |
+| TestMultipleSaveLoadCycles | 5 | 3-session roundtrip, cumulative backoff/retries/escalations/speed |
+| TestBackwardCompatibility | 2 | Old checkpoints without session_count |
+| TestConfigRecommendationsWithSessions | 1 | Recommendations use cumulative data |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 24 new tests: `pytest tests/test_rate_limit_metrics_aggregation.py -v` - PASSED
+- All 61 existing metrics tests: `pytest tests/test_rate_limit_metrics.py -v` - PASSED
+- All 175 rate limit tests: `pytest tests/test_rate_limit*.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_rate_limit_metrics_aggregation.py (24 tests)
+
+### Files Modified
+- src/downloader/rate_limit_metrics.py - session_count field, from_checkpoint() method, updated summary(), clear()
+- src/downloader/core.py - Use from_checkpoint() on resume
+
