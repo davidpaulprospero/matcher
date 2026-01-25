@@ -1487,6 +1487,94 @@ class CaptionFetcher:
             return False
         return bool(re.match(r'^[A-Za-z0-9_-]{11}$', video_id))
 
+    def is_live_stream(self, video_id: str, timeout: Optional[int] = None) -> bool:
+        """Check if a video is a live stream or was a live stream.
+
+        Implements US-002: Live stream detection to skip caption fetch.
+        Uses yt-dlp --dump-json to get video metadata and check is_live/was_live fields.
+
+        Live streams can hang indefinitely during caption fetch because they either:
+        - Are currently live (captions still being generated)
+        - Were live but captions may be incomplete or unavailable
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            timeout: Timeout for metadata fetch in seconds. If None, uses self._timeout.
+
+        Returns:
+            True if video is live or was live, False otherwise.
+
+        Example:
+            fetcher = CaptionFetcher()
+            if fetcher.is_live_stream("dQw4w9WgXcQ"):
+                print("Skipping live stream")
+            else:
+                result = fetcher.fetch_captions("dQw4w9WgXcQ")
+        """
+        if not self._is_valid_video_id(video_id):
+            logger.debug(f"Invalid video ID for live stream check: {video_id}")
+            return False
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        fetch_timeout = timeout if timeout is not None else self._timeout
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '--skip-download',
+            '--dump-json',
+            '--no-playlist',
+            '--no-warnings',
+        ]
+
+        # Add cookies if configured
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=fetch_timeout
+            )
+
+            if result.returncode != 0:
+                # Could not fetch metadata, assume not live to avoid blocking
+                logger.debug(
+                    f"Could not fetch metadata for {video_id}: {result.stderr[:100]}"
+                )
+                return False
+
+            # Parse JSON output
+            try:
+                metadata = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse metadata JSON for {video_id}: {e}")
+                return False
+
+            # Check is_live and was_live fields
+            is_live = metadata.get('is_live', False)
+            was_live = metadata.get('was_live', False)
+
+            if is_live or was_live:
+                logger.info(
+                    f"Video {video_id} is a live stream "
+                    f"(is_live={is_live}, was_live={was_live})"
+                )
+                return True
+
+            return False
+
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"Timeout checking live stream status for {video_id} "
+                f"(treating as not live)"
+            )
+            return False
+        except Exception as e:
+            logger.debug(f"Error checking live stream status for {video_id}: {e}")
+            return False
+
 
 @dataclass
 class CachedCaption:
@@ -2368,9 +2456,11 @@ class CaptionMetrics:
 
     Implements US-011: Add caption fetch metrics and reporting.
     Updated US-001: Thread-safe with Lock for parallel caption fetching.
+    Updated US-002: Tracks skipped live streams separately.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
+    - Skipped live streams (US-002)
     - Language distribution
     - Quality distribution (human, auto, unavailable)
     - Total segments fetched
@@ -2391,6 +2481,7 @@ class CaptionMetrics:
         successes: Number of successful caption fetches
         failures: Number of failed caption fetches (unavailable/error)
         cache_hits: Number of cache hits (captions loaded from cache)
+        skipped_live_streams: Number of live streams skipped (US-002)
         language_distribution: Dict mapping language code -> count
         quality_distribution: Dict mapping quality level -> count
         total_segments: Total caption segments fetched
@@ -2401,6 +2492,9 @@ class CaptionMetrics:
     successes: int = 0
     failures: int = 0
     cache_hits: int = 0
+
+    # Skipped live streams (US-002)
+    skipped_live_streams: int = 0
 
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
@@ -2487,6 +2581,25 @@ class CaptionMetrics:
 
         logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
 
+    def record_skipped_live_stream(self, video_id: str = "") -> None:
+        """Record a skipped live stream (US-002).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Live streams are skipped during caption fetch because they can
+        hang indefinitely. This is tracked separately from failures.
+
+        Args:
+            video_id: Video ID for logging.
+        """
+        with self._lock:
+            self.skipped_live_streams += 1
+
+            # Track as 'skipped' quality for distribution
+            self.quality_distribution['skipped'] = self.quality_distribution.get('skipped', 0) + 1
+
+        logger.debug(f"Caption fetch skipped for live stream: {video_id or 'unknown'}")
+
     def record_cache_hit(
         self,
         video_id: str = "",
@@ -2526,8 +2639,8 @@ class CaptionMetrics:
 
     @property
     def total_processed(self) -> int:
-        """Total videos processed (successes + failures + cache_hits)."""
-        return self.successes + self.failures + self.cache_hits
+        """Total videos processed (successes + failures + cache_hits + skipped_live_streams)."""
+        return self.successes + self.failures + self.cache_hits + self.skipped_live_streams
 
     @property
     def success_rate(self) -> float:
@@ -2562,11 +2675,15 @@ class CaptionMetrics:
         lines = []
 
         # Basic stats
-        lines.append(
+        basic_stats = (
             f"Caption fetch: {self.fetch_attempts} attempts, "
             f"{self.successes} succeeded, {self.failures} failed, "
             f"{self.cache_hits} from cache"
         )
+        # Add skipped live streams if any (US-002)
+        if self.skipped_live_streams > 0:
+            basic_stats += f", {self.skipped_live_streams} live streams skipped"
+        lines.append(basic_stats)
 
         if self.total_processed > 0:
             lines.append(
@@ -2613,6 +2730,7 @@ class CaptionMetrics:
             'successes': self.successes,
             'failures': self.failures,
             'cache_hits': self.cache_hits,
+            'skipped_live_streams': self.skipped_live_streams,  # US-002
             'language_distribution': dict(self.language_distribution),
             'quality_distribution': dict(self.quality_distribution),
             'total_segments': self.total_segments,
@@ -2638,6 +2756,7 @@ class CaptionMetrics:
             successes=data.get('successes', 0),
             failures=data.get('failures', 0),
             cache_hits=data.get('cache_hits', 0),
+            skipped_live_streams=data.get('skipped_live_streams', 0),  # US-002
             language_distribution=data.get('language_distribution', {}),
             quality_distribution=data.get('quality_distribution', {}),
             total_segments=data.get('total_segments', 0),
@@ -2663,6 +2782,7 @@ class CaptionMetrics:
             self.successes += other.successes
             self.failures += other.failures
             self.cache_hits += other.cache_hits
+            self.skipped_live_streams += other.skipped_live_streams  # US-002
             self.total_segments += other.total_segments
             self.auto_generated_count += other.auto_generated_count
             self.human_caption_count += other.human_caption_count
@@ -2687,6 +2807,7 @@ class CaptionMetrics:
             self.successes = 0
             self.failures = 0
             self.cache_hits = 0
+            self.skipped_live_streams = 0  # US-002
             self.language_distribution = {}
             self.quality_distribution = {}
             self.total_segments = 0

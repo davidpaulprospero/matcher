@@ -146,6 +146,11 @@ class CaptionFirstConfig:
     - CaptionUnavailableError (no captions exist) is NOT retried
     - CaptionFetchError (temporary failure) IS retried
     - After max_retries, video is marked for transcription fallback
+
+    Live stream detection (US-002):
+    - Detects live/was_live videos before caption fetch
+    - Skips caption fetch for live streams to prevent hangs
+    - Tracks skipped live streams in metrics separately
     """
     # Enable/disable caption-first mode
     enabled: bool = False  # Disabled by default, enable per-project
@@ -187,6 +192,11 @@ class CaptionFirstConfig:
     # Number of concurrent caption fetches (1 = sequential)
     # Higher values speed up projects with 50+ videos
     max_parallel_fetches: int = 4
+
+    # Live stream detection (US-002)
+    # Skip caption fetch for live streams to prevent hangs
+    # Live streams can hang indefinitely during caption fetch
+    skip_live_streams: bool = True
 
 
 @dataclass

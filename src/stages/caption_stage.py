@@ -136,6 +136,30 @@ class CaptionStage(Stage):
             # IDs that need fetching (not in checkpoint)
             ids_to_fetch = [vid for vid in video_ids if vid not in existing_captions]
 
+            # US-002: Check for live streams and skip them
+            skip_live_streams = getattr(caption_config, 'skip_live_streams', True)
+            live_stream_ids = []
+            if ids_to_fetch and skip_live_streams:
+                print(f"  Checking {len(ids_to_fetch)} videos for live streams...")
+                for video_id in ids_to_fetch:
+                    if self._fetcher.is_live_stream(video_id):
+                        live_stream_ids.append(video_id)
+                        # Record as skipped in metrics
+                        metrics.record_skipped_live_stream(video_id)
+                        # Store as skipped in caption results
+                        caption_results[video_id] = {
+                            'video_id': video_id,
+                            'skipped': True,
+                            'reason': 'live_stream',
+                            'caption_quality': 'low',
+                        }
+                        logger.warning(f"Skipping live stream: {video_id}")
+
+                # Remove live streams from fetch list
+                if live_stream_ids:
+                    ids_to_fetch = [vid for vid in ids_to_fetch if vid not in live_stream_ids]
+                    print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
+
             if ids_to_fetch:
                 print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
@@ -184,12 +208,17 @@ class CaptionStage(Stage):
             # Count results
             success_count = sum(
                 1 for r in caption_results.values()
-                if not r.get('unavailable') and not r.get('error')
+                if not r.get('unavailable') and not r.get('error') and not r.get('skipped')
                 and r.get('segment_count', 0) > 0
             ) - skip_count  # Don't double-count cached entries
             fail_count = sum(
                 1 for r in caption_results.values()
                 if r.get('unavailable') or r.get('error')
+            )
+            # US-002: Count skipped live streams
+            skipped_live_count = sum(
+                1 for r in caption_results.values()
+                if r.get('skipped') and r.get('reason') == 'live_stream'
             )
 
             # Store caption data in state.text_metadata for matching
@@ -198,14 +227,19 @@ class CaptionStage(Stage):
             # Calculate quality distribution (US-007)
             quality_distribution = self._calculate_quality_distribution(caption_results)
             human_count = sum(1 for r in caption_results.values()
-                             if not r.get('is_auto_generated') and not r.get('unavailable') and not r.get('error'))
+                             if not r.get('is_auto_generated') and not r.get('unavailable')
+                             and not r.get('error') and not r.get('skipped'))
             auto_count = sum(1 for r in caption_results.values()
-                            if r.get('is_auto_generated') and not r.get('unavailable') and not r.get('error'))
+                            if r.get('is_auto_generated') and not r.get('unavailable')
+                            and not r.get('error') and not r.get('skipped'))
 
             # Summary
             print(f"\n  + Caption fetch complete:")
             print(f"    - Success: {success_count} videos (new), {skip_count} videos (cached)")
             print(f"    - Unavailable/Error: {fail_count} videos")
+            # US-002: Report skipped live streams
+            if skipped_live_count > 0:
+                print(f"    - Skipped live streams: {skipped_live_count} videos")
             # US-007: Report caption quality distribution
             print(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
             print(f"    - Quality distribution: {quality_distribution['high']} high, "
@@ -216,9 +250,14 @@ class CaptionStage(Stage):
             for line in metrics.summary().split('\n'):
                 print(f"    {line}")
 
-            if fail_count > 0 and getattr(caption_config, 'fallback_to_transcription', True):
-                print(f"    - {fail_count} videos will use Whisper transcription fallback")
-                warnings.append(f"{fail_count} videos require transcription fallback")
+            # Fallback warnings (failed + skipped live streams)
+            fallback_count = fail_count + skipped_live_count
+            if fallback_count > 0 and getattr(caption_config, 'fallback_to_transcription', True):
+                print(f"    - {fallback_count} videos will use Whisper transcription fallback")
+                if fail_count > 0:
+                    warnings.append(f"{fail_count} videos require transcription fallback (unavailable)")
+                if skipped_live_count > 0:
+                    warnings.append(f"{skipped_live_count} live streams require transcription fallback")
 
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
@@ -226,6 +265,7 @@ class CaptionStage(Stage):
                 'success_count': success_count,
                 'skip_count': skip_count,
                 'fail_count': fail_count,
+                'skipped_live_count': skipped_live_count,  # US-002
                 'total_segments': sum(
                     r.get('segment_count', 0) for r in caption_results.values()
                 ),
