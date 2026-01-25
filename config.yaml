@@ -608,10 +608,12 @@ llm:
     exponential_backoff: true
 
   # Cache configuration - unified LLM response caching with TTL
+  # Quality tier tracking: cache entries are tagged high/medium/low based on confidence
   cache:
     enabled: true
     ttl_hours: 24  # 0 = never expire
     cache_dir: .cache/llm_responses
+    expire_low_quality: false  # Skip low-quality cache entries (confidence < 0.5), forcing re-evaluation
 
   # Provider-specific configurations
   gemini:

@@ -25,7 +25,8 @@ class GeminiClient(LLMClient):
         api_key: str,
         model: str = "gemini-2.0-flash",
         cache_dir: str = ".cache/llm_responses",
-        cache_ttl_hours: int = 24
+        cache_ttl_hours: int = 24,
+        cache_skip_low_quality: bool = False
     ):
         """
         Initialize Gemini client.
@@ -35,8 +36,9 @@ class GeminiClient(LLMClient):
             model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro")
             cache_dir: Cache directory
             cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
+            cache_skip_low_quality: If True, skip cache entries with quality_tier='low'
         """
-        super().__init__(api_key, model, cache_dir, cache_ttl_hours)
+        super().__init__(api_key, model, cache_dir, cache_ttl_hours, cache_skip_low_quality)
 
         try:
             import google.generativeai as genai

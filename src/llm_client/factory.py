@@ -18,6 +18,7 @@ def create_client(
     model: Optional[str] = None,
     cache_dir: str = ".cache/llm_responses",
     cache_ttl_hours: int = 24,
+    cache_skip_low_quality: bool = False,
     **kwargs
 ) -> LLMClient:
     """
@@ -29,6 +30,7 @@ def create_client(
         model: Model name (optional, uses provider default if not provided)
         cache_dir: Cache directory
         cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
+        cache_skip_low_quality: If True, skip cache entries with quality_tier='low'
         **kwargs: Additional provider-specific arguments (e.g., host for Ollama)
 
     Returns:
@@ -75,7 +77,8 @@ def create_client(
             api_key=api_key,
             model=model,
             cache_dir=cache_dir,
-            cache_ttl_hours=cache_ttl_hours
+            cache_ttl_hours=cache_ttl_hours,
+            cache_skip_low_quality=cache_skip_low_quality
         )
 
     elif provider == "anthropic":
@@ -97,7 +100,8 @@ def create_client(
             api_key=api_key,
             model=model,
             cache_dir=cache_dir,
-            cache_ttl_hours=cache_ttl_hours
+            cache_ttl_hours=cache_ttl_hours,
+            cache_skip_low_quality=cache_skip_low_quality
         )
 
     elif provider == "ollama":
@@ -112,7 +116,8 @@ def create_client(
             model=model,
             host=host,
             cache_dir=cache_dir,
-            cache_ttl_hours=cache_ttl_hours
+            cache_ttl_hours=cache_ttl_hours,
+            cache_skip_low_quality=cache_skip_low_quality
         )
 
     else:
@@ -157,12 +162,14 @@ def create_client_from_config(config: "Config", cache_dir: Optional[str] = None)
     # Determine model
     model = getattr(llm_config, 'model', None)
 
-    # Determine cache TTL (from config.llm.cache.ttl_hours)
+    # Determine cache TTL and skip_low_quality (from config.llm.cache)
     cache_config = getattr(llm_config, 'cache', None)
     if cache_config:
         cache_ttl_hours = getattr(cache_config, 'ttl_hours', 24)
+        cache_skip_low_quality = getattr(cache_config, 'expire_low_quality', False)
     else:
         cache_ttl_hours = 24
+        cache_skip_low_quality = False
 
     # Create client
     return create_client(
@@ -170,5 +177,6 @@ def create_client_from_config(config: "Config", cache_dir: Optional[str] = None)
         api_key=api_key,
         model=model,
         cache_dir=cache_dir,
-        cache_ttl_hours=cache_ttl_hours
+        cache_ttl_hours=cache_ttl_hours,
+        cache_skip_low_quality=cache_skip_low_quality
     )
