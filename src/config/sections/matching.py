@@ -210,6 +210,12 @@ class MatchingConfig:
     temporal_coherence_same_source_boost: float = 0.05  # Boost for clips from same source as adjacent
     temporal_coherence_context_switch_penalty: float = 0.05  # Penalty for jarring context switches
 
+    # Fallback matching (for edge cases when primary matching fails)
+    # Triggers when primary matching returns confidence < fallback_trigger_threshold
+    # Provides 3 levels: keyword-only (0.7), visual-description (0.5), generic-broll (0.3)
+    fallback_matching_enabled: bool = True
+    fallback_trigger_threshold: float = 0.4  # Trigger fallback when confidence below this
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 

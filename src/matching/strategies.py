@@ -916,3 +916,319 @@ class StrategyMatcher:
                 strategy_matches.append(match)
 
         return strategy_matches
+
+
+class FallbackMatchStrategy:
+    """
+    Fallback matching strategy for edge cases when primary matching fails.
+
+    Provides 3 fallback levels, each with a confidence ceiling:
+    - Level 1: Keyword-only matching (ceiling: 0.7)
+    - Level 2: Visual-description matching (ceiling: 0.5)
+    - Level 3: Generic B-roll matching (ceiling: 0.3)
+
+    Triggered when primary matching returns confidence < trigger_threshold (default: 0.4)
+    """
+
+    # Confidence ceilings for each fallback level
+    KEYWORD_ONLY_CEILING = 0.7
+    VISUAL_DESCRIPTION_CEILING = 0.5
+    GENERIC_BROLL_CEILING = 0.3
+
+    def __init__(self, config: Config):
+        """
+        Initialize FallbackMatchStrategy.
+
+        Args:
+            config: Configuration object with matching settings
+        """
+        self.config = config
+        mc = config.matching
+        self.enabled = getattr(mc, 'fallback_matching_enabled', True)
+        self.trigger_threshold = getattr(mc, 'fallback_trigger_threshold', 0.4)
+
+    def should_trigger(self, primary_confidence: float) -> bool:
+        """
+        Check if fallback matching should be triggered.
+
+        Args:
+            primary_confidence: Confidence score from primary matching
+
+        Returns:
+            True if fallback should be triggered
+        """
+        if not self.enabled:
+            return False
+        return primary_confidence < self.trigger_threshold
+
+    def match_keyword_only(
+        self,
+        vo_segment: SRTSegment,
+        candidates: List[Tuple[SRTSegment, float]]
+    ) -> Optional[Tuple[SRTSegment, float, str]]:
+        """
+        Level 1 Fallback: Match purely based on keyword overlap.
+
+        This is the highest quality fallback, using keyword extraction
+        to find semantically relevant videos even when embedding similarity
+        is low.
+
+        Args:
+            vo_segment: Voiceover segment to match
+            candidates: List of (video_segment, similarity) tuples
+
+        Returns:
+            Tuple of (best_segment, confidence, reasoning) or None
+        """
+        # Extract voiceover keywords
+        vo_kw = getattr(vo_segment, 'keywords', None) or []
+        vo_keywords = set(k.lower() for k in vo_kw if k)
+
+        # Also extract significant words from text if no keywords
+        if not vo_keywords and vo_segment.text:
+            stop_words = {'this', 'that', 'with', 'from', 'have', 'been', 'were', 'what',
+                          'when', 'where', 'which', 'their', 'there', 'would', 'could',
+                          'should', 'about', 'after', 'before', 'being', 'other'}
+            vo_keywords = set(
+                w.lower() for w in vo_segment.text.split()
+                if len(w) >= 4 and w.lower() not in stop_words
+            )
+
+        if not vo_keywords:
+            return None
+
+        best_segment = None
+        best_score = 0.0
+        best_keywords = []
+
+        for seg, emb_sim in candidates:
+            # Get video keywords
+            seg_kw = getattr(seg, 'keywords', None) or []
+            seg_keywords = set(k.lower() for k in seg_kw if k)
+
+            # Also check video text
+            if seg.text:
+                seg_text_words = set(
+                    w.lower() for w in seg.text.split()
+                    if len(w) >= 4
+                )
+                seg_keywords |= seg_text_words
+
+            if not seg_keywords:
+                continue
+
+            # Calculate keyword overlap
+            overlap = vo_keywords & seg_keywords
+            if not overlap:
+                continue
+
+            # Score based on overlap ratio
+            overlap_ratio = len(overlap) / len(vo_keywords)
+            score = overlap_ratio * self.KEYWORD_ONLY_CEILING
+
+            if score > best_score:
+                best_score = score
+                best_segment = seg
+                best_keywords = list(overlap)[:5]
+
+        if best_segment and best_score > 0:
+            confidence = min(best_score, self.KEYWORD_ONLY_CEILING)
+            reasoning = f"Fallback L1: keyword match ({', '.join(best_keywords)})"
+            return (best_segment, confidence, reasoning)
+
+        return None
+
+    def match_visual_description(
+        self,
+        vo_segment: SRTSegment,
+        candidates: List[Tuple[SRTSegment, float]],
+        scenes: Optional[Dict[str, List[SceneInfo]]] = None
+    ) -> Optional[Tuple[SRTSegment, float, str]]:
+        """
+        Level 2 Fallback: Match based on visual descriptions from scenes.
+
+        Uses scene descriptions and visual keywords from scene detection
+        to find visually relevant videos.
+
+        Args:
+            vo_segment: Voiceover segment to match
+            candidates: List of (video_segment, similarity) tuples
+            scenes: Dict mapping video paths to scene info lists
+
+        Returns:
+            Tuple of (best_segment, confidence, reasoning) or None
+        """
+        # Extract visual hints from voiceover text
+        visual_terms = {
+            'earthquake', 'tsunami', 'flood', 'storm', 'fire', 'volcano', 'disaster',
+            'building', 'city', 'water', 'wave', 'destruction', 'damage', 'rescue',
+            'people', 'crowd', 'evacuation', 'explosion', 'collapse', 'rubble',
+            'mountain', 'ocean', 'forest', 'river', 'sky', 'sunset', 'sunrise',
+            'car', 'plane', 'boat', 'train', 'road', 'street', 'bridge'
+        }
+
+        vo_text = vo_segment.text.lower() if vo_segment.text else ""
+        vo_visual_hints = set(w for w in vo_text.split() if w in visual_terms)
+
+        if not vo_visual_hints and not scenes:
+            return None
+
+        best_segment = None
+        best_score = 0.0
+        best_reason = ""
+
+        for seg, emb_sim in candidates:
+            score = 0.0
+
+            # Check scene descriptions
+            if scenes:
+                video_scenes = scenes.get(seg.source_file, [])
+                for scene in video_scenes:
+                    if scene.start_time <= seg.start_time < scene.end_time:
+                        # Found matching scene
+                        if scene.description:
+                            desc_lower = scene.description.lower()
+                            matches = sum(1 for hint in vo_visual_hints if hint in desc_lower)
+                            score += matches * 0.1
+
+                        if scene.visual_keywords:
+                            vis_kw = set(k.lower() for k in scene.visual_keywords)
+                            keyword_overlap = len(vo_visual_hints & vis_kw)
+                            score += keyword_overlap * 0.15
+                        break
+
+            # Check filename for visual hints
+            if seg.source_file:
+                filename = Path(seg.source_file).stem.lower()
+                filename_matches = sum(1 for hint in vo_visual_hints if hint in filename)
+                score += filename_matches * 0.1
+
+            # Check video text for visual terms
+            if seg.text:
+                seg_text = seg.text.lower()
+                text_matches = sum(1 for hint in vo_visual_hints if hint in seg_text)
+                score += text_matches * 0.05
+
+            if score > best_score:
+                best_score = score
+                best_segment = seg
+                best_reason = f"visual hints: {', '.join(list(vo_visual_hints)[:3])}"
+
+        if best_segment and best_score > 0:
+            confidence = min(best_score, self.VISUAL_DESCRIPTION_CEILING)
+            reasoning = f"Fallback L2: {best_reason}"
+            return (best_segment, confidence, reasoning)
+
+        return None
+
+    def match_generic_broll(
+        self,
+        vo_segment: SRTSegment,
+        candidates: List[Tuple[SRTSegment, float]]
+    ) -> Optional[Tuple[SRTSegment, float, str]]:
+        """
+        Level 3 Fallback: Return best available B-roll/generic footage.
+
+        Last resort fallback that returns any silent/B-roll footage,
+        or the best embedding match if no B-roll available.
+        Has the lowest confidence ceiling (0.3).
+
+        Args:
+            vo_segment: Voiceover segment to match
+            candidates: List of (video_segment, similarity) tuples
+
+        Returns:
+            Tuple of (best_segment, confidence, reasoning) or None
+        """
+        if not candidates:
+            return None
+
+        # First try: find B-roll candidates
+        broll_candidates = [
+            (seg, sim) for seg, sim in candidates
+            if getattr(seg, 'is_broll', False)
+        ]
+
+        if broll_candidates:
+            # Return best B-roll by embedding similarity
+            best_seg, best_sim = max(broll_candidates, key=lambda x: x[1])
+            confidence = min(best_sim * self.GENERIC_BROLL_CEILING, self.GENERIC_BROLL_CEILING)
+            return (best_seg, confidence, "Fallback L3: generic B-roll")
+
+        # Second try: find short/silent segments (likely B-roll even if not flagged)
+        silent_candidates = []
+        for seg, sim in candidates:
+            # Check if transcript is very short (likely silent/B-roll)
+            word_count = len(seg.text.split()) if seg.text else 0
+            if word_count < 10:
+                silent_candidates.append((seg, sim))
+
+        if silent_candidates:
+            best_seg, best_sim = max(silent_candidates, key=lambda x: x[1])
+            confidence = min(best_sim * self.GENERIC_BROLL_CEILING, self.GENERIC_BROLL_CEILING)
+            return (best_seg, confidence, "Fallback L3: short/silent segment")
+
+        # Last resort: return top embedding match with very low confidence
+        best_seg, best_sim = candidates[0]
+        confidence = min(best_sim * 0.5, self.GENERIC_BROLL_CEILING)
+        return (best_seg, confidence, "Fallback L3: best available (low confidence)")
+
+    def apply_fallback(
+        self,
+        vo_segment: SRTSegment,
+        candidates: List[Tuple[SRTSegment, float]],
+        primary_confidence: float,
+        scenes: Optional[Dict[str, List[SceneInfo]]] = None
+    ) -> Optional[Tuple[SRTSegment, float, str, int]]:
+        """
+        Apply fallback matching strategy.
+
+        Tries fallback levels in order until one succeeds:
+        1. Keyword-only matching (ceiling: 0.7)
+        2. Visual-description matching (ceiling: 0.5)
+        3. Generic B-roll matching (ceiling: 0.3)
+
+        Args:
+            vo_segment: Voiceover segment to match
+            candidates: List of (video_segment, similarity) tuples
+            primary_confidence: Confidence from primary matching
+            scenes: Optional scene info for visual matching
+
+        Returns:
+            Tuple of (segment, confidence, reasoning, fallback_level) or None
+            fallback_level: 1=keyword, 2=visual, 3=generic
+        """
+        if not self.should_trigger(primary_confidence):
+            return None
+
+        if not candidates:
+            return None
+
+        logger.info(
+            f"Fallback triggered: primary_confidence={primary_confidence:.3f} < "
+            f"threshold={self.trigger_threshold}"
+        )
+
+        # Level 1: Keyword-only
+        result = self.match_keyword_only(vo_segment, candidates)
+        if result:
+            seg, conf, reason = result
+            logger.info(f"Fallback L1 success: {reason}, confidence={conf:.3f}")
+            return (seg, conf, reason, 1)
+
+        # Level 2: Visual-description
+        result = self.match_visual_description(vo_segment, candidates, scenes)
+        if result:
+            seg, conf, reason = result
+            logger.info(f"Fallback L2 success: {reason}, confidence={conf:.3f}")
+            return (seg, conf, reason, 2)
+
+        # Level 3: Generic B-roll
+        result = self.match_generic_broll(vo_segment, candidates)
+        if result:
+            seg, conf, reason = result
+            logger.info(f"Fallback L3 success: {reason}, confidence={conf:.3f}")
+            return (seg, conf, reason, 3)
+
+        logger.warning("All fallback levels failed")
+        return None

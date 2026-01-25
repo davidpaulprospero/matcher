@@ -1658,3 +1658,91 @@ Progress: 1/12 stories complete
   - tests/test_adaptive_threshold.py (290 lines)
 
 Progress: 2/12 stories complete
+
+
+## Iteration 3 - [US-003] Add negative sampling for LLM reranking
+- Implemented select_negative_sample() function in src/matching/llm_providers.py (lines 174-221)
+  - Selects a negative sample from bottom 25% of candidates by similarity
+  - Requires at least 4 candidates for meaningful bottom 25%
+  - Uses random.choice to prevent predictable patterns
+  - Returns (segment, similarity) tuple or None if insufficient candidates
+  - Logs selection details at DEBUG level
+- Added format_negative_sample_for_prompt() helper function (lines 224-244)
+  - Formats negative sample for LLM prompt inclusion
+  - Uses "UNLIKELY" label by default
+  - Truncates source file name to 30 chars, text to 60 chars
+  - Escapes double quotes to single quotes for JSON safety
+- Updated LLMProvider base class to accept negative_samples parameter
+  - Updated match_batch() signature in all providers
+  - Parameter is optional list of (segment, similarity) tuples
+- Updated GeminiMatcher prompt template (lines 281-324)
+  - Includes negative sample with "unlikely match - for comparison" label
+  - Adds instruction: "do NOT select them, use them to calibrate confidence"
+- Updated ClaudeMatcher prompt template with same changes
+- Updated LocalLLMMatcher prompt template with same changes
+- Added negative_sampling_enabled config option (default: true)
+  - In src/config/sections/matching.py (line 125)
+  - In config.yaml with chain-of-thought documentation
+- Created tests/test_negative_sampling.py with 26 tests across 6 test classes:
+  - TestSelectNegativeSample (8 tests): empty, insufficient, 4 candidates, bottom 25%, custom percentile, large list, random variation, preserves tuple
+  - TestFormatNegativeSampleForPrompt (8 tests): basic, truncation, escaping, custom label, edge cases
+  - TestNegativeSamplingIntegration (5 tests): config exists, all providers accept parameter
+  - TestNegativeSamplingEdgeCases (5 tests): identical scores, zero scores, negative scores, unicode, special chars
+- All 26 tests pass
+- Files modified:
+  - src/matching/llm_providers.py (added functions, updated all 3 providers)
+  - src/config/sections/matching.py (added negative_sampling_enabled)
+  - config.yaml (added negative_sampling_enabled with docs)
+- Files created:
+  - tests/test_negative_sampling.py (220 lines)
+
+Progress: 3/12 stories complete
+
+
+## Iteration 4 - [US-004] Add fallback matching strategy for edge cases
+- Implemented FallbackMatchStrategy class in src/matching/strategies.py (lines 921-1235)
+  - 3 fallback levels with confidence ceilings:
+    - Level 1: keyword-only matching (ceiling: 0.7)
+    - Level 2: visual-description matching (ceiling: 0.5)
+    - Level 3: generic B-roll matching (ceiling: 0.3)
+  - Triggers when primary matching returns confidence < fallback_trigger_threshold (default: 0.4)
+- Implemented match_keyword_only() method
+  - Extracts keywords from voiceover segment
+  - Falls back to significant words from text if no explicit keywords
+  - Calculates keyword overlap ratio and scores candidates
+  - Confidence capped at KEYWORD_ONLY_CEILING (0.7)
+- Implemented match_visual_description() method
+  - Extracts visual terms from voiceover text (earthquake, flood, city, etc.)
+  - Matches against scene descriptions and visual_keywords
+  - Checks filename and video text for visual hints
+  - Confidence capped at VISUAL_DESCRIPTION_CEILING (0.5)
+- Implemented match_generic_broll() method
+  - Prioritizes B-roll flagged segments (is_broll=True)
+  - Falls back to short/silent segments (word_count < 10)
+  - Last resort: returns top embedding match with low confidence
+  - Confidence capped at GENERIC_BROLL_CEILING (0.3)
+- Implemented apply_fallback() main entry point
+  - Checks should_trigger() before processing
+  - Tries levels in order: L1 → L2 → L3
+  - Returns (segment, confidence, reasoning, fallback_level)
+- Added config options in src/config/sections/matching.py:
+  - fallback_matching_enabled (default: true)
+  - fallback_trigger_threshold (default: 0.4)
+- Added config entries in config.yaml with chain-of-thought documentation
+- Created tests/test_fallback_matching.py with 31 tests across 7 test classes:
+  - TestFallbackMatchStrategyInit (3 tests): enabled/disabled config, defaults
+  - TestShouldTrigger (4 tests): trigger thresholds, disabled state
+  - TestKeywordOnlyFallback (4 tests): success, text extraction, no match, ceiling
+  - TestVisualDescriptionFallback (4 tests): voiceover terms, scenes, no visual terms, ceiling
+  - TestGenericBrollFallback (5 tests): B-roll segments, short segments, best available, ceiling, empty
+  - TestApplyFallback (7 tests): level ordering, fallback cascade, not triggered, disabled, empty, scenes
+  - TestConfidenceCeilings (4 tests): constant values, ordering
+- All 31 tests pass
+- Files modified:
+  - src/matching/strategies.py (added FallbackMatchStrategy class, ~315 lines)
+  - src/config/sections/matching.py (added fallback config options)
+  - config.yaml (added fallback config with documentation)
+- Files created:
+  - tests/test_fallback_matching.py (520 lines)
+
+Progress: 4/12 stories complete
