@@ -994,6 +994,9 @@ download:
     enabled: true                       # Enable batch retry queue
     delay_seconds: 120.0                # Delay before retry (default: 120s = 2 min)
     max_passes: 2                       # Maximum retry passes (default: 2)
+    respect_circuit_breaker: true       # Wait for circuit breaker recovery before retry
+                                        # When true, if circuit breaker is tripped, batch retry
+                                        # waits for it to recover before processing the queue
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect

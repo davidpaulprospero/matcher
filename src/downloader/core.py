@@ -336,20 +336,29 @@ class VideoDownloader:
                 max_passes = int(getattr(batch_retry_config, 'max_passes', 2))
             except (TypeError, ValueError):
                 max_passes = 2
+            try:
+                respect_cb_val = getattr(batch_retry_config, 'respect_circuit_breaker', True)
+                respect_circuit_breaker = respect_cb_val is True
+            except (TypeError, ValueError):
+                respect_circuit_breaker = True
 
             self.retry_queue = RetryQueue(
                 BatchRetryConfig(
                     enabled=True,
                     delay_seconds=delay_secs,
-                    max_passes=max_passes
+                    max_passes=max_passes,
+                    respect_circuit_breaker=respect_circuit_breaker
                 )
             )
             logger.debug(
                 f"Batch retry enabled: {delay_secs:.0f}s delay, "
-                f"max {max_passes} passes"
+                f"max {max_passes} passes, respect_circuit_breaker={respect_circuit_breaker}"
             )
         else:
             self.retry_queue = RetryQueue(BatchRetryConfig(enabled=False))
+
+        # Link circuit breaker to retry queue for coordination (US-003)
+        self.retry_queue.set_circuit_breaker(self.circuit_breaker)
 
         # Rate limiting metrics tracking (US-010)
         self.rate_limit_metrics = RateLimitMetrics()
