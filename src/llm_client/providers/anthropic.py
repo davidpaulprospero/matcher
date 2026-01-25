@@ -24,7 +24,8 @@ class AnthropicClient(LLMClient):
         api_key: str,
         model: str = "claude-3-haiku-20240307",
         cache_dir: str = ".cache/llm_responses",
-        cache_ttl_hours: int = 24
+        cache_ttl_hours: int = 24,
+        cache_skip_low_quality: bool = False
     ):
         """
         Initialize Anthropic client.
@@ -34,8 +35,9 @@ class AnthropicClient(LLMClient):
             model: Model name (e.g., "claude-3-haiku-20240307", "claude-3-5-sonnet-20241022")
             cache_dir: Cache directory
             cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
+            cache_skip_low_quality: If True, skip cache entries with quality_tier='low'
         """
-        super().__init__(api_key, model, cache_dir, cache_ttl_hours)
+        super().__init__(api_key, model, cache_dir, cache_ttl_hours, cache_skip_low_quality)
 
         try:
             import anthropic

@@ -88,7 +88,8 @@ class OllamaClient(LLMClient):
         model: str = "llama3.2",
         host: str = "http://localhost:11434",
         cache_dir: str = ".cache/llm_responses",
-        cache_ttl_hours: int = 24
+        cache_ttl_hours: int = 24,
+        cache_skip_low_quality: bool = False
     ):
         """
         Initialize Ollama client.
@@ -98,9 +99,10 @@ class OllamaClient(LLMClient):
             host: Ollama server URL
             cache_dir: Cache directory
             cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
+            cache_skip_low_quality: If True, skip cache entries with quality_tier='low'
         """
         # Ollama doesn't need API key
-        super().__init__("", model, cache_dir, cache_ttl_hours)
+        super().__init__("", model, cache_dir, cache_ttl_hours, cache_skip_low_quality)
         self.host = host.rstrip('/')
 
     @property
