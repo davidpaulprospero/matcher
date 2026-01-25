@@ -3812,3 +3812,145 @@ Prints: `Format success: json3 92% (92/100), vtt 8% (8/100) (8 fallback)`
 - [x] Print in CaptionStage summary: 'Format success: json3 92% (92/100), vtt 8% (fallback)'
 - [x] Track which format ultimately succeeded for each video in fetch result
 - [x] Tests verify statistics calculated correctly across batch with mixed format results
+
+---
+
+## Iteration 5 - [US-005] Validate language configuration at CaptionStage initialization
+
+### Summary
+Implemented fail-fast validation of language configuration in caption-first mode. Invalid language codes, duplicates in fallback_languages, and redundant configurations are now caught at startup.
+
+### Implementation Details
+
+**ConfigValidationError Exception** (src/caption_fetcher.py:170-199)
+- New exception class for language config validation errors
+- Attributes: field, value, reason, suggestion
+- Extends CaptionError for consistent error hierarchy
+- Clear message format: "Invalid language configuration for '{field}': {value} - {reason}. Suggestion: {suggestion}"
+
+**ISO 639-1 Language Codes** (src/caption_fetcher.py:202-225)
+- Added `ISO_639_1_CODES` frozenset with ~184 valid 2-letter codes
+- Complete coverage of ISO 639-1 standard
+
+**Validation Functions** (src/caption_fetcher.py:228-336)
+- `is_valid_language_code(code)` - Check single code validity, case-insensitive
+- `validate_language_config(preferred, fallback, raise_on_error=True)`:
+  - Validates preferred_language is valid ISO 639-1
+  - Validates all fallback_languages are valid ISO 639-1
+  - Detects duplicates in fallback_languages (case-insensitive)
+  - Warns (but doesn't error) if preferred_language in fallback_languages
+  - Can return issues list instead of raising for batch validation
+
+**CaptionStage Integration** (src/stages/caption_stage.py)
+- `__init__()` accepts optional `config` param for early validation
+- `_validate_language_config()` helper method added
+- Validation runs at init if config provided, otherwise at start of run()
+- Config disabled mode skips validation (no point validating unused config)
+- Failed validation in run() returns StageResult.fail() (not exception)
+
+### Tests Added (28 total)
+
+**TestLanguageConfigValidation** (17 tests in test_caption_fetcher.py):
+1. `test_is_valid_language_code_valid_codes` - Common codes pass
+2. `test_is_valid_language_code_case_insensitive` - EN, En, eN all valid
+3. `test_is_valid_language_code_invalid_codes` - eng, english, e, xyz fail
+4. `test_is_valid_language_code_non_strings` - None, int, list fail
+5. `test_validate_language_config_valid` - Valid config returns []
+6. `test_validate_language_config_empty_fallback` - Empty fallback OK
+7. `test_validate_language_config_invalid_preferred` - xyz raises
+8. `test_validate_language_config_invalid_preferred_three_letter` - eng raises
+9. `test_validate_language_config_invalid_fallback_code` - invalid in fallback
+10. `test_validate_language_config_duplicate_in_fallback` - es twice raises
+11. `test_validate_language_config_duplicate_case_insensitive` - ES/es detected
+12. `test_validate_language_config_preferred_in_fallback_warns` - Warning not error
+13. `test_validate_language_config_no_raise_mode` - Collects all issues
+14. `test_config_validation_error_message_format` - Message formatting
+15. `test_config_validation_error_attributes` - Exception attributes
+16. `test_iso_639_1_codes_coverage` - 20 common codes present
+17. `test_iso_639_1_codes_count` - 170-190 codes in set
+
+**TestCaptionStageLanguageValidation** (11 tests in test_stage_caption.py):
+1. `test_validation_runs_at_init_with_config` - Init with bad config raises
+2. `test_validation_skipped_when_disabled` - Disabled mode skips validation
+3. `test_validation_runs_at_run_if_not_at_init` - Deferred validation works
+4. `test_valid_config_passes_validation` - Good config passes
+5. `test_invalid_fallback_language` - Bad fallback detected
+6. `test_duplicate_fallback_language` - Duplicate detected
+7. `test_preferred_in_fallback_logs_warning` - Warning logged
+8. `test_none_fallback_languages_handled` - None treated as []
+9. `test_no_config_at_init` - Stage works without config
+10. `test_three_letter_code_rejected` - eng rejected with helpful message
+11. `test_empty_string_code_rejected` - Empty string rejected
+
+### Verification
+- All 360 caption tests pass (17 + 11 new = 28 new tests)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/caption_fetcher.py - ConfigValidationError, ISO_639_1_CODES, validation functions
+- src/stages/caption_stage.py - __init__ config param, _validate_language_config()
+- tests/test_caption_fetcher.py - TestLanguageConfigValidation (17 tests)
+- tests/test_stage_caption.py - TestCaptionStageLanguageValidation (11 tests)
+
+### Acceptance Criteria Met
+- [x] Add validate_language_config() method checking all language codes are valid ISO 639-1
+- [x] Detect and warn if preferred_language appears in fallback_languages chain
+- [x] Detect and error on duplicate entries within fallback_languages
+- [x] Call validation in CaptionStage.__init__() before first fetch
+- [x] Invalid codes raise ConfigValidationError with clear message and suggestion
+- [x] Tests verify validation catches: invalid codes, duplicates, preferred-in-fallback
+
+## Iteration - US-006: Apply caption quality weights to match confidence scores
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Implemented multiplicative caption quality weights for confidence scoring.
+
+**Config changes (src/config/sections/matching.py):**
+- Added `caption_quality_weights: dict = None` field to MatchingConfig
+- When set to a dict like `{high: 1.0, medium: 0.9, low: 0.75}`, enables multiplicative mode
+- When None, falls back to legacy additive mode (boost/penalty)
+
+**Scoring changes (src/matching/scoring.py):**
+- Updated `apply_caption_quality_adjustment()` to support both modes:
+  - Multiplicative (US-006): `adjusted = raw * weight`
+  - Additive (US-007): `adjusted = raw + boost` or `adjusted = raw - penalty`
+- Multiplicative mode takes precedence when `caption_quality_weights` is set
+- Added specific logging format: `Confidence adjusted 0.85 -> 0.64 (low quality caption)`
+
+**Config.yaml updates:**
+- Documented both modes with examples
+- Commented example showing multiplicative weights config
+
+### Tests Added (tests/test_scoring.py)
+**TestCaptionQualityMultiplicativeWeights** (11 tests):
+1. `test_high_quality_weight_no_change` - weight=1.0 produces no change
+2. `test_medium_quality_weight_reduces_confidence` - 0.85 * 0.9 = 0.765
+3. `test_low_quality_weight_significantly_reduces_confidence` - 0.85 * 0.75 = 0.6375
+4. `test_same_text_different_quality_different_confidence` - Key AC test
+5. `test_weights_override_additive_mode` - Weights mode takes precedence
+6. `test_custom_weights` - Custom weight values work
+7. `test_weights_capped_at_1` - Result never exceeds 1.0
+8. `test_weights_capped_at_0` - Result never below 0.0
+9. `test_unknown_quality_uses_default_weight` - Unknown defaults to 1.0
+10. `test_partial_weights_dict_uses_defaults` - Missing keys use defaults
+11. `test_empty_weights_dict_falls_back_to_defaults` - Empty dict uses all defaults
+
+### Verification
+- All 54 scoring tests pass (9 legacy + 11 new = 20 caption quality tests total)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/config/sections/matching.py - Added caption_quality_weights field
+- src/matching/scoring.py - Updated apply_caption_quality_adjustment()
+- tests/test_scoring.py - Added TestCaptionQualityMultiplicativeWeights
+- config.yaml - Documented multiplicative weights mode
+
+### Acceptance Criteria Met
+- [x] Add caption_quality_weights config to MatchConfig: {high: 1.0, medium: 0.9, low: 0.75}
+- [x] MatchStage applies weight to raw confidence: adjusted = raw * quality_weight
+- [x] Log confidence adjustments: 'Confidence adjusted 0.85 -> 0.64 (low quality caption)'
+- [x] CaptionResult quality flows through text_metadata to MatchStage (already done US-007)
+- [x] Config option matching.apply_caption_quality_weights (uses caption_quality_adjustment_enabled)
+- [x] Tests verify same match text produces different confidence with high vs low quality

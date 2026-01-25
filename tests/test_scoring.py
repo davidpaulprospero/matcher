@@ -854,3 +854,236 @@ class TestApplyCaptionQualityAdjustment:
         # Default enabled=True, high_boost=0.05
         assert result_conf == 0.75
         assert "caption quality high" in reason
+
+
+# ============================================================================
+# Test apply_caption_quality_adjustment() - Multiplicative Weights Mode (US-006)
+# ============================================================================
+
+class TestCaptionQualityMultiplicativeWeights:
+    """Test caption quality multiplicative weights mode (US-006)
+
+    US-006: Apply caption quality weights to match confidence scores.
+    When caption_quality_weights dict is set, uses multiplicative mode:
+    adjusted = raw_confidence * weight
+    """
+
+    @pytest.fixture
+    def weights_config(self):
+        """Mock config with multiplicative weights"""
+        config = Mock()
+        matching = Mock()
+        matching.caption_quality_adjustment_enabled = True
+        # US-006: Multiplicative weights {high: 1.0, medium: 0.9, low: 0.75}
+        matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+        config.matching = matching
+        return config
+
+    def test_high_quality_weight_no_change(self, weights_config, sample_video_segment):
+        """Test high quality weight=1.0 produces no change (US-006 AC)"""
+        confidence = 0.85
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # high=1.0 means no change
+        assert result_conf == 0.85
+        assert reason == ""  # No reason when weight=1.0
+
+    def test_medium_quality_weight_reduces_confidence(self, weights_config, sample_video_segment):
+        """Test medium quality weight=0.9 reduces confidence by 10% (US-006 AC)"""
+        confidence = 0.85
+        sample_video_segment.caption_quality = "medium"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # 0.85 * 0.9 = 0.765
+        assert abs(result_conf - 0.765) < 0.001
+        assert "x0.90" in reason
+        assert "caption quality medium" in reason
+
+    def test_low_quality_weight_significantly_reduces_confidence(self, weights_config, sample_video_segment):
+        """Test low quality weight=0.75 reduces confidence by 25% (US-006 AC)"""
+        confidence = 0.85
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # 0.85 * 0.75 = 0.6375
+        assert abs(result_conf - 0.6375) < 0.001
+        assert "x0.75" in reason
+        assert "caption quality low" in reason
+
+    def test_same_text_different_quality_different_confidence(self, weights_config, sample_video_segment):
+        """Test that same match text produces different confidence with high vs low quality (US-006 AC)"""
+        base_confidence = 0.80
+
+        # High quality
+        sample_video_segment.caption_quality = "high"
+        high_conf, _ = scoring.apply_caption_quality_adjustment(
+            confidence=base_confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # Low quality
+        sample_video_segment.caption_quality = "low"
+        low_conf, _ = scoring.apply_caption_quality_adjustment(
+            confidence=base_confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # High quality (x1.0) vs Low quality (x0.75) - significant difference
+        assert high_conf == 0.80  # 0.80 * 1.0
+        assert abs(low_conf - 0.60) < 0.001  # 0.80 * 0.75
+        assert high_conf > low_conf
+        assert high_conf - low_conf >= 0.15  # At least 15% difference
+
+    def test_weights_override_additive_mode(self, sample_video_segment):
+        """Test that weights mode ignores legacy additive settings"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        # Both modes configured - weights should take precedence
+        config.matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+        config.matching.caption_quality_high_boost = 0.05  # Would be +0.05 in additive mode
+        config.matching.caption_quality_low_penalty = 0.1  # Would be -0.1 in additive mode
+
+        confidence = 0.85
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # Weights mode: 0.85 * 0.75 = 0.6375
+        # (Not additive: 0.85 - 0.1 = 0.75)
+        assert abs(result_conf - 0.6375) < 0.001
+        assert "x0.75" in reason
+
+    def test_custom_weights(self, sample_video_segment):
+        """Test custom weight values in config"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        # Custom weights - more aggressive
+        config.matching.caption_quality_weights = {'high': 1.05, 'medium': 0.85, 'low': 0.5}
+
+        confidence = 0.80
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # 0.80 * 0.5 = 0.4
+        assert abs(result_conf - 0.40) < 0.001
+
+    def test_weights_capped_at_1(self, sample_video_segment):
+        """Test that multiplicative result is capped at 1.0"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        config.matching.caption_quality_weights = {'high': 1.5, 'medium': 0.9, 'low': 0.75}
+
+        confidence = 0.90
+        sample_video_segment.caption_quality = "high"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # 0.90 * 1.5 = 1.35 -> capped at 1.0
+        assert result_conf == 1.0
+
+    def test_weights_capped_at_0(self, sample_video_segment):
+        """Test that multiplicative result is capped at 0.0"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        config.matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': -0.5}
+
+        confidence = 0.50
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # 0.50 * -0.5 = -0.25 -> capped at 0.0
+        assert result_conf == 0.0
+
+    def test_unknown_quality_uses_default_weight(self, weights_config, sample_video_segment):
+        """Test that unknown quality level defaults to weight=1.0"""
+        confidence = 0.80
+        sample_video_segment.caption_quality = "unknown"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=weights_config
+        )
+
+        # Unknown quality defaults to 1.0 (no change)
+        assert result_conf == 0.80
+        assert reason == ""
+
+    def test_partial_weights_dict_uses_defaults(self, sample_video_segment):
+        """Test that missing quality keys use default weights"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        # Only set 'low' - others should use defaults
+        config.matching.caption_quality_weights = {'low': 0.5}
+
+        confidence = 0.80
+        sample_video_segment.caption_quality = "medium"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # medium not in dict -> use default 0.9
+        assert abs(result_conf - 0.72) < 0.001  # 0.80 * 0.9 = 0.72
+
+    def test_empty_weights_dict_falls_back_to_defaults(self, sample_video_segment):
+        """Test that empty weights dict uses all default weights"""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.caption_quality_adjustment_enabled = True
+        config.matching.caption_quality_weights = {}  # Empty dict
+
+        confidence = 0.80
+        sample_video_segment.caption_quality = "low"
+
+        result_conf, reason = scoring.apply_caption_quality_adjustment(
+            confidence=confidence,
+            video_segment=sample_video_segment,
+            config=config
+        )
+
+        # low not in dict -> use default 0.75
+        assert abs(result_conf - 0.60) < 0.001  # 0.80 * 0.75 = 0.60

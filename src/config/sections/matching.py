@@ -199,12 +199,22 @@ class MatchingConfig:
     # Boosts confidence for: 1) silent/B-roll videos, 2) scenes without faces when topic matches
     broll_boost: float = 0.2  # Confidence boost for B-roll videos (0.0-0.3)
 
-    # Caption quality boost/penalty (US-007)
+    # Caption quality confidence adjustment (US-007, US-006)
     # Adjusts confidence based on caption quality: high, medium, low
-    # High quality (human captions): +boost, Medium (auto): no change, Low (fallback): -penalty
+    # Two modes available:
+    #   1. Additive (legacy): high_boost/low_penalty add/subtract from confidence
+    #   2. Multiplicative weights (US-006): confidence = raw * weight
     caption_quality_adjustment_enabled: bool = True  # Enable caption quality confidence adjustment
+
+    # Legacy additive mode (US-007) - used when caption_quality_weights is None
     caption_quality_high_boost: float = 0.05  # Boost for high-quality human captions
     caption_quality_low_penalty: float = 0.1  # Penalty for low-quality/fallback captions
+
+    # Multiplicative weights mode (US-006) - when set, overrides additive mode
+    # Keys: 'high', 'medium', 'low'; Values: multiplier (0.0-1.0)
+    # Example: {high: 1.0, medium: 0.9, low: 0.75}
+    # adjusted = raw_confidence * weight
+    caption_quality_weights: dict = None  # Dict[str, float] or None to use additive mode
 
     # B-roll preference (scene-level face detection)
     # When topic matches, prefer scenes without faces (B-roll) over talking heads

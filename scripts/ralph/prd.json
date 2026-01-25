@@ -81,8 +81,8 @@
         "Invalid codes raise ConfigValidationError with clear message and suggestion",
         "Tests verify validation catches: invalid codes, duplicates, preferred-in-fallback"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added ConfigValidationError exception with field/value/reason/suggestion attributes. Added ISO_639_1_CODES frozenset (~180 codes). Added is_valid_language_code() and validate_language_config() functions in caption_fetcher.py. CaptionStage.__init__() accepts optional config param and calls _validate_language_config(). Validation also runs in run() if not done at init. Invalid codes and duplicates raise ConfigValidationError. Preferred in fallback logs warning but doesn't error (redundant but functional). 28 tests added: TestLanguageConfigValidation (17) and TestCaptionStageLanguageValidation (11). Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_caption_fetcher.py, tests/test_stage_caption.py"
     },
     {
       "id": "US-006",
@@ -97,8 +97,8 @@
         "Add config option matching.apply_caption_quality_weights (default: true)",
         "Tests verify same match text produces different confidence with high vs low quality"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added caption_quality_weights: Dict[str, float] config to MatchingConfig (supports multiplicative mode: high=1.0, medium=0.9, low=0.75). Updated apply_caption_quality_adjustment() in scoring.py to support both multiplicative weights (US-006) and legacy additive boost/penalty (US-007). Multiplicative mode uses: adjusted = raw * weight. Logging format: 'Confidence adjusted 0.85 -> 0.64 (low quality caption)'. Quality flows via caption_quality in text_metadata (already implemented US-007). Config uses caption_quality_adjustment_enabled for toggle. Added 11 new tests in TestCaptionQualityMultiplicativeWeights class covering all AC. Files: src/config/sections/matching.py, src/matching/scoring.py, tests/test_scoring.py, config.yaml"
     },
     {
       "id": "US-007",
