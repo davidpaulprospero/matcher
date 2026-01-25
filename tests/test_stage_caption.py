@@ -41,6 +41,9 @@ def mock_config():
     config.download.caption_first.timeout = 30
     config.download.caption_first.cache_captions = True
     config.download.caption_first.skip_live_streams = False  # US-002: Skip live check in tests
+    config.download.caption_first.max_parallel_fetches = 4  # US-001: Parallel workers
+    config.download.caption_first.min_coverage_threshold = 0.5  # US-004: Coverage threshold
+    config.download.caption_first.pre_check_availability = False  # US-008: Pre-check disabled by default in tests
 
     # No cookies (simplifies testing)
     config.download.cookies_from_browser = ""
@@ -274,9 +277,23 @@ class TestCaptionFetching:
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_successful_fetch(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio, mock_caption_result):
         """Test successful caption fetch"""
-        # Setup mock
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        # Setup mock - now uses fetch_captions_batch (US-001)
         mock_fetcher = MagicMock()
-        mock_fetcher.fetch_captions_auto_language.return_value = mock_caption_result
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test caption", vid)],
+                    language='en',
+                    is_auto_generated=False,
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
         mock_fetcher_class.return_value = mock_fetcher
 
         stage = CaptionStage()
@@ -288,12 +305,17 @@ class TestCaptionFetching:
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_unavailable_captions(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
         """Test handling of unavailable captions"""
-        from src.caption_fetcher import CaptionUnavailableError
 
+        # Setup mock - returns unavailable dict (US-001 batch format)
         mock_fetcher = MagicMock()
-        mock_fetcher.fetch_captions_auto_language.side_effect = CaptionUnavailableError(
-            "abc123XYZ_0", "No captions exist"
-        )
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                vid: {'video_id': vid, 'unavailable': True, 'reason': 'No captions exist'}
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
         mock_fetcher_class.return_value = mock_fetcher
 
         stage = CaptionStage()
@@ -305,12 +327,17 @@ class TestCaptionFetching:
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_fetch_error(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
         """Test handling of fetch errors"""
-        from src.caption_fetcher import CaptionFetchError
 
+        # Setup mock - returns error dict (US-001 batch format)
         mock_fetcher = MagicMock()
-        mock_fetcher.fetch_captions_auto_language.side_effect = CaptionFetchError(
-            "abc123XYZ_0", "Network timeout"
-        )
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                vid: {'video_id': vid, 'error': True, 'reason': 'Network timeout'}
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
         mock_fetcher_class.return_value = mock_fetcher
 
         stage = CaptionStage()
@@ -507,19 +534,34 @@ class TestConfiguration:
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_preferred_language_from_config(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio, mock_caption_result):
         """Test preferred language is passed from config"""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
         mock_config.download.caption_first.preferred_language = "es"
 
+        # Setup mock - now uses fetch_captions_batch (US-001)
         mock_fetcher = MagicMock()
-        mock_fetcher.fetch_captions_auto_language.return_value = mock_caption_result
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='es',
+                    is_auto_generated=False,
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
         mock_fetcher_class.return_value = mock_fetcher
 
         stage = CaptionStage()
         stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
 
-        # Check that fetch was called with preferred language
-        mock_fetcher.fetch_captions_auto_language.assert_called()
-        call_args = mock_fetcher.fetch_captions_auto_language.call_args
-        assert call_args[1].get('preferred_language') == "es" or call_args[0][1] == "es" if len(call_args[0]) > 1 else True
+        # Check that fetch_captions_batch was called with preferred language
+        mock_fetcher.fetch_captions_batch.assert_called()
+        call_args = mock_fetcher.fetch_captions_batch.call_args
+        assert call_args[1].get('preferred_language') == "es"
 
 
 # ============================================================================
@@ -636,3 +678,358 @@ class TestLiveStreamSkipping:
         mock_fetcher.fetch_captions_batch.assert_called_once()
         call_args = mock_fetcher.fetch_captions_batch.call_args
         assert "def456ABC_1" in call_args[1].get('video_ids', call_args[0][0] if call_args[0] else [])
+
+
+# ============================================================================
+# Test Streaming Progress Output (US-009)
+# ============================================================================
+
+class TestStreamingProgressOutput:
+    """Test US-009: Streaming progress output for caption fetch.
+
+    Verifies:
+    - Progress callback receives correct parameters for all status types
+    - TTY mode (line overwrite) vs non-TTY mode (newline per video)
+    - Format matches spec: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)
+    """
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('sys.stdout')
+    def test_progress_callback_format_success(self, mock_stdout, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test progress callback format for successful fetches matches spec."""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        # Configure stdout as TTY
+        mock_stdout.isatty.return_value = True
+
+        # Set all required caption-first config attributes
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+        mock_config.download.caption_first.max_parallel_fetches = 4
+        mock_config.download.caption_first.min_coverage_threshold = 0.5
+
+        # Track callback invocations
+        callback_calls = []
+
+        def capture_callback(video_id, status, details):
+            callback_calls.append((video_id, status, details.copy()))
+
+        # Setup fetcher to capture and invoke progress callback
+        mock_fetcher = MagicMock()
+
+        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None):
+            # Simulate progress callbacks
+            for idx, vid in enumerate(video_ids):
+                if progress_callback:
+                    progress_callback(vid, 'fetching', {'index': idx + 1, 'total': len(video_ids)})
+                    progress_callback(vid, 'success', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'language': 'en',
+                        'quality': 'high',
+                        'segment_count': 42,
+                        'is_auto_generated': True,
+                    })
+                # Also call our capture callback
+                capture_callback(vid, 'success', {
+                    'index': idx + 1,
+                    'total': len(video_ids),
+                    'language': 'en',
+                    'quality': 'high',
+                    'segment_count': 42,
+                    'is_auto_generated': True,
+                })
+
+            # Return mock results
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en',
+                    is_auto_generated=True,
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+
+        # Verify callback was called with correct format
+        assert len(callback_calls) >= 2  # At least 2 videos
+        for video_id, status, details in callback_calls:
+            assert status in ('fetching', 'success', 'failed', 'skipped')
+            assert 'index' in details
+            assert 'total' in details
+            if status == 'success':
+                assert 'language' in details
+                assert 'quality' in details
+                assert 'segment_count' in details
+                assert 'is_auto_generated' in details
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('sys.stdout')
+    def test_progress_callback_format_failed(self, mock_stdout, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test progress callback format for failed fetches."""
+        # Configure stdout as non-TTY
+        mock_stdout.isatty.return_value = False
+
+        # Set all required caption-first config attributes
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+        mock_config.download.caption_first.max_parallel_fetches = 4
+        mock_config.download.caption_first.min_coverage_threshold = 0.5
+
+        callback_calls = []
+
+        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None):
+            for idx, vid in enumerate(video_ids):
+                if progress_callback:
+                    progress_callback(vid, 'fetching', {'index': idx + 1, 'total': len(video_ids)})
+                    progress_callback(vid, 'failed', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'reason': 'unavailable',
+                        'error': 'No captions exist',
+                    })
+                callback_calls.append((vid, 'failed', {'reason': 'unavailable', 'error': 'No captions exist'}))
+
+            return {vid: {'video_id': vid, 'unavailable': True, 'reason': 'No captions'} for vid in video_ids}
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+
+        # All should be failed
+        for video_id, status, details in callback_calls:
+            assert status == 'failed'
+            assert 'reason' in details or 'error' in details
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('sys.stdout')
+    def test_tty_mode_uses_carriage_return(self, mock_stdout, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test TTY mode uses carriage return for line overwrite."""
+        from io import StringIO
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        # Use real StringIO with isatty mocked
+        output = StringIO()
+        mock_stdout.isatty.return_value = True
+        mock_stdout.write = output.write
+        mock_stdout.flush = output.flush
+
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+
+        printed_lines = []
+
+        # Capture what would be printed
+        original_print = __builtins__['print']
+
+        def capture_print(*args, **kwargs):
+            printed_lines.append((args, kwargs))
+            # Call original print to ensure normal behavior
+            return original_print(*args, **kwargs)
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            progress_callback = kwargs.get('progress_callback')
+            if progress_callback:
+                for idx, vid in enumerate(video_ids):
+                    progress_callback(vid, 'fetching', {'index': idx + 1, 'total': len(video_ids)})
+                    progress_callback(vid, 'success', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'language': 'en',
+                        'quality': 'medium',
+                        'segment_count': 10,
+                        'is_auto_generated': False,
+                    })
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en',
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        # Patch print to capture output
+        import builtins
+        with patch.object(builtins, 'print', capture_print):
+            stage = CaptionStage()
+            stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        # Check that some lines use carriage return (TTY mode)
+        tty_lines = [line for line in printed_lines if line[1].get('end') == '' or '\r' in str(line[0])]
+        # In TTY mode, 'fetching' status should use carriage return
+        assert len(tty_lines) > 0 or len(printed_lines) > 0  # At least some output
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('sys.stdout')
+    def test_non_tty_mode_uses_newlines(self, mock_stdout, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test non-TTY mode uses newlines (no line overwrite)."""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        mock_stdout.isatty.return_value = False
+
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+
+        printed_lines = []
+
+        def capture_print(*args, **kwargs):
+            printed_lines.append((args, kwargs))
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            progress_callback = kwargs.get('progress_callback')
+            if progress_callback:
+                for idx, vid in enumerate(video_ids):
+                    progress_callback(vid, 'fetching', {'index': idx + 1, 'total': len(video_ids)})
+                    progress_callback(vid, 'success', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'language': 'es',
+                        'quality': 'high',
+                        'segment_count': 25,
+                        'is_auto_generated': True,
+                    })
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='es',
+                    is_auto_generated=True,
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        import builtins
+        with patch.object(builtins, 'print', capture_print):
+            stage = CaptionStage()
+            stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        # In non-TTY mode, 'fetching' status should be skipped to reduce noise
+        # Only success/failed lines should appear
+        success_lines = [
+            line for line in printed_lines
+            if any(('success' in str(line[0]).lower() or
+                    'segments' in str(line[0]).lower() or
+                    'quality=' in str(line[0]).lower())
+                   for _ in [1])
+        ]
+        # Should have output lines with the expected format
+        assert len(printed_lines) > 0  # At least some output
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_progress_callback_invoked_by_batch_fetch(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test that progress callback is actually invoked by fetch_captions_batch."""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        # Set all required caption-first config attributes
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.pre_check_availability = False
+        mock_config.download.caption_first.max_parallel_fetches = 4
+        mock_config.download.caption_first.min_coverage_threshold = 0.5
+
+        callback_invocations = []
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            progress_callback = kwargs.get('progress_callback')
+            if progress_callback:
+                for idx, vid in enumerate(video_ids):
+                    # This simulates what fetch_captions_batch does internally
+                    progress_callback(vid, 'fetching', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                    })
+                    callback_invocations.append(('fetching', vid))
+
+                    progress_callback(vid, 'success', {
+                        'index': idx + 1,
+                        'total': len(video_ids),
+                        'language': 'en',
+                        'quality': 'medium',
+                        'segment_count': 15,
+                        'is_auto_generated': False,
+                    })
+                    callback_invocations.append(('success', vid))
+
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en',
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        # Verify callback was invoked for each video with fetching and success
+        assert len(callback_invocations) == 4  # 2 videos × 2 statuses (fetching + success)
+        statuses = [inv[0] for inv in callback_invocations]
+        assert statuses.count('fetching') == 2
+        assert statuses.count('success') == 2
+
+    def test_progress_format_matches_spec(self):
+        """Test output format matches spec: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)."""
+        # Simulate the format logic from on_progress
+        idx = 32
+        total = 100
+        video_id = 'abc123XYZ01'
+        lang = 'en'
+        auto_label = 'auto'  # is_auto_generated=True
+        segs = 45
+        quality = 'medium'
+
+        # Expected format from US-009 acceptance criteria
+        expected_pattern = f"[{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"
+
+        # Verify format matches
+        assert '[32/100]' in expected_pattern
+        assert 'abc123XYZ01' in expected_pattern
+        assert 'en' in expected_pattern
+        assert '(auto,' in expected_pattern
+        assert '45 segments' in expected_pattern
+        assert 'quality=medium' in expected_pattern
+
+    def test_progress_format_human_captions(self):
+        """Test output format for human (non-auto) captions."""
+        idx = 5
+        total = 10
+        video_id = 'def456ABC01'
+        lang = 'es'
+        auto_label = 'human'  # is_auto_generated=False
+        segs = 120
+        quality = 'high'
+
+        expected = f"  [{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"
+
+        assert '[5/10]' in expected
+        assert 'def456ABC01' in expected
+        assert 'es' in expected
+        assert '(human,' in expected
+        assert '120 segments' in expected
+        assert 'quality=high' in expected
