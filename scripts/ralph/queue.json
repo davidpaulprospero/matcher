@@ -6,10 +6,8 @@
         "lastRetryAt": null,
         "backoffSeconds": 30
     },
-    "createdAt": "2026-01-25T06:09:46",
-    "queue": [
-        "quality"
-    ],
+    "createdAt": null,
+    "queue": [],
     "retryCount": 0,
     "skippedAreas": [],
     "currentIndex": 0,

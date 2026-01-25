@@ -338,7 +338,8 @@ function Update-LegacyQueueProgress {
         $queue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
 
         # Legacy format: add to completedAreas if not already present
-        if ($queue.completedAreas -and $queue.completedAreas -notcontains $CompletedArea) {
+        # Note: Use $null check, not truthy check, because empty array is falsy
+        if ($null -ne $queue.completedAreas -and $queue.completedAreas -notcontains $CompletedArea) {
             $queue.completedAreas += $CompletedArea
         }
 
