@@ -1,6 +1,6 @@
 {
-  "branchName": "ralph/sprint-4",
-  "sprintNumber": 4,
+  "branchName": "ralph/sprint-5",
+  "sprintNumber": 5,
   "focusArea": "quality",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -12,164 +12,164 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint 4 quality verification test",
+      "title": "Create sprint 5 quality verification test",
       "acceptanceCriteria": [
-        "Create tests/test_sprint_4_quality_verification.py with import checks for quality-related modules",
+        "Create tests/test_sprint_5_quality_verification.py with import checks for quality modules",
         "Test that src/matching/scoring.py imports cleanly",
         "Test that src/matching/tiered_matcher.py imports cleanly",
-        "Test that src/matching/strategies.py imports cleanly",
-        "All verification tests pass with pytest tests/test_sprint_4_quality_verification.py -v --non-interactive",
+        "Test that src/matching/llm_providers.py imports cleanly",
+        "All verification tests pass with pytest tests/test_sprint_5_quality_verification.py -v --non-interactive",
         "Mark story as passed by setting passes: true in prd.json"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Created test file with 18 tests across 6 test classes: TestScoringModuleImports (5), TestTieredMatcherModuleImports (4), TestStrategiesModuleImports (3), TestMatchingPackageImports (2), TestQualityRelatedImports (3), TestVerificationComplete (1). All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Add confidence variance tracking to MatchResult",
+      "title": "Add adaptive embedding similarity thresholds",
       "acceptanceCriteria": [
-        "Add confidence_variance field to MatchResult in src/utils.py",
-        "Track variance of top-N candidate scores when multiple candidates have similar scores",
-        "Calculate variance as std_dev of top 5 candidate similarities in TieredMatcher",
-        "Add variance to match result JSON output in checkpoint",
-        "Add unit test in tests/test_confidence_variance.py verifying variance is calculated",
-        "Test that high variance (> 0.1) indicates uncertain match"
+        "Add calculate_adaptive_threshold() function in src/matching/scoring.py",
+        "Base threshold adapts based on voiceover length (short <20 chars = +0.05 threshold)",
+        "Base threshold adapts based on candidate variance (low variance <0.05 = -0.05 threshold)",
+        "Add adaptive_threshold_enabled config option in MatchingConfig (default: true)",
+        "Integrate adaptive threshold in TieredMatcher for skip_llm_threshold decision",
+        "Add unit test in tests/test_adaptive_threshold.py covering all adjustment factors"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added confidence_variance field to MatchResult dataclass. Implemented _calculate_confidence_variance() in TieredMatcher using statistics.stdev() on top-5 candidates. Added variance to checkpoint JSON serialization in MatchStage. Created 21 comprehensive tests in 6 test classes. High variance (>0.1) indicates uncertain match; low variance indicates clear winner."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add semantic distance-based topic penalty",
+      "title": "Add negative sampling for LLM reranking",
       "acceptanceCriteria": [
-        "Update compute_topic_penalty in src/topic_extraction.py to use semantic similarity",
-        "Replace fixed -0.15 penalty with scaled penalty based on topic embedding distance",
-        "Use embedding model to compute topic similarity when LLM client available",
-        "Fall back to keyword overlap when embeddings unavailable",
-        "Add unit test in tests/test_topic_penalty_semantic.py for scaled penalty",
-        "Test that related topics (earthquake/disaster) get lower penalty than unrelated (earthquake/cooking)"
+        "Add select_negative_sample() function in src/matching/llm_providers.py",
+        "Select a negative sample from bottom 25% of candidates by embedding similarity",
+        "Include negative sample in LLM prompt with label 'unlikely match' for comparison",
+        "Update MATCH_PROMPT template to include negative sample comparison",
+        "Add negative_sampling_enabled config option (default: true)",
+        "Add unit test in tests/test_negative_sampling.py verifying negative selection"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added embedding_provider parameter to compute_topic_penalty(). Created _compute_semantic_topic_penalty() that uses cosine_similarity from embeddings module with threshold-based penalty scaling (>=0.8: 0, 0.6-0.8: small, 0.4-0.6: medium, <0.4: high penalty). Created _compute_keyword_topic_penalty() for fallback. Added 33 comprehensive tests in 11 test classes covering signature, semantic scaling, related vs unrelated topics, keyword fallback, and edge cases. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add match quality metrics logging",
+      "title": "Add fallback matching strategy for edge cases",
       "acceptanceCriteria": [
-        "Create MatchQualityMetrics dataclass in src/matching/metrics.py",
-        "Track: avg_confidence, min_confidence, max_confidence, confidence_std, gap_count, match_rate",
-        "Log quality summary at end of MATCH stage with all metrics",
-        "Add quality metrics to checkpoint stages.match.quality_metrics",
-        "Add unit test in tests/test_match_quality_metrics.py for metrics calculation",
-        "Test that metrics correctly reflect distribution of match confidences"
+        "Add FallbackMatchStrategy class in src/matching/strategies.py",
+        "Implement 3 fallback levels: keyword-only, visual-description, generic-broll",
+        "Each level has confidence ceiling (0.7, 0.5, 0.3 respectively)",
+        "Trigger fallback when primary matching returns confidence <0.4",
+        "Add fallback_matching_enabled config option (default: true)",
+        "Add unit test in tests/test_fallback_matching.py covering all fallback levels"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Created MatchQualityMetrics dataclass with avg_confidence, min_confidence, max_confidence, confidence_std, gap_count, match_rate, total_segments, matched_segments. Added calculate_match_quality_metrics() and log_quality_summary() functions. Integrated metrics calculation at end of MATCH stage with log_quality_summary() call. Added quality_metrics to checkpoint data. Created 30 comprehensive tests in 8 test classes covering dataclass, serialization, calculation, logging, and distribution verification."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add LLM reasoning quality validation",
+      "title": "Add transcript quality scoring",
       "acceptanceCriteria": [
-        "Add validate_llm_reasoning() function in src/matching/llm_providers.py",
-        "Check that LLM reasoning mentions specific keywords from voiceover or video",
-        "Flag low-quality reasoning that is generic (< 3 specific references)",
-        "Log warning when LLM provides generic reasoning",
-        "Add unit test in tests/test_llm_reasoning_validation.py for reasoning checks",
-        "Test that generic reasoning like 'good match' is flagged vs specific reasoning"
+        "Add calculate_transcript_quality() function in src/matching/scoring.py",
+        "Score based on: word count (>50 = good), sentence coherence, language consistency",
+        "Return quality tier: high (>0.8), medium (0.5-0.8), low (<0.5)",
+        "Reduce embedding weight by 20% when transcript quality is low",
+        "Add transcript_quality_weight config option (default: true)",
+        "Add unit test in tests/test_transcript_quality.py for quality scoring"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added validate_llm_reasoning() function with ReasoningValidation dataclass. Implemented _extract_keywords() helper to parse keywords from text. Added GENERIC_REASONING_PHRASES constant for detecting generic phrases like 'good match', 'topic match'. Function checks that LLM reasoning contains at least 3 specific keyword references from voiceover or video text. Logs warning for generic or low-quality reasoning. Created 46 comprehensive tests in 10 test classes covering function signature, dataclass structure, generic detection, specific validation, warning logging, threshold customization, keyword extraction, and real-world examples. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Add temporal coherence scoring for adjacent segments",
+      "title": "Add confidence normalization by candidate pool size",
       "acceptanceCriteria": [
-        "Add compute_temporal_coherence() function in src/matching/scoring.py",
-        "Score based on visual/topic similarity to previous segment's match",
-        "Apply small boost (+0.05) for clips from same source video as adjacent segments",
-        "Apply penalty (-0.05) for jarring context switches",
-        "Add temporal_coherence_enabled config option (default: true)",
-        "Add unit test in tests/test_temporal_coherence.py for coherence scoring"
+        "Add normalize_confidence_by_pool() function in src/matching/scoring.py",
+        "Boost confidence when pool is small (<10 candidates) and top match is clear",
+        "Reduce confidence when pool is large (>100 candidates) with tight margins",
+        "Apply normalization factor: sqrt(pool_size/50) capped at [0.8, 1.2]",
+        "Add pool_normalization_enabled config option (default: true)",
+        "Add unit test in tests/test_pool_normalization.py for pool size effects"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added compute_temporal_coherence() function in src/matching/scoring.py. Added _is_jarring_context_switch() helper. Added temporal_coherence_enabled, temporal_coherence_same_source_boost, temporal_coherence_context_switch_penalty to MatchingConfig. Function applies +0.05 boost for same-source videos as adjacent, -0.05 penalty for jarring context switches (no topic/keyword overlap). Created 38 comprehensive tests in 11 test classes covering function signature, config options, same-source boost, context switch penalty, helper function, edge cases, mixed scenarios, reason format, real config integration, and logging. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Add source diversity scoring for V4-V6 tracks",
+      "title": "Add LLM prompt chain-of-thought for match reasoning",
       "acceptanceCriteria": [
-        "Add calculate_source_diversity_score() function in src/matching/strategies.py",
-        "Score based on how different V4-V6 sources are from V1-V3 (unique files, unique keywords)",
-        "Log source diversity score (0.0-1.0) for each segment",
-        "Add diversity score to secondary match metadata",
-        "Add unit test in tests/test_source_diversity.py for diversity calculation",
-        "Test that same-source alternatives get lower diversity score"
+        "Update MATCH_PROMPT in src/matching/llm_providers.py with chain-of-thought structure",
+        "Prompt structure: 1) Identify key voiceover themes, 2) List matching elements in video, 3) Evaluate fit, 4) Score",
+        "Add explicit rubric: visual relevance (30%), topic match (40%), keyword overlap (20%), flow (10%)",
+        "Parse structured reasoning response into components",
+        "Add chain_of_thought_enabled config option (default: true)",
+        "Add unit test in tests/test_cot_reasoning.py for structured reasoning parsing"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added calculate_source_diversity_score() function with 60% weight for unique source files, 40% weight for unique keywords. Added diversity_score field to AlternativeMatch dataclass (default: 0.0). Updated get_secondary_matches_diversity() to calculate and populate diversity scores for V4-V6 matches. Added DEBUG logging for diversity scores. Created 28 comprehensive tests in 10 test classes covering function signature, scoring logic, integration, logging, and edge cases. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add keyword match highlighting in match reasoning",
+      "title": "Add early termination for obvious high-confidence matches",
       "acceptanceCriteria": [
-        "Update MatchResult to include matched_keywords list field",
-        "Extract matching keywords between voiceover and selected video transcript",
-        "Populate matched_keywords during match selection in TieredMatcher",
-        "Include matched_keywords in checkpoint match output",
-        "Add unit test in tests/test_keyword_highlighting.py for keyword extraction",
-        "Test that common keywords between VO and video are correctly identified"
+        "Add check_obvious_match() function in src/matching/tiered_matcher.py",
+        "Skip LLM when embedding sim >0.9 AND matched_keywords >=3 AND same entity found",
+        "Return boosted confidence (min 0.92) with reason 'obvious_match_early_termination'",
+        "Log when early termination is triggered with match details",
+        "Add obvious_match_enabled config option (default: true)",
+        "Add unit test in tests/test_early_termination.py for obvious match detection"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added matched_keywords list field to MatchResult dataclass. Implemented _extract_matched_keywords() helper in TieredMatcher that extracts common keywords from both keywords lists and text content. Filters common stopwords, short words, and returns sorted deduplicated list. Populated matched_keywords in all 3 MatchResult return paths (high-conf embedding, cached, LLM match). Added matched_keywords to checkpoint serialization in MatchStage. Created 25 comprehensive tests in 7 test classes covering field existence, helper function, matching logic, edge cases, checkpoint serialization, real-world scenarios, and integration. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add entity match scoring boost",
+      "title": "Add cache quality tier tracking",
       "acceptanceCriteria": [
-        "Add apply_entity_match_boost() function in src/matching/scoring.py",
-        "Boost confidence when video contains same named entities as voiceover",
-        "Extract entities from voiceover segment keywords if available",
-        "Apply graduated boost: +0.05 for 1 entity, +0.08 for 2+, +0.12 for 3+ matches",
-        "Add unit test in tests/test_entity_match_boost.py for entity scoring",
-        "Test that matching person/place names boost confidence appropriately"
+        "Add quality_tier field to LLM cache entries (high/medium/low based on confidence)",
+        "Update cache lookup to return quality_tier alongside cached response",
+        "Add cache_expire_low_quality config option (default: false)",
+        "When enabled, skip cache for entries with quality_tier='low' forcing re-evaluation",
+        "Log cache quality tier on hit with confidence range",
+        "Add unit test in tests/test_cache_quality_tier.py for tier tracking and expiration"
       ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Added apply_entity_match_boost() function in src/matching/scoring.py. Returns tuple of (boosted_confidence, reason, matched_entities). Added _extract_entity_texts() helper to extract entity text from entities field (dict or string format) and from capitalized keywords. Added _looks_like_entity() helper to detect proper nouns. Graduated boost: +0.05 for 1 entity, +0.08 for 2, +0.12 for 3+ matches. Case-insensitive matching. Confidence capped at 1.0. Created 37 comprehensive tests in 10 test classes covering function existence, graduated boost values, no-boost scenarios, case-insensitive matching, confidence capping, matched entities return, helper functions, person/place name matching, and logging. All tests pass."
+      "priority": "low",
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add low confidence segment analysis logging",
+      "title": "Add multi-modal similarity weighting",
       "acceptanceCriteria": [
-        "Add analyze_low_confidence_segments() function in src/matching/main.py",
-        "Identify segments with confidence < 0.6 after matching completes",
-        "Log analysis: common patterns (short voiceover, abstract content, missing keywords)",
-        "Suggest potential improvements in log output",
-        "Add unit test in tests/test_low_confidence_analysis.py for analysis function",
-        "Test that low confidence patterns are correctly identified and logged"
+        "Add compute_multimodal_score() function in src/matching/scoring.py",
+        "Weight contributions: text_embedding (40%), keyword_overlap (25%), entity_match (20%), visual_description (15%)",
+        "Each component normalized to 0-1 before weighting",
+        "Add multimodal_weights config option as dict with default weights",
+        "Replace simple additive boosting in TieredMatcher with multimodal score",
+        "Add unit test in tests/test_multimodal_scoring.py for weighted fusion"
       ],
       "priority": "low",
-      "passes": true,
-      "notes": "Added analyze_low_confidence_segments() function in src/matching/main.py. Created LowConfidencePattern and LowConfidenceAnalysis dataclasses. Function identifies 5 patterns: short_voiceover (<20 chars), missing_keywords, abstract_content (abstract words + few matches), high_variance (>0.15), no_keyword_overlap. Generates contextual suggestions for each pattern. Logs analysis header, threshold, segment counts, patterns, suggestions, and sample segments. Integrated at end of match_all_segments(). Created 53 comprehensive tests in 14 test classes covering function signature, dataclasses, identification, patterns, logging, suggestions, edge cases, and integration. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Add match confidence histogram logging",
+      "title": "Add semantic coherence between adjacent segments",
       "acceptanceCriteria": [
-        "Add log_confidence_histogram() function in src/matching/metrics.py",
-        "Generate ASCII histogram of confidence distribution (buckets: 0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0)",
-        "Log histogram at INFO level after MATCH stage completes",
-        "Include segment count per bucket in histogram output",
-        "Add unit test in tests/test_confidence_histogram.py for histogram generation",
-        "Test that histogram correctly buckets confidence values"
+        "Add compute_semantic_coherence() function in src/matching/scoring.py",
+        "Compute topic flow: embedding similarity between current and previous match",
+        "Apply boost (+0.03) when topic flow is smooth (similarity >0.6)",
+        "Apply penalty (-0.05) when topic flow is abrupt (similarity <0.3)",
+        "Add semantic_coherence_enabled config option (default: true)",
+        "Add unit test in tests/test_semantic_coherence.py for topic flow scoring"
       ],
       "priority": "low",
       "passes": false,
@@ -177,14 +177,14 @@
     },
     {
       "id": "US-012",
-      "title": "Add match quality summary to OUTPUT stage",
+      "title": "Add match explanation confidence validation",
       "acceptanceCriteria": [
-        "Add quality summary section to OTIO metadata in src/otio/builder.py",
-        "Include: total_segments, matched_segments, avg_confidence, gaps_count, source_variety",
-        "Write quality summary to output/quality_report.json alongside OTIO file",
-        "Add quality_report_enabled config option (default: true)",
-        "Add unit test in tests/test_quality_report.py for report generation",
-        "Test that quality report contains all expected fields and valid values"
+        "Add validate_explanation_confidence() function in src/matching/llm_providers.py",
+        "Cross-check that LLM explanation keywords appear in actual voiceover/video text",
+        "Downgrade confidence by 0.1 when <50% of explanation keywords are verifiable",
+        "Log warning when explanation appears to reference non-existent content",
+        "Add explanation_validation_enabled config option (default: true)",
+        "Add unit test in tests/test_explanation_validation.py for keyword verification"
       ],
       "priority": "low",
       "passes": false,
