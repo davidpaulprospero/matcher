@@ -142,7 +142,8 @@
         "Ensure progress logging does not slow down downloads significantly"
       ],
       "priority": "low",
-      "passes": false
+      "passes": true,
+      "notes": "Added logged_milestones set to track which 10% milestones have been logged. Milestone logging at lines 406-411 checks milestone = int(current_pct // 10) * 10 and logs 'Download progress: X% (N/M keywords)' only once per milestone. Added 100% milestone log after loop completion (line 439). Created tests/test_download_progress.py with 13 tests across 6 test classes covering: milestone logging (3), log format (3), milestone uniqueness (2), edge cases (2), intervals (2), performance (1). All 13 new tests pass, all 41 existing downloader tests pass."
     },
     {
       "id": "US-010",
