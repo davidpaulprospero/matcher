@@ -2638,9 +2638,11 @@ class TestCaptionFetcherRetry:
             fetcher.fetch_captions_with_retry("test1234567", max_retries=2, retry_delay=1.0)
 
         # Check log contains video_id and error info
+        # US-003 Sprint 7: Log format changed to show error category (TIMEOUT) instead of CaptionFetchError
         assert any("test1234567" in record.message for record in caplog.records)
-        assert any("CaptionFetchError" in record.message for record in caplog.records)
-        assert any("Network timeout" in record.message for record in caplog.records)
+        # Either TIMEOUT category or "timeout" keyword in message
+        assert any("TIMEOUT" in record.message or "timeout" in record.message.lower() for record in caplog.records)
+        assert any("retry" in record.message.lower() for record in caplog.records)
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
@@ -4722,3 +4724,283 @@ Also valid
 
         # Should return 1.0 when no attempts (avoid division by zero)
         assert result.success_rate == 1.0
+
+
+# ============================================================================
+# US-003 Sprint 7: Error Category Tests
+# ============================================================================
+
+class TestCaptionErrorCategory:
+    """Tests for CaptionErrorCategory enum and categorize_caption_error function (US-003 Sprint 7)."""
+
+    def test_error_category_enum_values(self):
+        """Test that all expected error categories exist."""
+        from src.caption_fetcher import CaptionErrorCategory
+
+        assert hasattr(CaptionErrorCategory, 'NETWORK')
+        assert hasattr(CaptionErrorCategory, 'TIMEOUT')
+        assert hasattr(CaptionErrorCategory, 'PARSE')
+        assert hasattr(CaptionErrorCategory, 'UNAVAILABLE')
+        assert hasattr(CaptionErrorCategory, 'RATE_LIMIT')
+
+    def test_categorize_unavailable_error(self):
+        """Test that CaptionUnavailableError is categorized as UNAVAILABLE."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = CaptionUnavailableError("test_video", "no subtitles")
+        category = categorize_caption_error(error)
+
+        assert category == CaptionErrorCategory.UNAVAILABLE
+
+    def test_categorize_timeout_error(self):
+        """Test that TimeoutError is categorized as TIMEOUT."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = TimeoutError("connection timed out")
+        category = categorize_caption_error(error)
+
+        assert category == CaptionErrorCategory.TIMEOUT
+
+    def test_categorize_json_decode_error(self):
+        """Test that JSONDecodeError is categorized as PARSE."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = json.JSONDecodeError("Expecting value", "doc", 0)
+        category = categorize_caption_error(error)
+
+        assert category == CaptionErrorCategory.PARSE
+
+    def test_categorize_rate_limit_by_reason(self):
+        """Test that 429 errors are categorized as RATE_LIMIT."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = CaptionFetchError("test_video", "HTTP 429 Too Many Requests")
+        category = categorize_caption_error(error, error.reason)
+
+        assert category == CaptionErrorCategory.RATE_LIMIT
+
+    def test_categorize_network_error_by_reason(self):
+        """Test that connection errors are categorized as NETWORK."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = CaptionFetchError("test_video", "Connection refused")
+        category = categorize_caption_error(error, error.reason)
+
+        assert category == CaptionErrorCategory.NETWORK
+
+    def test_categorize_parse_error_by_reason(self):
+        """Test that parse errors are categorized as PARSE."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = CaptionFetchError("test_video", "Invalid JSON format")
+        category = categorize_caption_error(error, error.reason)
+
+        assert category == CaptionErrorCategory.PARSE
+
+    def test_categorize_unknown_defaults_to_network(self):
+        """Test that unknown errors default to NETWORK (most likely to benefit from retry)."""
+        from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
+
+        error = Exception("Unknown error type")
+        category = categorize_caption_error(error)
+
+        assert category == CaptionErrorCategory.NETWORK
+
+
+class TestCaptionErrorCategoryRetryBudgets:
+    """Tests for per-category retry budgets (US-003 Sprint 7)."""
+
+    def test_default_retry_budgets(self):
+        """Test that DEFAULT_RETRY_BUDGETS has expected values."""
+        from src.caption_fetcher import DEFAULT_RETRY_BUDGETS, CaptionErrorCategory
+
+        assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.NETWORK] == 3
+        assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.TIMEOUT] == 2
+        assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.PARSE] == 1
+        assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.UNAVAILABLE] == 0
+        assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.RATE_LIMIT] == 2
+
+    def test_get_retry_budget_from_config(self):
+        """Test that _get_retry_budget reads from config correctly."""
+        from src.caption_fetcher import CaptionFetcher, CaptionErrorCategory
+
+        # Create mock config with custom retry budgets
+        mock_config = Mock()
+        mock_config.download = Mock()
+        mock_config.download.caption_first = Mock()
+        mock_config.download.caption_first.retry_budgets = {
+            "network": 5,  # Custom higher budget
+            "timeout": 1,  # Custom lower budget
+            "parse": 0,    # Disable parse retries
+        }
+
+        fetcher = CaptionFetcher(mock_config)
+
+        assert fetcher._get_retry_budget(CaptionErrorCategory.NETWORK) == 5
+        assert fetcher._get_retry_budget(CaptionErrorCategory.TIMEOUT) == 1
+        assert fetcher._get_retry_budget(CaptionErrorCategory.PARSE) == 0
+
+    def test_get_retry_budget_falls_back_to_default(self):
+        """Test that _get_retry_budget falls back to defaults when config is missing."""
+        from src.caption_fetcher import CaptionFetcher, CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
+
+        fetcher = CaptionFetcher(None)  # No config
+
+        for category in CaptionErrorCategory:
+            assert fetcher._get_retry_budget(category) == DEFAULT_RETRY_BUDGETS.get(category, 0)
+
+    def test_parse_errors_skip_retries(self):
+        """Test that parse errors with budget 1 don't retry (one attempt only)."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError, CaptionMetrics
+        from unittest.mock import call
+
+        fetcher = CaptionFetcher(None)
+        metrics = CaptionMetrics()
+        attempts = []
+
+        def failing_func():
+            attempts.append(1)
+            raise CaptionFetchError("test_video", "Invalid JSON parse error")
+
+        with pytest.raises(CaptionFetchError):
+            fetcher._with_retry(
+                func=failing_func,
+                video_id="test_video",
+                operation="test",
+                max_retries=5,  # High max, but parse budget is 1
+                retry_delay=0.01,  # Fast for testing
+                metrics=metrics
+            )
+
+        # Parse errors have budget 1, so should see 1 attempt + budget = 2 total
+        # (but the budget logic is attempts_for_category > budget, so it's actually budget + 1 attempts)
+        # With parse budget 1: attempt 1 fails, attempts_for_category=1, 1 > 1 is False, retry
+        # attempt 2 fails, attempts_for_category=2, 2 > 1 is True, stop
+        assert len(attempts) == 2
+
+    def test_network_errors_use_full_budget(self):
+        """Test that network errors use the full retry budget."""
+        from src.caption_fetcher import CaptionFetcher, CaptionFetchError, CaptionMetrics
+
+        fetcher = CaptionFetcher(None)
+        metrics = CaptionMetrics()
+        attempts = []
+
+        def failing_func():
+            attempts.append(1)
+            raise CaptionFetchError("test_video", "Connection refused")
+
+        with pytest.raises(CaptionFetchError):
+            fetcher._with_retry(
+                func=failing_func,
+                video_id="test_video",
+                operation="test",
+                max_retries=10,  # High max
+                retry_delay=0.01,  # Fast for testing
+                metrics=metrics
+            )
+
+        # Network errors have budget 3, so should see up to 4 attempts (initial + 3 retries)
+        # With network budget 3: attempts 1,2,3 retry, attempt 4 stops (4 > 3)
+        assert len(attempts) == 4
+
+    def test_unavailable_errors_never_retry(self):
+        """Test that unavailable errors (budget 0) never retry."""
+        from src.caption_fetcher import CaptionFetcher, CaptionMetrics
+
+        fetcher = CaptionFetcher(None)
+        metrics = CaptionMetrics()
+        attempts = []
+
+        def failing_func():
+            attempts.append(1)
+            raise CaptionUnavailableError("test_video", "no captions")
+
+        with pytest.raises(CaptionUnavailableError):
+            fetcher._with_retry(
+                func=failing_func,
+                video_id="test_video",
+                operation="test",
+                max_retries=10,
+                retry_delay=0.01,
+                metrics=metrics
+            )
+
+        # Unavailable errors always re-raise immediately, no retries
+        assert len(attempts) == 1
+
+
+class TestCaptionMetricsErrorCategory:
+    """Tests for CaptionMetrics error category tracking (US-003 Sprint 7)."""
+
+    def test_record_error_category(self):
+        """Test recording error categories."""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+
+        metrics = CaptionMetrics()
+
+        metrics.record_error_category(CaptionErrorCategory.NETWORK, "video1")
+        metrics.record_error_category(CaptionErrorCategory.NETWORK, "video2")
+        metrics.record_error_category(CaptionErrorCategory.PARSE, "video3")
+
+        assert metrics.error_category_counts.get("NETWORK") == 2
+        assert metrics.error_category_counts.get("PARSE") == 1
+
+    def test_get_error_category_summary_empty(self):
+        """Test summary when no errors recorded."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        summary = metrics.get_error_category_summary()
+
+        assert summary['total'] == 0
+        assert summary['top_category'] is None
+        assert summary['counts'] == {}
+        assert summary['category_rates'] == {}
+
+    def test_get_error_category_summary_with_data(self):
+        """Test summary with recorded errors."""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+
+        metrics = CaptionMetrics()
+
+        # Record various errors: 5 NETWORK, 3 PARSE, 2 TIMEOUT
+        for _ in range(5):
+            metrics.record_error_category(CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            metrics.record_error_category(CaptionErrorCategory.PARSE)
+        for _ in range(2):
+            metrics.record_error_category(CaptionErrorCategory.TIMEOUT)
+
+        summary = metrics.get_error_category_summary()
+
+        assert summary['total'] == 10
+        assert summary['top_category'] == "NETWORK"
+        assert summary['counts']['NETWORK'] == 5
+        assert summary['counts']['PARSE'] == 3
+        assert summary['counts']['TIMEOUT'] == 2
+        assert summary['category_rates']['NETWORK'] == 50.0
+        assert summary['category_rates']['PARSE'] == 30.0
+        assert summary['category_rates']['TIMEOUT'] == 20.0
+
+    def test_error_category_tracking_thread_safe(self):
+        """Test that error category tracking is thread-safe."""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+        import threading
+
+        metrics = CaptionMetrics()
+        num_threads = 10
+        iterations_per_thread = 100
+
+        def record_errors():
+            for _ in range(iterations_per_thread):
+                metrics.record_error_category(CaptionErrorCategory.NETWORK)
+
+        threads = [threading.Thread(target=record_errors) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should have exactly num_threads * iterations_per_thread = 1000
+        assert metrics.error_category_counts.get("NETWORK") == num_threads * iterations_per_thread

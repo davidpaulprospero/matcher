@@ -199,6 +199,129 @@ class ConfigValidationError(CaptionError):
         super().__init__(message)
 
 
+# Import Enum for CaptionErrorCategory
+from enum import Enum, auto
+
+
+class CaptionErrorCategory(Enum):
+    """Error categories for caption fetch failures (US-003 Sprint 7).
+
+    Different error types have different retry strategies:
+    - NETWORK: Transient network issues, should retry aggressively
+    - TIMEOUT: Request timeouts, may retry but with longer delays
+    - PARSE: Content parsing failed, unlikely to succeed on retry
+    - UNAVAILABLE: Video has no captions, should not retry
+    - RATE_LIMIT: API rate limit hit, should retry after delay
+
+    Each category has a configurable retry budget in CaptionFirstConfig.
+    The retry decision logged includes the category for debugging.
+
+    Example log output:
+        "NETWORK error, retry 2/3"
+        "PARSE error, no retry (budget: 1)"
+        "RATE_LIMIT error, retry 1/2 after 30s backoff"
+    """
+    NETWORK = auto()    # Network connectivity issues, DNS failures
+    TIMEOUT = auto()    # Request/connection timeouts
+    PARSE = auto()      # Caption content parsing failures
+    UNAVAILABLE = auto()  # No captions exist for the video
+    RATE_LIMIT = auto()   # API rate limiting (429, quota exceeded)
+
+
+def categorize_caption_error(error: Exception, reason: str = "") -> CaptionErrorCategory:
+    """Categorize an exception into a CaptionErrorCategory (US-003 Sprint 7).
+
+    Maps exception types and error message patterns to categories for
+    determining appropriate retry strategy.
+
+    Args:
+        error: The exception that occurred during caption fetch.
+        reason: Optional additional context string (e.g., from CaptionFetchError.reason).
+
+    Returns:
+        CaptionErrorCategory indicating the type of failure.
+
+    Examples:
+        >>> categorize_caption_error(CaptionUnavailableError("abc", "no subs"))
+        CaptionErrorCategory.UNAVAILABLE
+
+        >>> categorize_caption_error(TimeoutError())
+        CaptionErrorCategory.TIMEOUT
+
+        >>> e = CaptionFetchError("abc", "HTTP 429 Too Many Requests")
+        >>> categorize_caption_error(e, e.reason)
+        CaptionErrorCategory.RATE_LIMIT
+    """
+    # First check for specific exception types
+    if isinstance(error, CaptionUnavailableError):
+        return CaptionErrorCategory.UNAVAILABLE
+
+    if isinstance(error, (TimeoutError, )):
+        return CaptionErrorCategory.TIMEOUT
+
+    if isinstance(error, (json.JSONDecodeError, UnicodeDecodeError)):
+        return CaptionErrorCategory.PARSE
+
+    # Check reason string for patterns
+    reason_lower = reason.lower() if reason else ""
+    error_str = str(error).lower()
+    combined = f"{reason_lower} {error_str}"
+
+    # Rate limit patterns
+    rate_limit_patterns = [
+        "429", "too many requests", "rate limit", "quota exceeded",
+        "rate-limit", "throttle", "slow down"
+    ]
+    if any(p in combined for p in rate_limit_patterns):
+        return CaptionErrorCategory.RATE_LIMIT
+
+    # Timeout patterns
+    timeout_patterns = [
+        "timeout", "timed out", "deadline exceeded", "connection timed out"
+    ]
+    if any(p in combined for p in timeout_patterns):
+        return CaptionErrorCategory.TIMEOUT
+
+    # Parse error patterns
+    parse_patterns = [
+        "parse", "decode", "invalid json", "malformed", "syntax error",
+        "unexpected token", "invalid format", "corrupt"
+    ]
+    if any(p in combined for p in parse_patterns):
+        return CaptionErrorCategory.PARSE
+
+    # Unavailable patterns
+    unavailable_patterns = [
+        "not available", "unavailable", "no subtitles", "no captions",
+        "subtitles disabled", "captions disabled", "not found"
+    ]
+    if any(p in combined for p in unavailable_patterns):
+        return CaptionErrorCategory.UNAVAILABLE
+
+    # Network patterns (catch-all for connectivity issues)
+    network_patterns = [
+        "network", "connection", "dns", "resolve", "unreachable",
+        "refused", "reset", "broken pipe", "http error", "ssl",
+        "certificate", "socket", "eof"
+    ]
+    if any(p in combined for p in network_patterns):
+        return CaptionErrorCategory.NETWORK
+
+    # Default to NETWORK for unknown errors (most likely to benefit from retry)
+    return CaptionErrorCategory.NETWORK
+
+
+# Default retry budgets per error category (US-003 Sprint 7)
+# These can be overridden in CaptionFirstConfig.retry_budgets
+DEFAULT_RETRY_BUDGETS = {
+    CaptionErrorCategory.NETWORK: 3,      # Network errors retry aggressively
+    CaptionErrorCategory.TIMEOUT: 2,      # Timeouts get moderate retries
+    CaptionErrorCategory.PARSE: 1,        # Parse errors rarely succeed on retry
+    CaptionErrorCategory.UNAVAILABLE: 0,  # Never retry - video has no captions
+    CaptionErrorCategory.RATE_LIMIT: 2,   # Rate limits retry with backoff
+}
+
+
 @dataclass
 class ParseResult:
     """Result of parsing caption content with error recovery (US-001 Sprint 7).
@@ -1363,19 +1486,52 @@ class CaptionFetcher:
             retry_delay=delay
         )
 
+    def _get_retry_budget(self, category: CaptionErrorCategory) -> int:
+        """Get the retry budget for a specific error category (US-003 Sprint 7).
+
+        Looks up the category-specific retry budget from config, falling back
+        to DEFAULT_RETRY_BUDGETS if not configured.
+
+        Args:
+            category: The CaptionErrorCategory enum value.
+
+        Returns:
+            Maximum retry attempts for this category.
+        """
+        # Check config for category-specific budgets
+        if self.config:
+            caption_config = getattr(self.config.download, 'caption_first', None)
+            if caption_config:
+                retry_budgets = getattr(caption_config, 'retry_budgets', None)
+                if retry_budgets:
+                    # Config uses lowercase category names
+                    category_key = category.name.lower()
+                    if category_key in retry_budgets:
+                        return retry_budgets[category_key]
+
+        # Fall back to default budgets
+        return DEFAULT_RETRY_BUDGETS.get(category, 0)
+
     def _with_retry(
         self,
         func,
         video_id: str,
         operation: str,
         max_retries: int,
-        retry_delay: float
+        retry_delay: float,
+        metrics: Optional['CaptionMetrics'] = None
     ):
-        """Execute a function with exponential backoff retry logic (US-008).
+        """Execute a function with category-aware retry logic (US-003 Sprint 7).
 
-        Implements retry logic that distinguishes between:
-        - CaptionUnavailableError: Permanent, NOT retried (video has no captions)
-        - CaptionFetchError: Temporary, IS retried (network issues)
+        Implements retry logic that categorizes errors and applies type-specific
+        retry budgets. Different error types have different retry strategies:
+        - NETWORK errors retry aggressively (budget: 3)
+        - TIMEOUT errors get moderate retries (budget: 2)
+        - PARSE errors rarely succeed on retry (budget: 1)
+        - UNAVAILABLE never retries (budget: 0)
+        - RATE_LIMIT retries with longer backoff (budget: 2)
+
+        Updated in US-003 Sprint 7 to use CaptionErrorCategory for smarter retries.
 
         Backoff formula: delay * (2 ^ attempt)
         Example with delay=2.0: 2s, 4s, 8s, 16s...
@@ -1384,8 +1540,9 @@ class CaptionFetcher:
             func: Callable to execute (no arguments).
             video_id: Video ID for logging context.
             operation: Operation name for logging (e.g., "fetch_captions").
-            max_retries: Maximum retry attempts (0 = no retries, just one attempt).
+            max_retries: Maximum retry attempts (overridden by category budget).
             retry_delay: Base delay for exponential backoff (seconds).
+            metrics: Optional CaptionMetrics for error category tracking.
 
         Returns:
             Result from func.
@@ -1395,9 +1552,11 @@ class CaptionFetcher:
             CaptionFetchError: If all retries exhausted on temporary errors.
         """
         last_error = None
-        total_attempts = max_retries + 1  # +1 for initial attempt
+        attempt = 0
+        # Track attempts per category to respect category-specific budgets
+        category_attempts: Dict[CaptionErrorCategory, int] = {}
 
-        for attempt in range(total_attempts):
+        while True:
             try:
                 result = func()
                 if attempt > 0:
@@ -1407,53 +1566,101 @@ class CaptionFetcher:
                     )
                 return result
 
-            except CaptionUnavailableError:
-                # Permanent error - video has no captions, don't retry
+            except CaptionUnavailableError as e:
+                # Categorize and log (always UNAVAILABLE category)
+                category = CaptionErrorCategory.UNAVAILABLE
+                if metrics:
+                    metrics.record_error_category(category, video_id)
+
                 logger.debug(
                     f"Caption {operation} failed for video {video_id}: "
-                    f"no captions available (not retrying)"
+                    f"{category.name} error, no retry (budget: 0)"
                 )
                 raise
 
             except CaptionFetchError as e:
-                # Temporary error - network issue, retry with backoff
-                last_error = e
-                is_last_attempt = attempt >= max_retries
+                # Categorize the error
+                category = categorize_caption_error(e, e.reason)
+                if metrics:
+                    metrics.record_error_category(category, video_id)
 
-                if is_last_attempt:
-                    logger.error(
-                        f"Caption {operation} failed for video {video_id} "
-                        f"after {total_attempts} attempts: {e.reason}"
-                    )
-                else:
-                    wait_time = retry_delay * (2 ** attempt)
+                # Get category-specific retry budget
+                budget = self._get_retry_budget(category)
+                category_attempts[category] = category_attempts.get(category, 0) + 1
+                attempts_for_category = category_attempts[category]
+
+                last_error = e
+
+                # Check if we've exhausted the budget for this category
+                if attempts_for_category > budget:
                     logger.warning(
-                        f"Caption {operation} failed for video {video_id} "
-                        f"(attempt {attempt + 1}/{total_attempts}, "
-                        f"error_type=CaptionFetchError, reason={e.reason}). "
-                        f"Retrying in {wait_time:.1f}s..."
+                        f"Caption {operation} failed for video {video_id}: "
+                        f"{category.name} error, no retry (attempt {attempts_for_category}/{budget})"
                     )
-                    time.sleep(wait_time)
+                    break  # Exit loop, raise last error
+
+                # Retry is allowed for this category
+                wait_time = retry_delay * (2 ** attempt)
+
+                # RATE_LIMIT gets longer backoff
+                if category == CaptionErrorCategory.RATE_LIMIT:
+                    wait_time *= 2  # Double the backoff for rate limits
+
+                logger.warning(
+                    f"Caption {operation} failed for video {video_id}: "
+                    f"{category.name} error, retry {attempts_for_category}/{budget}. "
+                    f"Waiting {wait_time:.1f}s..."
+                )
+                time.sleep(wait_time)
+                attempt += 1
+
+                # Safety check: respect overall max_retries as a backstop
+                if attempt > max_retries:
+                    logger.error(
+                        f"Caption {operation} failed for video {video_id}: "
+                        f"exceeded max retries ({max_retries})"
+                    )
+                    break
 
             except Exception as e:
-                # Unexpected error - wrap in CaptionFetchError and retry
-                last_error = CaptionFetchError(video_id, str(e))
-                is_last_attempt = attempt >= max_retries
+                # Categorize unexpected errors
+                category = categorize_caption_error(e, str(e))
+                if metrics:
+                    metrics.record_error_category(category, video_id)
 
-                if is_last_attempt:
-                    logger.error(
-                        f"Caption {operation} failed for video {video_id} "
-                        f"after {total_attempts} attempts: {e}"
-                    )
-                else:
-                    wait_time = retry_delay * (2 ** attempt)
+                # Get category-specific retry budget
+                budget = self._get_retry_budget(category)
+                category_attempts[category] = category_attempts.get(category, 0) + 1
+                attempts_for_category = category_attempts[category]
+
+                last_error = CaptionFetchError(video_id, str(e))
+
+                # Check if we've exhausted the budget for this category
+                if attempts_for_category > budget:
                     logger.warning(
-                        f"Caption {operation} failed for video {video_id} "
-                        f"(attempt {attempt + 1}/{total_attempts}, "
-                        f"error_type={type(e).__name__}, reason={e}). "
-                        f"Retrying in {wait_time:.1f}s..."
+                        f"Caption {operation} failed for video {video_id}: "
+                        f"{category.name} error ({type(e).__name__}), no retry "
+                        f"(attempt {attempts_for_category}/{budget})"
                     )
-                    time.sleep(wait_time)
+                    break
+
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(
+                    f"Caption {operation} failed for video {video_id}: "
+                    f"{category.name} error ({type(e).__name__}), "
+                    f"retry {attempts_for_category}/{budget}. "
+                    f"Waiting {wait_time:.1f}s..."
+                )
+                time.sleep(wait_time)
+                attempt += 1
+
+                # Safety check: respect overall max_retries as a backstop
+                if attempt > max_retries:
+                    logger.error(
+                        f"Caption {operation} failed for video {video_id}: "
+                        f"exceeded max retries ({max_retries})"
+                    )
+                    break
 
         # All retries exhausted
         raise last_error
@@ -3705,6 +3912,7 @@ class CaptionMetrics:
     Updated US-008: Tracks pre-check availability results.
     Updated US-003 Sprint 6: Language selection audit trail for fallback debugging.
     Updated US-004 Sprint 6: Format preference success rate telemetry.
+    Updated US-003 Sprint 7: Error category tracking for type-specific retry debugging.
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
@@ -3716,6 +3924,7 @@ class CaptionMetrics:
     - Total segments fetched
     - Language selection audit trail (US-003 Sprint 6)
     - Format success counts and fallback tracking (US-004 Sprint 6)
+    - Error category counts (US-003 Sprint 7)
 
     Thread Safety:
         All mutation methods are protected by a Lock for concurrent access
@@ -3732,9 +3941,11 @@ class CaptionMetrics:
             selection_reason='English fallback',
             is_auto_generated=True
         )
+        metrics.record_error_category(CaptionErrorCategory.NETWORK, video_id="abc")  # US-003 Sprint 7
         # ... later ...
         print(metrics.summary())
         print(f"Efficiency: {metrics.get_language_fallback_efficiency('es')}%")
+        print(f"Error categories: {metrics.get_error_category_summary()}")
 
     Attributes:
         fetch_attempts: Total fetch attempts made
@@ -3751,6 +3962,7 @@ class CaptionMetrics:
         format_success_counts: Dict mapping format -> success count (US-004 Sprint 6)
         format_fallback_count: Videos needing format != first preference (US-004 Sprint 6)
         video_format_used: Dict mapping video_id -> format used (US-004 Sprint 6)
+        error_category_counts: Dict mapping error category name -> count (US-003 Sprint 7)
         total_segments: Total caption segments fetched
     """
 
@@ -3803,6 +4015,11 @@ class CaptionMetrics:
     cache_validation_passed: int = 0
     cache_validation_rejected: int = 0
     cache_validation_refetched: int = 0
+
+    # Error category tracking (US-003 Sprint 7)
+    # Dict mapping error category name -> count (e.g., {'NETWORK': 5, 'PARSE': 2})
+    # Used for debugging retry behavior and identifying error patterns
+    error_category_counts: Dict[str, int] = field(default_factory=dict)
 
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -3940,6 +4157,80 @@ class CaptionMetrics:
                 self.video_fetch_times[video_id] = elapsed_seconds
 
         logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
+
+    def record_error_category(
+        self,
+        category: 'CaptionErrorCategory',
+        video_id: str = ""
+    ) -> None:
+        """Record an error category occurrence (US-003 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks the distribution of error types encountered during caption
+        fetching. This data is used for debugging retry strategies and
+        identifying systemic issues (e.g., high rate of PARSE errors
+        indicates bad caption sources).
+
+        Args:
+            category: The CaptionErrorCategory enum value.
+            video_id: Optional video ID for logging context.
+
+        Example:
+            >>> metrics.record_error_category(CaptionErrorCategory.NETWORK, "abc123")
+            >>> metrics.record_error_category(CaptionErrorCategory.PARSE, "def456")
+        """
+        category_name = category.name
+        with self._lock:
+            self.error_category_counts[category_name] = (
+                self.error_category_counts.get(category_name, 0) + 1
+            )
+
+        logger.debug(f"Error category recorded for {video_id or 'unknown'}: {category_name}")
+
+    def get_error_category_summary(self) -> Dict[str, Any]:
+        """Get summary of error categories (US-003 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict with error category statistics:
+            - 'counts': Dict mapping category name -> count
+            - 'total': Total errors categorized
+            - 'top_category': Most frequent error category
+            - 'category_rates': Dict mapping category -> percentage
+
+        Example:
+            >>> summary = metrics.get_error_category_summary()
+            >>> print(f"Most common error: {summary['top_category']}")
+            >>> print(f"NETWORK errors: {summary['category_rates'].get('NETWORK', 0)}%")
+        """
+        with self._lock:
+            counts = dict(self.error_category_counts)
+            total = sum(counts.values())
+
+            if total == 0:
+                return {
+                    'counts': {},
+                    'total': 0,
+                    'top_category': None,
+                    'category_rates': {}
+                }
+
+            # Calculate rates
+            category_rates = {}
+            for cat, count in counts.items():
+                category_rates[cat] = round(100.0 * count / total, 1)
+
+            # Find top category
+            top_category = max(counts, key=counts.get) if counts else None
+
+            return {
+                'counts': counts,
+                'total': total,
+                'top_category': top_category,
+                'category_rates': category_rates
+            }
 
     def record_skipped_live_stream(self, video_id: str = "") -> None:
         """Record a skipped live stream (US-002).

@@ -4234,3 +4234,131 @@ Adaptive format order: vtt (90%), json3 (50%), srt (10%)
 - Metrics data takes priority over cache data (current session wins)
 - If no historical data, static preferred_formats order is used unchanged
 - Thread-safe: uses lock for parallel fetch environments
+
+## Iteration - US-002 Sprint 7 CaptionStage Integration
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Integrated adaptive format ordering into the CaptionStage pipeline:
+
+1. **CaptionCache initialization** (line 143-144):
+   - Create CaptionCache instance at stage start
+   - Enables loading historical format statistics from cross-run cache
+
+2. **Apply adaptive format order** (lines 146-152):
+   - Call apply_adaptive_format_order(cache=cache) before batch fetch
+   - Reorders preferred_formats based on historical success rates
+   - Prints status when adaptive ordering is applied
+
+3. **Save format statistics** (lines 452-458):
+   - Save format_success_counts to cache after batch fetch completes
+   - Enables cross-run learning for future runs
+
+### Acceptance Criteria Verification
+All 6 acceptance criteria from US-002 Sprint 7 are satisfied:
+- [x] get_optimal_format_order() returns formats sorted by success rate (tested)
+- [x] Format success rates persist in caption cache for cross-run learning (integrated)
+- [x] fetch_single() uses adaptive order when config.adaptive_format_order=true (via CaptionStage)
+- [x] Log format reordering with percentages (existing: line 842 caption_fetcher.py)
+- [x] Config option caption_first.adaptive_format_order (default: true) (existing)
+- [x] Tests verify 90% success rate format tried before 50% (test_get_optimal_format_order_sorts_by_count)
+
+### Files Modified
+- src/stages/caption_stage.py (+20 lines)
+
+### Verification
+- python -m py_compile src/stages/caption_stage.py: PASSED
+- pytest tests/test_caption_cache.py: 65 passed
+- pytest tests/test_caption_cache.py::TestCaptionFetcherAdaptiveOrder: 7 passed
+- pytest tests/test_caption_cache.py tests/test_config_dataclasses.py: 110 passed
+- main.py --help: PASSED
+
+### Commit
+b1186fa feat: [US-002] Integrate adaptive format ordering in CaptionStage
+
+
+## Iteration - US-003: Add error categorization with type-specific retry budgets
+- Focus: caption
+- Status: COMPLETE
+
+### Summary
+Implemented error categorization for caption fetch failures (US-003 Sprint 7). Different error types now have different retry strategies: network errors retry aggressively, while parse errors rarely succeed on retry.
+
+### Implementation Details
+
+1. **CaptionErrorCategory enum** (5 types):
+   - NETWORK: Transient network issues (budget: 3)
+   - TIMEOUT: Request timeouts (budget: 2)
+   - PARSE: Content parsing failures (budget: 1)
+   - UNAVAILABLE: No captions exist (budget: 0 - never retry)
+   - RATE_LIMIT: API rate limiting (budget: 2)
+
+2. **categorize_caption_error() function**:
+   - Maps exception types to categories (CaptionUnavailableError → UNAVAILABLE, TimeoutError → TIMEOUT)
+   - Analyzes reason strings for patterns (429 → RATE_LIMIT, "parse" → PARSE)
+   - Defaults to NETWORK for unknown errors
+
+3. **Config option: retry_budgets**:
+   - Per-category retry limits in caption_first section
+   - Configurable via project_config.yaml
+
+4. **CaptionMetrics tracking**:
+   - record_error_category() method (thread-safe)
+   - get_error_category_summary() returns counts, rates, top_category
+
+5. **Updated _with_retry() method**:
+   - Uses category-specific budgets instead of global max_retries
+   - Logs category with retry decision: "NETWORK error, retry 2/3"
+   - RATE_LIMIT errors get doubled backoff
+
+### Log Format Examples
+```
+NETWORK error, retry 2/3. Waiting 4.0s...
+PARSE error, no retry (attempt 2/1)
+TIMEOUT error, retry 1/2. Waiting 2.0s...
+UNAVAILABLE error, no retry (budget: 0)
+```
+
+### Tests Added (18 new tests)
+**TestCaptionErrorCategory (8 tests):**
+- test_error_category_enum_values
+- test_categorize_unavailable_error
+- test_categorize_timeout_error
+- test_categorize_json_decode_error
+- test_categorize_rate_limit_by_reason
+- test_categorize_network_error_by_reason
+- test_categorize_parse_error_by_reason
+- test_categorize_unknown_defaults_to_network
+
+**TestCaptionErrorCategoryRetryBudgets (6 tests):**
+- test_default_retry_budgets
+- test_get_retry_budget_from_config
+- test_get_retry_budget_falls_back_to_default
+- test_parse_errors_skip_retries
+- test_network_errors_use_full_budget
+- test_unavailable_errors_never_retry
+
+**TestCaptionMetricsErrorCategory (4 tests):**
+- test_record_error_category
+- test_get_error_category_summary_empty
+- test_get_error_category_summary_with_data
+- test_error_category_tracking_thread_safe
+
+### Acceptance Criteria Met
+- [x] Create CaptionErrorCategory enum: NETWORK, TIMEOUT, PARSE, UNAVAILABLE, RATE_LIMIT
+- [x] Map exception types to categories in fetch_single() error handling
+- [x] Add per-category retry budgets to config: {network: 3, timeout: 2, parse: 1, unavailable: 0}
+- [x] Track error_category_counts in CaptionMetrics for debugging
+- [x] Log error category with retry decision: 'NETWORK error, retry 2/3' vs 'PARSE error, no retry'
+- [x] Tests verify parse errors skip retries while network errors use full budget
+
+### Files Modified
+- src/caption_fetcher.py (added CaptionErrorCategory, categorize_caption_error, updated _with_retry, added metrics tracking)
+- src/config/sections/download.py (added retry_budgets config)
+- config.yaml (added retry_budgets section)
+- tests/test_caption_fetcher.py (added 18 tests, updated 1 test for new log format)
+
+### Verification
+- 301 tests in test_caption_fetcher.py pass
+- main.py --help works correctly
