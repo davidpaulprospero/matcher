@@ -113,7 +113,8 @@
         "Log when batch retry delay extended due to cookie cooldown",
         "Tests verify batch retry waits for cookie cooldown expiry"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented set_cookie_rotator() method in RetryQueue to link to cookie rotator. Added wait_for_cookie_cooldown config option (default: true) in both BatchRetryConfig classes. Added _wait_for_cookie_cooldown() method that checks all cookies' cooldown status and waits for shortest cooldown to expire. Modified start_retry_pass() to check cookie cooldowns after circuit breaker and log wait times. Cookie cooldown wait time tracked in stats and checkpoint. Integrated cookie rotator linking in core.py. 27 new tests verify all acceptance criteria."
     },
     {
       "id": "US-008",
@@ -128,7 +129,8 @@
         "Metrics track backoff events by severity level",
         "Tests verify different multipliers applied for different error types"
       ],
-      "passes": false
+      "passes": true,
+      "notes": "Implemented ERROR_SEVERITY_PATTERNS dict with high/medium/low patterns, SEVERITY_MULTIPLIERS dict (1.5/2.0/3.0), classify_error_severity() function for case-insensitive matching. Modified handle_rate_limit_error() to use adaptive multiplier when enabled. Added backoff_events_by_severity to metrics, updated record_backoff() with severity param. Added adaptive_multiplier config option (default: true). 31 new tests verify all acceptance criteria."
     },
     {
       "id": "US-009",

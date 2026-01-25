@@ -51,6 +51,81 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+# Error severity mapping for adaptive backoff multiplier (US-008)
+# Maps error patterns (case-insensitive) to severity levels
+# Severity determines backoff multiplier: low=1.5x, medium=2.0x, high=3.0x
+ERROR_SEVERITY_PATTERNS = {
+    # High severity: quota exceeded, bot detection, severe blocks
+    'high': [
+        'quota exceeded',
+        'daily quota',
+        'bot detection',
+        'automated',
+        'suspicious activity',
+        'account suspended',
+        'ip blocked',
+        'ip has been blocked',
+        'permanently banned',
+    ],
+    # Medium severity: standard rate limits, too many requests
+    'medium': [
+        'too many requests',
+        '429',
+        'rate limit',
+        'please try again later',
+        'temporarily unavailable',
+    ],
+    # Low severity: brief rate limits, minor throttling
+    'low': [
+        'sign in',
+        'login required',
+        'confirm your age',
+        'slow down',
+    ],
+}
+
+# Multipliers for each severity level
+SEVERITY_MULTIPLIERS = {
+    'low': 1.5,
+    'medium': 2.0,
+    'high': 3.0,
+}
+
+
+def classify_error_severity(error_message: str) -> str:
+    """Classify error message severity for adaptive backoff.
+
+    Examines the error message for known patterns and returns the
+    severity level that should determine the backoff multiplier.
+
+    Args:
+        error_message: Error string from yt-dlp or YouTube
+
+    Returns:
+        Severity level: 'low', 'medium', or 'high'
+        Defaults to 'medium' if no pattern matches.
+    """
+    error_lower = error_message.lower()
+
+    # Check high severity first (most impactful)
+    for pattern in ERROR_SEVERITY_PATTERNS['high']:
+        if pattern in error_lower:
+            return 'high'
+
+    # Check medium severity (standard rate limits)
+    for pattern in ERROR_SEVERITY_PATTERNS['medium']:
+        if pattern in error_lower:
+            return 'medium'
+
+    # Check low severity (minor issues)
+    for pattern in ERROR_SEVERITY_PATTERNS['low']:
+        if pattern in error_lower:
+            return 'low'
+
+    # Default to medium if no pattern matches
+    return 'medium'
+
+
 @dataclass
 class TierRateLimitState:
     """Per-tier rate limit state tracking.
@@ -743,6 +818,18 @@ class VideoDownloader:
         initial_backoff = getattr(rate_limit_config, 'initial_backoff_seconds', 5.0) if rate_limit_config else 5.0
         max_backoff = getattr(rate_limit_config, 'max_backoff_before_rotate', 60.0) if rate_limit_config else 60.0
         backoff_multiplier = getattr(rate_limit_config, 'backoff_multiplier', 2.0) if rate_limit_config else 2.0
+        adaptive_multiplier_enabled = getattr(rate_limit_config, 'adaptive_multiplier', True) if rate_limit_config else True
+
+        # Classify error severity and adjust multiplier if adaptive mode enabled (US-008)
+        severity = classify_error_severity(error_message)
+        if adaptive_multiplier_enabled:
+            backoff_multiplier = SEVERITY_MULTIPLIERS.get(severity, backoff_multiplier)
+            logger.info(
+                f"Rate limit error classified as '{severity}' severity "
+                f"(multiplier: {backoff_multiplier}x): {error_message[:80]}..."
+            )
+        else:
+            logger.info(f"Rate limit error (adaptive disabled): {error_message[:80]}...")
 
         # Get tier-specific state if isolation enabled
         if self._per_tier_isolation and tier and tier in self._tier_rate_limit_states:
@@ -817,17 +904,18 @@ class VideoDownloader:
                     self._rate_limit_backoff_count += 1
                     self._rate_limit_total_delay += delay
 
-                self.rate_limit_metrics.record_backoff(delay)
+                self.rate_limit_metrics.record_backoff(delay, severity=severity)
 
                 # Record in cross-keyword budget (US-004)
                 if self._share_budget_across_keywords:
                     self.rate_limit_budget.record_backoff(delay, keyword=keyword)
 
                 recovery_note = " (recovery mode)" if in_recovery else ""
+                severity_note = f" [{severity}]" if adaptive_multiplier_enabled else ""
                 new_count = tier_state.backoff_count if tier_state else self._rate_limit_backoff_count
                 new_total = tier_state.total_delay if tier_state else self._rate_limit_total_delay
                 logger.info(
-                    f"Rate limit backoff{tier_label} {new_count}{recovery_note}: "
+                    f"Rate limit backoff{tier_label}{severity_note} {new_count}{recovery_note}: "
                     f"waiting {delay:.1f}s (total: {new_total:.1f}s / {max_backoff:.0f}s max)"
                 )
                 time.sleep(delay)

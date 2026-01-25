@@ -73,6 +73,7 @@ class RateLimitMetrics:
     tier_rate_limit_events: Dict[str, int] = field(default_factory=dict)  # US-001: per-tier tracking
     backoff_attempts: int = 0
     time_spent_backing_off: float = 0.0
+    backoff_events_by_severity: Dict[str, int] = field(default_factory=dict)  # US-008: per-severity tracking
 
     # Cookie/VPN escalation
     cookie_rotations: int = 0
@@ -133,14 +134,17 @@ class RateLimitMetrics:
         if tier:
             self.tier_rate_limit_events[tier] = self.tier_rate_limit_events.get(tier, 0) + 1
 
-    def record_backoff(self, seconds: float) -> None:
+    def record_backoff(self, seconds: float, severity: str = None) -> None:
         """Record a progressive backoff delay.
 
         Args:
             seconds: Duration of the backoff delay
+            severity: Severity level (low, medium, high) for adaptive backoff tracking (US-008)
         """
         self.backoff_attempts += 1
         self.time_spent_backing_off += seconds
+        if severity:
+            self.backoff_events_by_severity[severity] = self.backoff_events_by_severity.get(severity, 0) + 1
 
     def record_cookie_rotation(self) -> None:
         """Record a cookie file rotation."""
@@ -353,6 +357,10 @@ class RateLimitMetrics:
             if self.tier_rate_limit_events:
                 tier_str = ", ".join(f"{k}: {v}" for k, v in sorted(self.tier_rate_limit_events.items()))
                 lines.append(f"  By tier: {tier_str}")
+            # Show per-severity breakdown if available (US-008)
+            if self.backoff_events_by_severity:
+                severity_str = ", ".join(f"{k}: {v}" for k, v in sorted(self.backoff_events_by_severity.items()))
+                lines.append(f"  By severity: {severity_str}")
 
         # Escalation summary
         escalations = []
@@ -419,6 +427,7 @@ class RateLimitMetrics:
             tier_rate_limit_events=data.get('tier_rate_limit_events', {}),
             backoff_attempts=data.get('backoff_attempts', 0),
             time_spent_backing_off=data.get('time_spent_backing_off', 0.0),
+            backoff_events_by_severity=data.get('backoff_events_by_severity', {}),
             cookie_rotations=data.get('cookie_rotations', 0),
             vpn_switches=data.get('vpn_switches', 0),
             circuit_breaker_trips=data.get('circuit_breaker_trips', 0),
@@ -486,6 +495,7 @@ class RateLimitMetrics:
         self.tier_rate_limit_events = {}
         self.backoff_attempts = 0
         self.time_spent_backing_off = 0.0
+        self.backoff_events_by_severity = {}
         self.cookie_rotations = 0
         self.vpn_switches = 0
         self.circuit_breaker_trips = 0
