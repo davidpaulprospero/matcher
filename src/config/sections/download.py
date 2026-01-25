@@ -280,6 +280,12 @@ class RateLimitConfig:
       (rotations, VPN switches, backoff time) can be tracked across all
       keywords. If keyword A exhausts all cookie rotations, keyword B
       skips directly to VPN switching instead of trying rotations again.
+
+    Adaptive backoff multiplier (US-008):
+      When adaptive_multiplier is enabled, the backoff multiplier is adjusted
+      based on the severity of the error. More severe errors (quota exceeded)
+      use higher multipliers than mild errors (brief rate limit).
+      Severity levels: low (1.5x), medium (2.0x), high (3.0x)
     """
     # Initial backoff delay on first rate limit error (seconds)
     initial_backoff_seconds: float = 5.0
@@ -307,6 +313,13 @@ class RateLimitConfig:
     # After this much total backoff, skip backoff and escalate immediately
     # 0 = unlimited
     max_backoff_budget: float = 300.0  # 5 minutes
+
+    # Adaptive backoff multiplier: adjust multiplier based on error severity (US-008)
+    # When True, backoff_multiplier is adjusted based on error patterns:
+    #   - low severity (brief rate limit): 1.5x multiplier
+    #   - medium severity (too many requests): 2.0x multiplier (default)
+    #   - high severity (quota exceeded, bot detection): 3.0x multiplier
+    adaptive_multiplier: bool = True
 
 
 @dataclass

@@ -1842,3 +1842,134 @@ Created `tests/test_rate_limit_metrics_aggregation.py` with 24 tests in 10 test 
 - src/downloader/rate_limit_metrics.py - session_count field, from_checkpoint() method, updated summary(), clear()
 - src/downloader/core.py - Use from_checkpoint() on resume
 
+
+## Iteration 31 - US-007: Synchronize cookie cooldown with batch retry delay
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented cookie cooldown synchronization to prevent batch retry from failing immediately due to unavailable cookies.
+
+**New set_cookie_rotator() method (src/downloader/retry_queue.py):**
+- Links CookieRotator instance to RetryQueue for cooldown coordination
+- Logs debug message when linked
+
+**New _wait_for_cookie_cooldown() method (src/downloader/retry_queue.py):**
+- Checks if all cookies are in cooldown before batch retry
+- If all unavailable, finds shortest remaining cooldown time
+- Waits for shortest cooldown to expire
+- Logs INFO message when waiting for cooldown
+- Accumulates total cookie cooldown wait time
+
+**New wait_for_cookie_cooldown config option:**
+- Added to BatchRetryConfig in both retry_queue.py and src/config/sections/download.py
+- Default: true
+- When false, proceeds with retry even if cookies in cooldown
+
+**Updated start_retry_pass() (src/downloader/retry_queue.py):**
+- Calls _wait_for_cookie_cooldown() after circuit breaker check
+- Logs both circuit breaker and cookie cooldown wait times
+- Cookie cooldown wait is additional to the retry delay (not subtracted)
+
+**Updated stats and checkpoint:**
+- get_stats() includes wait_for_cookie_cooldown and cookie_cooldown_wait_time
+- to_checkpoint_dict() and from_checkpoint_dict() persist cookie_cooldown_wait_time
+- clear() resets cookie_cooldown_wait_time to 0
+
+**Core integration (src/downloader/core.py):**
+- Reads wait_for_cookie_cooldown from config
+- Links cookie rotator to retry queue after initialization
+
+### Example Log Output
+```
+Batch retry pass 1/2: 5 videos queued. Waited for circuit breaker: 60.0s, cookie cooldown: 45.0s, additional delay: 120s...
+```
+
+### Tests Added
+Created `tests/test_cookie_cooldown_sync.py` with 27 tests in 10 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestCookieCooldownConfig | 3 | Default value, custom value, stats inclusion |
+| TestSetCookieRotator | 2 | Linking, logging |
+| TestWaitForCookieCooldown | 7 | No rotator, disabled config, rotator disabled, available cookies, no failed, shortest wait, logging, accumulation |
+| TestStartRetryPassCookieCooldown | 3 | Calls wait method, logs both waits, logs only cookie |
+| TestCookieCooldownStats | 2 | Stats inclusion, rounding |
+| TestCookieCooldownCheckpoint | 4 | Checkpoint include, restore, missing field, roundtrip |
+| TestCookieCooldownClear | 1 | Reset on clear |
+| TestVideoDownloaderCookieRotatorIntegration | 2 | Linked when enabled, not linked when disabled |
+| TestConfigSectionIntegration | 2 | Config option exists, dict conversion |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 27 new tests: `pytest tests/test_cookie_cooldown_sync.py -v` - PASSED
+- All 35 batch retry tests: `pytest tests/test_batch_retry.py -v` - PASSED
+- All 237 rate limit tests: `pytest tests/test_rate_limit*.py tests/test_batch_retry.py tests/test_cookie_cooldown_sync.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_cookie_cooldown_sync.py (27 tests)
+
+### Files Modified
+- src/downloader/retry_queue.py - set_cookie_rotator(), _wait_for_cookie_cooldown(), config option, stats, checkpoint
+- src/downloader/core.py - Read config option, link cookie rotator to retry queue
+- src/config/sections/download.py - Added wait_for_cookie_cooldown option to BatchRetryConfig
+
+## Iteration 8 - US-008: Add adaptive backoff multiplier based on error severity
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented adaptive backoff multiplier that adjusts based on error severity.
+
+**Error Severity Classification:**
+- **High severity** (3.0x multiplier): quota exceeded, daily quota, bot detection, automated traffic, suspicious activity, account suspended, ip blocked, permanently banned
+- **Medium severity** (2.0x multiplier): too many requests, 429, rate limit, please try again later, temporarily unavailable
+- **Low severity** (1.5x multiplier): sign in, login required, confirm your age, slow down
+- Unknown errors default to medium severity
+
+**Core Changes:**
+1. Added `ERROR_SEVERITY_PATTERNS` dict mapping error patterns to severity levels
+2. Added `SEVERITY_MULTIPLIERS` dict with multiplier values (low=1.5, medium=2.0, high=3.0)
+3. Added `classify_error_severity()` function for case-insensitive pattern matching
+4. Modified `handle_rate_limit_error()` to use adaptive multiplier when enabled
+5. Added severity to backoff log messages (e.g., "[high]", "[medium]", "[low]")
+
+**Config Changes:**
+- Added `adaptive_multiplier` option to RateLimitConfig (default: true)
+- Updated config.yaml with documentation
+
+**Metrics Changes:**
+- Added `backoff_events_by_severity` dict to RateLimitMetrics
+- Modified `record_backoff()` to accept optional severity parameter
+- Updated `summary()` to show per-severity breakdown
+- Updated `from_dict()` and `clear()` for checkpoint persistence
+
+### Test Coverage
+
+| Test Class | Tests | Coverage |
+|-----------|-------|----------|
+| TestErrorSeverityClassification | 11 | High/medium/low patterns, case insensitivity, defaults |
+| TestSeverityMultipliers | 1 | Multiplier values (1.5, 2.0, 3.0) |
+| TestAdaptiveBackoffEnabled | 4 | Low/medium/high multipliers, mixed severity session |
+| TestAdaptiveBackoffDisabled | 2 | Fixed multiplier, ignores severity |
+| TestSeverityMetricsTracking | 3 | Records by severity, summary output, checkpoint persistence |
+| TestSeverityLogging | 3 | Classification logged, multiplier logged, severity in backoff message |
+| TestConfigOption | 2 | Default true, can disable |
+| TestEdgeCases | 5 | Empty message, long message, None config, multiple patterns, metrics clear |
+
+### Verification
+- Syntax check: All files pass `python -m py_compile`
+- All 31 new tests: `pytest tests/test_adaptive_backoff_multiplier.py -v` - PASSED
+- All 20 existing backoff tests: `pytest tests/test_rate_limit_backoff.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_adaptive_backoff_multiplier.py (31 tests)
+
+### Files Modified
+- src/downloader/core.py - ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, classify_error_severity(), handle_rate_limit_error() adaptive logic
+- src/downloader/rate_limit_metrics.py - backoff_events_by_severity field, record_backoff() severity param, summary() severity display, from_dict(), clear()
+- src/config/sections/download.py - adaptive_multiplier option in RateLimitConfig
+- config.yaml - adaptive_multiplier documentation
+

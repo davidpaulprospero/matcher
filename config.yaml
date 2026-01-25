@@ -933,6 +933,19 @@ download:
     # Per-tier isolation: track rate limit state separately for each duration tier
     # When true, rate limit on 'long' tier won't affect 'short' tier backoff
     per_tier_isolation: true
+    # Cross-keyword budget sharing: track rate limit recovery resources across keywords
+    # When true, if keyword A exhausts rotations, keyword B skips directly to VPN
+    share_budget_across_keywords: true
+    # Maximum total backoff time budget per session (seconds)
+    # After this much total backoff, skip backoff and escalate immediately
+    # 0 = unlimited
+    max_backoff_budget: 300.0  # 5 minutes
+    # Adaptive backoff multiplier: adjust multiplier based on error severity (US-008)
+    # When true, backoff_multiplier is adjusted based on error patterns:
+    #   - low severity (sign in, login required): 1.5x multiplier
+    #   - medium severity (429, too many requests): 2.0x multiplier (default)
+    #   - high severity (quota exceeded, bot detection): 3.0x multiplier
+    adaptive_multiplier: true
 
   # VPN integration: switch VPN servers when cookies are exhausted
   # Requires a VPN client with CLI support (NordVPN, ExpressVPN, Mullvad, etc.)
