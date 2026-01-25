@@ -287,8 +287,9 @@ class SceneDetector:
             # Set CUDA as preferred backend
             try:
                 cv2.cuda.setDevice(0)
-            except:
-                pass
+            except cv2.error as e:
+                # CUDA device selection may fail if device unavailable or driver issues
+                logger.debug(f"CUDA device selection failed (continuing without): {e}")
         elif self.hw_info['opencl_available']:
             cv2.ocl.setUseOpenCL(True)
             self.hw_info['opencl_enabled'] = cv2.ocl.useOpenCL()
@@ -489,7 +490,9 @@ class SceneDetector:
         # Parse start timecode
         try:
             global_start = otio.opentime.from_timecode(self.start_timecode, framerate)
-        except:
+        except (ValueError, AttributeError) as e:
+            # Invalid timecode format or missing start_timecode attribute - use 0
+            logger.debug(f"Could not parse start timecode (using 0): {e}")
             global_start = otio.opentime.RationalTime(0, framerate)
         
         # Create media reference with sanitized path
@@ -673,8 +676,10 @@ class SceneDetector:
                         filtered.append(v)
                     else:
                         logger.debug(f"Skipping {v.name} (duration {duration:.1f}s < {min_duration}s)")
-                except:
-                    filtered.append(v)  # Process anyway if can't check
+                except (OSError, IOError, cv2.error) as e:
+                    # Corrupt or unreadable video file - process anyway and let full detection handle it
+                    logger.debug(f"Could not check duration for {v.name} (will process anyway): {e}")
+                    filtered.append(v)
             videos = filtered
         
         # Pre-check: count cached vs new
