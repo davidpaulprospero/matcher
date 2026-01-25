@@ -116,8 +116,10 @@ class TestGeminiMatcher:
         results = matcher.match_batch(mock_items)
 
         assert len(results) == 2
-        assert results[0] == (0, 0.85, "topic match")  # selected 1 -> idx 0
-        assert results[1] == (1, 0.75, "semantic alignment")  # selected 2 -> idx 1
+        # match_batch returns (selected_idx, confidence, reasoning, cot_reasoning)
+        # Check first 3 elements of each tuple (cot_reasoning is None when use_cot=False)
+        assert results[0][:3] == (0, 0.85, "topic match")  # selected 1 -> idx 0
+        assert results[1][:3] == (1, 0.75, "semantic alignment")  # selected 2 -> idx 1
 
     @patch('src.llm_client.create_client')
     def test_match_batch_with_context(self, mock_create_client, mock_items, mock_llm_response):
@@ -206,7 +208,8 @@ class TestGeminiMatcher:
         results = matcher.match_batch(mock_items)
 
         assert len(results) == 2
-        assert results[0] == (0, 0.85, "match")
+        # match_batch returns (selected_idx, confidence, reasoning, cot_reasoning)
+        assert results[0][:3] == (0, 0.85, "match")
         assert results[1][2] == "parse fallback"  # Fallback for missing entry
 
     @patch('src.llm_client.create_client')
@@ -300,8 +303,9 @@ class TestClaudeMatcher:
         results = matcher.match_batch(mock_items)
 
         assert len(results) == 2
-        assert results[0] == (0, 0.85, "topic match")
-        assert results[1] == (1, 0.75, "semantic alignment")
+        # match_batch returns (selected_idx, confidence, reasoning, cot_reasoning)
+        assert results[0][:3] == (0, 0.85, "topic match")
+        assert results[1][:3] == (1, 0.75, "semantic alignment")
 
     @patch('src.llm_client.create_client')
     def test_match_batch_with_context_and_rules(self, mock_create_client, mock_items, mock_llm_response):
@@ -386,7 +390,8 @@ class TestClaudeMatcher:
         results = matcher.match_batch(mock_items)
 
         assert len(results) == 2
-        assert results[0] == (1, 0.9, "good match")  # Parsed correctly
+        # match_batch returns (selected_idx, confidence, reasoning, cot_reasoning)
+        assert results[0][:3] == (1, 0.9, "good match")  # Parsed correctly
         assert results[1][2] == "parse fallback"  # Fallback
 
 
@@ -602,7 +607,8 @@ class TestEdgeCases:
         results = matcher.match_batch(items)
 
         assert len(results) == 1
-        assert results[0] == (0, 0.9, "match")
+        # match_batch returns (selected_idx, confidence, reasoning, cot_reasoning)
+        assert results[0][:3] == (0, 0.9, "match")
 
     @patch('src.llm_client.create_client')
     def test_empty_candidates_in_batch(self, mock_create_client):

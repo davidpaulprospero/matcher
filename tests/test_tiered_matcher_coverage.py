@@ -1098,12 +1098,9 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover text")
 
         # Mock primary_provider to return a match
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': current_seg,
-            'confidence': 0.9,
-            'reasoning': 'test'
-        }]
+        mock_provider.match_batch.return_value = [(0, 0.9, 'test')]
         matcher.primary_provider = mock_provider
 
         # Mock apply_face_preference
@@ -1120,6 +1117,8 @@ class TestTieredMatcherCoverageGaps:
         config.matching.face_preference = "neutral"
         cache = MagicMock()
         cache.cache_dir = "/tmp/cache"
+        # Ensure cache doesn't return a cached LLM response (to test the LLM path)
+        cache.get_llm_response.return_value = None
 
         matcher = TieredMatcher(config, cache)
 
@@ -1132,11 +1131,8 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover")
 
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': global_seg,
-            'confidence': 0.85,
-            'reasoning': 'test'
-        }]
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
+        mock_provider.match_batch.return_value = [(0, 0.85, 'test')]
         matcher.primary_provider = mock_provider
 
         result = matcher.match_segment(vo_seg, candidates, {}, 0)
@@ -1152,6 +1148,8 @@ class TestTieredMatcherCoverageGaps:
         config.matching.face_preference = "more"
         cache = MagicMock()
         cache.cache_dir = "/tmp/cache"
+        # Ensure cache doesn't return a cached LLM response (to test the LLM path)
+        cache.get_llm_response.return_value = None
 
         matcher = TieredMatcher(config, cache)
 
@@ -1166,11 +1164,8 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover")
 
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': global_seg,
-            'confidence': 0.85,
-            'reasoning': 'test'
-        }]
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
+        mock_provider.match_batch.return_value = [(0, 0.85, 'test')]
         matcher.primary_provider = mock_provider
 
         result = matcher.match_segment(vo_seg, candidates, {}, 0)

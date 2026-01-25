@@ -142,8 +142,8 @@
         "Add unit test in tests/test_cache_quality_tier.py for tier tracking and expiration"
       ],
       "priority": "low",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented quality tier tracking in src/llm_client/cache.py with compute_quality_tier() and extract_confidence_from_response() functions. Quality tiers: high (>=0.8), medium (0.5-0.8), low (<0.5). Added skip_low_quality param to LLMCache, all providers, and factory. Added expire_low_quality config option in LLMCacheConfig. Created 41 unit tests in tests/test_cache_quality_tier.py covering tier computation, cache storage, skip behavior, logging, config integration, provider integration, and legacy compatibility."
     },
     {
       "id": "US-010",
@@ -157,8 +157,8 @@
         "Add unit test in tests/test_multimodal_scoring.py for weighted fusion"
       ],
       "priority": "low",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented compute_multimodal_score() with DEFAULT_MULTIMODAL_WEIGHTS (text_embedding 40%, keyword_overlap 25%, entity_match 20%, visual_description 15%). Added helper functions: calculate_keyword_overlap_score(), calculate_entity_match_score(), calculate_visual_description_score(). Added _compute_multimodal_confidence() to TieredMatcher that replaces simple additive boosting with weighted multimodal fusion. Added multimodal_enabled and multimodal_weights config options. Created 50 unit tests in tests/test_multimodal_scoring.py covering all components."
     },
     {
       "id": "US-011",
