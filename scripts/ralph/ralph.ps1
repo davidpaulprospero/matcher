@@ -525,9 +525,9 @@ Start by reading the config and prompt files, then generate the PRD.
 
     # Always allow tools for PRD generation (needs write access to prd.json)
     # Also allow if -SkipPlanApproval was passed
+    # NOTE: Flag and value must be combined - CLI expects --allowedTools=VALUE format
     if ($GeneratePRD -or $SkipPlanApproval) {
-        $claudeArgs += "--allowedTools"
-        $claudeArgs += "Bash,Read,Write,Edit,Glob,Grep,WebSearch"
+        $claudeArgs += "--allowedTools=Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
 
     # Prompt must be LAST (positional argument)
