@@ -811,7 +811,7 @@ class VideoDownloader:
         # Record rate limit event for cross-session tracking and metrics
         self._rate_limit_event_count += 1
         self._record_rate_limit_event()
-        self.rate_limit_metrics.record_rate_limit_event(tier=tier)
+        self.rate_limit_metrics.record_rate_limit_event(tier=tier, keyword=keyword)
 
         # Get rate limit config settings
         rate_limit_config = getattr(self.download_config, 'rate_limit', None)
