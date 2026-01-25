@@ -219,6 +219,125 @@ class TestCaptionResult:
 
         assert result.caption_quality == "low"
 
+    # US-004: Coverage calculation tests
+
+    def test_calculate_coverage_full(self):
+        """Test calculate_coverage returns 1.0 for full coverage (US-004)"""
+        # 10 segments, each 10s, covering entire 100s video
+        segments = [
+            CaptionSegment(i, i * 10.0, (i + 1) * 10.0, f"Seg {i}", "vid1")
+            for i in range(10)
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 1.0
+
+    def test_calculate_coverage_partial(self):
+        """Test calculate_coverage returns correct ratio for partial coverage (US-004)"""
+        # 5 segments of 10s each = 50s out of 100s video
+        segments = [
+            CaptionSegment(i, i * 20.0, i * 20.0 + 10.0, f"Seg {i}", "vid1")
+            for i in range(5)
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 0.5
+
+    def test_calculate_coverage_low(self):
+        """Test calculate_coverage returns low ratio for sparse coverage (US-004)"""
+        # 1 segment of 20s out of 100s video = 20%
+        segments = [CaptionSegment(0, 0.0, 20.0, "Only segment", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 0.2
+
+    def test_calculate_coverage_no_duration(self):
+        """Test calculate_coverage returns 0.0 when no video duration (US-004)"""
+        segments = [CaptionSegment(0, 0.0, 10.0, "Test", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        # No duration provided
+        coverage = result.calculate_coverage()
+        assert coverage == 0.0
+
+    def test_calculate_coverage_zero_duration(self):
+        """Test calculate_coverage returns 0.0 for zero duration (US-004)"""
+        segments = [CaptionSegment(0, 0.0, 10.0, "Test", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        coverage = result.calculate_coverage(video_duration=0.0)
+        assert coverage == 0.0
+
+    def test_calculate_coverage_empty_segments(self):
+        """Test calculate_coverage returns 0.0 for empty segments (US-004)"""
+        result = CaptionResult(video_id="vid1", segments=[])
+
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 0.0
+
+    def test_calculate_coverage_capped_at_one(self):
+        """Test calculate_coverage caps at 1.0 even if segments overlap (US-004)"""
+        # Overlapping segments that sum to more than video duration
+        segments = [
+            CaptionSegment(0, 0.0, 60.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 30.0, 90.0, "Seg 2 overlaps", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        # 60s + 60s = 120s total, but video is only 100s
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 1.0
+
+    def test_calculate_coverage_with_gaps(self):
+        """Test calculate_coverage handles gaps between segments (US-004)"""
+        # Segments with gaps: 0-10, 20-30, 40-50 = 30s out of 100s
+        segments = [
+            CaptionSegment(0, 0.0, 10.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 20.0, 30.0, "Seg 2", "vid1"),
+            CaptionSegment(2, 40.0, 50.0, "Seg 3", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments)
+
+        coverage = result.calculate_coverage(video_duration=100.0)
+        assert coverage == 0.3
+
+    def test_coverage_ratio_property(self):
+        """Test coverage_ratio property uses video_duration field (US-004)"""
+        segments = [CaptionSegment(0, 0.0, 50.0, "Half", "vid1")]
+        result = CaptionResult(
+            video_id="vid1",
+            segments=segments,
+            video_duration=100.0  # Set video_duration field
+        )
+
+        assert result.coverage_ratio == 0.5
+
+    def test_coverage_ratio_property_no_duration(self):
+        """Test coverage_ratio returns 0.0 when video_duration not set (US-004)"""
+        segments = [CaptionSegment(0, 0.0, 50.0, "Test", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments)
+        # video_duration not set (None)
+
+        assert result.coverage_ratio == 0.0
+
+    def test_to_dict_includes_coverage(self):
+        """Test to_dict includes video_duration and coverage_ratio (US-004)"""
+        segments = [CaptionSegment(0, 0.0, 50.0, "Half", "vid1")]
+        result = CaptionResult(
+            video_id="vid1",
+            segments=segments,
+            video_duration=100.0
+        )
+
+        data = result.to_dict()
+        assert 'video_duration' in data
+        assert data['video_duration'] == 100.0
+        assert 'coverage_ratio' in data
+        assert data['coverage_ratio'] == 0.5
+
 
 class TestDetermineCaptionQuality:
     """Test determine_caption_quality function (US-007)"""
@@ -2455,6 +2574,233 @@ class TestCaptionMetrics:
         assert restored.quality_distribution == original.quality_distribution
         assert restored.auto_generated_count == original.auto_generated_count
         assert restored.human_caption_count == original.human_caption_count
+
+
+# =============================================================================
+# US-004: Coverage Distribution Tests
+# =============================================================================
+
+class TestCaptionMetricsCoverage:
+    """Test CaptionMetrics coverage distribution tracking (US-004)"""
+
+    def test_coverage_distribution_defaults(self):
+        """Test default coverage_distribution is empty (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        assert metrics.coverage_distribution == {}
+        assert metrics.low_coverage_videos == []
+
+    def test_record_fetch_success_with_high_coverage(self):
+        """Test high coverage (>80%) tracking (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="vid1",
+            language="en",
+            quality="high",
+            segment_count=50,
+            is_auto_generated=False,
+            coverage_ratio=0.95,
+            min_coverage_threshold=0.5
+        )
+
+        assert metrics.coverage_distribution.get('high') == 1
+        assert 'vid1' not in metrics.low_coverage_videos
+
+    def test_record_fetch_success_with_medium_coverage(self):
+        """Test medium coverage (50-80%) tracking (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="vid1",
+            language="en",
+            quality="medium",
+            segment_count=30,
+            is_auto_generated=True,
+            coverage_ratio=0.65,
+            min_coverage_threshold=0.5
+        )
+
+        assert metrics.coverage_distribution.get('medium') == 1
+        assert 'vid1' not in metrics.low_coverage_videos
+
+    def test_record_fetch_success_with_low_coverage(self):
+        """Test low coverage (<50%) tracking and warning (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="vid1",
+            language="en",
+            quality="low",
+            segment_count=10,
+            is_auto_generated=True,
+            coverage_ratio=0.25,
+            min_coverage_threshold=0.5
+        )
+
+        assert metrics.coverage_distribution.get('low') == 1
+        assert 'vid1' in metrics.low_coverage_videos
+
+    def test_record_fetch_success_without_coverage(self):
+        """Test backward compatibility when coverage_ratio is None (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="vid1",
+            language="en",
+            quality="high",
+            segment_count=50,
+            is_auto_generated=False
+            # No coverage_ratio provided
+        )
+
+        assert metrics.coverage_distribution == {}
+        assert metrics.low_coverage_videos == []
+        assert metrics.successes == 1
+
+    def test_record_cache_hit_with_coverage(self):
+        """Test cache hit with coverage tracking (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_cache_hit(
+            video_id="vid1",
+            language="en",
+            quality="high",
+            segment_count=50,
+            is_auto_generated=False,
+            coverage_ratio=0.90,
+            min_coverage_threshold=0.5
+        )
+
+        assert metrics.coverage_distribution.get('high') == 1
+        assert 'vid1' not in metrics.low_coverage_videos
+
+    def test_record_cache_hit_low_coverage(self):
+        """Test cache hit with low coverage warning (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_cache_hit(
+            video_id="vid1",
+            language="en",
+            quality="medium",
+            segment_count=20,
+            is_auto_generated=True,
+            coverage_ratio=0.30,
+            min_coverage_threshold=0.5
+        )
+
+        assert metrics.coverage_distribution.get('low') == 1
+        assert 'vid1' in metrics.low_coverage_videos
+
+    def test_classify_coverage_high(self):
+        """Test _classify_coverage returns 'high' for >80% (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        assert CaptionMetrics._classify_coverage(0.81) == 'high'
+        assert CaptionMetrics._classify_coverage(0.95) == 'high'
+        assert CaptionMetrics._classify_coverage(1.0) == 'high'
+
+    def test_classify_coverage_medium(self):
+        """Test _classify_coverage returns 'medium' for 50-80% (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        assert CaptionMetrics._classify_coverage(0.50) == 'medium'
+        assert CaptionMetrics._classify_coverage(0.65) == 'medium'
+        assert CaptionMetrics._classify_coverage(0.80) == 'medium'
+
+    def test_classify_coverage_low(self):
+        """Test _classify_coverage returns 'low' for <50% (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        assert CaptionMetrics._classify_coverage(0.0) == 'low'
+        assert CaptionMetrics._classify_coverage(0.25) == 'low'
+        assert CaptionMetrics._classify_coverage(0.49) == 'low'
+
+    def test_summary_includes_coverage(self):
+        """Test summary() includes coverage distribution (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("vid1", "en", "high", 50, False, 0.95, 0.5)
+        metrics.record_fetch_success("vid2", "en", "medium", 30, True, 0.65, 0.5)
+        metrics.record_fetch_success("vid3", "en", "low", 10, True, 0.20, 0.5)
+
+        summary = metrics.summary()
+
+        assert "Coverage:" in summary
+        assert "high: 1" in summary
+        assert "medium: 1" in summary
+        assert "low: 1" in summary
+        assert "Low coverage: 1 videos" in summary
+
+    def test_to_dict_includes_coverage(self):
+        """Test to_dict() includes coverage fields (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("vid1", "en", "high", 50, False, 0.95, 0.5)
+        metrics.record_fetch_success("vid2", "en", "low", 10, True, 0.20, 0.5)
+
+        data = metrics.to_dict()
+
+        assert 'coverage_distribution' in data
+        assert data['coverage_distribution'].get('high') == 1
+        assert data['coverage_distribution'].get('low') == 1
+        assert 'low_coverage_videos' in data
+        assert 'vid2' in data['low_coverage_videos']
+
+    def test_from_dict_restores_coverage(self):
+        """Test from_dict() restores coverage fields (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        original = CaptionMetrics()
+        original.record_fetch_success("vid1", "en", "high", 50, False, 0.95, 0.5)
+        original.record_fetch_success("vid2", "en", "low", 10, True, 0.20, 0.5)
+
+        data = original.to_dict()
+        restored = CaptionMetrics.from_dict(data)
+
+        assert restored.coverage_distribution == original.coverage_distribution
+        assert restored.low_coverage_videos == original.low_coverage_videos
+
+    def test_merge_includes_coverage(self):
+        """Test merge() combines coverage distributions (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_fetch_success("vid1", "en", "high", 50, False, 0.95, 0.5)
+
+        metrics2 = CaptionMetrics()
+        metrics2.record_fetch_success("vid2", "en", "low", 10, True, 0.20, 0.5)
+
+        metrics1.merge(metrics2)
+
+        assert metrics1.coverage_distribution.get('high') == 1
+        assert metrics1.coverage_distribution.get('low') == 1
+        assert 'vid2' in metrics1.low_coverage_videos
+
+    def test_clear_resets_coverage(self):
+        """Test clear() resets coverage fields (US-004)"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("vid1", "en", "low", 10, True, 0.20, 0.5)
+
+        assert metrics.coverage_distribution.get('low') == 1
+        assert 'vid1' in metrics.low_coverage_videos
+
+        metrics.clear()
+
+        assert metrics.coverage_distribution == {}
+        assert metrics.low_coverage_videos == []
 
 
 class TestCaptionMetricsThreadSafety:

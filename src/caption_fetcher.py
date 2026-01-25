@@ -171,12 +171,22 @@ class CaptionSegment:
 
 @dataclass
 class CaptionResult:
-    """Result of a caption fetch operation."""
+    """Result of a caption fetch operation.
+
+    Attributes:
+        video_id: YouTube video ID.
+        segments: List of caption segments with timing.
+        language: ISO 639-1 language code (e.g., 'en').
+        is_auto_generated: True if auto-generated captions.
+        format_source: Caption format ('vtt', 'srv3', 'json3', etc.).
+        video_duration: Optional video duration for coverage calculation (US-004).
+    """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
     language: str = ""  # ISO 639-1 code (e.g., 'en')
     is_auto_generated: bool = False
     format_source: str = ""  # 'vtt', 'srv3', 'json3', etc.
+    video_duration: Optional[float] = None  # US-004: For coverage calculation
 
     @property
     def text(self) -> str:
@@ -213,6 +223,51 @@ class CaptionResult:
             total_duration=self.duration
         )
 
+    def calculate_coverage(self, video_duration: Optional[float] = None) -> float:
+        """Calculate what percentage of video duration is covered by captions (US-004).
+
+        Coverage is calculated by summing actual caption segment durations
+        (not just start-to-end span) and dividing by video duration.
+
+        Args:
+            video_duration: Video duration in seconds. If not provided, uses
+                self.video_duration if set, otherwise returns 0.0.
+
+        Returns:
+            Coverage ratio from 0.0 to 1.0. Returns 0.0 if video_duration is
+            unknown or zero.
+
+        Example:
+            >>> result = CaptionResult(video_id="abc", segments=[...])
+            >>> coverage = result.calculate_coverage(video_duration=300.0)
+            >>> print(f"{coverage:.1%}")  # "85.3%"
+        """
+        duration = video_duration or self.video_duration
+        if not duration or duration <= 0:
+            return 0.0
+
+        if not self.segments:
+            return 0.0
+
+        # Sum actual segment durations (not just start-to-end span)
+        # This handles gaps between segments correctly
+        total_caption_duration = sum(
+            max(0.0, seg.end_time - seg.start_time)
+            for seg in self.segments
+        )
+
+        # Clamp to 1.0 in case captions overlap or extend past video
+        return min(1.0, total_caption_duration / duration)
+
+    @property
+    def coverage_ratio(self) -> float:
+        """Get coverage ratio using stored video_duration (US-004).
+
+        Returns:
+            Coverage ratio from 0.0 to 1.0, or 0.0 if video_duration not set.
+        """
+        return self.calculate_coverage()
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -222,6 +277,8 @@ class CaptionResult:
             'is_auto_generated': self.is_auto_generated,
             'format_source': self.format_source,
             'caption_quality': self.caption_quality,
+            'video_duration': self.video_duration,  # US-004
+            'coverage_ratio': self.coverage_ratio,  # US-004
         }
 
 
@@ -2501,12 +2558,14 @@ class CaptionMetrics:
     Implements US-011: Add caption fetch metrics and reporting.
     Updated US-001: Thread-safe with Lock for parallel caption fetching.
     Updated US-002: Tracks skipped live streams separately.
+    Updated US-004: Tracks coverage distribution (high/medium/low).
 
     Tracks:
     - Fetch attempts, successes, failures, cache hits
     - Skipped live streams (US-002)
     - Language distribution
     - Quality distribution (human, auto, unavailable)
+    - Coverage distribution (high >80%, medium 50-80%, low <50%) (US-004)
     - Total segments fetched
 
     Thread Safety:
@@ -2516,7 +2575,7 @@ class CaptionMetrics:
     Usage:
         metrics = CaptionMetrics()
         metrics.record_fetch_attempt("dQw4w9WgXcQ")
-        metrics.record_fetch_success("dQw4w9WgXcQ", language="en", quality="high")
+        metrics.record_fetch_success("dQw4w9WgXcQ", language="en", quality="high", coverage_ratio=0.85)
         # ... later ...
         print(metrics.summary())
 
@@ -2528,6 +2587,7 @@ class CaptionMetrics:
         skipped_live_streams: Number of live streams skipped (US-002)
         language_distribution: Dict mapping language code -> count
         quality_distribution: Dict mapping quality level -> count
+        coverage_distribution: Dict mapping coverage level -> count (US-004)
         total_segments: Total caption segments fetched
     """
 
@@ -2543,6 +2603,12 @@ class CaptionMetrics:
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
     quality_distribution: Dict[str, int] = field(default_factory=dict)
+
+    # Coverage distribution (US-004): high (>80%), medium (50-80%), low (<50%)
+    coverage_distribution: Dict[str, int] = field(default_factory=dict)
+
+    # Low coverage video tracking (US-004)
+    low_coverage_videos: List[str] = field(default_factory=list)
 
     # Additional metrics
     total_segments: int = 0
@@ -2570,7 +2636,9 @@ class CaptionMetrics:
         language: str = "en",
         quality: str = "medium",
         segment_count: int = 0,
-        is_auto_generated: bool = False
+        is_auto_generated: bool = False,
+        coverage_ratio: Optional[float] = None,
+        min_coverage_threshold: float = 0.5
     ) -> None:
         """Record a successful caption fetch.
 
@@ -2582,6 +2650,8 @@ class CaptionMetrics:
             quality: Caption quality level ('high', 'medium', 'low').
             segment_count: Number of caption segments fetched.
             is_auto_generated: Whether captions are auto-generated.
+            coverage_ratio: Caption coverage ratio 0.0-1.0 (US-004).
+            min_coverage_threshold: Threshold for low coverage warning (US-004).
         """
         with self._lock:
             self.successes += 1
@@ -2599,10 +2669,40 @@ class CaptionMetrics:
             else:
                 self.human_caption_count += 1
 
+            # Track coverage distribution (US-004)
+            if coverage_ratio is not None:
+                coverage_level = self._classify_coverage(coverage_ratio)
+                self.coverage_distribution[coverage_level] = (
+                    self.coverage_distribution.get(coverage_level, 0) + 1
+                )
+                # Track low coverage videos for warning
+                if coverage_ratio < min_coverage_threshold and video_id:
+                    self.low_coverage_videos.append(video_id)
+
         logger.debug(
+            f"Caption fetch success for {video_id or 'unknown'}: "
+            f"lang={language}, quality={quality}, segments={segment_count}, "
+            f"coverage={coverage_ratio:.1%}" if coverage_ratio else
             f"Caption fetch success for {video_id or 'unknown'}: "
             f"lang={language}, quality={quality}, segments={segment_count}"
         )
+
+    @staticmethod
+    def _classify_coverage(coverage_ratio: float) -> str:
+        """Classify coverage ratio into high/medium/low category (US-004).
+
+        Args:
+            coverage_ratio: Coverage ratio from 0.0 to 1.0.
+
+        Returns:
+            'high' if >80%, 'medium' if 50-80%, 'low' if <50%.
+        """
+        if coverage_ratio > 0.8:
+            return 'high'
+        elif coverage_ratio >= 0.5:
+            return 'medium'
+        else:
+            return 'low'
 
     def record_fetch_failure(
         self,
@@ -2650,7 +2750,9 @@ class CaptionMetrics:
         language: str = "en",
         quality: str = "medium",
         segment_count: int = 0,
-        is_auto_generated: bool = False
+        is_auto_generated: bool = False,
+        coverage_ratio: Optional[float] = None,
+        min_coverage_threshold: float = 0.5
     ) -> None:
         """Record a cache hit (captions loaded from cache).
 
@@ -2662,6 +2764,8 @@ class CaptionMetrics:
             quality: Caption quality level.
             segment_count: Number of segments in cached captions.
             is_auto_generated: Whether cached captions are auto-generated.
+            coverage_ratio: Caption coverage ratio 0.0-1.0 (US-004).
+            min_coverage_threshold: Threshold for low coverage warning (US-004).
         """
         with self._lock:
             self.cache_hits += 1
@@ -2678,6 +2782,16 @@ class CaptionMetrics:
                 self.auto_generated_count += 1
             else:
                 self.human_caption_count += 1
+
+            # Track coverage distribution (US-004)
+            if coverage_ratio is not None:
+                coverage_level = self._classify_coverage(coverage_ratio)
+                self.coverage_distribution[coverage_level] = (
+                    self.coverage_distribution.get(coverage_level, 0) + 1
+                )
+                # Track low coverage videos for warning
+                if coverage_ratio < min_coverage_threshold and video_id:
+                    self.low_coverage_videos.append(video_id)
 
         logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
 
@@ -2761,6 +2875,17 @@ class CaptionMetrics:
             )
             lines.append(f"  Quality: {quality_str}")
 
+        # Coverage distribution (US-004)
+        if self.coverage_distribution:
+            coverage_str = ", ".join(
+                f"{level}: {count}" for level, count in sorted(self.coverage_distribution.items())
+            )
+            lines.append(f"  Coverage: {coverage_str}")
+
+        # Low coverage warning (US-004)
+        if self.low_coverage_videos:
+            lines.append(f"  Low coverage: {len(self.low_coverage_videos)} videos below threshold")
+
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -2777,6 +2902,8 @@ class CaptionMetrics:
             'skipped_live_streams': self.skipped_live_streams,  # US-002
             'language_distribution': dict(self.language_distribution),
             'quality_distribution': dict(self.quality_distribution),
+            'coverage_distribution': dict(self.coverage_distribution),  # US-004
+            'low_coverage_videos': list(self.low_coverage_videos),  # US-004
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
@@ -2803,6 +2930,8 @@ class CaptionMetrics:
             skipped_live_streams=data.get('skipped_live_streams', 0),  # US-002
             language_distribution=data.get('language_distribution', {}),
             quality_distribution=data.get('quality_distribution', {}),
+            coverage_distribution=data.get('coverage_distribution', {}),  # US-004
+            low_coverage_videos=data.get('low_coverage_videos', []),  # US-004
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
@@ -2839,6 +2968,13 @@ class CaptionMetrics:
             for quality, count in other.quality_distribution.items():
                 self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + count
 
+            # Merge coverage distribution (US-004)
+            for level, count in other.coverage_distribution.items():
+                self.coverage_distribution[level] = self.coverage_distribution.get(level, 0) + count
+
+            # Merge low coverage videos (US-004)
+            self.low_coverage_videos.extend(other.low_coverage_videos)
+
         return self
 
     def clear(self) -> None:
@@ -2854,6 +2990,8 @@ class CaptionMetrics:
             self.skipped_live_streams = 0  # US-002
             self.language_distribution = {}
             self.quality_distribution = {}
+            self.coverage_distribution = {}  # US-004
+            self.low_coverage_videos = []  # US-004
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0
