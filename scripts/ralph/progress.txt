@@ -314,3 +314,32 @@ Replaced 4 bare `except:` blocks with specific exception handling in media sourc
 - src/media_sources/images/pixabay.py - Exception handling for HEAD request + import
 - src/media_sources/images/unsplash.py - Exception handling for HEAD request + import
 
+## Iteration 9 - US-008: Replace bare except blocks in downloader modules
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Replaced 2 bare `except:` blocks with specific exception handling in downloader modules:
+
+1. **core.py line 903 (info.json metadata loading):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError, json.JSONDecodeError) as e:` with logger.debug()
+   - Purpose: Handle file access errors or invalid JSON when loading optional video metadata
+   - Context: Metadata is optional - pipeline continues without it if unavailable
+
+2. **transcoding.py line 163 (GPU encoder detection):**
+   - Before: `except:` with `pass`
+   - After: `except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:` with logger.debug()
+   - Purpose: Handle ffmpeg not installed or failing to run when detecting hardware encoders
+   - Context: Falls back to 'none' (software encoding) if GPU detection fails
+
+### Verification
+- Syntax check: `python -m py_compile src/downloader/core.py` - PASSED
+- Syntax check: `python -m py_compile src/downloader/transcoding.py` - PASSED
+- All 339 download tests: `pytest tests/test_download*.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/downloader/core.py - Exception handling for JSON metadata loading
+- src/downloader/transcoding.py - Exception handling for GPU encoder detection
+

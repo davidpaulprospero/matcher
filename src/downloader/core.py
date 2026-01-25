@@ -900,8 +900,9 @@ class VideoDownloader:
                     try:
                         with open(info_file, 'r') as f:
                             metadata = json.load(f)
-                    except:
-                        pass
+                    except (OSError, IOError, json.JSONDecodeError) as e:
+                        # JSON metadata is optional - log and continue without it
+                        logger.debug(f"Could not load metadata from {info_file}: {e}")
 
                 # Transcode for DaVinci if enabled AND necessary
                 final_path = video_path
