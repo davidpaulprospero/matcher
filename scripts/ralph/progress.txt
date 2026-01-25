@@ -1015,3 +1015,27 @@ Progress: 7/12 stories complete
 
 Progress: 8/12 stories complete
 
+## Iteration 9 - [US-009] Add download progress percentage logging
+- Added milestone logging to download_all() in src/downloader/core.py:
+  - Added `logged_milestones = set()` to track which 10% milestones have been logged
+  - Added milestone calculation: `milestone = int(current_pct // 10) * 10`
+  - Logs "Download progress: X% (N/M keywords)" at 10%, 20%... 90%
+  - Added 100% milestone log after loop completion
+  - Uses set for O(1) lookup to avoid duplicate milestone logs
+- Log format matches acceptance criteria: 'Download progress: X% (N/M keywords)'
+- Created tests/test_download_progress.py with 13 tests across 6 test classes:
+  - TestProgressLoggingMilestones (3 tests): 10% logged, multiple milestones, 100% always
+  - TestProgressLogFormat (3 tests): percentage, keyword count, 100% shows total
+  - TestMilestoneUniqueness (2 tests): each milestone once, no duplicates
+  - TestProgressEdgeCases (2 tests): single keyword, few keywords
+  - TestProgressLoggingIntervals (2 tests): 50 keywords milestones, no 0%
+  - TestProgressPerformance (1 test): efficient tracking with set
+- All 13 new tests pass
+- All 41 existing downloader tests pass (no regressions)
+- Files modified:
+  - src/downloader/core.py (lines 398-411: milestone tracking, line 439: 100% log)
+- Files created:
+  - tests/test_download_progress.py (new file, 13 tests)
+
+Progress: 9/12 stories complete
+
