@@ -274,6 +274,12 @@ class RateLimitConfig:
       When downloading multiple tiers (short, medium, long, longer), rate limit
       state can be tracked separately per tier. This prevents a rate limit on
       one tier from affecting backoff counters for other tiers.
+
+    Cross-keyword budget sharing:
+      When downloading multiple keywords, rate limit recovery resources
+      (rotations, VPN switches, backoff time) can be tracked across all
+      keywords. If keyword A exhausts all cookie rotations, keyword B
+      skips directly to VPN switching instead of trying rotations again.
     """
     # Initial backoff delay on first rate limit error (seconds)
     initial_backoff_seconds: float = 5.0
@@ -292,6 +298,15 @@ class RateLimitConfig:
     # Per-tier isolation: track rate limit state separately for each duration tier
     # When True, rate limit on 'long' tier won't affect 'short' tier backoff
     per_tier_isolation: bool = True
+
+    # Cross-keyword budget sharing: track rate limit recovery resources across keywords
+    # When True, if keyword A exhausts rotations, keyword B skips directly to VPN
+    share_budget_across_keywords: bool = True
+
+    # Maximum total backoff time budget per session (seconds)
+    # After this much total backoff, skip backoff and escalate immediately
+    # 0 = unlimited
+    max_backoff_budget: float = 300.0  # 5 minutes
 
 
 @dataclass
@@ -396,6 +411,12 @@ class BatchRetryConfig:
       will check the circuit breaker state before processing. If the circuit
       breaker is tripped, the retry queue will wait for it to recover before
       retrying. This prevents retries from being wasted during active rate limits.
+
+    Cookie cooldown coordination:
+      When wait_for_cookie_cooldown is enabled (default), the batch retry queue
+      will check if any cookies are in cooldown before processing. If all cookies
+      are in cooldown, it waits for the shortest cooldown to expire before retrying.
+      This prevents retries from failing immediately due to cookie unavailability.
     """
     # Enable/disable batch retry queue
     enabled: bool = True
@@ -412,6 +433,11 @@ class BatchRetryConfig:
     # If True, wait for circuit breaker to recover before retrying
     # If False, retry immediately after delay_seconds regardless of circuit breaker
     respect_circuit_breaker: bool = True
+
+    # Wait for cookie cooldown before processing retries
+    # If True, check if any cookies are in cooldown and extend delay if needed
+    # If False, proceed with retry even if cookies are in cooldown
+    wait_for_cookie_cooldown: bool = True
 
 
 @dataclass

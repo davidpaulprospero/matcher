@@ -342,24 +342,35 @@ class VideoDownloader:
                 respect_circuit_breaker = respect_cb_val is True
             except (TypeError, ValueError):
                 respect_circuit_breaker = True
+            try:
+                wait_cookie_val = getattr(batch_retry_config, 'wait_for_cookie_cooldown', True)
+                wait_for_cookie_cooldown = wait_cookie_val is True
+            except (TypeError, ValueError):
+                wait_for_cookie_cooldown = True
 
             self.retry_queue = RetryQueue(
                 BatchRetryConfig(
                     enabled=True,
                     delay_seconds=delay_secs,
                     max_passes=max_passes,
-                    respect_circuit_breaker=respect_circuit_breaker
+                    respect_circuit_breaker=respect_circuit_breaker,
+                    wait_for_cookie_cooldown=wait_for_cookie_cooldown
                 )
             )
             logger.debug(
                 f"Batch retry enabled: {delay_secs:.0f}s delay, "
-                f"max {max_passes} passes, respect_circuit_breaker={respect_circuit_breaker}"
+                f"max {max_passes} passes, respect_circuit_breaker={respect_circuit_breaker}, "
+                f"wait_for_cookie_cooldown={wait_for_cookie_cooldown}"
             )
         else:
             self.retry_queue = RetryQueue(BatchRetryConfig(enabled=False))
 
         # Link circuit breaker to retry queue for coordination (US-003)
         self.retry_queue.set_circuit_breaker(self.circuit_breaker)
+
+        # Link cookie rotator to retry queue for cooldown coordination (US-007)
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            self.retry_queue.set_cookie_rotator(self.cookie_rotator)
 
         # Rate limiting metrics tracking (US-010)
         self.rate_limit_metrics = RateLimitMetrics()

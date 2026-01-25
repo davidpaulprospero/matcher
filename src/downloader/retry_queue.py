@@ -25,6 +25,7 @@ from typing import List, Dict, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreaker
+    from .cookie_rotator import CookieRotator
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,11 @@ class BatchRetryConfig:
     # If True, wait for circuit breaker to recover before retrying
     # If False, retry immediately after delay_seconds regardless of circuit breaker
     respect_circuit_breaker: bool = True
+
+    # Wait for cookie cooldown before processing retries
+    # If True, check if any cookies are in cooldown and extend delay if needed
+    # If False, proceed with retry even if cookies are in cooldown
+    wait_for_cookie_cooldown: bool = True
 
 
 @dataclass
@@ -122,6 +128,8 @@ class RetryQueue:
         self._total_retried: int = 0
         self._circuit_breaker: Optional['CircuitBreaker'] = None
         self._circuit_breaker_wait_time: float = 0.0  # Total time spent waiting for circuit breaker
+        self._cookie_rotator: Optional['CookieRotator'] = None
+        self._cookie_cooldown_wait_time: float = 0.0  # Total time spent waiting for cookie cooldown
 
     def set_circuit_breaker(self, circuit_breaker: 'CircuitBreaker') -> None:
         """Link a circuit breaker to coordinate retry timing.
@@ -135,6 +143,71 @@ class RetryQueue:
         """
         self._circuit_breaker = circuit_breaker
         logger.debug("Retry queue: linked to circuit breaker")
+
+    def set_cookie_rotator(self, cookie_rotator: 'CookieRotator') -> None:
+        """Link a cookie rotator to coordinate retry timing with cookie cooldowns.
+
+        When a cookie rotator is linked and wait_for_cookie_cooldown is enabled,
+        the retry queue will check if any cookies are in cooldown before processing.
+        If all cookies are in cooldown, it waits for the shortest cooldown to expire
+        before retrying.
+
+        Args:
+            cookie_rotator: CookieRotator instance to coordinate with.
+        """
+        self._cookie_rotator = cookie_rotator
+        logger.debug("Retry queue: linked to cookie rotator")
+
+    def _wait_for_cookie_cooldown(self) -> float:
+        """Wait for cookie cooldown to expire if all cookies are unavailable.
+
+        Checks if all cookies are in cooldown. If so, calculates the shortest
+        remaining cooldown time and waits for it to expire.
+
+        Returns:
+            The number of seconds waited (0 if cookies were available).
+        """
+        if not self._cookie_rotator:
+            return 0.0
+
+        if not self.config.wait_for_cookie_cooldown:
+            return 0.0
+
+        if not self._cookie_rotator.is_enabled:
+            return 0.0
+
+        # Check if any cookies are available
+        if self._cookie_rotator.available_cookies > 0:
+            return 0.0
+
+        # All cookies are in cooldown - find the shortest remaining cooldown
+        # Access the internal _failed_cookies dict to find cooldown times
+        if not self._cookie_rotator._failed_cookies:
+            return 0.0
+
+        cooldown_seconds = self._cookie_rotator.config.cooldown_seconds
+        now = time.time()
+
+        # Find the cookie with the shortest remaining cooldown
+        min_remaining = float('inf')
+        for cookie_path, failed_time in self._cookie_rotator._failed_cookies.items():
+            elapsed = now - failed_time
+            remaining = cooldown_seconds - elapsed
+            if remaining > 0 and remaining < min_remaining:
+                min_remaining = remaining
+
+        if min_remaining == float('inf') or min_remaining <= 0:
+            return 0.0
+
+        # Log and wait for cookie cooldown to expire
+        logger.info(
+            f"Batch retry: waiting {min_remaining:.1f}s for cookie cooldown to expire "
+            f"before processing retry queue"
+        )
+        time.sleep(min_remaining)
+        self._cookie_cooldown_wait_time += min_remaining
+
+        return min_remaining
 
     def _wait_for_circuit_breaker(self) -> float:
         """Wait for circuit breaker to recover if tripped.
@@ -277,14 +350,18 @@ class RetryQueue:
     def start_retry_pass(self) -> int:
         """Start a new retry pass.
 
-        Increments the pass counter, checks circuit breaker state, applies the
-        delay, and logs the start. Should be called before processing items in
-        the queue.
+        Increments the pass counter, checks circuit breaker state, checks cookie
+        cooldowns, applies the delay, and logs the start. Should be called before
+        processing items in the queue.
 
         If a circuit breaker is linked and respect_circuit_breaker is enabled,
         waits for the circuit breaker to recover before applying the retry delay.
-        The circuit breaker wait time is additional to the retry delay (not
-        subtracted from it).
+
+        If a cookie rotator is linked and wait_for_cookie_cooldown is enabled,
+        waits for cookie cooldowns to expire if all cookies are unavailable.
+
+        The circuit breaker and cookie cooldown wait times are additional to the
+        retry delay (not subtracted from it).
 
         Returns:
             The new pass number (1-indexed).
@@ -298,17 +375,28 @@ class RetryQueue:
         # If circuit breaker is tripped, wait for it to recover first
         cb_wait = self._wait_for_circuit_breaker()
 
+        # Check cookie cooldown before starting retry pass
+        # If all cookies are in cooldown, wait for the shortest cooldown to expire
+        cookie_wait = self._wait_for_cookie_cooldown()
+
         # Calculate effective delay
-        # If circuit breaker was tripped, we already waited for it to recover
+        # If circuit breaker was tripped or cookies were in cooldown, we already waited
         # The batch retry delay is additional time to let rate limits clear further
         effective_delay = self.config.delay_seconds
 
-        # Log at INFO level so users can see the retry happening
+        # Build wait info message
+        wait_parts = []
         if cb_wait > 0:
+            wait_parts.append(f"circuit breaker: {cb_wait:.1f}s")
+        if cookie_wait > 0:
+            wait_parts.append(f"cookie cooldown: {cookie_wait:.1f}s")
+
+        # Log at INFO level so users can see the retry happening
+        if wait_parts:
             logger.info(
                 f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
                 f"{len(self.items)} videos queued. "
-                f"Circuit breaker wait: {cb_wait:.1f}s, "
+                f"Waited for {', '.join(wait_parts)}, "
                 f"additional delay: {effective_delay:.0f}s..."
             )
         else:
@@ -356,6 +444,7 @@ class RetryQueue:
         self._total_added = 0
         self._total_retried = 0
         self._circuit_breaker_wait_time = 0.0
+        self._cookie_cooldown_wait_time = 0.0
         logger.debug("Retry queue: cleared for new session")
 
     def get_stats(self) -> dict:
@@ -373,6 +462,8 @@ class RetryQueue:
             - total_retried: Total successful retries this session
             - respect_circuit_breaker: Whether circuit breaker is respected
             - circuit_breaker_wait_time: Total time spent waiting for circuit breaker
+            - wait_for_cookie_cooldown: Whether cookie cooldown is respected
+            - cookie_cooldown_wait_time: Total time spent waiting for cookie cooldown
         """
         return {
             'enabled': self.config.enabled,
@@ -386,6 +477,8 @@ class RetryQueue:
             'total_retried': self._total_retried,
             'respect_circuit_breaker': self.config.respect_circuit_breaker,
             'circuit_breaker_wait_time': round(self._circuit_breaker_wait_time, 1),
+            'wait_for_cookie_cooldown': self.config.wait_for_cookie_cooldown,
+            'cookie_cooldown_wait_time': round(self._cookie_cooldown_wait_time, 1),
         }
 
     def to_checkpoint_dict(self) -> dict:
@@ -411,6 +504,7 @@ class RetryQueue:
             'total_added': self._total_added,
             'total_retried': self._total_retried,
             'circuit_breaker_wait_time': self._circuit_breaker_wait_time,
+            'cookie_cooldown_wait_time': self._cookie_cooldown_wait_time,
         }
 
     def from_checkpoint_dict(self, data: dict) -> None:
@@ -442,6 +536,7 @@ class RetryQueue:
         self._total_added = data.get('total_added', 0)
         self._total_retried = data.get('total_retried', 0)
         self._circuit_breaker_wait_time = data.get('circuit_breaker_wait_time', 0.0)
+        self._cookie_cooldown_wait_time = data.get('cookie_cooldown_wait_time', 0.0)
 
         if self.items:
             logger.debug(
