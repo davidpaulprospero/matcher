@@ -2457,3 +2457,77 @@ Added comprehensive language detection and selection capabilities to CaptionFetc
 - [x] Stores caption data in state.text_metadata compatible with existing matching
 - [x] Checkpoint integration: saves fetched captions, resumes from partial completion
 - [x] Tests verify stage execution and checkpoint behavior (27 tests)
+
+
+## Iteration N - US-005: Add caption cache for cross-project reuse
+
+**Status:** COMPLETE
+
+**Objective:** Implement caption caching to avoid re-fetching the same YouTube captions across projects.
+
+### Changes Made
+
+**1. Updated CaptionFirstConfig (src/config/sections/download.py)**
+- Added `cache_dir: str = "~/.matcher_caption_cache"` field
+- Added `max_cache_age_days: int = 30` field for TTL expiration
+- Supports ~ expansion for user home directory
+
+**2. Updated config.yaml**
+- Added `cache_dir` and `max_cache_age_days` to caption_first section
+- Added documentation comments for new options
+
+**3. Created CachedCaption dataclass (src/caption_fetcher.py)**
+- Stores video_id, language, segments, is_auto_generated, format_source
+- Includes fetch_timestamp for TTL validation
+- to_dict() / from_dict() for serialization
+- to_caption_result() to convert back to CaptionResult
+
+**4. Created CaptionCache class (src/caption_fetcher.py)**
+- Extends BaseCache for consistent caching behavior
+- Cache key format: `{video_id}_{language}` (e.g., "dQw4w9WgXcQ_en")
+- Methods:
+  - get_caption(video_id, language) -> Optional[CachedCaption]
+  - store(result: CaptionResult) -> bool
+  - get_or_fetch(fetcher, video_id, language) -> CaptionResult
+  - invalidate(video_id, language=None) -> int
+  - get_stats() -> Dict with cache metrics
+- TTL-based expiration (configurable days)
+- Respects enabled flag from config.cache_captions
+
+**5. Created tests/test_caption_cache.py**
+- 30 comprehensive tests covering:
+  - CachedCaption dataclass operations
+  - Cache initialization (with config, defaults, disabled)
+  - Store and retrieve operations
+  - Cache misses (wrong video, wrong language)
+  - Disabled cache behavior
+  - Multiple languages for same video
+  - Invalidation (specific language, all languages)
+  - TTL expiration testing
+  - get_or_fetch convenience method
+  - Cache statistics
+  - Persistence across instances
+  - Integration with real CaptionFirstConfig
+
+**6. Updated tests/test_config_post_init.py**
+- Added cache_dir and max_cache_age_days assertions to existing tests
+
+### Test Results
+- 30 new caption cache tests passing
+- 85 existing caption fetcher tests passing (1 network test skipped)
+- 142 total caption + config tests passing
+
+### Files Modified
+- src/config/sections/download.py (added 2 fields to CaptionFirstConfig)
+- config.yaml (added 2 config options)
+- src/caption_fetcher.py (added CachedCaption, CaptionCache classes)
+- tests/test_caption_cache.py (new file, 30 tests)
+- tests/test_config_post_init.py (updated assertions)
+
+### Acceptance Criteria Met
+- [x] New CaptionCache class in src/caption_fetcher.py
+- [x] Cache key: video_id + language code (e.g., "dQw4w9WgXcQ_en")
+- [x] Cache stores: caption text, timing info, is_auto_generated, fetch_timestamp
+- [x] Configurable cache location via caption_first.cache_dir (default: ~/.matcher_caption_cache/)
+- [x] Cache validation: check caption age, invalidate if older than configurable days
+- [x] Tests verify cache hits, misses, and invalidation
