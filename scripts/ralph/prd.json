@@ -82,7 +82,8 @@
         "Test that load time is logged when loading valid checkpoint file"
       ],
       "priority": "medium",
-      "passes": false
+      "passes": true,
+      "notes": "Added time.perf_counter() timing to load() (logs at INFO level) and _atomic_save() (logs at DEBUG level). Created tests/test_checkpoint_timing.py with 16 tests across 6 test classes covering: load timing (5 tests), save timing (5 tests), timing format (2 tests), large checkpoint timing (2 tests), intermediate save timing (1 test), mark_stage_incomplete timing (1 test). All 22 checkpoint tests pass (6 existing + 16 new)."
     },
     {
       "id": "US-006",

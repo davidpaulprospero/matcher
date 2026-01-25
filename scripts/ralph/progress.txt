@@ -899,3 +899,31 @@ Progress: 2/12 stories complete
 
 Progress: 4/12 stories complete
 
+## Iteration 5 - [US-005] Add checkpoint load time logging
+- Added `import time` to src/checkpoint.py
+- Added timing measurement to `CheckpointManager.load()`:
+  - Uses `time.perf_counter()` for high-resolution timing
+  - Records start time at method entry
+  - Logs elapsed time at INFO level after successful load
+  - Format: "Checkpoint loaded in X.Xms"
+  - No timing logged when checkpoint doesn't exist (returns early)
+- Added timing measurement to `CheckpointManager._atomic_save()`:
+  - Uses `time.perf_counter()` for high-resolution timing
+  - Records start time at method entry
+  - Logs elapsed time at DEBUG level after successful save
+  - Format: "Checkpoint saved in X.Xms"
+- Created tests/test_checkpoint_timing.py with 16 tests across 6 test classes:
+  - TestLoadTimingLogged (5 tests): timing message, milliseconds format, INFO level, no timing when missing, positive value
+  - TestSaveTimingLogged (5 tests): timing message, milliseconds format, DEBUG level, via save(), positive value
+  - TestTimingFormat (2 tests): load format, save format
+  - TestTimingWithLargeCheckpoint (2 tests): large load, large save
+  - TestIntermediateSaveTiming (1 test): save_intermediate timing
+  - TestMarkStageIncompleteTiming (1 test): mark_stage_incomplete timing
+- All 22 checkpoint tests pass (6 existing + 16 new)
+- Files modified:
+  - src/checkpoint.py (added time import, timing to load() and _atomic_save())
+- Files created:
+  - tests/test_checkpoint_timing.py (new file, 16 tests)
+
+Progress: 5/12 stories complete
+
