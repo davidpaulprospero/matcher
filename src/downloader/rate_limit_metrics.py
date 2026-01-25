@@ -11,12 +11,76 @@ Aggregates metrics from various rate-limiting subsystems:
 - Download speed tracking
 
 Implements US-010: Add rate limiting metrics to pipeline report.
+Implements US-012: Add rate limit health dashboard data export.
+
+JSON Export Schema (export_to_json):
+    {
+        "schema_version": "1.0",
+        "export_timestamp": "2026-01-25T12:34:56.789Z",
+        "session": {
+            "session_count": 1,
+            "session_start_time": "2026-01-25T10:00:00Z",
+            "session_end_time": "2026-01-25T12:34:56Z"
+        },
+        "downloads": {
+            "total": 100,
+            "successful": 95,
+            "failed": 5,
+            "success_rate_percent": 95.0
+        },
+        "retries": {
+            "total_attempts": 50,
+            "avg_per_download": 0.5,
+            "max_reached_count": 3,
+            "by_error_type": {"timeout": 20, "rate_limit": 15, "network": 10, "transient": 5}
+        },
+        "rate_limiting": {
+            "total_events": 15,
+            "percentage_of_downloads": 15.0,
+            "by_tier": {"short": 5, "medium": 5, "long": 5},
+            "by_keyword": {"sunset": 10, "ocean": 5},
+            "backoff": {
+                "total_attempts": 10,
+                "total_seconds": 120.5,
+                "by_severity": {"low": 3, "medium": 5, "high": 2}
+            }
+        },
+        "escalation": {
+            "cookie_rotations": 3,
+            "vpn_switches": 1
+        },
+        "circuit_breaker": {
+            "total_trips": 2,
+            "total_pause_seconds": 120.0
+        },
+        "batch_retry": {
+            "total_passes": 2,
+            "total_recovered": 10,
+            "total_failed": 2
+        },
+        "network": {
+            "speed_samples": 50,
+            "avg_speed_mbps": 5.5,
+            "timeout_extensions": 3
+        },
+        "config_snapshot": {
+            "rate_limit": {...},
+            "circuit_breaker": {...},
+            "batch_retry": {...},
+            "speed_tracking": {...},
+            "cookie_rotation": {...},
+            "vpn": {...}
+        },
+        "recommendations": ["Consider increasing initial_backoff_seconds...", ...]
+    }
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -560,3 +624,202 @@ class RateLimitMetrics:
         self.session_start_time = None
         self.session_end_time = None
         self.session_count = 1  # Reset to 1 for new session (US-006)
+
+    def export_to_json(self, config: Any = None) -> dict:
+        """Export metrics to structured JSON format for external monitoring tools.
+
+        Creates a well-structured export with all metrics, timestamps, session info,
+        active config values, and recommendations. The schema is documented in the
+        module docstring.
+
+        Args:
+            config: Optional Config object to include rate-limiting config snapshot.
+                    If provided, exports download.rate_limit, download.circuit_breaker,
+                    download.batch_retry, download.speed_tracking, download.cookie_rotation,
+                    and download.vpn config sections.
+
+        Returns:
+            Dict with structured metrics data ready for JSON serialization.
+            See module docstring for complete schema documentation.
+
+        Example:
+            >>> metrics = RateLimitMetrics()
+            >>> metrics.record_download_attempt()
+            >>> metrics.record_download_success()
+            >>> data = metrics.export_to_json(config)
+            >>> with open('metrics.json', 'w') as f:
+            ...     json.dump(data, f, indent=2)
+        """
+        export_timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Build structured export
+        export_data = {
+            "schema_version": "1.0",
+            "export_timestamp": export_timestamp,
+
+            # Session metadata
+            "session": {
+                "session_count": self.session_count,
+                "session_start_time": self.session_start_time,
+                "session_end_time": self.session_end_time or export_timestamp,
+            },
+
+            # Download statistics
+            "downloads": {
+                "total": self.total_downloads,
+                "successful": self.successful_downloads,
+                "failed": self.failed_downloads,
+                "success_rate_percent": self.success_rate,
+            },
+
+            # Retry statistics
+            "retries": {
+                "total_attempts": self.retry_attempts,
+                "avg_per_download": self.avg_retry_count,
+                "max_reached_count": self.max_retry_count_reached,
+                "by_error_type": dict(self.retries_by_error_type),
+            },
+
+            # Rate limiting statistics
+            "rate_limiting": {
+                "total_events": self.rate_limit_events,
+                "percentage_of_downloads": self.rate_limit_percentage,
+                "by_tier": dict(self.tier_rate_limit_events),
+                "by_keyword": dict(self.keyword_rate_limit_events),
+                "backoff": {
+                    "total_attempts": self.backoff_attempts,
+                    "total_seconds": round(self.time_spent_backing_off, 2),
+                    "by_severity": dict(self.backoff_events_by_severity),
+                },
+            },
+
+            # Escalation statistics
+            "escalation": {
+                "cookie_rotations": self.cookie_rotations,
+                "vpn_switches": self.vpn_switches,
+            },
+
+            # Circuit breaker statistics
+            "circuit_breaker": {
+                "total_trips": self.circuit_breaker_trips,
+                "total_pause_seconds": round(self.circuit_breaker_pause_seconds, 2),
+            },
+
+            # Batch retry statistics
+            "batch_retry": {
+                "total_passes": self.batch_retry_passes,
+                "total_recovered": self.batch_retry_successes,
+                "total_failed": self.batch_retry_failures,
+            },
+
+            # Network statistics
+            "network": {
+                "speed_samples": self.speed_samples,
+                "avg_speed_mbps": round(self.avg_speed_mbps, 3),
+                "timeout_extensions": self.timeout_extensions,
+            },
+
+            # Recommendations
+            "recommendations": self.get_config_recommendations(),
+        }
+
+        # Include config snapshot if provided
+        if config is not None:
+            config_snapshot = {}
+            download_config = getattr(config, 'download', None)
+
+            if download_config:
+                # Rate limit config
+                rate_limit = getattr(download_config, 'rate_limit', None)
+                if rate_limit:
+                    config_snapshot["rate_limit"] = {
+                        "initial_backoff_seconds": getattr(rate_limit, 'initial_backoff_seconds', 5.0),
+                        "max_backoff_before_rotate": getattr(rate_limit, 'max_backoff_before_rotate', 60.0),
+                        "backoff_multiplier": getattr(rate_limit, 'backoff_multiplier', 2.0),
+                        "per_tier_isolation": getattr(rate_limit, 'per_tier_isolation', True),
+                        "share_budget_across_keywords": getattr(rate_limit, 'share_budget_across_keywords', True),
+                        "max_backoff_budget": getattr(rate_limit, 'max_backoff_budget', 300.0),
+                        "adaptive_multiplier": getattr(rate_limit, 'adaptive_multiplier', True),
+                    }
+
+                # Circuit breaker config
+                circuit_breaker = getattr(download_config, 'circuit_breaker', None)
+                if circuit_breaker:
+                    config_snapshot["circuit_breaker"] = {
+                        "enabled": getattr(circuit_breaker, 'enabled', True),
+                        "consecutive_failures_threshold": getattr(circuit_breaker, 'consecutive_failures_threshold', 5),
+                        "pause_seconds": getattr(circuit_breaker, 'pause_seconds', 60.0),
+                        "block_download_retries": getattr(circuit_breaker, 'block_download_retries', True),
+                    }
+
+                # Batch retry config
+                batch_retry = getattr(download_config, 'batch_retry', None)
+                if batch_retry:
+                    config_snapshot["batch_retry"] = {
+                        "enabled": getattr(batch_retry, 'enabled', True),
+                        "delay_seconds": getattr(batch_retry, 'delay_seconds', 120.0),
+                        "max_passes": getattr(batch_retry, 'max_passes', 2),
+                        "respect_circuit_breaker": getattr(batch_retry, 'respect_circuit_breaker', True),
+                        "wait_for_cookie_cooldown": getattr(batch_retry, 'wait_for_cookie_cooldown', True),
+                    }
+
+                # Speed tracking config
+                speed_tracking = getattr(download_config, 'speed_tracking', None)
+                if speed_tracking:
+                    config_snapshot["speed_tracking"] = {
+                        "enabled": getattr(speed_tracking, 'enabled', True),
+                        "window_size": getattr(speed_tracking, 'window_size', 5),
+                        "min_speed_mbps": getattr(speed_tracking, 'min_speed_mbps', 1.0),
+                        "max_timeout_multiplier": getattr(speed_tracking, 'max_timeout_multiplier', 2.0),
+                        "rate_limit_signal_threshold": getattr(speed_tracking, 'rate_limit_signal_threshold', 0.1),
+                        "consecutive_slow_samples": getattr(speed_tracking, 'consecutive_slow_samples', 3),
+                    }
+
+                # Cookie rotation config
+                cookie_rotation = getattr(download_config, 'cookie_rotation', None)
+                if cookie_rotation:
+                    config_snapshot["cookie_rotation"] = {
+                        "enabled": getattr(cookie_rotation, 'enabled', False),
+                        "rotation_strategy": getattr(cookie_rotation, 'rotation_strategy', 'on_error'),
+                        "cooldown_seconds": getattr(cookie_rotation, 'cooldown_seconds', 300),
+                        "max_rotations_per_session": getattr(cookie_rotation, 'max_rotations_per_session', 0),
+                    }
+
+                # VPN config
+                vpn = getattr(download_config, 'vpn', None)
+                if vpn:
+                    config_snapshot["vpn"] = {
+                        "enabled": getattr(vpn, 'enabled', False),
+                        "rotate_on_rate_limit": getattr(vpn, 'rotate_on_rate_limit', True),
+                        "switch_delay_seconds": getattr(vpn, 'switch_delay_seconds', 10),
+                        "max_switches_per_session": getattr(vpn, 'max_switches_per_session', 10),
+                        "verify_connection": getattr(vpn, 'verify_connection', True),
+                    }
+
+            if config_snapshot:
+                export_data["config_snapshot"] = config_snapshot
+
+        return export_data
+
+    def export_to_json_file(self, path: str, config: Any = None) -> None:
+        """Export metrics to a JSON file.
+
+        Convenience method that calls export_to_json() and writes to a file.
+
+        Args:
+            path: File path to write JSON to.
+            config: Optional Config object to include in export.
+
+        Raises:
+            OSError: If file cannot be written.
+        """
+        from pathlib import Path as PathLib
+        export_data = self.export_to_json(config)
+
+        # Ensure parent directory exists
+        PathLib(path).parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"Exported rate limit metrics to {path}")

@@ -141,4 +141,11 @@ Examples:
         help='Force re-download entity images (ignore local cache)'
     )
 
+    parser.add_argument(
+        '--export-metrics',
+        type=str,
+        metavar='PATH',
+        help='Export rate limit metrics to JSON file after pipeline (e.g., metrics.json)'
+    )
+
     return parser.parse_args()
