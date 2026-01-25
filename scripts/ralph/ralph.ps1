@@ -516,11 +516,11 @@ Start by reading the config and prompt files, then generate the PRD.
     # Get Claude path
     $claudePath = Get-ClaudePath
 
-    # Build arguments
+    # Build arguments - FLAGS FIRST, then prompt LAST
+    # Claude CLI expects: claude [flags] "prompt"
     $claudeArgs = @(
         "--print",
-        "--dangerously-skip-permissions",
-        $prompt
+        "--dangerously-skip-permissions"
     )
 
     # Always allow tools for PRD generation (needs write access to prd.json)
@@ -529,6 +529,9 @@ Start by reading the config and prompt files, then generate the PRD.
         $claudeArgs += "--allowedTools"
         $claudeArgs += "Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
+
+    # Prompt must be LAST (positional argument)
+    $claudeArgs += $prompt
 
     Write-Host "  Invoking Claude..." -ForegroundColor Cyan
     Write-Host "  Prompt: Focus on $FocusAreaId" -ForegroundColor DarkGray
