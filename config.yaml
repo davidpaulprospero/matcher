@@ -926,6 +926,10 @@ download:
     initial_backoff_seconds: 5.0   # Initial delay on first rate limit error
     max_backoff_before_rotate: 60.0  # Max cumulative delay before rotating cookie
     backoff_multiplier: 2.0        # Exponential backoff multiplier
+    # Cross-session cooldown: minutes to wait before assuming rate limit cleared
+    # If resuming within this period, start with recovery mode (longer delays,
+    # faster escalation to cookie/VPN rotation)
+    resume_cooldown_minutes: 15.0
 
   # VPN integration: switch VPN servers when cookies are exhausted
   # Requires a VPN client with CLI support (NordVPN, ExpressVPN, Mullvad, etc.)
@@ -967,6 +971,21 @@ download:
     enabled: true                       # Enable circuit breaker
     consecutive_failures_threshold: 5   # Failures before tripping (default: 5)
     pause_seconds: 60.0                 # Seconds to pause after tripping (default: 60)
+
+  # Batch retry queue for rate-limited videos
+  # When rate limiting affects a batch, collect failed videos and retry them
+  # together after a delay. More effective than individual retries because it
+  # allows the rate limit window to pass before attempting the batch.
+  #
+  # How it works:
+  #   1. Video fails due to rate limit → added to retry queue
+  #   2. After batch completes, wait delay_seconds
+  #   3. Retry all queued videos together (pass 1)
+  #   4. If still failing, wait and retry again (up to max_passes)
+  batch_retry:
+    enabled: true                       # Enable batch retry queue
+    delay_seconds: 120.0                # Delay before retry (default: 120s = 2 min)
+    max_passes: 2                       # Maximum retry passes (default: 2)
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect

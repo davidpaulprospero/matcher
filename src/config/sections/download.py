@@ -19,6 +19,7 @@ __all__ = [
     'RateLimitConfig',
     'SpeedTrackingConfig',
     'CircuitBreakerConfig',
+    'BatchRetryConfig',
     'VPNConfig',
     'DownloadConfig',
     'DownloadingConfig',
@@ -263,6 +264,11 @@ class RateLimitConfig:
       2nd rate limit: wait 10s
       3rd rate limit: wait 20s
       4th rate limit: wait 25s (capped at 60s total, rotate cookie)
+
+    Cross-session cooldown:
+      Rate limit events are saved to checkpoint with timestamp. On resume,
+      if last rate limit was within cooldown period, the session starts
+      with aggressive recovery mode (longer delays, faster escalation).
     """
     # Initial backoff delay on first rate limit error (seconds)
     initial_backoff_seconds: float = 5.0
@@ -273,6 +279,10 @@ class RateLimitConfig:
 
     # Backoff multiplier (exponential growth)
     backoff_multiplier: float = 2.0
+
+    # Cross-session cooldown: minutes to wait before assuming rate limit cleared
+    # If resuming within this period, start with recovery mode
+    resume_cooldown_minutes: float = 15.0
 
 
 @dataclass
@@ -336,6 +346,33 @@ class CircuitBreakerConfig:
 
     # Duration to pause after circuit trips (seconds)
     pause_seconds: float = 60.0
+
+
+@dataclass
+class BatchRetryConfig:
+    """Batch-level retry queue for rate-limited videos.
+
+    When rate limiting affects multiple videos in a batch, collect them
+    and retry the entire batch after a delay. This is more effective than
+    individual retries because it allows the rate limit window to pass.
+
+    Example with defaults:
+      - Video fails due to rate limit → added to retry queue
+      - After batch completes, wait 120s
+      - Retry all queued videos together (pass 1)
+      - If still failing, wait and retry again (pass 2)
+      - After 2 passes, give up on remaining failures
+    """
+    # Enable/disable batch retry queue
+    enabled: bool = True
+
+    # Delay before processing retry queue (seconds)
+    # Should be long enough for rate limit window to pass
+    delay_seconds: float = 120.0
+
+    # Maximum retry passes per download session
+    # After this many batch retries, give up on remaining failures
+    max_passes: int = 2
 
 
 @dataclass
@@ -472,6 +509,9 @@ class DownloadConfig:
     # Circuit breaker: pause searches after consecutive failures
     circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
 
+    # Batch retry: collect rate-limited videos and retry after delay
+    batch_retry: BatchRetryConfig = field(default_factory=BatchRetryConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -508,6 +548,8 @@ class DownloadConfig:
             self.speed_tracking = SpeedTrackingConfig(**self.speed_tracking)
         if isinstance(self.circuit_breaker, dict):
             self.circuit_breaker = CircuitBreakerConfig(**self.circuit_breaker)
+        if isinstance(self.batch_retry, dict):
+            self.batch_retry = BatchRetryConfig(**self.batch_retry)
 
 
 @dataclass
