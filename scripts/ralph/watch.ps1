@@ -274,7 +274,7 @@ while ($true) {
                 $hasRetries = $null -ne $sessionMetrics[0].PSObject.Properties['retry_count']
                 $hasHour = $null -ne $sessionMetrics[0].PSObject.Properties['hour_of_day']
 
-                # Token Usage (Cost Tracking)
+                # Phase 4 - Task 4.1: Cost Attribution Dashboard
                 if ($hasTokens) {
                     $tokensWithValues = @($sessionMetrics | Where-Object { $_.tokens_used -and $_.tokens_used -ne '' })
                     if ($tokensWithValues.Count -gt 0) {
@@ -282,14 +282,91 @@ while ($true) {
                         $avgTokens = [math]::Round(($tokensWithValues | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Average).Average)
                         $estimatedCost = [math]::Round($totalTokens * 0.000003, 2)  # ~$3/1M tokens
 
-                        Write-Host "  COST:" -ForegroundColor Cyan
+                        Write-Host "  COST ATTRIBUTION:" -ForegroundColor Cyan
                         Write-Host "    Total tokens: $($totalTokens.ToString('N0'))" -ForegroundColor White
                         Write-Host "    Avg/iteration: $($avgTokens.ToString('N0'))" -ForegroundColor White
-                        $costColor = if ($estimatedCost -lt 1) { 'Green' } else { 'Yellow' }
-                        Write-Host "    Est. cost: `$$estimatedCost" -ForegroundColor $costColor
+                        $costColor = if ($estimatedCost -lt 1) { 'Green' } elseif ($estimatedCost -lt 5) { 'Yellow' } else { 'Red' }
+                        Write-Host "    Est. total: `$$estimatedCost" -ForegroundColor $costColor
+
+                        # Cost breakdown by focus area
+                        $focusCosts = $tokensWithValues | Group-Object focus_area | ForEach-Object {
+                            $fTokens = ($_.Group | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Sum).Sum
+                            $fCost = [math]::Round($fTokens * 0.000003, 3)
+                            $fPct = if ($totalTokens -gt 0) { [math]::Round(($fTokens / $totalTokens) * 100) } else { 0 }
+                            @{ Name = $_.Name; Cost = $fCost; Pct = $fPct }
+                        } | Sort-Object { $_.Cost } -Descending
+
+                        if ($focusCosts.Count -gt 0) {
+                            Write-Host "    By Focus Area:" -ForegroundColor DarkGray
+                            foreach ($fc in $focusCosts | Select-Object -First 4) {
+                                Write-Host "      $($fc.Name): `$$($fc.Cost) ($($fc.Pct)%)" -ForegroundColor Gray
+                            }
+                        }
+
+                        # Cost breakdown by story (top 5)
+                        $storyCosts = $tokensWithValues | Group-Object story_id | ForEach-Object {
+                            $sTokens = ($_.Group | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Sum).Sum
+                            $sCost = [math]::Round($sTokens * 0.000003, 3)
+                            @{ Name = $_.Name; Cost = $sCost }
+                        } | Sort-Object { $_.Cost } -Descending | Select-Object -First 5
+
+                        if ($storyCosts.Count -gt 0) {
+                            Write-Host "    By Story (top 5):" -ForegroundColor DarkGray
+                            foreach ($sc in $storyCosts) {
+                                Write-Host "      $($sc.Name): `$$($sc.Cost)" -ForegroundColor Gray
+                            }
+                        }
                         Write-Host ""
                     }
                 }
+
+                # Phase 4 - Task 4.2: Anomaly Detection
+                Write-Host "  ANOMALY CHECK:" -ForegroundColor Cyan
+                $anomalies = @()
+
+                # Duration anomaly
+                $durations = @($sessionMetrics | Where-Object { $_.duration_min -and $_.duration_min -ne '' } | ForEach-Object { [double]$_.duration_min })
+                if ($durations.Count -gt 2) {
+                    $avgDur = ($durations | Measure-Object -Average).Average
+                    $maxDur = ($durations | Measure-Object -Maximum).Maximum
+                    if ($maxDur -gt ($avgDur * 3) -and $avgDur -gt 0) {
+                        $anomalies += "Duration spike: max $([math]::Round($maxDur, 1)) min (avg $([math]::Round($avgDur, 1)) min)"
+                    }
+                }
+
+                # Error rate anomaly
+                $lastFive = @($sessionMetrics | Select-Object -Last 5)
+                if ($lastFive.Count -ge 5) {
+                    $recentFailures = @($lastFive | Where-Object { $_.success -eq 'false' }).Count
+                    if ($recentFailures -ge 4) {
+                        $anomalies += "High failure rate: $recentFailures/5 recent iterations failed"
+                    }
+                }
+
+                # Cost spike anomaly (if tokens available)
+                if ($hasTokens -and $tokensWithValues.Count -gt 5) {
+                    $recentTokens = $tokensWithValues | Select-Object -Last 3 | ForEach-Object { [int]$_.tokens_used }
+                    $recentAvg = ($recentTokens | Measure-Object -Average).Average
+                    $overallAvg = ($tokensWithValues | ForEach-Object { [int]$_.tokens_used } | Measure-Object -Average).Average
+                    if ($recentAvg -gt ($overallAvg * 2) -and $overallAvg -gt 0) {
+                        $anomalies += "Cost spike: recent avg $([math]::Round($recentAvg)) tokens (overall $([math]::Round($overallAvg)))"
+                    }
+                }
+
+                # Timeout trend
+                $recentTimeouts = @($sessionMetrics | Select-Object -Last 10 | Where-Object { $_.timeout -eq 'true' }).Count
+                if ($recentTimeouts -ge 3) {
+                    $anomalies += "Timeout trend: $recentTimeouts timeouts in last 10 iterations"
+                }
+
+                if ($anomalies.Count -gt 0) {
+                    foreach ($anomaly in $anomalies) {
+                        Write-Host "    ! $anomaly" -ForegroundColor Red
+                    }
+                } else {
+                    Write-Host "    No anomalies detected" -ForegroundColor Green
+                }
+                Write-Host ""
 
                 # Error Breakdown
                 if ($hasErrors) {
