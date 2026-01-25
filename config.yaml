@@ -912,6 +912,9 @@ download:
     # Live stream detection (US-002): skip caption fetch for live streams
     # Live streams can hang indefinitely during caption fetch
     skip_live_streams: true           # Skip caption fetch for live/was_live videos
+    # Coverage threshold (US-004): videos below this ratio are flagged for transcription fallback
+    # Coverage = sum of segment durations / video duration (0.0-1.0)
+    min_coverage_threshold: 0.5       # Flag videos with <50% caption coverage
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

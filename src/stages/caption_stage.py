@@ -90,8 +90,11 @@ class CaptionStage(Stage):
             timeout = getattr(caption_config, 'timeout', 30)
             max_workers = getattr(caption_config, 'max_parallel_fetches', 4)
 
+            # US-004: Get coverage threshold from config
+            min_coverage_threshold = getattr(caption_config, 'min_coverage_threshold', 0.5)
+
             print(f"  Caption settings: language={preferred_lang}, prefer_manual={prefer_manual}, "
-                  f"parallel_workers={max_workers}")
+                  f"parallel_workers={max_workers}, min_coverage={min_coverage_threshold:.0%}")
 
             # Initialize caption fetcher
             from ..caption_fetcher import (
@@ -109,6 +112,9 @@ class CaptionStage(Stage):
             # Initialize metrics tracker (US-011, US-001: thread-safe)
             metrics = CaptionMetrics()
 
+            # US-004: Get video durations for coverage calculation
+            video_durations = self._get_video_durations(state, config)
+
             # Check for already-fetched captions in checkpoint
             existing_captions = self._load_existing_captions(checkpoint)
             print(f"  Found {len(existing_captions)} captions in checkpoint")
@@ -125,12 +131,16 @@ class CaptionStage(Stage):
                     # US-011: Record as cache hit in metrics
                     cached_data = existing_captions[video_id]
                     if not cached_data.get('unavailable') and not cached_data.get('error'):
+                        # US-004: Get coverage ratio from cache or calculate if missing
+                        coverage_ratio = cached_data.get('coverage_ratio')
                         metrics.record_cache_hit(
                             video_id=video_id,
                             language=cached_data.get('language', 'en'),
                             quality=cached_data.get('caption_quality', 'medium'),
                             segment_count=cached_data.get('segment_count', 0),
-                            is_auto_generated=cached_data.get('is_auto_generated', False)
+                            is_auto_generated=cached_data.get('is_auto_generated', False),
+                            coverage_ratio=coverage_ratio,
+                            min_coverage_threshold=min_coverage_threshold,
                         )
 
             # IDs that need fetching (not in checkpoint)
@@ -191,6 +201,10 @@ class CaptionStage(Stage):
                 # Convert batch results to checkpoint format
                 for video_id, result in batch_results.items():
                     if isinstance(result, CaptionResult):
+                        # US-004: Calculate coverage ratio if video duration available
+                        video_duration = video_durations.get(video_id)
+                        coverage_ratio = result.calculate_coverage(video_duration)
+
                         # Success - convert to serializable dict
                         caption_results[video_id] = {
                             'video_id': video_id,
@@ -200,7 +214,20 @@ class CaptionStage(Stage):
                             'format_source': result.format_source,
                             'segment_count': len(result.segments),
                             'caption_quality': result.caption_quality,
+                            'video_duration': video_duration,  # US-004
+                            'coverage_ratio': coverage_ratio,  # US-004
                         }
+
+                        # US-004: Update metrics with coverage info
+                        # (fetch_captions_batch already recorded basic metrics, update coverage)
+                        if coverage_ratio is not None:
+                            coverage_level = metrics._classify_coverage(coverage_ratio)
+                            with metrics._lock:
+                                metrics.coverage_distribution[coverage_level] = (
+                                    metrics.coverage_distribution.get(coverage_level, 0) + 1
+                                )
+                                if coverage_ratio < min_coverage_threshold:
+                                    metrics.low_coverage_videos.append(video_id)
                     else:
                         # Error/unavailable - already in dict format
                         caption_results[video_id] = result
@@ -258,6 +285,22 @@ class CaptionStage(Stage):
                     warnings.append(f"{fail_count} videos require transcription fallback (unavailable)")
                 if skipped_live_count > 0:
                     warnings.append(f"{skipped_live_count} live streams require transcription fallback")
+
+            # US-004: Coverage warnings for low coverage videos
+            low_coverage_count = len(metrics.low_coverage_videos)
+            if low_coverage_count > 0:
+                print(f"    - Low coverage (<{min_coverage_threshold:.0%}): {low_coverage_count} videos")
+                warnings.append(f"{low_coverage_count} videos have low caption coverage (<{min_coverage_threshold:.0%})")
+                # Log first few low coverage videos for debugging
+                for vid in metrics.low_coverage_videos[:5]:
+                    result = caption_results.get(vid, {})
+                    coverage = result.get('coverage_ratio', 0.0)
+                    logger.warning(
+                        f"Low caption coverage for {vid}: {coverage:.1%} "
+                        f"(threshold: {min_coverage_threshold:.0%})"
+                    )
+                if low_coverage_count > 5:
+                    logger.warning(f"... and {low_coverage_count - 5} more videos with low coverage")
 
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
@@ -376,6 +419,36 @@ class CaptionStage(Stage):
                 video_ids.add(video_id)
 
         return list(video_ids)
+
+    def _get_video_durations(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, float]:
+        """Get video ID to duration mapping for coverage calculation (US-004).
+
+        Extracts durations from downloaded_videos and downloaded_audio.
+
+        Returns:
+            Dict mapping video_id to duration in seconds.
+        """
+        durations = {}
+
+        # From downloaded audio (audio-first mode)
+        for audio in state.downloaded_audio:
+            video_id = getattr(audio, 'video_id', None)
+            duration = getattr(audio, 'duration', 0.0)
+            if video_id and len(video_id) == 11 and duration > 0:
+                durations[video_id] = duration
+
+        # From downloaded videos
+        for video in state.downloaded_videos:
+            video_id = self._extract_video_id(video)
+            duration = getattr(video, 'duration', 0.0)
+            if video_id and len(video_id) == 11 and duration > 0:
+                durations[video_id] = duration
+
+        return durations
 
     def _extract_video_id(self, video) -> Optional[str]:
         """Extract YouTube video ID from a DownloadedVideo.

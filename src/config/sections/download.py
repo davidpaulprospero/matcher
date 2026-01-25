@@ -204,6 +204,12 @@ class CaptionFirstConfig:
     # Live streams can hang indefinitely during caption fetch
     skip_live_streams: bool = True
 
+    # Coverage threshold (US-004)
+    # Minimum coverage ratio (0.0-1.0) for caption quality
+    # Videos below this threshold are flagged for potential transcription fallback
+    # High coverage = better matching accuracy
+    min_coverage_threshold: float = 0.5
+
 
 @dataclass
 class AudioFirstConfig:
