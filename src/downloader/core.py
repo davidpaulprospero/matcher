@@ -38,6 +38,8 @@ from .title_filter import TitleFilter
 from .speech_screening import SpeechScreener
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
+from .cookie_rotator import CookieRotator
+from .vpn_manager import VPNManager
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,24 @@ class VideoDownloader:
             logger.info(f"Found cookies file: {self._cookies_path}")
         else:
             logger.warning("No cookies configured - YouTube downloads may fail!")
+
+        # Cookie rotation (for rate limit evasion)
+        cookie_rotation_config = getattr(self.download_config, 'cookie_rotation', None)
+        if cookie_rotation_config and getattr(cookie_rotation_config, 'enabled', False):
+            self.cookie_rotator = CookieRotator(cookie_rotation_config)
+            if self.cookie_rotator.is_enabled:
+                logger.info(f"Cookie rotation enabled with {self.cookie_rotator.available_cookies} cookies")
+        else:
+            self.cookie_rotator = None
+
+        # VPN manager (for IP rotation)
+        vpn_config = getattr(self.download_config, 'vpn', None)
+        if vpn_config and getattr(vpn_config, 'enabled', False):
+            self.vpn_manager = VPNManager(vpn_config)
+            if self.vpn_manager.is_enabled:
+                logger.info("VPN manager enabled for IP rotation")
+        else:
+            self.vpn_manager = None
 
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
@@ -314,10 +334,87 @@ class VideoDownloader:
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
         """Add cookie authentication to yt-dlp command."""
+        # Use cookie rotator if enabled, otherwise fall back to static cookie
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            current_cookie = self.cookie_rotator.get_current_cookie()
+            if current_cookie:
+                cmd.extend(['--cookies', current_cookie])
+                return
+
+        # Fallback to static cookie configuration
         if self._cookies_from_browser:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
+
+    def rotate_cookie_on_error(self, error_message: str) -> bool:
+        """
+        Attempt to rotate cookie based on error message.
+
+        Args:
+            error_message: Error string from yt-dlp
+
+        Returns:
+            True if cookie was rotated, False otherwise
+        """
+        if not self.cookie_rotator:
+            return False
+
+        if self.cookie_rotator.should_rotate(error_message):
+            new_cookie = self.cookie_rotator.rotate()
+            if new_cookie:
+                logger.info(f"Rotated to new cookie: {Path(new_cookie).name}")
+                return True
+            else:
+                logger.warning("Cookie rotation exhausted")
+
+        return False
+
+    def switch_vpn_on_error(self) -> bool:
+        """
+        Attempt to switch VPN server.
+
+        Should be called after cookie rotation is exhausted.
+
+        Returns:
+            True if VPN was switched, False otherwise
+        """
+        if not self.vpn_manager:
+            return False
+
+        if self.vpn_manager.can_switch():
+            success = self.vpn_manager.switch()
+            if success:
+                # Reset cookie rotator after VPN switch (new IP = fresh start)
+                if self.cookie_rotator:
+                    self.cookie_rotator.reset()
+                return True
+
+        return False
+
+    def handle_rate_limit_error(self, error_message: str) -> bool:
+        """
+        Handle rate limit or authentication error with rotation/VPN.
+
+        Tries in order:
+        1. Cookie rotation (if enabled and available)
+        2. VPN switch (if enabled and cookies exhausted)
+
+        Args:
+            error_message: Error string from yt-dlp
+
+        Returns:
+            True if recovery was attempted, False if no options left
+        """
+        # Try cookie rotation first
+        if self.rotate_cookie_on_error(error_message):
+            return True
+
+        # Try VPN switch if cookies exhausted
+        if self.switch_vpn_on_error():
+            return True
+
+        return False
 
     def download_all(
         self,
@@ -782,6 +879,53 @@ class VideoDownloader:
         # Combine already downloaded + newly downloaded
         return already_downloaded + newly_downloaded
 
+    # Error patterns for retry classification
+    # Transient errors: worth retrying with exponential backoff
+    TRANSIENT_ERROR_PATTERNS = [
+        '429',                  # Rate limit
+        'rate limit',
+        'too many requests',
+        'connection reset',
+        'connection refused',
+        'connection timed out',
+        'temporary failure',
+        'network unreachable',
+        'service unavailable',
+        'http error 503',
+        'http error 502',
+        'socket timeout',
+        'read timed out',
+    ]
+
+    # Permanent errors: fail immediately, no retry
+    PERMANENT_ERROR_PATTERNS = [
+        'video unavailable',
+        'private video',
+        'this video is private',
+        'age-restricted',
+        'sign in to confirm your age',
+        'video has been removed',
+        'this video is no longer available',
+        'copyright claim',
+        'blocked in your country',
+        'members-only',
+        'join this channel',
+        'premiere will begin',
+        'is not available',
+        'video is unavailable',
+        'account has been terminated',
+    ]
+
+    def _is_transient_error(self, stderr: str) -> bool:
+        """Check if error is transient (worth retrying)."""
+        stderr_lower = stderr.lower()
+        return any(pattern in stderr_lower for pattern in self.TRANSIENT_ERROR_PATTERNS)
+
+    def _is_permanent_error(self, stderr: str) -> bool:
+        """Check if error is permanent (should not retry)."""
+        stderr_lower = stderr.lower()
+        return any(pattern in stderr_lower for pattern in self.PERMANENT_ERROR_PATTERNS)
+
     def _run_download_cmd(
         self,
         cmd: List[str],
@@ -793,11 +937,13 @@ class VideoDownloader:
         timeout_override: int = None
     ) -> List[DownloadedVideo]:
         """
-        Execute download command and process results.
+        Execute download command and process results with exponential backoff retry.
 
         This is the most complex method in the core orchestrator (199 lines in original).
         Handles:
         - Subprocess execution with timeout
+        - Exponential backoff retry for transient errors
+        - Immediate failure for permanent errors
         - Cleanup of partial downloads
         - Transcoding if DaVinci mode enabled
         - Metadata extraction from info.json
@@ -841,158 +987,200 @@ class VideoDownloader:
             else:
                 download_timeout = getattr(self.download_config, 'download_timeout', 120)
 
+        # Get retry settings from config
+        max_retries = getattr(self.download_config, 'max_retries', 3)
+        retry_delay = getattr(self.download_config, 'retry_delay', 2.0)
+        retry_backoff = getattr(self.download_config, 'retry_backoff', 2.0)
+
         # Track timeout for retry logic
         self._last_download_timed_out = False
         process = None
+        last_stderr = ""
 
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
+        # Retry loop with exponential backoff
+        for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:
-                stdout, stderr = process.communicate(timeout=download_timeout)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
-                logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s")
-                self._last_download_timed_out = True
-                return []
-            finally:
-                # Ensure process is cleaned up
-                if process is not None and process.poll() is None:
-                    process.kill()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
-
-            # Only log actual errors
-            if stderr:
-                for line in stderr.strip().split('\n'):
-                    if line and 'WARNING' not in line and 'ERROR' in line:
-                        logger.warning(f"    yt-dlp: {line}")
-
-            # Find new files
-            existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
-            new_files = existing_after - existing_before
-
-            # Filter to video files
-            video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
-            new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
-
-            if new_videos:
-                logger.debug(f"    Downloaded {len(new_videos)} video(s)")
-
-            downloaded = []
-
-            for idx, video_file in enumerate(new_videos, 1):
-                video_path = keyword_dir / video_file
-
-                # Try to get metadata from info.json
-                info_file = video_path.with_suffix('.info.json')
-                metadata = {}
-                if info_file.exists():
-                    try:
-                        with open(info_file, 'r') as f:
-                            metadata = json.load(f)
-                    except (OSError, IOError, json.JSONDecodeError) as e:
-                        # JSON metadata is optional - log and continue without it
-                        logger.debug(f"Could not load metadata from {info_file}: {e}")
-
-                # Transcode for DaVinci if enabled AND necessary
-                final_path = video_path
-                if self.download_config.davinci_mode:
-                    needs_transcode, reason = self._needs_transcoding(str(video_path))
-
-                    if not needs_transcode:
-                        logger.debug(f"    No transcode needed: {reason}")
-                        final_path = video_path
-                    else:
-                        logger.debug(f"    Transcoding {video_file[:40]}...")
-                        transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
-                            str(video_path), str(video_path)
-                        )
-                        temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
-                        transcode_cmd[-1] = str(temp_output)
-
-                        transcode_process = None
-                        try:
-                            transcode_process = subprocess.Popen(
-                                transcode_cmd,
-                                stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE,
-                                text=True
-                            )
-
-                            try:
-                                _, stderr = transcode_process.communicate(timeout=download_timeout)
-                                if transcode_process.returncode != 0:
-                                    logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
-                            except subprocess.TimeoutExpired:
-                                transcode_process.kill()
-                                transcode_process.communicate()
-                                logger.warning(f"Transcode timeout for {video_file}")
-                            finally:
-                                if transcode_process is not None and transcode_process.poll() is None:
-                                    transcode_process.kill()
-                                    try:
-                                        transcode_process.wait(timeout=5)
-                                    except subprocess.TimeoutExpired:
-                                        pass
-
-                            if temp_output.exists() and temp_output.stat().st_size > 0:
-                                if self.download_config.delete_original:
-                                    video_path.unlink()
-                                final_path = temp_output.rename(temp_output.with_stem(
-                                    temp_output.stem.replace('_davinci', '')
-                                ))
-                                logger.info(f"    ↳ ✓ Transcode complete")
-                            else:
-                                logger.warning(f"    ↳ Transcode produced no output, using original")
-                                final_path = video_path
-                        except Exception as e:
-                            logger.warning(f"Transcode failed for {video_file}: {e}")
-                            final_path = video_path
-
-                # Sanitize filename for NLE compatibility
-                final_path = utils.sanitize_filename_for_nle(final_path)
-
-                # Create source record
-                source = DownloadedVideo(
-                    file=str(final_path.relative_to(output_dir)),
-                    url=metadata.get('webpage_url', metadata.get('url', 'Unknown')),
-                    title=metadata.get('title', video_file),
-                    channel=metadata.get('uploader', metadata.get('channel', 'Unknown')),
-                    upload_date=metadata.get('upload_date', 'Unknown'),
-                    duration=metadata.get('duration', 0),
-                    duration_tier=tier,
-                    keyword=keyword,
-                    download_date=datetime.now().strftime('%Y-%m-%d'),
-                    license=metadata.get('license', 'Unknown')
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
                 )
 
-                downloaded.append(source)
+                try:
+                    stdout, stderr = process.communicate(timeout=download_timeout)
+                    last_stderr = stderr
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
 
-                # Track source for inter-keyword diversity analysis
-                video_id = metadata.get('id', '')
-                if video_id:
-                    self._record_source_for_keyword(keyword, video_id)
+                    if attempt < max_retries:
+                        delay = retry_delay * (retry_backoff ** attempt)
+                        logger.info(f"Timeout downloading '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s - all {max_retries} retries exhausted")
+                        self._last_download_timed_out = True
+                        return []
+                finally:
+                    # Ensure process is cleaned up
+                    if process is not None and process.poll() is None:
+                        process.kill()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
 
-                # Clean up info.json
-                if info_file.exists():
-                    info_file.unlink()
+                # Check for errors in stderr
+                if stderr and process.returncode != 0:
+                    # Check for permanent errors - fail immediately
+                    if self._is_permanent_error(stderr):
+                        logger.debug(f"Permanent error for '{keyword}' ({tier}): {stderr[:200]}")
+                        return []
 
-            return downloaded
+                    # Check for transient errors - retry with backoff
+                    if self._is_transient_error(stderr) and attempt < max_retries:
+                        delay = retry_delay * (retry_backoff ** attempt)
+                        logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                        logger.debug(f"  Error: {stderr[:200]}")
+                        time.sleep(delay)
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error downloading '{keyword}' ({tier}): {e}")
-            return []
+                # Only log actual errors (not retried)
+                if stderr:
+                    for line in stderr.strip().split('\n'):
+                        if line and 'WARNING' not in line and 'ERROR' in line:
+                            logger.warning(f"    yt-dlp: {line}")
+
+                # Success or non-retryable error - break out of retry loop
+                break
+
+            except Exception as e:
+                # Handle unexpected exceptions with retry
+                if attempt < max_retries:
+                    delay = retry_delay * (retry_backoff ** attempt)
+                    logger.info(f"Error downloading '{keyword}' ({tier}): {e} - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                    time.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"Error downloading '{keyword}' ({tier}): {e} - all {max_retries} retries exhausted")
+                    return []
+
+        # After retry loop - process downloaded files
+        # Find new files
+        existing_after = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
+        new_files = existing_after - existing_before
+
+        # Filter to video files
+        video_extensions = {'.mp4', '.mkv', '.webm', '.avi', '.mov'}
+        new_videos = [f for f in new_files if Path(f).suffix.lower() in video_extensions]
+
+        if new_videos:
+            logger.debug(f"    Downloaded {len(new_videos)} video(s)")
+
+        downloaded = []
+
+        for idx, video_file in enumerate(new_videos, 1):
+            video_path = keyword_dir / video_file
+
+            # Try to get metadata from info.json
+            info_file = video_path.with_suffix('.info.json')
+            metadata = {}
+            if info_file.exists():
+                try:
+                    with open(info_file, 'r') as f:
+                        metadata = json.load(f)
+                except (OSError, IOError, json.JSONDecodeError) as e:
+                    # JSON metadata is optional - log and continue without it
+                    logger.debug(f"Could not load metadata from {info_file}: {e}")
+
+            # Transcode for DaVinci if enabled AND necessary
+            final_path = video_path
+            if self.download_config.davinci_mode:
+                needs_transcode, reason = self._needs_transcoding(str(video_path))
+
+                if not needs_transcode:
+                    logger.debug(f"    No transcode needed: {reason}")
+                    final_path = video_path
+                else:
+                    logger.debug(f"    Transcoding {video_file[:40]}...")
+                    transcode_cmd, output_path = self._get_ffmpeg_transcode_cmd(
+                        str(video_path), str(video_path)
+                    )
+                    temp_output = Path(output_path).with_stem(Path(output_path).stem + '_davinci')
+                    transcode_cmd[-1] = str(temp_output)
+
+                    transcode_process = None
+                    try:
+                        transcode_process = subprocess.Popen(
+                            transcode_cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+
+                        try:
+                            _, stderr = transcode_process.communicate(timeout=download_timeout)
+                            if transcode_process.returncode != 0:
+                                logger.warning(f"FFmpeg error: {stderr[-500:] if stderr else 'unknown'}")
+                        except subprocess.TimeoutExpired:
+                            transcode_process.kill()
+                            transcode_process.communicate()
+                            logger.warning(f"Transcode timeout for {video_file}")
+                        finally:
+                            if transcode_process is not None and transcode_process.poll() is None:
+                                transcode_process.kill()
+                                try:
+                                    transcode_process.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    pass
+
+                        if temp_output.exists() and temp_output.stat().st_size > 0:
+                            if self.download_config.delete_original:
+                                video_path.unlink()
+                            final_path = temp_output.rename(temp_output.with_stem(
+                                temp_output.stem.replace('_davinci', '')
+                            ))
+                            logger.info(f"    ↳ ✓ Transcode complete")
+                        else:
+                            logger.warning(f"    ↳ Transcode produced no output, using original")
+                            final_path = video_path
+                    except Exception as e:
+                        logger.warning(f"Transcode failed for {video_file}: {e}")
+                        final_path = video_path
+
+            # Sanitize filename for NLE compatibility
+            final_path = utils.sanitize_filename_for_nle(final_path)
+
+            # Create source record
+            source = DownloadedVideo(
+                file=str(final_path.relative_to(output_dir)),
+                url=metadata.get('webpage_url', metadata.get('url', 'Unknown')),
+                title=metadata.get('title', video_file),
+                channel=metadata.get('uploader', metadata.get('channel', 'Unknown')),
+                upload_date=metadata.get('upload_date', 'Unknown'),
+                duration=metadata.get('duration', 0),
+                duration_tier=tier,
+                keyword=keyword,
+                download_date=datetime.now().strftime('%Y-%m-%d'),
+                license=metadata.get('license', 'Unknown')
+            )
+
+            downloaded.append(source)
+
+            # Track source for inter-keyword diversity analysis
+            video_id = metadata.get('id', '')
+            if video_id:
+                self._record_source_for_keyword(keyword, video_id)
+
+            # Clean up info.json
+            if info_file.exists():
+                info_file.unlink()
+
+        return downloaded
 
     # =========================================================================
     # REPORTING METHODS

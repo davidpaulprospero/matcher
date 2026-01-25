@@ -44,6 +44,10 @@ def create_mock_config(tmp_path, **overrides):
     mock_config.download.per_keyword = {'short': 2, 'medium': 2, 'long': 2}
     mock_config.download.use_llm_filter = False
     mock_config.download.use_speech_screening = False
+    # Retry settings (added for US-001 exponential backoff)
+    mock_config.download.max_retries = 3
+    mock_config.download.retry_delay = 2.0
+    mock_config.download.retry_backoff = 2.0
     mock_config.llm = MagicMock()
     mock_config.llm.provider = 'gemini'
     mock_config.llm.model = 'gemini-pro'
@@ -423,10 +427,11 @@ class TestDownloadTimeout:
     """Test TimeoutExpired handling (lines 839-844)."""
 
     def test_timeout_expired_handling(self, tmp_path):
-        """Test handling of download timeout."""
+        """Test handling of download timeout after all retries exhausted."""
         from src.downloader.core import VideoDownloader
 
-        config = create_mock_config(tmp_path)
+        # Use max_retries=0 for simple timeout test (no retries)
+        config = create_mock_config(tmp_path, max_retries=0)
 
         with patch('src.downloader.core.CheckpointManager'):
             with patch('src.downloader.core.TranscodingManager'):
@@ -692,10 +697,11 @@ class TestGeneralException:
     """Test general exception handling (lines 972-974)."""
 
     def test_general_exception_in_run_download_cmd(self, tmp_path):
-        """Test handling of unexpected exceptions."""
+        """Test handling of unexpected exceptions after all retries exhausted."""
         from src.downloader.core import VideoDownloader
 
-        config = create_mock_config(tmp_path)
+        # Use max_retries=0 for simple exception test (no retries)
+        config = create_mock_config(tmp_path, max_retries=0)
 
         with patch('src.downloader.core.CheckpointManager'):
             with patch('src.downloader.core.TranscodingManager'):
