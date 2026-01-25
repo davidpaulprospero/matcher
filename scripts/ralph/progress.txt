@@ -1277,3 +1277,35 @@ Progress: 3/12 stories complete
 - Files created:
   - tests/test_topic_penalty_semantic.py (new file, 33 tests)
 
+Progress: 5/12 stories complete
+
+## Iteration 5 - [US-005] Add LLM reasoning quality validation
+- Added validate_llm_reasoning() function in src/matching/llm_providers.py:
+  - Takes reasoning, voiceover_text, optional video_text, and min_specific_references (default: 3)
+  - Returns ReasoningValidation dataclass with is_valid, specific_references, matched_keywords, warning_message
+  - Checks if reasoning mentions specific keywords from voiceover or video text
+  - Flags generic reasoning (like "good match", "topic match") with < 30 characters
+  - Logs warning when LLM provides generic or low-quality reasoning
+- Added GENERIC_REASONING_PHRASES constant with 17 common generic phrases
+- Implemented _extract_keywords() helper function:
+  - Extracts words >= 3 characters from text
+  - Filters out common stopwords (the, and, for, etc.)
+  - Normalizes to lowercase for matching
+- Added ReasoningValidation dataclass for structured return value
+- Created tests/test_llm_reasoning_validation.py with 46 tests across 10 test classes:
+  - TestValidateLLMReasoningFunction (5 tests): existence, callable, required/optional args
+  - TestReasoningValidationDataclass (6 tests): fields, defaults
+  - TestGenericReasoningDetection (5 tests): short generic phrases flagged
+  - TestSpecificReasoningValidation (4 tests): specific keywords validated
+  - TestWarningLogging (4 tests): caplog verification for warnings
+  - TestMinSpecificReferencesThreshold (3 tests): threshold customization
+  - TestExtractKeywordsHelper (6 tests): extraction, filtering, edge cases
+  - TestGenericPhrasesConstant (3 tests): constant structure
+  - TestEdgeCases (6 tests): None, whitespace, special chars, unicode, very long
+  - TestRealWorldExamples (4 tests): documentary, cooking, nature examples
+- All 46 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/matching/llm_providers.py (added validate_llm_reasoning, ReasoningValidation, GENERIC_REASONING_PHRASES, _extract_keywords)
+- Files created:
+  - tests/test_llm_reasoning_validation.py (new file, 46 tests)
+
