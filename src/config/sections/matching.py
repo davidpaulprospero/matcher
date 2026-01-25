@@ -114,6 +114,11 @@ class MatchingConfig:
     ambiguous_threshold: float = 0.6  # Use secondary LLM if confidence < this
     confidence_threshold: float = 0.5  # Legacy alias for min_confidence
 
+    # Adaptive threshold (adjusts skip_llm_threshold based on voiceover characteristics)
+    # Short voiceover (<20 chars): +0.05 threshold (harder to match, require higher confidence)
+    # Low candidate variance (<0.05): -0.05 threshold (clear winner, can accept lower)
+    adaptive_threshold_enabled: bool = True
+
     # Clip reuse prevention
     max_clip_reuse: int = 1
     reuse_penalty: float = 0.5

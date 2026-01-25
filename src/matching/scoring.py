@@ -7,15 +7,77 @@ Provides confidence adjustments for:
 - Topic-based penalties for chapter matching
 - B-roll footage boosts
 - Current project vs global cache scoring
+- Adaptive thresholds based on voiceover length and candidate variance
 """
 
 from typing import Tuple, List, Optional
 import logging
+import statistics
 
 from ..utils import SRTSegment
 from ..topic_extraction import compute_topic_penalty
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_adaptive_threshold(
+    base_threshold: float,
+    voiceover_text: str,
+    candidates: List[Tuple[SRTSegment, float]],
+    config=None
+) -> Tuple[float, str]:
+    """
+    Calculate an adaptive threshold based on voiceover length and candidate variance.
+
+    Adjustments:
+    - Short voiceover (<20 chars): +0.05 threshold (harder to match, need higher confidence)
+    - Low candidate variance (<0.05): -0.05 threshold (clear winner, can accept lower)
+
+    Args:
+        base_threshold: The base skip_llm_threshold from config
+        voiceover_text: The voiceover segment text
+        candidates: List of (video_segment, similarity) tuples
+        config: Optional config for additional settings
+
+    Returns:
+        Tuple of (adjusted_threshold, adjustment_reason)
+    """
+    adjustment = 0.0
+    reasons = []
+
+    # Adjustment 1: Voiceover length
+    # Short voiceover segments are harder to match accurately
+    # Require higher confidence to skip LLM for short text
+    vo_length = len(voiceover_text.strip()) if voiceover_text else 0
+    if vo_length < 20:
+        adjustment += 0.05
+        reasons.append(f"short_vo({vo_length}c):+0.05")
+
+    # Adjustment 2: Candidate variance
+    # Low variance means one candidate is clearly better than others
+    # Can accept lower threshold when there's a clear winner
+    if candidates and len(candidates) >= 2:
+        top_scores = [sim for _, sim in candidates[:5]]
+        try:
+            variance = statistics.stdev(top_scores) if len(top_scores) >= 2 else 0.0
+        except statistics.StatisticsError:
+            variance = 0.0
+
+        if variance < 0.05:
+            adjustment -= 0.05
+            reasons.append(f"low_var({variance:.3f}):-0.05")
+
+    # Calculate final threshold, clamped to valid range [0.5, 0.99]
+    adjusted_threshold = max(0.5, min(0.99, base_threshold + adjustment))
+
+    reason = "; ".join(reasons) if reasons else "no_adjustment"
+
+    logger.debug(
+        f"Adaptive threshold: base={base_threshold:.2f}, "
+        f"adjustment={adjustment:+.2f}, final={adjusted_threshold:.2f} ({reason})"
+    )
+
+    return adjusted_threshold, reason
 
 
 def apply_duration_penalty(confidence: float, speed_ratio: float, config) -> float:
