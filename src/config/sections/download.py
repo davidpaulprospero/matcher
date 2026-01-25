@@ -223,6 +223,13 @@ class CaptionFirstConfig:
     # The check uses --list-subs which is faster than downloading captions
     pre_check_availability: bool = True
 
+    # Timing validation epsilon (US-007 Sprint 6)
+    # Tolerance in milliseconds for floating-point precision at video duration boundary.
+    # Captions ending within this epsilon of video duration are treated as valid.
+    # Example: caption at 299.999s in 300s video is valid with 100ms epsilon.
+    # Set to 0 for exact matching (may cause false positives from float precision).
+    timing_epsilon_ms: float = 100.0
+
 
 @dataclass
 class AudioFirstConfig:
