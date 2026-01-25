@@ -289,6 +289,17 @@ class CaptionFirstConfig:
     # before applying the pattern to remaining videos in the batch.
     batch_precheck_sample_size: int = 5
 
+    # Prioritize fetch order by channel success rate (US-009 Sprint 7)
+    # When enabled, videos from channels with higher caption availability are
+    # fetched first. This improves average success rate early in the batch and
+    # helps identify problematic channels faster.
+    #
+    # Requires channel patterns to be populated from previous runs or batch pre-check.
+    # If no channel patterns are available, falls back to original video order.
+    #
+    # Example: Channels with 100% success fetched before channels with 50% success.
+    prioritize_by_channel: bool = True
+
     # Error pattern detection and early abort (US-007 Sprint 7)
     # When 30%+ of the first N videos fail with the same error, detect the pattern
     # and take action based on this setting. Useful for detecting geoblocking,

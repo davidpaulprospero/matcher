@@ -4695,3 +4695,76 @@ Network error pattern detection and early abort for caption batch fetching (US-0
 - Syntax checks pass for all modified files
 - main.py --help runs successfully
 
+
+## Iteration 9 - US-009: Track channel-level caption availability patterns
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+
+Implemented channel-level caption availability tracking to predict caption availability and prioritize fetch order for videos from known channels.
+
+1. **CaptionMetrics.channel_patterns Field (line 5359)**:
+   - Added `channel_patterns: Dict[str, 'ChannelCaptionPattern']` to track channel patterns
+   - Documents purpose: predicting availability, prioritizing fetch, reporting statistics
+
+2. **CaptionMetrics.set_channel_patterns() Method (line 5615)**:
+   - Thread-safe method to set channel patterns after batch_precheck_by_channel()
+   - Enables get_channel_statistics() to return meaningful data
+
+3. **CaptionMetrics.get_channel_statistics() Method (line 5639)**:
+   - Returns comprehensive statistics about channel availability:
+     - total_channels, total_videos_checked
+     - top_channels: List of (channel_id, success_rate, videos_checked) tuples
+     - bottom_channels: Same format for lowest success
+     - avg_success_rate, channels_with_100pct, channels_with_0pct
+   - Thread-safe with lock protection
+
+4. **CaptionMetrics.get_channel_summary() Method (line 5724)**:
+   - Returns formatted string for pipeline reports
+   - Format: "Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)"
+   - Truncates channel IDs to 10 chars, only shows bottom if <50% success
+
+5. **Updated summary() Method (line 6368)**:
+   - Now includes channel summary in output via get_channel_summary()
+
+6. **Updated to_dict/from_dict() Methods**:
+   - channel_patterns included in serialization for checkpoint persistence
+   - Uses ChannelCaptionPattern.to_dict/from_dict for nested serialization
+
+7. **prioritize_by_channel Config Option**:
+   - Added to CaptionFirstConfig (line 292 in download.py)
+   - Default: true (enabled)
+   - Added to config.yaml with documentation
+
+8. **CaptionFetcher._sort_videos_by_channel_success() (line 2389)**:
+   - Sorts videos so high-success channels are fetched first
+   - Unknown channels get 0.5 (neutral) priority
+   - Uses _video_channel_map for video->channel lookup
+
+9. **CaptionFetcher.set_video_channel_map() (line 2459)**:
+   - Sets video-to-channel mapping for fetch prioritization
+   - Called before fetch_captions_batch() by CaptionStage
+
+10. **Updated fetch_captions_batch() (line 2489)**:
+    - Applies channel-based sorting when prioritize_by_channel=true
+    - Uses metrics.channel_patterns for sorting decisions
+
+### Acceptance Criteria Met
+- [x] Add ChannelCaptionPattern dataclass (leveraged existing from US-006)
+- [x] Persist channel patterns in caption cache for cross-project learning (existing)
+- [x] Add CaptionMetrics.get_channel_statistics() returning top/bottom channels by success
+- [x] Sort fetch order: high-success channels first when config.prioritize_by_channel=true
+- [x] Print channel summary: 'Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)'
+- [x] Tests verify channel patterns update correctly after batch fetch
+
+### Files Modified
+- src/caption_fetcher.py (channel_patterns field, 4 new methods, serialization, summary update)
+- src/config/sections/download.py (prioritize_by_channel option)
+- config.yaml (config documentation)
+- tests/test_caption_fetcher.py (18 new tests in 4 test classes)
+
+### Verification
+- 18 new tests pass (TestChannelPatternTracking: 3, TestCaptionMetricsChannelStatistics: 8, TestChannelPrioritizedFetchOrder: 5, TestChannelSummaryInMetricsSummary: 2)
+- Syntax checks pass for all modified files
+- main.py --help runs successfully

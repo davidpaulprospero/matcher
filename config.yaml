@@ -979,6 +979,10 @@ download:
     batch_precheck_confidence: 0.9    # Min confidence to skip individual checks (0.0-1.0)
     batch_precheck_min_samples: 5     # Videos checked per channel before trusting pattern
     batch_precheck_sample_size: 5     # Videos to sample when building channel pattern
+    # Channel-based fetch prioritization (US-009 Sprint 7)
+    # When enabled, videos from channels with higher caption availability are fetched first.
+    # This improves average success rate early in the batch and identifies problematic channels faster.
+    prioritize_by_channel: true       # Fetch high-success channels first
     # Error pattern detection (US-007 Sprint 7)
     # When 30%+ of first N videos fail with the same error (e.g., 403 Forbidden),
     # detect the pattern and take action. Useful for early geoblocking detection.

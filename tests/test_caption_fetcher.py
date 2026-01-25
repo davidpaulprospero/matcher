@@ -6677,3 +6677,380 @@ class TestErrorPatternConfigOptions:
 
         config = CaptionFirstConfig(error_pattern_sample_size=20)
         assert config.error_pattern_sample_size == 20
+
+
+# ==============================================================================
+# US-009 Sprint 7: Channel-Level Caption Availability Pattern Tests
+# ==============================================================================
+
+
+class TestChannelPatternTracking:
+    """Tests for channel-level caption availability pattern tracking (US-009 Sprint 7)."""
+
+    def test_channel_pattern_dataclass_creation(self):
+        """Test creating a ChannelCaptionPattern."""
+        from src.caption_fetcher import ChannelCaptionPattern
+        import time
+
+        pattern = ChannelCaptionPattern(
+            channel_id="UCabc123",
+            videos_checked=10,
+            captions_found=9,
+            success_rate=0.9,
+            last_updated=time.time()
+        )
+
+        assert pattern.channel_id == "UCabc123"
+        assert pattern.videos_checked == 10
+        assert pattern.captions_found == 9
+        assert pattern.success_rate == 0.9
+
+    def test_channel_pattern_update(self):
+        """Test ChannelCaptionPattern.update() method."""
+        from src.caption_fetcher import ChannelCaptionPattern
+
+        pattern = ChannelCaptionPattern(channel_id="UCtest")
+
+        # Initial state
+        assert pattern.videos_checked == 0
+        assert pattern.captions_found == 0
+        assert pattern.success_rate == 0.0
+
+        # Update with success
+        pattern.update(has_captions=True)
+        assert pattern.videos_checked == 1
+        assert pattern.captions_found == 1
+        assert pattern.success_rate == 1.0
+
+        # Update with failure
+        pattern.update(has_captions=False)
+        assert pattern.videos_checked == 2
+        assert pattern.captions_found == 1
+        assert pattern.success_rate == 0.5
+
+    def test_channel_pattern_serialization(self):
+        """Test ChannelCaptionPattern to_dict/from_dict round-trip."""
+        from src.caption_fetcher import ChannelCaptionPattern
+        import time
+
+        original = ChannelCaptionPattern(
+            channel_id="UCtest",
+            videos_checked=5,
+            captions_found=4,
+            success_rate=0.8,
+            last_updated=time.time()
+        )
+
+        # Round-trip
+        data = original.to_dict()
+        restored = ChannelCaptionPattern.from_dict(data)
+
+        assert restored.channel_id == original.channel_id
+        assert restored.videos_checked == original.videos_checked
+        assert restored.captions_found == original.captions_found
+        assert restored.success_rate == original.success_rate
+
+
+class TestCaptionMetricsChannelStatistics:
+    """Tests for CaptionMetrics.get_channel_statistics() method (US-009 Sprint 7)."""
+
+    def test_get_channel_statistics_empty(self):
+        """Test get_channel_statistics with no channel patterns."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        stats = metrics.get_channel_statistics()
+
+        assert stats['total_channels'] == 0
+        assert stats['total_videos_checked'] == 0
+        assert stats['top_channels'] == []
+        assert stats['bottom_channels'] == []
+        assert stats['avg_success_rate'] == 0.0
+
+    def test_get_channel_statistics_single_channel(self):
+        """Test get_channel_statistics with one channel."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        metrics.channel_patterns = {
+            'UCabc': ChannelCaptionPattern('UCabc', 10, 8, 0.8),
+        }
+
+        stats = metrics.get_channel_statistics()
+
+        assert stats['total_channels'] == 1
+        assert stats['total_videos_checked'] == 10
+        assert len(stats['top_channels']) == 1
+        assert stats['top_channels'][0][0] == 'UCabc'
+        assert stats['top_channels'][0][1] == 0.8
+
+    def test_get_channel_statistics_multiple_channels(self):
+        """Test get_channel_statistics with multiple channels."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        metrics.channel_patterns = {
+            'UCbest': ChannelCaptionPattern('UCbest', 10, 10, 1.0),  # 100%
+            'UCgood': ChannelCaptionPattern('UCgood', 20, 19, 0.95),  # 95%
+            'UCmid': ChannelCaptionPattern('UCmid', 15, 8, 0.533),  # ~53%
+            'UCbad': ChannelCaptionPattern('UCbad', 10, 1, 0.1),  # 10%
+            'UCworst': ChannelCaptionPattern('UCworst', 5, 0, 0.0),  # 0%
+        }
+
+        stats = metrics.get_channel_statistics(top_n=3)
+
+        # Verify totals
+        assert stats['total_channels'] == 5
+        assert stats['total_videos_checked'] == 60  # 10+20+15+10+5
+
+        # Top 3 channels by success rate
+        top_ids = [t[0] for t in stats['top_channels']]
+        assert 'UCbest' in top_ids
+        assert 'UCgood' in top_ids
+
+        # Bottom 3 channels
+        bottom_ids = [b[0] for b in stats['bottom_channels']]
+        assert 'UCworst' in bottom_ids
+        assert 'UCbad' in bottom_ids
+
+        # Special counts
+        assert stats['channels_with_100pct'] == 1
+        assert stats['channels_with_0pct'] == 1
+
+    def test_set_channel_patterns(self):
+        """Test CaptionMetrics.set_channel_patterns() method."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        patterns = {
+            'UCa': ChannelCaptionPattern('UCa', 5, 5, 1.0),
+            'UCb': ChannelCaptionPattern('UCb', 5, 0, 0.0),
+        }
+
+        metrics.set_channel_patterns(patterns)
+
+        assert len(metrics.channel_patterns) == 2
+        assert 'UCa' in metrics.channel_patterns
+        assert 'UCb' in metrics.channel_patterns
+
+    def test_get_channel_summary_format(self):
+        """Test get_channel_summary returns formatted string."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        metrics.channel_patterns = {
+            'UCabc123456': ChannelCaptionPattern('UCabc123456', 10, 10, 1.0),
+            'UCdef789012': ChannelCaptionPattern('UCdef789012', 10, 0, 0.0),
+        }
+
+        summary = metrics.get_channel_summary()
+
+        # Should contain "Top channels" and truncated channel IDs with percentages
+        assert "Top channels:" in summary
+        assert "100%" in summary
+        # Bottom channels with <50% success
+        assert "Bottom:" in summary
+        assert "0%" in summary
+
+    def test_channel_patterns_in_to_dict(self):
+        """Test channel_patterns included in to_dict() serialization."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        metrics.channel_patterns = {
+            'UCtest': ChannelCaptionPattern('UCtest', 5, 4, 0.8),
+        }
+
+        data = metrics.to_dict()
+
+        assert 'channel_patterns' in data
+        assert 'UCtest' in data['channel_patterns']
+        assert data['channel_patterns']['UCtest']['videos_checked'] == 5
+
+    def test_channel_patterns_in_from_dict(self):
+        """Test channel_patterns restored from from_dict()."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        data = {
+            'fetch_attempts': 10,
+            'successes': 8,
+            'failures': 2,
+            'cache_hits': 0,
+            'channel_patterns': {
+                'UCtest': {
+                    'channel_id': 'UCtest',
+                    'videos_checked': 10,
+                    'captions_found': 9,
+                    'success_rate': 0.9,
+                    'last_updated': 1234567890.0,
+                }
+            }
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert len(metrics.channel_patterns) == 1
+        assert 'UCtest' in metrics.channel_patterns
+        assert metrics.channel_patterns['UCtest'].success_rate == 0.9
+
+    def test_channel_patterns_update_after_batch_fetch(self):
+        """Test channel patterns update correctly after batch fetch (acceptance criteria)."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        # Simulate batch fetch updating channel patterns
+        metrics = CaptionMetrics()
+
+        # Before: no patterns
+        assert len(metrics.channel_patterns) == 0
+
+        # After batch fetch: patterns populated
+        patterns = {
+            'UCchannel1': ChannelCaptionPattern('UCchannel1', 10, 9, 0.9),
+            'UCchannel2': ChannelCaptionPattern('UCchannel2', 5, 2, 0.4),
+            'UCchannel3': ChannelCaptionPattern('UCchannel3', 8, 8, 1.0),
+        }
+        metrics.set_channel_patterns(patterns)
+
+        # Verify statistics
+        stats = metrics.get_channel_statistics()
+        assert stats['total_channels'] == 3
+        assert stats['total_videos_checked'] == 23  # 10+5+8
+
+        # Top channel should be UCchannel3 (100%)
+        assert stats['top_channels'][0][0] == 'UCchannel3'
+        assert stats['top_channels'][0][1] == 1.0
+
+        # Bottom channel should be UCchannel2 (40%)
+        assert stats['bottom_channels'][0][0] == 'UCchannel2'
+        assert stats['bottom_channels'][0][1] == 0.4
+
+
+class TestChannelPrioritizedFetchOrder:
+    """Tests for channel-based fetch order prioritization (US-009 Sprint 7)."""
+
+    def test_sort_videos_by_channel_success_empty_patterns(self):
+        """Test sorting with no channel patterns returns original order."""
+        from src.caption_fetcher import CaptionFetcher
+        from unittest.mock import Mock
+
+        fetcher = CaptionFetcher(config=Mock())
+        video_ids = ['vid1', 'vid2', 'vid3']
+
+        result = fetcher._sort_videos_by_channel_success(video_ids, {})
+
+        assert result == video_ids
+
+    def test_sort_videos_by_channel_success_with_patterns(self):
+        """Test sorting prioritizes high-success channels."""
+        from src.caption_fetcher import CaptionFetcher, ChannelCaptionPattern
+        from unittest.mock import Mock
+
+        fetcher = CaptionFetcher(config=Mock())
+        # Set up video-channel mapping
+        fetcher._video_channel_map = {
+            'vid_bad': 'UCbad',
+            'vid_good': 'UCgood',
+            'vid_best': 'UCbest',
+        }
+
+        patterns = {
+            'UCbest': ChannelCaptionPattern('UCbest', 10, 10, 1.0),  # 100%
+            'UCgood': ChannelCaptionPattern('UCgood', 10, 8, 0.8),  # 80%
+            'UCbad': ChannelCaptionPattern('UCbad', 10, 2, 0.2),  # 20%
+        }
+
+        video_ids = ['vid_bad', 'vid_good', 'vid_best']
+        result = fetcher._sort_videos_by_channel_success(video_ids, patterns)
+
+        # Should be sorted: best (100%), good (80%), bad (20%)
+        assert result[0] == 'vid_best'
+        assert result[1] == 'vid_good'
+        assert result[2] == 'vid_bad'
+
+    def test_sort_videos_with_unknown_channels(self):
+        """Test sorting handles videos with unknown channels."""
+        from src.caption_fetcher import CaptionFetcher, ChannelCaptionPattern
+        from unittest.mock import Mock
+
+        fetcher = CaptionFetcher(config=Mock())
+        fetcher._video_channel_map = {
+            'vid_known': 'UCknown',
+            # vid_unknown not in map
+        }
+
+        patterns = {
+            'UCknown': ChannelCaptionPattern('UCknown', 10, 10, 1.0),  # 100%
+        }
+
+        video_ids = ['vid_unknown', 'vid_known']
+        result = fetcher._sort_videos_by_channel_success(video_ids, patterns)
+
+        # Known (100%) should come before unknown (0.5 default)
+        assert result[0] == 'vid_known'
+        assert result[1] == 'vid_unknown'
+
+    def test_set_video_channel_map(self):
+        """Test set_video_channel_map stores mapping correctly."""
+        from src.caption_fetcher import CaptionFetcher
+        from unittest.mock import Mock
+
+        fetcher = CaptionFetcher(config=Mock())
+
+        fetcher.set_video_channel_map({
+            'vid1': 'UCchannel1',
+            'vid2': 'UCchannel2',
+        })
+
+        assert fetcher._video_channel_map['vid1'] == 'UCchannel1'
+        assert fetcher._video_channel_map['vid2'] == 'UCchannel2'
+
+    def test_prioritize_by_channel_config_option(self):
+        """Test prioritize_by_channel config option exists."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Default should be True
+        config = CaptionFirstConfig()
+        assert config.prioritize_by_channel is True
+
+        # Can be disabled
+        config = CaptionFirstConfig(prioritize_by_channel=False)
+        assert config.prioritize_by_channel is False
+
+
+class TestChannelSummaryInMetricsSummary:
+    """Tests for channel summary in CaptionMetrics.summary() (US-009 Sprint 7)."""
+
+    def test_summary_includes_channel_info(self):
+        """Test summary() includes channel availability info."""
+        from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
+
+        metrics = CaptionMetrics()
+        metrics.fetch_attempts = 10
+        metrics.successes = 8
+        metrics.channel_patterns = {
+            'UCbest123456': ChannelCaptionPattern('UCbest123456', 5, 5, 1.0),
+            'UCworst12345': ChannelCaptionPattern('UCworst12345', 5, 0, 0.0),
+        }
+
+        summary = metrics.summary()
+
+        # Should contain channel info
+        assert "Top channels:" in summary
+        assert "100%" in summary
+        assert "Bottom:" in summary
+        assert "0%" in summary
+
+    def test_summary_without_channel_patterns(self):
+        """Test summary() works without channel patterns."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.fetch_attempts = 5
+        metrics.successes = 5
+
+        summary = metrics.summary()
+
+        # Should not crash, just no channel line
+        assert "Caption fetch:" in summary
+        # No channel line since no patterns
+        assert "Top channels:" not in summary
