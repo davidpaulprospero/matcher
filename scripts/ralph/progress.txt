@@ -1309,3 +1309,40 @@ Progress: 5/12 stories complete
 - Files created:
   - tests/test_llm_reasoning_validation.py (new file, 46 tests)
 
+Progress: 6/12 stories complete
+
+## Iteration 6 - [US-006] Add temporal coherence scoring for adjacent segments
+- Added compute_temporal_coherence() function to src/matching/scoring.py:
+  - Takes confidence, video_segment, previous_match, next_match, config
+  - Returns tuple of (adjusted_confidence, reason_string)
+  - Applies +0.05 boost for clips from same source video as adjacent
+  - Applies -0.05 penalty for jarring context switches (no topic/keyword overlap)
+  - Confidence clamped to [0.0, 1.0] range
+- Added _is_jarring_context_switch() helper function:
+  - Detects jarring switches when topics/keywords have NO overlap
+  - Case-insensitive comparison
+  - Requires both segments to have topics/keywords for comparison
+- Added config options to MatchingConfig in src/config/sections/matching.py:
+  - temporal_coherence_enabled: bool = True (enable/disable feature)
+  - temporal_coherence_same_source_boost: float = 0.05 (boost for same source)
+  - temporal_coherence_context_switch_penalty: float = 0.05 (penalty for jarring switch)
+- Updated config.yaml with temporal coherence settings and documentation
+- Created tests/test_temporal_coherence.py with 38 tests across 11 test classes:
+  - TestComputeTemporalCoherenceFunction (5 tests): function existence, signature, return types
+  - TestTemporalCoherenceConfig (4 tests): config defaults, disabled behavior
+  - TestSameSourceBoost (5 tests): prev/next/both boost, capping, different source
+  - TestContextSwitchPenalty (5 tests): jarring switch, overlap, no topics, floor
+  - TestIsJarringContextSwitch (5 tests): helper function behavior
+  - TestEdgeCases (6 tests): missing source, first/last segment, custom values
+  - TestMixedBoostAndPenalty (2 tests): combined scenarios
+  - TestReasonStringFormat (3 tests): reason string formatting
+  - TestRealConfigIntegration (2 tests): with real MatchingConfig
+  - TestLogging (1 test): debug logging behavior
+- All 38 new tests pass, all 18 sprint 4 verification tests pass
+- Files modified:
+  - src/matching/scoring.py (added compute_temporal_coherence, _is_jarring_context_switch)
+  - src/config/sections/matching.py (added 3 temporal coherence config fields)
+  - config.yaml (added temporal coherence section with documentation)
+- Files created:
+  - tests/test_temporal_coherence.py (new file, 38 tests)
+

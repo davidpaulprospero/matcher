@@ -260,3 +260,129 @@ def apply_duration_scoring(
     # Re-sort by adjusted similarity
     result.sort(key=lambda x: x[1], reverse=True)
     return result
+
+
+def compute_temporal_coherence(
+    confidence: float,
+    video_segment: SRTSegment,
+    previous_match: Optional[SRTSegment],
+    next_match: Optional[SRTSegment],
+    config
+) -> Tuple[float, str]:
+    """
+    Score based on visual/topic similarity to adjacent segment's matches.
+
+    Encourages temporal coherence in the timeline by applying:
+    - Small boost (+0.05 default) for clips from same source video as adjacent
+    - Small penalty (-0.05 default) for jarring context switches
+
+    A "jarring context switch" is detected when:
+    - Previous match has topics/keywords that are completely different
+    - Adjacent segments from same topic shouldn't jump to unrelated content
+
+    Args:
+        confidence: Original confidence score
+        video_segment: Video segment candidate being scored
+        previous_match: Previous segment's matched video (may be None for first segment)
+        next_match: Next segment's matched video (may be None for last segment or not yet matched)
+        config: Config with matching.temporal_coherence_* settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    mc = config.matching
+
+    # Check if temporal coherence is enabled
+    temporal_coherence_enabled = getattr(mc, 'temporal_coherence_enabled', True)
+    if not temporal_coherence_enabled:
+        return confidence, ""
+
+    same_source_boost = getattr(mc, 'temporal_coherence_same_source_boost', 0.05)
+    context_switch_penalty = getattr(mc, 'temporal_coherence_context_switch_penalty', 0.05)
+
+    # Get current video source file
+    current_source = getattr(video_segment, 'source_file', None)
+    if not current_source:
+        return confidence, ""
+
+    adjustment = 0.0
+    reasons = []
+
+    # Check previous match for same-source boost
+    if previous_match:
+        prev_source = getattr(previous_match, 'source_file', None)
+        if prev_source and prev_source == current_source:
+            adjustment += same_source_boost
+            reasons.append(f"same source as prev: +{same_source_boost:.2f}")
+        else:
+            # Check for jarring context switch using topics/keywords
+            is_jarring = _is_jarring_context_switch(video_segment, previous_match)
+            if is_jarring:
+                adjustment -= context_switch_penalty
+                reasons.append(f"context switch from prev: -{context_switch_penalty:.2f}")
+
+    # Check next match for same-source boost (if available)
+    if next_match:
+        next_source = getattr(next_match, 'source_file', None)
+        if next_source and next_source == current_source:
+            adjustment += same_source_boost
+            reasons.append(f"same source as next: +{same_source_boost:.2f}")
+        else:
+            # Check for jarring context switch
+            is_jarring = _is_jarring_context_switch(video_segment, next_match)
+            if is_jarring:
+                adjustment -= context_switch_penalty
+                reasons.append(f"context switch to next: -{context_switch_penalty:.2f}")
+
+    if adjustment == 0.0:
+        return confidence, ""
+
+    # Clamp to valid range
+    adjusted_confidence = max(0.0, min(1.0, confidence + adjustment))
+    reason = f"temporal coherence: {'; '.join(reasons)}"
+
+    logger.debug(f"Temporal coherence adjustment: {confidence:.2f} -> {adjusted_confidence:.2f}")
+
+    return adjusted_confidence, reason
+
+
+def _is_jarring_context_switch(
+    current_segment: SRTSegment,
+    adjacent_segment: SRTSegment
+) -> bool:
+    """
+    Detect if switching between segments would be jarring (no topic overlap).
+
+    A context switch is considered jarring when:
+    - Segments have topics/keywords and they share NO common keywords
+    - Both segments must have at least one topic/keyword for this check
+
+    Args:
+        current_segment: Current video segment candidate
+        adjacent_segment: Adjacent matched segment
+
+    Returns:
+        True if context switch is jarring, False otherwise
+    """
+    # Get topics/keywords from both segments
+    current_topics = set(getattr(current_segment, 'topics', []) or [])
+    current_keywords = set(getattr(current_segment, 'keywords', []) or [])
+    current_all = current_topics | current_keywords
+
+    adjacent_topics = set(getattr(adjacent_segment, 'topics', []) or [])
+    adjacent_keywords = set(getattr(adjacent_segment, 'keywords', []) or [])
+    adjacent_all = adjacent_topics | adjacent_keywords
+
+    # Both need content for comparison
+    if not current_all or not adjacent_all:
+        return False
+
+    # Normalize to lowercase for comparison
+    current_lower = {k.lower() for k in current_all if k}
+    adjacent_lower = {k.lower() for k in adjacent_all if k}
+
+    # Check for any overlap
+    overlap = current_lower & adjacent_lower
+
+    # Jarring = no overlap at all
+    return len(overlap) == 0

@@ -97,8 +97,8 @@
         "Add unit test in tests/test_temporal_coherence.py for coherence scoring"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added compute_temporal_coherence() function in src/matching/scoring.py. Added _is_jarring_context_switch() helper. Added temporal_coherence_enabled, temporal_coherence_same_source_boost, temporal_coherence_context_switch_penalty to MatchingConfig. Function applies +0.05 boost for same-source videos as adjacent, -0.05 penalty for jarring context switches (no topic/keyword overlap). Created 38 comprehensive tests in 11 test classes covering function signature, config options, same-source boost, context switch penalty, helper function, edge cases, mixed scenarios, reason format, real config integration, and logging. All tests pass."
     },
     {
       "id": "US-007",

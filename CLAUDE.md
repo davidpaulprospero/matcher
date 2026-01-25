@@ -490,11 +490,32 @@ missing = match_ids - segment_ids  # These won't have video in OTIO
 2. Limit matching to project's candidates only (loses global cache benefit)
 3. Add segment download for global cache videos (significant change)
 
-### Testing Checklist
+### Testing
+
+```bash
+# Quick verification (single test)
+pytest tests/test_cache.py::TestCacheStats::test_hit_rate -v
+
+# Fast unit tests only
+pytest tests/ -m fast -v
+
+# All tests (skips integration)
+pytest tests/ -v --tb=short
+
+# With coverage
+pytest tests/ --cov=src --cov-report=html
+
+# Run specific module tests
+pytest tests/test_llm_client/ tests/test_keyword_extractor/ -v
+```
+
+**Test markers:** `fast` (unit), `integration`, `stress`, `simulation`, `requires_api`, `requires_network`
+
+### Pre-commit Checklist
 
 - [ ] `python -m py_compile main.py`
 - [ ] `python -m py_compile src/config.py`
-- [ ] `pytest tests/ -v --tb=short -x` (quick verification)
+- [ ] `pytest tests/ -v --tb=short -x`
 - [ ] Config in both `config.py` AND `config.yaml`
 - [ ] Nested configs have `__post_init__`
 
@@ -513,71 +534,24 @@ missing = match_ids - segment_ids  # These won't have video in OTIO
 
 **Requires DaVinci Resolve Studio** (scripting is Studio-only).
 
-## Configuration
+## Ralph Loop (Autonomous Development)
 
-### Short Paths (E:/v, E:/i)
+Location: `scripts/ralph/` - Autonomous development assistant.
 
-```yaml
-download:
-  root_dir: "E:/v"    # Videos: E:/v/ProjectName/
-image_search:
-  root_dir: "E:/i"    # Images: E:/i/ProjectName/
+```powershell
+# Morning check-in (recommended)
+.\scripts\ralph\1-im-learnding.bat
+
+# Interview mode (give specific direction)
+.\scripts\ralph\7-hi-super-nintendo-chalmers.bat
+
+# Direct execution
+.\scripts\ralph\ralph.ps1 [-Queue] [-TrueAuto] [-Resume] [-FocusArea <area>]
 ```
 
-Avoids 260-char Windows limit, faster NLE imports.
+**Focus areas:** pipeline, testing, speed, quality, rate-limiting, otio, caption, config, client-learning, agents, compilation
 
-### Key Feature Configs
-
-```yaml
-# Audio-first: download audio only, then matched video segments
-download.audio_first.enabled: true
-
-# Caption-first: YouTube captions instead of Whisper
-download.caption_first.enabled: true
-
-# Self-healing
-healing.enabled: true
-healing.strategy: "conservative"  # aggressive, conservative, interactive, minimal
-```
-
-### PO Token Server (YouTube Auth)
-
-YouTube requires PO Tokens for subtitle/video access. The pipeline auto-starts the server when needed.
-
-**Setup (one-time):**
-```bash
-pip install bgutil-ytdlp-pot-provider
-git clone --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git ~/bgutil-ytdlp-pot-provider
-cd ~/bgutil-ytdlp-pot-provider/server && npm install && npx tsc
-```
-
-**Manual start:** `scripts\start_pot_server.bat` or `node ~/bgutil-ytdlp-pot-provider/server/build/main.js`
-
-The pipeline automatically checks and starts the PO Token server before running.
-
-## Caching
-
-| Cache | Location |
-|-------|----------|
-| Transcriptions | `.cache/transcriptions/` |
-| Embeddings | `.cache/embeddings/` |
-| Captions | `.cache/captions/` |
-| Global videos | `~/.matcher_global_cache/` |
-| Entity images | `~/.matcher_entity_cache/` |
-
-Clear with `--fresh` or `rm -rf .cache/`
-
-## Self-Healing Agents
-
-Location: `src/agents/` - Auto-recovery for pipeline errors.
-
-| Healer | Detects | Auto-Fix |
-|--------|---------|----------|
-| CheckpointHealer | Corrupt JSON | Restore backup |
-| APIHealer | Rate limits, auth | Backoff, switch provider |
-| DownloadHealer | YouTube 429 | Backoff, skip, alt format |
-| PathHealer | Windows 260 char | Switch to E:/v |
-| OTIOHealer | Timeline failures | Fix gaps, resolve paths |
+See `scripts/ralph/README.md` for full documentation.
 
 ## Git Conventions
 
@@ -587,15 +561,17 @@ Location: `src/agents/` - Auto-recovery for pipeline errors.
 | Fixes | `fix/issue-description` |
 | Commits | `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` |
 
+**Ignored files:** Most `*.md` files are gitignored. Exceptions: root-level docs (`CLAUDE.md`, `README.md`, etc.) and `docs/**/*.md`. If `git add` fails with "ignored by .gitignore", either:
+1. Add an exception to `.gitignore` (e.g., `!docs/plans/*.md`)
+2. Use `git add -f` if it's a one-off
+3. Place the file in an already-allowed location
+
 ## Session History
 
 | Date | Changes |
 |------|---------|
-| 2026-01-25 | Ralph startup improvements: Claude CLI path resolution, startup validation, -Resume flag, queue persistence, fast-fail detection |
-| 2026-01-24 | Global cache segment download: VideoCandidate creation for cache videos, strategy_matches remapping (V7+), duration clamping fix |
-| 2026-01-24 | Caption-first segment gap fix: 65% of matches from global cache lack segments. Rule 26 added |
-| 2026-01-24 | MatchResultWrapper voiceover timing fix: Was using video_start/end (wrong), now uses segment timing |
-| 2026-01-24 | V10 spam fix: Skip populating V10 track if <5 entity videos (prevents same video repeating) |
-| 2026-01-24 | Force DOWNLOAD_SEGMENTS re-run: Edit checkpoint.json, set last_completed_stage to ITERATIVE_MATCH |
+| 2026-01-25 | Ralph interview mode, metrics dashboard, queue advancement fix, CLI arg order fix, stdin piping for multiline prompts |
+| 2026-01-25 | Ralph startup improvements: Claude CLI path resolution, startup validation, -Resume flag |
+| 2026-01-24 | Global cache segment download, caption-first segment gap fix (Rule 26), V10 spam fix |
 
-*Older entries archived to [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
+*Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
