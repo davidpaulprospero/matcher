@@ -483,6 +483,7 @@ class MatchResult:
     strategy_matches: List[StrategyMatch] = field(default_factory=list)  # V7+
     has_gap: bool = False  # True if no good match found
     gap_reason: str = ""
+    confidence_variance: float = 0.0  # Std dev of top-N candidate similarities (high variance = uncertain match)
 
 
 @dataclass
