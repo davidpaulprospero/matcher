@@ -12,9 +12,11 @@ Providers:
 
 Utilities:
 - validate_llm_reasoning: Check if LLM reasoning is specific (not generic)
+- select_negative_sample: Select a negative sample from bottom candidates
 """
 
 import logging
+import random
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -169,6 +171,79 @@ def validate_llm_reasoning(
     )
 
 
+def select_negative_sample(
+    candidates: List[Tuple[SRTSegment, float]],
+    bottom_percentile: float = 0.25
+) -> Optional[Tuple[SRTSegment, float]]:
+    """
+    Select a negative sample from the bottom percentile of candidates by similarity.
+
+    Negative samples help LLMs calibrate confidence by showing what a poor match
+    looks like. This improves match quality by giving the LLM a reference point
+    for comparison.
+
+    Args:
+        candidates: List of (video_segment, similarity) tuples, sorted by similarity descending
+        bottom_percentile: Percentile threshold for "bottom" candidates (default: 0.25 = bottom 25%)
+
+    Returns:
+        A single (segment, similarity) tuple from the bottom percentile, or None if
+        insufficient candidates (need at least 4 to have meaningful bottom 25%)
+    """
+    if not candidates:
+        logger.debug("select_negative_sample: no candidates provided")
+        return None
+
+    # Need at least 4 candidates to have a meaningful bottom 25%
+    if len(candidates) < 4:
+        logger.debug(f"select_negative_sample: insufficient candidates ({len(candidates)}), need >= 4")
+        return None
+
+    # Calculate the cutoff index for bottom percentile
+    cutoff_index = int(len(candidates) * (1 - bottom_percentile))
+
+    # Get bottom percentile candidates
+    bottom_candidates = candidates[cutoff_index:]
+
+    if not bottom_candidates:
+        logger.debug("select_negative_sample: no bottom candidates after cutoff")
+        return None
+
+    # Randomly select one from the bottom candidates
+    # Random selection prevents predictable patterns and adds variety
+    selected = random.choice(bottom_candidates)
+
+    logger.debug(
+        f"select_negative_sample: selected negative from bottom {int(bottom_percentile*100)}% "
+        f"(index {cutoff_index}-{len(candidates)-1}), similarity={selected[1]:.3f}"
+    )
+
+    return selected
+
+
+def format_negative_sample_for_prompt(
+    negative: Tuple[SRTSegment, float],
+    index_label: str = "UNLIKELY"
+) -> str:
+    """
+    Format a negative sample for inclusion in an LLM prompt.
+
+    Args:
+        negative: Tuple of (segment, similarity) for the negative sample
+        index_label: Label to use for the negative sample (default: "UNLIKELY")
+
+    Returns:
+        Formatted string for inclusion in prompt
+    """
+    seg, sim = negative
+    source_name = Path(seg.source_file).stem[:30] if seg.source_file else "unknown"
+    text_preview = seg.text[:60].replace('"', "'") if seg.text else ""
+    if len(seg.text) > 60:
+        text_preview += "..."
+
+    return f"  {index_label}. [{source_name}] \"{text_preview}\" (unlikely match - for comparison)"
+
+
 class LLMProvider(ABC):
     """Base class for LLM providers"""
 
@@ -177,11 +252,21 @@ class LLMProvider(ABC):
         self,
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
-        negative_rules: Optional[List[str]] = None
+        negative_rules: Optional[List[str]] = None,
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
     ) -> List[Tuple[int, float, str]]:
         """
         Batch match voiceover segments to candidates.
-        Returns list of (selected_idx, confidence, reasoning)
+
+        Args:
+            items: List of (voiceover_text, candidates) tuples
+            context: Optional context string for the batch
+            negative_rules: Optional list of negative matching rules
+            negative_samples: Optional list of negative samples (one per item), used for
+                              calibrating confidence by showing what a poor match looks like
+
+        Returns:
+            List of (selected_idx, confidence, reasoning) tuples
         """
         pass
 
@@ -197,7 +282,8 @@ class GeminiMatcher(LLMProvider):
         self,
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
-        negative_rules: Optional[List[str]] = None
+        negative_rules: Optional[List[str]] = None,
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
     ) -> List[Tuple[int, float, str]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
@@ -210,7 +296,13 @@ class GeminiMatcher(LLMProvider):
                 f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean[:100]}\"\nCANDIDATES:\n{candidates_text}")
+
+            # Add negative sample if provided for this item
+            negative_sample_text = ""
+            if negative_samples and i < len(negative_samples) and negative_samples[i]:
+                negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
+
+            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean[:100]}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
 
         context_str = f"\nCONTEXT: {context}" if context else ""
 
@@ -218,8 +310,13 @@ class GeminiMatcher(LLMProvider):
         if negative_rules:
             negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
 
+        # Include instruction about negative sample if any are present
+        negative_instruction = ""
+        if negative_samples and any(ns is not None for ns in negative_samples):
+            negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
+
         prompt = f"""Match each voiceover to its best video candidate based on semantic meaning and topic alignment.
-{context_str}{negative_str}
+{context_str}{negative_str}{negative_instruction}
 
 {chr(10).join(batch_sections)}
 
@@ -285,7 +382,8 @@ class ClaudeMatcher(LLMProvider):
         self,
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
-        negative_rules: Optional[List[str]] = None
+        negative_rules: Optional[List[str]] = None,
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
     ) -> List[Tuple[int, float, str]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
@@ -297,7 +395,13 @@ class ClaudeMatcher(LLMProvider):
                 f"  {j+1}. [{Path(seg.source_file).stem[:30]}] \"{seg.text[:60].replace(chr(34), chr(39))}{'...' if len(seg.text) > 60 else ''}\""
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
-            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}")
+
+            # Add negative sample if provided for this item
+            negative_sample_text = ""
+            if negative_samples and i < len(negative_samples) and negative_samples[i]:
+                negative_sample_text = "\n" + format_negative_sample_for_prompt(negative_samples[i])
+
+            batch_sections.append(f"VOICEOVER {i+1}: \"{vo_text_clean}\"\nCANDIDATES:\n{candidates_text}{negative_sample_text}")
 
         context_str = f"\nCONTEXT: {context}" if context else ""
 
@@ -305,8 +409,13 @@ class ClaudeMatcher(LLMProvider):
         if negative_rules:
             negative_str = "\n\nAVOID:\n" + "\n".join(f"- {rule}" for rule in negative_rules)
 
+        # Include instruction about negative sample if any are present
+        negative_instruction = ""
+        if negative_samples and any(ns is not None for ns in negative_samples):
+            negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches shown for comparison - do NOT select them. Use them to calibrate your confidence scoring."
+
         prompt = f"""Match each voiceover to its best video candidate. Consider semantic meaning, visual relevance, and topic alignment.
-{context_str}{negative_str}
+{context_str}{negative_str}{negative_instruction}
 
 {chr(10).join(batch_sections)}
 
@@ -369,14 +478,15 @@ class LocalLLMMatcher(LLMProvider):
         self,
         items: List[Tuple[str, List[Tuple[SRTSegment, float]]]],
         context: Optional[str] = None,
-        negative_rules: Optional[List[str]] = None
+        negative_rules: Optional[List[str]] = None,
+        negative_samples: Optional[List[Optional[Tuple[SRTSegment, float]]]] = None
     ) -> List[Tuple[int, float, str]]:
         from src.llm_client import LLMRequest, ResponseFormat
 
         outputs = []
 
         # Process items one at a time (Ollama works better this way)
-        for vo_text, candidates in items:
+        for idx, (vo_text, candidates) in enumerate(items):
             # Escape quotes to avoid JSON issues
             vo_text_clean = vo_text.replace('"', "'")[:100]
             candidates_text = "\n".join([
@@ -384,12 +494,24 @@ class LocalLLMMatcher(LLMProvider):
                 for j, (seg, sim) in enumerate(candidates[:5])
             ])
 
-            prompt = f"""Match this voiceover to the best candidate:
+            # Add negative sample if provided
+            negative_sample_text = ""
+            if negative_samples and idx < len(negative_samples) and negative_samples[idx]:
+                neg_seg, neg_sim = negative_samples[idx]
+                neg_text = neg_seg.text[:80].replace('"', "'") if neg_seg.text else ""
+                negative_sample_text = f"\nUNLIKELY. \"{neg_text}\" (poor match - for comparison)"
+
+            # Add instruction about negative sample
+            negative_instruction = ""
+            if negative_sample_text:
+                negative_instruction = " Do NOT select UNLIKELY - it shows what a poor match looks like."
+
+            prompt = f"""Match this voiceover to the best candidate:{negative_instruction}
 
 VOICEOVER: "{vo_text_clean}"
 
 CANDIDATES:
-{candidates_text}
+{candidates_text}{negative_sample_text}
 
 Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85, "reason": "topic match"}}"""
 

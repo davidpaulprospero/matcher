@@ -119,6 +119,11 @@ class MatchingConfig:
     # Low candidate variance (<0.05): -0.05 threshold (clear winner, can accept lower)
     adaptive_threshold_enabled: bool = True
 
+    # Negative sampling for LLM reranking
+    # When enabled, includes a "unlikely match" sample from bottom 25% of candidates
+    # This helps LLMs calibrate confidence by showing what a poor match looks like
+    negative_sampling_enabled: bool = True
+
     # Clip reuse prevention
     max_clip_reuse: int = 1
     reuse_penalty: float = 0.5
