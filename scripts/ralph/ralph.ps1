@@ -2755,6 +2755,11 @@ function Start-StandardLoop {
                 }
             }
             else {
+                # Mark final focus area as completed before exiting
+                if ($status.focusArea) {
+                    Update-InterviewProgress -AreaId $status.focusArea
+                    Update-LegacyQueueProgress -CompletedArea $status.focusArea
+                }
                 Write-Host "  Queue complete! All focus areas done." -ForegroundColor Green
                 break
             }
