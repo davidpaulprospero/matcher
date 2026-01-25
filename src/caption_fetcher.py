@@ -737,6 +737,10 @@ class CaptionFetcher:
         self._retry_delay = 2.0
         # Format preference (US-006): json3 preferred since it's pre-structured
         self._preferred_formats = ["json3", "vtt", "srt"]
+        self._default_formats = ["json3", "vtt", "srt"]  # Original static order
+        # Adaptive format ordering (US-002 Sprint 7)
+        self._adaptive_format_order = True
+        self._using_adaptive_order = False  # Set to True when adaptive order applied
         if config:
             try:
                 caption_first = getattr(config.download, 'caption_first', None)
@@ -749,10 +753,99 @@ class CaptionFetcher:
                         self._timeout = timeout
                     # Format preference (US-006)
                     preferred_formats = getattr(caption_first, 'preferred_formats', None)
-                    if preferred_formats:
+                    if preferred_formats and isinstance(preferred_formats, list):
                         self._preferred_formats = preferred_formats
+                        self._default_formats = list(preferred_formats)
+                    # Adaptive format ordering (US-002 Sprint 7)
+                    self._adaptive_format_order = getattr(
+                        caption_first, 'adaptive_format_order', True
+                    )
             except AttributeError:
                 pass
+
+    def apply_adaptive_format_order(
+        self,
+        metrics: Optional['CaptionMetrics'] = None,
+        cache: Optional['CaptionCache'] = None,
+    ) -> List[str]:
+        """Apply adaptive format ordering based on historical success rates (US-002 Sprint 7).
+
+        When adaptive_format_order is enabled, this method reorders the format
+        preference list based on historical success rates. Formats with higher
+        success rates are tried first, reducing average fetch latency.
+
+        Args:
+            metrics: CaptionMetrics with format_success_counts data. If provided,
+                     uses these counts directly.
+            cache: CaptionCache to load historical format statistics from.
+                   Used if metrics is None or has no data.
+
+        Returns:
+            List of format names in the new order (for logging purposes).
+
+        Example:
+            >>> fetcher = CaptionFetcher(config)
+            >>> cache = CaptionCache(config.download.caption_first)
+            >>> new_order = fetcher.apply_adaptive_format_order(cache=cache)
+            >>> print(f"Adaptive format order: {new_order}")
+            Adaptive format order: ['vtt', 'json3', 'srt']
+
+        Note:
+            This method must be called before fetch operations to enable
+            adaptive ordering. If not called, static preferred_formats is used.
+        """
+        if not self._adaptive_format_order:
+            logger.debug("Adaptive format order disabled, using static order")
+            return list(self._preferred_formats)
+
+        # Get historical format counts
+        format_counts: Dict[str, int] = {}
+
+        # Priority 1: Use metrics if provided and has data
+        if metrics is not None:
+            with metrics._lock:
+                format_counts = dict(metrics.format_success_counts)
+
+        # Priority 2: Load from cache if metrics is empty
+        if not format_counts and cache is not None:
+            format_counts = cache.load_format_statistics()
+
+        # If no historical data, use default order
+        if not format_counts:
+            logger.debug("No historical format data, using default order")
+            return list(self._default_formats)
+
+        # Calculate optimal order using a temporary metrics object
+        temp_metrics = CaptionMetrics()
+        temp_metrics.format_success_counts = format_counts
+
+        optimal_order = temp_metrics.get_optimal_format_order(
+            default_formats=self._default_formats
+        )
+
+        # Calculate success rates for logging
+        total = sum(format_counts.values())
+        rates = {
+            fmt: round(100.0 * format_counts.get(fmt, 0) / total, 0)
+            for fmt in optimal_order
+            if format_counts.get(fmt, 0) > 0
+        }
+
+        # Only apply if order actually changed
+        if optimal_order != self._default_formats:
+            self._preferred_formats = optimal_order
+            self._using_adaptive_order = True
+
+            # Log with format and success rate
+            rate_strs = [f"{fmt} ({rates[fmt]:.0f}%)" for fmt in optimal_order if fmt in rates]
+            if rate_strs:
+                logger.info(f"Adaptive format order: {', '.join(rate_strs)}")
+            else:
+                logger.info(f"Adaptive format order: {optimal_order}")
+        else:
+            logger.debug("Adaptive order matches default order")
+
+        return optimal_order
 
     def list_available_languages(self, video_id: str) -> List[AvailableLanguage]:
         """List available caption languages for a YouTube video.
@@ -2889,6 +2982,81 @@ class CaptionCache(BaseCache):
 
         return invalidated
 
+    def save_format_statistics(self, format_success_counts: Dict[str, int]) -> bool:
+        """Save format success counts to cache metadata (US-002 Sprint 7).
+
+        Persists format success statistics for cross-run learning.
+        These statistics enable adaptive format ordering, trying
+        historically successful formats first.
+
+        Args:
+            format_success_counts: Dict mapping format name -> success count.
+                                   Example: {'json3': 95, 'vtt': 80, 'srt': 25}
+
+        Returns:
+            True if saved successfully, False otherwise.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> metrics = CaptionMetrics()
+            >>> # After batch fetch...
+            >>> cache.save_format_statistics(metrics.format_success_counts)
+            True
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            # Store in a special metadata entry
+            metadata_key = "__format_statistics__"
+            self.index[metadata_key] = {
+                'format_success_counts': format_success_counts,
+                'updated_at': time.time(),
+                'total_samples': sum(format_success_counts.values()),
+            }
+            if self.auto_save:
+                self._save_index()
+
+            logger.debug(f"Saved format statistics: {format_success_counts}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to save format statistics: {e}")
+            return False
+
+    def load_format_statistics(self) -> Dict[str, int]:
+        """Load format success counts from cache metadata (US-002 Sprint 7).
+
+        Retrieves persisted format success statistics for adaptive ordering.
+        Returns empty dict if no historical data available.
+
+        Returns:
+            Dict mapping format name -> success count.
+            Empty dict if no historical data exists.
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> historical = cache.load_format_statistics()
+            >>> if historical:
+            ...     metrics.format_success_counts = historical
+            ...     optimal_order = metrics.get_optimal_format_order()
+        """
+        if not self.enabled:
+            return {}
+
+        try:
+            metadata_key = "__format_statistics__"
+            metadata = self.index.get(metadata_key, {})
+            format_counts = metadata.get('format_success_counts', {})
+
+            if format_counts:
+                total = metadata.get('total_samples', sum(format_counts.values()))
+                logger.debug(f"Loaded format statistics: {format_counts} ({total} samples)")
+
+            return format_counts
+        except Exception as e:
+            logger.warning(f"Failed to load format statistics: {e}")
+            return {}
+
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics.
 
@@ -4101,6 +4269,60 @@ class CaptionMetrics:
                 'fallback_rate': fallback_rate,
                 'total_with_format': total
             }
+
+    def get_optimal_format_order(
+        self,
+        default_formats: Optional[List[str]] = None
+    ) -> List[str]:
+        """Get formats sorted by historical success rate (US-002 Sprint 7).
+
+        Returns formats ordered by their success rate, with most successful
+        formats first. This enables adaptive format ordering to try
+        historically successful formats first, reducing fetch latency.
+
+        Args:
+            default_formats: Default format order to use if no historical data.
+                             If None, uses ["json3", "vtt", "srt"].
+
+        Returns:
+            List of format names sorted by success rate (highest first).
+            If no historical data available, returns default_formats unchanged.
+
+        Example:
+            >>> metrics = CaptionMetrics()
+            >>> metrics.format_success_counts = {'vtt': 95, 'json3': 80, 'srt': 25}
+            >>> metrics.get_optimal_format_order()
+            ['vtt', 'json3', 'srt']  # Sorted by success count
+
+        Thread-safe: Uses lock for parallel fetching environments.
+        """
+        if default_formats is None:
+            default_formats = ["json3", "vtt", "srt"]
+
+        with self._lock:
+            total = sum(self.format_success_counts.values())
+
+            # No historical data - return default order unchanged
+            if total == 0:
+                return list(default_formats)
+
+            # Sort formats by success count (descending)
+            # Include all formats that have been used
+            sorted_formats = sorted(
+                self.format_success_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            # Build optimal order: successful formats first, then remaining defaults
+            optimal_order = [fmt for fmt, _ in sorted_formats]
+
+            # Add any default formats not seen in historical data at the end
+            for fmt in default_formats:
+                if fmt not in optimal_order:
+                    optimal_order.append(fmt)
+
+            return optimal_order
 
     @property
     def total_processed(self) -> int:

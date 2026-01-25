@@ -930,6 +930,10 @@ download:
     # Falls back to next format on parse error or unavailability
     # Available formats: json3, srv3, vtt, srt
     preferred_formats: ["json3", "vtt", "srt"]
+    # Adaptive format ordering (US-002 Sprint 7): reorder formats based on success rates
+    # When enabled, formats with higher historical success rates are tried first
+    # Success rates are persisted in caption cache for cross-run learning
+    adaptive_format_order: true  # Use historical success rates to order formats
     # Caption availability pre-check (US-008): check if captions exist before fetching
     # This avoids wasted network calls for videos without captions
     # Uses --list-subs which is faster than downloading caption content
@@ -939,6 +943,11 @@ download:
     # Example: 299.999s caption in 300s video is valid with 100ms epsilon
     # Set to 0 for exact matching (may cause false positives from float precision)
     timing_epsilon_ms: 100.0      # Timing tolerance in milliseconds (default: 100ms)
+    # Cross-project cache validation (US-008 Sprint 6)
+    # Validates cached caption data before use to prevent corrupt data propagation
+    # Modes: 'strict' (reject on mismatch), 'warn' (re-fetch on failure), 'skip' (no validation)
+    cache_validation: "warn"      # Validation mode (default: warn)
+    cache_validation_tolerance: 0.2  # Max segment count deviation ratio (20%)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

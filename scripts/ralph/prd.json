@@ -33,8 +33,8 @@
         "Config option caption_first.adaptive_format_order (default: true)",
         "Tests verify format with 90% success rate tried before format with 50% success rate"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented get_optimal_format_order() in CaptionMetrics, save/load_format_statistics() in CaptionCache, apply_adaptive_format_order() in CaptionFetcher. Added adaptive_format_order config option (default: true). Metrics data prioritized over cache. 17 new tests added, all 348 caption tests pass."
     },
     {
       "id": "US-003",

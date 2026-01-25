@@ -217,6 +217,13 @@ class CaptionFirstConfig:
     # Falls back to next format on parse error or unavailability
     preferred_formats: List[str] = field(default_factory=lambda: ["json3", "vtt", "srt"])
 
+    # Adaptive format ordering (US-002 Sprint 7)
+    # When enabled, reorders formats based on historical success rates from previous runs.
+    # Formats with higher success rates are tried first, reducing fetch latency.
+    # Success rates are persisted in caption cache metadata for cross-run learning.
+    # When disabled, uses static preferred_formats order.
+    adaptive_format_order: bool = True
+
     # Caption availability pre-check (US-008)
     # When enabled, checks if captions exist before attempting fetch
     # This avoids wasted network calls for videos without captions
@@ -229,6 +236,21 @@ class CaptionFirstConfig:
     # Example: caption at 299.999s in 300s video is valid with 100ms epsilon.
     # Set to 0 for exact matching (may cause false positives from float precision).
     timing_epsilon_ms: float = 100.0
+
+    # Cross-project cache validation (US-008 Sprint 6)
+    # Validates cached caption data integrity before use.
+    # Modes:
+    #   'strict': Reject cache if segment_count differs >20% from expected (based on duration)
+    #   'warn': Log warning and re-fetch on validation failure (default)
+    #   'skip': Skip validation entirely (fastest, but risks corrupt data)
+    # Validation checks: video_id match, language match, segment_count consistency
+    cache_validation: str = "warn"
+
+    # Cache validation segment count tolerance (US-008 Sprint 6)
+    # Maximum allowed deviation in segment count as a ratio (0.0-1.0).
+    # Default 0.2 means segment count can differ by up to 20% from expected.
+    # Expected segments = duration_seconds / 3 (typical caption segment is ~3 seconds)
+    cache_validation_tolerance: float = 0.2
 
 
 @dataclass
