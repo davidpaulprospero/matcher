@@ -904,6 +904,9 @@ download:
                                       # Actual delays: 2s, 4s, 8s (exponential backoff)
     # Parallel fetching (US-001): speed up projects with 50+ videos
     max_parallel_fetches: 4           # Number of concurrent caption fetches (1 = sequential)
+    # Live stream detection (US-002): skip caption fetch for live streams
+    # Live streams can hang indefinitely during caption fetch
+    skip_live_streams: true           # Skip caption fetch for live/was_live videos
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

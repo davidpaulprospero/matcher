@@ -2513,3 +2513,215 @@ class TestBatchCaptionFetch:
             f"Parallel ({parallel_time:.3f}s) not faster than sequential "
             f"({sequential_time:.3f}s) as expected"
         )
+
+
+class TestLiveStreamDetection:
+    """Tests for US-002: Live stream detection to skip caption fetch."""
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_true_for_live(self, mock_run):
+        """Test detection of currently live stream."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'id': 'test1234567',
+                'is_live': True,
+                'was_live': False,
+            }),
+            stderr=''
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is True
+        mock_run.assert_called_once()
+        # Verify yt-dlp command includes --dump-json
+        call_args = mock_run.call_args[0][0]
+        assert '--dump-json' in call_args
+        assert '--skip-download' in call_args
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_true_for_was_live(self, mock_run):
+        """Test detection of past live stream (was_live=True)."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'id': 'test1234567',
+                'is_live': False,
+                'was_live': True,
+            }),
+            stderr=''
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is True
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_false_for_regular_video(self, mock_run):
+        """Test that regular videos return False."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'id': 'test1234567',
+                'is_live': False,
+                'was_live': False,
+            }),
+            stderr=''
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is False
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_false_on_metadata_error(self, mock_run):
+        """Test that metadata fetch errors return False (don't block)."""
+        mock_run.return_value = Mock(
+            returncode=1,
+            stdout='',
+            stderr='Video unavailable'
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        # Should return False on error to avoid blocking
+        assert result is False
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_false_on_invalid_json(self, mock_run):
+        """Test that invalid JSON returns False."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='not valid json',
+            stderr=''
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is False
+
+    @patch('subprocess.run')
+    def test_is_live_stream_returns_false_on_timeout(self, mock_run):
+        """Test that timeout returns False."""
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=30)
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is False
+
+    def test_is_live_stream_returns_false_for_invalid_video_id(self):
+        """Test that invalid video IDs return False."""
+        fetcher = CaptionFetcher()
+
+        assert fetcher.is_live_stream('') is False
+        assert fetcher.is_live_stream('short') is False
+        assert fetcher.is_live_stream('toolongvideoid') is False
+
+    @patch('subprocess.run')
+    def test_is_live_stream_missing_fields_returns_false(self, mock_run):
+        """Test that missing is_live/was_live fields return False."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'id': 'test1234567',
+                # No is_live or was_live fields
+            }),
+            stderr=''
+        )
+
+        fetcher = CaptionFetcher()
+        result = fetcher.is_live_stream('test1234567')
+
+        assert result is False
+
+
+class TestCaptionMetricsSkippedLiveStreams:
+    """Tests for US-002: CaptionMetrics skipped live streams tracking."""
+
+    def test_record_skipped_live_stream(self):
+        """Test recording a skipped live stream."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        assert metrics.skipped_live_streams == 0
+
+        metrics.record_skipped_live_stream('test1234567')
+
+        assert metrics.skipped_live_streams == 1
+        assert metrics.quality_distribution.get('skipped') == 1
+
+    def test_skipped_live_streams_in_total_processed(self):
+        """Test that skipped live streams are included in total_processed."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success('vid1')
+        metrics.record_fetch_failure('vid2')
+        metrics.record_skipped_live_stream('vid3')
+
+        assert metrics.total_processed == 3
+
+    def test_skipped_live_streams_in_summary(self):
+        """Test that skipped live streams appear in summary."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_skipped_live_stream('vid1')
+        metrics.record_skipped_live_stream('vid2')
+
+        summary = metrics.summary()
+
+        assert '2 live streams skipped' in summary
+
+    def test_skipped_live_streams_to_dict(self):
+        """Test serialization includes skipped_live_streams."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_skipped_live_stream('vid1')
+
+        data = metrics.to_dict()
+
+        assert data['skipped_live_streams'] == 1
+
+    def test_skipped_live_streams_from_dict(self):
+        """Test deserialization includes skipped_live_streams."""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {'skipped_live_streams': 5}
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert metrics.skipped_live_streams == 5
+
+    def test_skipped_live_streams_merge(self):
+        """Test merging metrics combines skipped_live_streams."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_skipped_live_stream('vid1')
+
+        metrics2 = CaptionMetrics()
+        metrics2.record_skipped_live_stream('vid2')
+        metrics2.record_skipped_live_stream('vid3')
+
+        metrics1.merge(metrics2)
+
+        assert metrics1.skipped_live_streams == 3
+
+    def test_skipped_live_streams_clear(self):
+        """Test clear resets skipped_live_streams."""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_skipped_live_stream('vid1')
+
+        metrics.clear()
+
+        assert metrics.skipped_live_streams == 0

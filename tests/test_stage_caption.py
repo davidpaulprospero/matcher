@@ -40,6 +40,7 @@ def mock_config():
     config.download.caption_first.fallback_to_transcription = True
     config.download.caption_first.timeout = 30
     config.download.caption_first.cache_captions = True
+    config.download.caption_first.skip_live_streams = False  # US-002: Skip live check in tests
 
     # No cookies (simplifies testing)
     config.download.cookies_from_browser = ""
@@ -551,3 +552,87 @@ class TestStageOrder:
         transcribe_idx = STAGE_ORDER.index("TRANSCRIBE")
 
         assert caption_idx < transcribe_idx
+
+
+# ============================================================================
+# Test Live Stream Detection (US-002)
+# ============================================================================
+
+class TestLiveStreamSkipping:
+    """Test US-002: Live stream detection and skipping in CaptionStage."""
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_skips_live_streams_when_enabled(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test that live streams are skipped when skip_live_streams=True."""
+        # Enable live stream skipping
+        mock_config.download.caption_first.skip_live_streams = True
+
+        # Create mock fetcher that detects all videos as live
+        mock_fetcher = MagicMock()
+        mock_fetcher.is_live_stream.return_value = True  # All videos are live
+        mock_fetcher._get_cookies_args.return_value = []
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        # All 2 videos should be skipped
+        assert result.data.get('skipped_live_count', 0) == 2
+        # fetch_captions_batch should NOT be called (nothing to fetch)
+        mock_fetcher.fetch_captions_batch.assert_not_called()
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_does_not_skip_when_disabled(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test that live streams are not checked when skip_live_streams=False."""
+        # Disable live stream skipping
+        mock_config.download.caption_first.skip_live_streams = False
+
+        mock_fetcher = MagicMock()
+        # is_live_stream should not be called when disabled
+        mock_fetcher.fetch_captions_batch.return_value = {}
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        # is_live_stream should never be called
+        mock_fetcher.is_live_stream.assert_not_called()
+        # But fetch_captions_batch should be called
+        mock_fetcher.fetch_captions_batch.assert_called_once()
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_partial_live_stream_skipping(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
+        """Test that only live streams are skipped, regular videos are fetched."""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        # Enable live stream skipping
+        mock_config.download.caption_first.skip_live_streams = True
+
+        # Create mock fetcher - first video is live, second is not
+        mock_fetcher = MagicMock()
+        mock_fetcher.is_live_stream.side_effect = lambda vid: vid == "abc123XYZ_0"
+        mock_fetcher._get_cookies_args.return_value = []
+
+        # Second video returns captions
+        mock_fetcher.fetch_captions_batch.return_value = {
+            "def456ABC_1": CaptionResult(
+                video_id="def456ABC_1",
+                segments=[CaptionSegment(0, 0.0, 5.0, "Test", "def456ABC_1")],
+                language="en",
+                is_auto_generated=False,
+            )
+        }
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        # 1 video skipped as live, 1 fetched
+        assert result.data.get('skipped_live_count', 0) == 1
+        # fetch_captions_batch should be called with remaining video
+        mock_fetcher.fetch_captions_batch.assert_called_once()
+        call_args = mock_fetcher.fetch_captions_batch.call_args
+        assert "def456ABC_1" in call_args[1].get('video_ids', call_args[0][0] if call_args[0] else [])
