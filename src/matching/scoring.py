@@ -10,7 +10,7 @@ Provides confidence adjustments for:
 - Adaptive thresholds based on voiceover length and candidate variance
 """
 
-from typing import Tuple, List, Optional
+from typing import Any, Tuple, List, Optional
 import logging
 import statistics
 
@@ -1146,6 +1146,80 @@ def adjust_embedding_weight_for_transcript_quality(
 
     else:  # high quality
         return base_weight, "high_quality_transcript"
+
+
+# Semantic coherence constants (topic flow between adjacent segments)
+SEMANTIC_COHERENCE_SMOOTH_THRESHOLD = 0.6  # Similarity above this = smooth flow
+SEMANTIC_COHERENCE_ABRUPT_THRESHOLD = 0.3  # Similarity below this = abrupt transition
+SEMANTIC_COHERENCE_SMOOTH_BOOST = 0.03  # Boost for smooth topic flow
+SEMANTIC_COHERENCE_ABRUPT_PENALTY = 0.05  # Penalty for abrupt topic flow
+
+
+def compute_semantic_coherence(
+    current_embedding: Any,
+    previous_embedding: Any,
+    semantic_coherence_enabled: bool = True
+) -> Tuple[float, str]:
+    """
+    Compute semantic coherence adjustment based on topic flow between adjacent matches.
+
+    Semantic coherence measures how smoothly topics transition between segments.
+    A high embedding similarity between current and previous matches indicates
+    smooth topic flow (related content), while low similarity indicates an
+    abrupt topic change.
+
+    Adjustments:
+    - Smooth flow (similarity > 0.6): +0.03 boost (good continuity)
+    - Abrupt flow (similarity < 0.3): -0.05 penalty (jarring transition)
+    - Neutral (0.3 - 0.6): no adjustment
+
+    Args:
+        current_embedding: Embedding vector of current match candidate (numpy array or list)
+        previous_embedding: Embedding vector of previous matched segment (numpy array or list)
+        semantic_coherence_enabled: Whether to apply semantic coherence adjustment (config option)
+
+    Returns:
+        Tuple of (adjustment, reason):
+        - adjustment: Float adjustment to apply to confidence (+0.03, 0.0, or -0.05)
+        - reason: String explaining the adjustment
+    """
+    if not semantic_coherence_enabled:
+        return 0.0, "semantic_coherence_disabled"
+
+    # Handle None embeddings
+    if current_embedding is None or previous_embedding is None:
+        return 0.0, "missing_embedding"
+
+    # Import cosine_similarity from embeddings module
+    try:
+        from ..embeddings import cosine_similarity
+    except ImportError:
+        logger.warning("Could not import cosine_similarity from embeddings module")
+        return 0.0, "cosine_similarity_unavailable"
+
+    # Compute embedding similarity between current and previous
+    try:
+        similarity = cosine_similarity(current_embedding, previous_embedding)
+    except Exception as e:
+        logger.warning(f"Failed to compute cosine similarity: {e}")
+        return 0.0, f"similarity_error:{str(e)}"
+
+    # Apply adjustments based on similarity thresholds
+    if similarity > SEMANTIC_COHERENCE_SMOOTH_THRESHOLD:
+        adjustment = SEMANTIC_COHERENCE_SMOOTH_BOOST
+        reason = f"smooth_topic_flow(sim={similarity:.3f}):+{SEMANTIC_COHERENCE_SMOOTH_BOOST}"
+    elif similarity < SEMANTIC_COHERENCE_ABRUPT_THRESHOLD:
+        adjustment = -SEMANTIC_COHERENCE_ABRUPT_PENALTY
+        reason = f"abrupt_topic_flow(sim={similarity:.3f}):-{SEMANTIC_COHERENCE_ABRUPT_PENALTY}"
+    else:
+        adjustment = 0.0
+        reason = f"neutral_topic_flow(sim={similarity:.3f})"
+
+    logger.debug(
+        f"Semantic coherence: similarity={similarity:.3f}, adjustment={adjustment:+.3f} ({reason})"
+    )
+
+    return adjustment, reason
 
 
 # Pool normalization constants
