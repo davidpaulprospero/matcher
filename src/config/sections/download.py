@@ -219,7 +219,8 @@ class CookieRotationConfig:
     # - "random": Randomly select cookie on each error
     rotation_strategy: str = "on_error"
 
-    # Error patterns that trigger cookie rotation
+    # Error patterns that trigger cookie rotation (case-insensitive matching)
+    # Add custom patterns to match new YouTube error formats
     rotate_on_errors: List[str] = field(default_factory=lambda: [
         "429",
         "rate limit",
@@ -236,6 +237,15 @@ class CookieRotationConfig:
 
     # Maximum rotations before giving up (0 = unlimited)
     max_rotations_per_session: int = 0
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        # Ensure rotate_on_errors is a non-empty list when rotation is enabled
+        if self.enabled and not self.rotate_on_errors:
+            raise ValueError(
+                "cookie_rotation.rotate_on_errors must be a non-empty list when "
+                "cookie rotation is enabled. Add at least one error pattern like '429'."
+            )
 
 
 @dataclass
