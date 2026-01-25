@@ -896,6 +896,12 @@ download:
     cache_captions: true              # Cache captions for cross-project reuse
     cache_dir: "~/.matcher_caption_cache"  # Global cache directory (supports ~)
     max_cache_age_days: 30            # Cache TTL in days (0 = no expiration)
+    # Retry settings (US-008): exponential backoff on network errors
+    # CaptionUnavailableError (no captions exist) is NOT retried
+    # CaptionFetchError (temporary failure) IS retried with backoff
+    max_retries: 3                    # Max retry attempts on network/temporary errors
+    retry_delay: 2.0                  # Base delay between retries in seconds
+                                      # Actual delays: 2s, 4s, 8s (exponential backoff)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

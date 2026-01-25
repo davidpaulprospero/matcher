@@ -237,6 +237,12 @@ class CaptionFetcher:
     Supports multiple caption formats (VTT, SRT, JSON3) and auto-converts
     them to a common segment format.
 
+    Retry behavior (US-008):
+    - Network errors (CaptionFetchError) are retried with exponential backoff
+    - Permanent errors (CaptionUnavailableError) are NOT retried
+    - After max_retries, video is marked for transcription fallback
+    - Detailed logging includes video_id, error type, and retry attempt
+
     Example:
         fetcher = CaptionFetcher()
         result = fetcher.fetch_captions("dQw4w9WgXcQ")
@@ -246,6 +252,13 @@ class CaptionFetcher:
         languages = fetcher.list_available_languages("dQw4w9WgXcQ")
         for lang in languages:
             print(f"{lang.code}: {lang.name} (auto={lang.is_auto_generated})")
+
+        # With retry (US-008):
+        try:
+            result = fetcher.fetch_captions_with_retry("dQw4w9WgXcQ")
+        except CaptionFetchError as e:
+            # Mark for transcription fallback
+            print(f"Caption fetch failed after retries: {e}")
     """
 
     def __init__(self, config: Optional['Config'] = None):
@@ -256,6 +269,22 @@ class CaptionFetcher:
         """
         self.config = config
         self._timeout = 60  # seconds
+
+        # Retry settings from config (US-008)
+        self._max_retries = 3
+        self._retry_delay = 2.0
+        if config:
+            try:
+                caption_first = getattr(config.download, 'caption_first', None)
+                if caption_first:
+                    self._max_retries = getattr(caption_first, 'max_retries', 3)
+                    self._retry_delay = getattr(caption_first, 'retry_delay', 2.0)
+                    # Also use caption_first timeout if configured
+                    timeout = getattr(caption_first, 'timeout', None)
+                    if timeout:
+                        self._timeout = timeout
+            except AttributeError:
+                pass
 
     def list_available_languages(self, video_id: str) -> List[AvailableLanguage]:
         """List available caption languages for a YouTube video.
@@ -588,6 +617,211 @@ class CaptionFetcher:
             language=selected.code,
             prefer_manual=not selected.is_auto_generated
         )
+
+    def fetch_captions_with_retry(
+        self,
+        video_id: str,
+        language: str = "en",
+        prefer_manual: bool = True,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None
+    ) -> CaptionResult:
+        """Fetch captions with exponential backoff retry logic (US-008).
+
+        Retries on network/temporary errors (CaptionFetchError) but NOT on
+        permanent errors (CaptionUnavailableError - when captions don't exist).
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            language: Preferred language code (ISO 639-1).
+            prefer_manual: If True, prefer manually uploaded captions over auto-generated.
+            max_retries: Override max retry attempts (default: config or 3).
+            retry_delay: Override base delay between retries (default: config or 2.0s).
+
+        Returns:
+            CaptionResult with parsed segments and metadata.
+
+        Raises:
+            CaptionUnavailableError: If no captions exist (NOT retried).
+            CaptionFetchError: If all retries fail due to network/temporary errors.
+
+        Example:
+            try:
+                result = fetcher.fetch_captions_with_retry("dQw4w9WgXcQ")
+            except CaptionFetchError as e:
+                # Mark for transcription fallback after max retries
+                needs_transcription.append(video_id)
+        """
+        retries = max_retries if max_retries is not None else self._max_retries
+        delay = retry_delay if retry_delay is not None else self._retry_delay
+
+        return self._with_retry(
+            func=lambda: self.fetch_captions(video_id, language, prefer_manual),
+            video_id=video_id,
+            operation="fetch_captions",
+            max_retries=retries,
+            retry_delay=delay
+        )
+
+    def fetch_captions_auto_language_with_retry(
+        self,
+        video_id: str,
+        preferred_language: Optional[str] = None,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None
+    ) -> CaptionResult:
+        """Fetch captions with auto language selection and retry logic (US-008).
+
+        Combines automatic language selection with exponential backoff retry.
+
+        Args:
+            video_id: YouTube video ID.
+            preferred_language: Optional override for preferred language.
+            max_retries: Override max retry attempts (default: config or 3).
+            retry_delay: Override base delay between retries (default: config or 2.0s).
+
+        Returns:
+            CaptionResult with captions in the best available language.
+
+        Raises:
+            CaptionUnavailableError: If no captions available in any language (NOT retried).
+            CaptionFetchError: If all retries fail due to network/temporary errors.
+        """
+        retries = max_retries if max_retries is not None else self._max_retries
+        delay = retry_delay if retry_delay is not None else self._retry_delay
+
+        return self._with_retry(
+            func=lambda: self.fetch_captions_auto_language(video_id, preferred_language),
+            video_id=video_id,
+            operation="fetch_captions_auto_language",
+            max_retries=retries,
+            retry_delay=delay
+        )
+
+    def list_available_languages_with_retry(
+        self,
+        video_id: str,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None
+    ) -> List[AvailableLanguage]:
+        """List available languages with retry logic (US-008).
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            max_retries: Override max retry attempts (default: config or 3).
+            retry_delay: Override base delay between retries (default: config or 2.0s).
+
+        Returns:
+            List of AvailableLanguage objects.
+
+        Raises:
+            CaptionFetchError: If all retries fail.
+        """
+        retries = max_retries if max_retries is not None else self._max_retries
+        delay = retry_delay if retry_delay is not None else self._retry_delay
+
+        return self._with_retry(
+            func=lambda: self.list_available_languages(video_id),
+            video_id=video_id,
+            operation="list_available_languages",
+            max_retries=retries,
+            retry_delay=delay
+        )
+
+    def _with_retry(
+        self,
+        func,
+        video_id: str,
+        operation: str,
+        max_retries: int,
+        retry_delay: float
+    ):
+        """Execute a function with exponential backoff retry logic (US-008).
+
+        Implements retry logic that distinguishes between:
+        - CaptionUnavailableError: Permanent, NOT retried (video has no captions)
+        - CaptionFetchError: Temporary, IS retried (network issues)
+
+        Backoff formula: delay * (2 ^ attempt)
+        Example with delay=2.0: 2s, 4s, 8s, 16s...
+
+        Args:
+            func: Callable to execute (no arguments).
+            video_id: Video ID for logging context.
+            operation: Operation name for logging (e.g., "fetch_captions").
+            max_retries: Maximum retry attempts (0 = no retries, just one attempt).
+            retry_delay: Base delay for exponential backoff (seconds).
+
+        Returns:
+            Result from func.
+
+        Raises:
+            CaptionUnavailableError: If captions don't exist (NOT retried).
+            CaptionFetchError: If all retries exhausted on temporary errors.
+        """
+        last_error = None
+        total_attempts = max_retries + 1  # +1 for initial attempt
+
+        for attempt in range(total_attempts):
+            try:
+                result = func()
+                if attempt > 0:
+                    logger.info(
+                        f"Caption {operation} succeeded on attempt {attempt + 1} "
+                        f"for video {video_id}"
+                    )
+                return result
+
+            except CaptionUnavailableError:
+                # Permanent error - video has no captions, don't retry
+                logger.debug(
+                    f"Caption {operation} failed for video {video_id}: "
+                    f"no captions available (not retrying)"
+                )
+                raise
+
+            except CaptionFetchError as e:
+                # Temporary error - network issue, retry with backoff
+                last_error = e
+                is_last_attempt = attempt >= max_retries
+
+                if is_last_attempt:
+                    logger.error(
+                        f"Caption {operation} failed for video {video_id} "
+                        f"after {total_attempts} attempts: {e.reason}"
+                    )
+                else:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Caption {operation} failed for video {video_id} "
+                        f"(attempt {attempt + 1}/{total_attempts}, "
+                        f"error_type=CaptionFetchError, reason={e.reason}). "
+                        f"Retrying in {wait_time:.1f}s..."
+                    )
+                    time.sleep(wait_time)
+
+            except Exception as e:
+                # Unexpected error - wrap in CaptionFetchError and retry
+                last_error = CaptionFetchError(video_id, str(e))
+                is_last_attempt = attempt >= max_retries
+
+                if is_last_attempt:
+                    logger.error(
+                        f"Caption {operation} failed for video {video_id} "
+                        f"after {total_attempts} attempts: {e}"
+                    )
+                else:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Caption {operation} failed for video {video_id} "
+                        f"(attempt {attempt + 1}/{total_attempts}, "
+                        f"error_type={type(e).__name__}, reason={e}). "
+                        f"Retrying in {wait_time:.1f}s..."
+                    )
+                    time.sleep(wait_time)
+
+        # All retries exhausted
+        raise last_error
 
     def fetch_captions(
         self,
@@ -1268,6 +1502,61 @@ class CaptionCache(BaseCache):
 
         # Fetch and cache
         result = fetcher.fetch_captions(video_id, language=language, prefer_manual=prefer_manual)
+        self.store(result)
+        return result
+
+    def get_or_fetch_with_retry(
+        self,
+        fetcher: 'CaptionFetcher',
+        video_id: str,
+        language: str = "en",
+        prefer_manual: bool = True,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None
+    ) -> CaptionResult:
+        """Get from cache or fetch with retry logic and cache (US-008).
+
+        Combines cache lookup with fetch retry logic. Uses exponential backoff
+        for network errors (CaptionFetchError) but NOT for permanent errors
+        (CaptionUnavailableError).
+
+        Args:
+            fetcher: CaptionFetcher instance to use for fetching.
+            video_id: YouTube video ID.
+            language: Preferred language code.
+            prefer_manual: Prefer manual captions over auto-generated.
+            max_retries: Override max retry attempts (default: fetcher config).
+            retry_delay: Override base delay between retries (default: fetcher config).
+
+        Returns:
+            CaptionResult from cache or freshly fetched.
+
+        Raises:
+            CaptionUnavailableError: If no captions exist (NOT retried).
+            CaptionFetchError: If all retries fail due to network/temporary errors.
+
+        Example:
+            cache = CaptionCache(config.download.caption_first)
+            fetcher = CaptionFetcher(config)
+            try:
+                result = cache.get_or_fetch_with_retry(fetcher, "dQw4w9WgXcQ")
+            except CaptionFetchError:
+                # Mark for transcription fallback
+                needs_transcription.append("dQw4w9WgXcQ")
+        """
+        # Check cache first
+        cached = self.get_caption(video_id, language)
+        if cached:
+            return cached.to_caption_result()
+
+        # Fetch with retry and cache
+        result = fetcher.fetch_captions_with_retry(
+            video_id,
+            language=language,
+            prefer_manual=prefer_manual,
+            max_retries=max_retries,
+            retry_delay=retry_delay
+        )
         self.store(result)
         return result
 

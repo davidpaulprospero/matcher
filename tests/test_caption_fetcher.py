@@ -1504,3 +1504,373 @@ class TestFetchCaptionsAutoLanguage:
             language="en",
             prefer_manual=False  # Auto-generated selected
         )
+
+
+class TestCaptionFetcherRetry:
+    """Test caption fetch retry behavior (US-008)"""
+
+    def test_fetcher_init_default_retry_settings(self):
+        """Test default retry settings when no config"""
+        fetcher = CaptionFetcher()
+
+        assert fetcher._max_retries == 3
+        assert fetcher._retry_delay == 2.0
+
+    def test_fetcher_init_config_retry_settings(self):
+        """Test retry settings from config"""
+        mock_config = Mock()
+        mock_config.download.caption_first.max_retries = 5
+        mock_config.download.caption_first.retry_delay = 1.5
+        mock_config.download.caption_first.timeout = 45
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        assert fetcher._max_retries == 5
+        assert fetcher._retry_delay == 1.5
+        assert fetcher._timeout == 45
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_success_first_attempt(self, mock_fetch):
+        """Test successful fetch on first attempt"""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        mock_fetch.return_value = mock_result
+
+        result = fetcher.fetch_captions_with_retry("test1234567")
+
+        assert result.video_id == "test1234567"
+        assert mock_fetch.call_count == 1
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_temporary_error_then_success(self, mock_fetch, mock_sleep):
+        """Test retry on CaptionFetchError then success"""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        # First call fails, second succeeds
+        mock_fetch.side_effect = [
+            CaptionFetchError("test1234567", "Network timeout"),
+            mock_result
+        ]
+
+        result = fetcher.fetch_captions_with_retry("test1234567", max_retries=3, retry_delay=1.0)
+
+        assert result.video_id == "test1234567"
+        assert mock_fetch.call_count == 2
+        # Check exponential backoff: delay * (2^0) = 1.0
+        mock_sleep.assert_called_once_with(1.0)
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_exponential_backoff(self, mock_fetch, mock_sleep):
+        """Test exponential backoff timing"""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        # Fail twice, then succeed
+        mock_fetch.side_effect = [
+            CaptionFetchError("test1234567", "Error 1"),
+            CaptionFetchError("test1234567", "Error 2"),
+            mock_result
+        ]
+
+        result = fetcher.fetch_captions_with_retry("test1234567", max_retries=3, retry_delay=2.0)
+
+        assert mock_fetch.call_count == 3
+        # Check exponential backoff: 2*2^0=2, 2*2^1=4
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_any_call(2.0)  # 2.0 * 2^0
+        mock_sleep.assert_any_call(4.0)  # 2.0 * 2^1
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_all_retries_exhausted(self, mock_fetch, mock_sleep):
+        """Test all retries fail raises CaptionFetchError"""
+        fetcher = CaptionFetcher()
+
+        # All attempts fail
+        mock_fetch.side_effect = CaptionFetchError("test1234567", "Persistent error")
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.fetch_captions_with_retry("test1234567", max_retries=2, retry_delay=0.1)
+
+        assert "test1234567" in str(exc_info.value)
+        # 1 initial + 2 retries = 3 attempts
+        assert mock_fetch.call_count == 3
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_unavailable_not_retried(self, mock_fetch):
+        """Test CaptionUnavailableError is NOT retried"""
+        fetcher = CaptionFetcher()
+
+        mock_fetch.side_effect = CaptionUnavailableError("test1234567", "No captions")
+
+        with pytest.raises(CaptionUnavailableError) as exc_info:
+            fetcher.fetch_captions_with_retry("test1234567", max_retries=3)
+
+        # Should only try once - unavailable errors are permanent
+        assert mock_fetch.call_count == 1
+        assert "test1234567" in str(exc_info.value)
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_unexpected_error_wrapped(self, mock_fetch, mock_sleep):
+        """Test unexpected exceptions are wrapped in CaptionFetchError"""
+        fetcher = CaptionFetcher()
+
+        mock_fetch.side_effect = RuntimeError("Unexpected error")
+
+        with pytest.raises(CaptionFetchError) as exc_info:
+            fetcher.fetch_captions_with_retry("test1234567", max_retries=1, retry_delay=0.1)
+
+        assert "test1234567" in str(exc_info.value)
+        assert mock_fetch.call_count == 2  # Initial + 1 retry
+
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_fetch_with_retry_override_params(self, mock_fetch):
+        """Test override parameters are used"""
+        mock_config = Mock()
+        mock_config.download.caption_first.max_retries = 10
+        mock_config.download.caption_first.retry_delay = 5.0
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        mock_fetch.return_value = mock_result
+
+        # Override config values
+        result = fetcher.fetch_captions_with_retry(
+            "test1234567",
+            max_retries=1,
+            retry_delay=0.5
+        )
+
+        assert result.video_id == "test1234567"
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'list_available_languages')
+    def test_list_languages_with_retry(self, mock_list, mock_sleep):
+        """Test list_available_languages_with_retry"""
+        fetcher = CaptionFetcher()
+
+        mock_languages = [AvailableLanguage("en", "English", False)]
+        # Fail once, then succeed
+        mock_list.side_effect = [
+            CaptionFetchError("test1234567", "Timeout"),
+            mock_languages
+        ]
+
+        result = fetcher.list_available_languages_with_retry("test1234567", max_retries=2, retry_delay=1.0)
+
+        assert len(result) == 1
+        assert result[0].code == "en"
+        assert mock_list.call_count == 2
+
+    @patch.object(CaptionFetcher, 'fetch_captions_auto_language')
+    def test_fetch_auto_language_with_retry(self, mock_fetch):
+        """Test fetch_captions_auto_language_with_retry"""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        mock_fetch.return_value = mock_result
+
+        result = fetcher.fetch_captions_auto_language_with_retry("test1234567")
+
+        assert result.video_id == "test1234567"
+        mock_fetch.assert_called_once()
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_retry_logs_context(self, mock_fetch, mock_sleep, caplog):
+        """Test retry logging includes video_id and error details"""
+        import logging
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test1234567",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test1234567")],
+            language="en"
+        )
+        mock_fetch.side_effect = [
+            CaptionFetchError("test1234567", "Network timeout"),
+            mock_result
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            fetcher.fetch_captions_with_retry("test1234567", max_retries=2, retry_delay=1.0)
+
+        # Check log contains video_id and error info
+        assert any("test1234567" in record.message for record in caplog.records)
+        assert any("CaptionFetchError" in record.message for record in caplog.records)
+        assert any("Network timeout" in record.message for record in caplog.records)
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    def test_retry_logs_final_failure(self, mock_fetch, mock_sleep, caplog):
+        """Test final failure is logged with error level"""
+        import logging
+        fetcher = CaptionFetcher()
+
+        mock_fetch.side_effect = CaptionFetchError("test1234567", "Persistent error")
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(CaptionFetchError):
+                fetcher.fetch_captions_with_retry("test1234567", max_retries=1, retry_delay=0.1)
+
+        # Check final error is logged
+        error_logs = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert len(error_logs) >= 1
+        assert "test1234567" in error_logs[-1].message
+
+    def test_with_retry_zero_retries(self):
+        """Test max_retries=0 means only one attempt"""
+        fetcher = CaptionFetcher()
+
+        with patch.object(fetcher, 'fetch_captions') as mock_fetch:
+            mock_fetch.side_effect = CaptionFetchError("test1234567", "Error")
+
+            with pytest.raises(CaptionFetchError):
+                fetcher.fetch_captions_with_retry("test1234567", max_retries=0)
+
+            # Only 1 attempt (no retries)
+            assert mock_fetch.call_count == 1
+
+
+class TestCaptionCacheRetry:
+    """Test CaptionCache retry integration (US-008)"""
+
+    @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    def test_get_or_fetch_with_retry_cache_miss(self, mock_fetch, tmp_path):
+        """Test get_or_fetch_with_retry fetches on cache miss"""
+        from src.caption_fetcher import CaptionCache
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use a fresh temp cache
+        config = CaptionFirstConfig(cache_dir=str(tmp_path / "caption_cache"))
+        cache = CaptionCache(config)
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="misstest123",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "misstest123")],
+            language="en"
+        )
+        mock_fetch.return_value = mock_result
+
+        result = cache.get_or_fetch_with_retry(fetcher, "misstest123", "en")
+
+        assert result.video_id == "misstest123"
+        mock_fetch.assert_called_once()
+
+    @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    def test_get_or_fetch_with_retry_cache_hit(self, mock_fetch, tmp_path):
+        """Test get_or_fetch_with_retry uses cache on hit"""
+        from src.caption_fetcher import CaptionCache
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use a fresh temp cache
+        config = CaptionFirstConfig(cache_dir=str(tmp_path / "caption_cache"))
+        cache = CaptionCache(config)
+        fetcher = CaptionFetcher()
+
+        # Pre-populate cache
+        mock_result = CaptionResult(
+            video_id="hittest1234",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "hittest1234")],
+            language="en"
+        )
+        cache.store(mock_result)
+
+        # Should use cache, not fetch
+        result = cache.get_or_fetch_with_retry(fetcher, "hittest1234", "en")
+
+        assert result.video_id == "hittest1234"
+        mock_fetch.assert_not_called()
+
+    @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    def test_get_or_fetch_with_retry_passes_params(self, mock_fetch, tmp_path):
+        """Test retry parameters are passed through"""
+        from src.caption_fetcher import CaptionCache
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use a fresh temp cache
+        config = CaptionFirstConfig(cache_dir=str(tmp_path / "caption_cache"))
+        cache = CaptionCache(config)
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="paramtest123",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "paramtest123")],
+            language="es"
+        )
+        mock_fetch.return_value = mock_result
+
+        cache.get_or_fetch_with_retry(
+            fetcher, "paramtest123", "es",
+            prefer_manual=False,
+            max_retries=5,
+            retry_delay=3.0
+        )
+
+        mock_fetch.assert_called_once_with(
+            "paramtest123",
+            language="es",
+            prefer_manual=False,
+            max_retries=5,
+            retry_delay=3.0
+        )
+
+    @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    def test_get_or_fetch_with_retry_propagates_unavailable(self, mock_fetch, tmp_path):
+        """Test CaptionUnavailableError propagates from retry"""
+        from src.caption_fetcher import CaptionCache
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use a fresh temp cache to avoid cache hits from prior tests
+        config = CaptionFirstConfig(cache_dir=str(tmp_path / "caption_cache"))
+        cache = CaptionCache(config)
+        fetcher = CaptionFetcher()
+
+        mock_fetch.side_effect = CaptionUnavailableError("errtest1234", "No captions")
+
+        with pytest.raises(CaptionUnavailableError):
+            cache.get_or_fetch_with_retry(fetcher, "errtest1234", "en")
+
+    @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    def test_get_or_fetch_with_retry_propagates_fetch_error(self, mock_fetch, tmp_path):
+        """Test CaptionFetchError propagates after retry exhaustion"""
+        from src.caption_fetcher import CaptionCache
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use a fresh temp cache to avoid cache hits from prior tests
+        config = CaptionFirstConfig(cache_dir=str(tmp_path / "caption_cache"))
+        cache = CaptionCache(config)
+        fetcher = CaptionFetcher()
+
+        mock_fetch.side_effect = CaptionFetchError("errtest1234", "Network failure")
+
+        with pytest.raises(CaptionFetchError):
+            cache.get_or_fetch_with_retry(fetcher, "errtest1234", "en")

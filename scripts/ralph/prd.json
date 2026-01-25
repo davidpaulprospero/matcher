@@ -129,8 +129,8 @@
         "After max_retries, mark video for transcription fallback",
         "Tests verify retry behavior and error classification"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added max_retries and retry_delay to CaptionFirstConfig. Implemented _with_retry() with exponential backoff (delay * 2^attempt). CaptionUnavailableError NOT retried (permanent), CaptionFetchError IS retried (temporary). Added fetch_captions_with_retry(), fetch_captions_auto_language_with_retry(), list_available_languages_with_retry(), get_or_fetch_with_retry() on CaptionCache. Detailed logging includes video_id, error_type, reason, attempt count. 19 new tests: 14 in TestCaptionFetcherRetry, 5 in TestCaptionCacheRetry. All tests pass."
     },
     {
       "id": "US-009",
