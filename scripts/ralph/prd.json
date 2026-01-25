@@ -70,33 +70,35 @@
       "id": "US-005",
       "title": "Add return type hints to core matching module functions",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add return type hints to all public methods in src/matching/strategies.py",
         "Add return type hints to all public methods in src/matching/location_matching.py",
         "Add return type hints to all public methods in src/matching/tracking.py",
         "Use Optional[], List[], Dict[], etc. from typing module appropriately",
         "Syntax check passes for all modified files"
-      ]
+      ],
+      "notes": "Added return type hints to all public methods in strategies.py (StrategyMatcher, FallbackMatchStrategy classes), location_matching.py (LocationMatcher class), and tracking.py (TimelineVarietyTracker, GlobalClipTracker classes). Used Optional[] for nullable parameters and return types. All 101 matching tests pass. Syntax check passes for all files."
     },
     {
       "id": "US-006",
       "title": "Add docstrings to StrategyMatcher class methods",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add docstrings to all public methods in src/matching/strategies.py StrategyMatcher class",
         "Docstrings include description, Args, Returns, and Raises sections where applicable",
         "Document the different matching strategies (visual_first, different_source, embedding_diversity, broll_only)",
         "Document scoring weights and how alternatives are selected",
         "No syntax errors: python -m py_compile src/matching/strategies.py"
-      ]
+      ],
+      "notes": "Added comprehensive docstrings to all 12 public methods in StrategyMatcher class: __init__, get_clip_id, is_clip_excluded, match_visual_first, match_different_source, match_keyword_only, match_embedding_diversity, match_broll_only, get_secondary_matches_diversity, _get_scene_for_segment, match_source_rotation, get_strategy_matches. Each docstring includes description, Args, Returns, and Notes sections. Documented scoring weights (e.g., 70% visual/30% text for visual_first, 40% relevance/60% diversity for embedding_diversity). All 118 strategy tests pass. Syntax check passes."
     },
     {
       "id": "US-007",
       "title": "Replace bare except blocks in media source modules",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Replace bare except: in src/media_sources/images/google_bing.py line 383",
         "Replace bare except: in src/media_sources/images/pexels.py line 167",
@@ -104,7 +106,8 @@
         "Replace bare except: in src/media_sources/images/unsplash.py line 167",
         "Use requests.RequestException, json.JSONDecodeError, or other specific types",
         "Syntax check passes for all modified files"
-      ]
+      ],
+      "notes": "Replaced 4 bare except: blocks with specific exception handling. google_bing.py: (OSError, IOError) for file deletion. pexels.py, pixabay.py, unsplash.py: (requests.RequestException, ValueError) for HEAD request size pre-check. Added logger.debug() calls for troubleshooting. Syntax check passes for all files."
     },
     {
       "id": "US-008",

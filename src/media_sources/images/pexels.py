@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
+import requests
+
 from ..base import BaseMediaClient
 from ..models import ImageResult
 
@@ -164,7 +166,9 @@ class PexelsImageClient(BaseMediaClient):
                     if content_length > 0 and content_length < self.min_size:
                         logger.debug(f"Image too small (pre-check): {filename} ({content_length/1024/1024:.2f}MB)")
                         return None
-                except:
+                except (requests.RequestException, ValueError) as e:
+                    # HEAD request may fail (timeouts, connection errors) or content-length may not be numeric
+                    logger.debug(f"HEAD request failed for {filename}: {e}")
                     pass  # Continue with download anyway
 
             # Download
