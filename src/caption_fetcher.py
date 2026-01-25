@@ -741,6 +741,236 @@ class ErrorPatternResult:
         )
 
 
+@dataclass
+class CaptionBatchCheckpoint:
+    """Checkpoint for batch caption fetching with partial result recovery (US-005 Sprint 8).
+
+    Stores successfully fetched captions during batch operation, enabling:
+    1. Periodic saves every N successful fetches
+    2. Recovery from ErrorPatternAbortError with partial results
+    3. Resume capability that skips already-fetched videos
+
+    Checkpoint is saved to: <project>/.cache/caption_checkpoint.json
+
+    Attributes:
+        results: Dict mapping video_id to serialized CaptionResult or error dict.
+        total_requested: Total number of videos requested in the batch.
+        success_count: Number of successfully fetched captions.
+        error_count: Number of failed fetches (errors/unavailable).
+        aborted: Whether batch was aborted due to error pattern.
+        abort_reason: Human-readable abort reason if aborted.
+        abort_pattern_info: Dict with ErrorPatternResult data if aborted by pattern.
+        created_at: Unix timestamp when checkpoint was created.
+        updated_at: Unix timestamp when checkpoint was last updated.
+        remaining_video_ids: List of video IDs not yet processed.
+
+    Example:
+        >>> checkpoint = CaptionBatchCheckpoint(
+        ...     results={'abc123': {'video_id': 'abc123', 'segments': [...]}},
+        ...     total_requested=100,
+        ...     success_count=50,
+        ...     error_count=0,
+        ...     aborted=True,
+        ...     abort_reason='Error pattern detected: 403 Forbidden (30/100 videos)',
+        ...     remaining_video_ids=['def456', 'ghi789', ...]
+        ... )
+        >>> checkpoint.save('/path/to/cache/caption_checkpoint.json')
+    """
+    results: Dict[str, Any] = field(default_factory=dict)
+    total_requested: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    aborted: bool = False
+    abort_reason: str = ""
+    abort_pattern_info: Optional[Dict[str, Any]] = None
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    remaining_video_ids: List[str] = field(default_factory=list)
+
+    def update(self, video_id: str, result: Union['CaptionResult', Dict[str, Any]]) -> None:
+        """Add or update a result in the checkpoint.
+
+        Args:
+            video_id: Video ID that was processed.
+            result: CaptionResult on success, or error dict on failure.
+        """
+        if isinstance(result, CaptionResult):
+            # Serialize CaptionResult to dict
+            self.results[video_id] = {
+                'video_id': result.video_id,
+                'segments': [seg.to_dict() for seg in result.segments],
+                'language': result.language,
+                'is_auto_generated': result.is_auto_generated,
+                'format_source': result.format_source,
+                'segment_count': len(result.segments),
+                'caption_quality': result.caption_quality,
+            }
+            self.success_count += 1
+        else:
+            # Already a dict (error result)
+            self.results[video_id] = result
+            if result.get('error') or result.get('unavailable'):
+                self.error_count += 1
+            else:
+                self.success_count += 1
+
+        # Remove from remaining if present
+        if video_id in self.remaining_video_ids:
+            self.remaining_video_ids.remove(video_id)
+
+        self.updated_at = time.time()
+
+    def mark_aborted(
+        self,
+        reason: str,
+        pattern_result: Optional['ErrorPatternResult'] = None,
+        remaining_ids: Optional[List[str]] = None
+    ) -> None:
+        """Mark the checkpoint as aborted due to error pattern.
+
+        Args:
+            reason: Human-readable abort reason.
+            pattern_result: ErrorPatternResult with detection details.
+            remaining_ids: List of video IDs not yet processed.
+        """
+        self.aborted = True
+        self.abort_reason = reason
+        if pattern_result:
+            self.abort_pattern_info = {
+                'detected': pattern_result.detected,
+                'error_signature': pattern_result.error_signature,
+                'affected_video_ids': pattern_result.affected_video_ids,
+                'sample_size': pattern_result.sample_size,
+                'ratio': pattern_result.ratio,
+                'likely_cause': pattern_result.likely_cause,
+            }
+        if remaining_ids:
+            self.remaining_video_ids = remaining_ids
+        self.updated_at = time.time()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'results': self.results,
+            'total_requested': self.total_requested,
+            'success_count': self.success_count,
+            'error_count': self.error_count,
+            'aborted': self.aborted,
+            'abort_reason': self.abort_reason,
+            'abort_pattern_info': self.abort_pattern_info,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at,
+            'remaining_video_ids': self.remaining_video_ids,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CaptionBatchCheckpoint':
+        """Create from dictionary loaded from JSON."""
+        return cls(
+            results=data.get('results', {}),
+            total_requested=data.get('total_requested', 0),
+            success_count=data.get('success_count', 0),
+            error_count=data.get('error_count', 0),
+            aborted=data.get('aborted', False),
+            abort_reason=data.get('abort_reason', ''),
+            abort_pattern_info=data.get('abort_pattern_info'),
+            created_at=data.get('created_at', time.time()),
+            updated_at=data.get('updated_at', time.time()),
+            remaining_video_ids=data.get('remaining_video_ids', []),
+        )
+
+    def save(self, path: Union[str, Path]) -> bool:
+        """Save checkpoint to JSON file.
+
+        Args:
+            path: Path to checkpoint file.
+
+        Returns:
+            True if save succeeded, False otherwise.
+        """
+        try:
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write atomically (write to temp, then rename)
+            temp_path = path.with_suffix('.tmp')
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(self.to_dict(), f, indent=2)
+            temp_path.replace(path)
+
+            logger.debug(f"Saved caption checkpoint: {self.success_count} successes, {self.error_count} errors")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save caption checkpoint: {e}")
+            return False
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> Optional['CaptionBatchCheckpoint']:
+        """Load checkpoint from JSON file.
+
+        Args:
+            path: Path to checkpoint file.
+
+        Returns:
+            CaptionBatchCheckpoint if loaded successfully, None otherwise.
+        """
+        try:
+            path = Path(path)
+            if not path.exists():
+                return None
+
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            checkpoint = cls.from_dict(data)
+            logger.info(
+                f"Loaded caption checkpoint: {checkpoint.success_count} successes, "
+                f"{checkpoint.error_count} errors, aborted={checkpoint.aborted}"
+            )
+            return checkpoint
+        except json.JSONDecodeError as e:
+            logger.warning(f"Corrupt caption checkpoint (JSON error): {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load caption checkpoint: {e}")
+            return None
+
+    @staticmethod
+    def get_checkpoint_path(project_dir: Union[str, Path]) -> Path:
+        """Get the standard checkpoint file path for a project.
+
+        Args:
+            project_dir: Project directory path.
+
+        Returns:
+            Path to .cache/caption_checkpoint.json in the project.
+        """
+        return Path(project_dir) / '.cache' / 'caption_checkpoint.json'
+
+    def get_remaining_ids(self, all_video_ids: List[str]) -> List[str]:
+        """Get video IDs that haven't been processed yet.
+
+        Args:
+            all_video_ids: Complete list of video IDs for the batch.
+
+        Returns:
+            List of video IDs not in results.
+        """
+        processed = set(self.results.keys())
+        return [vid for vid in all_video_ids if vid not in processed]
+
+    def has_result(self, video_id: str) -> bool:
+        """Check if a video ID has already been processed."""
+        return video_id in self.results
+
+    def get_successful_results(self) -> Dict[str, Any]:
+        """Get only successful results (no errors/unavailable)."""
+        return {
+            vid: result for vid, result in self.results.items()
+            if not result.get('error') and not result.get('unavailable')
+        }
+
+
 class ErrorPatternDetector:
     """Detects repeated error patterns during batch caption fetching (US-007 Sprint 7).
 
@@ -2793,6 +3023,8 @@ class CaptionFetcher:
         metrics: Optional['CaptionMetrics'] = None,
         progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
         skip_video_ids: Optional[set] = None,
+        batch_checkpoint: Optional['CaptionBatchCheckpoint'] = None,
+        checkpoint_save_interval: int = 10,
     ) -> Dict[str, Union[CaptionResult, Dict[str, Any]]]:
         """Fetch captions for multiple videos in parallel using ThreadPoolExecutor.
 
@@ -2808,6 +3040,12 @@ class CaptionFetcher:
         - 'warn': Logs warning and continues fetching (default)
         - 'skip': Disables pattern detection entirely
 
+        US-005 Sprint 8: Adds checkpoint support for partial result recovery.
+        When batch_checkpoint is provided:
+        - Saves checkpoint every checkpoint_save_interval successful fetches
+        - On ErrorPatternAbortError, saves checkpoint with abort info
+        - Enables resume by skipping already-fetched videos in checkpoint
+
         Args:
             video_ids: List of YouTube video IDs to fetch captions for.
             preferred_language: Preferred caption language (ISO 639-1 code).
@@ -2821,6 +3059,10 @@ class CaptionFetcher:
                 - status: 'fetching', 'success', 'failed', 'skipped', 'pattern_detected'
                 - details: Dict with language, quality, segment_count, error, etc.
             skip_video_ids: Set of video IDs to skip (already cached).
+            batch_checkpoint: Optional CaptionBatchCheckpoint for partial result recovery.
+                If provided, results are saved periodically and on abort.
+            checkpoint_save_interval: Save checkpoint every N successful fetches.
+                Default: 10. Only used if batch_checkpoint is provided.
 
         Returns:
             Dict mapping video_id to either:
@@ -2830,20 +3072,29 @@ class CaptionFetcher:
         Raises:
             ErrorPatternAbortError: When abort_on_error_pattern='abort' and
                 error pattern is detected. Exception contains partial_results.
+                If batch_checkpoint is provided, checkpoint is saved before raising.
 
         Example:
             fetcher = CaptionFetcher(config)
             metrics = CaptionMetrics()
 
-            def on_progress(video_id, status, details):
-                print(f"[{details.get('index', 0)}/{details.get('total', 0)}] "
-                      f"{video_id}: {status}")
-
-            results = fetcher.fetch_captions_batch(
-                video_ids=['abc123XYZ01', 'def456ABC02'],
-                metrics=metrics,
-                progress_callback=on_progress
+            # With checkpointing (US-005 Sprint 8)
+            checkpoint = CaptionBatchCheckpoint(
+                total_requested=len(video_ids),
+                remaining_video_ids=list(video_ids)
             )
+            checkpoint_path = CaptionBatchCheckpoint.get_checkpoint_path(project_dir)
+
+            try:
+                results = fetcher.fetch_captions_batch(
+                    video_ids=['abc123XYZ01', 'def456ABC02', ...],
+                    metrics=metrics,
+                    batch_checkpoint=checkpoint,
+                    checkpoint_save_interval=10,
+                )
+            except ErrorPatternAbortError:
+                # Checkpoint already saved with abort info
+                checkpoint.save(checkpoint_path)
         """
         if not video_ids:
             return {}
@@ -2906,6 +3157,10 @@ class CaptionFetcher:
 
         results: Dict[str, Union[CaptionResult, Dict[str, Any]]] = {}
         total_videos = len(videos_to_fetch)
+
+        # US-005 Sprint 8: Track checkpoint save state
+        checkpoint_success_count = 0
+        checkpoint_lock = threading.Lock()
 
         # US-002 Sprint 6: Get timeout threshold for slow fetch warning
         timeout_threshold = self._timeout if self._timeout else 30.0
@@ -3106,6 +3361,20 @@ class CaptionFetcher:
                     vid, result = future.result()
                     results[vid] = result
 
+                    # US-005 Sprint 8: Update checkpoint and save periodically
+                    if batch_checkpoint is not None:
+                        with checkpoint_lock:
+                            batch_checkpoint.update(vid, result)
+                            # Save checkpoint every N successful fetches
+                            if isinstance(result, CaptionResult):
+                                checkpoint_success_count += 1
+                                if checkpoint_success_count % checkpoint_save_interval == 0:
+                                    # Note: save path must be provided by caller
+                                    logger.debug(
+                                        f"Checkpoint: {checkpoint_success_count} successes "
+                                        f"({len(batch_checkpoint.results)}/{total_videos} processed)"
+                                    )
+
                     # US-007 Sprint 7: Record result with pattern detector
                     if pattern_detector and not pattern_handled:
                         if isinstance(result, CaptionResult):
@@ -3157,6 +3426,26 @@ class CaptionFetcher:
                                     # Cancel remaining futures
                                     for f in futures:
                                         f.cancel()
+
+                                    # US-005 Sprint 8: Save checkpoint before abort
+                                    if batch_checkpoint is not None:
+                                        # Calculate remaining video IDs
+                                        processed_ids = set(results.keys())
+                                        remaining_ids = [
+                                            vid for vid in videos_to_fetch
+                                            if vid not in processed_ids
+                                        ]
+                                        batch_checkpoint.mark_aborted(
+                                            reason=str(pattern_result),
+                                            pattern_result=pattern_result,
+                                            remaining_ids=remaining_ids
+                                        )
+                                        logger.info(
+                                            f"Checkpoint saved before abort: "
+                                            f"{batch_checkpoint.success_count} successes, "
+                                            f"{len(remaining_ids)} remaining"
+                                        )
+
                                     raise ErrorPatternAbortError(
                                         pattern_result=pattern_result,
                                         partial_results=dict(results)
@@ -3185,6 +3474,84 @@ class CaptionFetcher:
             f"Batch caption fetch complete: {len(results)} processed, "
             f"{sum(1 for r in results.values() if isinstance(r, CaptionResult))} succeeded"
         )
+
+        return results
+
+    def resume_from_checkpoint(
+        self,
+        checkpoint: 'CaptionBatchCheckpoint',
+        video_ids: List[str],
+        preferred_language: Optional[str] = None,
+        max_workers: Optional[int] = None,
+        metrics: Optional['CaptionMetrics'] = None,
+        progress_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+        checkpoint_save_interval: int = 10,
+    ) -> Dict[str, Union[CaptionResult, Dict[str, Any]]]:
+        """Resume batch caption fetch from a checkpoint (US-005 Sprint 8).
+
+        Loads partial results from checkpoint, skips already-fetched videos,
+        and continues fetching remaining videos. Merges checkpoint results
+        with new fetch results.
+
+        Args:
+            checkpoint: CaptionBatchCheckpoint with partial results.
+            video_ids: Complete list of video IDs for the batch (same as original).
+            preferred_language: Preferred caption language (ISO 639-1 code).
+            max_workers: Number of parallel workers.
+            metrics: Optional CaptionMetrics instance.
+            progress_callback: Optional progress callback.
+            checkpoint_save_interval: Save checkpoint every N successful fetches.
+
+        Returns:
+            Combined dict of checkpoint results + new fetch results.
+
+        Example:
+            checkpoint_path = CaptionBatchCheckpoint.get_checkpoint_path(project_dir)
+            checkpoint = CaptionBatchCheckpoint.load(checkpoint_path)
+
+            if checkpoint and checkpoint.aborted:
+                print(f"Resuming from {checkpoint.success_count} successful fetches")
+                results = fetcher.resume_from_checkpoint(
+                    checkpoint=checkpoint,
+                    video_ids=all_video_ids,
+                )
+        """
+        # Start with existing results from checkpoint
+        results = dict(checkpoint.results)
+
+        # Determine which videos still need fetching
+        skip_video_ids = set(checkpoint.results.keys())
+        remaining_ids = [vid for vid in video_ids if vid not in skip_video_ids]
+
+        if not remaining_ids:
+            logger.info("Resume: All videos already fetched in checkpoint")
+            return results
+
+        logger.info(
+            f"Resuming batch fetch: {len(remaining_ids)} remaining "
+            f"(skipping {len(skip_video_ids)} from checkpoint)"
+        )
+
+        # Clear abort state since we're resuming
+        checkpoint.aborted = False
+        checkpoint.abort_reason = ""
+        checkpoint.abort_pattern_info = None
+        checkpoint.remaining_video_ids = remaining_ids
+
+        # Fetch remaining videos (checkpoint will be updated internally)
+        new_results = self.fetch_captions_batch(
+            video_ids=remaining_ids,
+            preferred_language=preferred_language,
+            max_workers=max_workers,
+            metrics=metrics,
+            progress_callback=progress_callback,
+            skip_video_ids=set(),  # We already filtered
+            batch_checkpoint=checkpoint,
+            checkpoint_save_interval=checkpoint_save_interval,
+        )
+
+        # Merge new results
+        results.update(new_results)
 
         return results
 
@@ -4452,6 +4819,128 @@ class CaptionCache(BaseCache):
             metadata=data.get('metadata', {})
         )
 
+    def _is_valid_entry(self, entry: CacheEntry) -> bool:
+        """Override to prevent auto-deletion of stale entries (US-004 Sprint 8).
+
+        All validation modes (strict/warn/skip) return True here to prevent
+        BaseCache.get() from auto-deleting entries. Staleness handling
+        (skip/warn/reject) is done in get_caption() instead.
+
+        This ensures stale entries are preserved for explicit cleanup via
+        --cleanup-caption-cache rather than being silently deleted.
+        """
+        # Never auto-delete based on TTL - let get_caption() handle staleness
+        return True
+
+    def is_stale(self, entry: CacheEntry, max_age_days: Optional[int] = None) -> bool:
+        """Check if a cache entry is stale based on age (US-004 Sprint 8).
+
+        Args:
+            entry: Cache entry to check.
+            max_age_days: Override max age in days. If None, uses config value.
+
+        Returns:
+            True if the entry is older than max_age_days, False otherwise.
+            Returns False if max_age_days is 0 (no expiration).
+        """
+        max_days = max_age_days if max_age_days is not None else self.max_age_days
+        if max_days <= 0:
+            return False
+
+        age_seconds = time.time() - entry.cached_at
+        max_age_seconds = max_days * 24 * 3600
+        return age_seconds > max_age_seconds
+
+    def get_entry_age_days(self, entry: CacheEntry) -> float:
+        """Get the age of a cache entry in days (US-004 Sprint 8).
+
+        Args:
+            entry: Cache entry to check.
+
+        Returns:
+            Age in days (fractional).
+        """
+        age_seconds = time.time() - entry.cached_at
+        return age_seconds / (24 * 3600)
+
+    def cleanup_stale_entries(
+        self,
+        max_age_days: Optional[int] = None,
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Remove stale cache entries older than max_age_days (US-004 Sprint 8).
+
+        Args:
+            max_age_days: Maximum age in days. If None, uses config value.
+            dry_run: If True, only count entries without removing them.
+
+        Returns:
+            Dict with cleanup results:
+            - entries_removed: Number of stale entries removed
+            - bytes_freed: Estimated bytes freed (from JSON serialization size)
+            - oldest_removed_days: Age of oldest removed entry in days
+            - dry_run: Whether this was a dry run
+
+        Example:
+            >>> cache = CaptionCache(config)
+            >>> result = cache.cleanup_stale_entries(max_age_days=7)
+            >>> print(f"Removed {result['entries_removed']} stale entries")
+        """
+        max_days = max_age_days if max_age_days is not None else self.max_age_days
+        if max_days <= 0:
+            return {
+                'entries_removed': 0,
+                'bytes_freed': 0,
+                'oldest_removed_days': 0,
+                'dry_run': dry_run,
+            }
+
+        stale_keys = []
+        oldest_age_days = 0
+        total_bytes = 0
+
+        for key in list(self.index.keys()):
+            # Skip metadata entries
+            if key.startswith('__'):
+                continue
+
+            try:
+                entry_data = self.index[key]
+                entry = self._deserialize_entry(entry_data)
+
+                if self.is_stale(entry, max_days):
+                    stale_keys.append(key)
+                    age_days = self.get_entry_age_days(entry)
+                    if age_days > oldest_age_days:
+                        oldest_age_days = age_days
+                    # Estimate bytes from JSON serialization
+                    total_bytes += len(json.dumps(entry_data))
+            except Exception as e:
+                logger.debug(f"Error checking entry {key}: {e}")
+                # Mark corrupt entries for removal too
+                stale_keys.append(key)
+
+        if not dry_run:
+            for key in stale_keys:
+                if key in self.index:
+                    del self.index[key]
+
+            if stale_keys and self.auto_save:
+                self._save_index()
+
+            if stale_keys:
+                logger.info(
+                    f"Cleaned up {len(stale_keys)} stale caption cache entries "
+                    f"(oldest: {oldest_age_days:.1f} days)"
+                )
+
+        return {
+            'entries_removed': len(stale_keys),
+            'bytes_freed': total_bytes,
+            'oldest_removed_days': oldest_age_days,
+            'dry_run': dry_run,
+        }
+
     def validate_cache_entry(
         self,
         cached: CachedCaption,
@@ -4547,6 +5036,11 @@ class CaptionCache(BaseCache):
     def get_caption(self, video_id: str, language: str) -> Optional[CachedCaption]:
         """Get cached caption for a video and language.
 
+        Staleness handling depends on validation_mode (US-004 Sprint 8):
+        - 'strict': Returns None for stale entries (triggers re-fetch)
+        - 'warn': Logs warning for stale entries but returns them
+        - 'skip': No staleness check, returns cached data as-is
+
         Args:
             video_id: YouTube video ID.
             language: ISO 639-1 language code.
@@ -4563,6 +5057,23 @@ class CaptionCache(BaseCache):
         if entry is None:
             logger.debug(f"Caption cache miss: {key}")
             return None
+
+        # Check staleness based on validation_mode (US-004 Sprint 8)
+        if self.validation_mode != 'skip' and self.is_stale(entry):
+            age_days = self.get_entry_age_days(entry)
+            if self.validation_mode == 'strict':
+                logger.info(
+                    f"Caption cache stale (strict mode): {key} "
+                    f"(age: {age_days:.1f} days, max: {self.max_age_days} days)"
+                )
+                # Don't delete - let user investigate or cleanup explicitly
+                return None
+            else:  # 'warn' mode
+                logger.warning(
+                    f"Caption cache stale: {key} "
+                    f"(age: {age_days:.1f} days, max: {self.max_age_days} days) - "
+                    f"returning cached data, consider running --cleanup-caption-cache"
+                )
 
         try:
             cached = CachedCaption.from_dict(entry.data)

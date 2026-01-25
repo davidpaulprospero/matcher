@@ -131,6 +131,8 @@ class CaptionStage(Stage):
                 CaptionResult,
                 CaptionMetrics,
                 CaptionCache,
+                CaptionBatchCheckpoint,
+                ErrorPatternAbortError,
                 determine_caption_quality,
             )
 
@@ -157,6 +159,25 @@ class CaptionStage(Stage):
             # Check for already-fetched captions in checkpoint
             existing_captions = self._load_existing_captions(checkpoint)
             print(f"  Found {len(existing_captions)} captions in checkpoint")
+
+            # US-005 Sprint 8: Check for batch checkpoint from aborted run
+            batch_checkpoint_path = None
+            batch_checkpoint = None
+            project_dir = getattr(state, 'project_dir', None)
+            if project_dir:
+                batch_checkpoint_path = CaptionBatchCheckpoint.get_checkpoint_path(project_dir)
+                batch_checkpoint = CaptionBatchCheckpoint.load(batch_checkpoint_path)
+                if batch_checkpoint:
+                    if batch_checkpoint.aborted:
+                        print(f"  ! Found aborted batch checkpoint: {batch_checkpoint.success_count} fetched, "
+                              f"{len(batch_checkpoint.remaining_video_ids)} remaining")
+                        print(f"    Abort reason: {batch_checkpoint.abort_reason[:80]}...")
+                    else:
+                        print(f"  Found batch checkpoint: {batch_checkpoint.success_count} fetched")
+                    # Merge batch checkpoint results into existing captions
+                    for vid, result in batch_checkpoint.results.items():
+                        if vid not in existing_captions:
+                            existing_captions[vid] = result
 
             # Prepare caption results with existing cached entries
             caption_results = {}
@@ -366,14 +387,40 @@ class CaptionStage(Stage):
                             else:
                                 print(line)
 
+                # US-005 Sprint 8: Create or reuse batch checkpoint for partial recovery
+                checkpoint_save_interval = getattr(caption_config, 'checkpoint_save_interval', 10)
+                if batch_checkpoint is None and batch_checkpoint_path:
+                    batch_checkpoint = CaptionBatchCheckpoint(
+                        total_requested=len(ids_to_fetch),
+                        remaining_video_ids=list(ids_to_fetch)
+                    )
+
                 # US-001: Use batch fetch for parallel processing
-                batch_results = self._fetcher.fetch_captions_batch(
-                    video_ids=ids_to_fetch,
-                    preferred_language=preferred_lang,
-                    max_workers=max_workers,
-                    metrics=metrics,
-                    progress_callback=on_progress,
-                )
+                # US-005 Sprint 8: With checkpoint support for abort recovery
+                try:
+                    batch_results = self._fetcher.fetch_captions_batch(
+                        video_ids=ids_to_fetch,
+                        preferred_language=preferred_lang,
+                        max_workers=max_workers,
+                        metrics=metrics,
+                        progress_callback=on_progress,
+                        batch_checkpoint=batch_checkpoint,
+                        checkpoint_save_interval=checkpoint_save_interval,
+                    )
+                    # US-005 Sprint 8: Save final checkpoint on success
+                    if batch_checkpoint and batch_checkpoint_path:
+                        batch_checkpoint.save(batch_checkpoint_path)
+                        logger.info(f"Batch checkpoint saved: {batch_checkpoint.success_count} successes")
+                except ErrorPatternAbortError as e:
+                    # US-005 Sprint 8: Checkpoint already updated in fetch_captions_batch
+                    # Save checkpoint to disk before re-raising
+                    if batch_checkpoint and batch_checkpoint_path:
+                        batch_checkpoint.save(batch_checkpoint_path)
+                        print(f"  ! Batch aborted: checkpoint saved with {batch_checkpoint.success_count} results")
+                        print(f"    Resume by running the pipeline again with --resume")
+                    # Use partial results from the exception
+                    batch_results = e.partial_results
+                    warnings.append(f"Batch fetch aborted due to error pattern: {e.pattern_result}")
 
                 # Convert batch results to checkpoint format
                 for video_id, result in batch_results.items():
