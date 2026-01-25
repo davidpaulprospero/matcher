@@ -925,5 +925,64 @@ Progress: 4/12 stories complete
 - Files created:
   - tests/test_checkpoint_timing.py (new file, 16 tests)
 
-Progress: 5/12 stories complete
+Progress: 6/12 stories complete
+
+## Iteration 6 - [US-006] Add transcription audio extraction timeout
+- Added audio_extraction_timeout field to TranscriptionConfig in src/config/sections/core.py:
+  - Type: int, default: 60 (seconds)
+  - Comment: "FFmpeg subprocess killed if extraction exceeds this limit"
+- Updated extract_audio() in src/transcription/utils.py:
+  - Added timeout parameter (default: 60 seconds)
+  - Changed hardcoded timeout=120 to use the parameter
+  - Catches subprocess.TimeoutExpired and raises TimeoutError
+  - Logs warning with video path on timeout
+  - Cleans up partial audio file on timeout
+- Added audio_extraction_timeout to config.yaml in transcription section
+- Created tests/test_audio_extraction_timeout.py with 21 tests across 7 test classes:
+  - TestTranscriptionConfigTimeout (4 tests): field existence, default, setter, type
+  - TestExtractAudioTimeoutParameter (3 tests): accepts param, default, passes to subprocess
+  - TestTimeoutErrorBehavior (4 tests): raises TimeoutError, message includes path/timeout, cleanup
+  - TestTimeoutWarningLogging (3 tests): logs warning, includes path, includes seconds
+  - TestExtractionWithTimeout (2 tests): success within timeout, respects custom
+  - TestConfigIntegration (2 tests): config usable with extract_audio, defaults match
+  - TestEdgeCases (3 tests): zero timeout, large timeout, skip if exists
+- All 21 new tests pass
+- All 49 transcription-related tests pass (no regressions)
+- All 35 sprint 3 verification tests pass
+- Files modified:
+  - src/config/sections/core.py (added audio_extraction_timeout field)
+  - src/transcription/utils.py (updated extract_audio with timeout handling)
+  - config.yaml (added audio_extraction_timeout setting)
+- Files created:
+  - tests/test_audio_extraction_timeout.py (new file, 21 tests)
+
+## Iteration 7 - [US-007] Add skip_if_cached flag to transcribe_videos_parallel
+- Added skip_if_cached parameter to transcribe_videos_parallel() in src/transcription/parallel_processor.py:
+  - Default value: True (skip cached videos)
+  - When False: reprocess all videos ignoring cache
+  - Provides clearer semantics than force_reprocess (which is now deprecated)
+- Implementation logic:
+  - should_skip_cached = skip_if_cached and not force_reprocess
+  - When not should_skip_cached: all videos added to uncached_videos list (no cache check)
+  - When should_skip_cached: cache is checked for each video
+- Added logging for skipped videos:
+  - Logs "Skipped N cached videos (skip_if_cached=True)" when cached videos are found and skipped
+  - Only logs when should_skip_cached is True AND cached_videos list is non-empty
+- Created tests/test_transcription_skip_cached.py with 17 tests across 7 test classes:
+  - TestSkipIfCachedParameter (3 tests): parameter existence, default True, bool type
+  - TestSkipIfCachedTrue (3 tests): cached videos skipped, default skips, uncached processed
+  - TestSkipIfCachedFalse (2 tests): cached videos reprocessed, all videos reprocessed
+  - TestSkipIfCachedWithForceReprocess (2 tests): force_reprocess overrides, both false still reprocesses
+  - TestSkipIfCachedLogging (3 tests): logs skipped count, no log when no cached, no log when skip false
+  - TestSkipIfCachedReturnsCorrectResults (2 tests): returns TranscriptSegments, mixed cached/fresh
+  - TestSkipIfCachedEdgeCases (2 tests): empty video list, all cached returns immediately
+- All 17 new tests pass
+- All 24 existing parallel_processor tests pass (no regressions)
+- All 35 sprint 3 verification tests pass
+- Files modified:
+  - src/transcription/parallel_processor.py (added skip_if_cached parameter, updated cache logic, added logging)
+- Files created:
+  - tests/test_transcription_skip_cached.py (new file, 17 tests)
+
+Progress: 7/12 stories complete
 
