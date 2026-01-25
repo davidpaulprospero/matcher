@@ -193,3 +193,124 @@ Created comprehensive test suites for three healer classes:
 - tests/test_agents/test_path_healer.py (36 tests)
 - tests/test_agents/test_checkpoint_healer.py (31 tests)
 
+## Iteration 6 - US-005: Add return type hints to core matching module functions
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Added return type hints to all public methods in three core matching modules:
+
+**src/matching/strategies.py:**
+- `StrategyMatcher.__init__` -> None
+- `StrategyMatcher.get_clip_id` -> str (already present)
+- `StrategyMatcher.is_clip_excluded` -> Tuple[bool, str] (already present)
+- `StrategyMatcher.match_visual_first`, `match_different_source`, `match_keyword_only`, `match_embedding_diversity`, `match_broll_only`, `match_source_rotation` -> Optional[StrategyMatch] (already present)
+- `StrategyMatcher.get_secondary_matches_diversity` -> List[AlternativeMatch] (already present)
+- `StrategyMatcher.get_strategy_matches` -> List[StrategyMatch] (already present)
+- `FallbackMatchStrategy.__init__` -> None
+- Updated parameter types to use `Optional[]` for nullable parameters (existing_embeddings, candidate_embeddings, global_used_clips)
+
+**src/matching/location_matching.py:**
+- `LocationMatcher.__init__` -> None
+- `LocationMatcher.set_location_chapters` -> None
+- `LocationMatcher.set_video_locations` -> None
+- `_get_location_chapter` -> Optional[LocationChapter] (already present)
+- `_get_video_location` -> Optional[GeoLocation] (already present)
+- `apply_location_filter` -> Tuple[...] (already present)
+
+**src/matching/tracking.py:**
+- `TimelineVarietyTracker.__init__` -> None
+- `TimelineVarietyTracker.get_excluded_sources` -> Set[str] (already present)
+- `TimelineVarietyTracker.record_usage` -> None
+- `TimelineVarietyTracker.get_stats` -> Dict[str, Any] (already present, added docstring)
+- `GlobalClipTracker.__init__` -> None
+- `GlobalClipTracker.get_clip_id` -> str (already present)
+- `GlobalClipTracker.is_used` -> bool (already present)
+- `GlobalClipTracker.record_usage` -> None
+- `GlobalClipTracker.get_used_clips` -> Set[str] (already present)
+- `GlobalClipTracker.get_stats` -> Dict[str, Any] (already present)
+
+### Verification
+- Syntax check: All 3 files pass `python -m py_compile`
+- Tests: All 101 matching tests pass
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/matching/strategies.py - Return type hints and Optional[] parameters
+- src/matching/location_matching.py - Return type hints
+- src/matching/tracking.py - Return type hints and improved docstrings
+
+## Iteration 7 - US-006: Add docstrings to StrategyMatcher class methods
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Added comprehensive docstrings to all 12 public methods in the StrategyMatcher class:
+
+1. **`__init__`**: Documented config and scenes parameters, notes on variety_config handling
+2. **`get_clip_id`**: Documented clip ID format ("source:start-end")
+3. **`is_clip_excluded`**: Documented 4 exclusion rules (same clip, same source, time window, embedding distance)
+4. **`match_visual_first`**: Documented scoring weights (70% visual, 30% text), visual terms list
+5. **`match_different_source`**: Documented source uniqueness enforcement and 0.8x fallback penalty
+6. **`match_keyword_only`**: Documented keyword/entity matching (0.2 per term, 0.1 per text match)
+7. **`match_embedding_diversity`**: Documented 40% relevance / 60% diversity weights, 0.3 threshold
+8. **`match_broll_only`**: Documented B-roll detection sources (face_score, word_count threshold)
+9. **`get_secondary_matches_diversity`**: Documented V4-V6 diversity algorithm, relaxed fallback threshold
+10. **`_get_scene_for_segment`**: Documented scene lookup logic
+11. **`match_source_rotation`**: Documented round-robin assignment (N % num_sources)
+12. **`get_strategy_matches`**: Documented strategy orchestration and execution order
+
+Each docstring includes:
+- Description of the method's purpose
+- Args section with parameter documentation
+- Returns section with return type/value documentation
+- Notes section with implementation details and config references
+
+### Verification
+- Syntax check: `python -m py_compile src/matching/strategies.py` - PASSED
+- Tests: All 118 strategy tests pass
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/matching/strategies.py - Comprehensive docstrings for StrategyMatcher class
+
+## Iteration 8 - US-007: Replace bare except blocks in media source modules
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Replaced 4 bare `except:` blocks with specific exception handling in media source image clients:
+
+1. **google_bing.py line 383 (file deletion):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle file deletion errors (permissions, locks) when removing small files
+
+2. **pexels.py line 167 (HEAD request):**
+   - Before: `except:` with `pass`
+   - After: `except (requests.RequestException, ValueError) as e:` with logger.debug()
+   - Purpose: Handle HTTP request failures and non-numeric content-length header
+
+3. **pixabay.py line 177 (HEAD request):**
+   - Before: `except:` with `pass`
+   - After: `except (requests.RequestException, ValueError) as e:` with logger.debug()
+   - Purpose: Same as pexels.py
+
+4. **unsplash.py line 167 (HEAD request):**
+   - Before: `except:` with `pass`
+   - After: `except (requests.RequestException, ValueError) as e:` with logger.debug()
+   - Purpose: Same as pexels.py
+
+**Additional changes:**
+- Added `import requests` to pexels.py, pixabay.py, and unsplash.py to use `requests.RequestException`
+
+### Verification
+- Syntax check: All 4 files pass `python -m py_compile`
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/media_sources/images/google_bing.py - Exception handling for file deletion
+- src/media_sources/images/pexels.py - Exception handling for HEAD request + import
+- src/media_sources/images/pixabay.py - Exception handling for HEAD request + import
+- src/media_sources/images/unsplash.py - Exception handling for HEAD request + import
+
