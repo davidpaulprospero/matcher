@@ -148,4 +148,27 @@ Examples:
         help='Export rate limit metrics to JSON file after pipeline (e.g., metrics.json)'
     )
 
+    # Caption-first mode flags
+    parser.add_argument(
+        '--caption-first',
+        action='store_true',
+        help='Enable caption-first mode: fetch YouTube captions before video download. '
+             'Faster matching with lower bandwidth. Falls back to Whisper if unavailable.'
+    )
+
+    parser.add_argument(
+        '--caption-language',
+        type=str,
+        metavar='CODE',
+        help='Preferred caption language code (ISO 639-1, e.g., "en", "es", "fr"). '
+             'Overrides config.yaml caption_first.preferred_language.'
+    )
+
+    parser.add_argument(
+        '--no-caption-fallback',
+        action='store_true',
+        help='Disable transcription fallback when captions are unavailable. '
+             'Videos without captions will be skipped instead of transcribed.'
+    )
+
     return parser.parse_args()
