@@ -161,8 +161,8 @@
         "Help text documents caption-first mode and its benefits",
         "Tests verify CLI flags are parsed and applied correctly"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added --caption-first, --caption-language, --no-caption-fallback to src/cli/args.py. Flags override config.download.caption_first settings in main.py. Help text describes benefits. 12 new tests in TestParseArgumentsCaptionFirst class. Updated CLAUDE.md CLI reference."
     },
     {
       "id": "US-011",
@@ -177,8 +177,8 @@
         "Metrics saved to checkpoint for cross-session aggregation",
         "Tests verify metrics collection and reporting"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added CaptionMetrics dataclass with record_fetch_attempt(), record_fetch_success(), record_fetch_failure(), record_cache_hit() methods. Integrated into CaptionStage for pipeline reporting and checkpoint persistence. 18 new tests in TestCaptionMetrics class."
     },
     {
       "id": "US-012",

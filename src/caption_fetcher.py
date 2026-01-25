@@ -2123,3 +2123,310 @@ class CaptionNormalizer:
         """
         vtt_ts = CaptionNormalizer.seconds_to_vtt_timestamp(seconds)
         return vtt_ts.replace('.', ',')
+
+
+@dataclass
+class CaptionMetrics:
+    """
+    Tracks caption fetch statistics for pipeline reporting.
+
+    Implements US-011: Add caption fetch metrics and reporting.
+
+    Tracks:
+    - Fetch attempts, successes, failures, cache hits
+    - Language distribution
+    - Quality distribution (human, auto, unavailable)
+    - Total segments fetched
+
+    Usage:
+        metrics = CaptionMetrics()
+        metrics.record_fetch_attempt("dQw4w9WgXcQ")
+        metrics.record_fetch_success("dQw4w9WgXcQ", language="en", quality="high")
+        # ... later ...
+        print(metrics.summary())
+
+    Attributes:
+        fetch_attempts: Total fetch attempts made
+        successes: Number of successful caption fetches
+        failures: Number of failed caption fetches (unavailable/error)
+        cache_hits: Number of cache hits (captions loaded from cache)
+        language_distribution: Dict mapping language code -> count
+        quality_distribution: Dict mapping quality level -> count
+        total_segments: Total caption segments fetched
+    """
+
+    # Core counts
+    fetch_attempts: int = 0
+    successes: int = 0
+    failures: int = 0
+    cache_hits: int = 0
+
+    # Distribution tracking
+    language_distribution: Dict[str, int] = field(default_factory=dict)
+    quality_distribution: Dict[str, int] = field(default_factory=dict)
+
+    # Additional metrics
+    total_segments: int = 0
+    auto_generated_count: int = 0
+    human_caption_count: int = 0
+
+    def record_fetch_attempt(self, video_id: str = "") -> None:
+        """Record a caption fetch attempt.
+
+        Args:
+            video_id: Optional video ID for logging context.
+        """
+        self.fetch_attempts += 1
+        logger.debug(f"Caption fetch attempt recorded for {video_id or 'unknown'}")
+
+    def record_fetch_success(
+        self,
+        video_id: str = "",
+        language: str = "en",
+        quality: str = "medium",
+        segment_count: int = 0,
+        is_auto_generated: bool = False
+    ) -> None:
+        """Record a successful caption fetch.
+
+        Args:
+            video_id: Video ID for logging.
+            language: ISO 639-1 language code (e.g., 'en').
+            quality: Caption quality level ('high', 'medium', 'low').
+            segment_count: Number of caption segments fetched.
+            is_auto_generated: Whether captions are auto-generated.
+        """
+        self.successes += 1
+        self.total_segments += segment_count
+
+        # Track language distribution
+        self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
+
+        # Track quality distribution
+        self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
+
+        # Track auto vs human
+        if is_auto_generated:
+            self.auto_generated_count += 1
+        else:
+            self.human_caption_count += 1
+
+        logger.debug(
+            f"Caption fetch success for {video_id or 'unknown'}: "
+            f"lang={language}, quality={quality}, segments={segment_count}"
+        )
+
+    def record_fetch_failure(
+        self,
+        video_id: str = "",
+        reason: str = "unknown"
+    ) -> None:
+        """Record a failed caption fetch.
+
+        Args:
+            video_id: Video ID for logging.
+            reason: Reason for failure (e.g., 'unavailable', 'error', 'timeout').
+        """
+        self.failures += 1
+
+        # Track as 'unavailable' quality
+        self.quality_distribution['unavailable'] = self.quality_distribution.get('unavailable', 0) + 1
+
+        logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
+
+    def record_cache_hit(
+        self,
+        video_id: str = "",
+        language: str = "en",
+        quality: str = "medium",
+        segment_count: int = 0,
+        is_auto_generated: bool = False
+    ) -> None:
+        """Record a cache hit (captions loaded from cache).
+
+        Args:
+            video_id: Video ID for logging.
+            language: ISO 639-1 language code.
+            quality: Caption quality level.
+            segment_count: Number of segments in cached captions.
+            is_auto_generated: Whether cached captions are auto-generated.
+        """
+        self.cache_hits += 1
+        self.total_segments += segment_count
+
+        # Track language distribution
+        self.language_distribution[language] = self.language_distribution.get(language, 0) + 1
+
+        # Track quality distribution
+        self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + 1
+
+        # Track auto vs human
+        if is_auto_generated:
+            self.auto_generated_count += 1
+        else:
+            self.human_caption_count += 1
+
+        logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
+
+    @property
+    def total_processed(self) -> int:
+        """Total videos processed (successes + failures + cache_hits)."""
+        return self.successes + self.failures + self.cache_hits
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate fetch success rate as percentage.
+
+        Returns:
+            Success rate percentage (0-100), or 0.0 if no attempts.
+        """
+        total = self.successes + self.failures
+        if total == 0:
+            return 0.0
+        return round(100.0 * self.successes / total, 1)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """Calculate cache hit rate as percentage.
+
+        Returns:
+            Cache hit rate percentage (0-100), or 0.0 if no processed videos.
+        """
+        total = self.total_processed
+        if total == 0:
+            return 0.0
+        return round(100.0 * self.cache_hits / total, 1)
+
+    def summary(self) -> str:
+        """Generate human-readable summary for pipeline report.
+
+        Returns:
+            Multi-line string suitable for printing in the report.
+        """
+        lines = []
+
+        # Basic stats
+        lines.append(
+            f"Caption fetch: {self.fetch_attempts} attempts, "
+            f"{self.successes} succeeded, {self.failures} failed, "
+            f"{self.cache_hits} from cache"
+        )
+
+        if self.total_processed > 0:
+            lines.append(
+                f"  Success rate: {self.success_rate}%, "
+                f"Cache hit rate: {self.cache_hit_rate}%"
+            )
+            lines.append(f"  Total segments: {self.total_segments}")
+
+        # Caption source breakdown
+        if self.human_caption_count > 0 or self.auto_generated_count > 0:
+            lines.append(
+                f"  Caption sources: {self.human_caption_count} human, "
+                f"{self.auto_generated_count} auto, "
+                f"{self.quality_distribution.get('unavailable', 0)} unavailable"
+            )
+
+        # Language distribution (top 5)
+        if self.language_distribution:
+            sorted_langs = sorted(
+                self.language_distribution.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+            lang_str = ", ".join(f"{lang}: {count}" for lang, count in sorted_langs)
+            lines.append(f"  Languages: {lang_str}")
+
+        # Quality distribution
+        if self.quality_distribution:
+            quality_str = ", ".join(
+                f"{q}: {c}" for q, c in sorted(self.quality_distribution.items())
+            )
+            lines.append(f"  Quality: {quality_str}")
+
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize metrics to dictionary for checkpoint/JSON.
+
+        Returns:
+            Dict representation of all metrics.
+        """
+        return {
+            'fetch_attempts': self.fetch_attempts,
+            'successes': self.successes,
+            'failures': self.failures,
+            'cache_hits': self.cache_hits,
+            'language_distribution': dict(self.language_distribution),
+            'quality_distribution': dict(self.quality_distribution),
+            'total_segments': self.total_segments,
+            'auto_generated_count': self.auto_generated_count,
+            'human_caption_count': self.human_caption_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CaptionMetrics':
+        """Create CaptionMetrics from dictionary.
+
+        Args:
+            data: Dict from to_dict() or checkpoint.
+
+        Returns:
+            New CaptionMetrics instance.
+        """
+        if not data:
+            return cls()
+
+        return cls(
+            fetch_attempts=data.get('fetch_attempts', 0),
+            successes=data.get('successes', 0),
+            failures=data.get('failures', 0),
+            cache_hits=data.get('cache_hits', 0),
+            language_distribution=data.get('language_distribution', {}),
+            quality_distribution=data.get('quality_distribution', {}),
+            total_segments=data.get('total_segments', 0),
+            auto_generated_count=data.get('auto_generated_count', 0),
+            human_caption_count=data.get('human_caption_count', 0),
+        )
+
+    def merge(self, other: 'CaptionMetrics') -> 'CaptionMetrics':
+        """Merge another CaptionMetrics into this one.
+
+        Useful for cross-session aggregation. Modifies self in-place
+        and returns self for chaining.
+
+        Args:
+            other: Another CaptionMetrics to merge.
+
+        Returns:
+            Self after merging.
+        """
+        self.fetch_attempts += other.fetch_attempts
+        self.successes += other.successes
+        self.failures += other.failures
+        self.cache_hits += other.cache_hits
+        self.total_segments += other.total_segments
+        self.auto_generated_count += other.auto_generated_count
+        self.human_caption_count += other.human_caption_count
+
+        # Merge language distribution
+        for lang, count in other.language_distribution.items():
+            self.language_distribution[lang] = self.language_distribution.get(lang, 0) + count
+
+        # Merge quality distribution
+        for quality, count in other.quality_distribution.items():
+            self.quality_distribution[quality] = self.quality_distribution.get(quality, 0) + count
+
+        return self
+
+    def clear(self) -> None:
+        """Reset all metrics."""
+        self.fetch_attempts = 0
+        self.successes = 0
+        self.failures = 0
+        self.cache_hits = 0
+        self.language_distribution = {}
+        self.quality_distribution = {}
+        self.total_segments = 0
+        self.auto_generated_count = 0
+        self.human_caption_count = 0
