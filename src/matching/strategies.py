@@ -85,7 +85,7 @@ class StrategyMatcher:
     - source_rotation: Round-robin through source videos
     """
 
-    def __init__(self, config: Config, scenes: Optional[Dict[str, List[SceneInfo]]]):
+    def __init__(self, config: Config, scenes: Optional[Dict[str, List[SceneInfo]]]) -> None:
         self.config = config
         self.scenes = scenes or {}
 
@@ -107,15 +107,15 @@ class StrategyMatcher:
             self.variety_config = vc
 
     def get_clip_id(self, segment: SRTSegment) -> str:
-        """Generate unique clip ID"""
+        """Generate unique clip ID."""
         return f"{segment.source_file}:{segment.start_time:.2f}-{segment.end_time:.2f}"
 
     def is_clip_excluded(
         self,
         candidate: SRTSegment,
         existing_matches: List[SRTSegment],
-        existing_embeddings: List[List[float]] = None,
-        candidate_embedding: List[float] = None,
+        existing_embeddings: Optional[List[List[float]]] = None,
+        candidate_embedding: Optional[List[float]] = None,
         force_different_source: bool = False
     ) -> Tuple[bool, str]:
         """
@@ -175,8 +175,8 @@ class StrategyMatcher:
         vo_segment: SRTSegment,
         all_candidates: List[Tuple[SRTSegment, float]],
         existing_matches: List[SRTSegment],
-        existing_embeddings: List[List[float]] = None,
-        candidate_embeddings: Dict[str, List[float]] = None
+        existing_embeddings: Optional[List[List[float]]] = None,
+        candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
         Strategy A: Visual-First
@@ -259,8 +259,8 @@ class StrategyMatcher:
         vo_segment: SRTSegment,
         all_candidates: List[Tuple[SRTSegment, float]],
         existing_matches: List[SRTSegment],
-        existing_embeddings: List[List[float]] = None,
-        candidate_embeddings: Dict[str, List[float]] = None
+        existing_embeddings: Optional[List[List[float]]] = None,
+        candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
         Strategy B: Different Source Video
@@ -307,8 +307,8 @@ class StrategyMatcher:
         vo_segment: SRTSegment,
         all_candidates: List[Tuple[SRTSegment, float]],
         existing_matches: List[SRTSegment],
-        existing_embeddings: List[List[float]] = None,
-        candidate_embeddings: Dict[str, List[float]] = None
+        existing_embeddings: Optional[List[List[float]]] = None,
+        candidate_embeddings: Optional[Dict[str, List[float]]] = None
     ) -> Optional[StrategyMatch]:
         """
         Strategy C: Keyword-Only
@@ -544,7 +544,7 @@ class StrategyMatcher:
         alternatives: List[SRTSegment],
         vo_embedding: List[float],
         candidate_embeddings: Dict[str, List[float]],
-        global_used_clips: Set[str] = None
+        global_used_clips: Optional[Set[str]] = None
     ) -> List[AlternativeMatch]:
         """
         Get secondary matches (V4-V6) using diversity scoring.
@@ -743,8 +743,8 @@ class StrategyMatcher:
         vo_segment: SRTSegment,
         all_candidates: List[Tuple[SRTSegment, float]],
         existing_matches: List[SRTSegment],
-        existing_embeddings: List[List[float]] = None,
-        candidate_embeddings: Dict[str, List[float]] = None,
+        existing_embeddings: Optional[List[List[float]]] = None,
+        candidate_embeddings: Optional[Dict[str, List[float]]] = None,
         segment_index: int = 0
     ) -> Optional[StrategyMatch]:
         """
@@ -831,7 +831,7 @@ class StrategyMatcher:
         vo_embedding: List[float],
         candidate_embeddings: Dict[str, List[float]],
         segment_index: int = 0,
-        global_used_clips: Set[str] = None
+        global_used_clips: Optional[Set[str]] = None
     ) -> List[StrategyMatch]:
         """
         Get all strategy matches for a voiceover segment.
@@ -935,7 +935,7 @@ class FallbackMatchStrategy:
     VISUAL_DESCRIPTION_CEILING = 0.5
     GENERIC_BROLL_CEILING = 0.3
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         """
         Initialize FallbackMatchStrategy.
 

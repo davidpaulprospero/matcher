@@ -22,7 +22,7 @@ class LocationMatcher:
     Migrated from TieredMatcher location-related methods.
     """
 
-    def __init__(self, location_service: Optional[LocationService] = None):
+    def __init__(self, location_service: Optional[LocationService] = None) -> None:
         """
         Initialize LocationMatcher.
 
@@ -33,7 +33,7 @@ class LocationMatcher:
         self.location_chapters: Dict[int, LocationChapter] = {}
         self.video_locations: Dict[str, GeoLocation] = {}
 
-    def set_location_chapters(self, location_chapters: List[LocationChapter]):
+    def set_location_chapters(self, location_chapters: List[LocationChapter]) -> None:
         """
         Set location chapters for location-aware matching.
 
@@ -55,7 +55,7 @@ class LocationMatcher:
                 self.location_chapters[idx] = lc
         logger.info(f"Set {len(location_chapters)} location chapters covering {len(self.location_chapters)} segments")
 
-    def set_video_locations(self, video_locations: Dict[str, GeoLocation]):
+    def set_video_locations(self, video_locations: Dict[str, GeoLocation]) -> None:
         """
         Set video location data for location-aware matching.
 
