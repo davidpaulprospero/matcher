@@ -244,7 +244,8 @@ def create_timeline(
     frame_rate: float = 30.0,
     entity_images: Optional[Dict] = None,
     entity_videos: Optional[Dict] = None,
-    downloaded_segments: Optional[List] = None
+    downloaded_segments: Optional[List] = None,
+    quality_metrics: Optional[Dict] = None
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
@@ -272,6 +273,7 @@ def create_timeline(
         entity_videos: Stock videos from EntityVideosStage
         downloaded_segments: Optional list of DownloadedSegment from audio-first mode.
             When provided, video segment files are used instead of audio files.
+        quality_metrics: Optional dictionary with quality metrics to embed in metadata
 
     Returns:
         OTIO Timeline with all tracks populated
@@ -390,6 +392,10 @@ def create_timeline(
     timeline.metadata['Resolve_OTIO'] = {
         'Resolve OTIO Meta Version': '1.0'
     }
+
+    # Add quality_summary metadata if quality_metrics provided
+    if quality_metrics:
+        timeline.metadata['quality_summary'] = quality_metrics
 
     # CRITICAL: Set global_start_time to valid RationalTime (not empty string!)
     # DaVinci Resolve hangs indefinitely if this is "" or invalid

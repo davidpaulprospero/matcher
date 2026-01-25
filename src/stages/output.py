@@ -345,6 +345,10 @@ class OutputStage(Stage):
             # Scan for downloaded video segments (for audio-first mode resolution)
             downloaded_segments = self._scan_video_segments(config)
 
+            # Calculate quality metrics for OTIO metadata and quality report
+            quality_metrics = self._calculate_quality_metrics(state.matches)
+            quality_metrics_dict = quality_metrics.to_dict() if quality_metrics else None
+
             timeline = create_timeline(
                 matches=state.matches,
                 config=config,
@@ -352,7 +356,8 @@ class OutputStage(Stage):
                 frame_rate=getattr(config.output, 'frame_rate', 30.0),
                 entity_images=state.entity_images or None,
                 entity_videos=state.entity_videos or None,
-                downloaded_segments=downloaded_segments
+                downloaded_segments=downloaded_segments,
+                quality_metrics=quality_metrics_dict
             )
 
             # Generate OTIO
@@ -405,6 +410,13 @@ class OutputStage(Stage):
             if config.output.generate_report:
                 report_path = self._generate_report(state, output_dir)
                 outputs['report'] = str(report_path)
+
+            # Generate quality report JSON
+            if getattr(config.output, 'quality_report_enabled', True):
+                quality_report_path = self._generate_quality_report(
+                    state, output_dir, quality_metrics
+                )
+                outputs['quality_report'] = str(quality_report_path)
 
             # Track all output files
             state.output_files = [Path(p) for p in self._collect_output_paths(outputs)]
@@ -696,3 +708,101 @@ class OutputStage(Stage):
             elif isinstance(value, str):
                 paths.append(value)
         return paths
+
+    def _calculate_quality_metrics(
+        self,
+        matches: List[Any]
+    ) -> Optional[Any]:
+        """
+        Calculate quality metrics for matches.
+
+        Returns MatchQualityMetrics with calculated values including
+        avg_confidence, min_confidence, max_confidence, gap_count,
+        match_rate, and source_variety.
+        """
+        try:
+            from ..matching.metrics import (
+                MatchQualityMetrics,
+                calculate_match_quality_metrics
+            )
+        except ImportError:
+            logger.warning("Could not import matching.metrics, skipping quality metrics")
+            return None
+
+        if not matches:
+            return MatchQualityMetrics(total_segments=0)
+
+        # Calculate metrics using the existing function
+        metrics = calculate_match_quality_metrics(matches, len(matches))
+
+        # Also calculate source_variety (unique source files / total matches)
+        source_files = set()
+        for m in matches:
+            if hasattr(m, 'primary_match') and m.primary_match:
+                pm = m.primary_match
+                if hasattr(pm, 'video_segment') and pm.video_segment:
+                    source_file = pm.video_segment.source_file
+                    if source_file:
+                        source_files.add(source_file)
+
+        # Store source_variety in a custom attribute
+        # We'll include it when generating the report
+        metrics._source_variety = len(source_files) / len(matches) if matches else 0.0
+        metrics._unique_sources = len(source_files)
+
+        return metrics
+
+    def _generate_quality_report(
+        self,
+        state: 'PipelineState',
+        output_dir: Path,
+        metrics: Optional[Any]
+    ) -> Path:
+        """
+        Generate quality_report.json with match quality metrics.
+
+        The report includes:
+        - total_segments: Total number of voiceover segments
+        - matched_segments: Number of segments with matches
+        - avg_confidence: Average confidence score
+        - gaps_count: Number of gaps (unmatched segments)
+        - source_variety: Ratio of unique sources to total matches
+        """
+        report_path = output_dir / "quality_report.json"
+
+        report_data = {
+            'total_segments': len(state.matches) if state.matches else 0,
+            'matched_segments': 0,
+            'avg_confidence': 0.0,
+            'min_confidence': 0.0,
+            'max_confidence': 0.0,
+            'confidence_std': 0.0,
+            'gaps_count': 0,
+            'match_rate': 0.0,
+            'source_variety': 0.0,
+            'unique_sources': 0,
+        }
+
+        if metrics:
+            report_data['matched_segments'] = metrics.matched_segments
+            report_data['avg_confidence'] = round(metrics.avg_confidence, 4)
+            report_data['min_confidence'] = round(metrics.min_confidence, 4)
+            report_data['max_confidence'] = round(metrics.max_confidence, 4)
+            report_data['confidence_std'] = round(metrics.confidence_std, 4)
+            report_data['gaps_count'] = metrics.gap_count
+            report_data['match_rate'] = round(metrics.match_rate, 4)
+
+            # Include source variety from custom attribute
+            if hasattr(metrics, '_source_variety'):
+                report_data['source_variety'] = round(metrics._source_variety, 4)
+            if hasattr(metrics, '_unique_sources'):
+                report_data['unique_sources'] = metrics._unique_sources
+
+        # Write JSON report
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report_data, f, indent=2)
+
+        print(f"  + Quality report: {report_path.name}")
+        logger.info(f"Generated quality report: {report_path}")
+
+        return report_path

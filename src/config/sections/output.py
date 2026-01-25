@@ -60,6 +60,7 @@ class OutputConfig:
     generate_xml: bool = True  # DaVinci Resolve XML (fallback if OTIO fails)
     xml_parts: int = 2  # Split XML into multiple files (helps with large projects)
     generate_report: bool = True
+    quality_report_enabled: bool = True  # Generate quality_report.json with match metrics
 
     # Timeline settings
     frame_rate: float = 30.0
