@@ -1,198 +1,200 @@
 {
-  "branchName": "ralph/sprint-3",
-  "sprintNumber": 3,
-  "focusArea": "rate-limiting",
-  "projectContext": "Continue improving YouTube download resilience. Sprint 2 established core retry mechanisms, circuit breaker, batch retry queue, speed tracking, and metrics. Sprint 3 focuses on cross-component coordination, per-tier isolation, proactive rate limit detection, and checkpoint persistence improvements. Key gaps: rate limit state is global (not per-tier), circuit breaker and batch retry don't coordinate, VPN manager state not persisted, metrics not loaded on resume, cookie cooldown and batch retry delays not synchronized.",
+  "branchName": "ralph/sprint-4",
+  "sprintNumber": 4,
+  "focusArea": "caption",
+  "projectContext": "Implement caption-first mode for the voiceover-matcher pipeline. Caption functionality is referenced in architecture (CLAUDE.md Rules 22, 26) but not yet implemented. Currently the pipeline downloads videos, then transcribes with Whisper. Caption-first mode will fetch YouTube captions BEFORE video download, enabling faster matching with lower bandwidth. Key gaps: no caption fetcher implementation, no CAPTION pipeline stage, no CaptionFirstConfig, no caption caching, no language handling, no caption quality indicators. Audio-first mode (src/downloader/audio_first.py) provides a good architectural pattern to follow.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Implement per-tier rate limit state isolation",
-      "description": "Rate limiting state (backoff count, delay, cooldown mode) is tracked globally. When downloading multiple tiers simultaneously, a rate limit on 'long' tier affects 'short' tier backoff. Each tier should maintain independent rate limit state.",
+      "title": "Create YouTube caption fetcher module",
+      "description": "Implement a caption fetcher that uses yt-dlp to extract YouTube captions/subtitles. This is the foundation for caption-first mode, enabling transcript retrieval without downloading video content.",
       "priority": 1,
       "acceptanceCriteria": [
-        "New TierRateLimitState class tracks backoff_count, current_delay, in_recovery for each tier",
-        "RateLimitConfig gains per_tier_isolation option (default: true)",
-        "handle_rate_limit_error() uses tier-specific state when isolation enabled",
-        "_reset_rate_limit_backoff() resets only the affected tier's state",
-        "Rate limit metrics track events per tier in tier_rate_limit_events dict",
-        "Tests verify tier A rate limit does not affect tier B backoff"
+        "New src/caption_fetcher.py module with CaptionFetcher class",
+        "fetch_captions(video_id) method returns caption text with timing info",
+        "Support for multiple caption formats: VTT, SRT, JSON3 (auto-converted to common format)",
+        "Distinguish between auto-generated and human-uploaded captions via is_auto_generated flag",
+        "Handle unavailable captions gracefully with CaptionUnavailableError",
+        "Tests verify caption extraction for videos with and without captions"
       ],
       "passes": true,
-      "notes": "Implemented TierRateLimitState dataclass, added per_tier_isolation config option (default: true), updated handle_rate_limit_error() and _reset_rate_limit_backoff() for tier-specific state, added tier_rate_limit_events to metrics. 25 tests verify isolation behavior."
+      "notes": "Created src/caption_fetcher.py with CaptionFetcher class supporting VTT/SRT/JSON3 formats, is_auto_generated detection, CaptionUnavailableError/CaptionFetchError exceptions. 52 tests in tests/test_caption_fetcher.py."
     },
     {
       "id": "US-002",
-      "title": "Add proactive rate limit detection via speed drop monitoring",
-      "description": "Speed tracker monitors download speeds but doesn't signal potential rate limiting. A sudden drop to near-zero or stalled progress often precedes hard rate limit failures. Add proactive detection.",
+      "title": "Add CaptionFirstConfig to download configuration",
+      "description": "Create configuration dataclass for caption-first mode settings, following the pattern established by AudioFirstConfig. This enables users to enable/configure caption-first behavior.",
       "priority": 2,
       "acceptanceCriteria": [
-        "SpeedTracker gains detect_rate_limit_signals() method checking for speed anomalies",
-        "New config option speed_tracking.rate_limit_signal_threshold (default: 0.1 Mbps)",
-        "When speed drops below threshold for 3+ consecutive samples, emit rate_limit_signal",
-        "Signal triggers preemptive backoff via circuit breaker integration",
-        "Signal logged at WARNING level with speed history context",
-        "Tests verify signal detection and preemptive action"
+        "New CaptionFirstConfig dataclass in src/config/sections/download.py",
+        "Fields: enabled (bool), fallback_to_transcription (bool), preferred_language (str), timeout (int)",
+        "Fields: prefer_human_captions (bool), cache_captions (bool)",
+        "Add caption_first field to DownloadConfig with __post_init__ conversion",
+        "Update config.yaml with caption_first section and documentation",
+        "Tests verify config loading and validation"
       ],
-      "passes": true,
-      "notes": "Implemented detect_rate_limit_signals() method returning RateLimitSignal dataclass with detection status and speed history. Added rate_limit_signal_threshold (0.1 MB/s) and consecutive_slow_samples (3) config options. Integrated with circuit breaker in core.py to trigger preemptive backoff when signal detected. 20 new tests cover signal detection, logging, circuit breaker integration, and edge cases."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Coordinate circuit breaker pause with batch retry scheduling",
-      "description": "Circuit breaker pauses for 60s after failures, but batch retry queue has its own 120s delay. If circuit breaker is paused, batch retry should wait for it to recover before processing.",
+      "title": "Implement caption language detection and selection",
+      "description": "YouTube videos often have captions in multiple languages. Add logic to detect available languages and select the best match based on user preference.",
       "priority": 3,
       "acceptanceCriteria": [
-        "RetryQueue gains set_circuit_breaker() method to link to circuit breaker instance",
-        "Before processing batch retry, check if circuit breaker is tripped",
-        "If tripped, wait for circuit breaker pause to complete before retry",
-        "New config option batch_retry.respect_circuit_breaker (default: true)",
-        "Batch retry delay extends if circuit breaker pause overlaps",
-        "Tests verify batch retry waits for circuit breaker recovery"
+        "CaptionFetcher.list_available_languages(video_id) returns list of available caption languages",
+        "Language codes follow ISO 639-1 format (en, es, fr, etc.)",
+        "Auto-select matching language from config.transcription.language or caption_first.preferred_language",
+        "Fallback chain: preferred_language -> 'en' -> any available language",
+        "Log which language was selected and why",
+        "Tests verify language selection logic with various availability scenarios"
       ],
-      "passes": true,
-      "notes": "Implemented set_circuit_breaker() method in RetryQueue, added respect_circuit_breaker config option (default: true), modified start_retry_pass() to check and wait for circuit breaker recovery before processing. Tracks circuit_breaker_wait_time in stats/checkpoint. 30 tests verify all acceptance criteria including VideoDownloader integration."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add cross-keyword rate limit budget tracking",
-      "description": "When processing multiple keywords, rate limit events from keyword A are not shared with keyword B. If keyword A exhausted cookie rotations, keyword B doesn't know. Add shared rate limit budget.",
+      "title": "Create CAPTION pipeline stage",
+      "description": "Add a new pipeline stage that fetches captions for all video candidates before the TRANSCRIBE stage. This enables early transcript availability without video download.",
       "priority": 4,
       "acceptanceCriteria": [
-        "New RateLimitBudget class tracks: rotations_used, vpn_switches_used, backoff_time_spent",
-        "Budget shared across all keywords in a download session",
-        "New config option rate_limit.share_budget_across_keywords (default: true)",
-        "When budget exhausted (e.g., all rotations used), skip to next escalation level",
-        "Budget state saved to checkpoint for resume",
-        "Tests verify keyword B skips exhausted rotations from keyword A"
+        "New src/stages/caption_stage.py with CaptionStage class following stage pattern",
+        "Stage runs AFTER VIDEO_METADATA and BEFORE TRANSCRIBE in pipeline order",
+        "Fetches captions for each video in video_candidates list",
+        "Stores caption data in state.text_metadata compatible with existing matching",
+        "Checkpoint integration: saves fetched captions, resumes from partial completion",
+        "Tests verify stage execution and checkpoint behavior"
       ],
-      "passes": true,
-      "notes": "Implemented RateLimitBudget dataclass with rotations_used, vpn_switches_used, backoff_time_spent tracking plus budget limits and keyword tracking. Added share_budget_across_keywords (default: true) and max_backoff_budget (300s) config options. Modified handle_rate_limit_error(), rotate_cookie_on_error(), switch_vpn_on_error() to check and record in shared budget. Budget persisted to checkpoint and restored on resume. 47 tests verify all acceptance criteria including cross-keyword budget sharing scenario."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add VPN manager checkpoint persistence",
-      "description": "VPN manager tracks switch_count in memory but doesn't persist to checkpoint. On resume, switch count is lost and may exceed max_switches_per_session.",
+      "title": "Add caption cache for cross-project reuse",
+      "description": "Cache fetched captions by video ID to avoid re-fetching the same captions across projects. Follows the global cache pattern used for videos.",
       "priority": 5,
       "acceptanceCriteria": [
-        "VpnManager gains to_checkpoint_state() and from_checkpoint_state() methods",
-        "Checkpoint includes vpn_manager_state with switch_count, last_switch_timestamp",
-        "On resume, VpnManager loads previous state and continues tracking",
-        "max_switches_per_session enforced across resume boundaries",
-        "Status logged on resume: 'Resuming VPN manager: X/Y switches used'",
-        "Tests verify switch count preserved across checkpoint save/load"
+        "New CaptionCache class in src/caption_fetcher.py or src/cache/caption_cache.py",
+        "Cache key: video_id + language code (e.g., 'dQw4w9WgXcQ_en')",
+        "Cache stores: caption text, timing info, is_auto_generated, fetch_timestamp",
+        "Configurable cache location via caption_first.cache_dir (default: ~/.matcher_caption_cache/)",
+        "Cache validation: check caption age, invalidate if older than configurable days",
+        "Tests verify cache hits, misses, and invalidation"
       ],
-      "passes": true,
-      "notes": "Implemented to_checkpoint_state() and from_checkpoint_state() methods on VPNManager class. Added restore_from_checkpoint() for updating existing instance. Added vpn_manager_state field to DownloadCheckpoint with backward compatibility. Integrated save/restore in core.py's _save_checkpoint() and download_all(). Logs 'Resuming VPN manager: X/Y switches used' on restore. 24 new tests verify checkpoint persistence, roundtrip, timestamp helpers, and max_switches enforcement across resume."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Implement rate limit metrics aggregation on resume",
-      "description": "Rate limit metrics are saved to checkpoint but not loaded on resume. Users can't see cumulative metrics across session boundaries for multi-day downloads.",
+      "title": "Implement caption-to-transcription fallback logic",
+      "description": "When caption-first mode is enabled but captions are unavailable, seamlessly fall back to Whisper transcription. Track which videos used captions vs transcription.",
       "priority": 6,
       "acceptanceCriteria": [
-        "RateLimitMetrics gains from_checkpoint() classmethod to load previous state",
-        "On resume, metrics loaded and aggregation continues from previous values",
-        "New session_count field tracks how many sessions contributed to metrics",
-        "Cross-session metrics distinguished in report (e.g., 'Total across 3 sessions')",
-        "Metrics reset method clears all values including session count",
-        "Tests verify cumulative metrics across multiple save/load cycles"
+        "TranscribeStage checks for existing caption data in state before transcribing",
+        "Skip transcription for videos with valid captions (caption_source='youtube' in metadata)",
+        "Track source in text_metadata: caption_source field ('youtube', 'whisper', 'manual')",
+        "New config option caption_first.fallback_to_transcription (default: true)",
+        "Log summary: 'X videos used captions, Y required transcription'",
+        "Tests verify fallback triggers correctly and metadata is set"
       ],
-      "passes": true,
-      "notes": "Implemented from_checkpoint() classmethod that loads metrics and increments session_count. Added session_count field (default: 1) to track sessions. Updated summary() to show 'Total across N sessions:' when session_count > 1. Updated clear() to reset session_count to 1. Changed core.py to use from_checkpoint() instead of from_dict() on resume. 24 new tests verify cumulative metrics across multiple save/load cycles including backward compatibility."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Synchronize cookie cooldown with batch retry delay",
-      "description": "Cookie rotation tracks per-cookie cooldown (300s), batch retry has 120s delay. If a cookie fails, batch retry might reuse it before cooldown expires. Synchronize these delays.",
+      "title": "Add caption quality indicators to matching",
+      "description": "Caption quality varies significantly between auto-generated and human-uploaded. Add quality metadata that the matching stage can use for confidence scoring.",
       "priority": 7,
       "acceptanceCriteria": [
-        "RetryQueue gains set_cookie_rotator() method to access cooldown info",
-        "Before batch retry, check if any required cookies are in cooldown",
-        "If cookies in cooldown, extend batch retry delay to wait for cooldown expiry",
-        "New config option batch_retry.wait_for_cookie_cooldown (default: true)",
-        "Log when batch retry delay extended due to cookie cooldown",
-        "Tests verify batch retry waits for cookie cooldown expiry"
+        "text_metadata gains caption_quality field: 'high' (human), 'medium' (auto), 'low' (missing/fallback)",
+        "CaptionFetcher sets quality based on is_auto_generated and completeness",
+        "Matching confidence can be adjusted based on caption quality (optional config)",
+        "Report includes caption quality distribution: 'Caption sources: 50 human, 30 auto, 20 whisper'",
+        "Quality saved to checkpoint for analysis",
+        "Tests verify quality detection and confidence adjustment"
       ],
-      "passes": true,
-      "notes": "Implemented set_cookie_rotator() method in RetryQueue to link to cookie rotator. Added wait_for_cookie_cooldown config option (default: true) in both BatchRetryConfig classes. Added _wait_for_cookie_cooldown() method that checks all cookies' cooldown status and waits for shortest cooldown to expire. Modified start_retry_pass() to check cookie cooldowns after circuit breaker and log wait times. Cookie cooldown wait time tracked in stats and checkpoint. Integrated cookie rotator linking in core.py. 27 new tests verify all acceptance criteria."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add adaptive backoff multiplier based on error severity",
-      "description": "Rate limit backoff uses fixed 2.0 multiplier regardless of error type. A 429 quota exceeded should use higher multiplier than 'too many requests'. Add severity-based adjustment.",
+      "title": "Add caption fetch retry and error handling",
+      "description": "Caption fetching can fail due to network issues or YouTube restrictions. Add robust retry logic with exponential backoff and meaningful error messages.",
       "priority": 8,
       "acceptanceCriteria": [
-        "New error_severity dict maps error patterns to severity levels (low, medium, high)",
-        "Backoff multiplier adjusted based on severity: low=1.5, medium=2.0, high=3.0",
-        "New config option rate_limit.adaptive_multiplier (default: true)",
-        "Severity classification logged with each rate limit event",
-        "Metrics track backoff events by severity level",
-        "Tests verify different multipliers applied for different error types"
+        "CaptionFetcher retries on network errors with exponential backoff",
+        "New config options: caption_first.max_retries (default: 3), caption_first.retry_delay (default: 2.0)",
+        "Distinguish error types: CaptionUnavailableError (no captions exist) vs CaptionFetchError (temporary failure)",
+        "Log detailed error context: video_id, error type, retry attempt",
+        "After max_retries, mark video for transcription fallback",
+        "Tests verify retry behavior and error classification"
       ],
-      "passes": true,
-      "notes": "Implemented ERROR_SEVERITY_PATTERNS dict with high/medium/low patterns, SEVERITY_MULTIPLIERS dict (1.5/2.0/3.0), classify_error_severity() function for case-insensitive matching. Modified handle_rate_limit_error() to use adaptive multiplier when enabled. Added backoff_events_by_severity to metrics, updated record_backoff() with severity param. Added adaptive_multiplier config option (default: true). 31 new tests verify all acceptance criteria."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add per-keyword rate limit event tracking in metrics",
-      "description": "Metrics aggregate rate limit events globally but don't track which keywords trigger the most. Keyword-level metrics help identify problematic search terms.",
+      "title": "Implement caption timestamp normalization",
+      "description": "YouTube captions can have irregular timing (overlapping, gaps, inconsistent formats). Normalize timestamps to match the format expected by the matching stage.",
       "priority": 9,
       "acceptanceCriteria": [
-        "RateLimitMetrics gains keyword_rate_limit_events dict tracking events per keyword",
-        "record_rate_limit_event() accepts optional keyword parameter",
-        "Report shows top 5 keywords by rate limit events when > 10 events total",
-        "Config recommendation suggests skipping high-rate-limit keywords",
-        "Keyword events saved to checkpoint for cross-session analysis",
-        "Tests verify per-keyword tracking and report output"
+        "CaptionSegment dataclass with start_time, end_time, text fields (matches TranscriptSegment)",
+        "Normalize overlapping segments: merge or split based on configurable strategy",
+        "Handle gap segments: insert empty placeholders or extend adjacent segments",
+        "Convert various timestamp formats (VTT, SRT, JSON3) to consistent float seconds",
+        "Validate segment continuity: no negative durations, start < end",
+        "Tests verify normalization with edge cases (overlaps, gaps, malformed timestamps)"
       ],
-      "passes": true,
-      "notes": "Added keyword_rate_limit_events dict to RateLimitMetrics dataclass. Updated record_rate_limit_event() to accept optional keyword parameter. Modified summary() to show top 5 keywords (sorted by count descending) when total rate limit events > 10. Added get_config_recommendations() logic to suggest skipping keywords causing > 30% of rate limit events. Updated from_dict() and clear() for keyword events persistence. Modified core.py handle_rate_limit_error() to pass keyword through. 27 new tests verify all acceptance criteria."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add configurable VPN connection verification endpoint",
-      "description": "VPN manager verifies connection by pinging Google (8.8.8.8). For privacy-conscious users, this leaks connection tests to Google. Make endpoint configurable.",
+      "title": "Add caption-first mode CLI integration",
+      "description": "Add CLI flags to enable caption-first mode and control caption behavior, following existing CLI patterns.",
       "priority": 10,
       "acceptanceCriteria": [
-        "New config option vpn.verification_endpoint (default: 'https://www.google.com')",
-        "New config option vpn.verification_ip (default: '8.8.8.8')",
-        "VpnManager uses configured endpoints instead of hardcoded Google",
-        "Option to disable verification entirely: vpn.skip_verification (default: false)",
-        "Verification failure logged with endpoint used",
-        "Tests verify custom endpoints are used for verification"
+        "New CLI flag --caption-first enables caption-first mode for the run",
+        "New CLI flag --caption-language <code> overrides preferred language",
+        "New CLI flag --no-caption-fallback disables transcription fallback",
+        "Flags properly override config.yaml settings",
+        "Help text documents caption-first mode and its benefits",
+        "Tests verify CLI flags are parsed and applied correctly"
       ],
-      "passes": true,
-      "notes": "Added skip_verification, verification_endpoint, and verification_ip config options to VPNConfig. Updated VpnManager._verify_connection() to use configured endpoints with getattr() for backward compatibility. Verification failure logs which endpoints were tried. Added skip logic in switch() that checks skip_verification. 15 new tests verify custom endpoints (Cloudflare, OpenDNS), skip option, backward compatibility, logging, and precedence rules."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Implement download retry and circuit breaker timeout coordination",
-      "description": "Download retry loop and circuit breaker operate independently. If circuit breaker pauses during a download retry, the two mechanisms don't coordinate. Add synchronization.",
+      "title": "Add caption fetch metrics and reporting",
+      "description": "Track caption fetch statistics for pipeline reporting: success rate, cache hits, language distribution, quality breakdown.",
       "priority": 11,
       "acceptanceCriteria": [
-        "Download retry loop checks circuit breaker state before each attempt",
-        "If circuit breaker tripped during retry, wait for recovery before continuing",
-        "New config option circuit_breaker.block_download_retries (default: true)",
-        "Retry count preserved across circuit breaker pause (not reset)",
-        "Log when download retry paused due to circuit breaker",
-        "Tests verify download retry waits for circuit breaker recovery"
+        "New CaptionMetrics dataclass tracking: fetch_attempts, successes, failures, cache_hits",
+        "Track by language: language_distribution dict with counts",
+        "Track by quality: quality_distribution dict (human, auto, unavailable)",
+        "Metrics displayed in pipeline summary report",
+        "Metrics saved to checkpoint for cross-session aggregation",
+        "Tests verify metrics collection and reporting"
       ],
-      "passes": false
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "Add rate limit health dashboard data export",
-      "description": "Rate limit metrics are shown in pipeline report but not exportable. Add JSON export for external monitoring and visualization tools.",
+      "title": "Create caption integration tests with real YouTube videos",
+      "description": "Add integration tests that verify caption functionality against real YouTube videos with known caption availability.",
       "priority": 12,
       "acceptanceCriteria": [
-        "RateLimitMetrics gains export_to_json() method returning structured data",
-        "Export includes all metrics, timestamps, and session info",
-        "New CLI flag --export-metrics <path> saves metrics JSON after pipeline",
-        "JSON schema documented in rate_limit_metrics.py docstring",
-        "Export includes config values that were active during session",
-        "Tests verify JSON export matches expected schema"
+        "Test fixtures include video IDs with known caption states (has human, has auto, no captions)",
+        "Integration test verifies end-to-end caption fetch for video with human captions",
+        "Integration test verifies auto-caption detection and quality marking",
+        "Integration test verifies graceful handling of no-caption video",
+        "Tests marked with @pytest.mark.requires_network for CI skipping",
+        "Tests document expected video states in fixtures for maintenance"
       ],
-      "passes": false
+      "passes": false,
+      "notes": ""
     }
   ]
 }

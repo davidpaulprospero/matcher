@@ -2104,3 +2104,193 @@ vpn:
 ✓ vpn.skip_verification option (default: false) disables verification
 ✓ Verification failure logged with endpoint used
 ✓ Tests verify custom endpoints are used for verification (15 tests)
+
+## Iteration - US-011: Download retry and circuit breaker timeout coordination
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented coordination between download retry loop and circuit breaker:
+
+1. **CircuitBreakerConfig (both src/config/sections/download.py and src/downloader/circuit_breaker.py):**
+   - Added `block_download_retries: bool = True` config option
+   - Updated docstrings with download retry coordination explanation
+
+2. **CircuitBreaker class (src/downloader/circuit_breaker.py):**
+   - Added `get_remaining_pause_time()` method for non-blocking pause time check
+   - Added `wait_for_recovery_if_needed(context)` method for coordinated waits
+   - Method logs with context, transitions to half-open state after wait
+
+3. **RateLimitMetrics (src/downloader/rate_limit_metrics.py):**
+   - Added `record_circuit_breaker_wait(wait_seconds)` method
+   - Tracks additional wait time from download retry coordination
+
+4. **VideoDownloader._run_download_cmd() (src/downloader/core.py):**
+   - Modified retry loop to check circuit breaker state before each retry attempt
+   - Only checks on retry attempts (attempt > 0), not first attempt
+   - Uses getattr() for backward compatibility with older configs
+   - Records wait time in metrics
+
+5. **config.yaml:**
+   - Added `block_download_retries: true` option with documentation
+
+### Files Modified
+- src/config/sections/download.py - Added block_download_retries config
+- src/downloader/circuit_breaker.py - Added config option, get_remaining_pause_time(), wait_for_recovery_if_needed()
+- src/downloader/core.py - Added circuit breaker check in retry loop
+- src/downloader/rate_limit_metrics.py - Added record_circuit_breaker_wait()
+- config.yaml - Added block_download_retries option
+- tests/test_download_retry_circuit_breaker.py - 32 new tests (NEW FILE)
+- tests/test_circuit_breaker_retry_coordination.py - Fixed test assertion
+
+### Verification
+- All 32 new tests pass
+- All 95 circuit breaker related tests pass
+- Syntax checks pass on all modified files
+- main.py --help works correctly
+
+### Acceptance Criteria Met
+- [x] Download retry loop checks circuit breaker state before each attempt
+- [x] If circuit breaker tripped during retry, wait for recovery before continuing
+- [x] New config option circuit_breaker.block_download_retries (default: true)
+- [x] Retry count preserved across circuit breaker pause (not reset)
+- [x] Log when download retry paused due to circuit breaker
+- [x] Tests verify download retry waits for circuit breaker recovery
+
+## Iteration 28 - US-012: Add rate limit health dashboard data export
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented JSON export functionality for rate limit metrics to enable external monitoring and visualization tools.
+
+**1. RateLimitMetrics.export_to_json() method (src/downloader/rate_limit_metrics.py):**
+   - Returns structured dict with schema_version "1.0"
+   - Sections: session, downloads, retries, rate_limiting, escalation, circuit_breaker, batch_retry, network, recommendations
+   - Includes export_timestamp in ISO format
+   - All dicts use dict() copy to avoid mutation of original data
+   - Numeric values rounded appropriately (2 decimals for seconds, 3 for MB/s)
+
+**2. Config snapshot (when config object provided):**
+   - Extracts rate_limit, circuit_breaker, batch_retry, speed_tracking, cookie_rotation, vpn sections
+   - Uses getattr() with defaults for backward compatibility
+   - Only includes sections that exist in config
+
+**3. export_to_json_file() convenience method:**
+   - Writes JSON to specified path
+   - Creates parent directories if needed
+   - Uses UTF-8 encoding with ensure_ascii=False
+   - Pretty-prints with indent=2
+   - Logs export path on completion
+
+**4. CLI --export-metrics flag (src/cli/args.py, main.py):**
+   - New argument: --export-metrics PATH
+   - Loads metrics from download checkpoint after pipeline
+   - Resolves relative paths to project directory
+   - Handles missing checkpoint or metrics gracefully
+   - Prints summary (downloads count, success rate, rate limit events)
+
+**5. JSON schema documentation (module docstring):**
+   - Complete example of export format
+   - All fields documented with example values
+   - Matches actual export structure
+
+### Files Modified
+- src/downloader/rate_limit_metrics.py - Added export_to_json(), export_to_json_file(), updated docstring
+- src/cli/args.py - Added --export-metrics argument
+- main.py - Added _export_rate_limit_metrics() function and CLI handling
+- tests/test_rate_limit_metrics.py - 21 new tests in 3 classes
+
+### New Test Classes
+- TestExportToJson - 15 tests for export method
+- TestExportToJsonFile - 5 tests for file export
+- TestExportCompleteSchema - 1 test for schema validation
+
+### Verification
+- All 103 rate limit metrics tests pass
+- All 217 rate limit related tests pass
+- Syntax checks pass on all modified files
+- main.py --help shows new --export-metrics flag
+
+### Acceptance Criteria Met
+- [x] RateLimitMetrics gains export_to_json() method returning structured data
+- [x] Export includes all metrics, timestamps, and session info
+- [x] New CLI flag --export-metrics <path> saves metrics JSON after pipeline
+- [x] JSON schema documented in rate_limit_metrics.py docstring
+- [x] Export includes config values that were active during session
+- [x] Tests verify JSON export matches expected schema
+
+## Focus Area: caption - 2026-01-25 22:05:27
+- Status: In Progress...
+
+
+## Iteration 1 - US-001: Create YouTube caption fetcher module
+- Focus: caption
+- Status: COMPLETE
+- Sprint: 4
+
+### Changes Made
+Created new src/caption_fetcher.py module with CaptionFetcher class for YouTube caption extraction using yt-dlp.
+
+**Core Components:**
+
+1. **CaptionFetcher class:**
+   - fetch_captions(video_id, language, prefer_manual) - Main entry point
+   - Supports multiple caption formats: VTT, SRT, JSON3/SRV3
+   - Detects auto-generated vs human-uploaded captions
+   - Fallback chain: preferred language -> 'en' -> any available
+   - Cookie support via config (browser or file)
+
+2. **CaptionSegment dataclass:**
+   - Compatible with TranscriptSegment for downstream matching
+   - Fields: index, start_time, end_time, text, source_file
+   - to_dict() method for serialization
+
+3. **CaptionResult dataclass:**
+   - video_id, segments, language, is_auto_generated, format_source
+   - Properties: text (concatenated), duration
+   - to_dict() for checkpoint storage
+
+4. **Exception Classes:**
+   - CaptionError - Base exception
+   - CaptionUnavailableError - No captions exist (not retryable)
+   - CaptionFetchError - Temporary/network error (retryable)
+
+**Format Parsers:**
+- _parse_vtt() - WebVTT with style tag removal
+- _parse_srt() - SubRip with tag removal
+- _parse_json3() - YouTube's JSON3/SRV3 format
+
+**Utilities:**
+- _parse_timestamp() - Handles VTT/SRT timestamp formats
+- _is_valid_video_id() - YouTube ID validation (11 chars, [A-Za-z0-9_-])
+- _get_cookies_args() - Config-based cookie arguments
+
+### Tests Created
+52 tests in tests/test_caption_fetcher.py covering:
+- CaptionSegment and CaptionResult dataclasses
+- Exception classes and inheritance
+- Video ID validation
+- Timestamp parsing (VTT, SRT, short format)
+- VTT, SRT, JSON3 format parsing
+- fetch_captions method (mocked)
+- Cookie argument handling
+- Integration tests with file parsing
+- Network test (marked @pytest.mark.requires_network)
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py` - PASSED
+- Tests: 52/52 passed (51 unit + 1 network test skipped in CI)
+- main.py --help: PASSED
+
+### Files Created
+- src/caption_fetcher.py - Caption fetcher module
+- tests/test_caption_fetcher.py - Comprehensive tests
+
+### Acceptance Criteria Met
+- [x] New src/caption_fetcher.py module with CaptionFetcher class
+- [x] fetch_captions(video_id) method returns caption text with timing info
+- [x] Support for multiple caption formats: VTT, SRT, JSON3 (auto-converted)
+- [x] Distinguish between auto-generated and human-uploaded captions via is_auto_generated
+- [x] Handle unavailable captions gracefully with CaptionUnavailableError
+- [x] Tests verify caption extraction for videos with and without captions
