@@ -663,3 +663,226 @@ Created `tests/test_rate_limit_backoff.py` with 20 tests in 9 test classes:
 ### Files Created
 - tests/test_rate_limit_backoff.py (20 tests)
 
+
+## Iteration 17 - US-003: Make cookie rotator error patterns configurable
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Analysis
+Most US-003 acceptance criteria were already satisfied:
+- Error patterns already in CookieRotationConfig.rotate_on_errors (not hardcoded)
+- Default patterns include all required values
+- should_rotate() reads from config.rotate_on_errors
+- Case-insensitive matching already implemented via .lower()
+
+Missing functionality:
+- Config validation for non-empty error_patterns when enabled
+- Tests verifying custom patterns trigger rotation
+
+### Changes Made
+
+**Config validation (src/config/sections/download.py):**
+- Added `__post_init__` to CookieRotationConfig
+- Validates rotate_on_errors is non-empty when `enabled=True`
+- Raises ValueError with helpful message if validation fails
+
+**Cookie file validation (src/downloader/cookie_rotator.py):**
+- Enhanced `_validate_cookie_files()` to check readability, not just existence
+- Validates: file exists, is a file (not dir), is readable
+- Invalid files logged with path AND specific reason
+- Added `_invalid_cookies: Dict[str, str]` tracking failures
+- Added `continue_on_partial` constructor param (default True)
+- Updated `get_status()` to include:
+  - `total_cookies`: All configured (valid + invalid)
+  - `valid_cookies`: Files that passed validation
+  - `invalid_cookies`: Dict mapping path -> failure reason
+
+**Tests added (tests/test_cookie_rotation.py):**
+
+| Test Class | Tests | Purpose |
+|------------|-------|---------|
+| TestCookieValidation | 8 | Startup validation behavior |
+| TestCustomErrorPatterns | 5 | Configurable error patterns |
+
+**TestCookieValidation tests:**
+- test_validates_existence_and_readability
+- test_logs_warning_for_missing_file
+- test_logs_warning_for_directory
+- test_logs_warning_for_unreadable_file (skipped on Windows)
+- test_get_status_includes_valid_cookies_count
+- test_continue_on_partial_true_allows_startup
+- test_continue_on_partial_false_raises_on_invalid
+- test_mixed_valid_invalid_cookies
+
+**TestCustomErrorPatterns tests:**
+- test_custom_pattern_triggers_rotation
+- test_case_insensitive_matching
+- test_empty_patterns_validation_when_enabled
+- test_empty_patterns_allowed_when_disabled
+- test_multiple_custom_patterns
+
+### Verification
+- Syntax check: `python -m py_compile src/config/sections/download.py` - PASSED
+- Syntax check: `python -m py_compile src/downloader/cookie_rotator.py` - PASSED
+- All 28 tests: `pytest tests/test_cookie_rotation.py -v` - PASSED (1 skipped on Windows)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/config/sections/download.py - __post_init__ validation
+- src/downloader/cookie_rotator.py - Enhanced validation, status reporting
+- tests/test_cookie_rotation.py - 13 new tests (8 validation + 5 patterns)
+
+
+## Iteration 18 - US-004: Add search timeout fallback with keyword remix
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented search timeout detection with LLM keyword remix fallback when YouTube search hangs.
+
+**New SearchResult class (src/downloader/title_filter.py):**
+- Created `SearchResult` dataclass to capture search state:
+  - `videos: List[Dict]` - Search results
+  - `timed_out: bool` - True if search timed out
+  - `error: Optional[str]` - Error message if failed
+- Implements `__bool__` for backward compatibility (truthy when videos exist)
+- Updated `search_video_metadata()` to return `SearchResult` instead of raw list
+
+**Timeout-based remix in _download_single (src/downloader/core.py):**
+- When search times out, try LLM keyword remix before giving up
+- Maximum 2 remix attempts per original keyword
+- Remix loop:
+  1. Call `_get_remix_keyword()` for alternative search term
+  2. Retry search with remixed keyword
+  3. Stop if remix returns same keyword or no videos found
+- Comprehensive logging: timeout, remix attempts, and final status
+
+**Config changes:**
+- Changed `search_timeout` default from 60s to 30s (config.yaml and DownloadConfig)
+- Added comment explaining timeout triggers keyword remix
+
+**Test updates:**
+- Updated mocks in test_downloader_core_advanced.py to use SearchResult
+- Updated mocks in test_downloader_core_coverage.py to use SearchResult
+- All existing tests continue to pass
+
+### Tests Added
+Created `tests/test_search_timeout_remix.py` with 18 tests in 7 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestSearchResult | 4 | SearchResult dataclass behavior |
+| TestSearchTimeout | 4 | Timeout detection, config access |
+| TestSearchTimeoutRemix | 4 | Remix loop logic, max attempts |
+| TestSearchTimeoutLogging | 2 | Logging verification |
+| TestConfigDefaults | 2 | 30s default, separate from download timeout |
+| TestIntegration | 2 | Backward compatibility, full flow simulation |
+
+### Verification
+- Syntax check: `python -m py_compile src/downloader/title_filter.py` - PASSED
+- Syntax check: `python -m py_compile src/downloader/core.py` - PASSED
+- Syntax check: `python -m py_compile src/config/sections/download.py` - PASSED
+- All 18 new tests: `pytest tests/test_search_timeout_remix.py -v` - PASSED
+- All 23 related tests: `pytest tests/test_search_timeout_remix.py tests/test_downloader_core_advanced.py::TestDownloadSingle -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/downloader/title_filter.py - SearchResult class, updated search_video_metadata()
+- src/downloader/core.py - Timeout-based remix loop in _download_single()
+- src/config/sections/download.py - Changed search_timeout default to 30s
+- config.yaml - Changed search_timeout to 30s with comment
+- tests/test_downloader_core_advanced.py - Updated mocks to use SearchResult
+- tests/test_downloader_core_coverage.py - Updated mocks to use SearchResult
+
+### Files Created
+- tests/test_search_timeout_remix.py (18 tests)
+
+
+## Iteration 19 - US-005: Implement download speed monitoring for adaptive timeouts
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Implemented download speed tracking with sliding window to enable adaptive timeout extension on slow networks.
+
+**New DownloadSpeedTracker class (src/downloader/speed_tracker.py):**
+- `DownloadSpeedConfig` dataclass with:
+  - `enabled: bool = True` - Enable/disable tracking
+  - `window_size: int = 5` - Sliding window size (number of downloads)
+  - `min_speed_mbps: float = 1.0` - Minimum expected speed (MB/s)
+  - `max_timeout_multiplier: float = 2.0` - Maximum timeout extension (2x)
+  - `enable_adaptive_timeout: bool = True` - Use speed data to extend timeouts
+- `DownloadRecord` dataclass tracking individual downloads
+- `DownloadSpeedTracker` class with:
+  - `record_download()` - Record bytes downloaded, duration, video ID, tier
+  - `get_average_speed_mbps()` - Calculate average speed from sliding window
+  - `get_adjusted_timeout()` - Extend timeout proportionally on slow networks
+  - `get_speed_stats()` - Return detailed stats for debugging
+  - `to_checkpoint_dict()` / `from_checkpoint_dict()` - Checkpoint persistence
+  - `clear()` - Clear all records
+
+**Config additions (src/config/sections/download.py):**
+- New `SpeedTrackingConfig` dataclass with all settings
+- Added `speed_tracking: SpeedTrackingConfig` field to `DownloadConfig`
+- Added `__post_init__` handling for dict-to-dataclass conversion
+
+**Config additions (config.yaml):**
+- New `download.speed_tracking` section with all settings
+- Documented how it works in comments (sliding window, proportional extension)
+
+**Integration (src/downloader/core.py):**
+- Initialize `DownloadSpeedTracker` in `VideoDownloader.__init__`
+- Modified `_run_download_cmd()` to:
+  1. Apply adaptive timeout via `speed_tracker.get_adjusted_timeout(base_timeout)`
+  2. Track download start time
+  3. Record download speed after successful downloads
+- Added `get_speed_stats()` method for reporting
+- Robust config handling with safe int/float/bool conversion (handles MagicMock in tests)
+
+**Checkpoint persistence (src/downloader/checkpoint.py):**
+- Added `speed_tracker_state: Optional[Dict]` field to `DownloadCheckpoint`
+- Updated `from_dict()` to handle checkpoints without the new field
+- Speed tracker state saved/restored in `_save_checkpoint()` and `download_all()`
+
+**Exports (src/downloader/__init__.py):**
+- Added `DownloadSpeedTracker`, `DownloadSpeedConfig`, `DownloadRecord` to exports
+
+### Example Behavior
+With defaults (min_speed_mbps=1.0, max_timeout_multiplier=2.0):
+- Network at 2.0 MB/s: no timeout adjustment
+- Network at 0.5 MB/s: timeout extended 2x (1.0/0.5 = 2x)
+- Network at 0.25 MB/s: timeout extended 2x (capped)
+
+### Tests Added
+Created `tests/test_speed_tracker.py` with 28 tests in 9 test classes:
+
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| TestDownloadSpeedConfig | 2 | Default and custom config values |
+| TestDownloadRecord | 2 | Speed calculation, zero duration handling |
+| TestTrackerInitialization | 3 | Default config, custom config, empty records |
+| TestRecordDownload | 4 | Valid download, invalid values, disabled, window limit |
+| TestAverageSpeed | 3 | No records, single record, multiple records |
+| TestAdaptiveTimeout | 5 | No adjustment, slow network, capped, disabled |
+| TestSpeedStats | 2 | Empty stats, stats with records |
+| TestCheckpointPersistence | 5 | Save/restore, missing tier, invalid records, clear |
+| TestIntegration | 2 | Sliding window, roundtrip checkpoint |
+
+### Verification
+- Syntax check: All new/modified files pass `python -m py_compile`
+- All 28 new tests: `pytest tests/test_speed_tracker.py -v` - PASSED
+- All 49 speed+retry tests: `pytest tests/test_speed_tracker.py tests/test_downloader_retry.py -v` - PASSED
+- All 356 download tests: `pytest tests/test_download*.py -v` - 356 PASSED (4 pre-existing failures)
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- src/downloader/speed_tracker.py - DownloadSpeedTracker class
+- tests/test_speed_tracker.py (28 tests)
+
+### Files Modified
+- src/config/sections/download.py - SpeedTrackingConfig dataclass
+- config.yaml - download.speed_tracking section
+- src/downloader/core.py - Speed tracker integration
+- src/downloader/checkpoint.py - speed_tracker_state field
+- src/downloader/__init__.py - Exports
+

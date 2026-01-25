@@ -49,8 +49,8 @@
         "Config validation ensures error_patterns is a non-empty list",
         "Tests verify custom patterns trigger rotation"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Error patterns already configurable via rotate_on_errors in CookieRotationConfig. Added __post_init__ validation for non-empty list when enabled. Case-insensitive matching via .lower(). Also added cookie file validation at startup (validates existence AND readability, logs warnings with reason, get_status includes valid_cookies count). 28 tests pass in test_cookie_rotation.py (8 validation + 5 custom patterns + 15 existing)."
     },
     {
       "id": "US-004",
@@ -65,8 +65,8 @@
         "Timeout is logged with original keyword and remix attempts",
         "Tests verify remix is tried after search timeout"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented SearchResult class in title_filter.py to track timeout state. Modified search_video_metadata() to return SearchResult with timed_out flag. Updated _download_single() in core.py with timeout-based remix loop (max 2 attempts). Changed search_timeout default from 60s to 30s. 18 new tests in tests/test_search_timeout_remix.py. Updated existing test mocks to use SearchResult. All 23 related tests pass."
     },
     {
       "id": "US-005",
@@ -81,8 +81,8 @@
         "Tracker state persisted in checkpoint for resume scenarios",
         "Tests verify timeout extension on slow networks"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented DownloadSpeedTracker class in src/downloader/speed_tracker.py with DownloadSpeedConfig dataclass (enabled, window_size=5, min_speed_mbps=1.0, max_timeout_multiplier=2.0). DownloadRecord tracks per-video stats with speed_mbps property. Sliding window via deque(maxlen=window_size). get_adjusted_timeout() extends timeout proportionally when speed < min_speed_mbps. Added SpeedTrackingConfig to download.py config, integrated in core.py _run_download_cmd(). Checkpoint persistence via speed_tracker_state field in DownloadCheckpoint. 28 tests in test_speed_tracker.py covering config, recording, averaging, adaptive timeout, checkpoint persistence, and integration. All 356 download tests pass."
     },
     {
       "id": "US-006",

@@ -17,6 +17,7 @@ __all__ = [
     'SpeechScreeningConfig',
     'CookieRotationConfig',
     'RateLimitConfig',
+    'SpeedTrackingConfig',
     'VPNConfig',
     'DownloadConfig',
     'DownloadingConfig',
@@ -274,6 +275,46 @@ class RateLimitConfig:
 
 
 @dataclass
+class SpeedTrackingConfig:
+    """Download speed monitoring for adaptive timeouts.
+
+    Tracks actual download speeds and adjusts timeouts dynamically based on
+    network conditions. On slow networks, timeouts can be extended up to
+    max_timeout_multiplier to prevent unnecessary timeout failures.
+
+    How it works:
+      1. After each download, records bytes downloaded and time taken
+      2. Maintains a sliding window of the last N downloads (window_size)
+      3. Calculates average speed across the window
+      4. If speed < min_speed_mbps, extends timeouts proportionally
+      5. State is persisted in checkpoint for resume scenarios
+
+    Example with defaults (min_speed_mbps=1.0, max_timeout_multiplier=2.0):
+      - Network at 2.0 MB/s: no adjustment
+      - Network at 0.5 MB/s: timeout extended 2x
+      - Network at 0.25 MB/s: timeout extended 2x (capped)
+    """
+    # Enable/disable speed tracking
+    enabled: bool = True
+
+    # Number of downloads to track in sliding window
+    # Smaller = more responsive, larger = more stable
+    window_size: int = 5
+
+    # Minimum expected speed in MB/s
+    # Below this, timeouts start getting extended
+    min_speed_mbps: float = 1.0
+
+    # Maximum timeout extension multiplier
+    # 2.0 means timeout can be at most doubled
+    max_timeout_multiplier: float = 2.0
+
+    # Enable adaptive timeout (use speed data to extend timeouts)
+    # If False, speeds are tracked but timeouts are not adjusted
+    enable_adaptive_timeout: bool = True
+
+
+@dataclass
 class VPNConfig:
     """VPN integration for IP rotation on rate limits.
 
@@ -369,7 +410,8 @@ class DownloadConfig:
     max_search_pool: int = 100  # Maximum search pool size (for adaptive sizing)
 
     # Timeout settings
-    search_timeout: int = 60  # Seconds for search metadata subprocess
+    # Search timeout: If YouTube search takes longer, trigger keyword remix (max 2 attempts)
+    search_timeout: int = 30  # Seconds for search metadata subprocess (triggers remix on timeout)
     download_timeout: int = 120  # Default seconds per video download (used for 'short' tier)
 
     # Tier-specific download timeouts (longer videos need more time)
@@ -399,6 +441,9 @@ class DownloadConfig:
 
     # VPN integration: switch VPN servers when cookies are exhausted
     vpn: VPNConfig = field(default_factory=VPNConfig)
+
+    # Speed tracking: monitor download speeds for adaptive timeouts
+    speed_tracking: SpeedTrackingConfig = field(default_factory=SpeedTrackingConfig)
 
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
@@ -432,6 +477,8 @@ class DownloadConfig:
             self.rate_limit = RateLimitConfig(**self.rate_limit)
         if isinstance(self.vpn, dict):
             self.vpn = VPNConfig(**self.vpn)
+        if isinstance(self.speed_tracking, dict):
+            self.speed_tracking = SpeedTrackingConfig(**self.speed_tracking)
 
 
 @dataclass

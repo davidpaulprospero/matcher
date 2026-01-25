@@ -32,12 +32,17 @@ class DownloadCheckpoint:
     current_keyword: Optional[str]
     current_tier: Optional[str]
     timestamp: str
+    # Speed tracker state for adaptive timeout persistence (US-005)
+    speed_tracker_state: Optional[Dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "DownloadCheckpoint":
+        # Handle checkpoints created before speed_tracker_state was added
+        if 'speed_tracker_state' not in data:
+            data['speed_tracker_state'] = None
         return cls(**data)
 
 

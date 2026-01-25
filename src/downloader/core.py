@@ -40,6 +40,7 @@ from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .vpn_manager import VPNManager
+from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,49 @@ class VideoDownloader:
         self._rate_limit_backoff_count = 0  # Current backoff attempt count
         self._rate_limit_total_delay = 0.0  # Cumulative delay applied
 
+        # Speed tracker (for adaptive timeouts)
+        speed_tracking_config = getattr(self.download_config, 'speed_tracking', None)
+        speed_tracking_enabled = False
+        if speed_tracking_config:
+            try:
+                enabled_val = getattr(speed_tracking_config, 'enabled', False)
+                speed_tracking_enabled = enabled_val is True  # Strict check, not just truthy
+            except (TypeError, ValueError):
+                speed_tracking_enabled = False
+
+        if speed_tracking_enabled:
+            # Get config values with safe defaults (handles MagicMock in tests)
+            try:
+                window_size = int(getattr(speed_tracking_config, 'window_size', 5))
+            except (TypeError, ValueError):
+                window_size = 5
+            try:
+                min_speed = float(getattr(speed_tracking_config, 'min_speed_mbps', 1.0))
+            except (TypeError, ValueError):
+                min_speed = 1.0
+            try:
+                max_mult = float(getattr(speed_tracking_config, 'max_timeout_multiplier', 2.0))
+            except (TypeError, ValueError):
+                max_mult = 2.0
+            try:
+                adaptive_val = getattr(speed_tracking_config, 'enable_adaptive_timeout', True)
+                adaptive = adaptive_val is True
+            except (TypeError, ValueError):
+                adaptive = True
+
+            self.speed_tracker = DownloadSpeedTracker(
+                DownloadSpeedConfig(
+                    enabled=True,
+                    window_size=window_size,
+                    min_speed_mbps=min_speed,
+                    max_timeout_multiplier=max_mult,
+                    enable_adaptive_timeout=adaptive
+                )
+            )
+            logger.debug("Speed tracker enabled for adaptive timeouts")
+        else:
+            self.speed_tracker = DownloadSpeedTracker(DownloadSpeedConfig(enabled=False))
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -173,8 +217,10 @@ class VideoDownloader:
         return self.checkpoint_mgr.load_checkpoint()
 
     def _save_checkpoint(self):
-        """Delegate to CheckpointManager."""
+        """Delegate to CheckpointManager, including speed tracker state."""
         if self.checkpoint:
+            # Include speed tracker state in checkpoint for resume
+            self.checkpoint.speed_tracker_state = self.speed_tracker.to_checkpoint_dict()
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -507,6 +553,10 @@ class VideoDownloader:
                 logger.info(f"Resuming from checkpoint ({len(self.checkpoint.completed_keywords)} keywords done)")
                 # Filter out completed keywords
                 keywords = [k for k in keywords if k not in self.checkpoint.completed_keywords]
+                # Restore speed tracker state from checkpoint
+                if self.checkpoint.speed_tracker_state:
+                    self.speed_tracker.from_checkpoint_dict(self.checkpoint.speed_tracker_state)
+                    logger.debug(f"Restored speed tracker state: {self.speed_tracker.get_speed_stats()['samples']} samples")
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(
@@ -515,7 +565,8 @@ class VideoDownloader:
                 failed_keywords=[],
                 current_keyword=None,
                 current_tier=None,
-                timestamp=datetime.now().isoformat()
+                timestamp=datetime.now().isoformat(),
+                speed_tracker_state=None
             )
 
         all_downloaded = []
@@ -760,8 +811,32 @@ class VideoDownloader:
             # NEW FLOW: Search metadata first, filter with LLM, then download specific videos
             logger.debug(f"    Searching {search_pool} videos for LLM filtering...")
 
-            videos = self._search_video_metadata(keyword, tier, search_pool)
+            # Search with timeout-based remix fallback (max 2 remix attempts)
+            search_result = self._search_video_metadata(keyword, tier, search_pool)
+            current_keyword = keyword
+            remix_attempts = 0
+            max_remix_attempts = 2
 
+            # If search timed out, try LLM keyword remix before giving up
+            while search_result.timed_out and remix_attempts < max_remix_attempts:
+                logger.info(f"    Search timeout for '{current_keyword}' - trying keyword remix ({remix_attempts + 1}/{max_remix_attempts})")
+
+                remix_keyword = self._get_remix_keyword(current_keyword, topic)
+                if remix_keyword and remix_keyword != current_keyword:
+                    logger.info(f"    Remixed keyword: '{current_keyword}' → '{remix_keyword}'")
+                    current_keyword = remix_keyword
+                    search_result = self._search_video_metadata(remix_keyword, tier, search_pool)
+                    remix_attempts += 1
+                else:
+                    logger.debug(f"    No remix available for '{current_keyword}'")
+                    break
+
+            # Final check after all remix attempts
+            if search_result.timed_out:
+                logger.warning(f"    Search timeout for '{keyword}' after {remix_attempts} remix attempts")
+                return []
+
+            videos = search_result.videos
             if not videos:
                 logger.debug(f"    No videos found for '{keyword}'")
                 return []
@@ -1026,13 +1101,19 @@ class VideoDownloader:
 
         # Use override, tier-specific timeout, config default, or fallback
         if timeout_override:
-            download_timeout = timeout_override
+            base_timeout = timeout_override
         else:
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
             if tier and tier in tier_timeouts:
-                download_timeout = tier_timeouts[tier]
+                base_timeout = tier_timeouts[tier]
             else:
-                download_timeout = getattr(self.download_config, 'download_timeout', 120)
+                base_timeout = getattr(self.download_config, 'download_timeout', 120)
+
+        # Apply adaptive timeout based on network speed
+        download_timeout = self.speed_tracker.get_adjusted_timeout(base_timeout)
+
+        # Track download timing for speed measurement
+        download_start_time = time.time()
 
         # Get retry settings from config
         max_retries = getattr(self.download_config, 'max_retries', 3)
@@ -1128,6 +1209,30 @@ class VideoDownloader:
             logger.debug(f"    Downloaded {len(new_videos)} video(s)")
             # Reset rate limit backoff on successful download
             self._reset_rate_limit_backoff()
+
+            # Record download speed for adaptive timeout tracking
+            download_duration = time.time() - download_start_time
+            total_bytes = sum(
+                (keyword_dir / f).stat().st_size
+                for f in new_videos
+                if (keyword_dir / f).exists()
+            )
+            if total_bytes > 0 and download_duration > 0:
+                # Record per-video average for more consistent speed tracking
+                for video_file in new_videos:
+                    video_path = keyword_dir / video_file
+                    if video_path.exists():
+                        file_size = video_path.stat().st_size
+                        # Proportional time based on file size
+                        video_duration = download_duration * (file_size / total_bytes) if total_bytes > 0 else download_duration / len(new_videos)
+                        # Extract video ID from filename (format: title_VIDEOID.ext)
+                        video_id = Path(video_file).stem.split('_')[-1] if '_' in video_file else video_file
+                        self.speed_tracker.record_download(
+                            video_id=video_id,
+                            bytes_downloaded=file_size,
+                            duration_seconds=video_duration,
+                            tier=tier
+                        )
 
         downloaded = []
 
@@ -1308,3 +1413,18 @@ class VideoDownloader:
             'keywords_covered': list(keywords_covered),
             'num_keywords_covered': len(keywords_covered)
         }
+
+    def get_speed_stats(self) -> Dict:
+        """Get download speed statistics for debugging.
+
+        Returns:
+            Dict with speed stats from the speed tracker:
+            - samples: Number of downloads tracked
+            - avg_speed_mbps: Average speed in MB/s
+            - min_speed_mbps: Minimum speed in MB/s
+            - max_speed_mbps: Maximum speed in MB/s
+            - total_bytes: Total bytes downloaded
+            - total_duration: Total download duration in seconds
+            - records: List of recent download records
+        """
+        return self.speed_tracker.get_speed_stats()
