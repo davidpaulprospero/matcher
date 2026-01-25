@@ -356,6 +356,187 @@ function Start-Interview {
 }
 
 # ============================================================================
+# FOCUS AREA SUGGESTION FUNCTIONS
+# ============================================================================
+
+function Get-SuggestedFocusAreas {
+    <#
+    .SYNOPSIS
+        Suggests focus areas based on interview context
+    .PARAMETER Context
+        The interview context hashtable from Start-Interview
+    .RETURNS
+        Array of suggested focus area IDs (max 5)
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Context
+    )
+
+    $suggestions = @()
+
+    # If user specified an area, add it first
+    if ($Context.area -and $Context.area.Trim() -ne "") {
+        $suggestions += $Context.area.Trim().ToLower()
+    }
+
+    # Keyword matching from details (lowercase)
+    $keywordMap = @{
+        "otio|timeline|edl|xml|davinci|resolve" = "otio"
+        "download|youtube|yt-dlp|429|rate limit|cookie" = "rate-limiting"
+        "match|confidence|score|quality|poor" = "quality"
+        "caption|subtitle|srt|transcript" = "caption"
+        "config|yaml|setting" = "config"
+        "test|coverage|pytest" = "testing"
+        "speed|slow|fast|performance|cache" = "speed"
+        "client|theresa|stu|preset|learn" = "client-learning"
+        "heal|recover|retry|error|fail" = "agents"
+        "compile|compilation|topic|keyword" = "compilation"
+    }
+
+    $detailsLower = $Context.details.ToLower()
+
+    foreach ($pattern in $keywordMap.Keys) {
+        if ($detailsLower -match $pattern) {
+            $areaId = $keywordMap[$pattern]
+            if ($suggestions -notcontains $areaId) {
+                $suggestions += $areaId
+            }
+        }
+    }
+
+    # If < 3 suggestions, add defaults based on work type
+    if ($suggestions.Count -lt 3) {
+        $defaults = @{
+            "bug" = @("agents", "testing")
+            "feature" = @("pipeline", "config")
+            "improvement" = @("quality", "speed")
+            "client" = @("client-learning", "quality")
+        }
+
+        $workTypeDefaults = $defaults[$Context.workType]
+        if ($workTypeDefaults) {
+            foreach ($defaultArea in $workTypeDefaults) {
+                if ($suggestions -notcontains $defaultArea -and $suggestions.Count -lt 5) {
+                    $suggestions += $defaultArea
+                }
+            }
+        }
+    }
+
+    # Cap at 5 suggestions
+    if ($suggestions.Count -gt 5) {
+        $suggestions = $suggestions[0..4]
+    }
+
+    return $suggestions
+}
+
+function Show-Suggestions {
+    <#
+    .SYNOPSIS
+        Displays the suggested focus areas with options
+    .PARAMETER Suggestions
+        Array of focus area IDs to display
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [array]$Suggestions
+    )
+
+    Write-Host "  Suggested focus areas:" -ForegroundColor Cyan
+    Write-Host ""
+
+    $index = 1
+    foreach ($area in $Suggestions) {
+        # Try to get a friendly name from config
+        $areaName = $area
+        if ($config -and $config.focusAreas) {
+            foreach ($configArea in $config.focusAreas) {
+                $configId = if ($configArea.id) { $configArea.id } else { $configArea }
+                if ($configId -eq $area -and $configArea.name) {
+                    $areaName = "$area ($($configArea.name))"
+                    break
+                }
+            }
+        }
+        Write-Host "  [$index] $areaName" -ForegroundColor White
+        $index++
+    }
+
+    Write-Host ""
+    Write-Host "  [A] Approve all" -ForegroundColor Green
+    Write-Host "  [1-$($Suggestions.Count)] Remove specific" -ForegroundColor Yellow
+    Write-Host "  [+area] Add area (e.g., +testing)" -ForegroundColor Yellow
+    Write-Host "  [R] Restart interview" -ForegroundColor Red
+    Write-Host ""
+}
+
+function Get-ApprovedAreas {
+    <#
+    .SYNOPSIS
+        Interactive loop to let user approve/modify suggested areas
+    .PARAMETER Suggestions
+        Initial array of suggested focus area IDs
+    .RETURNS
+        ArrayList of approved focus areas, or $null to restart
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [array]$Suggestions
+    )
+
+    # Create mutable ArrayList from suggestions
+    $approved = [System.Collections.ArrayList]::new()
+    foreach ($s in $Suggestions) {
+        [void]$approved.Add($s)
+    }
+
+    while ($true) {
+        Show-Suggestions -Suggestions $approved.ToArray()
+
+        $choice = Read-Host "  Choice"
+
+        # [A] Approve all
+        if ($choice -match "^[Aa]$") {
+            return $approved
+        }
+
+        # [R] Restart
+        if ($choice -match "^[Rr]$") {
+            return $null
+        }
+
+        # [+area] Add area
+        if ($choice -match "^\+(.+)$") {
+            $newArea = $Matches[1].Trim().ToLower()
+            if ($approved -notcontains $newArea) {
+                [void]$approved.Add($newArea)
+                Write-Host "  Added: $newArea" -ForegroundColor Green
+            } else {
+                Write-Host "  Already in list: $newArea" -ForegroundColor Yellow
+            }
+            continue
+        }
+
+        # [1-5] Remove specific
+        if ($choice -match "^[1-5]$") {
+            $removeIndex = [int]$choice - 1
+            if ($removeIndex -lt $approved.Count) {
+                $removed = $approved[$removeIndex]
+                $approved.RemoveAt($removeIndex)
+                Write-Host "  Removed: $removed" -ForegroundColor Yellow
+            } else {
+                Write-Host "  Invalid index" -ForegroundColor Red
+            }
+            continue
+        }
+
+        Write-Host "  Invalid choice. Try again." -ForegroundColor Red
+    }
+}
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 
