@@ -78,6 +78,10 @@ class TranscriptionConfig:
     cache_transcriptions: bool = True
     cache_dir: str = "transcriptions"
 
+    # Audio extraction timeout (seconds)
+    # FFmpeg subprocess killed if extraction exceeds this limit
+    audio_extraction_timeout: int = 60
+
     def __post_init__(self):
         if self.pause_split is None:
             self.pause_split = PauseSplitConfig()
