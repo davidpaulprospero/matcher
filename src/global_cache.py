@@ -743,7 +743,9 @@ class GlobalCacheManager:
                         ts = datetime.fromisoformat(entry.last_used).timestamp() if entry.last_used else 0
                     else:
                         ts = datetime.fromisoformat(entry.first_seen).timestamp() if entry.first_seen else 0
-                except:
+                except (ValueError, OSError) as e:
+                    # ValueError: invalid ISO format, OSError: timestamp out of range
+                    logger.debug(f"Could not parse timestamp for {video_hash}: {e}")
                     ts = 0
                 entries_with_time.append((video_hash, entry, ts))
 
