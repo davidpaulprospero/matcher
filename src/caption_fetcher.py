@@ -4829,6 +4829,7 @@ class CaptionMetrics:
             'total_segments': self.total_segments,
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
+            'error_category_counts': dict(self.error_category_counts),  # US-003 Sprint 7
         }
 
     @classmethod
@@ -4867,7 +4868,242 @@ class CaptionMetrics:
             total_segments=data.get('total_segments', 0),
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
+            error_category_counts=data.get('error_category_counts', {}),  # US-003 Sprint 7
         )
+
+    def export_json(
+        self,
+        path: str,
+        project_path: Optional[str] = None,
+        config: Any = None,
+        video_count: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Export all metrics to a timestamped JSON file (US-004 Sprint 7).
+
+        Creates a structured JSON export with all metrics, run metadata, and
+        optional config snapshot for historical tracking, dashboards, and
+        cross-project analysis.
+
+        JSON Schema:
+            {
+                "schema_version": "1.0",
+                "export_timestamp": "2026-01-26T12:30:45.123456+00:00",
+                "run_metadata": {
+                    "project_path": "/path/to/project" | null,
+                    "video_count": 42 | null,
+                    "export_path": "/path/to/caption_metrics.json"
+                },
+                "config_snapshot": {
+                    "caption_first": {...} | null,
+                    "enabled": true,
+                    "preferred_language": "en",
+                    ...
+                } | null,
+                "summary": {
+                    "total_processed": 100,
+                    "success_rate_percent": 95.0,
+                    "cache_hit_rate_percent": 30.0,
+                    "fetch_attempts": 100,
+                    "successes": 95,
+                    "failures": 5,
+                    "cache_hits": 30
+                },
+                "timing": {
+                    "video_fetch_times": {"vid1": 2.5, ...},
+                    "slowest_videos": [["vid1", 8.2], ["vid2", 7.1], ...]
+                },
+                "formats": {
+                    "success_counts": {"json3": 80, "vtt": 15, "srt": 5},
+                    "success_rates": {"json3": 80.0, "vtt": 15.0, "srt": 5.0},
+                    "fallback_count": 20,
+                    "fallback_rate_percent": 20.0,
+                    "video_format_used": {"vid1": "json3", ...}
+                },
+                "languages": {
+                    "distribution": {"en": 90, "es": 8, "fr": 2},
+                    "selection_trace": [...],
+                    "fallback_summary": {"preferred": 85, "fallback_1": 10, ...}
+                },
+                "errors": {
+                    "category_counts": {"NETWORK": 3, "PARSE": 2, ...},
+                    "category_rates": {"NETWORK": 60.0, "PARSE": 40.0, ...},
+                    "top_category": "NETWORK" | null
+                },
+                "coverage": {
+                    "distribution": {"high": 70, "medium": 20, "low": 10},
+                    "low_coverage_videos": ["vid1", "vid2", ...]
+                },
+                "quality": {
+                    "distribution": {"high": 50, "medium": 40, "low": 10},
+                    "human_caption_count": 60,
+                    "auto_generated_count": 40
+                },
+                "cache_validation": {
+                    "passed": 85,
+                    "rejected": 10,
+                    "refetched": 5
+                },
+                "pre_check": {
+                    "available": 95,
+                    "unavailable": 5
+                },
+                "raw_metrics": {...}  # Full to_dict() output for completeness
+            }
+
+        Args:
+            path: Output file path for JSON export.
+            project_path: Optional project directory path for metadata.
+            config: Optional Config object to include caption config snapshot.
+            video_count: Optional count of videos processed for metadata.
+
+        Returns:
+            Dict with the exported data (same as written to file).
+
+        Raises:
+            OSError: If file cannot be written.
+
+        Example:
+            >>> metrics = CaptionMetrics()
+            >>> metrics.record_fetch_success("vid1", language="en")
+            >>> data = metrics.export_json(
+            ...     "caption_metrics.json",
+            ...     project_path="/path/to/project",
+            ...     video_count=100
+            ... )
+            >>> print(f"Exported {data['summary']['fetch_attempts']} fetch attempts")
+        """
+        from datetime import datetime, timezone
+        from pathlib import Path as PathLib
+        import json
+
+        export_timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Build config snapshot if config provided
+        config_snapshot = None
+        if config is not None:
+            try:
+                caption_config = getattr(config.download, 'caption_first', None)
+                if caption_config:
+                    # Extract relevant caption config fields
+                    config_snapshot = {
+                        'enabled': getattr(caption_config, 'enabled', False),
+                        'preferred_language': getattr(caption_config, 'preferred_language', 'en'),
+                        'fallback_languages': getattr(caption_config, 'fallback_languages', []),
+                        'preferred_formats': getattr(caption_config, 'preferred_formats', []),
+                        'allow_auto_generated': getattr(caption_config, 'allow_auto_generated', True),
+                        'min_coverage_threshold': getattr(caption_config, 'min_coverage_threshold', 0.5),
+                        'max_fetch_timeout': getattr(caption_config, 'max_fetch_timeout', 30),
+                        'adaptive_format_order': getattr(caption_config, 'adaptive_format_order', True),
+                    }
+            except (AttributeError, TypeError):
+                config_snapshot = None
+
+        # Get format statistics
+        format_stats = self.get_format_statistics()
+
+        # Get error category summary
+        error_summary = self.get_error_category_summary()
+
+        # Get language fallback summary
+        lang_fallback_summary = self.get_language_fallback_summary()
+
+        # Build structured export
+        export_data = {
+            "schema_version": "1.0",
+            "export_timestamp": export_timestamp,
+
+            # Run metadata
+            "run_metadata": {
+                "project_path": project_path,
+                "video_count": video_count,
+                "export_path": str(path),
+            },
+
+            # Config snapshot (if provided)
+            "config_snapshot": config_snapshot,
+
+            # Summary statistics
+            "summary": {
+                "total_processed": self.total_processed,
+                "success_rate_percent": self.success_rate,
+                "cache_hit_rate_percent": self.cache_hit_rate,
+                "fetch_attempts": self.fetch_attempts,
+                "successes": self.successes,
+                "failures": self.failures,
+                "cache_hits": self.cache_hits,
+                "total_segments": self.total_segments,
+                "skipped_live_streams": self.skipped_live_streams,
+            },
+
+            # Timing metrics
+            "timing": {
+                "video_fetch_times": dict(self.video_fetch_times),
+                "slowest_videos": self.get_slowest_videos(10),
+            },
+
+            # Format statistics
+            "formats": {
+                "success_counts": format_stats['format_counts'],
+                "success_rates": format_stats['format_rates'],
+                "fallback_count": format_stats['fallback_count'],
+                "fallback_rate_percent": format_stats['fallback_rate'],
+                "video_format_used": dict(self.video_format_used),
+            },
+
+            # Language statistics
+            "languages": {
+                "distribution": dict(self.language_distribution),
+                "selection_trace": list(self.language_selection_trace),
+                "fallback_summary": lang_fallback_summary,
+            },
+
+            # Error statistics
+            "errors": {
+                "category_counts": error_summary['counts'],
+                "category_rates": error_summary['category_rates'],
+                "top_category": error_summary['top_category'],
+            },
+
+            # Coverage statistics
+            "coverage": {
+                "distribution": dict(self.coverage_distribution),
+                "low_coverage_videos": list(self.low_coverage_videos),
+            },
+
+            # Quality statistics
+            "quality": {
+                "distribution": dict(self.quality_distribution),
+                "human_caption_count": self.human_caption_count,
+                "auto_generated_count": self.auto_generated_count,
+            },
+
+            # Cache validation (US-008 Sprint 6)
+            "cache_validation": {
+                "passed": self.cache_validation_passed,
+                "rejected": self.cache_validation_rejected,
+                "refetched": self.cache_validation_refetched,
+            },
+
+            # Pre-check statistics
+            "pre_check": {
+                "available": self.pre_check_available,
+                "unavailable": self.pre_check_unavailable,
+            },
+
+            # Raw metrics for completeness
+            "raw_metrics": self.to_dict(),
+        }
+
+        # Write to file
+        output_path = PathLib(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"Exported caption metrics to {path}")
+
+        return export_data
 
     def merge(self, other: 'CaptionMetrics') -> 'CaptionMetrics':
         """Merge another CaptionMetrics into this one.

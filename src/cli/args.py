@@ -148,6 +148,14 @@ Examples:
         help='Export rate limit metrics to JSON file after pipeline (e.g., metrics.json)'
     )
 
+    parser.add_argument(
+        '--export-caption-metrics',
+        type=str,
+        metavar='PATH',
+        help='Export caption fetch metrics to JSON file after pipeline '
+             '(e.g., caption_metrics.json). Writes to project directory by default.'
+    )
+
     # Caption-first mode flags
     parser.add_argument(
         '--caption-first',
