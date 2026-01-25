@@ -4166,3 +4166,71 @@ Created TestSegmentLevelErrorRecovery class with 9 tests:
 ### Files Modified
 - src/caption_fetcher.py (ParseResult class, modified parsers, updated CaptionResult)
 - tests/test_caption_fetcher.py (added TestSegmentLevelErrorRecovery, updated existing tests for ParseResult return type)
+
+## Iteration - [US-002] Implement adaptive format ordering from historical success rates
+- Focus: caption
+- Status: COMPLETE
+
+### What was implemented
+Implemented adaptive format ordering that uses historical success rates to try formats in optimal order:
+
+1. **CaptionMetrics.get_optimal_format_order()** - Sorts formats by historical success count
+2. **CaptionCache.save_format_statistics()** - Persists format success counts to cache metadata
+3. **CaptionCache.load_format_statistics()** - Loads historical format statistics from cache
+4. **CaptionFetcher.apply_adaptive_format_order()** - Applies adaptive ordering from metrics/cache
+5. **Config option: caption_first.adaptive_format_order** - Enable/disable (default: true)
+
+### Logging format
+When adaptive ordering is applied:
+```
+Adaptive format order: vtt (90%), json3 (50%), srt (10%)
+```
+
+### Tests Added (17 new tests)
+**TestAdaptiveFormatOrdering (5 tests):**
+- test_get_optimal_format_order_no_data
+- test_get_optimal_format_order_sorts_by_count
+- test_get_optimal_format_order_includes_defaults
+- test_get_optimal_format_order_custom_defaults
+- test_get_optimal_format_order_thread_safety
+
+**TestCaptionCacheFormatStatistics (5 tests):**
+- test_save_format_statistics
+- test_load_format_statistics
+- test_load_format_statistics_empty
+- test_format_statistics_disabled_cache
+- test_format_statistics_persistence
+
+**TestCaptionFetcherAdaptiveOrder (7 tests):**
+- test_fetcher_default_adaptive_enabled
+- test_fetcher_config_disables_adaptive
+- test_apply_adaptive_format_order_from_metrics
+- test_apply_adaptive_format_order_from_cache
+- test_apply_adaptive_format_order_no_data
+- test_apply_adaptive_format_order_disabled
+- test_apply_adaptive_format_order_metrics_priority_over_cache
+
+### Acceptance Criteria Met
+- [x] Add CaptionMetrics.get_optimal_format_order() returning formats sorted by success rate
+- [x] Persist format success rates in caption cache metadata for cross-run learning
+- [x] CaptionFetcher.fetch_single() uses adaptive order when config.adaptive_format_order=true
+- [x] Log format reordering: 'Adaptive format order: vtt (95%), json3 (80%), srt (60%)'
+- [x] Config option caption_first.adaptive_format_order (default: true)
+- [x] Tests verify format with 90% success rate tried before format with 50% success rate
+
+### Files Modified
+- src/caption_fetcher.py (added get_optimal_format_order, save/load_format_statistics, apply_adaptive_format_order)
+- src/config/sections/download.py (added adaptive_format_order config)
+- config.yaml (added adaptive_format_order setting)
+- tests/test_caption_cache.py (added 17 tests for adaptive format ordering)
+
+### Verification
+- All 17 new tests pass
+- All 348 caption_cache + caption_fetcher tests pass
+- main.py --help: PASSED
+- python -m py_compile src/caption_fetcher.py: PASSED
+
+### Notes
+- Metrics data takes priority over cache data (current session wins)
+- If no historical data, static preferred_formats order is used unchanged
+- Thread-safe: uses lock for parallel fetch environments
