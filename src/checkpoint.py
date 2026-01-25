@@ -8,6 +8,7 @@ Also manages saved keyword presets for reproducible runs.
 import json
 import hashlib
 import shutil
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List, TYPE_CHECKING
@@ -161,6 +162,8 @@ class CheckpointManager:
         If the main checkpoint is corrupt, attempts to restore from backup.
         Validates required fields and version compatibility.
         """
+        start_time = time.perf_counter()
+
         if not self.exists():
             return None
 
@@ -188,6 +191,11 @@ class CheckpointManager:
             # Continue with partial data rather than failing completely
 
         self.data = data
+
+        # Log load time
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(f"Checkpoint loaded in {elapsed_ms:.1f}ms")
+
         return self.data
 
     def _try_load_file(self, path: Path) -> Optional[CheckpointData]:
@@ -393,19 +401,24 @@ class CheckpointManager:
 
     def _atomic_save(self):
         """Atomically save checkpoint (write temp, then rename)"""
+        start_time = time.perf_counter()
         temp_path = self.checkpoint_path.with_suffix('.tmp')
         try:
             # Backup existing checkpoint
             if self.checkpoint_path.exists():
                 shutil.copy2(self.checkpoint_path, self.backup_path)
-            
+
             # Write to temp file
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data.to_dict(), f, indent=2, default=str)
-            
+
             # Atomic rename
             temp_path.replace(self.checkpoint_path)
-            
+
+            # Log save time
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(f"Checkpoint saved in {elapsed_ms:.1f}ms")
+
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
             if temp_path.exists():

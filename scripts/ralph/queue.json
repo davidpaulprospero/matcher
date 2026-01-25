@@ -25,10 +25,10 @@
                        ],
     "session":  {
                     "startedAt":  "2026-01-25T08:00:00",
-                    "currentStoryId":  "US-001",
+                    "currentStoryId":  "US-005",
                     "id":  "2026-01-25_080000",
-                    "iterationCount":  6,
-                    "lastActivityAt":  "2026-01-25T07:42:29"
+                    "iterationCount":  10,
+                    "lastActivityAt":  "2026-01-25T08:00:39"
                 },
     "networkRetries":  {
                            "lastError":  null,
