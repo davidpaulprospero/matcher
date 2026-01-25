@@ -1874,3 +1874,311 @@ class TestCaptionCacheRetry:
 
         with pytest.raises(CaptionFetchError):
             cache.get_or_fetch_with_retry(fetcher, "errtest1234", "en")
+
+
+# =============================================================================
+# US-011: CaptionMetrics Tests
+# =============================================================================
+
+class TestCaptionMetrics:
+    """Test CaptionMetrics dataclass for fetch statistics tracking (US-011)"""
+
+    def test_caption_metrics_defaults(self):
+        """Test default values for CaptionMetrics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        assert metrics.fetch_attempts == 0
+        assert metrics.successes == 0
+        assert metrics.failures == 0
+        assert metrics.cache_hits == 0
+        assert metrics.language_distribution == {}
+        assert metrics.quality_distribution == {}
+        assert metrics.total_segments == 0
+        assert metrics.auto_generated_count == 0
+        assert metrics.human_caption_count == 0
+
+    def test_record_fetch_attempt(self):
+        """Test recording fetch attempts"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_attempt("dQw4w9WgXcQ")
+        metrics.record_fetch_attempt("abc12345678")
+
+        assert metrics.fetch_attempts == 2
+
+    def test_record_fetch_success(self):
+        """Test recording successful fetches with distribution tracking"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success(
+            video_id="vid1",
+            language="en",
+            quality="high",
+            segment_count=50,
+            is_auto_generated=False
+        )
+        metrics.record_fetch_success(
+            video_id="vid2",
+            language="es",
+            quality="medium",
+            segment_count=30,
+            is_auto_generated=True
+        )
+        metrics.record_fetch_success(
+            video_id="vid3",
+            language="en",
+            quality="high",
+            segment_count=40,
+            is_auto_generated=False
+        )
+
+        assert metrics.successes == 3
+        assert metrics.total_segments == 120
+        assert metrics.human_caption_count == 2
+        assert metrics.auto_generated_count == 1
+        assert metrics.language_distribution == {"en": 2, "es": 1}
+        assert metrics.quality_distribution == {"high": 2, "medium": 1}
+
+    def test_record_fetch_failure(self):
+        """Test recording fetch failures"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_failure("vid1", reason="unavailable")
+        metrics.record_fetch_failure("vid2", reason="error")
+        metrics.record_fetch_failure("vid3", reason="timeout")
+
+        assert metrics.failures == 3
+        assert metrics.quality_distribution.get("unavailable") == 3
+
+    def test_record_cache_hit(self):
+        """Test recording cache hits"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_cache_hit(
+            video_id="vid1",
+            language="en",
+            quality="high",
+            segment_count=25,
+            is_auto_generated=False
+        )
+
+        assert metrics.cache_hits == 1
+        assert metrics.total_segments == 25
+        assert metrics.human_caption_count == 1
+        assert metrics.language_distribution == {"en": 1}
+        assert metrics.quality_distribution == {"high": 1}
+
+    def test_total_processed(self):
+        """Test total_processed property"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", segment_count=10)
+        metrics.record_fetch_failure("v2")
+        metrics.record_cache_hit("v3", segment_count=5)
+
+        assert metrics.total_processed == 3
+
+    def test_success_rate(self):
+        """Test success_rate calculation"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1")
+        metrics.record_fetch_success("v2")
+        metrics.record_fetch_failure("v3")
+
+        assert metrics.success_rate == 66.7  # 2/3 = 66.7%
+
+    def test_success_rate_no_attempts(self):
+        """Test success_rate with no attempts"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        assert metrics.success_rate == 0.0
+
+    def test_cache_hit_rate(self):
+        """Test cache_hit_rate calculation"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1")
+        metrics.record_cache_hit("v2")
+        metrics.record_cache_hit("v3")
+        metrics.record_fetch_failure("v4")
+
+        # 2 cache hits out of 4 total = 50%
+        assert metrics.cache_hit_rate == 50.0
+
+    def test_cache_hit_rate_no_processed(self):
+        """Test cache_hit_rate with no processed videos"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        assert metrics.cache_hit_rate == 0.0
+
+    def test_summary(self):
+        """Test summary generation"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.fetch_attempts = 5
+        metrics.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+        metrics.record_fetch_success("v2", language="en", quality="medium", segment_count=30, is_auto_generated=True)
+        metrics.record_cache_hit("v3", language="es", quality="high", segment_count=40)
+        metrics.record_fetch_failure("v4")
+
+        summary = metrics.summary()
+
+        assert "Caption fetch: 5 attempts" in summary
+        assert "2 succeeded" in summary
+        assert "1 failed" in summary
+        assert "1 from cache" in summary
+        assert "Success rate:" in summary
+        assert "Cache hit rate:" in summary
+        assert "Total segments: 120" in summary
+        assert "Caption sources:" in summary
+        assert "Languages:" in summary
+        assert "Quality:" in summary
+
+    def test_to_dict(self):
+        """Test serialization to dictionary"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+
+        result = metrics.to_dict()
+
+        assert result['fetch_attempts'] == 0
+        assert result['successes'] == 1
+        assert result['failures'] == 0
+        assert result['cache_hits'] == 0
+        assert result['language_distribution'] == {"en": 1}
+        assert result['quality_distribution'] == {"high": 1}
+        assert result['total_segments'] == 50
+        assert result['auto_generated_count'] == 0
+        assert result['human_caption_count'] == 1
+
+    def test_from_dict(self):
+        """Test deserialization from dictionary"""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {
+            'fetch_attempts': 10,
+            'successes': 7,
+            'failures': 2,
+            'cache_hits': 3,
+            'language_distribution': {"en": 5, "es": 2},
+            'quality_distribution': {"high": 4, "medium": 3, "unavailable": 2},
+            'total_segments': 250,
+            'auto_generated_count': 3,
+            'human_caption_count': 4,
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert metrics.fetch_attempts == 10
+        assert metrics.successes == 7
+        assert metrics.failures == 2
+        assert metrics.cache_hits == 3
+        assert metrics.language_distribution == {"en": 5, "es": 2}
+        assert metrics.quality_distribution == {"high": 4, "medium": 3, "unavailable": 2}
+        assert metrics.total_segments == 250
+        assert metrics.auto_generated_count == 3
+        assert metrics.human_caption_count == 4
+
+    def test_from_dict_empty(self):
+        """Test from_dict with empty data"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics.from_dict({})
+
+        assert metrics.fetch_attempts == 0
+        assert metrics.successes == 0
+
+    def test_from_dict_none(self):
+        """Test from_dict with None"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics.from_dict(None)
+
+        assert metrics.fetch_attempts == 0
+        assert metrics.successes == 0
+
+    def test_merge(self):
+        """Test merging two CaptionMetrics instances"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics1 = CaptionMetrics()
+        metrics1.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+        metrics1.record_fetch_failure("v2")
+
+        metrics2 = CaptionMetrics()
+        metrics2.record_fetch_success("v3", language="es", quality="medium", segment_count=30)
+        metrics2.record_cache_hit("v4", language="en", quality="high", segment_count=20)
+
+        metrics1.merge(metrics2)
+
+        assert metrics1.fetch_attempts == 0  # fetch_attempts not incremented by record_ methods
+        assert metrics1.successes == 2
+        assert metrics1.failures == 1
+        assert metrics1.cache_hits == 1
+        assert metrics1.total_segments == 100
+        assert metrics1.language_distribution == {"en": 2, "es": 1}
+        assert metrics1.quality_distribution == {"high": 2, "medium": 1, "unavailable": 1}
+
+    def test_clear(self):
+        """Test clearing all metrics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+        metrics.record_fetch_failure("v2")
+
+        metrics.clear()
+
+        assert metrics.fetch_attempts == 0
+        assert metrics.successes == 0
+        assert metrics.failures == 0
+        assert metrics.cache_hits == 0
+        assert metrics.language_distribution == {}
+        assert metrics.quality_distribution == {}
+        assert metrics.total_segments == 0
+        assert metrics.auto_generated_count == 0
+        assert metrics.human_caption_count == 0
+
+    def test_roundtrip_serialization(self):
+        """Test that to_dict/from_dict preserves all data"""
+        from src.caption_fetcher import CaptionMetrics
+
+        original = CaptionMetrics()
+        original.record_fetch_attempt("v1")
+        original.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+        original.record_fetch_attempt("v2")
+        original.record_fetch_success("v2", language="es", quality="medium", segment_count=30, is_auto_generated=True)
+        original.record_fetch_attempt("v3")
+        original.record_fetch_failure("v3")
+        original.record_cache_hit("v4", language="fr", quality="low", segment_count=10)
+
+        # Serialize and deserialize
+        data = original.to_dict()
+        restored = CaptionMetrics.from_dict(data)
+
+        assert restored.fetch_attempts == original.fetch_attempts
+        assert restored.successes == original.successes
+        assert restored.failures == original.failures
+        assert restored.cache_hits == original.cache_hits
+        assert restored.total_segments == original.total_segments
+        assert restored.language_distribution == original.language_distribution
+        assert restored.quality_distribution == original.quality_distribution
+        assert restored.auto_generated_count == original.auto_generated_count
+        assert restored.human_caption_count == original.human_caption_count

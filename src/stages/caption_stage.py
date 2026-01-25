@@ -93,11 +93,15 @@ class CaptionStage(Stage):
                 CaptionUnavailableError,
                 CaptionFetchError,
                 CaptionResult,
+                CaptionMetrics,
                 determine_caption_quality,
             )
 
             self._fetcher = CaptionFetcher(config=config)
             self._fetcher._timeout = timeout
+
+            # Initialize metrics tracker (US-011)
+            metrics = CaptionMetrics()
 
             # Check for already-fetched captions in checkpoint
             existing_captions = self._load_existing_captions(checkpoint)
@@ -110,13 +114,26 @@ class CaptionStage(Stage):
             fail_count = 0
 
             for idx, video_id in enumerate(video_ids, 1):
-                # Skip if already fetched
+                # Skip if already fetched (but still track in metrics as cache hit)
                 if video_id in existing_captions:
                     caption_results[video_id] = existing_captions[video_id]
                     skip_count += 1
+                    # US-011: Record as cache hit in metrics
+                    cached_data = existing_captions[video_id]
+                    if not cached_data.get('unavailable') and not cached_data.get('error'):
+                        metrics.record_cache_hit(
+                            video_id=video_id,
+                            language=cached_data.get('language', 'en'),
+                            quality=cached_data.get('caption_quality', 'medium'),
+                            segment_count=cached_data.get('segment_count', 0),
+                            is_auto_generated=cached_data.get('is_auto_generated', False)
+                        )
                     continue
 
                 print(f"  [{idx}/{len(video_ids)}] Fetching captions for {video_id}...", end=' ')
+
+                # US-011: Record fetch attempt
+                metrics.record_fetch_attempt(video_id)
 
                 try:
                     result = self._fetcher.fetch_captions_auto_language(
@@ -140,6 +157,15 @@ class CaptionStage(Stage):
                     quality_label = 'human' if not result.is_auto_generated else 'auto'
                     print(f"✓ {len(result.segments)} segments ({result.language}, {quality_label}, quality={quality})")
 
+                    # US-011: Record success in metrics
+                    metrics.record_fetch_success(
+                        video_id=video_id,
+                        language=result.language,
+                        quality=quality,
+                        segment_count=len(result.segments),
+                        is_auto_generated=result.is_auto_generated
+                    )
+
                 except CaptionUnavailableError as e:
                     caption_results[video_id] = {
                         'video_id': video_id,
@@ -150,6 +176,9 @@ class CaptionStage(Stage):
                     fail_count += 1
                     print(f"✗ No captions available (quality=low)")
                     logger.debug(f"Captions unavailable for {video_id}: {e}")
+
+                    # US-011: Record failure in metrics
+                    metrics.record_fetch_failure(video_id=video_id, reason='unavailable')
 
                 except CaptionFetchError as e:
                     caption_results[video_id] = {
@@ -162,9 +191,12 @@ class CaptionStage(Stage):
                     print(f"✗ Fetch error (quality=low)")
                     logger.warning(f"Caption fetch error for {video_id}: {e}")
 
+                    # US-011: Record failure in metrics
+                    metrics.record_fetch_failure(video_id=video_id, reason='error')
+
                 # Periodic checkpoint save
                 if idx % 10 == 0:
-                    self._save_intermediate_checkpoint(checkpoint, caption_results)
+                    self._save_intermediate_checkpoint(checkpoint, caption_results, metrics)
 
             # Store caption data in state.text_metadata for matching
             self._populate_text_metadata(state, caption_results)
@@ -186,11 +218,16 @@ class CaptionStage(Stage):
             print(f"    - Quality distribution: {quality_distribution['high']} high, "
                   f"{quality_distribution['medium']} medium, {quality_distribution['low']} low")
 
+            # US-011: Display metrics summary
+            print(f"\n  + Caption metrics (US-011):")
+            for line in metrics.summary().split('\n'):
+                print(f"    {line}")
+
             if fail_count > 0 and getattr(caption_config, 'fallback_to_transcription', True):
                 print(f"    - {fail_count} videos will use Whisper transcription fallback")
                 warnings.append(f"{fail_count} videos require transcription fallback")
 
-            # Prepare checkpoint data (US-007: include quality stats)
+            # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
                 'caption_results': caption_results,
                 'success_count': success_count,
@@ -203,6 +240,8 @@ class CaptionStage(Stage):
                 'quality_distribution': quality_distribution,
                 'human_count': human_count,
                 'auto_count': auto_count,
+                # US-011: Full metrics for cross-session aggregation
+                'caption_metrics': metrics.to_dict(),
             }
 
             return StageResult.ok(checkpoint_data, warnings)
@@ -238,8 +277,21 @@ class CaptionStage(Stage):
             caption_results = data.get('caption_results', {})
             if caption_results:
                 self._populate_text_metadata(state, caption_results)
-                logger.info(f"Restored CAPTION: {len(caption_results)} videos, "
-                           f"{data.get('total_segments', 0)} segments")
+
+                # US-011: Log metrics if available
+                metrics_data = data.get('caption_metrics')
+                if metrics_data:
+                    from ..caption_fetcher import CaptionMetrics
+                    metrics = CaptionMetrics.from_dict(metrics_data)
+                    logger.info(
+                        f"Restored CAPTION: {len(caption_results)} videos, "
+                        f"{data.get('total_segments', 0)} segments, "
+                        f"metrics: {metrics.successes} succeeded, "
+                        f"{metrics.failures} failed, {metrics.cache_hits} cached"
+                    )
+                else:
+                    logger.info(f"Restored CAPTION: {len(caption_results)} videos, "
+                               f"{data.get('total_segments', 0)} segments")
                 return True
 
             return False
@@ -342,9 +394,16 @@ class CaptionStage(Stage):
     def _save_intermediate_checkpoint(
         self,
         checkpoint: 'CheckpointManager',
-        caption_results: Dict[str, Dict[str, Any]]
+        caption_results: Dict[str, Dict[str, Any]],
+        metrics: Any = None
     ):
-        """Save intermediate checkpoint during long fetch operations."""
+        """Save intermediate checkpoint during long fetch operations.
+
+        Args:
+            checkpoint: CheckpointManager instance.
+            caption_results: Caption results so far.
+            metrics: Optional CaptionMetrics instance for US-011.
+        """
         try:
             checkpoint_data = {
                 'caption_results': caption_results,
@@ -352,6 +411,9 @@ class CaptionStage(Stage):
                                     if not r.get('unavailable') and not r.get('error')),
                 'partial': True,
             }
+            # US-011: Include metrics in intermediate checkpoint
+            if metrics is not None:
+                checkpoint_data['caption_metrics'] = metrics.to_dict()
             checkpoint.save_intermediate(self.name, checkpoint_data)
         except Exception as e:
             logger.debug(f"Intermediate checkpoint save failed: {e}")

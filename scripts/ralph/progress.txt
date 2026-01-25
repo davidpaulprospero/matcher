@@ -2816,3 +2816,72 @@ Created tests/test_caption_normalizer.py with 60 tests across 12 test classes:
 - [x] Convert various timestamp formats (VTT, SRT, JSON3) to consistent float seconds
 - [x] Validate segment continuity: no negative durations, start < end
 - [x] Tests verify normalization with edge cases (60 tests covering all scenarios)
+
+## Iteration - [US-010] Add caption-first mode CLI integration
+- Added 3 CLI flags: --caption-first, --caption-language, --no-caption-fallback
+- src/cli/args.py: Added argparse definitions with help text
+- main.py: Added config override logic after config loading
+- tests/test_cli_args.py: Added 12 tests in TestParseArgumentsCaptionFirst class
+- CLAUDE.md: Updated CLI Flags table and Common Commands section
+- All 52 CLI argument tests pass
+- Test results: 205 caption tests pass (1 network-dependent test skipped)
+
+## Iteration - [US-011] Add caption fetch metrics and reporting
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Added CaptionMetrics dataclass for tracking caption fetch statistics:
+
+**CaptionMetrics dataclass (src/caption_fetcher.py):**
+- Core counts: fetch_attempts, successes, failures, cache_hits
+- Distribution tracking: language_distribution, quality_distribution
+- Additional metrics: total_segments, auto_generated_count, human_caption_count
+- Properties: total_processed, success_rate, cache_hit_rate
+- Methods: record_fetch_attempt(), record_fetch_success(), record_fetch_failure(), record_cache_hit()
+- Serialization: to_dict(), from_dict(), merge(), clear()
+- Reporting: summary() method generates human-readable report
+
+**CaptionStage integration (src/stages/caption_stage.py):**
+- Initialized CaptionMetrics at stage start
+- Records fetch attempts, successes, failures, and cache hits
+- Includes metrics in intermediate checkpoint saves
+- Displays metrics summary in pipeline output
+- Saves metrics to final checkpoint for cross-session aggregation
+- Restores and logs metrics on checkpoint restore
+
+**Tests (tests/test_caption_fetcher.py):**
+- 18 new tests in TestCaptionMetrics class:
+  - test_caption_metrics_defaults
+  - test_record_fetch_attempt
+  - test_record_fetch_success
+  - test_record_fetch_failure
+  - test_record_cache_hit
+  - test_total_processed
+  - test_success_rate
+  - test_success_rate_no_attempts
+  - test_cache_hit_rate
+  - test_cache_hit_rate_no_processed
+  - test_summary
+  - test_to_dict
+  - test_from_dict
+  - test_from_dict_empty
+  - test_from_dict_none
+  - test_merge
+  - test_clear
+  - test_roundtrip_serialization
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py src/stages/caption_stage.py` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+- New tests: 18 passed in TestCaptionMetrics
+- Caption stage tests: 27 passed
+
+### Acceptance Criteria Met
+- [x] New CaptionMetrics dataclass tracking: fetch_attempts, successes, failures, cache_hits
+- [x] Track by language: language_distribution dict with counts
+- [x] Track by quality: quality_distribution dict (human, auto, unavailable)
+- [x] Metrics displayed in pipeline summary report
+- [x] Metrics saved to checkpoint for cross-session aggregation
+- [x] Tests verify metrics collection and reporting (18 tests)
+
