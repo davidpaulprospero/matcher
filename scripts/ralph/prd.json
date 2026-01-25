@@ -1,197 +1,165 @@
 {
-  "branchName": "ralph/sprint-4",
-  "sprintNumber": 4,
+  "branchName": "ralph/sprint-5",
+  "sprintNumber": 5,
   "focusArea": "caption",
-  "projectContext": "Implement caption-first mode for the voiceover-matcher pipeline. Caption functionality is referenced in architecture (CLAUDE.md Rules 22, 26) but not yet implemented. Currently the pipeline downloads videos, then transcribes with Whisper. Caption-first mode will fetch YouTube captions BEFORE video download, enabling faster matching with lower bandwidth. Key gaps: no caption fetcher implementation, no CAPTION pipeline stage, no CaptionFirstConfig, no caption caching, no language handling, no caption quality indicators. Audio-first mode (src/downloader/audio_first.py) provides a good architectural pattern to follow.",
+  "projectContext": "Enhance caption-first mode with parallel processing, better resilience, and advanced features. Sprint 4 built the foundation (CaptionFetcher, CaptionStage, cache, retry logic, normalization, CLI, metrics). Sprint 5 focuses on performance (parallel fetch), reliability (live stream detection, corrupted caption handling), flexibility (language fallback chains, format preferences), and advanced workflows (batch operations, coverage metrics, playlist support).",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create YouTube caption fetcher module",
-      "description": "Implement a caption fetcher that uses yt-dlp to extract YouTube captions/subtitles. This is the foundation for caption-first mode, enabling transcript retrieval without downloading video content.",
+      "title": "Implement parallel caption fetching with ThreadPoolExecutor",
+      "description": "The CaptionStage currently fetches captions sequentially, which is slow for projects with 50+ videos. Implement parallel fetching using ThreadPoolExecutor to fetch 3-5 videos concurrently, following the pattern in src/transcription/parallel_processor.py.",
       "priority": 1,
       "acceptanceCriteria": [
-        "New src/caption_fetcher.py module with CaptionFetcher class",
-        "fetch_captions(video_id) method returns caption text with timing info",
-        "Support for multiple caption formats: VTT, SRT, JSON3 (auto-converted to common format)",
-        "Distinguish between auto-generated and human-uploaded captions via is_auto_generated flag",
-        "Handle unavailable captions gracefully with CaptionUnavailableError",
-        "Tests verify caption extraction for videos with and without captions"
+        "Add fetch_captions_batch() method to CaptionFetcher using ThreadPoolExecutor",
+        "Default max_workers=4 with config option caption_first.max_parallel_fetches",
+        "Thread-safe metrics tracking using Lock for CaptionMetrics",
+        "CaptionStage uses batch fetch instead of sequential loop",
+        "Progress callback support for real-time updates during batch fetch",
+        "Tests verify parallel execution completes faster than sequential for 10+ videos"
       ],
       "passes": true,
-      "notes": "Created src/caption_fetcher.py with CaptionFetcher class supporting VTT/SRT/JSON3 formats, is_auto_generated detection, CaptionUnavailableError/CaptionFetchError exceptions. 52 tests in tests/test_caption_fetcher.py."
+      "notes": "Already implemented in commit 04b862b. All 6 acceptance criteria verified: fetch_captions_batch() uses ThreadPoolExecutor, max_parallel_fetches=4 config option, CaptionMetrics uses Lock for thread-safety, CaptionStage calls batch fetch, progress_callback parameter supported, tests verify parallel faster than sequential."
     },
     {
       "id": "US-002",
-      "title": "Add CaptionFirstConfig to download configuration",
-      "description": "Create configuration dataclass for caption-first mode settings, following the pattern established by AudioFirstConfig. This enables users to enable/configure caption-first behavior.",
+      "title": "Add live stream detection to skip caption fetch",
+      "description": "Caption fetching can hang indefinitely on live streams. Add detection to identify live/premiering videos and skip caption fetch with a warning, preventing 30-second timeouts.",
       "priority": 2,
       "acceptanceCriteria": [
-        "New CaptionFirstConfig dataclass in src/config/sections/download.py",
-        "Fields: enabled (bool), fallback_to_transcription (bool), preferred_language (str), timeout (int)",
-        "Fields: prefer_human_captions (bool), cache_captions (bool)",
-        "Add caption_first field to DownloadConfig with __post_init__ conversion",
-        "Update config.yaml with caption_first section and documentation",
-        "Tests verify config loading and validation"
+        "New is_live_stream(video_id) method using yt-dlp --dump-json metadata",
+        "Check 'is_live' and 'was_live' fields from video metadata",
+        "CaptionStage skips live streams with logged warning",
+        "Metrics track skipped live streams separately from unavailable captions",
+        "Config option caption_first.skip_live_streams (default: true)",
+        "Tests verify live stream detection with mocked yt-dlp output"
       ],
       "passes": true,
-      "notes": "Created CaptionFirstConfig dataclass with all required fields. Added caption_first to DownloadConfig with __post_init__ dict conversion. Updated config.yaml with caption_first section and documentation. Exported in both __init__.py files. Added tests for defaults, custom values, and dict conversion. All 235 config tests pass."
+      "notes": "Already implemented in commit c0bbb26. All 6 acceptance criteria verified: is_live_stream() uses yt-dlp --dump-json (lines 1490-1576 in caption_fetcher.py), checks is_live/was_live fields (lines 1555-1564), CaptionStage skips with warning (lines 139-161 in caption_stage.py), CaptionMetrics.record_skipped_live_stream() tracks separately, config.download.caption_first.skip_live_streams=true (line 199 in download.py), 15 tests pass including 8 detection tests and 7 metrics tests."
     },
     {
       "id": "US-003",
-      "title": "Implement caption language detection and selection",
-      "description": "YouTube videos often have captions in multiple languages. Add logic to detect available languages and select the best match based on user preference.",
+      "title": "Implement configurable language fallback chain",
+      "description": "Currently falls back to English, then any available language. Add support for user-defined fallback chains for multilingual projects (e.g., es -> en -> pt).",
       "priority": 3,
       "acceptanceCriteria": [
-        "CaptionFetcher.list_available_languages(video_id) returns list of available caption languages",
-        "Language codes follow ISO 639-1 format (en, es, fr, etc.)",
-        "Auto-select matching language from config.transcription.language or caption_first.preferred_language",
-        "Fallback chain: preferred_language -> 'en' -> any available language",
-        "Log which language was selected and why",
-        "Tests verify language selection logic with various availability scenarios"
+        "New config option caption_first.fallback_languages: list of ISO 639-1 codes",
+        "select_best_language() uses fallback_languages before falling back to 'any'",
+        "Fallback chain stops at first available language",
+        "Log which language was selected from which position in chain",
+        "Empty or missing fallback_languages preserves current behavior (en -> any)",
+        "Tests verify fallback chain selection with various language availability"
       ],
       "passes": true,
-      "notes": "Implemented list_available_languages() using yt-dlp --list-subs, select_best_language() with fallback chain (preferred -> en -> any), _get_preferred_language_from_config() checking caption_first.preferred_language and transcription.language, fetch_captions_auto_language() for one-call convenience. Added AvailableLanguage dataclass. 34 new tests covering language listing, selection, config priority, and regional codes. All tests pass."
+      "notes": "Implemented in commit 29d9519. All 6 acceptance criteria verified: fallback_languages config option added (List[str], default=[]), select_best_language() checks fallback chain before English fallback, chain stops at first available, logging shows position (e.g., 'from fallback chain position 1'), empty list preserves original behavior, 17 new tests covering all scenarios."
     },
     {
       "id": "US-004",
-      "title": "Create CAPTION pipeline stage",
-      "description": "Add a new pipeline stage that fetches captions for all video candidates before the TRANSCRIBE stage. This enables early transcript availability without video download.",
+      "title": "Add caption coverage percentage metrics",
+      "description": "Track and report what percentage of video duration is covered by captions. Flag videos with low coverage (<50%) for potential transcription fallback.",
       "priority": 4,
       "acceptanceCriteria": [
-        "New src/stages/caption_stage.py with CaptionStage class following stage pattern",
-        "Stage runs AFTER VIDEO_METADATA and BEFORE TRANSCRIBE in pipeline order",
-        "Fetches captions for each video in video_candidates list",
-        "Stores caption data in state.text_metadata compatible with existing matching",
-        "Checkpoint integration: saves fetched captions, resumes from partial completion",
-        "Tests verify stage execution and checkpoint behavior"
+        "New calculate_coverage() method returns coverage ratio (0.0-1.0) from segments",
+        "CaptionResult gains coverage_ratio field calculated from segments",
+        "Config option caption_first.min_coverage_threshold (default: 0.5)",
+        "Warnings logged for videos below coverage threshold",
+        "CaptionMetrics tracks coverage distribution (high >80%, medium 50-80%, low <50%)",
+        "Tests verify coverage calculation with various segment patterns"
       ],
       "passes": true,
-      "notes": "Created src/stages/caption_stage.py with CaptionStage class. Stage runs AFTER REMIX and BEFORE TRANSCRIBE (between download and transcription). Extracts video IDs from downloaded_videos and downloaded_audio. Fetches captions using CaptionFetcher with config-driven language/timeout. Populates state.text_metadata with caption segments for matching. Checkpoint integration with partial resume support. Added CAPTION to STAGE_ORDER in checkpoint.py. 27 tests in tests/test_stage_caption.py all passing."
+      "notes": "Implemented in commit 19f3731. All 6 acceptance criteria verified: calculate_coverage() method added to CaptionResult (sums segment durations / video_duration), video_duration and coverage_ratio fields added, min_coverage_threshold=0.5 in CaptionFirstConfig and config.yaml, warnings logged for videos below threshold, CaptionMetrics tracks coverage_distribution and low_coverage_videos, 36 new tests added for coverage calculation and metrics."
     },
     {
       "id": "US-005",
-      "title": "Add caption cache for cross-project reuse",
-      "description": "Cache fetched captions by video ID to avoid re-fetching the same captions across projects. Follows the global cache pattern used for videos.",
+      "title": "Handle corrupted captions with partial recovery",
+      "description": "A single malformed caption segment can break parsing. Implement graceful degradation that skips bad segments and uses partial results, logging which segments were skipped.",
       "priority": 5,
       "acceptanceCriteria": [
-        "New CaptionCache class in src/caption_fetcher.py or src/cache/caption_cache.py",
-        "Cache key: video_id + language code (e.g., 'dQw4w9WgXcQ_en')",
-        "Cache stores: caption text, timing info, is_auto_generated, fetch_timestamp",
-        "Configurable cache location via caption_first.cache_dir (default: ~/.matcher_caption_cache/)",
-        "Cache validation: check caption age, invalidate if older than configurable days",
-        "Tests verify cache hits, misses, and invalidation"
+        "CaptionNormalizer.normalize() catches per-segment parsing errors",
+        "Malformed segments are logged and skipped, not fatal",
+        "CaptionResult gains skipped_segments_count field",
+        "Partial results accepted if >50% of segments parse successfully",
+        "New CaptionParseWarning for non-fatal parsing issues",
+        "Tests verify partial recovery with intentionally malformed input"
       ],
       "passes": true,
-      "notes": "Created CaptionCache class extending BaseCache. Cache key format: video_id_language. Added cache_dir and max_cache_age_days to CaptionFirstConfig. CachedCaption dataclass stores all required fields. TTL-based expiration. get_or_fetch() convenience method. 30 new tests in tests/test_caption_cache.py."
+      "notes": "Implemented. All 6 acceptance criteria verified: (1) normalize() now wraps per-segment validation in try/except (lines 2196-2218), (2) Malformed segments logged with warning and skipped, (3) CaptionResult.skipped_segments_count field added (line 212), (4) 50% threshold via min_success_ratio param - only counts actual parse errors, not intentional filters (lines 2223-2236), (5) CaptionParseWarning exception class added (lines 149-167), (6) 15 new tests added in TestPartialRecovery, TestCaptionParseWarning, TestCaptionResultSkippedCount classes. normalize() now returns tuple (segments, skipped_count). Tests updated to use tuple unpacking."
     },
     {
       "id": "US-006",
-      "title": "Implement caption-to-transcription fallback logic",
-      "description": "When caption-first mode is enabled but captions are unavailable, seamlessly fall back to Whisper transcription. Track which videos used captions vs transcription.",
+      "title": "Add caption format preference configuration",
+      "description": "Let users specify preferred caption formats (VTT, SRT, JSON3) to work around format-specific parsing issues or optimize for speed (JSON3 is pre-structured).",
       "priority": 6,
       "acceptanceCriteria": [
-        "TranscribeStage checks for existing caption data in state before transcribing",
-        "Skip transcription for videos with valid captions (caption_source='youtube' in metadata)",
-        "Track source in text_metadata: caption_source field ('youtube', 'whisper', 'manual')",
-        "New config option caption_first.fallback_to_transcription (default: true)",
-        "Log summary: 'X videos used captions, Y required transcription'",
-        "Tests verify fallback triggers correctly and metadata is set"
+        "New config option caption_first.preferred_formats: list (default: ['json3', 'vtt', 'srt'])",
+        "CaptionFetcher tries formats in preference order",
+        "JSON3 preferred by default since it's already structured",
+        "Fallback to next format on parse error (not just unavailable)",
+        "Log which format was ultimately used",
+        "Tests verify format selection and fallback behavior"
       ],
-      "passes": true,
-      "notes": "Added _get_videos_with_captions(), _filter_videos_with_captions(), _extract_video_id_from_path(), and _mark_transcription_source() methods to TranscribeStage. Logs caption vs transcription summary. Checkpoint includes caption_count, transcription_count, caption_source_stats. 16 new tests in test_stage_transcribe.py. All 55 transcribe tests passing."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Add caption quality indicators to matching",
-      "description": "Caption quality varies significantly between auto-generated and human-uploaded. Add quality metadata that the matching stage can use for confidence scoring.",
+      "title": "Validate caption timestamps against video duration",
+      "description": "Captions can be out of sync if timestamps exceed video duration. Add validation that compares caption duration to video duration and flags mismatches.",
       "priority": 7,
       "acceptanceCriteria": [
-        "text_metadata gains caption_quality field: 'high' (human), 'medium' (auto), 'low' (missing/fallback)",
-        "CaptionFetcher sets quality based on is_auto_generated and completeness",
-        "Matching confidence can be adjusted based on caption quality (optional config)",
-        "Report includes caption quality distribution: 'Caption sources: 50 human, 30 auto, 20 whisper'",
-        "Quality saved to checkpoint for analysis",
-        "Tests verify quality detection and confidence adjustment"
+        "New validate_timing(video_duration) method on CaptionResult",
+        "Compare last segment end_time to video duration",
+        "Flag if caption duration > video_duration * 1.1 (10% tolerance)",
+        "Flag if caption duration < video_duration * 0.5 (coverage too low)",
+        "Validation result stored in CaptionResult.timing_validated field",
+        "Tests verify timing validation with edge cases"
       ],
-      "passes": true,
-      "notes": "Added determine_caption_quality() function and caption_quality property to CaptionResult. Quality determined by is_auto_generated flag and segment completeness (density). CaptionStage populates text_metadata with caption_quality field. Added caption_quality_adjustment_enabled, caption_quality_high_boost (+5%), caption_quality_low_penalty (-10%) to MatchingConfig. apply_caption_quality_adjustment() in scoring.py integrated into TieredMatcher at 4 locations. CaptionStage reports quality distribution in summary and checkpoint. 21 new tests: 12 in test_caption_fetcher.py (determine_caption_quality), 9 in test_scoring.py (apply_caption_quality_adjustment). All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add caption fetch retry and error handling",
-      "description": "Caption fetching can fail due to network issues or YouTube restrictions. Add robust retry logic with exponential backoff and meaningful error messages.",
+      "title": "Implement caption availability pre-check",
+      "description": "Before fetching full captions, quickly check if captions are available at all using yt-dlp --list-subs. This avoids wasted network calls for videos without captions.",
       "priority": 8,
       "acceptanceCriteria": [
-        "CaptionFetcher retries on network errors with exponential backoff",
-        "New config options: caption_first.max_retries (default: 3), caption_first.retry_delay (default: 2.0)",
-        "Distinguish error types: CaptionUnavailableError (no captions exist) vs CaptionFetchError (temporary failure)",
-        "Log detailed error context: video_id, error type, retry attempt",
-        "After max_retries, mark video for transcription fallback",
-        "Tests verify retry behavior and error classification"
+        "New has_captions(video_id) method using list_available_languages()",
+        "Returns boolean without downloading actual caption content",
+        "CaptionStage can pre-filter candidates to those with captions",
+        "Config option caption_first.pre_check_availability (default: true)",
+        "Metrics track pre-check results (available/unavailable counts)",
+        "Tests verify pre-check correctly identifies caption availability"
       ],
-      "passes": true,
-      "notes": "Added max_retries and retry_delay to CaptionFirstConfig. Implemented _with_retry() with exponential backoff (delay * 2^attempt). CaptionUnavailableError NOT retried (permanent), CaptionFetchError IS retried (temporary). Added fetch_captions_with_retry(), fetch_captions_auto_language_with_retry(), list_available_languages_with_retry(), get_or_fetch_with_retry() on CaptionCache. Detailed logging includes video_id, error_type, reason, attempt count. 19 new tests: 14 in TestCaptionFetcherRetry, 5 in TestCaptionCacheRetry. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Implement caption timestamp normalization",
-      "description": "YouTube captions can have irregular timing (overlapping, gaps, inconsistent formats). Normalize timestamps to match the format expected by the matching stage.",
+      "title": "Add streaming progress output for caption fetch",
+      "description": "Currently only shows summary after all fetches complete. Add real-time streaming output showing progress per video: language, quality, segment count.",
       "priority": 9,
       "acceptanceCriteria": [
-        "CaptionSegment dataclass with start_time, end_time, text fields (matches TranscriptSegment)",
-        "Normalize overlapping segments: merge or split based on configurable strategy",
-        "Handle gap segments: insert empty placeholders or extend adjacent segments",
-        "Convert various timestamp formats (VTT, SRT, JSON3) to consistent float seconds",
-        "Validate segment continuity: no negative durations, start < end",
-        "Tests verify normalization with edge cases (overlaps, gaps, malformed timestamps)"
+        "Progress callback parameter for fetch_captions_batch()",
+        "Callback receives: video_id, status ('fetching'/'success'/'failed'), details dict",
+        "CaptionStage uses callback to print real-time progress",
+        "Format: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)",
+        "Support both TTY (overwrite line) and non-TTY (newline per video) output",
+        "Tests verify callback is invoked with correct parameters"
       ],
-      "passes": true,
-      "notes": "Created CaptionNormalizer class with NormalizationConfig dataclass. Overlap strategies: 'merge' (combine overlapping segments), 'split' (divide at midpoint), 'truncate' (trim earlier segment). Gap strategies: 'extend' (expand previous segment), 'placeholder' (insert empty segments), 'ignore'. Validation fixes negative timestamps, end <= start, short durations, empty text. Static methods convert_timestamp_to_seconds() and seconds_to_vtt_timestamp/seconds_to_srt_timestamp. validate_continuity() method for diagnostics. 60 new tests in tests/test_caption_normalizer.py covering all strategies and edge cases. All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add caption-first mode CLI integration",
-      "description": "Add CLI flags to enable caption-first mode and control caption behavior, following existing CLI patterns.",
+      "title": "Create caption health check script for test fixtures",
+      "description": "Integration tests depend on specific YouTube videos having captions. Create a health check script that validates fixture video IDs still have expected caption states.",
       "priority": 10,
       "acceptanceCriteria": [
-        "New CLI flag --caption-first enables caption-first mode for the run",
-        "New CLI flag --caption-language <code> overrides preferred language",
-        "New CLI flag --no-caption-fallback disables transcription fallback",
-        "Flags properly override config.yaml settings",
-        "Help text documents caption-first mode and its benefits",
-        "Tests verify CLI flags are parsed and applied correctly"
-      ],
-      "passes": true,
-      "notes": "Added --caption-first, --caption-language, --no-caption-fallback to src/cli/args.py. Flags override config.download.caption_first settings in main.py. Help text describes benefits. 12 new tests in TestParseArgumentsCaptionFirst class. Updated CLAUDE.md CLI reference."
-    },
-    {
-      "id": "US-011",
-      "title": "Add caption fetch metrics and reporting",
-      "description": "Track caption fetch statistics for pipeline reporting: success rate, cache hits, language distribution, quality breakdown.",
-      "priority": 11,
-      "acceptanceCriteria": [
-        "New CaptionMetrics dataclass tracking: fetch_attempts, successes, failures, cache_hits",
-        "Track by language: language_distribution dict with counts",
-        "Track by quality: quality_distribution dict (human, auto, unavailable)",
-        "Metrics displayed in pipeline summary report",
-        "Metrics saved to checkpoint for cross-session aggregation",
-        "Tests verify metrics collection and reporting"
-      ],
-      "passes": true,
-      "notes": "Added CaptionMetrics dataclass with record_fetch_attempt(), record_fetch_success(), record_fetch_failure(), record_cache_hit() methods. Integrated into CaptionStage for pipeline reporting and checkpoint persistence. 18 new tests in TestCaptionMetrics class."
-    },
-    {
-      "id": "US-012",
-      "title": "Create caption integration tests with real YouTube videos",
-      "description": "Add integration tests that verify caption functionality against real YouTube videos with known caption availability.",
-      "priority": 12,
-      "acceptanceCriteria": [
-        "Test fixtures include video IDs with known caption states (has human, has auto, no captions)",
-        "Integration test verifies end-to-end caption fetch for video with human captions",
-        "Integration test verifies auto-caption detection and quality marking",
-        "Integration test verifies graceful handling of no-caption video",
-        "Tests marked with @pytest.mark.requires_network for CI skipping",
-        "Tests document expected video states in fixtures for maintenance"
+        "New scripts/check_caption_fixtures.py script",
+        "Reads VIDEO_FIXTURES from tests/test_caption_integration.py",
+        "Checks each fixture video: exists, has captions, matches expected state",
+        "Reports mismatches with suggested updates",
+        "Exit code 0 if all fixtures valid, 1 if any need attention",
+        "Can be run manually or in CI (optional GitHub Action workflow)"
       ],
       "passes": false,
       "notes": ""
