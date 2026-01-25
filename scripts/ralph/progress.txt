@@ -432,3 +432,51 @@ PRD.json was not updated after iterations 10-11 completed US-009 and US-010. Com
 ### Files Modified
 - scripts/ralph/prd.json - Updated US-009, US-010 to passes: true with notes
 
+## Iteration 13 - US-011: Add type hints and docstrings to GlobalClipTracker class
+- Focus: quality
+- Status: COMPLETE
+
+### Analysis
+Return type hints were already present from US-005. The task focused on adding comprehensive docstrings.
+
+### Changes Made
+Added comprehensive docstrings to GlobalClipTracker class and all 5 methods:
+
+1. **Class docstring:**
+   - Explained "Key Concepts": Clip ID, Audio-First Mode, Used Clips Set
+   - Added "Why This Matters" section explaining the duplicate prevention benefit
+   - Documented both attributes (used_clips, clip_track_map)
+
+2. **`get_clip_id` docstring:**
+   - Detailed both file patterns: audio-first segments and regular videos
+   - Included concrete example: "dQw4w9WgXcQ_0045.mp4" → clip ID calculation
+   - Explained "Why Original Coordinates Matter" with collision example
+   - Documented the regex pattern for YouTube video IDs
+
+3. **`is_used` docstring:**
+   - Added "Typical Usage in StrategyMatcher" code example
+   - Documented O(1) performance characteristics
+   - Clarified that text content is ignored
+
+4. **`record_usage` docstring:**
+   - Documented the 3-step recording process
+   - Explained location format "{track}@S{segment_idx:03d}" with example
+   - Listed all track names (V1-V8)
+   - Added idempotency notes
+
+5. **`get_used_clips` docstring:**
+   - Explained use case in StrategyMatcher
+   - Documented copy semantics and why copy is returned
+
+6. **`get_stats` docstring:**
+   - Added example output JSON
+   - Explained interpretation of each field
+   - Documented tracks_used extraction logic
+
+### Verification
+- Syntax check: `python -m py_compile src/matching/tracking.py` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/matching/tracking.py - Comprehensive docstrings for GlobalClipTracker class
+
