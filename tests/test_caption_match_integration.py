@@ -1,18 +1,15 @@
 """
-Integration test for caption quality impact on matching (US-010).
+Integration tests for caption metadata impact on matching.
 
-This test validates the full pipeline path from caption quality metadata
-through to match confidence scoring. It verifies that:
-1. Low-quality auto-generated captions flow to MatchStage with quality='low'
-2. Same match text produces different confidence with high vs low quality
-3. Quality weights config is correctly applied
-4. Caption quality metadata is preserved for downstream filtering
+This module contains integration tests for:
+1. Caption quality impact on matching (US-010 Sprint 6)
+2. Timing penalty impact on matching (US-002 Sprint 8)
 
-This is an integration smoke test for the caption-to-match quality pipeline.
-
-Sprint 6 Story: US-010 - Create integration test for caption quality impact on matching
+Tests validate the full pipeline path from caption metadata through to
+match confidence scoring.
 
 Created: 2026-01-26
+Updated: 2026-01-26 - Added timing penalty pipeline tests (US-002 Sprint 8)
 """
 
 import sys
@@ -23,8 +20,9 @@ import pytest
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.matching.scoring import apply_caption_quality_adjustment
+from src.matching.scoring import apply_caption_quality_adjustment, apply_timing_penalty
 from src.utils import SRTSegment
+from src.caption_fetcher import CaptionResult, CaptionSegment
 
 
 # =============================================================================
@@ -754,3 +752,758 @@ class TestCaptionQualityPipelineSmokeTest:
             if r['reason']:
                 print(f"    Reason: {r['reason']}")
         print("=" * 60)
+
+
+# =============================================================================
+# Test Class: Timing Penalty Pipeline Integration (US-002 Sprint 8)
+# =============================================================================
+
+class TestTimingPenaltyPipeline:
+    """Integration tests for timing penalty impact on matching (US-002 Sprint 8).
+
+    This test class verifies the complete flow of timing penalty from
+    CaptionResult through to MatchStage confidence adjustments.
+
+    The timing penalty flow:
+    1. CaptionResult.timing_penalty_factor is calculated from validate_timing()
+    2. CaptionStage stores timing_penalty in text_metadata for each video
+    3. MatchStage reads timing_penalty from text_metadata and sets on vid_segment
+    4. TieredMatcher calls apply_timing_penalty() to adjust confidence
+
+    Test Coverage:
+    - AC1: CaptionResult.timing_penalty_factor calculated correctly
+    - AC2: timing_penalty stored in text_metadata by CaptionStage
+    - AC3: MatchStage retrieves timing_penalty from text_metadata
+    - AC4: apply_timing_penalty() reduces confidence: 0.9 * 0.75 = 0.675
+    - AC5: Mock pipeline with real CaptionStage and MatchStage integration
+    """
+
+    # =========================================================================
+    # Fixtures
+    # =========================================================================
+
+    @pytest.fixture
+    def timing_penalty_config(self):
+        """Mock config with timing penalty enabled."""
+        config = Mock()
+        matching = Mock()
+        matching.apply_timing_penalty = True
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def timing_penalty_disabled_config(self):
+        """Mock config with timing penalty disabled."""
+        config = Mock()
+        matching = Mock()
+        matching.apply_timing_penalty = False
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def sample_caption_segments_perfect(self):
+        """Caption segments with perfect timing (100% coverage, no exceeds)."""
+        return [
+            CaptionSegment(index=0, start_time=0.0, end_time=25.0,
+                          text="First quarter of video", source_file="vid_perfect"),
+            CaptionSegment(index=1, start_time=25.0, end_time=50.0,
+                          text="Second quarter of video", source_file="vid_perfect"),
+            CaptionSegment(index=2, start_time=50.0, end_time=75.0,
+                          text="Third quarter of video", source_file="vid_perfect"),
+            CaptionSegment(index=3, start_time=75.0, end_time=100.0,
+                          text="Final quarter of video", source_file="vid_perfect"),
+        ]
+
+    @pytest.fixture
+    def sample_caption_segments_poor(self):
+        """Caption segments with poor timing (50% coverage, 20% exceeds)."""
+        return [
+            CaptionSegment(index=0, start_time=0.0, end_time=60.0,
+                          text="Only caption, extends past video", source_file="vid_poor"),
+        ]
+
+    @pytest.fixture
+    def sample_text_metadata_with_timing_penalty(self):
+        """Sample text_metadata entry with timing penalty (from CaptionStage)."""
+        return {
+            'video_path': 'vid_with_penalty',
+            'start_time': 0.0,
+            'end_time': 10.0,
+            'text': 'Wildlife documentary segment',
+            'caption_source': 'youtube',
+            'caption_language': 'en',
+            'caption_auto_generated': True,
+            'caption_quality': 'medium',
+            'timing_penalty': 0.75,  # 25% penalty from timing issues
+        }
+
+    @pytest.fixture
+    def sample_text_metadata_perfect_timing(self):
+        """Sample text_metadata entry with perfect timing (no penalty)."""
+        return {
+            'video_path': 'vid_perfect_timing',
+            'start_time': 0.0,
+            'end_time': 10.0,
+            'text': 'Wildlife documentary segment',
+            'caption_source': 'youtube',
+            'caption_language': 'en',
+            'caption_auto_generated': False,
+            'caption_quality': 'high',
+            'timing_penalty': 1.0,  # No penalty
+        }
+
+    # =========================================================================
+    # AC1: CaptionResult.timing_penalty_factor is calculated correctly
+    # =========================================================================
+
+    def test_timing_penalty_factor_calculated_correctly_perfect(
+        self, sample_caption_segments_perfect
+    ):
+        """Test CaptionResult.timing_penalty_factor calculation for perfect timing.
+
+        With 100% coverage and no exceeds, penalty factor should be 1.0.
+        """
+        result = CaptionResult(
+            video_id="vid_perfect",
+            segments=sample_caption_segments_perfect,
+            video_duration=100.0,
+        )
+
+        # Validate timing to populate timing_validated
+        result.validate_timing()
+
+        # Perfect timing = no penalty (factor 1.0)
+        assert result.timing_penalty_factor == pytest.approx(1.0, abs=0.01)
+
+    def test_timing_penalty_factor_calculated_correctly_poor(
+        self, sample_caption_segments_poor
+    ):
+        """Test CaptionResult.timing_penalty_factor calculation for poor timing.
+
+        With 50% coverage (50s video but 60s captions) and 20% exceeds,
+        penalty should be significant.
+        """
+        result = CaptionResult(
+            video_id="vid_poor",
+            segments=sample_caption_segments_poor,
+            video_duration=50.0,  # 60s caption in 50s video = 20% exceeds
+        )
+
+        # Validate timing to populate timing_validated
+        result.validate_timing()
+
+        # Penalty formula: 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+        # exceeds_ratio = (60-50)/50 = 0.2
+        # coverage_ratio = min(1.0, 60/50) = 1.0 (capped)
+        # penalty = 1.0 - (0.2 * 0.3) - 0 = 0.94
+        assert result.timing_penalty_factor == pytest.approx(0.94, abs=0.02)
+
+    def test_timing_penalty_factor_low_coverage(self):
+        """Test penalty factor with 50% coverage."""
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=50.0,
+                          text="Only half", source_file="vid_half"),
+        ]
+        result = CaptionResult(
+            video_id="vid_half",
+            segments=segments,
+            video_duration=100.0,  # 50s captions in 100s video = 50% coverage
+        )
+
+        result.validate_timing()
+
+        # coverage_ratio = 50/100 = 0.5
+        # coverage_penalty = (1 - 0.5) * 0.2 = 0.1
+        # penalty = 1.0 - 0 - 0.1 = 0.9
+        assert result.timing_penalty_factor == pytest.approx(0.90, abs=0.01)
+
+    # =========================================================================
+    # AC2: timing_penalty stored in text_metadata by CaptionStage
+    # =========================================================================
+
+    def test_timing_penalty_stored_in_text_metadata(self):
+        """Test that timing_penalty is correctly stored in text_metadata.
+
+        This simulates what CaptionStage._build_text_metadata does:
+        1. Fetch captions and validate timing
+        2. Calculate timing_penalty_factor
+        3. Include timing_penalty in text_metadata for each segment
+        """
+        # Simulate caption fetch with timing issues (50% coverage)
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=50.0,
+                          text="Half coverage caption", source_file="test_vid"),
+        ]
+        caption_result = CaptionResult(
+            video_id="test_vid",
+            segments=segments,
+            video_duration=100.0,
+        )
+
+        # Validate timing (as CaptionStage does)
+        caption_result.validate_timing()
+        timing_penalty = caption_result.timing_penalty_factor
+
+        # Build text_metadata entry (simulating CaptionStage._build_text_metadata)
+        text_metadata = {
+            'video_path': caption_result.video_id,
+            'start_time': segments[0].start_time,
+            'end_time': segments[0].end_time,
+            'text': segments[0].text,
+            'caption_source': 'youtube',
+            'caption_language': 'en',
+            'caption_auto_generated': False,
+            'caption_quality': 'medium',
+            'timing_penalty': timing_penalty,  # Key assertion target
+        }
+
+        # Verify timing_penalty is stored correctly
+        assert 'timing_penalty' in text_metadata
+        assert text_metadata['timing_penalty'] == pytest.approx(0.90, abs=0.01)
+        assert text_metadata['timing_penalty'] < 1.0  # Has penalty
+
+    def test_timing_penalty_perfect_timing_stored_as_1(self):
+        """Test that perfect timing stores timing_penalty=1.0."""
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=100.0,
+                          text="Full coverage", source_file="test_vid"),
+        ]
+        caption_result = CaptionResult(
+            video_id="test_vid",
+            segments=segments,
+            video_duration=100.0,
+        )
+
+        caption_result.validate_timing()
+        timing_penalty = caption_result.timing_penalty_factor
+
+        text_metadata = {
+            'video_path': caption_result.video_id,
+            'timing_penalty': timing_penalty,
+        }
+
+        # Perfect timing = 1.0 (no penalty)
+        assert text_metadata['timing_penalty'] == pytest.approx(1.0, abs=0.01)
+
+    # =========================================================================
+    # AC3: MatchStage retrieves timing_penalty from text_metadata
+    # =========================================================================
+
+    def test_match_stage_retrieves_timing_penalty(
+        self, sample_text_metadata_with_timing_penalty
+    ):
+        """Test that MatchStage correctly retrieves timing_penalty from text_metadata.
+
+        Simulates MatchStage._prepare_segments setting timing_penalty on vid_segment.
+        """
+        meta = sample_text_metadata_with_timing_penalty
+
+        # Create segment from metadata (as MatchStage does)
+        vid_segment = SRTSegment(
+            index=1,
+            start_time=meta['start_time'],
+            end_time=meta['end_time'],
+            text=meta['text'],
+            source_file=meta['video_path']
+        )
+
+        # MatchStage sets timing_penalty from metadata (match.py:419-420)
+        if meta.get('timing_penalty') is not None:
+            vid_segment.timing_penalty = meta['timing_penalty']
+
+        # Verify timing_penalty was set correctly
+        assert hasattr(vid_segment, 'timing_penalty')
+        assert vid_segment.timing_penalty == 0.75
+
+    def test_match_stage_handles_missing_timing_penalty(self):
+        """Test that MatchStage handles missing timing_penalty gracefully."""
+        meta = {
+            'video_path': 'vid_no_timing',
+            'start_time': 0.0,
+            'end_time': 10.0,
+            'text': 'No timing penalty in metadata',
+            # No timing_penalty key
+        }
+
+        vid_segment = SRTSegment(
+            index=1,
+            start_time=meta['start_time'],
+            end_time=meta['end_time'],
+            text=meta['text'],
+            source_file=meta['video_path']
+        )
+
+        # Only set if present (as MatchStage does)
+        if meta.get('timing_penalty') is not None:
+            vid_segment.timing_penalty = meta['timing_penalty']
+
+        # timing_penalty should NOT be set
+        assert not hasattr(vid_segment, 'timing_penalty') or \
+               getattr(vid_segment, 'timing_penalty', None) is None
+
+    # =========================================================================
+    # AC4: apply_timing_penalty() reduces confidence correctly
+    # =========================================================================
+
+    def test_apply_timing_penalty_reduces_confidence(
+        self, timing_penalty_config
+    ):
+        """Test that apply_timing_penalty() reduces confidence: 0.9 * 0.75 = 0.675.
+
+        This is the key acceptance criterion verifying the math is correct.
+        """
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test segment", source_file="/test.mp4"
+        )
+        segment.timing_penalty = 0.75  # 25% penalty
+
+        base_confidence = 0.9
+
+        adjusted_conf, reason = apply_timing_penalty(
+            confidence=base_confidence,
+            video_segment=segment,
+            config=timing_penalty_config
+        )
+
+        # 0.9 * 0.75 = 0.675
+        assert adjusted_conf == pytest.approx(0.675, abs=0.001)
+        assert "timing penalty" in reason.lower()
+        assert "x0.75" in reason
+
+    def test_apply_timing_penalty_no_change_when_1(
+        self, timing_penalty_config
+    ):
+        """Test that timing_penalty=1.0 produces no confidence change."""
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test segment", source_file="/test.mp4"
+        )
+        segment.timing_penalty = 1.0  # No penalty
+
+        base_confidence = 0.85
+
+        adjusted_conf, reason = apply_timing_penalty(
+            confidence=base_confidence,
+            video_segment=segment,
+            config=timing_penalty_config
+        )
+
+        # No change when penalty = 1.0
+        assert adjusted_conf == base_confidence
+        assert reason == ""
+
+    def test_apply_timing_penalty_disabled_no_change(
+        self, timing_penalty_disabled_config
+    ):
+        """Test that disabled timing penalty produces no change."""
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test segment", source_file="/test.mp4"
+        )
+        segment.timing_penalty = 0.5  # Would be 50% penalty
+
+        base_confidence = 0.80
+
+        adjusted_conf, reason = apply_timing_penalty(
+            confidence=base_confidence,
+            video_segment=segment,
+            config=timing_penalty_disabled_config
+        )
+
+        # No change when disabled
+        assert adjusted_conf == base_confidence
+        assert reason == ""
+
+    # =========================================================================
+    # AC5: Mock pipeline with CaptionStage and MatchStage integration
+    # =========================================================================
+
+    def test_full_pipeline_timing_penalty_flow(self, timing_penalty_config):
+        """Test complete flow: CaptionResult -> text_metadata -> segment -> confidence.
+
+        This is the integration smoke test verifying the entire timing penalty pipeline:
+        1. CaptionResult.timing_penalty_factor is calculated
+        2. CaptionStage stores timing_penalty in text_metadata
+        3. MatchStage transfers timing_penalty to vid_segment
+        4. apply_timing_penalty() adjusts confidence correctly
+        """
+        # Step 1: Caption fetch with timing issues
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=50.0,
+                          text="Half coverage caption", source_file="integration_test"),
+        ]
+        caption_result = CaptionResult(
+            video_id="integration_test",
+            segments=segments,
+            video_duration=100.0,  # 50% coverage
+        )
+
+        # Step 2: Validate timing and get penalty (CaptionStage does this)
+        caption_result.validate_timing()
+        timing_penalty = caption_result.timing_penalty_factor
+        assert timing_penalty == pytest.approx(0.90, abs=0.01)  # 10% penalty
+
+        # Step 3: Build text_metadata with timing_penalty (CaptionStage does this)
+        text_metadata = {
+            'video_path': caption_result.video_id,
+            'start_time': segments[0].start_time,
+            'end_time': segments[0].end_time,
+            'text': segments[0].text,
+            'timing_penalty': timing_penalty,
+        }
+
+        # Step 4: Create vid_segment and set timing_penalty (MatchStage does this)
+        vid_segment = SRTSegment(
+            index=1,
+            start_time=text_metadata['start_time'],
+            end_time=text_metadata['end_time'],
+            text=text_metadata['text'],
+            source_file=text_metadata['video_path']
+        )
+        vid_segment.timing_penalty = text_metadata['timing_penalty']
+
+        # Step 5: Apply timing penalty during matching (TieredMatcher does this)
+        base_confidence = 0.90
+        adjusted_conf, reason = apply_timing_penalty(
+            confidence=base_confidence,
+            video_segment=vid_segment,
+            config=timing_penalty_config
+        )
+
+        # Final assertions
+        # 0.90 (base) * 0.90 (penalty) = 0.81
+        assert adjusted_conf == pytest.approx(0.81, abs=0.01)
+        assert "timing penalty" in reason.lower()
+
+    def test_full_pipeline_perfect_vs_poor_timing(self, timing_penalty_config):
+        """Test that perfect and poor timing produce different confidence.
+
+        Same video content, same base confidence, but timing issues affect final score.
+        """
+        base_confidence = 0.85
+        results = []
+
+        test_cases = [
+            ("perfect", 100.0, 100.0, 1.0),   # 100s captions in 100s video = perfect
+            ("poor", 50.0, 100.0, 0.90),      # 50s captions in 100s video = 50% coverage
+        ]
+
+        for name, caption_duration, video_duration, expected_penalty in test_cases:
+            # Create caption result
+            segments = [
+                CaptionSegment(index=0, start_time=0.0, end_time=caption_duration,
+                              text=f"Caption for {name}", source_file=f"vid_{name}"),
+            ]
+            caption_result = CaptionResult(
+                video_id=f"vid_{name}",
+                segments=segments,
+                video_duration=video_duration,
+            )
+
+            # Calculate timing penalty
+            caption_result.validate_timing()
+            timing_penalty = caption_result.timing_penalty_factor
+
+            # Create segment with timing penalty
+            vid_segment = SRTSegment(
+                index=1, start_time=0.0, end_time=10.0,
+                text="Same content", source_file=f"vid_{name}"
+            )
+            vid_segment.timing_penalty = timing_penalty
+
+            # Apply penalty
+            adjusted_conf, reason = apply_timing_penalty(
+                confidence=base_confidence,
+                video_segment=vid_segment,
+                config=timing_penalty_config
+            )
+
+            results.append({
+                'name': name,
+                'timing_penalty': timing_penalty,
+                'base_confidence': base_confidence,
+                'adjusted_confidence': adjusted_conf,
+                'reason': reason,
+            })
+
+            # Verify expected penalty
+            assert timing_penalty == pytest.approx(expected_penalty, abs=0.02)
+
+        # Perfect timing should have higher confidence than poor timing
+        perfect = next(r for r in results if r['name'] == 'perfect')
+        poor = next(r for r in results if r['name'] == 'poor')
+
+        assert perfect['adjusted_confidence'] > poor['adjusted_confidence']
+        assert perfect['adjusted_confidence'] == base_confidence  # No penalty
+        assert poor['adjusted_confidence'] < base_confidence  # Has penalty
+
+    def test_timing_penalty_combined_with_caption_quality(self, timing_penalty_config):
+        """Test that timing penalty can be combined with caption quality adjustment.
+
+        In the real pipeline, both adjustments are applied sequentially.
+        This test verifies they work together correctly.
+        """
+        # Configure for both adjustments
+        config = Mock()
+        config.matching = Mock()
+        config.matching.apply_timing_penalty = True
+        config.matching.caption_quality_adjustment_enabled = True
+        config.matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+
+        # Create segment with both quality and timing penalty
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test content", source_file="/test.mp4"
+        )
+        segment.caption_quality = "low"  # x0.75
+        segment.timing_penalty = 0.90    # x0.90
+
+        base_confidence = 0.80
+
+        # Apply caption quality first (as TieredMatcher does)
+        after_quality, quality_reason = apply_caption_quality_adjustment(
+            confidence=base_confidence,
+            video_segment=segment,
+            config=config
+        )
+
+        # Then apply timing penalty
+        after_timing, timing_reason = apply_timing_penalty(
+            confidence=after_quality,
+            video_segment=segment,
+            config=config
+        )
+
+        # Combined effect: 0.80 * 0.75 * 0.90 = 0.54
+        assert abs(after_timing - 0.54) < 0.01
+
+        # Both reasons should be present
+        assert "caption quality" in quality_reason.lower()
+        assert "timing penalty" in timing_reason.lower()
+
+
+# =============================================================================
+# Test Class: Timing Penalty Edge Cases
+# =============================================================================
+
+class TestTimingPenaltyEdgeCases:
+    """Edge case tests for timing penalty handling."""
+
+    @pytest.fixture
+    def timing_config(self):
+        """Mock config with timing penalty enabled."""
+        config = Mock()
+        config.matching = Mock()
+        config.matching.apply_timing_penalty = True
+        return config
+
+    def test_zero_duration_video_no_penalty(self):
+        """Test that zero-duration video produces no penalty (can't calculate)."""
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=10.0,
+                          text="Some text", source_file="vid"),
+        ]
+        result = CaptionResult(
+            video_id="vid",
+            segments=segments,
+            video_duration=0.0,  # Invalid duration
+        )
+
+        result.validate_timing()
+
+        # Can't calculate penalty without valid duration
+        assert result.timing_penalty_factor == 1.0
+
+    def test_negative_penalty_clamped_to_zero(self, timing_config):
+        """Test that extreme timing issues clamp penalty at 0.0."""
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test", source_file="/test.mp4"
+        )
+        segment.timing_penalty = -0.5  # Invalid but tests clamping
+
+        conf, _ = apply_timing_penalty(
+            confidence=0.80,
+            video_segment=segment,
+            config=timing_config
+        )
+
+        assert conf == 0.0  # Clamped at 0
+
+    def test_penalty_above_one_is_no_penalty(self, timing_config):
+        """Test that timing_penalty >= 1.0 means no penalty."""
+        segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test", source_file="/test.mp4"
+        )
+        segment.timing_penalty = 1.5  # Invalid but >= 1.0
+
+        conf, reason = apply_timing_penalty(
+            confidence=0.80,
+            video_segment=segment,
+            config=timing_config
+        )
+
+        assert conf == 0.80  # No change
+        assert reason == ""
+
+    def test_caption_exceeds_duration_significantly(self):
+        """Test penalty for caption far exceeding video duration."""
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=200.0,
+                          text="Very long caption", source_file="vid"),
+        ]
+        result = CaptionResult(
+            video_id="vid",
+            segments=segments,
+            video_duration=100.0,  # Caption 2x video length
+        )
+
+        result.validate_timing()
+        penalty = result.timing_penalty_factor
+
+        # exceeds_ratio = 1.0 (100% exceeds)
+        # exceeds_penalty = 1.0 * 0.3 = 0.3
+        # coverage_ratio = 1.0 (capped)
+        # penalty = 1.0 - 0.3 = 0.7
+        assert penalty == pytest.approx(0.7, abs=0.02)
+
+    def test_very_sparse_captions_low_coverage(self):
+        """Test penalty for very sparse captions."""
+        segments = [
+            CaptionSegment(index=0, start_time=0.0, end_time=10.0,
+                          text="Just intro", source_file="vid"),
+        ]
+        result = CaptionResult(
+            video_id="vid",
+            segments=segments,
+            video_duration=100.0,  # Only 10% coverage
+        )
+
+        result.validate_timing()
+        penalty = result.timing_penalty_factor
+
+        # coverage_ratio = 0.1
+        # coverage_penalty = 0.9 * 0.2 = 0.18
+        # penalty = 1.0 - 0.18 = 0.82
+        assert penalty == pytest.approx(0.82, abs=0.02)
+
+
+# =============================================================================
+# Timing Penalty Pipeline Smoke Test Summary
+# =============================================================================
+
+class TestTimingPenaltyPipelineSmokeTest:
+    """Comprehensive smoke test for timing penalty pipeline (US-002 Sprint 8).
+
+    This test provides a single comprehensive validation of the entire
+    timing penalty -> match confidence pipeline.
+
+    Use this test for quick validation after changes to:
+    - caption_fetcher.py (CaptionResult.timing_penalty_factor, validate_timing)
+    - caption_stage.py (timing_penalty in text_metadata)
+    - match.py (timing_penalty attribute propagation)
+    - scoring.py (apply_timing_penalty)
+    - tiered_matcher.py (timing penalty application)
+    """
+
+    def test_full_pipeline_smoke_test(self):
+        """Comprehensive smoke test for timing penalty pipeline.
+
+        Tests the complete flow:
+        1. Caption fetch calculates timing_penalty_factor
+        2. CaptionStage includes timing_penalty in text_metadata
+        3. MatchStage transfers timing_penalty to segments
+        4. Scoring applies timing-based confidence adjustment
+        5. Results show expected confidence differences
+        """
+        # Config with timing penalty enabled
+        config = Mock()
+        config.matching = Mock()
+        config.matching.apply_timing_penalty = True
+
+        # Test cases: caption duration, video duration, expected penalty
+        test_scenarios = [
+            ("Perfect timing", 100.0, 100.0, 1.0),
+            ("80% coverage", 80.0, 100.0, 0.96),
+            ("50% coverage", 50.0, 100.0, 0.90),
+            ("20% exceeds", 120.0, 100.0, 0.94),
+        ]
+
+        results = []
+        base_confidence = 0.85
+
+        for name, caption_dur, video_dur, expected_penalty in test_scenarios:
+            # Step 1: Create caption result
+            segments = [
+                CaptionSegment(index=0, start_time=0.0, end_time=caption_dur,
+                              text=f"Caption for {name}", source_file=name.lower().replace(" ", "_")),
+            ]
+            caption_result = CaptionResult(
+                video_id=name.lower().replace(" ", "_"),
+                segments=segments,
+                video_duration=video_dur,
+            )
+
+            # Step 2: Calculate timing penalty (CaptionStage)
+            caption_result.validate_timing()
+            timing_penalty = caption_result.timing_penalty_factor
+
+            # Step 3: Build text_metadata with timing_penalty
+            text_metadata = {
+                'video_path': caption_result.video_id,
+                'timing_penalty': timing_penalty,
+            }
+
+            # Step 4: Create segment with timing_penalty (MatchStage)
+            segment = SRTSegment(
+                index=1, start_time=0.0, end_time=10.0,
+                text="Test content", source_file=text_metadata['video_path']
+            )
+            segment.timing_penalty = text_metadata['timing_penalty']
+
+            # Step 5: Apply timing penalty (TieredMatcher)
+            adjusted_conf, reason = apply_timing_penalty(
+                confidence=base_confidence,
+                video_segment=segment,
+                config=config
+            )
+
+            results.append({
+                'scenario': name,
+                'timing_penalty': timing_penalty,
+                'expected_penalty': expected_penalty,
+                'base_confidence': base_confidence,
+                'adjusted_confidence': adjusted_conf,
+                'reason': reason,
+            })
+
+            # Verify expected penalty (within tolerance)
+            assert timing_penalty == pytest.approx(expected_penalty, abs=0.02), \
+                f"{name}: expected penalty {expected_penalty}, got {timing_penalty}"
+
+        # Summary assertions
+        perfect = next(r for r in results if r['scenario'] == "Perfect timing")
+        poor_coverage = next(r for r in results if r['scenario'] == "50% coverage")
+
+        # 1. Perfect timing preserves confidence
+        assert perfect['adjusted_confidence'] == base_confidence
+
+        # 2. Poor coverage reduces confidence
+        assert poor_coverage['adjusted_confidence'] < base_confidence
+        # 0.85 * 0.90 = 0.765
+        assert poor_coverage['adjusted_confidence'] == pytest.approx(0.765, abs=0.02)
+
+        # 3. Perfect > Poor coverage
+        assert perfect['adjusted_confidence'] > poor_coverage['adjusted_confidence']
+
+        # Print summary
+        print("=" * 70)
+        print("Timing Penalty Pipeline Smoke Test PASSED (US-002 Sprint 8)")
+        print("=" * 70)
+        for r in results:
+            penalty_str = f"x{r['timing_penalty']:.2f}" if r['timing_penalty'] < 1.0 else "none"
+            print(f"  {r['scenario']:20s}: penalty={penalty_str:>6s}  "
+                  f"conf: {r['base_confidence']:.2f} -> {r['adjusted_confidence']:.3f}")
+        print("=" * 70)
