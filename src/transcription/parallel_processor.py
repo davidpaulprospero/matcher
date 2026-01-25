@@ -160,7 +160,8 @@ def transcribe_videos_parallel(
                     print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
             except Exception as e:
                 completed += 1
-                logger.error(f"  Audio extraction error: {e}")
+                # Log full traceback for debugging parallel processing issues
+                logger.exception(f"  Audio extraction error: {e}")
 
     phase1_time = time.time() - phase1_start
     if show_progress:
@@ -210,14 +211,16 @@ def transcribe_videos_parallel(
             ]
 
         except Exception as e:
-            logger.error(f"  Transcription error for {video_name}: {e}")
+            # Log full traceback for debugging transcription issues
+            logger.exception(f"  Transcription error for {video_name}: {e}")
             results[video_path] = []
 
         # Clean up audio file
         try:
             Path(audio_path).unlink()
-        except:
-            pass
+        except (OSError, IOError) as e:
+            # Non-critical: temp file cleanup failure won't affect results
+            logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
 
     if show_progress:
         print()  # New line after progress
@@ -229,8 +232,9 @@ def transcribe_videos_parallel(
     # Clean up temp directory
     try:
         shutil.rmtree(temp_dir, ignore_errors=True)
-    except:
-        pass
+    except (OSError, IOError) as e:
+        # Non-critical: temp directory cleanup failure won't affect results
+        logger.debug(f"Could not remove temp directory {temp_dir}: {e}")
 
     return results
 
@@ -301,8 +305,9 @@ def transcribe_video(
         # Clean up audio file
         try:
             Path(audio_path).unlink()
-        except:
-            pass
+        except (OSError, IOError) as e:
+            # Non-critical: temp file cleanup failure won't affect results
+            logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
 
         return [
             TranscriptSegment(
@@ -412,8 +417,9 @@ def transcribe_voiceover_media(
         # Clean up extracted audio
         try:
             Path(audio_path).unlink()
-        except:
-            pass
+        except (OSError, IOError) as e:
+            # Non-critical: temp file cleanup failure won't affect results
+            logger.debug(f"Could not remove extracted audio file {audio_path}: {e}")
 
     elif media_path.suffix.lower() in audio_extensions:
         # It's already an audio file
