@@ -356,6 +356,8 @@ class CaptionFetcher:
         # Retry settings from config (US-008)
         self._max_retries = 3
         self._retry_delay = 2.0
+        # Format preference (US-006): json3 preferred since it's pre-structured
+        self._preferred_formats = ["json3", "vtt", "srt"]
         if config:
             try:
                 caption_first = getattr(config.download, 'caption_first', None)
@@ -366,6 +368,10 @@ class CaptionFetcher:
                     timeout = getattr(caption_first, 'timeout', None)
                     if timeout:
                         self._timeout = timeout
+                    # Format preference (US-006)
+                    preferred_formats = getattr(caption_first, 'preferred_formats', None)
+                    if preferred_formats:
+                        self._preferred_formats = preferred_formats
             except AttributeError:
                 pass
 
@@ -1263,12 +1269,67 @@ class CaptionFetcher:
     ) -> Optional[CaptionResult]:
         """Fetch a specific subtitle track.
 
+        Tries formats in preference order (US-006). Falls back to next format
+        on parse error, not just unavailability.
+
         Args:
             video_url: Full YouTube URL.
             video_id: Video ID for result metadata.
             temp_dir: Temporary directory for downloaded files.
             language: Language code.
             auto_generated: Whether to fetch auto-generated captions.
+
+        Returns:
+            CaptionResult if successful, None if no captions for this format.
+        """
+        # Try each format in preference order (US-006)
+        last_error = None
+        for fmt in self._preferred_formats:
+            try:
+                result = self._fetch_subtitle_with_format(
+                    video_url, video_id, temp_dir, language, auto_generated, fmt
+                )
+                if result and result.segments:
+                    logger.info(
+                        f"Caption {video_id}: Using {fmt} format "
+                        f"({len(result.segments)} segments)"
+                    )
+                    return result
+            except CaptionUnavailableError:
+                # No captions in this format, try next
+                logger.debug(f"Caption {video_id}: {fmt} format unavailable, trying next")
+                continue
+            except CaptionFetchError as e:
+                # Parse or fetch error - try next format (US-006)
+                last_error = e
+                logger.debug(
+                    f"Caption {video_id}: {fmt} format failed ({e.reason}), trying next"
+                )
+                continue
+
+        # All formats exhausted
+        if last_error:
+            raise last_error
+        return None
+
+    def _fetch_subtitle_with_format(
+        self,
+        video_url: str,
+        video_id: str,
+        temp_dir: Path,
+        language: str,
+        auto_generated: bool,
+        subtitle_format: str
+    ) -> Optional[CaptionResult]:
+        """Fetch subtitle in a specific format.
+
+        Args:
+            video_url: Full YouTube URL.
+            video_id: Video ID for result metadata.
+            temp_dir: Temporary directory for downloaded files.
+            language: Language code.
+            auto_generated: Whether to fetch auto-generated captions.
+            subtitle_format: Format to request (json3, vtt, srt).
 
         Returns:
             CaptionResult if successful, None if no captions for this format.
@@ -1283,8 +1344,7 @@ class CaptionFetcher:
             '--skip-download',  # Don't download video
             sub_flag,
             '--sub-lang', language,
-            '--sub-format', 'json3/srv3/vtt/srt/best',  # Prefer structured formats
-            '--convert-subs', 'vtt',  # Convert to VTT for parsing
+            '--sub-format', subtitle_format,  # Request specific format (US-006)
             '-o', output_template,
             '--no-playlist',
             '--no-warnings',
@@ -1315,12 +1375,13 @@ class CaptionFetcher:
                 else:
                     raise CaptionFetchError(video_id, result.stderr[:200])
 
-            # Find downloaded subtitle file
-            sub_files = list(temp_dir.glob(f"{video_id}*.vtt"))
+            # Find downloaded subtitle file - look for the specific format first
+            format_ext = f".{subtitle_format}"
+            sub_files = list(temp_dir.glob(f"{video_id}*{format_ext}"))
             if not sub_files:
-                # Try other extensions
+                # Try other extensions as fallback
                 sub_files = list(temp_dir.glob(f"{video_id}*"))
-                sub_files = [f for f in sub_files if f.suffix in ['.vtt', '.srt', '.json3', '.srv3']]
+                sub_files = [f for f in sub_files if f.suffix in ['.vtt', '.srt', '.json3', '.srv3', '.json']]
 
             if not sub_files:
                 return None  # No subtitle file created

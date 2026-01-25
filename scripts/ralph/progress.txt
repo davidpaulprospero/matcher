@@ -3251,3 +3251,65 @@ Added 15 new tests in tests/test_caption_normalizer.py:
 ### Files Modified
 - src/caption_fetcher.py: CaptionParseWarning class, skipped_segments_count field, normalize() partial recovery
 - tests/test_caption_normalizer.py: Updated 37 calls to tuple unpacking, added 15 new tests
+
+## Iteration 6 - US-006: Add caption format preference configuration
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Implemented configurable caption format preference with format fallback on parse errors.
+
+**Config Changes:**
+1. Added `preferred_formats` field to CaptionFirstConfig (src/config/sections/download.py):
+   - Type: `List[str]`
+   - Default: `["json3", "vtt", "srt"]`
+   - json3 first since it's pre-structured (no conversion needed)
+
+2. Updated config.yaml with new option under `download.caption_first.preferred_formats`
+
+**CaptionFetcher Changes (src/caption_fetcher.py):**
+1. Added `_preferred_formats` initialization in `__init__` (line 360)
+   - Reads from config if available, otherwise uses default
+
+2. Refactored `_fetch_subtitle()` to iterate through `_preferred_formats`:
+   - For each format, calls new `_fetch_subtitle_with_format()` method
+   - CaptionUnavailableError triggers try next format
+   - CaptionFetchError (parse/network error) also triggers try next format (US-006 key requirement)
+   - Logs "Caption {video_id}: Using {fmt} format ({N} segments)" on success
+
+3. New `_fetch_subtitle_with_format()` method:
+   - Takes `subtitle_format` parameter for `--sub-format` flag
+   - Removed `--convert-subs vtt` to preserve native format for direct parsing
+   - Finds subtitle file with specific format extension first
+
+### Tests Added (11 tests in TestCaptionFormatPreference)
+- test_default_preferred_formats: Verify default is ["json3", "vtt", "srt"]
+- test_config_preferred_formats: Verify config override works
+- test_config_empty_formats_uses_default: Verify None fallback to default
+- test_fetch_tries_formats_in_order: Verify json3 tried before vtt
+- test_fetch_fallback_on_parse_error: Verify malformed json3 falls back to vtt
+- test_fetch_uses_first_successful_format: Verify first valid format used
+- test_fetch_logs_format_used: Verify logging of format selection
+- test_all_formats_exhausted_raises_error: Verify CaptionFetchError when all fail
+- test_custom_format_order: Verify custom order ["srt", "vtt", "json3"]
+- test_single_format_preference: Verify single format works
+- test_format_preference_with_unavailable_error: Verify CaptionUnavailableError fallback
+
+### Verification
+- Syntax check: All 3 modified files compile successfully
+- main.py --help: PASSED
+- TestCaptionFormatPreference: 11 passed
+
+### Acceptance Criteria Verification
+1. ✅ New config option caption_first.preferred_formats (default: ['json3', 'vtt', 'srt'])
+2. ✅ CaptionFetcher tries formats in preference order
+3. ✅ JSON3 preferred by default since it's already structured
+4. ✅ Fallback to next format on parse error (not just unavailable)
+5. ✅ Log which format was ultimately used
+6. ✅ Tests verify format selection and fallback behavior
+
+### Files Modified
+- src/config/sections/download.py: Added preferred_formats field to CaptionFirstConfig
+- src/caption_fetcher.py: Refactored _fetch_subtitle(), added _fetch_subtitle_with_format(), format loop with fallback
+- config.yaml: Added preferred_formats option under caption_first
+- tests/test_caption_fetcher.py: Added TestCaptionFormatPreference class with 11 tests

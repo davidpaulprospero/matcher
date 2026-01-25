@@ -3339,3 +3339,313 @@ class TestCaptionMetricsSkippedLiveStreams:
         metrics.clear()
 
         assert metrics.skipped_live_streams == 0
+
+
+class TestCaptionFormatPreference:
+    """Tests for US-006: Caption format preference configuration."""
+
+    def test_default_preferred_formats(self):
+        """Test default preferred formats (json3, vtt, srt)."""
+        fetcher = CaptionFetcher()
+
+        assert fetcher._preferred_formats == ["json3", "vtt", "srt"]
+
+    def test_config_preferred_formats(self):
+        """Test preferred formats from config."""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_formats = ["vtt", "srt"]
+        mock_config.download.caption_first.max_retries = 3
+        mock_config.download.caption_first.retry_delay = 2.0
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        assert fetcher._preferred_formats == ["vtt", "srt"]
+
+    def test_config_empty_formats_uses_default(self):
+        """Test that empty preferred_formats uses default."""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_formats = None  # Not configured
+        mock_config.download.caption_first.max_retries = 3
+        mock_config.download.caption_first.retry_delay = 2.0
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        assert fetcher._preferred_formats == ["json3", "vtt", "srt"]
+
+    @patch('subprocess.run')
+    def test_fetch_tries_formats_in_order(self, mock_run, tmp_path):
+        """Test that formats are tried in preference order."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        video_id = "dQw4w9WgXcQ"
+
+        # Track which formats were requested
+        formats_tried = []
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            # Find the format in the command
+            if '--sub-format' in cmd:
+                fmt_idx = cmd.index('--sub-format')
+                formats_tried.append(cmd[fmt_idx + 1])
+
+                # json3 not available - use "no subtitles" to trigger CaptionUnavailableError
+                # which correctly falls through to next format
+                if 'json3' in cmd[fmt_idx + 1]:
+                    result = Mock()
+                    result.returncode = 1
+                    result.stderr = "no subtitles available in json3 format"
+                    return result
+                else:
+                    result = Mock()
+                    result.returncode = 0
+                    result.stderr = ""
+                    return result
+            else:
+                result = Mock()
+                result.returncode = 0
+                result.stderr = ""
+                return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Create VTT file for success
+            vtt_file = tmp_path / f"{video_id}.en.vtt"
+            vtt_file.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTest")
+
+            result = fetcher.fetch_captions(video_id)
+
+        # Should have tried json3 first, then vtt
+        assert "json3" in formats_tried
+        assert "vtt" in formats_tried
+        # json3 should be tried before vtt
+        json3_idx = formats_tried.index("json3")
+        vtt_idx = formats_tried.index("vtt")
+        assert json3_idx < vtt_idx
+
+    @patch('subprocess.run')
+    def test_fetch_fallback_on_parse_error(self, mock_run, tmp_path):
+        """Test fallback to next format on parse error (not just unavailable)."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt"]
+        video_id = "dQw4w9WgXcQ"
+
+        formats_tried = []
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            if '--sub-format' in cmd:
+                fmt_idx = cmd.index('--sub-format')
+                formats_tried.append(cmd[fmt_idx + 1])
+            result = Mock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Create a malformed json3 file that will fail parsing
+            json3_file = tmp_path / f"{video_id}.en.json3"
+            json3_file.write_text("not valid json {{{")
+
+            # Also create a valid VTT file for fallback
+            vtt_file = tmp_path / f"{video_id}.en.vtt"
+            vtt_file.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTest")
+
+            result = fetcher.fetch_captions(video_id)
+
+        # Should have tried json3 (failed parsing), then vtt (succeeded)
+        assert "json3" in formats_tried
+        assert "vtt" in formats_tried
+        # Final result should be VTT since json3 failed to parse
+        assert result.format_source == "vtt"
+
+    @patch('subprocess.run')
+    def test_fetch_uses_first_successful_format(self, mock_run, tmp_path):
+        """Test that first successfully parsed format is used."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        video_id = "dQw4w9WgXcQ"
+
+        def mock_run_side_effect(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Create valid json3 file
+            json3_content = json.dumps({
+                "events": [
+                    {"tStartMs": 1000, "dDurationMs": 2000, "segs": [{"utf8": "Test"}]}
+                ]
+            })
+            json3_file = tmp_path / f"{video_id}.en.json3"
+            json3_file.write_text(json3_content)
+
+            result = fetcher.fetch_captions(video_id)
+
+        # Should use json3 since it's first and valid
+        assert result.format_source == "json3"
+
+    @patch('subprocess.run')
+    def test_fetch_logs_format_used(self, mock_run, tmp_path, caplog):
+        """Test that the used format is logged."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["vtt"]
+        video_id = "dQw4w9WgXcQ"
+
+        def mock_run_side_effect(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Create VTT file
+            vtt_file = tmp_path / f"{video_id}.en.vtt"
+            vtt_file.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTest")
+
+            result = fetcher.fetch_captions(video_id)
+
+        # Check that format was logged
+        assert any("Using vtt format" in record.message for record in caplog.records)
+
+    @patch('subprocess.run')
+    def test_all_formats_exhausted_raises_error(self, mock_run, tmp_path):
+        """Test that error is raised when all formats fail."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        video_id = "dQw4w9WgXcQ"
+
+        formats_tried = []
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            if '--sub-format' in cmd:
+                fmt_idx = cmd.index('--sub-format')
+                formats_tried.append(cmd[fmt_idx + 1])
+
+            # All formats fail with network error
+            result = Mock()
+            result.returncode = 1
+            result.stderr = "Connection timeout"
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            with pytest.raises(CaptionFetchError) as exc_info:
+                fetcher.fetch_captions(video_id)
+
+            # Should have tried all formats
+            assert "json3" in formats_tried
+            assert "vtt" in formats_tried
+            assert "srt" in formats_tried
+            # Error message should indicate timeout
+            assert "Connection timeout" in str(exc_info.value)
+
+    def test_custom_format_order(self):
+        """Test custom format order preference."""
+        mock_config = Mock()
+        mock_config.download.caption_first.preferred_formats = ["srt", "vtt", "json3"]
+        mock_config.download.caption_first.max_retries = 3
+        mock_config.download.caption_first.retry_delay = 2.0
+        mock_config.download.caption_first.timeout = 30
+
+        fetcher = CaptionFetcher(config=mock_config)
+
+        assert fetcher._preferred_formats == ["srt", "vtt", "json3"]
+
+    @patch('subprocess.run')
+    def test_single_format_preference(self, mock_run, tmp_path):
+        """Test with only one format in preference list."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["vtt"]
+        video_id = "dQw4w9WgXcQ"
+
+        def mock_run_side_effect(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            vtt_file = tmp_path / f"{video_id}.en.vtt"
+            vtt_file.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTest")
+
+            result = fetcher.fetch_captions(video_id)
+
+        assert result.format_source == "vtt"
+
+    @patch('subprocess.run')
+    def test_format_preference_with_unavailable_error(self, mock_run, tmp_path):
+        """Test that CaptionUnavailableError triggers next format."""
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt"]
+        video_id = "dQw4w9WgXcQ"
+
+        call_count = [0]
+
+        def mock_run_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            cmd = args[0]
+            fmt_idx = cmd.index('--sub-format')
+            fmt = cmd[fmt_idx + 1]
+
+            result = Mock()
+            if fmt == "json3":
+                # First format unavailable
+                result.returncode = 1
+                result.stderr = "no subtitles available for this video"
+            else:
+                # Second format succeeds
+                result.returncode = 0
+                result.stderr = ""
+            return result
+
+        mock_run.side_effect = mock_run_side_effect
+
+        with patch('tempfile.TemporaryDirectory') as mock_tempdir:
+            mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(tmp_path))
+            mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
+
+            vtt_file = tmp_path / f"{video_id}.en.vtt"
+            vtt_file.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nTest")
+
+            result = fetcher.fetch_captions(video_id)
+
+        # Should have tried both formats
+        assert call_count[0] == 2
+        assert result.format_source == "vtt"
