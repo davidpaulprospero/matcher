@@ -183,6 +183,11 @@ class CaptionFirstConfig:
     # Actual delays: retry_delay, retry_delay*2, retry_delay*4, ...
     retry_delay: float = 2.0
 
+    # Parallel caption fetching (US-001)
+    # Number of concurrent caption fetches (1 = sequential)
+    # Higher values speed up projects with 50+ videos
+    max_parallel_fetches: int = 4
+
 
 @dataclass
 class AudioFirstConfig:

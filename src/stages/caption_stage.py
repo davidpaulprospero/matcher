@@ -57,7 +57,11 @@ class CaptionStage(Stage):
         config: 'Config',
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
-        """Execute the caption fetch stage."""
+        """Execute the caption fetch stage.
+
+        US-001: Uses parallel batch fetching with ThreadPoolExecutor for faster
+        processing of projects with 50+ videos.
+        """
         warnings = []
 
         try:
@@ -84,8 +88,10 @@ class CaptionStage(Stage):
             preferred_lang = getattr(caption_config, 'preferred_language', 'en')
             prefer_manual = getattr(caption_config, 'prefer_human_captions', True)
             timeout = getattr(caption_config, 'timeout', 30)
+            max_workers = getattr(caption_config, 'max_parallel_fetches', 4)
 
-            print(f"  Caption settings: language={preferred_lang}, prefer_manual={prefer_manual}")
+            print(f"  Caption settings: language={preferred_lang}, prefer_manual={prefer_manual}, "
+                  f"parallel_workers={max_workers}")
 
             # Initialize caption fetcher
             from ..caption_fetcher import (
@@ -100,21 +106,19 @@ class CaptionStage(Stage):
             self._fetcher = CaptionFetcher(config=config)
             self._fetcher._timeout = timeout
 
-            # Initialize metrics tracker (US-011)
+            # Initialize metrics tracker (US-011, US-001: thread-safe)
             metrics = CaptionMetrics()
 
             # Check for already-fetched captions in checkpoint
             existing_captions = self._load_existing_captions(checkpoint)
             print(f"  Found {len(existing_captions)} captions in checkpoint")
 
-            # Fetch captions for each video
+            # Prepare caption results with existing cached entries
             caption_results = {}
-            success_count = 0
             skip_count = 0
-            fail_count = 0
 
-            for idx, video_id in enumerate(video_ids, 1):
-                # Skip if already fetched (but still track in metrics as cache hit)
+            # Track cache hits from checkpoint (these were fetched in a previous run)
+            for video_id in video_ids:
                 if video_id in existing_captions:
                     caption_results[video_id] = existing_captions[video_id]
                     skip_count += 1
@@ -128,75 +132,65 @@ class CaptionStage(Stage):
                             segment_count=cached_data.get('segment_count', 0),
                             is_auto_generated=cached_data.get('is_auto_generated', False)
                         )
-                    continue
 
-                print(f"  [{idx}/{len(video_ids)}] Fetching captions for {video_id}...", end=' ')
+            # IDs that need fetching (not in checkpoint)
+            ids_to_fetch = [vid for vid in video_ids if vid not in existing_captions]
 
-                # US-011: Record fetch attempt
-                metrics.record_fetch_attempt(video_id)
+            if ids_to_fetch:
+                print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
-                try:
-                    result = self._fetcher.fetch_captions_auto_language(
-                        video_id,
-                        preferred_language=preferred_lang
-                    )
+                # US-001: Progress callback for real-time console output
+                def on_progress(video_id: str, status: str, details: Dict) -> None:
+                    """Print progress for each video fetch."""
+                    idx = details.get('index', 0)
+                    total = details.get('total', 0)
+                    if status == 'success':
+                        lang = details.get('language', '?')
+                        quality = details.get('quality', '?')
+                        segs = details.get('segment_count', 0)
+                        auto_label = 'auto' if details.get('is_auto_generated') else 'human'
+                        print(f"  [{idx}/{total}] {video_id}: ✓ {segs} segments "
+                              f"({lang}, {auto_label}, quality={quality})")
+                    elif status == 'failed':
+                        reason = details.get('reason', 'unknown')
+                        print(f"  [{idx}/{total}] {video_id}: ✗ {reason} (quality=low)")
 
-                    # Determine caption quality (US-007)
-                    quality = result.caption_quality
+                # US-001: Use batch fetch for parallel processing
+                batch_results = self._fetcher.fetch_captions_batch(
+                    video_ids=ids_to_fetch,
+                    preferred_language=preferred_lang,
+                    max_workers=max_workers,
+                    metrics=metrics,
+                    progress_callback=on_progress,
+                )
 
-                    caption_results[video_id] = {
-                        'video_id': video_id,
-                        'segments': [seg.to_dict() for seg in result.segments],
-                        'language': result.language,
-                        'is_auto_generated': result.is_auto_generated,
-                        'format_source': result.format_source,
-                        'segment_count': len(result.segments),
-                        'caption_quality': quality,  # US-007: Quality indicator
-                    }
-                    success_count += 1
-                    quality_label = 'human' if not result.is_auto_generated else 'auto'
-                    print(f"✓ {len(result.segments)} segments ({result.language}, {quality_label}, quality={quality})")
+                # Convert batch results to checkpoint format
+                for video_id, result in batch_results.items():
+                    if isinstance(result, CaptionResult):
+                        # Success - convert to serializable dict
+                        caption_results[video_id] = {
+                            'video_id': video_id,
+                            'segments': [seg.to_dict() for seg in result.segments],
+                            'language': result.language,
+                            'is_auto_generated': result.is_auto_generated,
+                            'format_source': result.format_source,
+                            'segment_count': len(result.segments),
+                            'caption_quality': result.caption_quality,
+                        }
+                    else:
+                        # Error/unavailable - already in dict format
+                        caption_results[video_id] = result
 
-                    # US-011: Record success in metrics
-                    metrics.record_fetch_success(
-                        video_id=video_id,
-                        language=result.language,
-                        quality=quality,
-                        segment_count=len(result.segments),
-                        is_auto_generated=result.is_auto_generated
-                    )
-
-                except CaptionUnavailableError as e:
-                    caption_results[video_id] = {
-                        'video_id': video_id,
-                        'unavailable': True,
-                        'reason': str(e.reason),
-                        'caption_quality': 'low',  # US-007: Unavailable = low quality
-                    }
-                    fail_count += 1
-                    print(f"✗ No captions available (quality=low)")
-                    logger.debug(f"Captions unavailable for {video_id}: {e}")
-
-                    # US-011: Record failure in metrics
-                    metrics.record_fetch_failure(video_id=video_id, reason='unavailable')
-
-                except CaptionFetchError as e:
-                    caption_results[video_id] = {
-                        'video_id': video_id,
-                        'error': True,
-                        'reason': str(e.reason),
-                        'caption_quality': 'low',  # US-007: Error = low quality
-                    }
-                    fail_count += 1
-                    print(f"✗ Fetch error (quality=low)")
-                    logger.warning(f"Caption fetch error for {video_id}: {e}")
-
-                    # US-011: Record failure in metrics
-                    metrics.record_fetch_failure(video_id=video_id, reason='error')
-
-                # Periodic checkpoint save
-                if idx % 10 == 0:
-                    self._save_intermediate_checkpoint(checkpoint, caption_results, metrics)
+            # Count results
+            success_count = sum(
+                1 for r in caption_results.values()
+                if not r.get('unavailable') and not r.get('error')
+                and r.get('segment_count', 0) > 0
+            ) - skip_count  # Don't double-count cached entries
+            fail_count = sum(
+                1 for r in caption_results.values()
+                if r.get('unavailable') or r.get('error')
+            )
 
             # Store caption data in state.text_metadata for matching
             self._populate_text_metadata(state, caption_results)
@@ -210,8 +204,7 @@ class CaptionStage(Stage):
 
             # Summary
             print(f"\n  + Caption fetch complete:")
-            print(f"    - Success: {success_count} videos")
-            print(f"    - Skipped (cached): {skip_count} videos")
+            print(f"    - Success: {success_count} videos (new), {skip_count} videos (cached)")
             print(f"    - Unavailable/Error: {fail_count} videos")
             # US-007: Report caption quality distribution
             print(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
