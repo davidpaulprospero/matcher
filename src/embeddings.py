@@ -17,6 +17,7 @@ import json
 import hashlib
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Union
 from dataclasses import dataclass
@@ -512,6 +513,118 @@ def get_embedding_provider(config: Any) -> EmbeddingProvider:
     except Exception as e:
         logger.error(f"Could not initialize any embedding provider: {e}")
         raise RuntimeError("No embedding provider available")
+
+
+def parallel_embed_batch(
+    texts: List[str],
+    provider: EmbeddingProvider,
+    config: Any = None,
+    show_progress: bool = True
+) -> List[List[float]]:
+    """
+    Embed texts in parallel batches using ThreadPoolExecutor.
+
+    Splits input texts into batches and processes them in parallel threads
+    for improved performance on large text sets (200+ texts).
+
+    Args:
+        texts: List of texts to embed
+        provider: EmbeddingProvider instance
+        config: Configuration object with embedding.max_workers, batch_size, etc.
+        show_progress: Whether to log progress
+
+    Returns:
+        List of embedding vectors in original order
+
+    Example:
+        >>> from src.embeddings import parallel_embed_batch, get_embedding_provider
+        >>> provider = get_embedding_provider(config)
+        >>> embeddings = parallel_embed_batch(texts, provider, config)
+        >>> len(embeddings) == len(texts)
+        True
+    """
+    if not texts:
+        return []
+
+    # Get config values with safe defaults
+    if config and hasattr(config, 'embedding'):
+        batch_size = getattr(config.embedding, 'batch_size', 100)
+        max_workers = getattr(config.embedding, 'max_workers', 4)
+        max_retries = getattr(config.embedding, 'max_retries', 3)
+        retry_delay = getattr(config.embedding, 'retry_delay', 2.0)
+    else:
+        batch_size = 100
+        max_workers = 4
+        max_retries = 3
+        retry_delay = 2.0
+
+    # Clean texts
+    cleaned_texts = []
+    for t in texts:
+        t = t.strip() if t else ""
+        cleaned_texts.append(t if t else "[silence]")
+
+    # Split into batches
+    batches = []
+    for i in range(0, len(cleaned_texts), batch_size):
+        batches.append((i // batch_size, cleaned_texts[i:i + batch_size]))
+
+    total_batches = len(batches)
+
+    if show_progress:
+        logger.info(
+            f"  Parallel embedding: {len(cleaned_texts)} texts, "
+            f"{total_batches} batches, {max_workers} workers"
+        )
+
+    # Results storage: {batch_index: embeddings}
+    results: Dict[int, List[List[float]]] = {}
+    start_time = time.time()
+
+    def process_batch(batch_tuple: Tuple[int, List[str]]) -> Tuple[int, List[List[float]]]:
+        """Process a single batch with retries."""
+        batch_idx, batch_texts = batch_tuple
+
+        for attempt in range(max_retries):
+            try:
+                embeddings = provider.embed(batch_texts)
+                return (batch_idx, embeddings)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = retry_delay * (2 ** attempt)
+                    logger.warning(f"    Batch {batch_idx + 1} failed, retrying in {wait:.1f}s: {e}")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"    Batch {batch_idx + 1} failed after {max_retries} attempts: {e}")
+                    # Return zeros to maintain alignment
+                    dim = 768  # Default dimension
+                    return (batch_idx, [[0.0] * dim] * len(batch_texts))
+
+    # Process batches in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_batch, batch): batch[0] for batch in batches}
+
+        completed = 0
+        for future in as_completed(futures):
+            batch_idx, embeddings = future.result()
+            results[batch_idx] = embeddings
+            completed += 1
+
+            if show_progress:
+                logger.info(f"    Completed batch {completed}/{total_batches}")
+
+    # Reassemble results in original order
+    all_embeddings = []
+    for i in range(total_batches):
+        all_embeddings.extend(results[i])
+
+    elapsed = time.time() - start_time
+
+    if show_progress:
+        rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
+        logger.info(f"  Parallel embedding complete: {len(all_embeddings)} embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+
+    return all_embeddings
 
 
 def compute_embeddings(
