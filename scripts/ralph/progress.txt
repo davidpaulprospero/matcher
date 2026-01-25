@@ -986,3 +986,32 @@ Progress: 6/12 stories complete
 
 Progress: 7/12 stories complete
 
+## Iteration 8 - [US-008] Add FAISS index build time logging
+- Added timing measurement to build_embedding_index() in src/embeddings.py:
+  - Uses time.perf_counter() for high-resolution timing
+  - Records start time before index construction
+  - Calculates elapsed time in milliseconds after index.add()
+  - New log format: "✓ Built FAISS index ({index_type}): {vector_count} vectors, dim={dimension} in {elapsed}ms"
+- Log includes all required elements:
+  - Index type (flat or ivf)
+  - Vector count
+  - Vector dimension
+  - Build time in milliseconds
+- Created tests/test_faiss_timing.py with 19 tests across 9 test classes:
+  - TestBuildEmbeddingIndexTimingLogged (6 tests): flat timing, vector count, dimension, index type flat/ivf, log level
+  - TestTimingFormat (2 tests): milliseconds format, positive value
+  - TestTimingWith100PlusVectors (3 tests): 100, 500, 1000 vectors
+  - TestDifferentDimensions (3 tests): 384, 768, 1536 dimensions
+  - TestNoTimingWhenFaissDisabled (1 test): no timing when use_faiss=False
+  - TestTimingWithListInput (1 test): list embeddings converted to numpy
+  - TestIVFIndexTiming (1 test): IVF includes training time
+  - TestLogMessageFormat (2 tests): complete message format for flat and ivf
+- All 19 new tests pass
+- All 68 sprint 3 related tests pass (35 verification + 33 validation)
+- Files modified:
+  - src/embeddings.py (added timing to build_embedding_index)
+- Files created:
+  - tests/test_faiss_timing.py (new file, 19 tests)
+
+Progress: 8/12 stories complete
+
