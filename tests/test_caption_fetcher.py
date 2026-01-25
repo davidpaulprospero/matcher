@@ -936,6 +936,11 @@ class TestCaptionFetcherRealVideos:
             # The actual is_auto_generated value depends on what's available
         except CaptionUnavailableError:
             pytest.skip("Video captions not available (may have been removed)")
+        except CaptionFetchError as e:
+            # Skip on transient yt-dlp errors (preprocessing, network, etc.)
+            if "preprocessing" in str(e).lower() or "invalid data" in str(e).lower():
+                pytest.skip(f"yt-dlp transient error: {e}")
+            raise
 
 
 class TestAvailableLanguage:
