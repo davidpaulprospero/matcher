@@ -82,8 +82,8 @@
         "Add unit test in tests/test_transcript_quality.py for quality scoring"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented calculate_transcript_quality() with 3 scoring factors: word count (0-0.4), sentence coherence (0-0.35), language consistency (0-0.25). Added adjust_embedding_weight_for_transcript_quality() to reduce embedding weight by 20% for low-quality transcripts. Added transcript_quality_weight config option. Created 32 unit tests in tests/test_transcript_quality.py covering all quality tiers and edge cases."
     },
     {
       "id": "US-006",

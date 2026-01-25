@@ -216,6 +216,11 @@ class MatchingConfig:
     fallback_matching_enabled: bool = True
     fallback_trigger_threshold: float = 0.4  # Trigger fallback when confidence below this
 
+    # Transcript quality scoring (adjust embedding weight based on transcript quality)
+    # Low-quality transcripts (short, incoherent, repetitive) are less reliable for matching
+    # When enabled, reduces embedding weight by 20% for low-quality transcripts
+    transcript_quality_weight: bool = True  # Enable transcript quality-based weight adjustment
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 
