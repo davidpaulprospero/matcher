@@ -27,6 +27,7 @@ from .scoring import (
     apply_broll_boost,
     apply_current_project_boost,
     calculate_adaptive_threshold,
+    _extract_entity_texts,
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
@@ -269,6 +270,88 @@ class TieredMatcher:
 
         return result
 
+    def check_obvious_match(
+        self,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment,
+        similarity: float,
+        matched_keywords: List[str]
+    ) -> Optional[Tuple[float, str, List[str]]]:
+        """
+        Check if this is an obvious high-confidence match that can skip LLM.
+
+        An obvious match requires ALL THREE conditions:
+        1. Embedding similarity > config threshold (default 0.9)
+        2. At least N keywords match (default 3)
+        3. At least one named entity appears in both voiceover and video
+
+        Args:
+            vo_segment: Voiceover segment
+            video_segment: Video segment candidate
+            similarity: Embedding similarity score
+            matched_keywords: List of keywords matching between voiceover and video
+
+        Returns:
+            None if not an obvious match, otherwise tuple of:
+            (boosted_confidence, reasoning, matched_entities)
+        """
+        mc = self.config.matching
+
+        # Check if obvious match is enabled
+        obvious_match_enabled = getattr(mc, 'obvious_match_enabled', True)
+        if not obvious_match_enabled:
+            return None
+
+        # Get thresholds from config
+        min_similarity = getattr(mc, 'obvious_match_min_similarity', 0.9)
+        min_keywords = getattr(mc, 'obvious_match_min_keywords', 3)
+        min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
+
+        # Condition 1: Embedding similarity must be very high
+        if similarity < min_similarity:
+            return None
+
+        # Condition 2: Must have enough matched keywords
+        if len(matched_keywords) < min_keywords:
+            return None
+
+        # Condition 3: Must have at least one matching named entity
+        vo_entities = _extract_entity_texts(vo_segment)
+        video_entities = _extract_entity_texts(video_segment)
+
+        if not vo_entities or not video_entities:
+            return None
+
+        # Find matching entities (case-insensitive)
+        vo_lower = {e.lower() for e in vo_entities}
+        video_lower = {e.lower() for e in video_entities}
+        matching_entities = vo_lower & video_lower
+
+        if not matching_entities:
+            return None
+
+        # All conditions met - this is an obvious match
+        # Get the original-case entity names for display
+        matched_entity_names = [e for e in vo_entities if e.lower() in matching_entities]
+
+        # Calculate boosted confidence (ensure minimum confidence)
+        boosted_confidence = max(min_confidence, similarity)
+
+        # Build reasoning string
+        reasoning = (
+            f"obvious_match_early_termination: "
+            f"sim={similarity:.3f}, "
+            f"keywords={len(matched_keywords)}, "
+            f"entities={matched_entity_names[:3]}"
+        )
+
+        logger.info(
+            f"  Obvious match detected: {reasoning} "
+            f"(skipping LLM, confidence={boosted_confidence:.3f})"
+        )
+
+        return boosted_confidence, reasoning, matched_entity_names
+
     def _should_skip_llm(self, similarity: float) -> bool:
         """Skip LLM if embedding similarity is high enough"""
         return similarity >= self.config.matching.high_confidence_threshold
@@ -457,6 +540,81 @@ class TieredMatcher:
         else:
             skip_threshold = mc.skip_llm_threshold
             logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={skip_threshold}")
+
+        # Check for obvious match (early termination before LLM)
+        # This bypasses both the threshold check and LLM when match is obviously good
+        best_seg = valid_candidates[0][0]
+        matched_keywords_for_check = self._extract_matched_keywords(vo_segment, best_seg)
+        obvious_result = self.check_obvious_match(
+            vo_segment, best_seg, top_similarity, matched_keywords_for_check
+        )
+
+        if obvious_result:
+            boosted_confidence, obvious_reasoning, matched_entities = obvious_result
+            self.reuse_tracker.record_usage(best_seg)
+
+            scene = self._get_scene_for_segment(best_seg, scenes)
+
+            # Apply scoring adjustments (same as normal path for consistency)
+            adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
+                boosted_confidence, vo_segment, best_seg,
+                video_topics=self.video_topics,
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                topic_mismatch_penalty=self.topic_mismatch_penalty
+            )
+
+            adjusted_confidence, broll_reason = apply_broll_boost(
+                adjusted_confidence, best_seg, self.config
+            )
+
+            adjusted_confidence, project_reason = apply_current_project_boost(
+                adjusted_confidence, best_seg, self.config
+            )
+
+            # Ensure we don't drop below minimum confidence after adjustments
+            min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
+            adjusted_confidence = max(adjusted_confidence, min_confidence)
+
+            final_reasoning = obvious_reasoning
+            if topic_penalty_reason:
+                final_reasoning += f" [{topic_penalty_reason}]"
+            if broll_reason:
+                final_reasoning += f" [{broll_reason}]"
+            if project_reason:
+                final_reasoning += f" [{project_reason}]"
+
+            match = Match(
+                voiceover_segment=vo_segment,
+                video_segment=best_seg,
+                video_scene=scene,
+                confidence=adjusted_confidence,
+                reasoning=final_reasoning,
+                embedding_similarity=top_similarity,
+                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
+            )
+
+            alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
+
+            used_video_files = {best_seg.source_file}
+            alt_segments = []
+            for alt in alternatives:
+                used_video_files.add(alt.video_segment.source_file)
+                alt_segments.append(alt.video_segment)
+
+            secondary_matches = self._get_secondary_matches(
+                valid_candidates, scenes, used_video_files,
+                primary_segment=best_seg, alt_segments=alt_segments
+            )
+
+            confidence_variance = self._calculate_confidence_variance(valid_candidates)
+
+            return MatchResult(
+                primary_match=match,
+                alternatives=alternatives,
+                secondary_matches=secondary_matches,
+                confidence_variance=confidence_variance,
+                matched_keywords=matched_keywords_for_check
+            )
 
         if top_similarity >= skip_threshold:
             best_seg = valid_candidates[0][0]
