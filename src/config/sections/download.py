@@ -252,6 +252,20 @@ class CaptionFirstConfig:
     # Expected segments = duration_seconds / 3 (typical caption segment is ~3 seconds)
     cache_validation_tolerance: float = 0.2
 
+    # Per-category retry budgets (US-003 Sprint 7)
+    # Maps error category names to maximum retry attempts.
+    # Categories: network, timeout, parse, unavailable, rate_limit
+    # Network errors should retry aggressively; parse errors rarely succeed on retry.
+    # Set to 0 to never retry a category.
+    # Example log: "NETWORK error, retry 2/3" vs "PARSE error, no retry (budget: 1)"
+    retry_budgets: Dict[str, int] = field(default_factory=lambda: {
+        "network": 3,      # Network connectivity issues, DNS failures
+        "timeout": 2,      # Request/connection timeouts
+        "parse": 1,        # Caption content parsing failures (unlikely to succeed)
+        "unavailable": 0,  # No captions exist - never retry
+        "rate_limit": 2,   # API rate limiting, retry with backoff
+    })
+
 
 @dataclass
 class AudioFirstConfig:

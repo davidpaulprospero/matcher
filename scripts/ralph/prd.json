@@ -34,7 +34,7 @@
         "Tests verify format with 90% success rate tried before format with 50% success rate"
       ],
       "passes": true,
-      "notes": "Implemented get_optimal_format_order() in CaptionMetrics, save/load_format_statistics() in CaptionCache, apply_adaptive_format_order() in CaptionFetcher. Added adaptive_format_order config option (default: true). Metrics data prioritized over cache. 17 new tests added, all 348 caption tests pass."
+      "notes": "Implemented get_optimal_format_order() in CaptionMetrics, save/load_format_statistics() in CaptionCache, apply_adaptive_format_order() in CaptionFetcher. Added adaptive_format_order config option (default: true). Metrics data prioritized over cache. Integrated in CaptionStage: cache loads historical success rates before batch fetch, saves updated statistics after. All 110 caption/config tests pass."
     },
     {
       "id": "US-003",
@@ -49,8 +49,8 @@
         "Log error category with retry decision: 'NETWORK error, retry 2/3' vs 'PARSE error, no retry'",
         "Tests verify parse errors skip retries while network errors use full budget"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented CaptionErrorCategory enum with 5 types, categorize_caption_error() function, per-category retry budgets in config, error_category_counts tracking in CaptionMetrics, category-aware logging in _with_retry(). 18 new tests added (all pass). NETWORK errors use budget 3, PARSE errors use budget 1, UNAVAILABLE never retries."
     },
     {
       "id": "US-004",

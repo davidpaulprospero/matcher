@@ -949,6 +949,20 @@ download:
     cache_validation: "warn"      # Validation mode (default: warn)
     cache_validation_tolerance: 0.2  # Max segment count deviation ratio (20%)
 
+    # Per-category retry budgets (US-003 Sprint 7)
+    # Maps error type to maximum retry attempts. Different errors need different strategies:
+    # - network: Transient connectivity issues, retry aggressively
+    # - timeout: Request timeouts, moderate retries
+    # - parse: Content parsing failures, rarely succeed on retry
+    # - unavailable: Video has no captions, never retry
+    # - rate_limit: API rate limiting, retry with longer backoff
+    retry_budgets:
+      network: 3      # Network errors retry aggressively
+      timeout: 2      # Timeouts get moderate retries
+      parse: 1        # Parse errors rarely succeed on retry
+      unavailable: 0  # Never retry - video has no captions
+      rate_limit: 2   # Rate limits retry with backoff
+
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
   zero_download_remix:
