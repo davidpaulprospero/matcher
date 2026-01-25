@@ -174,7 +174,8 @@ class TestStartRetryPassWithCircuitBreaker:
             # Should log with circuit breaker wait time
             info_calls = mock_logger.info.call_args_list
             first_log = info_calls[0][0][0]
-            assert 'Circuit breaker wait' in first_log
+            # Actual log message format: "Waited for circuit breaker: X.Xs"
+            assert 'circuit breaker' in first_log
 
     def test_logs_standard_message_when_no_cb_wait(self):
         """Should log standard message when circuit breaker wait is 0."""

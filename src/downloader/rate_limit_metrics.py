@@ -167,6 +167,21 @@ class RateLimitMetrics:
         self.circuit_breaker_trips += 1
         self.circuit_breaker_pause_seconds += pause_seconds
 
+    def record_circuit_breaker_wait(self, wait_seconds: float) -> None:
+        """Record time spent waiting for circuit breaker recovery.
+
+        This is separate from circuit_breaker_pause_seconds which tracks
+        pauses from trips. This tracks additional waits from download retry
+        coordination (US-011) where a retry is paused waiting for an
+        already-tripped circuit breaker to recover.
+
+        Args:
+            wait_seconds: Duration of the wait
+        """
+        # Add to circuit breaker pause seconds since it's the same category
+        # of time spent blocked by circuit breaker
+        self.circuit_breaker_pause_seconds += wait_seconds
+
     def record_batch_retry_pass(self, successes: int, failures: int) -> None:
         """Record completion of a batch retry pass.
 
