@@ -1,7 +1,7 @@
 {
-  "branchName": "ralph/sprint-3",
-  "sprintNumber": 3,
-  "focusArea": "speed",
+  "branchName": "ralph/sprint-4",
+  "sprintNumber": 4,
+  "focusArea": "quality",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
     "testFramework": "pytest",
@@ -12,180 +12,183 @@
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create sprint 3 speed verification test",
+      "title": "Create sprint 4 quality verification test",
       "acceptanceCriteria": [
-        "Create tests/test_sprint_3_speed_verification.py with import checks for speed-related modules",
-        "Test that src/transcription/parallel_processor.py imports cleanly",
-        "Test that src/cache/base.py imports cleanly",
-        "Test that src/embeddings.py imports cleanly",
-        "All verification tests pass with pytest tests/test_sprint_3_speed_verification.py -v --non-interactive",
+        "Create tests/test_sprint_4_quality_verification.py with import checks for quality-related modules",
+        "Test that src/matching/scoring.py imports cleanly",
+        "Test that src/matching/tiered_matcher.py imports cleanly",
+        "Test that src/matching/strategies.py imports cleanly",
+        "All verification tests pass with pytest tests/test_sprint_4_quality_verification.py -v --non-interactive",
         "Mark story as passed by setting passes: true in prd.json"
       ],
       "priority": "high",
       "passes": true,
-      "notes": "Created tests/test_sprint_3_speed_verification.py with 35 tests across 10 test classes covering: parallel_processor imports (6), cache/base imports (6), embeddings imports (4), function signatures (2), BaseCache methods (3), batch sizes (4), CacheEntry (5), EvictionResult (4), verification marker (1)"
+      "notes": "Created test file with 18 tests across 6 test classes: TestScoringModuleImports (5), TestTieredMatcherModuleImports (4), TestStrategiesModuleImports (3), TestMatchingPackageImports (2), TestQualityRelatedImports (3), TestVerificationComplete (1). All tests pass."
     },
     {
       "id": "US-002",
-      "title": "Add parallel download worker count configuration",
+      "title": "Add confidence variance tracking to MatchResult",
       "acceptanceCriteria": [
-        "Add download.parallel_workers field to DownloadConfig dataclass in src/config/sections/download.py",
-        "Add parallel_workers: 4 to config.yaml under download section with comment",
-        "Update src/downloader/core.py to use config.download.parallel_workers instead of hardcoded value",
-        "Add unit test in tests/test_downloader_parallel.py verifying worker count is configurable",
-        "Test that setting parallel_workers=8 in config results in 8 workers being used",
-        "All tests pass with pytest tests/test_downloader_parallel.py -v --non-interactive"
+        "Add confidence_variance field to MatchResult in src/utils.py",
+        "Track variance of top-N candidate scores when multiple candidates have similar scores",
+        "Calculate variance as std_dev of top 5 candidate similarities in TieredMatcher",
+        "Add variance to match result JSON output in checkpoint",
+        "Add unit test in tests/test_confidence_variance.py verifying variance is calculated",
+        "Test that high variance (> 0.1) indicates uncertain match"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added parallel_workers field to DownloadConfig (default: 4). Updated VideoDownloader.download_all() to use config value when max_concurrent is None with getattr fallback. Added parallel workers logging. Created 10 unit tests covering config field, VideoDownloader usage, explicit override, and parallel_workers=8 scenario."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add cache statistics tracking to BaseCache",
+      "title": "Add semantic distance-based topic penalty",
       "acceptanceCriteria": [
-        "Add hits, misses, and bytes_saved counters to BaseCache in src/cache/base.py",
-        "Increment hit counter in get() method when cache hit occurs",
-        "Increment miss counter in get() method when cache miss occurs",
-        "Add get_stats() method returning dict with hits, misses, hit_rate, bytes_saved",
-        "Add unit test in tests/test_cache_stats.py verifying stats are tracked correctly",
-        "Test that hit_rate calculation is correct (hits / (hits + misses))"
+        "Update compute_topic_penalty in src/topic_extraction.py to use semantic similarity",
+        "Replace fixed -0.15 penalty with scaled penalty based on topic embedding distance",
+        "Use embedding model to compute topic similarity when LLM client available",
+        "Fall back to keyword overlap when embeddings unavailable",
+        "Add unit test in tests/test_topic_penalty_semantic.py for scaled penalty",
+        "Test that related topics (earthquake/disaster) get lower penalty than unrelated (earthquake/cooking)"
       ],
       "priority": "high",
-      "passes": true,
-      "notes": "Added _hits, _misses, _bytes_saved counters to BaseCache.__init__(). Updated get() to increment hit/miss counters and track bytes_saved on hits. Enhanced get_stats() to return hits, misses, hit_rate, bytes_saved. Added reset_stats() utility method. Created tests/test_cache_stats.py with 22 tests across 7 test classes covering: counter initialization, hit/miss tracking, get_stats return values, hit_rate calculation (0%, 50%, 75%, 100%), reset_stats, expired entries, and existing stats fields. All 641 cache-related tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add embedding batch size validation",
+      "title": "Add match quality metrics logging",
       "acceptanceCriteria": [
-        "Add validate_batch_size() function to src/embeddings.py that checks provider limits",
-        "Return warning if batch_size exceeds provider maximum (Gemini: 100, Voyage: 128)",
-        "Add unit test in tests/test_embedding_validation.py for batch size validation",
-        "Test that batch_size=150 with gemini provider returns warning",
-        "Test that batch_size=100 with gemini provider returns no warning",
-        "Document provider limits in config.yaml embedding section comment"
+        "Create MatchQualityMetrics dataclass in src/matching/metrics.py",
+        "Track: avg_confidence, min_confidence, max_confidence, confidence_std, gap_count, match_rate",
+        "Log quality summary at end of MATCH stage with all metrics",
+        "Add quality metrics to checkpoint stages.match.quality_metrics",
+        "Add unit test in tests/test_match_quality_metrics.py for metrics calculation",
+        "Test that metrics correctly reflect distribution of match confidences"
       ],
-      "priority": "medium",
-      "passes": true,
-      "notes": "Added PROVIDER_MAX_BATCH_SIZES constant and validate_batch_size() function in src/embeddings.py. Function checks provider limits (Gemini: 100, Voyage: 128, OpenAI: 2048, Local: 256), logs warning, and returns warning message string when exceeded. Created tests/test_embedding_validation.py with 33 tests across 10 test classes. Documented provider limits in config.yaml embedding section."
+      "priority": "high",
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add checkpoint load time logging",
+      "title": "Add LLM reasoning quality validation",
       "acceptanceCriteria": [
-        "Add timing measurement to CheckpointManager.load() in src/checkpoint.py",
-        "Log checkpoint load time in milliseconds using logger.info()",
-        "Add timing measurement to CheckpointManager._atomic_save() method",
-        "Log checkpoint save time in milliseconds using logger.debug()",
-        "Add unit test in tests/test_checkpoint_timing.py verifying timing is logged",
-        "Test that load time is logged when loading valid checkpoint file"
+        "Add validate_llm_reasoning() function in src/matching/llm_providers.py",
+        "Check that LLM reasoning mentions specific keywords from voiceover or video",
+        "Flag low-quality reasoning that is generic (< 3 specific references)",
+        "Log warning when LLM provides generic reasoning",
+        "Add unit test in tests/test_llm_reasoning_validation.py for reasoning checks",
+        "Test that generic reasoning like 'good match' is flagged vs specific reasoning"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added time.perf_counter() timing to load() (logs at INFO level) and _atomic_save() (logs at DEBUG level). Created tests/test_checkpoint_timing.py with 16 tests across 6 test classes covering: load timing (5 tests), save timing (5 tests), timing format (2 tests), large checkpoint timing (2 tests), intermediate save timing (1 test), mark_stage_incomplete timing (1 test). All 22 checkpoint tests pass (6 existing + 16 new)."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Add transcription audio extraction timeout",
+      "title": "Add temporal coherence scoring for adjacent segments",
       "acceptanceCriteria": [
-        "Add audio_extraction_timeout field to TranscriptionConfig (default: 60 seconds)",
-        "Update extract_audio() in src/transcription/utils.py to respect timeout",
-        "Kill FFmpeg subprocess if extraction exceeds timeout",
-        "Log warning when audio extraction times out with video path",
-        "Add unit test in tests/test_audio_extraction_timeout.py for timeout behavior",
-        "Test that extraction exceeding timeout raises TimeoutError"
+        "Add compute_temporal_coherence() function in src/matching/scoring.py",
+        "Score based on visual/topic similarity to previous segment's match",
+        "Apply small boost (+0.05) for clips from same source video as adjacent segments",
+        "Apply penalty (-0.05) for jarring context switches",
+        "Add temporal_coherence_enabled config option (default: true)",
+        "Add unit test in tests/test_temporal_coherence.py for coherence scoring"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added audio_extraction_timeout field to TranscriptionConfig (default: 60s). Updated extract_audio() to accept timeout parameter, raise TimeoutError on subprocess.TimeoutExpired, log warning with video path, and clean up partial files. Created tests/test_audio_extraction_timeout.py with 21 tests across 7 test classes covering: config field (4 tests), timeout parameter (3 tests), TimeoutError behavior (4 tests), warning logging (3 tests), extraction success (2 tests), config integration (2 tests), edge cases (3 tests). All tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Add skip_if_cached flag to transcribe_videos_parallel",
+      "title": "Add source diversity scoring for V4-V6 tracks",
       "acceptanceCriteria": [
-        "Add skip_if_cached parameter to transcribe_videos_parallel() in src/transcription/parallel_processor.py",
-        "When skip_if_cached=True (default), skip videos already in cache",
-        "When skip_if_cached=False, reprocess all videos ignoring cache",
-        "Log count of skipped videos when skip_if_cached=True",
-        "Add unit test in tests/test_transcription_skip_cached.py for skip behavior",
-        "Test that cached videos are not reprocessed when skip_if_cached=True"
+        "Add calculate_source_diversity_score() function in src/matching/strategies.py",
+        "Score based on how different V4-V6 sources are from V1-V3 (unique files, unique keywords)",
+        "Log source diversity score (0.0-1.0) for each segment",
+        "Add diversity score to secondary match metadata",
+        "Add unit test in tests/test_source_diversity.py for diversity calculation",
+        "Test that same-source alternatives get lower diversity score"
       ],
       "priority": "medium",
-      "passes": true,
-      "notes": "Added skip_if_cached parameter to transcribe_videos_parallel() with default=True. Parameter provides clearer semantics than force_reprocess (which is now deprecated). Logic: should_skip_cached = skip_if_cached and not force_reprocess. Added logging 'Skipped N cached videos (skip_if_cached=True)' when cached videos are found. Created tests/test_transcription_skip_cached.py with 17 tests across 7 test classes covering: parameter existence (3), skip_if_cached=True behavior (3), skip_if_cached=False behavior (2), force_reprocess interaction (2), logging (3), result correctness (2), edge cases (2). All 17 new tests pass, all 24 existing parallel_processor tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add FAISS index build time logging",
+      "title": "Add keyword match highlighting in match reasoning",
       "acceptanceCriteria": [
-        "Add timing measurement when building FAISS index in src/embeddings.py",
-        "Log index build time in milliseconds with vector count",
-        "Log index type used (flat vs ivf) in timing message",
-        "Add unit test in tests/test_faiss_timing.py verifying timing is logged",
-        "Test that index build time is logged for 100+ vectors",
-        "Include vector dimension in log message"
+        "Update MatchResult to include matched_keywords list field",
+        "Extract matching keywords between voiceover and selected video transcript",
+        "Populate matched_keywords during match selection in TieredMatcher",
+        "Include matched_keywords in checkpoint match output",
+        "Add unit test in tests/test_keyword_highlighting.py for keyword extraction",
+        "Test that common keywords between VO and video are correctly identified"
       ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Added time.perf_counter() timing to build_embedding_index(). Log format: '✓ Built FAISS index ({index_type}): {vector_count} vectors, dim={dimension} in {elapsed}ms'. Created tests/test_faiss_timing.py with 19 tests across 9 test classes covering: flat index timing (6 tests), timing format (2 tests), 100+ vectors (3 tests), different dimensions (3 tests), FAISS disabled (1 test), list input (1 test), IVF timing (1 test), log message format (2 tests)."
+      "priority": "medium",
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add download progress percentage logging",
+      "title": "Add entity match scoring boost",
       "acceptanceCriteria": [
-        "Add progress logging every 10% during download_all() in src/downloader/core.py",
-        "Log format: 'Download progress: X% (N/M videos)'",
-        "Log at 10%, 20%, 30%... 90%, 100% completion points",
-        "Add unit test in tests/test_download_progress.py verifying progress is logged",
-        "Test that progress messages are logged at expected intervals",
-        "Ensure progress logging does not slow down downloads significantly"
+        "Add apply_entity_match_boost() function in src/matching/scoring.py",
+        "Boost confidence when video contains same named entities as voiceover",
+        "Extract entities from voiceover segment keywords if available",
+        "Apply graduated boost: +0.05 for 1 entity, +0.08 for 2+, +0.12 for 3+ matches",
+        "Add unit test in tests/test_entity_match_boost.py for entity scoring",
+        "Test that matching person/place names boost confidence appropriately"
       ],
-      "priority": "low",
-      "passes": true,
-      "notes": "Added logged_milestones set to track which 10% milestones have been logged. Milestone logging at lines 406-411 checks milestone = int(current_pct // 10) * 10 and logs 'Download progress: X% (N/M keywords)' only once per milestone. Added 100% milestone log after loop completion (line 439). Created tests/test_download_progress.py with 13 tests across 6 test classes covering: milestone logging (3), log format (3), milestone uniqueness (2), edge cases (2), intervals (2), performance (1). All 13 new tests pass, all 41 existing downloader tests pass."
+      "priority": "medium",
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add cache warm-up utility function",
+      "title": "Add low confidence segment analysis logging",
       "acceptanceCriteria": [
-        "Create warm_cache() function in src/cache/base.py that pre-loads index into memory",
-        "Add pre_warm parameter to BaseCache.__init__() (default: False)",
-        "When pre_warm=True, load entire index at initialization",
-        "Log cache warm-up completion with entry count and time taken",
-        "Add unit test in tests/test_cache_warmup.py for warm-up behavior",
-        "Test that pre_warm=True loads index immediately on init"
+        "Add analyze_low_confidence_segments() function in src/matching/main.py",
+        "Identify segments with confidence < 0.6 after matching completes",
+        "Log analysis: common patterns (short voiceover, abstract content, missing keywords)",
+        "Suggest potential improvements in log output",
+        "Add unit test in tests/test_low_confidence_analysis.py for analysis function",
+        "Test that low confidence patterns are correctly identified and logged"
       ],
       "priority": "low",
-      "passes": false
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Add parallel embedding generation for multiple providers",
+      "title": "Add match confidence histogram logging",
       "acceptanceCriteria": [
-        "Add parallel_embed_batch() function to src/embeddings.py that processes batches in parallel",
-        "Use ThreadPoolExecutor with max_workers from config.embedding.max_workers (add field if missing)",
-        "Split input texts into batches, process batches in parallel",
-        "Aggregate results maintaining original order",
-        "Add unit test in tests/test_parallel_embedding.py for parallel behavior",
-        "Test that parallel processing is faster than sequential for 200+ texts"
+        "Add log_confidence_histogram() function in src/matching/metrics.py",
+        "Generate ASCII histogram of confidence distribution (buckets: 0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0)",
+        "Log histogram at INFO level after MATCH stage completes",
+        "Include segment count per bucket in histogram output",
+        "Add unit test in tests/test_confidence_histogram.py for histogram generation",
+        "Test that histogram correctly buckets confidence values"
       ],
       "priority": "low",
-      "passes": false
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "Add LLM response cache TTL configuration",
+      "title": "Add match quality summary to OUTPUT stage",
       "acceptanceCriteria": [
-        "Add llm.cache_ttl_hours field to LLMConfig in src/config/sections/llm.py (default: 24)",
-        "Update LLM cache to use TTL from config instead of hardcoded 24 hours",
-        "Add cache_ttl_hours: 24 to config.yaml under llm section with comment",
-        "Add unit test in tests/test_llm_cache_ttl.py for TTL configuration",
-        "Test that setting cache_ttl_hours=1 expires entries after 1 hour",
-        "Document TTL setting in config.yaml comment"
+        "Add quality summary section to OTIO metadata in src/otio/builder.py",
+        "Include: total_segments, matched_segments, avg_confidence, gaps_count, source_variety",
+        "Write quality summary to output/quality_report.json alongside OTIO file",
+        "Add quality_report_enabled config option (default: true)",
+        "Add unit test in tests/test_quality_report.py for report generation",
+        "Test that quality report contains all expected fields and valid values"
       ],
       "priority": "low",
-      "passes": false
+      "passes": false,
+      "notes": ""
     }
   ]
 }
