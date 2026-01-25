@@ -36,53 +36,101 @@ while ($true) {
     if (Test-Path $QueuePath) {
         try {
             $queue = Get-Content $QueuePath -Raw | ConvertFrom-Json
-            if ($queue.queue.Count -gt 0) {
+
+            # Check for interview format (focusAreas) or legacy format (queue)
+            $isInterviewFormat = $null -ne $queue.focusAreas
+            $isLegacyFormat = $null -ne $queue.queue
+
+            if ($isInterviewFormat -or $isLegacyFormat) {
                 $queueActive = $true
-                $queueTotal = $queue.queue.Count
-                $queueCompleted = $queue.completedAreas.Count
-                $queueSkipped = $queue.skippedAreas.Count
-                $queueCurrent = $queue.currentIndex + 1
 
-                # Queue progress bar
-                $queuePct = if ($queueTotal -gt 0) { [math]::Round(($queueCompleted / $queueTotal) * 100) } else { 0 }
-                $qBarWidth = 30
-                $qFilledWidth = if ($queueTotal -gt 0) { [math]::Round(($queueCompleted / $queueTotal) * $qBarWidth) } else { 0 }
-                $qEmptyWidth = $qBarWidth - $qFilledWidth
-                $qBar = ("=" * $qFilledWidth) + ("-" * $qEmptyWidth)
+                if ($isInterviewFormat) {
+                    # Interview format: focusAreas array with completed flag
+                    $allAreas = $queue.focusAreas
+                    $queueTotal = $allAreas.Count
+                    $completed = @($allAreas | Where-Object { $_.completed -eq $true })
+                    $queueCompleted = $completed.Count
+                    $queueSkipped = 0  # Interview format doesn't track skipped separately
 
-                Write-Host "  QUEUE MODE" -ForegroundColor Magenta
-                Write-Host "  [$qBar] $queuePct% ($queueCompleted/$queueTotal areas)" -ForegroundColor Magenta
-                Write-Host ""
-
-                # Show queue status
-                foreach ($i in 0..($queueTotal - 1)) {
-                    $area = $queue.queue[$i]
-                    if ($queue.completedAreas -contains $area) {
-                        Write-Host "    [DONE] $area" -ForegroundColor Green
-                    } elseif ($queue.skippedAreas | Where-Object { $_.area -eq $area }) {
-                        $skipInfo = $queue.skippedAreas | Where-Object { $_.area -eq $area } | Select-Object -First 1
-                        Write-Host "    [SKIP] $area ($($skipInfo.reason))" -ForegroundColor Yellow
-                    } elseif ($i -eq $queue.currentIndex) {
-                        Write-Host "    [>>  ] $area (current)" -ForegroundColor Cyan
+                    # Find current (first incomplete)
+                    $currentArea = $allAreas | Where-Object { -not $_.completed } | Select-Object -First 1
+                    $queueCurrent = if ($currentArea) {
+                        $idx = 0
+                        for ($i = 0; $i -lt $allAreas.Count; $i++) {
+                            if ($allAreas[$i].id -eq $currentArea.id) { $idx = $i; break }
+                        }
+                        $idx + 1
                     } else {
-                        Write-Host "    [    ] $area" -ForegroundColor DarkGray
+                        $queueTotal
                     }
-                }
-                Write-Host ""
-
-                # Retry status
-                if ($queue.networkRetries.currentRetryCount -gt 0) {
-                    Write-Host "    Network retries: $($queue.networkRetries.currentRetryCount)/$($queue.networkRetries.maxRetries)" -ForegroundColor Yellow
-                }
-                if ($queue.apiRetries.currentRetryCount -gt 0) {
-                    Write-Host "    API retries: $($queue.apiRetries.currentRetryCount)/$($queue.apiRetries.maxRetries)" -ForegroundColor Yellow
-                }
-                if ($queue.retryCount -gt 0) {
-                    Write-Host "    Sprint retries: $($queue.retryCount)" -ForegroundColor Yellow
+                } else {
+                    # Legacy format: queue array + completedAreas/skippedAreas arrays
+                    $queueTotal = $queue.queue.Count
+                    $queueCompleted = if ($queue.completedAreas) { $queue.completedAreas.Count } else { 0 }
+                    $queueSkipped = if ($queue.skippedAreas) { $queue.skippedAreas.Count } else { 0 }
+                    $queueCurrent = $queue.currentIndex + 1
                 }
 
-                Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
-                Write-Host ""
+                if ($queueTotal -gt 0) {
+                    # Queue progress bar
+                    $queuePct = [math]::Round(($queueCompleted / $queueTotal) * 100)
+                    $qBarWidth = 30
+                    $qFilledWidth = [math]::Round(($queueCompleted / $queueTotal) * $qBarWidth)
+                    $qEmptyWidth = $qBarWidth - $qFilledWidth
+                    $qBar = ("=" * $qFilledWidth) + ("-" * $qEmptyWidth)
+
+                    Write-Host "  QUEUE MODE" -ForegroundColor Magenta
+                    Write-Host "  [$qBar] $queuePct% ($queueCompleted/$queueTotal areas)" -ForegroundColor Magenta
+
+                    # Show interview context if available
+                    if ($queue.interviewContext) {
+                        Write-Host "  Context: $($queue.interviewContext)" -ForegroundColor DarkGray
+                    }
+                    Write-Host ""
+
+                    # Show queue status based on format
+                    if ($isInterviewFormat) {
+                        foreach ($area in $allAreas) {
+                            if ($area.completed) {
+                                Write-Host "    [DONE] $($area.id)" -ForegroundColor Green
+                            } elseif ($currentArea -and $area.id -eq $currentArea.id) {
+                                Write-Host "    [>>  ] $($area.id) (current)" -ForegroundColor Cyan
+                            } else {
+                                Write-Host "    [    ] $($area.id)" -ForegroundColor DarkGray
+                            }
+                        }
+                    } else {
+                        # Legacy format display
+                        foreach ($i in 0..($queueTotal - 1)) {
+                            $area = $queue.queue[$i]
+                            if ($queue.completedAreas -contains $area) {
+                                Write-Host "    [DONE] $area" -ForegroundColor Green
+                            } elseif ($queue.skippedAreas | Where-Object { $_.area -eq $area }) {
+                                $skipInfo = $queue.skippedAreas | Where-Object { $_.area -eq $area } | Select-Object -First 1
+                                Write-Host "    [SKIP] $area ($($skipInfo.reason))" -ForegroundColor Yellow
+                            } elseif ($i -eq $queue.currentIndex) {
+                                Write-Host "    [>>  ] $area (current)" -ForegroundColor Cyan
+                            } else {
+                                Write-Host "    [    ] $area" -ForegroundColor DarkGray
+                            }
+                        }
+                    }
+                    Write-Host ""
+
+                    # Retry status
+                    if ($queue.networkRetries -and $queue.networkRetries.currentRetryCount -gt 0) {
+                        Write-Host "    Network retries: $($queue.networkRetries.currentRetryCount)/$($queue.networkRetries.maxRetries)" -ForegroundColor Yellow
+                    }
+                    if ($queue.apiRetries -and $queue.apiRetries.currentRetryCount -gt 0) {
+                        Write-Host "    API retries: $($queue.apiRetries.currentRetryCount)/$($queue.apiRetries.maxRetries)" -ForegroundColor Yellow
+                    }
+                    if ($queue.retryCount -gt 0) {
+                        Write-Host "    Sprint retries: $($queue.retryCount)" -ForegroundColor Yellow
+                    }
+
+                    Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
+                    Write-Host ""
+                }
             }
         } catch {}
     }
