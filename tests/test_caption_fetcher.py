@@ -18,6 +18,7 @@ from src.caption_fetcher import (
     CaptionUnavailableError,
     CaptionFetchError,
     AvailableLanguage,
+    determine_caption_quality,
 )
 
 
@@ -150,6 +151,144 @@ class TestCaptionResult:
         assert data['language'] == "en"
         assert data['is_auto_generated'] is True
         assert data['format_source'] == "json3"
+        # US-007: caption_quality should be included in to_dict
+        assert 'caption_quality' in data
+
+    def test_caption_result_caption_quality_high(self):
+        """Test caption_quality returns 'high' for human captions with good completeness (US-007)"""
+        # Create many segments for good completeness
+        segments = [
+            CaptionSegment(i, i * 3.0, (i + 1) * 3.0, f"Segment {i}", "vid1")
+            for i in range(50)  # 50 segments over 150s = 3s avg
+        ]
+
+        result = CaptionResult(
+            video_id="vid1",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,  # Human captions
+            format_source="vtt"
+        )
+
+        assert result.caption_quality == "high"
+
+    def test_caption_result_caption_quality_medium_auto(self):
+        """Test caption_quality returns 'medium' for auto-generated captions (US-007)"""
+        segments = [
+            CaptionSegment(i, i * 3.0, (i + 1) * 3.0, f"Segment {i}", "vid1")
+            for i in range(50)
+        ]
+
+        result = CaptionResult(
+            video_id="vid1",
+            segments=segments,
+            language="en",
+            is_auto_generated=True,  # Auto-generated
+            format_source="vtt"
+        )
+
+        assert result.caption_quality == "medium"
+
+    def test_caption_result_caption_quality_low_sparse(self):
+        """Test caption_quality returns 'low' for very sparse captions (US-007)"""
+        # Only 2 segments over 60 seconds = very sparse
+        segments = [
+            CaptionSegment(0, 0.0, 30.0, "First", "vid1"),
+            CaptionSegment(1, 30.0, 60.0, "Second", "vid1"),
+        ]
+
+        result = CaptionResult(
+            video_id="vid1",
+            segments=segments,
+            language="en",
+            is_auto_generated=True,
+            format_source="vtt"
+        )
+
+        assert result.caption_quality == "low"
+
+    def test_caption_result_caption_quality_low_empty(self):
+        """Test caption_quality returns 'low' for empty captions (US-007)"""
+        result = CaptionResult(
+            video_id="vid1",
+            segments=[],
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+
+        assert result.caption_quality == "low"
+
+
+class TestDetermineCaptionQuality:
+    """Test determine_caption_quality function (US-007)"""
+
+    def test_high_quality_human_dense(self):
+        """Human captions with dense segments = high quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=False,
+            segment_count=100,
+            total_duration=300.0  # 3s avg per segment
+        )
+        assert quality == "high"
+
+    def test_medium_quality_human_sparse(self):
+        """Human captions with sparse segments = medium quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=False,
+            segment_count=8,  # 8 segments (below min_segments_for_high=10)
+            total_duration=60.0  # 7.5s avg per segment - acceptable but sparse
+        )
+        assert quality == "medium"
+
+    def test_medium_quality_auto_dense(self):
+        """Auto-generated captions with dense segments = medium quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=True,
+            segment_count=100,
+            total_duration=300.0
+        )
+        assert quality == "medium"
+
+    def test_low_quality_empty(self):
+        """No segments = low quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=False,
+            segment_count=0,
+            total_duration=0.0
+        )
+        assert quality == "low"
+
+    def test_low_quality_very_sparse(self):
+        """Very few segments = low quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=True,
+            segment_count=2,
+            total_duration=120.0  # 60s avg - very sparse
+        )
+        assert quality == "low"
+
+    def test_low_quality_auto_very_sparse_long_video(self):
+        """Auto captions with very long avg duration on long video = low quality"""
+        quality = determine_caption_quality(
+            is_auto_generated=True,
+            segment_count=3,
+            total_duration=120.0  # 40s avg
+        )
+        assert quality == "low"
+
+    def test_custom_thresholds(self):
+        """Test custom min_segments and max_avg_duration thresholds"""
+        # With default thresholds (10 segments, 10s max avg), this would be medium
+        # With custom thresholds (5 segments, 20s max avg), this should be high
+        quality = determine_caption_quality(
+            is_auto_generated=False,
+            segment_count=6,
+            total_duration=100.0,  # ~16s avg
+            min_segments_for_high=5,
+            max_avg_duration_for_high=20.0
+        )
+        assert quality == "high"
 
 
 class TestCaptionExceptions:

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from .scoring import (
     apply_topic_penalty,
     apply_broll_boost,
+    apply_caption_quality_adjustment,  # US-007
     apply_current_project_boost,
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -657,6 +658,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            # US-007: Apply caption quality adjustment
+            adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
+                adjusted_confidence, best_seg, self.config
+            )
+
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
@@ -670,6 +676,8 @@ class TieredMatcher:
                 final_reasoning += f" [{topic_penalty_reason}]"
             if broll_reason:
                 final_reasoning += f" [{broll_reason}]"
+            if caption_quality_reason:
+                final_reasoning += f" [{caption_quality_reason}]"
             if project_reason:
                 final_reasoning += f" [{project_reason}]"
 
@@ -724,6 +732,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, self.config
             )
 
+            # US-007: Apply caption quality adjustment
+            adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
+                adjusted_confidence, best_seg, self.config
+            )
+
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
@@ -733,6 +746,8 @@ class TieredMatcher:
                 reasoning += f" [{topic_penalty_reason}]"
             if broll_reason:
                 reasoning += f" [{broll_reason}]"
+            if caption_quality_reason:
+                reasoning += f" [{caption_quality_reason}]"
             if project_reason:
                 reasoning += f" [{project_reason}]"
 
@@ -798,6 +813,11 @@ class TieredMatcher:
                     adjusted_confidence, cached_seg, self.config
                 )
 
+                # US-007: Apply caption quality adjustment
+                adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
+                    adjusted_confidence, cached_seg, self.config
+                )
+
                 adjusted_confidence, project_reason = apply_current_project_boost(
                     adjusted_confidence, cached_seg, self.config
                 )
@@ -807,6 +827,8 @@ class TieredMatcher:
                     final_reasoning += f" [{topic_penalty_reason}]"
                 if broll_reason:
                     final_reasoning += f" [{broll_reason}]"
+                if caption_quality_reason:
+                    final_reasoning += f" [{caption_quality_reason}]"
                 if project_reason:
                     final_reasoning += f" [{project_reason}]"
 
@@ -940,6 +962,11 @@ class TieredMatcher:
             adjusted_confidence, best_seg, self.config
         )
 
+        # US-007: Apply caption quality adjustment
+        adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
+            adjusted_confidence, best_seg, self.config
+        )
+
         adjusted_confidence, project_reason = apply_current_project_boost(
             adjusted_confidence, best_seg, self.config
         )
@@ -951,6 +978,8 @@ class TieredMatcher:
             final_reasoning += f" [{topic_penalty_reason}]"
         if broll_reason:
             final_reasoning += f" [{broll_reason}]"
+        if caption_quality_reason:
+            final_reasoning += f" [{caption_quality_reason}]"
         if project_reason:
             final_reasoning += f" [{project_reason}]"
 

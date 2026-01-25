@@ -208,6 +208,59 @@ def apply_broll_boost(
     return boosted, reason
 
 
+def apply_caption_quality_adjustment(
+    confidence: float,
+    video_segment: SRTSegment,
+    config
+) -> Tuple[float, str]:
+    """
+    Apply confidence adjustment based on caption quality (US-007).
+
+    Caption quality levels:
+    - 'high': Human-uploaded captions -> confidence boost
+    - 'medium': Auto-generated captions -> no change
+    - 'low': Missing/fallback/sparse captions -> confidence penalty
+
+    Args:
+        confidence: Original confidence score
+        video_segment: Video segment being considered (may have caption_quality)
+        config: Config with caption_quality adjustment settings
+
+    Returns:
+        Tuple of (adjusted_confidence, adjustment_reason)
+    """
+    mc = config.matching
+
+    # Check if caption quality adjustment is enabled
+    if not getattr(mc, 'caption_quality_adjustment_enabled', True):
+        return confidence, ""
+
+    # Get caption quality from video segment metadata
+    caption_quality = getattr(video_segment, 'caption_quality', None)
+
+    if not caption_quality:
+        return confidence, ""
+
+    # Get adjustment values from config
+    high_boost = getattr(mc, 'caption_quality_high_boost', 0.05)
+    low_penalty = getattr(mc, 'caption_quality_low_penalty', 0.1)
+
+    if caption_quality == 'high' and high_boost > 0:
+        adjusted = min(1.0, confidence + high_boost)
+        reason = f"caption quality high: +{high_boost:.2f}"
+        logger.debug(f"Caption quality boost applied: {confidence:.2f} -> {adjusted:.2f}")
+        return adjusted, reason
+
+    elif caption_quality == 'low' and low_penalty > 0:
+        adjusted = max(0.0, confidence - low_penalty)
+        reason = f"caption quality low: -{low_penalty:.2f}"
+        logger.debug(f"Caption quality penalty applied: {confidence:.2f} -> {adjusted:.2f}")
+        return adjusted, reason
+
+    # Medium quality or unknown - no adjustment
+    return confidence, ""
+
+
 def apply_current_project_boost(
     confidence: float,
     video_segment: SRTSegment,

@@ -93,6 +93,7 @@ class CaptionStage(Stage):
                 CaptionUnavailableError,
                 CaptionFetchError,
                 CaptionResult,
+                determine_caption_quality,
             )
 
             self._fetcher = CaptionFetcher(config=config)
@@ -123,6 +124,9 @@ class CaptionStage(Stage):
                         preferred_language=preferred_lang
                     )
 
+                    # Determine caption quality (US-007)
+                    quality = result.caption_quality
+
                     caption_results[video_id] = {
                         'video_id': video_id,
                         'segments': [seg.to_dict() for seg in result.segments],
@@ -130,18 +134,21 @@ class CaptionStage(Stage):
                         'is_auto_generated': result.is_auto_generated,
                         'format_source': result.format_source,
                         'segment_count': len(result.segments),
+                        'caption_quality': quality,  # US-007: Quality indicator
                     }
                     success_count += 1
-                    print(f"✓ {len(result.segments)} segments ({result.language})")
+                    quality_label = 'human' if not result.is_auto_generated else 'auto'
+                    print(f"✓ {len(result.segments)} segments ({result.language}, {quality_label}, quality={quality})")
 
                 except CaptionUnavailableError as e:
                     caption_results[video_id] = {
                         'video_id': video_id,
                         'unavailable': True,
                         'reason': str(e.reason),
+                        'caption_quality': 'low',  # US-007: Unavailable = low quality
                     }
                     fail_count += 1
-                    print(f"✗ No captions available")
+                    print(f"✗ No captions available (quality=low)")
                     logger.debug(f"Captions unavailable for {video_id}: {e}")
 
                 except CaptionFetchError as e:
@@ -149,9 +156,10 @@ class CaptionStage(Stage):
                         'video_id': video_id,
                         'error': True,
                         'reason': str(e.reason),
+                        'caption_quality': 'low',  # US-007: Error = low quality
                     }
                     fail_count += 1
-                    print(f"✗ Fetch error")
+                    print(f"✗ Fetch error (quality=low)")
                     logger.warning(f"Caption fetch error for {video_id}: {e}")
 
                 # Periodic checkpoint save
@@ -161,17 +169,28 @@ class CaptionStage(Stage):
             # Store caption data in state.text_metadata for matching
             self._populate_text_metadata(state, caption_results)
 
+            # Calculate quality distribution (US-007)
+            quality_distribution = self._calculate_quality_distribution(caption_results)
+            human_count = sum(1 for r in caption_results.values()
+                             if not r.get('is_auto_generated') and not r.get('unavailable') and not r.get('error'))
+            auto_count = sum(1 for r in caption_results.values()
+                            if r.get('is_auto_generated') and not r.get('unavailable') and not r.get('error'))
+
             # Summary
             print(f"\n  + Caption fetch complete:")
             print(f"    - Success: {success_count} videos")
             print(f"    - Skipped (cached): {skip_count} videos")
             print(f"    - Unavailable/Error: {fail_count} videos")
+            # US-007: Report caption quality distribution
+            print(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
+            print(f"    - Quality distribution: {quality_distribution['high']} high, "
+                  f"{quality_distribution['medium']} medium, {quality_distribution['low']} low")
 
             if fail_count > 0 and getattr(caption_config, 'fallback_to_transcription', True):
                 print(f"    - {fail_count} videos will use Whisper transcription fallback")
                 warnings.append(f"{fail_count} videos require transcription fallback")
 
-            # Prepare checkpoint data
+            # Prepare checkpoint data (US-007: include quality stats)
             checkpoint_data = {
                 'caption_results': caption_results,
                 'success_count': success_count,
@@ -180,6 +199,10 @@ class CaptionStage(Stage):
                 'total_segments': sum(
                     r.get('segment_count', 0) for r in caption_results.values()
                 ),
+                # US-007: Quality distribution for analysis
+                'quality_distribution': quality_distribution,
+                'human_count': human_count,
+                'auto_count': auto_count,
             }
 
             return StageResult.ok(checkpoint_data, warnings)
@@ -333,6 +356,29 @@ class CaptionStage(Stage):
         except Exception as e:
             logger.debug(f"Intermediate checkpoint save failed: {e}")
 
+    def _calculate_quality_distribution(
+        self,
+        caption_results: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, int]:
+        """Calculate caption quality distribution (US-007).
+
+        Args:
+            caption_results: Dict of video_id -> caption result data
+
+        Returns:
+            Dict with counts for 'high', 'medium', 'low' quality
+        """
+        distribution = {'high': 0, 'medium': 0, 'low': 0}
+
+        for result in caption_results.values():
+            quality = result.get('caption_quality', 'low')
+            if quality in distribution:
+                distribution[quality] += 1
+            else:
+                distribution['low'] += 1  # Unknown quality counts as low
+
+        return distribution
+
     def _populate_text_metadata(
         self,
         state: 'PipelineState',
@@ -342,6 +388,8 @@ class CaptionStage(Stage):
 
         Converts caption segments to the format expected by the matching stage.
         Compatible with TranscriptSegment format used by TRANSCRIBE stage.
+
+        US-007: Includes caption_quality field for matching confidence adjustment.
         """
         text_metadata = []
 
@@ -353,6 +401,7 @@ class CaptionStage(Stage):
             segments = result.get('segments', [])
             language = result.get('language', 'en')
             is_auto = result.get('is_auto_generated', False)
+            caption_quality = result.get('caption_quality', 'medium')  # US-007
 
             for seg in segments:
                 text_metadata.append({
@@ -365,6 +414,7 @@ class CaptionStage(Stage):
                     'caption_source': 'youtube',
                     'caption_language': language,
                     'caption_auto_generated': is_auto,
+                    'caption_quality': caption_quality,  # US-007: Quality indicator
                 })
 
         # Extend existing text_metadata (don't replace, as TRANSCRIBE may add more)

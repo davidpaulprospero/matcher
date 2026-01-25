@@ -113,8 +113,8 @@
         "Quality saved to checkpoint for analysis",
         "Tests verify quality detection and confidence adjustment"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added determine_caption_quality() function and caption_quality property to CaptionResult. Quality determined by is_auto_generated flag and segment completeness (density). CaptionStage populates text_metadata with caption_quality field. Added caption_quality_adjustment_enabled, caption_quality_high_boost (+5%), caption_quality_low_penalty (-10%) to MatchingConfig. apply_caption_quality_adjustment() in scoring.py integrated into TieredMatcher at 4 locations. CaptionStage reports quality distribution in summary and checkpoint. 21 new tests: 12 in test_caption_fetcher.py (determine_caption_quality), 9 in test_scoring.py (apply_caption_quality_adjustment). All tests pass."
     },
     {
       "id": "US-008",
