@@ -191,6 +191,37 @@ class CaptionSegment:
 
 
 @dataclass
+class TimingValidationResult:
+    """Result of caption timing validation against video duration (US-007).
+
+    Attributes:
+        is_valid: True if timing is within acceptable bounds.
+        caption_end_time: End time of the last caption segment.
+        video_duration: Video duration used for comparison.
+        exceeds_duration: True if captions extend beyond video duration + tolerance.
+        below_coverage: True if caption coverage is below minimum threshold.
+        message: Human-readable description of validation result.
+    """
+    is_valid: bool
+    caption_end_time: float
+    video_duration: float
+    exceeds_duration: bool = False
+    below_coverage: bool = False
+    message: str = ""
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'is_valid': self.is_valid,
+            'caption_end_time': self.caption_end_time,
+            'video_duration': self.video_duration,
+            'exceeds_duration': self.exceeds_duration,
+            'below_coverage': self.below_coverage,
+            'message': self.message,
+        }
+
+
+@dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
 
@@ -202,6 +233,7 @@ class CaptionResult:
         format_source: Caption format ('vtt', 'srv3', 'json3', etc.).
         video_duration: Optional video duration for coverage calculation (US-004).
         skipped_segments_count: Number of segments skipped due to parse errors (US-005).
+        timing_validated: Result of timing validation, or None if not validated (US-007).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -210,6 +242,7 @@ class CaptionResult:
     format_source: str = ""  # 'vtt', 'srv3', 'json3', etc.
     video_duration: Optional[float] = None  # US-004: For coverage calculation
     skipped_segments_count: int = 0  # US-005: Segments skipped due to parse errors
+    timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
 
     @property
     def text(self) -> str:
@@ -291,6 +324,93 @@ class CaptionResult:
         """
         return self.calculate_coverage()
 
+    def validate_timing(
+        self,
+        video_duration: Optional[float] = None,
+        max_exceed_ratio: float = 1.1,
+        min_coverage_ratio: float = 0.5,
+    ) -> TimingValidationResult:
+        """Validate caption timestamps against video duration (US-007).
+
+        Checks two conditions:
+        1. Caption end time should not exceed video duration by more than 10% (default)
+        2. Caption coverage should not be below 50% of video duration (default)
+
+        Args:
+            video_duration: Video duration in seconds. If not provided, uses
+                self.video_duration if set.
+            max_exceed_ratio: Maximum allowed ratio of caption_end/video_duration.
+                Default 1.1 means captions can extend up to 10% beyond video.
+            min_coverage_ratio: Minimum required coverage ratio.
+                Default 0.5 means captions must cover at least 50% of video.
+
+        Returns:
+            TimingValidationResult with validation details. Also stores result
+            in self.timing_validated.
+
+        Example:
+            >>> result = CaptionResult(video_id="abc", segments=[...], video_duration=300.0)
+            >>> validation = result.validate_timing()
+            >>> if not validation.is_valid:
+            ...     print(f"Warning: {validation.message}")
+        """
+        duration = video_duration or self.video_duration
+
+        # Cannot validate without video duration
+        if not duration or duration <= 0:
+            result = TimingValidationResult(
+                is_valid=True,  # Can't fail validation without duration
+                caption_end_time=0.0,
+                video_duration=0.0,
+                message="Cannot validate timing: video duration unknown"
+            )
+            self.timing_validated = result
+            return result
+
+        # Get caption end time from last segment
+        caption_end_time = self.segments[-1].end_time if self.segments else 0.0
+
+        # Check if captions exceed video duration
+        exceeds_duration = caption_end_time > (duration * max_exceed_ratio)
+
+        # Check coverage (using last segment end time, not summed duration)
+        # This is different from calculate_coverage which sums segment durations
+        caption_coverage = caption_end_time / duration if duration > 0 else 0.0
+        below_coverage = caption_coverage < min_coverage_ratio
+
+        # Determine overall validity
+        is_valid = not exceeds_duration and not below_coverage
+
+        # Build message
+        messages = []
+        if exceeds_duration:
+            exceed_pct = (caption_end_time / duration - 1.0) * 100
+            messages.append(
+                f"Caption end ({caption_end_time:.1f}s) exceeds video duration "
+                f"({duration:.1f}s) by {exceed_pct:.1f}%"
+            )
+        if below_coverage:
+            coverage_pct = caption_coverage * 100
+            messages.append(
+                f"Caption coverage ({coverage_pct:.1f}%) is below minimum "
+                f"({min_coverage_ratio * 100:.0f}%)"
+            )
+        if is_valid:
+            messages.append(f"Timing valid: captions end at {caption_end_time:.1f}s, "
+                          f"video is {duration:.1f}s")
+
+        result = TimingValidationResult(
+            is_valid=is_valid,
+            caption_end_time=caption_end_time,
+            video_duration=duration,
+            exceeds_duration=exceeds_duration,
+            below_coverage=below_coverage,
+            message="; ".join(messages)
+        )
+
+        self.timing_validated = result
+        return result
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -303,6 +423,7 @@ class CaptionResult:
             'video_duration': self.video_duration,  # US-004
             'coverage_ratio': self.coverage_ratio,  # US-004
             'skipped_segments_count': self.skipped_segments_count,  # US-005
+            'timing_validated': self.timing_validated.to_dict() if self.timing_validated else None,  # US-007
         }
 
 

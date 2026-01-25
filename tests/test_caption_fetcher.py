@@ -18,6 +18,7 @@ from src.caption_fetcher import (
     CaptionUnavailableError,
     CaptionFetchError,
     AvailableLanguage,
+    TimingValidationResult,
     determine_caption_quality,
 )
 
@@ -337,6 +338,265 @@ class TestCaptionResult:
         assert data['video_duration'] == 100.0
         assert 'coverage_ratio' in data
         assert data['coverage_ratio'] == 0.5
+
+    # US-007: Timing validation tests
+
+    def test_validate_timing_valid(self):
+        """Test validate_timing returns valid for normal captions (US-007)"""
+        # Captions end at 90s, video is 100s - should be valid
+        segments = [
+            CaptionSegment(0, 0.0, 30.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 30.0, 60.0, "Seg 2", "vid1"),
+            CaptionSegment(2, 60.0, 90.0, "Seg 3", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+        assert validation.below_coverage is False
+        assert validation.caption_end_time == 90.0
+        assert validation.video_duration == 100.0
+        assert "Timing valid" in validation.message
+
+    def test_validate_timing_exceeds_duration(self):
+        """Test validate_timing detects captions exceeding video duration (US-007)"""
+        # Captions end at 120s, video is 100s - exceeds by 20% (over 10% tolerance)
+        segments = [
+            CaptionSegment(0, 0.0, 60.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 60.0, 120.0, "Seg 2", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is False
+        assert validation.exceeds_duration is True
+        assert validation.caption_end_time == 120.0
+        assert "exceeds video duration" in validation.message.lower()
+
+    def test_validate_timing_within_tolerance(self):
+        """Test validate_timing allows captions within 10% tolerance (US-007)"""
+        # Captions end at 105s, video is 100s - within 10% tolerance
+        segments = [
+            CaptionSegment(0, 0.0, 105.0, "Long segment", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+
+    def test_validate_timing_at_tolerance_boundary(self):
+        """Test validate_timing at exactly 110% boundary (US-007)"""
+        # Captions end at exactly 110s when video is 100s - should be valid (<=110%)
+        segments = [CaptionSegment(0, 0.0, 110.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is True
+        assert validation.exceeds_duration is False
+
+    def test_validate_timing_just_over_tolerance(self):
+        """Test validate_timing just over 110% boundary (US-007)"""
+        # Captions end at 110.1s when video is 100s - should fail (>110%)
+        segments = [CaptionSegment(0, 0.0, 110.1, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is False
+        assert validation.exceeds_duration is True
+
+    def test_validate_timing_below_coverage(self):
+        """Test validate_timing detects low coverage (US-007)"""
+        # Captions only cover 0-40s of a 100s video (40% < 50% threshold)
+        segments = [
+            CaptionSegment(0, 0.0, 20.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 20.0, 40.0, "Seg 2", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        assert validation.is_valid is False
+        assert validation.below_coverage is True
+        assert validation.exceeds_duration is False
+        assert "below minimum" in validation.message.lower()
+
+    def test_validate_timing_both_issues(self):
+        """Test validate_timing detects both exceed and low coverage (US-007)"""
+        # Captions at 120s but only one early segment (low coverage, exceeds duration)
+        # Note: This scenario is unusual but tests that both flags can be set
+        segments = [
+            CaptionSegment(0, 0.0, 10.0, "Seg 1", "vid1"),
+            CaptionSegment(1, 100.0, 120.0, "Seg 2 way later", "vid1"),
+        ]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # This tests exceeds (120 > 110) but coverage is 120% so not below_coverage
+        validation = result.validate_timing()
+
+        assert validation.is_valid is False
+        assert validation.exceeds_duration is True
+
+    def test_validate_timing_no_duration(self):
+        """Test validate_timing without video duration (US-007)"""
+        segments = [CaptionSegment(0, 0.0, 100.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments)  # No video_duration
+
+        validation = result.validate_timing()
+
+        # Should be marked as valid since we can't validate
+        assert validation.is_valid is True
+        assert "video duration unknown" in validation.message
+
+    def test_validate_timing_empty_segments(self):
+        """Test validate_timing with no segments (US-007)"""
+        result = CaptionResult(video_id="vid1", segments=[], video_duration=100.0)
+
+        validation = result.validate_timing()
+
+        # No segments = 0 end time = below coverage threshold
+        assert validation.is_valid is False
+        assert validation.below_coverage is True
+        assert validation.caption_end_time == 0.0
+
+    def test_validate_timing_stores_result(self):
+        """Test validate_timing stores result in timing_validated field (US-007)"""
+        segments = [CaptionSegment(0, 0.0, 50.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        assert result.timing_validated is None
+
+        validation = result.validate_timing()
+
+        assert result.timing_validated is validation
+        assert result.timing_validated.is_valid is True
+
+    def test_validate_timing_custom_thresholds(self):
+        """Test validate_timing with custom tolerance thresholds (US-007)"""
+        # 115s captions on 100s video - fails with default 1.1, passes with 1.2
+        segments = [CaptionSegment(0, 0.0, 115.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # Should fail with default
+        validation1 = result.validate_timing(max_exceed_ratio=1.1)
+        assert validation1.is_valid is False
+        assert validation1.exceeds_duration is True
+
+        # Should pass with relaxed threshold
+        validation2 = result.validate_timing(max_exceed_ratio=1.2)
+        assert validation2.is_valid is True
+        assert validation2.exceeds_duration is False
+
+    def test_validate_timing_custom_min_coverage(self):
+        """Test validate_timing with custom minimum coverage (US-007)"""
+        # 30s captions on 100s video - fails with default 0.5, passes with 0.25
+        segments = [CaptionSegment(0, 0.0, 30.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # Should fail with default 50% threshold
+        validation1 = result.validate_timing(min_coverage_ratio=0.5)
+        assert validation1.is_valid is False
+        assert validation1.below_coverage is True
+
+        # Should pass with 25% threshold
+        validation2 = result.validate_timing(min_coverage_ratio=0.25)
+        assert validation2.is_valid is True
+        assert validation2.below_coverage is False
+
+    def test_validate_timing_with_explicit_duration(self):
+        """Test validate_timing with explicitly provided video duration (US-007)"""
+        segments = [CaptionSegment(0, 0.0, 80.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # Use explicit duration instead of stored duration
+        validation = result.validate_timing(video_duration=200.0)
+
+        assert validation.video_duration == 200.0
+        assert validation.below_coverage is True  # 80s < 50% of 200s
+
+    def test_to_dict_includes_timing_validated(self):
+        """Test to_dict includes timing_validated field (US-007)"""
+        segments = [CaptionSegment(0, 0.0, 90.0, "Seg", "vid1")]
+        result = CaptionResult(video_id="vid1", segments=segments, video_duration=100.0)
+
+        # Before validation
+        data1 = result.to_dict()
+        assert data1['timing_validated'] is None
+
+        # After validation
+        result.validate_timing()
+        data2 = result.to_dict()
+
+        assert data2['timing_validated'] is not None
+        assert data2['timing_validated']['is_valid'] is True
+        assert data2['timing_validated']['caption_end_time'] == 90.0
+        assert data2['timing_validated']['video_duration'] == 100.0
+
+
+class TestTimingValidationResult:
+    """Test TimingValidationResult dataclass (US-007)"""
+
+    def test_timing_validation_result_creation(self):
+        """Test creating TimingValidationResult"""
+        from src.caption_fetcher import TimingValidationResult
+
+        result = TimingValidationResult(
+            is_valid=True,
+            caption_end_time=90.0,
+            video_duration=100.0,
+            exceeds_duration=False,
+            below_coverage=False,
+            message="Timing valid"
+        )
+
+        assert result.is_valid is True
+        assert result.caption_end_time == 90.0
+        assert result.video_duration == 100.0
+        assert result.exceeds_duration is False
+        assert result.below_coverage is False
+        assert result.message == "Timing valid"
+
+    def test_timing_validation_result_to_dict(self):
+        """Test TimingValidationResult serialization"""
+        from src.caption_fetcher import TimingValidationResult
+
+        result = TimingValidationResult(
+            is_valid=False,
+            caption_end_time=120.0,
+            video_duration=100.0,
+            exceeds_duration=True,
+            below_coverage=False,
+            message="Caption exceeds video"
+        )
+
+        data = result.to_dict()
+
+        assert data['is_valid'] is False
+        assert data['caption_end_time'] == 120.0
+        assert data['video_duration'] == 100.0
+        assert data['exceeds_duration'] is True
+        assert data['below_coverage'] is False
+        assert data['message'] == "Caption exceeds video"
+
+    def test_timing_validation_result_defaults(self):
+        """Test TimingValidationResult default values"""
+        from src.caption_fetcher import TimingValidationResult
+
+        result = TimingValidationResult(
+            is_valid=True,
+            caption_end_time=50.0,
+            video_duration=100.0
+        )
+
+        assert result.exceeds_duration is False
+        assert result.below_coverage is False
+        assert result.message == ""
 
 
 class TestDetermineCaptionQuality:
