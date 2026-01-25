@@ -2996,3 +2996,258 @@ US-012 was already completed, but running tests revealed two issues:
 ### Files Modified
 - tests/test_caption_integration.py - Test improvements
 
+
+
+## Iteration - US-001: Verify parallel caption fetching implementation
+- Focus: caption
+- Status: VERIFIED COMPLETE
+
+### Context
+US-001 was requested to be worked on, but examination revealed it was already fully implemented in commit 04b862b from a previous session.
+
+### Verification of Acceptance Criteria
+All 6 acceptance criteria verified as implemented:
+
+1. **fetch_captions_batch() method** - Lines 828-1060 in src/caption_fetcher.py
+   - Uses ThreadPoolExecutor for parallel execution
+   
+2. **max_parallel_fetches config option** - Default 4, configurable
+   - src/config/sections/download.py:189
+   - config.yaml:906
+   
+3. **Thread-safe CaptionMetrics** - Uses Lock for all mutations
+   - src/caption_fetcher.py:2415 adds _lock field
+   - All record_* methods use `with self._lock:`
+   
+4. **CaptionStage uses batch fetch** - Line 159 in src/stages/caption_stage.py
+   - Calls fetch_captions_batch() instead of sequential loop
+   
+5. **Progress callback support** - Lines 834, 907-948
+   - Callback receives video_id, status, details dict
+   
+6. **Tests verify parallel faster than sequential**
+   - TestBatchCaptionFetch::test_batch_fetch_parallel_faster_than_sequential
+   - All 9 tests in TestBatchCaptionFetch pass
+
+### Test Results
+```
+pytest tests/test_caption_fetcher.py::TestBatchCaptionFetch -v
+9 passed in 1.68s
+```
+
+### Files Modified
+- scripts/ralph/prd.json - Marked US-001 as passes: true with notes
+
+
+## Iteration - US-002: Verify live stream detection implementation
+- Focus: caption
+- Status: VERIFIED COMPLETE
+
+### Context
+US-002 was requested to be worked on, but examination revealed it was already fully implemented in commit c0bbb26 from a previous session.
+
+### Verification of Acceptance Criteria
+All 6 acceptance criteria verified as implemented:
+
+1. **is_live_stream(video_id) method** - Lines 1490-1576 in src/caption_fetcher.py
+   - Uses yt-dlp --dump-json to get video metadata
+   - Returns True for live/was_live videos, False otherwise
+   
+2. **Check is_live and was_live fields** - Lines 1555-1564
+   - `is_live = metadata.get('is_live', False)`
+   - `was_live = metadata.get('was_live', False)`
+   - Returns True if either is True
+   
+3. **CaptionStage skips with warning** - Lines 139-161 in src/stages/caption_stage.py
+   - Checks skip_live_streams config option
+   - Calls fetcher.is_live_stream() for each video
+   - Logs warning and stores skipped result
+   
+4. **Metrics track skipped live streams separately** - CaptionMetrics class
+   - skipped_live_streams field (line 2497)
+   - record_skipped_live_stream() method (lines 2584-2601)
+   - Tracked as 'skipped' in quality_distribution
+   
+5. **Config option caption_first.skip_live_streams** - Default True
+   - src/config/sections/download.py:199
+   - Documented in docstring (lines 150-153)
+   
+6. **Tests verify live stream detection**
+   - TestLiveStreamDetection: 8 tests (all pass)
+   - TestCaptionMetricsSkippedLiveStreams: 7 tests (all pass)
+
+### Test Results
+```
+pytest tests/test_caption_fetcher.py -v -k "live_stream"
+15 passed in 0.58s
+```
+
+### Files Modified
+- scripts/ralph/prd.json - Marked US-002 as passes: true with notes
+
+## Iteration N - US-003: Implement configurable language fallback chain
+- Focus: caption
+- Status: COMPLETE
+
+### Implementation Summary
+Added new config option `caption_first.fallback_languages` for user-defined language
+fallback chains in multilingual projects.
+
+### Acceptance Criteria Verification
+
+1. **New config option caption_first.fallback_languages**
+   - src/config/sections/download.py:165-169 - List[str] field with default []
+   - config.yaml:894-898 - Documented with example
+
+2. **select_best_language() uses fallback_languages**
+   - src/caption_fetcher.py:521-530 - Iterates through fallback chain
+   - Tries each language before falling back to English
+
+3. **Fallback chain stops at first available language**
+   - src/caption_fetcher.py:526-528 - Returns on first match
+
+4. **Log which language was selected from which position**
+   - src/caption_fetcher.py:500, 506 - Logs position (e.g., "from fallback chain position 1")
+   - src/caption_fetcher.py:515, 534, 545, 551 - All selection points log position
+
+5. **Empty/missing fallback_languages preserves current behavior**
+   - src/caption_fetcher.py:476-477 - Gets from config, defaults to []
+   - When empty, skips directly to English fallback (line 532-538)
+
+6. **Tests verify fallback chain selection**
+   - TestFallbackLanguageChain: 12 tests covering all scenarios
+   - TestGetFallbackLanguagesFromConfig: 5 tests for config reading
+
+### Test Results
+```
+pytest tests/test_caption_fetcher.py::TestFallbackLanguageChain tests/test_caption_fetcher.py::TestGetFallbackLanguagesFromConfig -v
+17 passed in 0.57s
+```
+
+### Files Modified
+- src/config/sections/download.py - Added fallback_languages field
+- src/caption_fetcher.py - Updated select_best_language() with fallback chain
+- config.yaml - Added fallback_languages option with docs
+- tests/test_caption_fetcher.py - Added 17 new tests
+- scripts/ralph/prd.json - Marked US-003 as passes: true
+
+## Iteration 4 - [US-004] Add caption coverage percentage metrics
+
+### Implementation Summary
+Implemented caption coverage percentage tracking to report what percentage of video duration is covered by captions and flag videos with low coverage for potential transcription fallback.
+
+### Acceptance Criteria Verification
+
+1. **New calculate_coverage() method returns coverage ratio (0.0-1.0)**
+   - src/caption_fetcher.py:226-260 - Sums segment durations / video duration
+   - Handles gaps between segments correctly
+   - Clamps to 1.0 if segments overlap
+
+2. **CaptionResult gains coverage_ratio field**
+   - src/caption_fetcher.py:189 - video_duration field added
+   - src/caption_fetcher.py:262-269 - coverage_ratio property
+   - to_dict() includes both fields
+
+3. **Config option caption_first.min_coverage_threshold (default: 0.5)**
+   - src/config/sections/download.py:207-211 - min_coverage_threshold: float = 0.5
+   - config.yaml:915-917 - Documented with comment
+
+4. **Warnings logged for videos below coverage threshold**
+   - src/stages/caption_stage.py:289-303 - Logs warnings for low coverage videos
+   - Shows count in summary output
+   - Logs first 5 video IDs at WARNING level
+
+5. **CaptionMetrics tracks coverage distribution**
+   - src/caption_fetcher.py:2607-2611 - coverage_distribution and low_coverage_videos fields
+   - src/caption_fetcher.py:2672-2680 - record_fetch_success tracks coverage
+   - src/caption_fetcher.py:2690-2705 - _classify_coverage() categorizes high/medium/low
+   - summary(), to_dict(), from_dict(), merge(), clear() all updated
+
+6. **Tests verify coverage calculation**
+   - 11 tests for CaptionResult coverage calculation
+   - 15 tests for CaptionMetrics coverage distribution
+   - Total: 36 new tests (21 CaptionResult + 15 CaptionMetricsCoverage)
+
+### Test Results
+```
+pytest tests/test_caption_fetcher.py::TestCaptionResult tests/test_caption_fetcher.py::TestCaptionMetricsCoverage -v
+36 passed in 1.24s
+```
+
+### Files Modified
+- src/caption_fetcher.py - Added coverage calculation and tracking
+- src/config/sections/download.py - Added min_coverage_threshold option
+- src/stages/caption_stage.py - Added coverage tracking and warnings
+- config.yaml - Added min_coverage_threshold option
+- tests/test_caption_fetcher.py - Added 36 new tests
+- scripts/ralph/prd.json - Marked US-004 as passes: true
+
+
+## Iteration 5 - [US-005] Handle corrupted captions with partial recovery
+- Focus: caption
+- Status: COMPLETE
+
+### Changes Made
+Implemented graceful degradation for malformed caption segments:
+
+**1. CaptionParseWarning Exception (lines 149-167 in caption_fetcher.py):**
+- New non-fatal warning class for tracking parse issues
+- Attributes: video_id, segment_index, reason
+- Inherits from CaptionError
+
+**2. CaptionResult.skipped_segments_count Field (line 212):**
+- New field to track how many segments were skipped due to parse errors
+- Defaults to 0
+- Included in to_dict() serialization
+
+**3. CaptionNormalizer.normalize() Partial Recovery (lines 2186-2260):**
+- Now returns tuple (segments, skipped_count) instead of just list
+- Per-segment try/except wrapping catches unexpected errors
+- Distinguishes between:
+  - **Filtered segments**: Intentionally skipped (empty text, invalid timestamps) - don't count against threshold
+  - **Error segments**: Unexpected exceptions - count against threshold
+- min_success_ratio parameter (default 0.5 = 50%)
+- Raises CaptionNormalizationError if error ratio > threshold
+- Logs skipped segments with warning level
+
+**4. Updated All normalize() Callers:**
+- All 37 test calls updated to use tuple unpacking: `result, _ = normalizer.normalize(...)`
+
+### Tests Added
+Added 15 new tests in tests/test_caption_normalizer.py:
+
+**TestPartialRecovery (8 tests):**
+- test_skipped_count_zero_for_valid_segments
+- test_skipped_count_for_filtered_segments (filtered != skipped)
+- test_partial_recovery_with_malformed_segment
+- test_partial_recovery_threshold_raises_when_exceeded
+- test_partial_recovery_threshold_customizable
+- test_skipped_segments_logged
+- test_empty_list_returns_zero_skipped
+- test_all_filtered_returns_empty_with_zero_skipped
+
+**TestCaptionParseWarning (3 tests):**
+- test_warning_with_all_fields
+- test_warning_without_reason
+- test_warning_inherits_from_caption_error
+
+**TestCaptionResultSkippedCount (4 tests):**
+- test_default_skipped_count_is_zero
+- test_skipped_count_in_constructor
+- test_skipped_count_in_to_dict
+- test_skipped_count_zero_in_to_dict
+
+### Verification
+- Syntax check: `python -m py_compile src/caption_fetcher.py` - PASSED
+- main.py --help: PASSED
+- Caption normalizer tests: 75 passed (60 original + 15 new)
+- All caption tests: 232 passed, 1 skipped
+
+### Design Decisions
+1. **Tuple return vs new method**: Changed normalize() to return tuple for explicit skipped count tracking. Updated all callers to use tuple unpacking.
+2. **Filtered vs Error**: Distinguished between intentionally filtered segments (empty text, invalid timestamps) and actual parse errors. Only errors count against the 50% threshold.
+3. **Default threshold 50%**: If >50% of segments have parse errors, raise exception. This is configurable via min_success_ratio parameter.
+
+### Files Modified
+- src/caption_fetcher.py: CaptionParseWarning class, skipped_segments_count field, normalize() partial recovery
+- tests/test_caption_normalizer.py: Updated 37 calls to tuple unpacking, added 15 new tests

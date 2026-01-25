@@ -146,6 +146,27 @@ class CaptionFetchError(CaptionError):
         super().__init__(message)
 
 
+class CaptionParseWarning(CaptionError):
+    """Non-fatal warning for caption parsing issues (US-005).
+
+    This indicates a segment could not be parsed but other segments
+    may still be usable. Use for graceful degradation with partial recovery.
+
+    Attributes:
+        video_id: YouTube video ID.
+        segment_index: Index of the problematic segment.
+        reason: Description of the parsing issue.
+    """
+    def __init__(self, video_id: str, segment_index: int, reason: str = ""):
+        self.video_id = video_id
+        self.segment_index = segment_index
+        self.reason = reason
+        message = f"Parse warning for video {video_id} segment {segment_index}"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)
+
+
 @dataclass
 class CaptionSegment:
     """A single caption segment with timing information.
@@ -180,6 +201,7 @@ class CaptionResult:
         is_auto_generated: True if auto-generated captions.
         format_source: Caption format ('vtt', 'srv3', 'json3', etc.).
         video_duration: Optional video duration for coverage calculation (US-004).
+        skipped_segments_count: Number of segments skipped due to parse errors (US-005).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -187,6 +209,7 @@ class CaptionResult:
     is_auto_generated: bool = False
     format_source: str = ""  # 'vtt', 'srv3', 'json3', etc.
     video_duration: Optional[float] = None  # US-004: For coverage calculation
+    skipped_segments_count: int = 0  # US-005: Segments skipped due to parse errors
 
     @property
     def text(self) -> str:
@@ -279,6 +302,7 @@ class CaptionResult:
             'caption_quality': self.caption_quality,
             'video_duration': self.video_duration,  # US-004
             'coverage_ratio': self.coverage_ratio,  # US-004
+            'skipped_segments_count': self.skipped_segments_count,  # US-005
         }
 
 
@@ -2128,41 +2152,99 @@ class CaptionNormalizer:
     def normalize(
         self,
         segments: List[CaptionSegment],
-        video_id: str = ""
-    ) -> List[CaptionSegment]:
-        """Normalize a list of caption segments.
+        video_id: str = "",
+        min_success_ratio: float = 0.5
+    ) -> tuple[List[CaptionSegment], int]:
+        """Normalize a list of caption segments with partial recovery (US-005).
 
         Applies the following normalization steps:
-        1. Validate and fix individual segment timestamps
+        1. Validate and fix individual segment timestamps (with per-segment error handling)
         2. Sort segments by start time
         3. Handle overlapping segments (based on overlap_strategy)
         4. Handle gaps between segments (based on gap_strategy)
         5. Re-index segments sequentially
 
+        Partial recovery (US-005): If a segment fails to parse due to unexpected
+        errors, it is skipped rather than failing the entire normalization. The
+        number of skipped segments is returned, and partial results are accepted
+        if more than min_success_ratio (default 50%) of segments parse successfully.
+
         Args:
             segments: List of CaptionSegment to normalize.
             video_id: Video ID for source_file field in new segments.
+            min_success_ratio: Minimum ratio of segments that must parse successfully
+                for partial results to be accepted (default: 0.5 = 50%).
 
         Returns:
-            List of normalized CaptionSegment objects.
+            Tuple of (normalized_segments, skipped_count). The skipped_count
+            indicates how many segments were skipped due to parse errors.
 
         Raises:
-            CaptionNormalizationError: If normalization fails catastrophically.
+            CaptionNormalizationError: If normalization fails catastrophically
+                (less than min_success_ratio of segments parsed successfully).
         """
         if not segments:
-            return []
+            return ([], 0)
 
-        logger.debug(f"Normalizing {len(segments)} caption segments for video {video_id}")
+        original_count = len(segments)
+        skipped_count = 0  # Segments skipped due to parse errors (exceptions)
+        filtered_count = 0  # Segments intentionally filtered (invalid but not errors)
+        logger.debug(f"Normalizing {original_count} caption segments for video {video_id}")
 
-        # Step 1: Validate and fix individual timestamps
+        # Step 1: Validate and fix individual timestamps with per-segment error handling
+        validated_segments = []
         if self.config.validate_timestamps:
-            segments = [self._validate_segment(seg, video_id) for seg in segments]
-            # Filter out None (invalid segments)
-            segments = [seg for seg in segments if seg is not None]
+            for i, seg in enumerate(segments):
+                try:
+                    validated = self._validate_segment(seg, video_id)
+                    if validated is not None:
+                        validated_segments.append(validated)
+                    else:
+                        # Segment was intentionally filtered (e.g., empty text, invalid timing)
+                        # This is expected behavior, not an error
+                        filtered_count += 1
+                except Exception as e:
+                    # Unexpected error during validation - log and skip segment (US-005)
+                    # This counts toward the skip threshold
+                    skipped_count += 1
+                    logger.warning(
+                        f"Skipped malformed segment {i} for video {video_id}: {e}"
+                    )
+                    # Emit a CaptionParseWarning for tracking (non-fatal)
+                    try:
+                        warning = CaptionParseWarning(video_id, i, str(e))
+                        logger.debug(f"CaptionParseWarning: {warning}")
+                    except Exception:
+                        pass  # Don't let warning emission cause failures
+            segments = validated_segments
+        else:
+            segments = list(segments)
+
+        # Check if too many segments had parse ERRORS (US-005)
+        # Only count unexpected exceptions against the threshold, not intentional filters
+        if skipped_count > 0 and original_count > 0:
+            # Calculate what fraction of segments had actual errors
+            error_ratio = skipped_count / original_count
+            if error_ratio > (1.0 - min_success_ratio):
+                logger.warning(
+                    f"Too many parse errors: {skipped_count}/{original_count} segments "
+                    f"({error_ratio:.1%}) had errors, threshold is {1.0 - min_success_ratio:.0%}"
+                )
+                raise CaptionNormalizationError(
+                    f"Partial recovery failed: {error_ratio:.1%} of segments had parse errors "
+                    f"(threshold: {1.0 - min_success_ratio:.0%})"
+                )
 
         if not segments:
             logger.warning("All segments were invalid after validation")
-            return []
+            return ([], skipped_count)
+
+        # Log skipped/filtered segments summary (US-005)
+        if skipped_count > 0 or filtered_count > 0:
+            logger.info(
+                f"Partial recovery: {skipped_count} segments had errors, "
+                f"{filtered_count} filtered, {len(segments)} usable for video {video_id}"
+            )
 
         # Step 2: Sort by start time
         segments = sorted(segments, key=lambda s: s.start_time)
@@ -2176,8 +2258,8 @@ class CaptionNormalizer:
         # Step 5: Re-index
         segments = self._reindex(segments)
 
-        logger.debug(f"Normalization complete: {len(segments)} segments")
-        return segments
+        logger.debug(f"Normalization complete: {len(segments)} segments, {skipped_count} skipped")
+        return (segments, skipped_count)
 
     def _validate_segment(
         self,
