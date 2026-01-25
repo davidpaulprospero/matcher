@@ -256,6 +256,14 @@ class MatchingConfig:
     multimodal_enabled: bool = True  # Enable multi-modal similarity weighting
     multimodal_weights: dict = None  # Custom weights dict (defaults used if None)
 
+    # Semantic coherence (topic flow between adjacent segments)
+    # When enabled, evaluates embedding similarity between current match candidate
+    # and the previous segment's match to ensure smooth topic transitions.
+    # - Smooth flow (similarity > 0.6): +0.03 boost (good continuity)
+    # - Abrupt flow (similarity < 0.3): -0.05 penalty (jarring transition)
+    # - Neutral (0.3 - 0.6): no adjustment
+    semantic_coherence_enabled: bool = True  # Enable semantic coherence scoring
+
     # Location-aware matching (for travel/location content)
     location_matching: LocationMatchingConfig = None
 
