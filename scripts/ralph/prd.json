@@ -127,7 +127,7 @@
       "id": "US-009",
       "title": "Add tests for matching strategy selection logic",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create tests/test_matching/test_strategies.py with tests for StrategyMatcher class",
         "Test visual_first strategy returns clips with highest visual scores",
@@ -135,20 +135,22 @@
         "Test embedding_diversity strategy maximizes embedding variance",
         "Test broll_only strategy only returns B-roll clips",
         "Minimum 15 test cases covering all strategy branches"
-      ]
+      ],
+      "notes": "Tests exist at tests/test_matching_strategies.py (flat structure). 45 tests covering all strategies: TestVisualFirstStrategySelection (2 tests), TestDifferentSourceStrategyExclusion (2 tests), TestEmbeddingDiversityMaximization (2 tests), TestBRollOnlyExclusivity (3 tests), plus 36 other tests. All 45 tests pass."
     },
     {
       "id": "US-010",
       "title": "Replace bare except blocks in scene_detection.py",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Replace bare except: at lines 290, 492, 676 with specific exception types",
         "Use OSError, cv2.error, subprocess.SubprocessError as appropriate",
         "Add debug logging for exceptions to aid troubleshooting scene detection issues",
         "Ensure scene detection gracefully handles corrupt video files",
         "All existing tests continue to pass"
-      ]
+      ],
+      "notes": "Replaced 3 bare except: blocks with specific exception handling. Line 290: cv2.error for CUDA device selection failures. Line 492: (ValueError, AttributeError) for OTIO timecode parsing. Line 679: (OSError, IOError, cv2.error) for video duration checks. Added logger.debug() calls. All 77 scene detection tests pass."
     },
     {
       "id": "US-011",

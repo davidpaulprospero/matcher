@@ -345,5 +345,90 @@ Replaced 2 bare `except:` blocks with specific exception handling in downloader 
 
 ## Iteration 10 - US-009: Add tests for matching strategy selection logic
 - Focus: quality
-- Status: IN PROGRESS - Testing US-009...
+- Status: COMPLETE
+
+### Analysis
+Tests already existed in `tests/test_matching_strategies.py` (flat directory structure, not subdirectory as specified in criteria). Existing coverage: 35 tests covering StrategyMatcher class initialization, clip identification, and all 6 strategies.
+
+### Changes Made
+Added 10 additional test cases explicitly verifying strategy selection logic:
+
+**TestVisualFirstStrategySelection (2 tests):**
+- `test_visual_first_selects_highest_visual_score`: Verifies visual match selected over higher text similarity
+- `test_visual_first_scoring_weights_visual_over_text`: Verifies 70/30 visual/text weighting
+
+**TestDifferentSourceStrategyExclusion (2 tests):**
+- `test_different_source_excludes_multiple_used_sources`: Verifies all used sources excluded, not just first
+- `test_different_source_returns_first_unused_from_sorted_candidates`: Verifies behavior with pre-sorted candidates
+
+**TestEmbeddingDiversityMaximization (2 tests):**
+- `test_embedding_diversity_selects_most_diverse`: Verifies max distance from existing embeddings
+- `test_embedding_diversity_respects_relevance_threshold`: Verifies 0.3 minimum relevance threshold
+
+**TestBRollOnlyExclusivity (3 tests):**
+- `test_broll_only_ignores_non_broll_even_with_higher_score`: Non-broll clips NEVER selected
+- `test_broll_only_returns_best_broll_by_relevance`: Returns highest relevance among B-roll
+- `test_broll_only_rejects_all_non_broll`: Returns None when no B-roll available
+
+**TestStrategySelectionOrdering (1 test):**
+- `test_strategies_build_on_previous_exclusions`: Cumulative exclusion across strategies
+
+### Verification
+- All 45 tests pass: `pytest tests/test_matching_strategies.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- tests/test_matching_strategies.py - Added 10 additional strategy selection tests
+
+## Iteration 11 - US-010: Replace bare except blocks in scene_detection.py
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Replaced 3 bare `except:` blocks with specific exception handling in scene detection:
+
+1. **Line 290 (_setup_hw_accel - CUDA device selection):**
+   - Before: `except:` with `pass`
+   - After: `except cv2.error as e:` with logger.debug()
+   - Purpose: Handle CUDA device selection failures (driver issues, device unavailable)
+   - Context: Scene detection continues without CUDA if selection fails
+
+2. **Line 492 (_create_otio_timeline - timecode parsing):**
+   - Before: `except:` with fallback to RationalTime(0)
+   - After: `except (ValueError, AttributeError) as e:` with logger.debug()
+   - Purpose: Handle invalid timecode formats or missing start_timecode attribute
+   - Context: Falls back to 0 if timecode parsing fails
+
+3. **Line 679 (process_all_videos - duration check):**
+   - Before: `except:` with append to filtered list
+   - After: `except (OSError, IOError, cv2.error) as e:` with logger.debug()
+   - Purpose: Handle corrupt/unreadable video files during duration filtering
+   - Context: Adds video to process list anyway - let full detection handle errors
+
+### Verification
+- Grep for bare except: - 0 remaining in scene_detection.py
+- Syntax check: `python -m py_compile src/scene_detection.py` - PASSED
+- All 77 scene detection tests: `pytest tests/test_scene*.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Modified
+- src/scene_detection.py - Exception handling improvements at 3 locations
+
+## Iteration 12 - US-009/US-010: PRD Status Fix
+- Focus: quality
+- Status: COMPLETE
+
+### Issue
+PRD.json was not updated after iterations 10-11 completed US-009 and US-010. Commits exist for both stories but prd.json still had `passes: false`.
+
+### Changes Made
+- Updated prd.json to mark US-009 and US-010 as `passes: true`
+- Added notes summarizing what was done in each story
+
+### Verification
+- All 45 matching strategy tests pass: `pytest tests/test_matching_strategies.py -v`
+- All 77 scene detection tests pass
+
+### Files Modified
+- scripts/ralph/prd.json - Updated US-009, US-010 to passes: true with notes
 
