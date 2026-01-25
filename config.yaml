@@ -886,6 +886,8 @@ download:
     timeout: 30                       # Timeout for caption fetch requests (seconds)
     prefer_human_captions: true       # Prefer human-uploaded over auto-generated
     cache_captions: true              # Cache captions for cross-project reuse
+    cache_dir: "~/.matcher_caption_cache"  # Global cache directory (supports ~)
+    max_cache_age_days: 30            # Cache TTL in days (0 = no expiration)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms

@@ -81,8 +81,8 @@
         "Cache validation: check caption age, invalidate if older than configurable days",
         "Tests verify cache hits, misses, and invalidation"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created CaptionCache class extending BaseCache. Cache key format: video_id_language. Added cache_dir and max_cache_age_days to CaptionFirstConfig. CachedCaption dataclass stores all required fields. TTL-based expiration. get_or_fetch() convenience method. 30 new tests in tests/test_caption_cache.py."
     },
     {
       "id": "US-006",

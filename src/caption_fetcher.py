@@ -10,21 +10,35 @@ Usage:
     result = fetcher.fetch_captions("dQw4w9WgXcQ")
     for segment in result.segments:
         print(f"{segment.start_time:.2f} -> {segment.end_time:.2f}: {segment.text}")
+
+    # With caching:
+    cache = CaptionCache(config.download.caption_first)
+    cached = cache.get("dQw4w9WgXcQ", "en")
+    if cached:
+        print(f"Cache hit: {len(cached.segments)} segments")
+    else:
+        result = fetcher.fetch_captions("dQw4w9WgXcQ")
+        cache.store(result)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from .cache import BaseCache, CacheEntry
 
 if TYPE_CHECKING:
     from .config import Config
+    from .config.sections.download import CaptionFirstConfig
 
 logger = logging.getLogger(__name__)
 
@@ -912,3 +926,321 @@ class CaptionFetcher:
         if not video_id or len(video_id) != 11:
             return False
         return bool(re.match(r'^[A-Za-z0-9_-]{11}$', video_id))
+
+
+@dataclass
+class CachedCaption:
+    """Cached caption data for cross-project reuse.
+
+    Stores the full caption result along with fetch metadata.
+    """
+    video_id: str
+    language: str
+    segments: List[Dict[str, Any]]  # CaptionSegment.to_dict() format
+    is_auto_generated: bool
+    format_source: str
+    fetch_timestamp: float  # Unix timestamp when fetched
+    duration: float = 0.0  # Total caption duration
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'video_id': self.video_id,
+            'language': self.language,
+            'segments': self.segments,
+            'is_auto_generated': self.is_auto_generated,
+            'format_source': self.format_source,
+            'fetch_timestamp': self.fetch_timestamp,
+            'duration': self.duration,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CachedCaption':
+        """Create from dictionary."""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    def to_caption_result(self) -> CaptionResult:
+        """Convert cached data back to CaptionResult."""
+        segments = [
+            CaptionSegment(
+                index=seg.get('index', i),
+                start_time=seg.get('start', seg.get('start_time', 0.0)),
+                end_time=seg.get('end', seg.get('end_time', 0.0)),
+                text=seg.get('text', ''),
+                source_file=seg.get('source_file', self.video_id),
+            )
+            for i, seg in enumerate(self.segments)
+        ]
+        return CaptionResult(
+            video_id=self.video_id,
+            segments=segments,
+            language=self.language,
+            is_auto_generated=self.is_auto_generated,
+            format_source=self.format_source,
+        )
+
+
+class CaptionCache(BaseCache):
+    """Cache for YouTube captions, enabling cross-project reuse.
+
+    Caches fetched captions by video_id + language code to avoid
+    re-fetching the same captions across different projects.
+
+    Features:
+    - JSON index for fast lookups
+    - Age-based expiration (configurable days)
+    - Cache key: video_id_language (e.g., 'dQw4w9WgXcQ_en')
+    - Stores caption text, timing info, is_auto_generated, fetch_timestamp
+
+    Usage:
+        cache = CaptionCache(config.download.caption_first)
+
+        # Check cache before fetching
+        cached = cache.get_caption("dQw4w9WgXcQ", "en")
+        if cached:
+            result = cached.to_caption_result()
+        else:
+            result = fetcher.fetch_captions("dQw4w9WgXcQ")
+            cache.store(result)
+
+    Example with CaptionFetcher:
+        fetcher = CaptionFetcher(config)
+        cache = CaptionCache(config.download.caption_first)
+
+        def fetch_with_cache(video_id: str, language: str = "en"):
+            cached = cache.get_caption(video_id, language)
+            if cached:
+                return cached.to_caption_result()
+            result = fetcher.fetch_captions(video_id, language=language)
+            cache.store(result)
+            return result
+    """
+
+    def __init__(self, config: Optional['CaptionFirstConfig'] = None):
+        """Initialize the caption cache.
+
+        Args:
+            config: CaptionFirstConfig with cache settings. If None, uses defaults.
+        """
+        # Get config values with defaults
+        if config:
+            cache_dir = getattr(config, 'cache_dir', '~/.matcher_caption_cache')
+            max_age_days = getattr(config, 'max_cache_age_days', 30)
+            self.enabled = getattr(config, 'cache_captions', True)
+        else:
+            cache_dir = '~/.matcher_caption_cache'
+            max_age_days = 30
+            self.enabled = True
+
+        # Expand ~ in cache_dir
+        cache_dir = Path(os.path.expanduser(cache_dir))
+
+        # Convert max_age_days to TTL seconds (0 = no expiration)
+        ttl_seconds = max_age_days * 24 * 3600 if max_age_days > 0 else 0
+
+        # Initialize BaseCache
+        super().__init__(
+            cache_dir=cache_dir,
+            index_name="caption_cache_index.json",
+            ttl_seconds=ttl_seconds,
+            auto_save=True
+        )
+
+        self.max_age_days = max_age_days
+
+        logger.debug(f"CaptionCache initialized: dir={cache_dir}, "
+                    f"ttl={max_age_days} days, enabled={self.enabled}")
+
+    def _make_cache_key(self, video_id: str, language: str) -> str:
+        """Create cache key from video_id and language.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            language: ISO 639-1 language code (e.g., 'en').
+
+        Returns:
+            Cache key in format 'video_id_language' (e.g., 'dQw4w9WgXcQ_en').
+        """
+        return f"{video_id}_{language}"
+
+    def _serialize_entry(self, entry: CacheEntry) -> Dict[str, Any]:
+        """Serialize CachedCaption to dict."""
+        return {
+            'data': entry.data,  # CachedCaption.to_dict()
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: Dict[str, Any]) -> CacheEntry:
+        """Deserialize dict to CachedCaption entry."""
+        return CacheEntry(
+            data=data.get('data', {}),
+            cached_at=data.get('cached_at', 0.0),
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
+    def get_caption(self, video_id: str, language: str) -> Optional[CachedCaption]:
+        """Get cached caption for a video and language.
+
+        Args:
+            video_id: YouTube video ID.
+            language: ISO 639-1 language code.
+
+        Returns:
+            CachedCaption if found and valid, None otherwise.
+        """
+        if not self.enabled:
+            return None
+
+        key = self._make_cache_key(video_id, language)
+        entry = self.get(key)
+
+        if entry is None:
+            logger.debug(f"Caption cache miss: {key}")
+            return None
+
+        try:
+            cached = CachedCaption.from_dict(entry.data)
+            logger.debug(f"Caption cache hit: {key} "
+                        f"({len(cached.segments)} segments, "
+                        f"auto={cached.is_auto_generated})")
+            return cached
+        except Exception as e:
+            logger.warning(f"Failed to deserialize cached caption {key}: {e}")
+            self.delete(key)
+            return None
+
+    def store(self, result: CaptionResult) -> bool:
+        """Store a CaptionResult in the cache.
+
+        Args:
+            result: CaptionResult to cache.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        if not result.segments:
+            logger.debug(f"Not caching empty caption result for {result.video_id}")
+            return False
+
+        key = self._make_cache_key(result.video_id, result.language)
+
+        cached = CachedCaption(
+            video_id=result.video_id,
+            language=result.language,
+            segments=[seg.to_dict() for seg in result.segments],
+            is_auto_generated=result.is_auto_generated,
+            format_source=result.format_source,
+            fetch_timestamp=time.time(),
+            duration=result.duration,
+        )
+
+        self.set(key, cached.to_dict())
+
+        logger.info(f"Cached captions: {key} "
+                   f"({len(result.segments)} segments, "
+                   f"duration={result.duration:.1f}s, "
+                   f"auto={result.is_auto_generated})")
+        return True
+
+    def get_or_fetch(
+        self,
+        fetcher: 'CaptionFetcher',
+        video_id: str,
+        language: str = "en",
+        prefer_manual: bool = True
+    ) -> CaptionResult:
+        """Get from cache or fetch and cache.
+
+        Convenience method that combines cache lookup and fetching.
+
+        Args:
+            fetcher: CaptionFetcher instance to use for fetching.
+            video_id: YouTube video ID.
+            language: Preferred language code.
+            prefer_manual: Prefer manual captions over auto-generated.
+
+        Returns:
+            CaptionResult from cache or freshly fetched.
+
+        Raises:
+            CaptionUnavailableError: If no captions exist.
+            CaptionFetchError: If fetch fails due to network/temporary error.
+        """
+        # Check cache first
+        cached = self.get_caption(video_id, language)
+        if cached:
+            return cached.to_caption_result()
+
+        # Fetch and cache
+        result = fetcher.fetch_captions(video_id, language=language, prefer_manual=prefer_manual)
+        self.store(result)
+        return result
+
+    def invalidate(self, video_id: str, language: Optional[str] = None) -> int:
+        """Invalidate cached captions for a video.
+
+        Args:
+            video_id: YouTube video ID.
+            language: If provided, only invalidate for this language.
+                     If None, invalidate all languages for this video.
+
+        Returns:
+            Number of cache entries invalidated.
+        """
+        if language:
+            key = self._make_cache_key(video_id, language)
+            if self.delete(key):
+                logger.debug(f"Invalidated caption cache: {key}")
+                return 1
+            return 0
+
+        # Invalidate all languages for this video
+        invalidated = 0
+        for key in list(self.index.keys()):
+            if key.startswith(f"{video_id}_"):
+                self.delete(key)
+                invalidated += 1
+
+        if invalidated:
+            logger.debug(f"Invalidated {invalidated} caption cache entries for {video_id}")
+
+        return invalidated
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics.
+
+        Returns:
+            Dict with cache metrics.
+        """
+        base_stats = super().get_stats()
+
+        # Add caption-specific stats
+        total_segments = 0
+        auto_generated_count = 0
+        manual_count = 0
+
+        for entry in self.get_all().values():
+            try:
+                cached = CachedCaption.from_dict(entry.data)
+                total_segments += len(cached.segments)
+                if cached.is_auto_generated:
+                    auto_generated_count += 1
+                else:
+                    manual_count += 1
+            except Exception:
+                pass
+
+        base_stats.update({
+            'total_segments': total_segments,
+            'auto_generated_entries': auto_generated_count,
+            'manual_entries': manual_count,
+            'max_age_days': self.max_age_days,
+            'enabled': self.enabled,
+        })
+
+        return base_stats

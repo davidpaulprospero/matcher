@@ -160,6 +160,14 @@ class CaptionFirstConfig:
     # Cache captions for cross-project reuse
     cache_captions: bool = True
 
+    # Cache directory for cross-project caption reuse
+    # Supports ~ expansion (default: ~/.matcher_caption_cache)
+    cache_dir: str = "~/.matcher_caption_cache"
+
+    # Maximum cache age in days (0 = no expiration)
+    # Captions older than this will be re-fetched
+    max_cache_age_days: int = 30
+
 
 @dataclass
 class AudioFirstConfig:

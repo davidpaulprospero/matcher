@@ -330,6 +330,8 @@ class TestCaptionFirstConfigDefaults:
         assert config.timeout == 30
         assert config.prefer_human_captions == True
         assert config.cache_captions == True
+        assert config.cache_dir == "~/.matcher_caption_cache"
+        assert config.max_cache_age_days == 30
 
     def test_caption_first_custom_values(self):
         """Test custom values for caption first config."""
@@ -339,7 +341,9 @@ class TestCaptionFirstConfigDefaults:
             preferred_language="es",
             timeout=60,
             prefer_human_captions=False,
-            cache_captions=False
+            cache_captions=False,
+            cache_dir="/custom/cache/path",
+            max_cache_age_days=7
         )
         assert config.enabled == True
         assert config.fallback_to_transcription == False
@@ -347,3 +351,5 @@ class TestCaptionFirstConfigDefaults:
         assert config.timeout == 60
         assert config.prefer_human_captions == False
         assert config.cache_captions == False
+        assert config.cache_dir == "/custom/cache/path"
+        assert config.max_cache_age_days == 7
