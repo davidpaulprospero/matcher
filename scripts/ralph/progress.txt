@@ -1973,3 +1973,134 @@ Implemented adaptive backoff multiplier that adjusts based on error severity.
 - src/config/sections/download.py - adaptive_multiplier option in RateLimitConfig
 - config.yaml - adaptive_multiplier documentation
 
+
+## Iteration 9 - [US-009] Add per-keyword rate limit event tracking in metrics
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Added per-keyword rate limit event tracking to help identify problematic search terms:
+
+1. **RateLimitMetrics class (rate_limit_metrics.py):**
+   - Added `keyword_rate_limit_events: Dict[str, int]` field
+   - Updated `record_rate_limit_event(tier, keyword)` to track keyword events
+   - Modified `summary()` to show top 5 keywords (by count) when > 10 total events
+   - Added config recommendation for keywords causing > 30% of rate limit events
+   - Updated `from_dict()` and `clear()` for keyword events persistence
+
+2. **VideoDownloader (core.py):**
+   - Modified `handle_rate_limit_error()` call to pass keyword through to metrics
+
+### Example Output
+When > 10 rate limit events with keyword tracking:
+```
+Rate limiting: 15 events, 8 backoffs (45.0s total)
+  By tier: long: 8, short: 7
+  Top keywords: "problematic keyword": 8, "other keyword": 5, "third keyword": 2
+```
+
+Config recommendation when keyword exceeds 30%:
+```
+Keywords causing high rate limiting: "problematic keyword". Consider adding these
+to keyword.skip_keywords or using more specific search terms.
+```
+
+### Tests Added
+27 new tests in test_rate_limit_metrics.py:
+- TestKeywordRateLimitTracking: 11 tests for basic tracking, serialization
+- TestKeywordSummaryDisplay: 4 tests for summary output formatting
+- TestKeywordConfigRecommendations: 5 tests for recommendation logic
+- TestKeywordCrossSessionPersistence: 2 tests for checkpoint persistence
+
+### Verification
+- Syntax check: PASSED
+- Sanity check: main.py --help PASSED
+- Tests: 82 tests in test_rate_limit_metrics.py PASSED
+- All 252 rate-limiting tests PASSED
+
+### Files Modified
+- src/downloader/rate_limit_metrics.py - Keyword tracking, summary, recommendations
+- src/downloader/core.py - Pass keyword to metrics
+- tests/test_rate_limit_metrics.py - 27 new tests
+
+### Acceptance Criteria Verification
+✓ keyword_rate_limit_events dict tracks events per keyword
+✓ record_rate_limit_event() accepts optional keyword parameter
+✓ Report shows top 5 keywords when > 10 events total
+✓ Config recommendation suggests skipping high-rate-limit keywords (>30%)
+✓ Keyword events saved to checkpoint (via from_dict/clear/to_dict)
+✓ Tests verify per-keyword tracking and report output (27 tests)
+
+
+## Iteration 10 - [US-010] Add configurable VPN connection verification endpoint
+- Focus: rate-limiting
+- Status: COMPLETE
+
+### Changes Made
+Added configurable VPN verification endpoints for privacy-conscious users:
+
+1. **VPNConfig (config/sections/download.py):**
+   - Added `skip_verification: bool = False` - skip verification entirely
+   - Added `verification_endpoint: str = "https://www.google.com"` - HTTPS for curl
+   - Added `verification_ip: str = "8.8.8.8"` - IP for ping fallback
+   - Updated docstring with privacy context and example alternatives
+
+2. **VpnManager (downloader/vpn_manager.py):**
+   - Modified `_verify_connection()` to use `getattr()` for config fields
+   - Verification uses configured endpoint/IP instead of hardcoded Google
+   - Failure log includes which endpoints were tried
+   - Modified `switch()` to check `skip_verification` flag
+   - Debug logging shows endpoints being verified
+
+3. **config.yaml:**
+   - Added `skip_verification`, `verification_endpoint`, `verification_ip` options
+   - Documented alternatives: Cloudflare (1.1.1.1), OpenDNS (208.67.222.222)
+
+### Example Configuration
+```yaml
+vpn:
+  enabled: true
+  switch_command: "nordvpn connect random"
+  verify_connection: true
+  # Privacy-friendly alternatives
+  skip_verification: false    # true to skip entirely
+  verification_endpoint: "https://cloudflare.com"
+  verification_ip: "1.1.1.1"  # Cloudflare DNS
+```
+
+### Tests Added
+15 new tests in test_vpn_manager.py (TestVPNVerificationEndpoints class):
+- test_default_endpoints_used
+- test_custom_endpoints_used
+- test_verification_uses_custom_endpoint
+- test_verification_uses_custom_ip_on_curl_failure
+- test_skip_verification_option
+- test_verification_failure_logs_endpoints
+- test_switch_with_skip_verification_logs_skip
+- test_config_dataclass_has_new_fields
+- test_config_dataclass_custom_values
+- test_verification_with_opendns
+- test_verification_timeout_continues_to_next
+- test_backward_compatibility_no_new_fields
+- test_skip_verification_takes_precedence_over_verify_connection
+- test_verification_endpoint_examples_in_docstring
+- test_verification_debug_logging
+
+### Verification
+- Syntax check: PASSED
+- Sanity check: main.py --help PASSED
+- Tests: 56 tests in test_vpn_manager.py PASSED
+
+### Files Modified
+- src/config/sections/download.py - 3 new VPNConfig fields, updated docstring
+- src/downloader/vpn_manager.py - Configurable endpoints, skip logic, logging
+- config.yaml - New VPN options with documentation
+- tests/test_vpn_manager.py - 15 new tests
+
+### Acceptance Criteria Verification
+✓ vpn.verification_endpoint config option (default: https://www.google.com)
+✓ vpn.verification_ip config option (default: 8.8.8.8)
+✓ VpnManager uses configured endpoints instead of hardcoded Google
+✓ vpn.skip_verification option (default: false) disables verification
+✓ Verification failure logged with endpoint used
+✓ Tests verify custom endpoints are used for verification (15 tests)
