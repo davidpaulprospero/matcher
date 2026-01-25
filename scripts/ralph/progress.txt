@@ -1625,3 +1625,36 @@ Progress: 0/12 stories complete
   - tests/test_sprint_5_quality_verification.py (93 lines)
 
 Progress: 1/12 stories complete
+
+
+## Iteration 2 - [US-002] Add adaptive embedding similarity thresholds
+- Implemented calculate_adaptive_threshold() in src/matching/scoring.py (lines 23-80)
+  - Adjusts skip_llm_threshold based on voiceover characteristics
+  - Short voiceover (<20 chars): +0.05 threshold (harder to match, require higher confidence)
+  - Low candidate variance (<0.05): -0.05 threshold (clear winner, can accept lower)
+  - Threshold clamped to valid range [0.5, 0.99]
+  - Returns tuple of (adjusted_threshold, adjustment_reason) for logging
+- Added adaptive_threshold_enabled config option in MatchingConfig (default: true)
+  - Located in src/config/sections/matching.py (line 120)
+  - Documents behavior in config comments
+- Integrated adaptive threshold in TieredMatcher.match_segment() (lines 447-461)
+  - Uses calculate_adaptive_threshold() when adaptive_threshold_enabled=true
+  - Logs both the adaptive threshold and the reason for adjustment
+  - Falls back to static skip_llm_threshold when disabled
+- Created comprehensive unit tests in tests/test_adaptive_threshold.py (15 tests)
+  - test_no_adjustment_with_normal_input: Normal text + high variance = no adjustment
+  - test_short_voiceover_increases_threshold: <20 chars adds +0.05
+  - test_low_variance_decreases_threshold: variance <0.05 subtracts 0.05
+  - test_short_vo_and_low_variance_cancel_out: Adjustments can cancel each other
+  - test_threshold_clamped_to_minimum/maximum: Threshold stays in [0.5, 0.99]
+  - Edge cases: empty/None voiceover, empty/single candidate, whitespace
+  - Boundary tests: exactly 19/20 chars, variance exactly 0.05
+- All 15 tests pass
+- Files modified:
+  - src/matching/scoring.py (added calculate_adaptive_threshold function)
+  - src/config/sections/matching.py (added adaptive_threshold_enabled option)
+  - src/matching/tiered_matcher.py (integrated adaptive threshold)
+- Files created:
+  - tests/test_adaptive_threshold.py (290 lines)
+
+Progress: 2/12 stories complete

@@ -26,6 +26,7 @@ from .scoring import (
     apply_topic_penalty,
     apply_broll_boost,
     apply_current_project_boost,
+    calculate_adaptive_threshold,
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
@@ -442,9 +443,22 @@ class TieredMatcher:
 
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
-        logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={mc.skip_llm_threshold}")
 
-        if top_similarity >= mc.skip_llm_threshold:
+        # Calculate adaptive threshold if enabled
+        adaptive_threshold_enabled = getattr(mc, 'adaptive_threshold_enabled', True)
+        if adaptive_threshold_enabled:
+            skip_threshold, threshold_reason = calculate_adaptive_threshold(
+                base_threshold=mc.skip_llm_threshold,
+                voiceover_text=vo_segment.text,
+                candidates=valid_candidates,
+                config=self.config
+            )
+            logger.info(f"  match_segment: top_sim={top_similarity:.3f}, adaptive_threshold={skip_threshold:.3f} ({threshold_reason})")
+        else:
+            skip_threshold = mc.skip_llm_threshold
+            logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={skip_threshold}")
+
+        if top_similarity >= skip_threshold:
             best_seg = valid_candidates[0][0]
             self.reuse_tracker.record_usage(best_seg)
 
