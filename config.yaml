@@ -344,6 +344,13 @@ matching:
   temporal_coherence_same_source_boost: 0.05  # Boost for clips from same source as adjacent (+5%)
   temporal_coherence_context_switch_penalty: 0.05  # Penalty for jarring context switches (-5%)
 
+  # Fallback matching (for edge cases when primary matching fails)
+  # Chain-of-thought: Some segments may not match well with embedding/LLM approach
+  # Reasoning: Use fallback strategies with confidence ceilings for difficult cases
+  # Decision: 3 levels - keyword-only (0.7), visual-description (0.5), generic-broll (0.3)
+  fallback_matching_enabled: true  # Enable fallback matching for edge cases
+  fallback_trigger_threshold: 0.4  # Trigger fallback when primary confidence below this
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
