@@ -105,12 +105,16 @@ class MatchStage(Stage):
             print(f"  Average confidence: {avg_conf:.1%}")
 
             # Calculate and log quality metrics
-            from ..matching.metrics import calculate_match_quality_metrics, log_quality_summary
+            from ..matching.metrics import calculate_match_quality_metrics, log_quality_summary, log_confidence_histogram
             quality_metrics = calculate_match_quality_metrics(
                 matches=matches,
                 total_segments=len(state.voiceover_segments)
             )
             log_quality_summary(quality_metrics)
+
+            # Log confidence distribution histogram
+            if confidences:
+                log_confidence_histogram(confidences)
 
             # Update logger stats for match-only mode
             run_logger = get_global_logger()
