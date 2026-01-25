@@ -145,8 +145,8 @@
         "Print channel summary: 'Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)'",
         "Tests verify channel patterns update correctly after batch fetch"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Leveraged existing ChannelCaptionPattern from US-006 (already has channel_id, videos_checked, captions_found, success_rate, persistence). Added: CaptionMetrics.channel_patterns field, set_channel_patterns(), get_channel_statistics() returning top/bottom channels, get_channel_summary() for formatted output. Added prioritize_by_channel config option (default: true) to CaptionFirstConfig and config.yaml. Added _sort_videos_by_channel_success() and set_video_channel_map() to CaptionFetcher for fetch ordering. Updated summary() to print channel availability. Added to_dict/from_dict serialization. 18 new tests in 4 test classes all pass."
     },
     {
       "id": "US-010",

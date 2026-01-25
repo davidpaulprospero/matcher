@@ -2386,6 +2386,93 @@ class CaptionFetcher:
         # All retries exhausted
         raise last_error
 
+    def _sort_videos_by_channel_success(
+        self,
+        video_ids: List[str],
+        channel_patterns: Dict[str, 'ChannelCaptionPattern']
+    ) -> List[str]:
+        """Sort videos by channel caption availability success rate (US-009 Sprint 7).
+
+        Reorders videos so that those from channels with higher caption availability
+        are fetched first. This improves average success rate early in the batch
+        and helps identify problematic channels faster.
+
+        Args:
+            video_ids: List of YouTube video IDs to sort.
+            channel_patterns: Dict mapping channel_id -> ChannelCaptionPattern.
+
+        Returns:
+            Sorted list of video IDs, with high-success channels first.
+            Videos from unknown channels are placed at the end.
+
+        Example:
+            >>> patterns = {
+            ...     'UCabc': ChannelCaptionPattern('UCabc', 10, 10, 1.0),  # 100% success
+            ...     'UCdef': ChannelCaptionPattern('UCdef', 10, 5, 0.5),   # 50% success
+            ... }
+            >>> sorted_vids = fetcher._sort_videos_by_channel_success(
+            ...     ['vid1_UCdef', 'vid2_UCabc', 'vid3_unknown'],
+            ...     patterns
+            ... )
+            >>> # vid2_UCabc comes first (100%), then vid1_UCdef (50%), then unknown
+        """
+        if not channel_patterns:
+            return video_ids
+
+        def get_channel_success_rate(video_id: str) -> float:
+            """Get success rate for video's channel, or 0.5 for unknown."""
+            # Try to extract channel ID from video metadata
+            channel_id = self._get_channel_id_from_video(video_id)
+            if channel_id and channel_id in channel_patterns:
+                pattern = channel_patterns[channel_id]
+                if pattern.videos_checked > 0:
+                    return pattern.success_rate
+            # Unknown channel: use neutral 0.5 (middle of the pack)
+            return 0.5
+
+        # Sort descending by success rate (highest first)
+        sorted_videos = sorted(
+            video_ids,
+            key=lambda vid: get_channel_success_rate(vid),
+            reverse=True
+        )
+
+        return sorted_videos
+
+    def _get_channel_id_from_video(self, video_id: str) -> Optional[str]:
+        """Extract channel ID for a video (US-009 Sprint 7).
+
+        Uses cached metadata if available, otherwise returns None.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            Channel ID (UCxxxx format) if known, None otherwise.
+        """
+        # Check if we have cached metadata with channel info
+        # This would be populated during batch_precheck_by_channel or other metadata fetch
+        if hasattr(self, '_video_channel_map'):
+            return self._video_channel_map.get(video_id)
+        return None
+
+    def set_video_channel_map(self, video_channel_map: Dict[str, str]) -> None:
+        """Set video-to-channel mapping for fetch prioritization (US-009 Sprint 7).
+
+        Called before fetch_captions_batch() to enable channel-based sorting.
+
+        Args:
+            video_channel_map: Dict mapping video_id -> channel_id.
+
+        Example:
+            >>> fetcher.set_video_channel_map({
+            ...     'dQw4w9WgXcQ': 'UCuAXFkgsw1L7xaCfnd5JJOw',
+            ...     'abc123XYZ01': 'UCabc123def456',
+            ... })
+        """
+        self._video_channel_map = dict(video_channel_map)
+        logger.debug(f"Video-channel map set: {len(video_channel_map)} videos")
+
     def fetch_captions_batch(
         self,
         video_ids: List[str],
@@ -2485,6 +2572,20 @@ class CaptionFetcher:
         # Filter out skipped video IDs
         skip_set = skip_video_ids or set()
         videos_to_fetch = [vid for vid in video_ids if vid not in skip_set]
+
+        # US-009 Sprint 7: Prioritize fetch order by channel success rate
+        prioritize_by_channel = True  # Default
+        if caption_config:
+            prioritize_by_channel = getattr(caption_config, 'prioritize_by_channel', True)
+
+        if prioritize_by_channel and metrics and metrics.channel_patterns:
+            videos_to_fetch = self._sort_videos_by_channel_success(
+                videos_to_fetch, metrics.channel_patterns
+            )
+            logger.info(
+                f"Prioritized fetch order by channel success rate "
+                f"({len(metrics.channel_patterns)} channels)"
+            )
 
         logger.info(
             f"Batch caption fetch: {len(videos_to_fetch)} videos with {workers} workers "
@@ -5356,6 +5457,14 @@ class CaptionMetrics:
     # Used for debugging retry behavior and identifying error patterns
     error_category_counts: Dict[str, int] = field(default_factory=dict)
 
+    # Channel-level caption availability patterns (US-009 Sprint 7)
+    # Dict mapping channel_id -> ChannelCaptionPattern for cross-project learning
+    # Used for:
+    # - Predicting caption availability for new videos from known channels
+    # - Prioritizing fetch order (high-success channels first)
+    # - Reporting top/bottom channels by caption availability
+    channel_patterns: Dict[str, 'ChannelCaptionPattern'] = field(default_factory=dict)
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -5603,6 +5712,160 @@ class CaptionMetrics:
             f"Error pattern recorded: {error_signature} "
             f"({affected_count}/{sample_size} videos)"
         )
+
+    def set_channel_patterns(
+        self,
+        patterns: Dict[str, 'ChannelCaptionPattern']
+    ) -> None:
+        """Set channel-level caption availability patterns (US-009 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called after batch_precheck_by_channel() completes to store the
+        channel patterns for statistics and reporting. This enables
+        get_channel_statistics() to return top/bottom channels.
+
+        Args:
+            patterns: Dict mapping channel_id -> ChannelCaptionPattern.
+
+        Example:
+            >>> result = fetcher.batch_precheck_by_channel(video_ids)
+            >>> metrics.set_channel_patterns(result.channel_patterns)
+        """
+        with self._lock:
+            self.channel_patterns = dict(patterns)
+
+        logger.debug(f"Channel patterns set: {len(patterns)} channels")
+
+    def get_channel_statistics(self, top_n: int = 5) -> Dict[str, Any]:
+        """Get channel-level caption availability statistics (US-009 Sprint 7).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns statistics about caption availability by YouTube channel,
+        including top channels (highest success rate) and bottom channels
+        (lowest success rate). Used for:
+        - Predicting caption availability for new videos
+        - Prioritizing fetch order (high-success channels first)
+        - Debugging channels with caption issues
+
+        Args:
+            top_n: Number of top/bottom channels to return (default: 5).
+
+        Returns:
+            Dict with channel statistics:
+            - 'total_channels': Total number of channels tracked
+            - 'total_videos_checked': Sum of videos_checked across all channels
+            - 'top_channels': List of (channel_id, success_rate, videos_checked) tuples
+                              for channels with highest caption availability
+            - 'bottom_channels': List of (channel_id, success_rate, videos_checked) tuples
+                                 for channels with lowest caption availability
+            - 'avg_success_rate': Average success rate across all channels
+            - 'channels_with_100pct': Count of channels with 100% caption availability
+            - 'channels_with_0pct': Count of channels with 0% caption availability
+
+        Example:
+            >>> stats = metrics.get_channel_statistics()
+            >>> print(f"Top channels: {stats['top_channels']}")
+            >>> print(f"Bottom: {stats['bottom_channels']}")
+            Top channels: [('UCabc', 1.0, 10), ('UCdef', 0.95, 20)]
+            Bottom: [('UCghi', 0.0, 5), ('UCjkl', 0.1, 8)]
+        """
+        with self._lock:
+            if not self.channel_patterns:
+                return {
+                    'total_channels': 0,
+                    'total_videos_checked': 0,
+                    'top_channels': [],
+                    'bottom_channels': [],
+                    'avg_success_rate': 0.0,
+                    'channels_with_100pct': 0,
+                    'channels_with_0pct': 0,
+                }
+
+            # Build list of (channel_id, success_rate, videos_checked)
+            channel_data = [
+                (cid, pattern.success_rate, pattern.videos_checked)
+                for cid, pattern in self.channel_patterns.items()
+                if pattern.videos_checked > 0
+            ]
+
+            if not channel_data:
+                return {
+                    'total_channels': len(self.channel_patterns),
+                    'total_videos_checked': 0,
+                    'top_channels': [],
+                    'bottom_channels': [],
+                    'avg_success_rate': 0.0,
+                    'channels_with_100pct': 0,
+                    'channels_with_0pct': 0,
+                }
+
+            # Sort by success rate descending for top, ascending for bottom
+            sorted_by_success = sorted(channel_data, key=lambda x: (-x[1], -x[2]))
+            top_channels = sorted_by_success[:top_n]
+            bottom_channels = sorted(channel_data, key=lambda x: (x[1], -x[2]))[:top_n]
+
+            # Calculate statistics
+            total_videos = sum(c[2] for c in channel_data)
+            avg_success = sum(c[1] for c in channel_data) / len(channel_data) if channel_data else 0.0
+            perfect_channels = sum(1 for c in channel_data if c[1] >= 1.0)
+            zero_channels = sum(1 for c in channel_data if c[1] <= 0.0)
+
+            return {
+                'total_channels': len(self.channel_patterns),
+                'total_videos_checked': total_videos,
+                'top_channels': top_channels,
+                'bottom_channels': bottom_channels,
+                'avg_success_rate': round(avg_success, 3),
+                'channels_with_100pct': perfect_channels,
+                'channels_with_0pct': zero_channels,
+            }
+
+    def get_channel_summary(self) -> str:
+        """Get human-readable channel availability summary (US-009 Sprint 7).
+
+        Returns a formatted string suitable for printing in pipeline reports.
+        Shows top channels with high caption availability and bottom channels
+        with low/no availability.
+
+        Returns:
+            Formatted string like:
+            "Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)"
+            Or empty string if no channel data available.
+
+        Example:
+            >>> print(metrics.get_channel_summary())
+            Top channels: UCabc (100%), UCdef (95%). Bottom: UCghi (0%)
+        """
+        stats = self.get_channel_statistics(top_n=3)
+
+        if stats['total_channels'] == 0:
+            return ""
+
+        parts = []
+
+        # Format top channels
+        if stats['top_channels']:
+            top_strs = [
+                f"{cid[:10]}{'...' if len(cid) > 10 else ''} ({rate:.0%})"
+                for cid, rate, _ in stats['top_channels'][:3]
+            ]
+            parts.append(f"Top channels: {', '.join(top_strs)}")
+
+        # Format bottom channels (only if different from top and have issues)
+        bottom_with_issues = [
+            (cid, rate, count) for cid, rate, count in stats['bottom_channels']
+            if rate < 0.5  # Only show channels with <50% success
+        ]
+        if bottom_with_issues:
+            bottom_strs = [
+                f"{cid[:10]}{'...' if len(cid) > 10 else ''} ({rate:.0%})"
+                for cid, rate, _ in bottom_with_issues[:3]
+            ]
+            parts.append(f"Bottom: {', '.join(bottom_strs)}")
+
+        return ". ".join(parts)
 
     def record_skipped_live_stream(self, video_id: str = "") -> None:
         """Record a skipped live stream (US-002).
@@ -6203,6 +6466,11 @@ class CaptionMetrics:
                     format_line += f" ({format_stats['fallback_count']} fallback)"
                 lines.append(format_line)
 
+        # Channel availability summary (US-009 Sprint 7)
+        channel_summary = self.get_channel_summary()
+        if channel_summary:
+            lines.append(f"  {channel_summary}")
+
         return "\n".join(lines)
 
     def get_slowest_videos(self, n: int = 5) -> List[tuple]:
@@ -6266,6 +6534,10 @@ class CaptionMetrics:
             'auto_generated_count': self.auto_generated_count,
             'human_caption_count': self.human_caption_count,
             'error_category_counts': dict(self.error_category_counts),  # US-003 Sprint 7
+            'channel_patterns': {  # US-009 Sprint 7
+                cid: pattern.to_dict()
+                for cid, pattern in self.channel_patterns.items()
+            },
         }
 
     @classmethod
@@ -6309,6 +6581,10 @@ class CaptionMetrics:
             auto_generated_count=data.get('auto_generated_count', 0),
             human_caption_count=data.get('human_caption_count', 0),
             error_category_counts=data.get('error_category_counts', {}),  # US-003 Sprint 7
+            channel_patterns={  # US-009 Sprint 7
+                cid: ChannelCaptionPattern.from_dict(pattern_data)
+                for cid, pattern_data in data.get('channel_patterns', {}).items()
+            },
         )
 
     def export_json(
