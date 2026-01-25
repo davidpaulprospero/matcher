@@ -92,3 +92,104 @@ Replaced 4 bare `except:` blocks with specific exception handling in FaceDetecto
 ### Files Modified
 - src/face_detection.py - Exception handling improvements
 
+## Iteration 4 - US-003: Replace bare except blocks in parallel_processor.py
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Replaced 4 bare `except:` blocks with specific exception handling in parallel transcription:
+
+1. **Line 219 (Phase 2 - audio file cleanup):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle temp audio file removal errors without affecting results
+
+2. **Line 232 (temp directory cleanup):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle temp directory removal errors without affecting results
+
+3. **Line 304 (transcribe_video - audio file cleanup):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle temp audio file removal in single-video transcription
+
+4. **Line 415 (transcribe_voiceover_media - extracted audio cleanup):**
+   - Before: `except:` with `pass`
+   - After: `except (OSError, IOError) as e:` with logger.debug()
+   - Purpose: Handle cleanup of extracted audio from video files
+
+**Additional improvements:**
+- Changed `logger.error()` to `logger.exception()` at line 161 (audio extraction errors)
+- Changed `logger.error()` to `logger.exception()` at line 213 (transcription errors)
+- These changes provide full traceback for debugging parallel processing issues
+
+### Tests Added
+Created `TestParallelErrorRecovery` class with 3 tests:
+- `test_audio_extraction_error_logs_full_traceback`: Verifies logger.exception() is called
+- `test_transcription_error_logs_full_traceback`: Verifies traceback for GPU errors
+- `test_cleanup_error_does_not_affect_results`: Verifies results unaffected by cleanup errors
+
+Updated existing tests to expect `logger.exception()` instead of `logger.error()`.
+
+### Verification
+- Syntax check: `python -m py_compile src/transcription/parallel_processor.py` - PASSED
+- Grep for bare except: - 0 remaining
+- All 27 tests: `pytest tests/test_transcription_parallel_processor.py -v` - PASSED
+- main.py --help: PASSED
+
+### Files Modified
+- src/transcription/parallel_processor.py - Exception handling improvements
+- tests/test_transcription_parallel_processor.py - Added error recovery tests
+
+## Iteration 5 - US-004: Add comprehensive tests for DiskHealer, PathHealer, and CheckpointHealer
+- Focus: quality
+- Status: COMPLETE
+
+### Changes Made
+Created comprehensive test suites for three healer classes:
+
+**test_disk_healer.py (33 tests):**
+- TestDiskHealerInit: 4 tests for initialization
+- TestDiskHealerCanHandle: 6 tests for error pattern matching
+- TestDiskHealerHandleDiskFull: 3 tests for disk cleanup logic
+- TestDiskHealerHandlePermission: 2 tests for permission error handling
+- TestDiskHealerGetDirSize: 3 tests for directory size calculation
+- TestDiskHealerGetFreeSpace: 2 tests for free space detection
+- TestDiskHealerFormatSize: 4 tests for size formatting (B/KB/MB/GB)
+- TestDiskHealerCheckSpace: 3 tests for space checking
+- TestDiskHealerFindOldFiles: 3 tests for old file detection
+- TestDiskHealerFix: 3 tests for fix() routing
+
+**test_path_healer.py (36 tests):**
+- TestPathHealerInit: 4 tests for initialization
+- TestPathHealerCanHandle: 7 tests for error pattern matching (path too long, errno 63/36/206, unicode)
+- TestPathHealerHandlePathTooLong: 2 tests for short root switching
+- TestPathHealerHandleUnicodeError: 2 tests for unicode sanitization
+- TestPathHealerSanitizeUnicode: 7 tests for smart quotes, dashes, ellipsis, invalid chars
+- TestPathHealerCheckPathLength: 3 tests for MAX_PATH validation
+- TestPathHealerEstimateSafeFilenameLength: 3 tests for safe length calculation
+- TestPathHealerFindAvailableShortRoot: 2 tests for short root detection
+- TestPathHealerTruncateFilenames: 2 tests for filename truncation
+- TestPathHealerFix: 4 tests for fix() routing
+
+**test_checkpoint_healer.py (31 tests):**
+- TestCheckpointHealerInit: 5 tests for initialization
+- TestCheckpointHealerCanHandle: 6 tests for error pattern matching
+- TestCheckpointHealerRestoreFromBackup: 3 tests for backup restoration
+- TestCheckpointHealerRebuildCheckpoint: 5 tests for cache-based rebuilding
+- TestCheckpointHealerHandleHashMismatch: 1 test for hash mismatch handling
+- TestCheckpointHealerStartFresh: 2 tests for fresh start logic
+- TestCheckpointHealerCreateBackup: 3 tests for backup creation
+- TestCheckpointHealerFix: 4 tests for fix() routing
+- TestCheckpointHealerIntegration: 2 integration tests for full recovery cycles
+
+### Verification
+- All 100 tests pass: `pytest tests/test_agents/test_*_healer.py -v` - PASSED
+- Sanity check: `python main.py --help` - PASSED
+
+### Files Created
+- tests/test_agents/test_disk_healer.py (33 tests)
+- tests/test_agents/test_path_healer.py (36 tests)
+- tests/test_agents/test_checkpoint_healer.py (31 tests)
+
