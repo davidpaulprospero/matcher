@@ -255,6 +255,103 @@ def main():
             print("    ✓ Configuration is valid")
             sys.exit(0)
 
+    # Handle --validate-captions (US-005 Sprint 7)
+    if getattr(args, 'validate_captions', False):
+        from src.caption_fetcher import (
+            validate_caption_config, run_caption_test_fetch
+        )
+
+        print("\n  Caption Configuration Validation")
+        print("  " + "=" * 40)
+
+        # Run validation
+        validation_result = validate_caption_config(config)
+
+        # Print checks performed
+        for check_name, status in validation_result.checks_performed.items():
+            icon = "✓" if status == "passed" else ("⚠" if status == "warning" else ("○" if status == "skipped" else "✗"))
+            print(f"    {icon} {check_name}: {status}")
+
+        # Print errors and warnings
+        if validation_result.errors:
+            print("\n  Errors:")
+            for error in validation_result.errors:
+                print(f"    ✗ {error}")
+
+        if validation_result.warnings:
+            print("\n  Warnings:")
+            for warning in validation_result.warnings:
+                print(f"    ⚠ {warning}")
+
+        # Handle --test-fetch N
+        test_fetch_count = getattr(args, 'test_fetch', None)
+        if test_fetch_count and test_fetch_count > 0:
+            if not validation_result.is_valid:
+                print("\n  ⚠ Skipping test fetch due to validation errors")
+                sys.exit(1)
+
+            print(f"\n  Test Fetch ({test_fetch_count} videos)")
+            print("  " + "-" * 30)
+
+            # Get video IDs from checkpoint if available
+            video_ids = []
+            checkpoint_file = PROJECT_DIR / "checkpoint.json"
+            if checkpoint_file.exists():
+                import json
+                try:
+                    with open(checkpoint_file, 'r', encoding='utf-8') as f:
+                        checkpoint = json.load(f)
+                    # Try to get video IDs from video_candidates or text_metadata
+                    stages = checkpoint.get('stages', {})
+                    download_stage = stages.get('DOWNLOAD', {})
+                    video_candidates = download_stage.get('video_candidates', [])
+                    if video_candidates:
+                        # Extract video IDs from candidates
+                        for vc in video_candidates:
+                            vid = vc.get('video_id') or vc.get('id')
+                            if vid and len(vid) == 11:  # YouTube video IDs are 11 chars
+                                video_ids.append(vid)
+                except Exception as e:
+                    print(f"    ⚠ Could not load checkpoint: {e}")
+
+            if not video_ids:
+                print("    ⚠ No video IDs found in checkpoint")
+                print("    Run the pipeline first to collect video candidates")
+                print("\n  Config valid. Test fetch: skipped (no videos)")
+                sys.exit(0)
+
+            # Run test fetch
+            summary = run_caption_test_fetch(
+                video_ids, config, max_videos=test_fetch_count
+            )
+
+            # Print results
+            print(f"    {summary}")
+
+            if summary.results:
+                print("\n  Individual Results:")
+                for result in summary.results:
+                    status = "✓" if result.success else "✗"
+                    if result.success:
+                        print(f"    {status} {result.video_id}: {result.format_used}, "
+                              f"{result.segment_count} segments, {result.elapsed_seconds:.1f}s")
+                    else:
+                        print(f"    {status} {result.video_id}: {result.error}")
+
+            # Exit code 2 if any fetches failed
+            if summary.failures > 0:
+                print(f"\n  ⚠ {summary.failures}/{summary.total} test fetches failed")
+                sys.exit(2)
+
+        # Final summary
+        if validation_result.is_valid:
+            print(f"\n  ✓ Config valid." +
+                  (f" {test_fetch_count} test fetch(es) succeeded." if test_fetch_count else ""))
+            sys.exit(0)
+        else:
+            print(f"\n  ✗ Config invalid: {len(validation_result.errors)} error(s)")
+            sys.exit(1)
+
     # Validate at startup
     if not validate_config_at_startup(config):
         print("\n  ⚠ Configuration has critical errors. Fix and retry.")

@@ -179,4 +179,24 @@ Examples:
              'Videos without captions will be skipped instead of transcribed.'
     )
 
+    # Caption validation CLI (US-005 Sprint 7)
+    parser.add_argument(
+        '--validate-captions',
+        action='store_true',
+        help='Validate caption-first configuration and exit. '
+             'Checks: language codes (ISO 639-1), format preferences, '
+             'timeout values, and cache path writability. '
+             'Exit codes: 0=valid, 1=validation errors.'
+    )
+
+    parser.add_argument(
+        '--test-fetch',
+        type=int,
+        metavar='N',
+        default=None,
+        help='With --validate-captions: fetch captions for N sample videos to test. '
+             'Requires --project with existing video candidates. '
+             'Exit code 2 if any test fetches fail.'
+    )
+
     return parser.parse_args()

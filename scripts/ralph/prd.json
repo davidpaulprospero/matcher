@@ -65,8 +65,8 @@
         "JSON schema documented in docstring with example output structure",
         "Tests verify exported JSON is valid and contains all expected fields"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented export_json() method with full JSON schema documented in docstring. Added --export-caption-metrics CLI flag. Export includes run metadata (timestamp, project_path, config snapshot, video_count) and all sub-metrics (timing, formats, languages, errors, coverage, quality, cache_validation, pre_check, raw_metrics). Fixed error_category_counts serialization bug in to_dict/from_dict. Added 21 tests (18 export + 3 serialization). All 322 caption_fetcher tests pass."
     },
     {
       "id": "US-005",
@@ -81,8 +81,8 @@
         "Return exit code 0 for valid config, 1 for validation errors, 2 for test fetch failures",
         "Tests verify CLI validates config correctly and reports test fetch results"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented CaptionConfigValidationResult, TestFetchResult, TestFetchSummary dataclasses. Added validate_caption_config() function with comprehensive checks (language codes, format preferences, timeout values, cache path writability, retry budgets). Added run_caption_test_fetch() for sample video testing. CLI flags --validate-captions and --test-fetch N added to args.py. main.py integration with proper exit codes (0=valid, 1=validation error, 2=test fetch failure). 29 new tests added (all pass). Full CLI output shows check status icons."
     },
     {
       "id": "US-006",

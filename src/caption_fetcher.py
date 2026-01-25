@@ -500,6 +500,380 @@ def validate_language_config(
 
 
 @dataclass
+class CaptionConfigValidationResult:
+    """Result of full caption configuration validation (US-005 Sprint 7).
+
+    Attributes:
+        is_valid: True if all validation checks passed.
+        errors: List of error messages (validation failures).
+        warnings: List of warning messages (non-fatal issues).
+        checks_performed: Dict mapping check name -> status (passed/failed/warning).
+    """
+    is_valid: bool
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    checks_performed: Dict[str, str] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        """Human-readable summary."""
+        status = "VALID" if self.is_valid else "INVALID"
+        lines = [f"Caption Config Validation: {status}"]
+        if self.errors:
+            lines.append("Errors:")
+            for e in self.errors:
+                lines.append(f"  - {e}")
+        if self.warnings:
+            lines.append("Warnings:")
+            for w in self.warnings:
+                lines.append(f"  - {w}")
+        return "\n".join(lines)
+
+
+@dataclass
+class TestFetchResult:
+    """Result of caption test fetch operation (US-005 Sprint 7).
+
+    Attributes:
+        video_id: YouTube video ID tested.
+        success: True if fetch succeeded.
+        format_used: Caption format that succeeded (e.g., 'json3', 'vtt').
+        elapsed_seconds: Time taken for fetch.
+        error: Error message if fetch failed.
+        segment_count: Number of segments fetched (0 if failed).
+    """
+    video_id: str
+    success: bool
+    format_used: str = ""
+    elapsed_seconds: float = 0.0
+    error: str = ""
+    segment_count: int = 0
+
+
+@dataclass
+class TestFetchSummary:
+    """Summary of multiple test fetch operations (US-005 Sprint 7).
+
+    Attributes:
+        total: Total number of test fetches attempted.
+        successes: Number of successful fetches.
+        failures: Number of failed fetches.
+        results: List of individual TestFetchResult objects.
+        avg_time: Average fetch time in seconds.
+        dominant_format: Most common successful format.
+    """
+    total: int = 0
+    successes: int = 0
+    failures: int = 0
+    results: List[TestFetchResult] = field(default_factory=list)
+    avg_time: float = 0.0
+    dominant_format: str = ""
+
+    def __str__(self) -> str:
+        """Human-readable summary for CLI output."""
+        if self.total == 0:
+            return "Test fetch: No videos tested"
+
+        success_rate = f"{self.successes}/{self.total}"
+        avg_time_str = f"{self.avg_time:.1f}s" if self.avg_time > 0 else "N/A"
+        format_str = self.dominant_format or "N/A"
+
+        return f"Test fetch: {success_rate} success, avg {avg_time_str}, {format_str} format"
+
+
+def validate_caption_config(
+    config: Optional['Config'] = None,
+    caption_first_config: Optional['CaptionFirstConfig'] = None,
+) -> CaptionConfigValidationResult:
+    """Validate caption-first configuration comprehensively (US-005 Sprint 7).
+
+    Performs all validation checks required for caption-first mode:
+    1. Language codes: preferred_language and fallback_languages are valid ISO 639-1
+    2. Format preferences: preferred_formats contains valid format names
+    3. Timeout values: timeout > 0, retry_delay > 0
+    4. Cache path writability: cache_dir exists and is writable
+
+    Args:
+        config: Full Config object. If provided, extracts caption_first_config from it.
+        caption_first_config: Direct CaptionFirstConfig object. Used if config is None.
+
+    Returns:
+        CaptionConfigValidationResult with validation details.
+
+    Example:
+        >>> result = validate_caption_config(config)
+        >>> if not result.is_valid:
+        ...     for error in result.errors:
+        ...         print(f"Error: {error}")
+        ...     sys.exit(1)
+        >>> print(result)  # "Caption Config Validation: VALID"
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+    checks: Dict[str, str] = {}
+
+    # Extract caption_first_config from full config if needed
+    cf_config = caption_first_config
+    if cf_config is None and config is not None:
+        cf_config = getattr(getattr(config, 'download', None), 'caption_first', None)
+
+    if cf_config is None:
+        errors.append("No caption_first configuration found")
+        return CaptionConfigValidationResult(
+            is_valid=False,
+            errors=errors,
+            checks_performed={'config_exists': 'failed'}
+        )
+
+    checks['config_exists'] = 'passed'
+
+    # 1. Validate language codes
+    preferred_lang = getattr(cf_config, 'preferred_language', 'en')
+    fallback_langs = getattr(cf_config, 'fallback_languages', [])
+
+    try:
+        lang_issues = validate_language_config(
+            preferred_lang, fallback_langs, raise_on_error=False
+        )
+        for issue in lang_issues:
+            if issue.startswith("Error:"):
+                errors.append(issue.replace("Error: ", ""))
+                checks['language_codes'] = 'failed'
+            elif issue.startswith("Warning:"):
+                warnings.append(issue.replace("Warning: ", ""))
+                checks['language_codes'] = 'warning'
+
+        if 'language_codes' not in checks:
+            checks['language_codes'] = 'passed'
+    except Exception as e:
+        errors.append(f"Language validation error: {e}")
+        checks['language_codes'] = 'failed'
+
+    # 2. Validate format preferences
+    preferred_formats = getattr(cf_config, 'preferred_formats', ['json3', 'vtt', 'srt'])
+    valid_formats = {'json3', 'srv3', 'vtt', 'srt', 'ttml'}
+
+    if not preferred_formats:
+        errors.append("preferred_formats is empty (need at least one format)")
+        checks['format_preferences'] = 'failed'
+    else:
+        invalid_formats = [f for f in preferred_formats if f not in valid_formats]
+        if invalid_formats:
+            errors.append(
+                f"Invalid format(s) in preferred_formats: {invalid_formats}. "
+                f"Valid formats: {sorted(valid_formats)}"
+            )
+            checks['format_preferences'] = 'failed'
+        else:
+            checks['format_preferences'] = 'passed'
+
+    # 3. Validate timeout values
+    timeout = getattr(cf_config, 'timeout', 30)
+    retry_delay = getattr(cf_config, 'retry_delay', 2.0)
+    max_retries = getattr(cf_config, 'max_retries', 3)
+
+    if timeout <= 0:
+        errors.append(f"timeout must be positive, got {timeout}")
+        checks['timeout_values'] = 'failed'
+    elif timeout < 5:
+        warnings.append(f"timeout={timeout}s is very low, may cause failures")
+        checks['timeout_values'] = 'warning'
+    else:
+        checks['timeout_values'] = 'passed'
+
+    if retry_delay <= 0:
+        errors.append(f"retry_delay must be positive, got {retry_delay}")
+        if checks.get('timeout_values') != 'failed':
+            checks['timeout_values'] = 'failed'
+
+    if max_retries < 0:
+        errors.append(f"max_retries cannot be negative, got {max_retries}")
+        if checks.get('timeout_values') != 'failed':
+            checks['timeout_values'] = 'failed'
+
+    # 4. Validate cache path writability
+    cache_dir = getattr(cf_config, 'cache_dir', '~/.matcher_caption_cache')
+    cache_enabled = getattr(cf_config, 'cache_captions', True)
+
+    if cache_enabled:
+        cache_path = Path(os.path.expanduser(cache_dir))
+        try:
+            # Check if path exists or can be created
+            if cache_path.exists():
+                # Check writability by trying to create a temp file
+                test_file = cache_path / '.write_test'
+                try:
+                    test_file.touch()
+                    test_file.unlink()
+                    checks['cache_path'] = 'passed'
+                except (OSError, PermissionError) as e:
+                    errors.append(f"Cache path not writable: {cache_path} ({e})")
+                    checks['cache_path'] = 'failed'
+            else:
+                # Try to create the directory
+                try:
+                    cache_path.mkdir(parents=True, exist_ok=True)
+                    # Also test writability
+                    test_file = cache_path / '.write_test'
+                    test_file.touch()
+                    test_file.unlink()
+                    checks['cache_path'] = 'passed'
+                except (OSError, PermissionError) as e:
+                    errors.append(f"Cannot create cache directory: {cache_path} ({e})")
+                    checks['cache_path'] = 'failed'
+        except Exception as e:
+            errors.append(f"Cache path validation error: {e}")
+            checks['cache_path'] = 'failed'
+    else:
+        checks['cache_path'] = 'skipped'
+
+    # 5. Validate retry budgets (US-003 Sprint 7)
+    retry_budgets = getattr(cf_config, 'retry_budgets', {})
+    if retry_budgets:
+        valid_categories = {'network', 'timeout', 'parse', 'unavailable', 'rate_limit'}
+        invalid_categories = [k for k in retry_budgets.keys() if k not in valid_categories]
+        if invalid_categories:
+            warnings.append(
+                f"Unknown retry_budgets categories: {invalid_categories}. "
+                f"Valid: {sorted(valid_categories)}"
+            )
+            checks['retry_budgets'] = 'warning'
+        else:
+            # Check for negative values
+            negative_budgets = {k: v for k, v in retry_budgets.items() if v < 0}
+            if negative_budgets:
+                errors.append(f"retry_budgets cannot be negative: {negative_budgets}")
+                checks['retry_budgets'] = 'failed'
+            else:
+                checks['retry_budgets'] = 'passed'
+    else:
+        checks['retry_budgets'] = 'skipped'
+
+    is_valid = len(errors) == 0
+    return CaptionConfigValidationResult(
+        is_valid=is_valid,
+        errors=errors,
+        warnings=warnings,
+        checks_performed=checks
+    )
+
+
+def run_caption_test_fetch(
+    video_ids: List[str],
+    config: Optional['Config'] = None,
+    max_videos: int = 5,
+) -> TestFetchSummary:
+    """Run test caption fetches on sample videos (US-005 Sprint 7).
+
+    Fetches captions for a small set of videos to verify the caption-first
+    configuration works in practice. This is useful for testing API connectivity,
+    language availability, and format preferences.
+
+    Args:
+        video_ids: List of YouTube video IDs to test.
+        config: Config object with caption_first settings.
+        max_videos: Maximum number of videos to test (default: 5).
+
+    Returns:
+        TestFetchSummary with results and statistics.
+
+    Example:
+        >>> summary = run_caption_test_fetch(["dQw4w9WgXcQ", "abc123"], config)
+        >>> print(summary)  # "Test fetch: 2/2 success, avg 1.5s, json3 format"
+    """
+    import random
+
+    results: List[TestFetchResult] = []
+
+    # Limit to max_videos
+    test_videos = video_ids[:max_videos] if len(video_ids) > max_videos else video_ids
+
+    if not test_videos:
+        return TestFetchSummary(total=0, results=[])
+
+    # Shuffle to get random sample
+    random.shuffle(test_videos)
+
+    # Create fetcher
+    fetcher = CaptionFetcher(config)
+
+    # Get preferred language from config
+    preferred_lang = "en"
+    if config:
+        cf_config = getattr(getattr(config, 'download', None), 'caption_first', None)
+        if cf_config:
+            preferred_lang = getattr(cf_config, 'preferred_language', 'en')
+
+    # Fetch captions for each video
+    for video_id in test_videos:
+        start_time = time.time()
+
+        try:
+            result = fetcher.fetch_captions(video_id, language=preferred_lang)
+            elapsed = time.time() - start_time
+
+            results.append(TestFetchResult(
+                video_id=video_id,
+                success=True,
+                format_used=result.format_source,
+                elapsed_seconds=elapsed,
+                segment_count=len(result.segments)
+            ))
+
+        except CaptionUnavailableError as e:
+            elapsed = time.time() - start_time
+            results.append(TestFetchResult(
+                video_id=video_id,
+                success=False,
+                elapsed_seconds=elapsed,
+                error=f"No captions available: {e.reason}"
+            ))
+
+        except CaptionFetchError as e:
+            elapsed = time.time() - start_time
+            results.append(TestFetchResult(
+                video_id=video_id,
+                success=False,
+                elapsed_seconds=elapsed,
+                error=f"Fetch error: {e.reason}"
+            ))
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            results.append(TestFetchResult(
+                video_id=video_id,
+                success=False,
+                elapsed_seconds=elapsed,
+                error=str(e)
+            ))
+
+    # Calculate summary statistics
+    successes = [r for r in results if r.success]
+    failures = [r for r in results if not r.success]
+
+    avg_time = 0.0
+    if successes:
+        avg_time = sum(r.elapsed_seconds for r in successes) / len(successes)
+
+    # Find dominant format
+    dominant_format = ""
+    if successes:
+        format_counts: Dict[str, int] = {}
+        for r in successes:
+            format_counts[r.format_used] = format_counts.get(r.format_used, 0) + 1
+        if format_counts:
+            dominant_format = max(format_counts, key=format_counts.get)
+
+    return TestFetchSummary(
+        total=len(results),
+        successes=len(successes),
+        failures=len(failures),
+        results=results,
+        avg_time=avg_time,
+        dominant_format=dominant_format
+    )
+
+
+@dataclass
 class CaptionSegment:
     """A single caption segment with timing information.
 
