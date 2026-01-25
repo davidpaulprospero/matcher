@@ -20,6 +20,7 @@ from src.config.sections.llm import (
 from src.config.sections.download import (
     DownloadConfig,
     LLMTitleFilterConfig,
+    CaptionFirstConfig,
     AudioFirstConfig,
     ZeroDownloadRemixConfig,
     SpeechScreeningConfig,
@@ -135,6 +136,22 @@ class TestDownloadConfigPostInit:
         assert config.audio_first.enabled == True
         assert config.audio_first.buffer_seconds == 45.0
 
+    def test_download_config_caption_first_as_dict(self):
+        """Test caption_first converted from dict."""
+        config = DownloadConfig(
+            caption_first={
+                'enabled': True,
+                'fallback_to_transcription': False,
+                'preferred_language': 'es',
+                'timeout': 60
+            }
+        )
+        assert isinstance(config.caption_first, CaptionFirstConfig)
+        assert config.caption_first.enabled == True
+        assert config.caption_first.fallback_to_transcription == False
+        assert config.caption_first.preferred_language == 'es'
+        assert config.caption_first.timeout == 60
+
     def test_download_config_zero_download_remix_as_dict(self):
         """Test zero_download_remix converted from dict (lines 284-285)."""
         config = DownloadConfig(
@@ -158,11 +175,13 @@ class TestDownloadConfigPostInit:
         config = DownloadConfig(
             llm_title_filter={'enabled': True},
             audio_first={'enabled': True},
+            caption_first={'enabled': True},
             zero_download_remix={'enabled': True},
             speech_screening={'enabled': True}
         )
         assert isinstance(config.llm_title_filter, LLMTitleFilterConfig)
         assert isinstance(config.audio_first, AudioFirstConfig)
+        assert isinstance(config.caption_first, CaptionFirstConfig)
         assert isinstance(config.zero_download_remix, ZeroDownloadRemixConfig)
         assert isinstance(config.speech_screening, SpeechScreeningConfig)
 
@@ -170,18 +189,21 @@ class TestDownloadConfigPostInit:
         """Test nested configs already as dataclass instances."""
         llm_filter = LLMTitleFilterConfig(enabled=False)
         audio_first = AudioFirstConfig(enabled=True)
+        caption_first = CaptionFirstConfig(enabled=True)
         zero_remix = ZeroDownloadRemixConfig(enabled=False)
         speech = SpeechScreeningConfig(enabled=True)
 
         config = DownloadConfig(
             llm_title_filter=llm_filter,
             audio_first=audio_first,
+            caption_first=caption_first,
             zero_download_remix=zero_remix,
             speech_screening=speech
         )
 
         assert config.llm_title_filter is llm_filter
         assert config.audio_first is audio_first
+        assert config.caption_first is caption_first
         assert config.zero_download_remix is zero_remix
         assert config.speech_screening is speech
 
@@ -294,3 +316,34 @@ class TestLLMTitleFilterConfigDefaults:
         assert config.model == "gemini-2.0-flash"
         assert config.batch_size == 20
         assert config.min_relevance == 0.7
+
+
+class TestCaptionFirstConfigDefaults:
+    """Test CaptionFirstConfig default values."""
+
+    def test_caption_first_defaults(self):
+        """Test default values for caption first config."""
+        config = CaptionFirstConfig()
+        assert config.enabled == False
+        assert config.fallback_to_transcription == True
+        assert config.preferred_language == "en"
+        assert config.timeout == 30
+        assert config.prefer_human_captions == True
+        assert config.cache_captions == True
+
+    def test_caption_first_custom_values(self):
+        """Test custom values for caption first config."""
+        config = CaptionFirstConfig(
+            enabled=True,
+            fallback_to_transcription=False,
+            preferred_language="es",
+            timeout=60,
+            prefer_human_captions=False,
+            cache_captions=False
+        )
+        assert config.enabled == True
+        assert config.fallback_to_transcription == False
+        assert config.preferred_language == "es"
+        assert config.timeout == 60
+        assert config.prefer_human_captions == False
+        assert config.cache_captions == False

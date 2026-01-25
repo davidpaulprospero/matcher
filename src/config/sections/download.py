@@ -13,6 +13,7 @@ __all__ = [
     'ZeroDownloadRemixConfig',
     'EnhancedFeaturesConfig',
     'LLMTitleFilterConfig',
+    'CaptionFirstConfig',
     'AudioFirstConfig',
     'SpeechScreeningConfig',
     'CookieRotationConfig',
@@ -120,6 +121,44 @@ class LLMTitleFilterConfig:
     model: str = "gemini-2.0-flash"  # or claude-3-haiku-20240307
     batch_size: int = 20  # Check multiple titles at once
     min_relevance: float = 0.7  # 0-1, reject if below
+
+
+@dataclass
+class CaptionFirstConfig:
+    """Caption-first mode configuration.
+
+    When enabled, fetches YouTube captions BEFORE video download, enabling
+    faster matching with lower bandwidth. If captions are unavailable,
+    falls back to Whisper transcription.
+
+    Enable per-project in project_config.yaml:
+        download:
+          caption_first:
+            enabled: true
+
+    Benefits:
+    - Faster: No need to download/process audio for transcription
+    - Lower bandwidth: Only downloads video segments after matching
+    - Quality indicators: Tracks human vs auto-generated captions
+    """
+    # Enable/disable caption-first mode
+    enabled: bool = False  # Disabled by default, enable per-project
+
+    # Fall back to Whisper transcription when captions unavailable
+    fallback_to_transcription: bool = True
+
+    # Preferred caption language (ISO 639-1 code)
+    # Fallback chain: preferred_language -> 'en' -> any available
+    preferred_language: str = "en"
+
+    # Timeout for caption fetch requests (seconds)
+    timeout: int = 30
+
+    # Prefer human-uploaded captions over auto-generated
+    prefer_human_captions: bool = True
+
+    # Cache captions for cross-project reuse
+    cache_captions: bool = True
 
 
 @dataclass
@@ -593,6 +632,10 @@ class DownloadConfig:
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
 
+    # Caption-first mode: fetch YouTube captions before video download
+    # Enables faster matching with lower bandwidth - falls back to Whisper if unavailable
+    caption_first: CaptionFirstConfig = field(default_factory=CaptionFirstConfig)
+
     # Zero-download remix: auto-retry with alternative keywords when 0 results
     zero_download_remix: ZeroDownloadRemixConfig = field(default_factory=ZeroDownloadRemixConfig)
 
@@ -640,6 +683,8 @@ class DownloadConfig:
             self.llm_title_filter = LLMTitleFilterConfig(**self.llm_title_filter)
         if isinstance(self.audio_first, dict):
             self.audio_first = AudioFirstConfig(**self.audio_first)
+        if isinstance(self.caption_first, dict):
+            self.caption_first = CaptionFirstConfig(**self.caption_first)
         if isinstance(self.zero_download_remix, dict):
             self.zero_download_remix = ZeroDownloadRemixConfig(**self.zero_download_remix)
         if isinstance(self.speech_screening, dict):
