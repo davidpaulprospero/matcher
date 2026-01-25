@@ -92,6 +92,31 @@ function Get-RalphConfig {
 $script:Config = Get-RalphConfig
 
 # ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+function Write-JsonNoBom {
+    <#
+    .SYNOPSIS
+        Write JSON to file without UTF-8 BOM
+    .PARAMETER Path
+        File path to write to
+    .PARAMETER Content
+        JSON string content
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [Parameter(Mandatory=$true)]
+        [string]$Content
+    )
+
+    # Use .NET to write without BOM
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
+# ============================================================================
 # BANNER AND DISPLAY
 # ============================================================================
 
@@ -221,7 +246,7 @@ function Update-InterviewProgress {
             $queue.session.iterationCount = $script:IterationCount
         }
 
-        $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
+        Write-JsonNoBom -Path $script:QueueFile -Content ($queue | ConvertTo-Json -Depth 10)
 
         Write-Host "  Marked '$AreaId' as completed" -ForegroundColor Green
     }
@@ -335,7 +360,7 @@ function Update-LegacyQueueProgress {
             }
         }
 
-        $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
+        Write-JsonNoBom -Path $script:QueueFile -Content ($queue | ConvertTo-Json -Depth 10)
         Write-Host "  Updated queue progress: $CompletedArea completed" -ForegroundColor DarkGray
     }
     catch {
@@ -567,6 +592,12 @@ function Log-ClaudeInvocation {
         [bool]$TimedOut
     )
 
+    # Input validation
+    if (-not $script:SessionLogDir) {
+        Write-Warning "Log-ClaudeInvocation: SessionLogDir not set, skipping"
+        return
+    }
+
     $invocationFile = Join-Path $script:SessionLogDir "claude_invocation_$Iteration.json"
 
     # Read prompt metadata
@@ -616,7 +647,7 @@ function Log-ClaudeInvocation {
         }
     }
 
-    $invocation | ConvertTo-Json -Depth 5 | Set-Content -Path $invocationFile -Encoding UTF8
+    Write-JsonNoBom -Path $invocationFile -Content ($invocation | ConvertTo-Json -Depth 5)
 }
 
 function Log-IterationManifest {
@@ -669,6 +700,16 @@ function Log-IterationManifest {
         [int]$RetryCount
     )
 
+    # Input validation
+    if (-not $script:SessionLogDir) {
+        Write-Warning "Log-IterationManifest: SessionLogDir not set, skipping"
+        return
+    }
+    if ($Iteration -lt 1) {
+        Write-Warning "Log-IterationManifest: Invalid iteration number: $Iteration"
+        $Iteration = 1
+    }
+
     $manifestFile = Join-Path $script:SessionLogDir "iteration_${Iteration}_manifest.json"
 
     # Parse test results
@@ -681,15 +722,18 @@ function Log-IterationManifest {
 
     # Get PRD info
     $sprint = 0
-    $branch = ""
+    $prdBranch = ""
     if (Test-Path $script:PrdFile) {
         try {
             $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
             $sprint = $prd.sprintNumber
-            $branch = $prd.branchName
+            $prdBranch = $prd.branchName
         }
         catch {}
     }
+
+    # Use git branch as source of truth, fall back to PRD branch
+    $actualBranch = if ($GitAfter -and $GitAfter.branch) { $GitAfter.branch } else { $prdBranch }
 
     # Calculate lines from commits
     $linesAdded = 0
@@ -699,12 +743,17 @@ function Log-IterationManifest {
         $linesDeleted += $commit.deletions
     }
 
+    # Determine if this is focus area work vs story work
+    # StoryId should be null/empty for focus area work (PRD generation)
+    $isStoryWork = $StoryId -and $StoryId -match "^US-\d+"
+    $effectiveStoryId = if ($isStoryWork) { $StoryId } else { $null }
+
     $manifest = @{
         iteration = $Iteration
-        storyId = $StoryId
+        storyId = $effectiveStoryId
         focusArea = $FocusArea
         sprint = $sprint
-        branch = $branch
+        branch = $actualBranch
         status = $Status
         timestamps = @{
             started = $StartTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -719,12 +768,12 @@ function Log-IterationManifest {
             stderr = "claude_err_$Iteration.log"
         }
         git = @{
-            beforeCommit = $GitBefore.hash
-            afterCommit = $GitAfter.hash
-            branch = $GitAfter.branch
-            filesCreated = $FileOps.filesCreated.Count
-            filesModified = $FileOps.filesModified.Count
-            filesDeleted = $FileOps.filesDeleted.Count
+            beforeCommit = if ($GitBefore) { $GitBefore.hash } else { "" }
+            afterCommit = if ($GitAfter) { $GitAfter.hash } else { "" }
+            branch = $actualBranch
+            filesCreated = if ($FileOps -and $FileOps.filesCreated) { $FileOps.filesCreated.Count } else { 0 }
+            filesModified = if ($FileOps -and $FileOps.filesModified) { $FileOps.filesModified.Count } else { 0 }
+            filesDeleted = if ($FileOps -and $FileOps.filesDeleted) { $FileOps.filesDeleted.Count } else { 0 }
             linesAdded = $linesAdded
             linesDeleted = $linesDeleted
             commits = $Commits
@@ -741,7 +790,7 @@ function Log-IterationManifest {
         }
     }
 
-    $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestFile -Encoding UTF8
+    Write-JsonNoBom -Path $manifestFile -Content ($manifest | ConvertTo-Json -Depth 10)
 }
 
 function Log-FileOperations {
@@ -760,7 +809,7 @@ function Log-FileOperations {
 
     $fileOpsFile = Join-Path $script:SessionLogDir "file_operations_$Iteration.json"
 
-    $FileOps | ConvertTo-Json -Depth 5 | Set-Content -Path $fileOpsFile -Encoding UTF8
+    Write-JsonNoBom -Path $fileOpsFile -Content ($FileOps | ConvertTo-Json -Depth 5)
 }
 
 function Log-GitOperations {
@@ -803,7 +852,7 @@ function Log-GitOperations {
         totalCommits = $Commits.Count
     }
 
-    $gitOps | ConvertTo-Json -Depth 5 | Set-Content -Path $gitOpsFile -Encoding UTF8
+    Write-JsonNoBom -Path $gitOpsFile -Content ($gitOps | ConvertTo-Json -Depth 5)
 }
 
 function Log-StoryVerification {
@@ -853,7 +902,7 @@ function Log-StoryVerification {
         overallVerified = $Passed
     }
 
-    $verification | ConvertTo-Json -Depth 5 | Set-Content -Path $verificationFile -Encoding UTF8
+    Write-JsonNoBom -Path $verificationFile -Content ($verification | ConvertTo-Json -Depth 5)
 }
 
 function Append-SessionTimeline {
@@ -869,6 +918,11 @@ function Append-SessionTimeline {
         [string]$Event,
         [hashtable]$Data = @{}
     )
+
+    # Skip if session not initialized
+    if (-not $script:SessionLogDir -or -not (Test-Path $script:SessionLogDir)) {
+        return
+    }
 
     $timelineFile = Join-Path $script:SessionLogDir "session_timeline.jsonl"
 
@@ -909,6 +963,11 @@ function Log-StateTransition {
         [string]$Reason,
         [hashtable]$Context = @{}
     )
+
+    # Skip if session not initialized
+    if (-not $script:SessionLogDir -or -not (Test-Path $script:SessionLogDir)) {
+        return
+    }
 
     $stateFile = Join-Path $script:SessionLogDir "state_transitions.jsonl"
 
@@ -1126,7 +1185,7 @@ function Log-TestDetails {
         }
     }
 
-    $testDetails | ConvertTo-Json -Depth 5 | Set-Content -Path $testDetailsFile -Encoding UTF8
+    Write-JsonNoBom -Path $testDetailsFile -Content ($testDetails | ConvertTo-Json -Depth 5)
     return $testDetails
 }
 
@@ -1197,7 +1256,7 @@ function Log-ResourceUsage {
         samples = $Samples
     }
 
-    $usage | ConvertTo-Json -Depth 5 | Set-Content -Path $resourceFile -Encoding UTF8
+    Write-JsonNoBom -Path $resourceFile -Content ($usage | ConvertTo-Json -Depth 5)
 }
 
 # Task 3.4: Prompt Effectiveness Scoring
@@ -1480,51 +1539,99 @@ Start by reading the config and prompt files, then generate the PRD.
         # Write prompt to file (multiline strings break when passed as arguments)
         $prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
 
-        # Build the command with stdin redirection via cmd
-        # This properly handles multiline prompts
+        # Use ProcessStartInfo for proper exit code capture
+        # cmd.exe /c with pipes doesn't reliably propagate exit codes
         $flagsString = ($claudeArgs -join ' ')
-        $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
 
         # Record execution start time
         $executionStart = Get-Date
 
-        # Run Claude with timeout using cmd for proper stdin piping
-        $process = Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", $cmdCommand `
-            -WorkingDirectory $script:ProjectRoot `
-            -NoNewWindow `
-            -PassThru `
-            -RedirectStandardOutput $outFile `
-            -RedirectStandardError $errFile
+        # Create process with proper stdin redirection for multiline prompts
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $claudePath
+        $psi.Arguments = $flagsString
+        $psi.WorkingDirectory = $script:ProjectRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
 
-        # Phase 3 - Task 3.3: Sample resource usage during execution
-        $resourceSamples = @()
-        $sampleIntervalMs = 5000  # Sample every 5 seconds
-        $waitedMs = 0
-        $timeoutMs = $timeout * 1000
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
 
-        while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
-            Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
-            $waitedMs += $sampleIntervalMs
-            if (-not $process.HasExited) {
-                $sample = Get-ProcessMetrics -ProcessId $process.Id
-                $resourceSamples += $sample
+        # Use StringBuilder for async output capture
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
+
+        # Register async handlers before starting
+        $outHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data)
+            }
+        }
+        $errHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data)
             }
         }
 
-        $exited = $process.HasExited  # True if process finished within timeout
-        $executionEnd = Get-Date
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
+
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            # Write prompt to stdin and close it
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # Phase 3 - Task 3.3: Sample resource usage during execution
+            $resourceSamples = @()
+            $sampleIntervalMs = 5000  # Sample every 5 seconds
+            $waitedMs = 0
+            $timeoutMs = $timeout * 1000
+
+            while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
+                Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
+                $waitedMs += $sampleIntervalMs
+                if (-not $process.HasExited) {
+                    $sample = Get-ProcessMetrics -ProcessId $process.Id
+                    $resourceSamples += $sample
+                }
+            }
+
+            $exited = $process.HasExited  # True if process finished within timeout
+            $executionEnd = Get-Date
+
+            # Capture exit code - with ProcessStartInfo this is reliable
+            $exitCode = $null
+            if ($exited) {
+                $process.WaitForExit()  # Ensure async reads complete
+                $exitCode = $process.ExitCode
+            }
+        }
+        finally {
+            # Unregister event handlers
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+
+            # Give a moment for final output to arrive
+            Start-Sleep -Milliseconds 100
+
+            # Save output to files for logging
+            $outBuilder.ToString() | Set-Content $outFile -ErrorAction SilentlyContinue
+            $errBuilder.ToString() | Set-Content $errFile -ErrorAction SilentlyContinue
+        }
 
         $iterationDuration = (Get-Date) - $iterationStart
 
-        # Read output for metrics
-        $claudeOutput = ""
-        if (Test-Path $outFile) {
-            $claudeOutput = Get-Content $outFile -Raw -ErrorAction SilentlyContinue
-        }
-        if (Test-Path $errFile) {
-            $claudeOutput += Get-Content $errFile -Raw -ErrorAction SilentlyContinue
-        }
+        # Read output for metrics from StringBuilders (already captured)
+        $claudeOutput = $outBuilder.ToString() + $errBuilder.ToString()
 
         # Calculate metrics
         $tokensUsed = Get-EstimatedTokens -Output $claudeOutput
@@ -1566,7 +1673,7 @@ Start by reading the config and prompt files, then generate the PRD.
 
             $script:ConsecutiveFailures++
         }
-        elseif ($process.ExitCode -eq 0) {
+        elseif ($exitCode -eq 0) {
             Write-Host "  Iteration completed successfully" -ForegroundColor Green
             "Completed successfully in $([math]::Round($iterationDuration.TotalSeconds)) seconds" | Add-Content $iterationLog
             $iterationStatus = "completed"
@@ -1582,16 +1689,17 @@ Start by reading the config and prompt files, then generate the PRD.
             $script:ConsecutiveFailures = 0
         }
         else {
-            Write-Host "  Iteration failed with exit code $($process.ExitCode)" -ForegroundColor Red
-            "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
+            $exitCodeStr = if ($null -ne $exitCode) { $exitCode } else { "unknown" }
+            Write-Host "  Iteration failed with exit code $exitCodeStr" -ForegroundColor Red
+            "Failed with exit code $exitCodeStr" | Add-Content $iterationLog
             $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
 
             # Phase 2 - Task 2.4: Log error evolution
-            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $($process.ExitCode)" -Iteration $script:IterationCount
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCodeStr" -Iteration $script:IterationCount
 
             # Phase 2 - Task 2.5: Log state transition
-            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $($process.ExitCode)"
+            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $exitCodeStr"
 
             Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
@@ -1610,7 +1718,7 @@ Start by reading the config and prompt files, then generate the PRD.
             -ProcessId $process.Id `
             -StartTime $executionStart `
             -EndTime $executionEnd `
-            -ExitCode $process.ExitCode `
+            -ExitCode $(if ($null -ne $exitCode) { $exitCode } else { -1 }) `
             -TimedOut $timedOut
 
         # 2. Log iteration manifest
@@ -1787,49 +1895,102 @@ function Invoke-ClaudeForStory {
         $errFile = Join-Path $script:SessionLogDir "claude_err_$($script:IterationCount).log"
         $promptFile = Join-Path $script:SessionLogDir "prompt_$($script:IterationCount).txt"
 
-        # Write prompt to file and pipe via stdin (consistent with Invoke-ClaudeForFocusArea)
+        # Write prompt to file (for logging reference)
         $prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
+
+        # Use ProcessStartInfo for proper exit code capture
+        # cmd.exe /c with pipes doesn't reliably propagate exit codes
         $flagsString = ($claudeArgs -join ' ')
-        $cmdCommand = "type `"$promptFile`" | `"$claudePath`" $flagsString"
 
         # Record execution start time
         $executionStart = Get-Date
 
-        $process = Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", $cmdCommand `
-            -WorkingDirectory $script:ProjectRoot `
-            -NoNewWindow `
-            -PassThru `
-            -RedirectStandardOutput $outFile `
-            -RedirectStandardError $errFile
+        # Create process with proper stdin redirection for multiline prompts
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $claudePath
+        $psi.Arguments = $flagsString
+        $psi.WorkingDirectory = $script:ProjectRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
 
-        # Phase 3 - Task 3.3: Sample resource usage during execution
-        $resourceSamples = @()
-        $sampleIntervalMs = 5000  # Sample every 5 seconds
-        $waitedMs = 0
-        $timeoutMs = $timeout * 1000
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
 
-        while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
-            Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
-            $waitedMs += $sampleIntervalMs
-            if (-not $process.HasExited) {
-                $sample = Get-ProcessMetrics -ProcessId $process.Id
-                $resourceSamples += $sample
+        # Use StringBuilder for async output capture
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
+
+        # Register async handlers before starting
+        $outHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data)
+            }
+        }
+        $errHandler = {
+            if (-not [string]::IsNullOrEmpty($EventArgs.Data)) {
+                $Event.MessageData.AppendLine($EventArgs.Data)
             }
         }
 
-        $exited = $process.HasExited  # True if process finished within timeout
-        $executionEnd = Get-Date
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
+
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            # Write prompt to stdin and close it
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # Phase 3 - Task 3.3: Sample resource usage during execution
+            $resourceSamples = @()
+            $sampleIntervalMs = 5000  # Sample every 5 seconds
+            $waitedMs = 0
+            $timeoutMs = $timeout * 1000
+
+            while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
+                Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
+                $waitedMs += $sampleIntervalMs
+                if (-not $process.HasExited) {
+                    $sample = Get-ProcessMetrics -ProcessId $process.Id
+                    $resourceSamples += $sample
+                }
+            }
+
+            $exited = $process.HasExited  # True if process finished within timeout
+            $executionEnd = Get-Date
+
+            # Capture exit code - with ProcessStartInfo this is reliable
+            $exitCode = $null
+            if ($exited) {
+                $process.WaitForExit()  # Ensure async reads complete
+                $exitCode = $process.ExitCode
+            }
+        }
+        finally {
+            # Unregister event handlers
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+
+            # Give a moment for final output to arrive
+            Start-Sleep -Milliseconds 100
+
+            # Save output to files for logging
+            $outBuilder.ToString() | Set-Content $outFile -ErrorAction SilentlyContinue
+            $errBuilder.ToString() | Set-Content $errFile -ErrorAction SilentlyContinue
+        }
+
         $iterationDuration = (Get-Date) - $iterationStart
 
-        # Read output for metrics
-        $claudeOutput = ""
-        if (Test-Path $outFile) {
-            $claudeOutput = Get-Content $outFile -Raw -ErrorAction SilentlyContinue
-        }
-        if (Test-Path $errFile) {
-            $claudeOutput += Get-Content $errFile -Raw -ErrorAction SilentlyContinue
-        }
+        # Read output for metrics from StringBuilders (already captured)
+        $claudeOutput = $outBuilder.ToString() + $errBuilder.ToString()
 
         # Calculate metrics
         $tokensUsed = Get-EstimatedTokens -Output $claudeOutput
@@ -1865,9 +2026,13 @@ function Invoke-ClaudeForStory {
             Log-StateTransition -From "running" -To "failed" -Reason "Timeout after ${timeout}s" -Context @{ storyId = $StoryId }
 
             Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
+
+            # Log story verification for timeout (Task 1.3)
+            Log-StoryVerification -StoryId $StoryId -Story $storyObj -Iteration $script:IterationCount -Passed $false
+
             $script:ConsecutiveFailures++
         }
-        elseif ($process.ExitCode -eq 0) {
+        elseif ($exitCode -eq 0) {
             Write-Host "  Story completed successfully" -ForegroundColor Green
             $iterationStatus = "completed"
             $success = $true
@@ -1890,17 +2055,22 @@ function Invoke-ClaudeForStory {
             }
         }
         else {
-            Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
+            $exitCodeStr = if ($null -ne $exitCode) { $exitCode } else { "unknown" }
+            Write-Host "  Story failed with exit code $exitCodeStr" -ForegroundColor Red
             $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
 
             # Phase 2 - Task 2.4: Log error evolution
-            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $($process.ExitCode) on story $StoryId" -Iteration $script:IterationCount
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCodeStr on story $StoryId" -Iteration $script:IterationCount
 
             # Phase 2 - Task 2.5: Log state transition
-            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $($process.ExitCode)" -Context @{ storyId = $StoryId }
+            Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $exitCodeStr" -Context @{ storyId = $StoryId }
 
             Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
+
+            # Log story verification for failure (Task 1.3)
+            Log-StoryVerification -StoryId $StoryId -Story $storyObj -Iteration $script:IterationCount -Passed $false
+
             $script:ConsecutiveFailures++
         }
 
@@ -1916,7 +2086,7 @@ function Invoke-ClaudeForStory {
             -ProcessId $process.Id `
             -StartTime $executionStart `
             -EndTime $executionEnd `
-            -ExitCode $process.ExitCode `
+            -ExitCode $(if ($null -ne $exitCode) { $exitCode } else { -1 }) `
             -TimedOut $timedOut
 
         # 2. Log iteration manifest
@@ -2163,32 +2333,44 @@ function Record-Metric {
         [int]$PhaseCommitMs = 0
     )
 
-    # Ensure metrics file exists with header (v2 schema with phase timings)
-    if (-not (Test-Path $script:MetricsFile)) {
-        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms" | Set-Content $script:MetricsFile
-    }
+    # V2 schema: 21 columns including extended metrics and phase timings
+    $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"
 
-    # Check if we need to migrate to v2 schema (add phase columns if missing)
-    $header = Get-Content $script:MetricsFile -First 1
-    if ($header -notmatch "phase_read_ms") {
-        # Migrate: add new columns to header
-        $lines = Get-Content $script:MetricsFile
-        $lines[0] = $lines[0] + ",phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"
-        # Add empty values to existing rows
-        for ($i = 1; $i -lt $lines.Count; $i++) {
-            $lines[$i] = $lines[$i] + ",0,0,0,0,0"
+    # Ensure metrics file exists with v2 header
+    if (-not (Test-Path $script:MetricsFile)) {
+        $v2Header | Set-Content $script:MetricsFile -Encoding UTF8
+    }
+    else {
+        # Check if we need to migrate to v2 schema
+        $header = Get-Content $script:MetricsFile -First 1
+        $headerCols = ($header -split ',').Count
+
+        if ($headerCols -lt 21) {
+            # Full migration: rewrite with v2 header and pad old rows
+            $lines = Get-Content $script:MetricsFile
+            $lines[0] = $v2Header
+            # Add empty values to existing rows (pad to 21 columns)
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                $rowCols = ($lines[$i] -split ',').Count
+                $padding = 21 - $rowCols
+                if ($padding -gt 0) {
+                    $lines[$i] = $lines[$i] + (',' + '0' * $padding -replace '0', ',0').Substring(1)
+                }
+            }
+            $lines | Set-Content $script:MetricsFile -Encoding UTF8
+            Write-Host "  Migrated metrics.csv to v2 schema (21 columns)" -ForegroundColor DarkGray
         }
-        $lines | Set-Content $script:MetricsFile
     }
 
     # Use defaults from script variables if not provided
     if (-not $Session) { $Session = $script:SessionId }
     if (-not $Mode) { $Mode = $script:CurrentMode }
-    if (-not $FocusArea) {
+    if (-not $FocusArea -or -not $Sprint) {
         if (Test-Path $script:PrdFile) {
             try {
                 $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-                $FocusArea = $prd.focusArea
+                if (-not $FocusArea) { $FocusArea = $prd.focusArea }
+                if (-not $Sprint) { $Sprint = "sprint-$($prd.sprintNumber)" }
             }
             catch {}
         }
