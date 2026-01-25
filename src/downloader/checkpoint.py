@@ -41,6 +41,10 @@ class DownloadCheckpoint:
     rate_limit_event_count: int = 0
     # Rate limit metrics for cross-session analysis (US-010)
     rate_limit_metrics: Optional[Dict] = None
+    # Cross-keyword rate limit budget (US-004)
+    rate_limit_budget: Optional[Dict] = None
+    # VPN manager state for switch count persistence (US-005)
+    vpn_manager_state: Optional[Dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -58,6 +62,12 @@ class DownloadCheckpoint:
         # Handle checkpoints created before rate limit metrics was added (US-010)
         if 'rate_limit_metrics' not in data:
             data['rate_limit_metrics'] = None
+        # Handle checkpoints created before rate limit budget was added (US-004)
+        if 'rate_limit_budget' not in data:
+            data['rate_limit_budget'] = None
+        # Handle checkpoints created before VPN manager state was added (US-005)
+        if 'vpn_manager_state' not in data:
+            data['vpn_manager_state'] = None
         return cls(**data)
 
 

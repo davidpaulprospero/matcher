@@ -385,6 +385,10 @@ class TestRecoveryModeBehavior:
             from src.downloader.rate_limit_metrics import RateLimitMetrics
             downloader.rate_limit_metrics = RateLimitMetrics()
 
+            # Cross-keyword rate limit budget (US-004)
+            downloader._share_budget_across_keywords = False
+            downloader.rate_limit_budget = None
+
             return downloader
 
     @patch('time.sleep')
@@ -608,6 +612,10 @@ class TestCooldownIntegration:
             # Rate limit metrics (US-010)
             from src.downloader.rate_limit_metrics import RateLimitMetrics
             downloader.rate_limit_metrics = RateLimitMetrics()
+
+            # Cross-keyword rate limit budget (US-004)
+            downloader._share_budget_across_keywords = False
+            downloader.rate_limit_budget = None
 
             # Simulate multiple rate limit errors
             with patch('time.sleep'):
