@@ -3475,3 +3475,153 @@ All 8 US-009 related tests pass.
 - src/stages/caption_stage.py - on_progress() callback implementation
 - tests/test_caption_fetcher.py - 1 test
 - tests/test_stage_caption.py - 7 tests
+
+## Iteration 57 - [US-009] Implement streaming progress output (actual implementation)
+- Focus: caption
+- Status: COMPLETE
+
+### What was implemented
+Previous iteration (56) incorrectly claimed US-009 was "already implemented" but inspection revealed:
+- 'fetching' status was NOT being printed (only success/failed)
+- Format didn't match spec exactly
+- No TTY detection or line overwrite support
+
+This iteration actually implemented the missing features:
+
+**1. TTY-aware progress callback in CaptionStage (lines 205-271)**
+- Added `sys.stdout.isatty()` detection
+- TTY mode: Uses `\r` for carriage return to overwrite 'fetching' line, then newline for final status
+- Non-TTY mode: Skips 'fetching' status to reduce noise, only prints final success/failed
+
+**2. Updated format to match spec exactly**
+- Format: `[32/100] abc123XYZ: en (auto, 45 segments, quality=medium)`
+- Shows language, auto/human label, segment count, and quality
+
+**3. Added 'skipped' status handling**
+- For videos skipped due to live stream or other reasons
+
+**4. Added 7 new tests in TestStreamingProgressOutput class**
+- test_progress_callback_format_success
+- test_progress_callback_format_failed
+- test_tty_mode_uses_carriage_return
+- test_non_tty_mode_uses_newlines
+- test_progress_callback_invoked_by_batch_fetch
+- test_progress_format_matches_spec
+- test_progress_format_human_captions
+
+**5. Fixed 4 pre-existing broken tests in TestCaptionFetching/TestConfiguration**
+- Updated to use fetch_captions_batch instead of deprecated fetch_captions_auto_language
+- Added missing config attributes to mock_config fixture (max_parallel_fetches, min_coverage_threshold, pre_check_availability)
+
+### Test results
+All 37 tests in test_stage_caption.py pass.
+
+### Files modified
+- src/stages/caption_stage.py (64 lines changed) - TTY-aware progress callback
+- tests/test_stage_caption.py (427 lines added/modified) - 7 new tests, 4 fixed tests
+
+### Commit
+41ab0c1 feat: [US-009] Add streaming progress output for caption fetch
+
+## Iteration 67 - [US-010] Create caption health check script for test fixtures
+- Focus: caption
+- Status: COMPLETE
+
+### Summary
+Created a health check script that validates YouTube video fixtures in integration tests still have expected caption states. This helps maintain reliable integration tests by detecting when fixture videos become unavailable or their caption status changes.
+
+### Implementation
+
+**1. New script: scripts/check_caption_fixtures.py (370 lines)**
+- `load_video_fixtures()` - Parses VIDEO_FIXTURES from tests/test_caption_integration.py using brace matching
+- `FixtureCheckResult` dataclass - Stores check results with fixture_key, video_id, expected_state, actual_state, is_valid, details, error, suggested_action
+- `check_fixture()` - Checks single fixture using CaptionFetcher.list_available_languages()
+- `run_health_check()` - Runs checks on all fixtures, returns list of results
+- `print_summary()` - Pretty-prints summary with fixtures needing attention
+- `export_report()` - Exports JSON report with timestamp, summary, and detailed results
+
+**Features:**
+- Verbose mode (`--verbose/-v`): Shows real-time progress per fixture
+- JSON export (`--output/-o`): Exports detailed report including available languages
+- Exit codes: 0 if all valid, 1 if any need attention
+- Handles video unavailability (deleted/private) with specific error messages
+- Suggests replacement actions when fixtures need updates
+
+**2. New workflow: .github/workflows/caption-fixtures-check.yml**
+- Runs weekly: Monday 9am UTC (cron: '0 9 * * 1')
+- Manual trigger support via workflow_dispatch
+- Uploads fixture_report.json as artifact
+- Warns on fixture mismatches without blocking CI
+
+### Acceptance Criteria Verification
+1. [x] New scripts/check_caption_fixtures.py script
+2. [x] Reads VIDEO_FIXTURES from tests/test_caption_integration.py
+3. [x] Checks each fixture: exists, has captions, matches expected state
+4. [x] Reports mismatches with suggested updates (suggested_action field)
+5. [x] Exit code 0 if all valid, 1 if any need attention
+6. [x] Can be run manually or in CI (GitHub Action workflow added)
+
+### Test Results
+Script tested successfully:
+```
+$ python scripts/check_caption_fixtures.py --verbose
+Loaded 4 video fixtures from tests/test_caption_integration.py
+
+Checking with_captions (iG9CE55wbtY)... OK
+Checking auto_captions (jNQXAC9IVRw)... OK
+Checking no_captions (2Z4m4lnjxkY)... OK
+Checking backup_with_captions (dQw4w9WgXcQ)... OK
+```
+
+### Files Created
+- scripts/check_caption_fixtures.py (370 lines)
+- .github/workflows/caption-fixtures-check.yml (48 lines)
+
+### Commit
+308b3a3 feat: [US-010] Create caption health check script for test fixtures
+
+## Focus Area: caption - 2026-01-26 02:15:20
+- Status: In Progress...
+
+## Iteration - [US-001] Add thread-safe locking to streaming progress callback
+- Focus: caption (Sprint 6)
+- Status: COMPLETE
+
+### Changes Made
+Added thread-safe locking to the streaming progress callback in CaptionStage to prevent garbled TTY output when 8+ parallel workers call on_progress simultaneously.
+
+**Implementation:**
+1. Added `import threading` and created `progress_lock = threading.Lock()` in the `run()` method
+2. Wrapped all TTY writes and `last_line_length` state access inside `with progress_lock:` block
+3. Updated docstring to document thread-safety guarantees
+
+**Key Changes in src/stages/caption_stage.py:**
+- Line 208: Added `import threading`
+- Line 211: Created `progress_lock = threading.Lock()`
+- Lines 222-228: Added comprehensive docstring documenting thread-safety
+- Line 234: All print operations and state access now protected by lock
+
+### Tests Added (TestProgressCallbackThreadSafety class)
+1. `test_concurrent_progress_callbacks_no_garbling` - 16 videos with 8 workers, verifies no garbled output
+2. `test_last_line_length_protected_under_concurrency` - Verifies state variable protected, no deadlocks
+3. `test_lock_overhead_under_5ms` - 100 videos, confirms avg callback time < 5ms
+4. `test_tty_writes_serialized_under_concurrency` - Verifies TTY writes are serialized
+
+### Verification
+- Syntax check: `python -m py_compile src/stages/caption_stage.py` - PASSED
+- All 41 caption stage tests pass
+- Sanity check: `python main.py --help` - PASSED
+- Performance: Average callback time well under 5ms (typically <1ms)
+
+### Files Modified
+- src/stages/caption_stage.py - Added thread-safe locking
+- tests/test_stage_caption.py - Added TestProgressCallbackThreadSafety class (4 tests)
+
+### Acceptance Criteria Met
+- [x] Add threading.Lock to CaptionStage progress callback protecting TTY writes
+- [x] Protect last_line_length state variable with the same lock
+- [x] Create test simulating 8 concurrent workers calling on_progress simultaneously
+- [x] Verify output remains readable without garbled lines or character overlaps
+- [x] Add docstring documenting thread-safety guarantees for progress_callback
+- [x] Performance test confirms lock adds <5ms overhead per callback
+
