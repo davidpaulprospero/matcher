@@ -130,6 +130,7 @@ class CaptionStage(Stage):
                 CaptionFetchError,
                 CaptionResult,
                 CaptionMetrics,
+                CaptionCache,
                 determine_caption_quality,
             )
 
@@ -138,6 +139,17 @@ class CaptionStage(Stage):
 
             # Initialize metrics tracker (US-011, US-001: thread-safe)
             metrics = CaptionMetrics()
+
+            # US-002 Sprint 7: Initialize caption cache for adaptive format ordering
+            caption_cache = CaptionCache(caption_config)
+
+            # US-002 Sprint 7: Apply adaptive format ordering from historical success rates
+            # This reorders preferred_formats based on what worked best in previous runs
+            adaptive_enabled = getattr(caption_config, 'adaptive_format_order', True)
+            if adaptive_enabled and caption_cache.enabled:
+                new_order = self._fetcher.apply_adaptive_format_order(cache=caption_cache)
+                if self._fetcher._using_adaptive_order:
+                    print(f"  Using adaptive format order based on historical success rates")
 
             # US-004: Get video durations for coverage calculation
             video_durations = self._get_video_durations(state, config)
@@ -436,6 +448,14 @@ class CaptionStage(Stage):
             if slowest:
                 slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
                 print(f"    - Slowest fetches: {slowest_str}")
+
+            # US-002 Sprint 7: Save format statistics for cross-run learning
+            # This enables adaptive format ordering in future runs
+            if caption_cache.enabled and metrics.format_success_counts:
+                if caption_cache.save_format_statistics(metrics.format_success_counts):
+                    logger.info(f"Saved format statistics: {metrics.format_success_counts}")
+                else:
+                    logger.warning("Failed to save format statistics to cache")
 
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
