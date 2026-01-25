@@ -4879,3 +4879,57 @@ All 6 criteria were already implemented:
 - src/caption_fetcher.py - Fixed RLock deadlock (line 390)
 - scripts/ralph/prd.json - Marked US-001 as passes: true
 
+## Iteration - US-002: Create end-to-end timing penalty integration test
+- Focus: caption
+- Status: COMPLETE
+
+### Implementation Summary
+Created comprehensive integration test suite verifying timing_penalty flows through
+the entire pipeline from CaptionResult to match confidence adjustment.
+
+### Test Classes Created
+
+**TestTimingPenaltyPipeline** (13 tests):
+- `test_timing_penalty_factor_calculated_correctly_perfect` - 100% coverage returns 1.0
+- `test_timing_penalty_factor_calculated_correctly_poor` - 50% video with 20% exceeds
+- `test_timing_penalty_factor_low_coverage` - 50% coverage returns 0.90
+- `test_timing_penalty_stored_in_text_metadata` - Verifies CaptionStage storage
+- `test_timing_penalty_perfect_timing_stored_as_1` - Perfect timing = 1.0
+- `test_match_stage_retrieves_timing_penalty` - MatchStage reads from text_metadata
+- `test_match_stage_handles_missing_timing_penalty` - Graceful handling
+- `test_apply_timing_penalty_reduces_confidence` - **Key AC: 0.9 * 0.75 = 0.675**
+- `test_apply_timing_penalty_no_change_when_1` - No penalty when factor is 1.0
+- `test_apply_timing_penalty_disabled_no_change` - Config disable works
+- `test_full_pipeline_timing_penalty_flow` - End-to-end pipeline test
+- `test_full_pipeline_perfect_vs_poor_timing` - Comparison test
+- `test_timing_penalty_combined_with_caption_quality` - Combined adjustments
+
+**TestTimingPenaltyEdgeCases** (5 tests):
+- `test_zero_duration_video_no_penalty` - Invalid duration handling
+- `test_negative_penalty_clamped_to_zero` - Floor clamping
+- `test_penalty_above_one_is_no_penalty` - Ceiling handling
+- `test_caption_exceeds_duration_significantly` - 2x video length
+- `test_very_sparse_captions_low_coverage` - 10% coverage case
+
+**TestTimingPenaltyPipelineSmokeTest** (1 test):
+- `test_full_pipeline_smoke_test` - Comprehensive validation with 4 scenarios
+
+### Acceptance Criteria Verification
+
+1. **TestTimingPenaltyPipeline class** - tests/test_caption_match_integration.py:761-1283
+2. **CaptionResult.timing_penalty_factor calculation** - Tests at lines 859-918
+3. **timing_penalty stored in text_metadata** - Tests at lines 924-986
+4. **MatchStage retrieves from text_metadata** - Tests at lines 992-1042
+5. **apply_timing_penalty() confidence reduction** - Test at line 1048-1072 verifies 0.9 * 0.75 = 0.675
+6. **Mock pipeline integration** - Tests at lines 1122-1283
+
+### Verification
+- `python -m py_compile tests/test_caption_match_integration.py` - PASSED
+- `python main.py --help` - PASSED
+- All 36 tests in test_caption_match_integration.py pass (19 new + 17 existing)
+- All 686 caption/scoring tests pass (excluding 3 pre-existing failures unrelated to this work)
+
+### Files Modified
+- tests/test_caption_match_integration.py - Added 19 tests in 3 new test classes
+- scripts/ralph/prd.json - Marked US-002 as passes: true
+
