@@ -251,7 +251,13 @@ audio_analysis:
 matching:
   # Confidence thresholds (using shared defaults)
   <<: *quality_defaults
-  
+
+  # Negative sampling for LLM reranking
+  # Chain-of-thought: LLMs need calibration to set accurate confidence scores
+  # Reasoning: Showing a poor match helps LLM understand what "unlikely" looks like
+  # Decision: Select from bottom 25% of candidates as negative sample
+  negative_sampling_enabled: true  # Include negative sample in LLM prompts
+
   # Clip reuse prevention
   # Chain-of-thought: Prevent same clip appearing multiple times
   # Reasoning: Variety improves viewer experience
