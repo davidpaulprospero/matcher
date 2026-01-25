@@ -1,5 +1,10 @@
 """
 Unified caching for LLM responses with TTL support.
+
+Quality tier tracking:
+- high: confidence >= 0.8
+- medium: 0.5 <= confidence < 0.8
+- low: confidence < 0.5
 """
 
 import json
@@ -7,9 +12,62 @@ import hashlib
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# Quality tier thresholds
+QUALITY_TIER_HIGH_THRESHOLD = 0.8
+QUALITY_TIER_MEDIUM_THRESHOLD = 0.5
+
+
+def compute_quality_tier(confidence: float) -> str:
+    """
+    Compute quality tier from confidence score.
+
+    Args:
+        confidence: Confidence score (0.0-1.0)
+
+    Returns:
+        Quality tier: 'high', 'medium', or 'low'
+    """
+    if confidence >= QUALITY_TIER_HIGH_THRESHOLD:
+        return 'high'
+    elif confidence >= QUALITY_TIER_MEDIUM_THRESHOLD:
+        return 'medium'
+    else:
+        return 'low'
+
+
+def extract_confidence_from_response(response: "LLMResponse") -> Optional[float]:
+    """
+    Extract confidence score from LLM response parsed data.
+
+    The confidence is typically in the JSON response from matching LLM calls.
+    We check common locations where confidence might be stored.
+
+    Args:
+        response: LLM response object
+
+    Returns:
+        Confidence score or None if not found
+    """
+    if response.parsed_data is None:
+        return None
+
+    # Handle list of results (batch responses)
+    if isinstance(response.parsed_data, list):
+        # Use first result's confidence if available
+        if response.parsed_data and isinstance(response.parsed_data[0], dict):
+            return response.parsed_data[0].get('confidence')
+        return None
+
+    # Handle single result dict
+    if isinstance(response.parsed_data, dict):
+        return response.parsed_data.get('confidence')
+
+    return None
 
 
 class LLMCache:
@@ -30,11 +88,20 @@ class LLMCache:
         "parsed_data": {...},  # Optional
         "cached_at": 1234567890.0,
         "provider": "gemini",
-        "model": "gemini-2.0-flash"
+        "model": "gemini-2.0-flash",
+        "quality_tier": "high"  # high, medium, or low (based on confidence)
     }
+
+    Quality tiers:
+    - high: confidence >= 0.8
+    - medium: 0.5 <= confidence < 0.8
+    - low: confidence < 0.5
+
+    When skip_low_quality=True, cache hits with quality_tier='low' are skipped,
+    forcing a fresh LLM evaluation.
     """
 
-    def __init__(self, base_dir: str, provider: str, ttl_hours: int = 24):
+    def __init__(self, base_dir: str, provider: str, ttl_hours: int = 24, skip_low_quality: bool = False):
         """
         Initialize cache.
 
@@ -42,11 +109,13 @@ class LLMCache:
             base_dir: Base cache directory (e.g., ".cache/llm_responses")
             provider: Provider name (gemini, anthropic, ollama)
             ttl_hours: Time-to-live in hours (0 = never expire)
+            skip_low_quality: If True, skip cache entries with quality_tier='low'
         """
         self.cache_dir = Path(base_dir) / provider
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.ttl_seconds = ttl_hours * 3600
         self.provider = provider
+        self.skip_low_quality = skip_low_quality
 
     def _cache_key(self, request: "LLMRequest") -> str:
         """
@@ -88,7 +157,8 @@ class LLMCache:
             request: LLM request object
 
         Returns:
-            Cached response dict or None if not found/expired
+            Cached response dict or None if not found/expired/low-quality-skipped.
+            The dict includes 'quality_tier' field if available.
         """
         cache_key = self._cache_key(request)
         cache_file = self.cache_dir / f"{request.cache_key_prefix}_{cache_key}.json"
@@ -111,7 +181,31 @@ class LLMCache:
                     logger.debug(f"Cache expired for key {cache_key} (age: {age_seconds/3600:.1f}h)")
                     return None
 
-            logger.debug(f"Cache hit for key {cache_key}")
+            # Get quality tier (might be missing from old cache entries)
+            quality_tier = data.get('quality_tier', 'unknown')
+
+            # Check for low-quality skip
+            if self.skip_low_quality and quality_tier == 'low':
+                # Extract confidence for logging
+                confidence = None
+                if data.get('parsed_data'):
+                    if isinstance(data['parsed_data'], dict):
+                        confidence = data['parsed_data'].get('confidence')
+                    elif isinstance(data['parsed_data'], list) and data['parsed_data']:
+                        confidence = data['parsed_data'][0].get('confidence') if isinstance(data['parsed_data'][0], dict) else None
+
+                conf_str = f" (confidence: {confidence:.2f})" if confidence is not None else ""
+                logger.info(f"Cache skip (low-quality): key={cache_key}, quality_tier=low{conf_str}")
+                return None
+
+            # Log cache hit with quality tier info
+            if quality_tier != 'unknown':
+                # Get confidence range for logging
+                conf_range = self._get_confidence_range(quality_tier)
+                logger.debug(f"Cache hit for key {cache_key}, quality_tier={quality_tier} {conf_range}")
+            else:
+                logger.debug(f"Cache hit for key {cache_key} (legacy entry, no quality_tier)")
+
             return data
 
         except (json.JSONDecodeError, KeyError, OSError) as e:
@@ -123,9 +217,24 @@ class LLMCache:
                 pass
             return None
 
+    def _get_confidence_range(self, quality_tier: str) -> str:
+        """Get human-readable confidence range for a quality tier."""
+        if quality_tier == 'high':
+            return f"(conf >= {QUALITY_TIER_HIGH_THRESHOLD})"
+        elif quality_tier == 'medium':
+            return f"({QUALITY_TIER_MEDIUM_THRESHOLD} <= conf < {QUALITY_TIER_HIGH_THRESHOLD})"
+        elif quality_tier == 'low':
+            return f"(conf < {QUALITY_TIER_MEDIUM_THRESHOLD})"
+        return ""
+
     def set(self, request: "LLMRequest", response: "LLMResponse"):
         """
-        Cache an LLM response.
+        Cache an LLM response with quality tier tracking.
+
+        Quality tier is computed from the confidence score in parsed_data:
+        - high: confidence >= 0.8
+        - medium: 0.5 <= confidence < 0.8
+        - low: confidence < 0.5
 
         Args:
             request: LLM request object
@@ -134,19 +243,28 @@ class LLMCache:
         cache_key = self._cache_key(request)
         cache_file = self.cache_dir / f"{request.cache_key_prefix}_{cache_key}.json"
 
+        # Extract confidence and compute quality tier
+        confidence = extract_confidence_from_response(response)
+        quality_tier = compute_quality_tier(confidence) if confidence is not None else 'unknown'
+
         data = {
             "text": response.text,
             "parsed_data": response.parsed_data,
             "cached_at": time.time(),
             "provider": response.provider,
-            "model": response.model
+            "model": response.model,
+            "quality_tier": quality_tier
         }
 
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            logger.debug(f"Cached response for key {cache_key}")
+            # Log with quality tier info
+            if confidence is not None:
+                logger.debug(f"Cached response for key {cache_key}, quality_tier={quality_tier} (confidence: {confidence:.2f})")
+            else:
+                logger.debug(f"Cached response for key {cache_key}, quality_tier=unknown (no confidence in response)")
 
         except (OSError, TypeError) as e:
             logger.warning(f"Failed to cache LLM response: {e}")
