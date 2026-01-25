@@ -4828,3 +4828,54 @@ Created comprehensive stress test suite for high-concurrency caption fetching in
 - All 409 caption_fetcher tests pass
 - main.py --help runs successfully
 - pytest marker @pytest.mark.stress properly registered in pytest.ini
+
+## Focus Area: caption - 2026-01-26 06:06:25
+- Status: In Progress...
+
+## Iteration - [US-001] Add adaptive retry budget allocation across video batches (Sprint 8)
+- Focus: caption
+- Status: COMPLETE
+
+### Context
+US-001 Sprint 8 requested implementation of batch-level retry budget tracking. Upon investigation, the `BatchRetryBudget` class was already implemented (lines 346-656 in src/caption_fetcher.py), but contained a deadlock bug that caused test_get_summary to hang indefinitely.
+
+### Bug Found and Fixed
+**Deadlock in get_summary() method:**
+- `get_summary()` acquires `_lock` and calls `get_total_retries_saved()`
+- `get_total_retries_saved()` also tries to acquire the same `_lock`
+- Python's `threading.Lock` is not reentrant, causing deadlock
+
+**Fix:** Changed `_lock` from `threading.Lock` to `threading.RLock` (reentrant lock) on line 390.
+
+### Acceptance Criteria Verified
+All 6 criteria were already implemented:
+
+1. **BatchRetryBudget class** - Lines 346-656
+   - Tracks cumulative errors across all videos in batch
+   - Thread-safe with RLock protection
+
+2. **budget_remaining(category) method** - Lines 476-501
+   - Returns reduced retry count when pattern detected
+
+3. **>30% network errors → reduce to 1** - Lines 461-474
+   - `network_reduce_threshold: float = 0.30`
+
+4. **>50% network errors → disable retries** - Lines 446-458
+   - `network_disable_threshold: float = 0.50`
+
+5. **batch_retry_budget field in CaptionMetrics** - Line 5785
+   - Stores summary dict after batch completion
+   - `set_batch_retry_budget()` method at line 5954
+
+6. **Tests verify 40% errors use 60% fewer retries** - test_batch_retry_budget.py:166
+   - `test_40_percent_network_errors_uses_60_percent_fewer_retries()`
+
+### Verification
+- `python -m py_compile src/caption_fetcher.py` - PASSED
+- `python main.py --help` - PASSED
+- All 32 BatchRetryBudget tests pass in 0.45s
+
+### Files Modified
+- src/caption_fetcher.py - Fixed RLock deadlock (line 390)
+- scripts/ralph/prd.json - Marked US-001 as passes: true
+
