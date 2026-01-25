@@ -5004,3 +5004,376 @@ class TestCaptionMetricsErrorCategory:
 
         # Should have exactly num_threads * iterations_per_thread = 1000
         assert metrics.error_category_counts.get("NETWORK") == num_threads * iterations_per_thread
+
+
+# =============================================================================
+# US-004 Sprint 7: CaptionMetrics Export JSON Tests
+# =============================================================================
+
+class TestCaptionMetricsExportJson:
+    """Test CaptionMetrics.export_json() method (US-004 Sprint 7)"""
+
+    def test_export_json_creates_valid_file(self, tmp_path):
+        """Test that export_json creates a valid JSON file"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_attempt("vid1")
+        metrics.record_fetch_success("vid1", language="en", quality="high", segment_count=50)
+
+        output_file = tmp_path / "caption_metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        # File should exist
+        assert output_file.exists()
+
+        # Should be valid JSON
+        with open(output_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Return value should match file content
+        assert result == data
+
+    def test_export_json_contains_schema_version(self, tmp_path):
+        """Test that export includes schema version"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "metrics.json"
+
+        result = metrics.export_json(str(output_file))
+
+        assert result["schema_version"] == "1.0"
+
+    def test_export_json_contains_timestamp(self, tmp_path):
+        """Test that export includes ISO format timestamp"""
+        from src.caption_fetcher import CaptionMetrics
+        from datetime import datetime
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "metrics.json"
+
+        result = metrics.export_json(str(output_file))
+
+        # Should have export_timestamp
+        assert "export_timestamp" in result
+        # Should be valid ISO format
+        timestamp = datetime.fromisoformat(result["export_timestamp"].replace("Z", "+00:00"))
+        assert timestamp is not None
+
+    def test_export_json_contains_run_metadata(self, tmp_path):
+        """Test that export includes run metadata"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "metrics.json"
+
+        result = metrics.export_json(
+            str(output_file),
+            project_path="/path/to/project",
+            video_count=42
+        )
+
+        assert "run_metadata" in result
+        assert result["run_metadata"]["project_path"] == "/path/to/project"
+        assert result["run_metadata"]["video_count"] == 42
+        assert result["run_metadata"]["export_path"] == str(output_file)
+
+    def test_export_json_contains_summary_statistics(self, tmp_path):
+        """Test that export includes summary statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_attempt("v1")
+        metrics.record_fetch_success("v1", language="en", quality="high", segment_count=50)
+        metrics.record_fetch_attempt("v2")
+        metrics.record_fetch_failure("v2")
+        metrics.record_cache_hit("v3", language="en", quality="high", segment_count=30)
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        summary = result["summary"]
+        assert summary["total_processed"] == 3  # 1 success + 1 failure + 1 cache hit
+        assert summary["fetch_attempts"] == 2
+        assert summary["successes"] == 1
+        assert summary["failures"] == 1
+        assert summary["cache_hits"] == 1
+        assert summary["total_segments"] == 80  # 50 + 30
+
+    def test_export_json_contains_timing_metrics(self, tmp_path):
+        """Test that export includes timing metrics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", elapsed_seconds=2.5)
+        metrics.record_fetch_success("v2", elapsed_seconds=5.0)
+        metrics.record_fetch_success("v3", elapsed_seconds=1.0)
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        timing = result["timing"]
+        assert "video_fetch_times" in timing
+        assert "slowest_videos" in timing
+        # Slowest videos should be sorted by time descending
+        slowest = timing["slowest_videos"]
+        assert len(slowest) == 3
+        assert slowest[0][1] >= slowest[1][1]  # First is slowest
+
+    def test_export_json_contains_format_statistics(self, tmp_path):
+        """Test that export includes format success statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        # Simulate format tracking
+        metrics.record_fetch_success("v1", format_source="json3", preferred_format="json3")
+        metrics.record_fetch_success("v2", format_source="json3", preferred_format="json3")
+        metrics.record_fetch_success("v3", format_source="vtt", preferred_format="json3")  # fallback
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        formats = result["formats"]
+        assert "success_counts" in formats
+        assert "success_rates" in formats
+        assert "fallback_count" in formats
+        assert "video_format_used" in formats
+
+    def test_export_json_contains_language_statistics(self, tmp_path):
+        """Test that export includes language statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", language="en")
+        metrics.record_fetch_success("v2", language="es")
+        metrics.record_fetch_success("v3", language="en")
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        languages = result["languages"]
+        assert languages["distribution"] == {"en": 2, "es": 1}
+        assert "selection_trace" in languages
+        assert "fallback_summary" in languages
+
+    def test_export_json_contains_error_statistics(self, tmp_path):
+        """Test that export includes error category statistics"""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+
+        metrics = CaptionMetrics()
+        metrics.record_error_category(CaptionErrorCategory.NETWORK)
+        metrics.record_error_category(CaptionErrorCategory.NETWORK)
+        metrics.record_error_category(CaptionErrorCategory.PARSE)
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        errors = result["errors"]
+        assert errors["category_counts"] == {"NETWORK": 2, "PARSE": 1}
+        assert errors["top_category"] == "NETWORK"
+
+    def test_export_json_contains_coverage_statistics(self, tmp_path):
+        """Test that export includes coverage statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", coverage_ratio=0.95)  # high
+        metrics.record_fetch_success("v2", coverage_ratio=0.65)  # medium
+        metrics.record_fetch_success("v3", coverage_ratio=0.30)  # low
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        coverage = result["coverage"]
+        assert "distribution" in coverage
+        assert "low_coverage_videos" in coverage
+
+    def test_export_json_contains_quality_statistics(self, tmp_path):
+        """Test that export includes quality statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", quality="high", is_auto_generated=False)
+        metrics.record_fetch_success("v2", quality="medium", is_auto_generated=True)
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        quality = result["quality"]
+        assert quality["distribution"] == {"high": 1, "medium": 1}
+        assert quality["human_caption_count"] == 1
+        assert quality["auto_generated_count"] == 1
+
+    def test_export_json_contains_cache_validation(self, tmp_path):
+        """Test that export includes cache validation statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.cache_validation_passed = 10
+        metrics.cache_validation_rejected = 2
+        metrics.cache_validation_refetched = 2
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        cache_val = result["cache_validation"]
+        assert cache_val["passed"] == 10
+        assert cache_val["rejected"] == 2
+        assert cache_val["refetched"] == 2
+
+    def test_export_json_contains_pre_check_statistics(self, tmp_path):
+        """Test that export includes pre-check statistics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_pre_check("v1", has_captions=True)
+        metrics.record_pre_check("v2", has_captions=False)
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        pre_check = result["pre_check"]
+        assert pre_check["available"] == 1
+        assert pre_check["unavailable"] == 1
+
+    def test_export_json_contains_raw_metrics(self, tmp_path):
+        """Test that export includes raw to_dict() output"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_fetch_success("v1", language="en")
+
+        output_file = tmp_path / "metrics.json"
+        result = metrics.export_json(str(output_file))
+
+        assert "raw_metrics" in result
+        assert result["raw_metrics"]["successes"] == 1
+        assert result["raw_metrics"]["language_distribution"] == {"en": 1}
+
+    def test_export_json_with_config_snapshot(self, tmp_path):
+        """Test that export includes config snapshot when provided"""
+        from src.caption_fetcher import CaptionMetrics
+        from unittest.mock import MagicMock
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "metrics.json"
+
+        # Mock config with caption_first settings
+        mock_config = MagicMock()
+        mock_caption_first = MagicMock()
+        mock_caption_first.enabled = True
+        mock_caption_first.preferred_language = "es"
+        mock_caption_first.fallback_languages = ["en", "pt"]
+        mock_caption_first.preferred_formats = ["json3", "vtt"]
+        mock_caption_first.allow_auto_generated = True
+        mock_caption_first.min_coverage_threshold = 0.5
+        mock_caption_first.max_fetch_timeout = 30
+        mock_caption_first.adaptive_format_order = True
+        mock_config.download.caption_first = mock_caption_first
+
+        result = metrics.export_json(str(output_file), config=mock_config)
+
+        assert result["config_snapshot"] is not None
+        assert result["config_snapshot"]["enabled"] is True
+        assert result["config_snapshot"]["preferred_language"] == "es"
+        assert result["config_snapshot"]["fallback_languages"] == ["en", "pt"]
+
+    def test_export_json_creates_parent_directories(self, tmp_path):
+        """Test that export_json creates parent directories if needed"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "nested" / "deep" / "metrics.json"
+
+        metrics.export_json(str(output_file))
+
+        assert output_file.exists()
+
+    def test_export_json_handles_empty_metrics(self, tmp_path):
+        """Test that export_json works with empty metrics"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "empty_metrics.json"
+
+        result = metrics.export_json(str(output_file))
+
+        assert result["summary"]["total_processed"] == 0
+        assert result["summary"]["fetch_attempts"] == 0
+        assert result["errors"]["category_counts"] == {}
+        assert result["errors"]["top_category"] is None
+
+    def test_export_json_all_expected_fields(self, tmp_path):
+        """Test that exported JSON contains all expected top-level fields"""
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        output_file = tmp_path / "metrics.json"
+
+        result = metrics.export_json(str(output_file))
+
+        expected_fields = [
+            "schema_version",
+            "export_timestamp",
+            "run_metadata",
+            "config_snapshot",
+            "summary",
+            "timing",
+            "formats",
+            "languages",
+            "errors",
+            "coverage",
+            "quality",
+            "cache_validation",
+            "pre_check",
+            "raw_metrics",
+        ]
+        for field in expected_fields:
+            assert field in result, f"Missing expected field: {field}"
+
+
+class TestCaptionMetricsErrorCategorySerialization:
+    """Test that error_category_counts is properly serialized (US-003 Sprint 7 fix)"""
+
+    def test_error_category_counts_in_to_dict(self):
+        """Test that error_category_counts is included in to_dict()"""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+
+        metrics = CaptionMetrics()
+        metrics.record_error_category(CaptionErrorCategory.NETWORK)
+        metrics.record_error_category(CaptionErrorCategory.PARSE)
+
+        data = metrics.to_dict()
+
+        assert "error_category_counts" in data
+        assert data["error_category_counts"] == {"NETWORK": 1, "PARSE": 1}
+
+    def test_error_category_counts_in_from_dict(self):
+        """Test that error_category_counts is restored from from_dict()"""
+        from src.caption_fetcher import CaptionMetrics
+
+        data = {
+            "fetch_attempts": 10,
+            "error_category_counts": {"NETWORK": 3, "TIMEOUT": 2}
+        }
+
+        metrics = CaptionMetrics.from_dict(data)
+
+        assert metrics.error_category_counts == {"NETWORK": 3, "TIMEOUT": 2}
+
+    def test_error_category_counts_roundtrip(self):
+        """Test that error_category_counts survives serialization roundtrip"""
+        from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
+
+        original = CaptionMetrics()
+        original.record_error_category(CaptionErrorCategory.NETWORK)
+        original.record_error_category(CaptionErrorCategory.NETWORK)
+        original.record_error_category(CaptionErrorCategory.PARSE)
+        original.record_error_category(CaptionErrorCategory.RATE_LIMIT)
+
+        # Roundtrip
+        data = original.to_dict()
+        restored = CaptionMetrics.from_dict(data)
+
+        assert restored.error_category_counts == {"NETWORK": 2, "PARSE": 1, "RATE_LIMIT": 1}

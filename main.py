@@ -456,6 +456,11 @@ def main():
     if export_metrics_path:
         _export_rate_limit_metrics(export_metrics_path, config, PROJECT_DIR)
 
+    # Handle --export-caption-metrics flag (export caption fetch metrics to JSON)
+    export_caption_metrics_path = getattr(args, 'export_caption_metrics', None)
+    if export_caption_metrics_path:
+        _export_caption_metrics(export_caption_metrics_path, config, PROJECT_DIR, checkpoint_manager)
+
     if not success:
         print("\n  ❌ Pipeline failed")
         sys.exit(1)
@@ -520,6 +525,78 @@ def _export_rate_limit_metrics(path: str, config, project_dir: Path):
     except Exception as e:
         logger.warning(f"Failed to export rate limit metrics: {e}")
         print(f"\n  ⚠ Failed to export metrics: {e}")
+
+
+def _export_caption_metrics(path: str, config, project_dir: Path, checkpoint_manager):
+    """Export caption fetch metrics to JSON file (US-004 Sprint 7).
+
+    Loads caption metrics from the pipeline checkpoint and exports to the specified path.
+
+    Args:
+        path: Output file path for JSON export
+        config: Pipeline config
+        project_dir: Project directory
+        checkpoint_manager: CheckpointManager instance with loaded checkpoint
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from src.caption_fetcher import CaptionMetrics
+
+        # Try to get caption metrics from checkpoint manager's stages data
+        caption_data = None
+        if checkpoint_manager:
+            stages = getattr(checkpoint_manager, '_stages', {})
+            caption_data = stages.get('CAPTION', {})
+
+        if not caption_data:
+            # Fallback: try to load from checkpoint file directly
+            checkpoint_file = project_dir / "checkpoint.json"
+            if checkpoint_file.exists():
+                import json
+                with open(checkpoint_file, 'r', encoding='utf-8') as f:
+                    checkpoint = json.load(f)
+                caption_data = checkpoint.get('stages', {}).get('CAPTION', {})
+
+        if not caption_data:
+            print("\n  ⚠ No caption stage data found in checkpoint.")
+            print("  Run a CAPTION stage to collect metrics.")
+            return
+
+        # Extract caption_metrics from stage data
+        caption_metrics_data = caption_data.get('caption_metrics')
+        if not caption_metrics_data:
+            print("\n  ⚠ No caption metrics in checkpoint.")
+            print("  Run caption-first mode to collect metrics.")
+            return
+
+        # Reconstruct CaptionMetrics from checkpoint data
+        metrics = CaptionMetrics.from_dict(caption_metrics_data)
+
+        # Resolve output path
+        output_path = Path(path)
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+
+        # Get video count from caption data
+        video_count = caption_data.get('total_videos', len(caption_data.get('caption_results', {})))
+
+        # Export to JSON with run metadata
+        metrics.export_json(
+            str(output_path),
+            project_path=str(project_dir),
+            config=config,
+            video_count=video_count
+        )
+
+        print(f"\n  📊 Exported caption metrics to {output_path}")
+        print(f"     Fetch attempts: {metrics.fetch_attempts}, Successes: {metrics.successes}")
+        print(f"     Success rate: {metrics.success_rate}%, Cache hit rate: {metrics.cache_hit_rate}%")
+
+    except Exception as e:
+        logger.warning(f"Failed to export caption metrics: {e}")
+        print(f"\n  ⚠ Failed to export caption metrics: {e}")
 
 
 if __name__ == '__main__':
