@@ -1761,11 +1761,23 @@ class VideoDownloader:
         process = None
         last_stderr = ""
 
+        # Check if circuit breaker should block download retries (US-011)
+        block_download_retries = getattr(
+            self.circuit_breaker.config, 'block_download_retries', True
+        )
+
         # Record download attempt for metrics
         self.rate_limit_metrics.record_download_attempt()
 
         # Retry loop with exponential backoff
         for attempt in range(max_retries + 1):  # +1 for initial attempt
+            # US-011: Check circuit breaker state before retry attempts (not first attempt)
+            if attempt > 0 and block_download_retries and self.circuit_breaker.is_open:
+                wait_time = self.circuit_breaker.wait_for_recovery_if_needed(
+                    context=f"download retry {attempt}/{max_retries} for '{keyword}' ({tier})"
+                )
+                if wait_time > 0:
+                    self.rate_limit_metrics.record_circuit_breaker_wait(wait_time)
             try:
                 process = subprocess.Popen(
                     cmd,

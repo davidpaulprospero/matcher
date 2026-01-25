@@ -393,6 +393,13 @@ class CircuitBreakerConfig:
       - 5 searches fail in a row → circuit trips
       - Wait 60 seconds before allowing new searches
       - On next successful search → circuit resets to closed state
+
+    Download retry coordination:
+      When block_download_retries is enabled (default), the download retry loop
+      in _run_download_cmd will check the circuit breaker state before each retry
+      attempt. If the circuit breaker is tripped during a retry sequence, the
+      retry will wait for the circuit breaker to recover before continuing.
+      The retry count is preserved across circuit breaker pauses.
     """
     # Enable/disable circuit breaker
     enabled: bool = True
@@ -402,6 +409,10 @@ class CircuitBreakerConfig:
 
     # Duration to pause after circuit trips (seconds)
     pause_seconds: float = 60.0
+
+    # Block download retries when circuit breaker is tripped
+    # When true, download retry loop waits for circuit breaker recovery
+    block_download_retries: bool = True
 
 
 @dataclass

@@ -33,6 +33,13 @@ class CircuitBreakerConfig:
       - 5 searches fail in a row → circuit trips
       - Wait 60 seconds before allowing new searches
       - On next successful search → circuit resets to closed state
+
+    Download retry coordination:
+      When block_download_retries is enabled (default), the download retry loop
+      in _run_download_cmd will check the circuit breaker state before each retry
+      attempt. If the circuit breaker is tripped during a retry sequence, the
+      retry will wait for the circuit breaker to recover before continuing.
+      The retry count is preserved across circuit breaker pauses.
     """
     # Enable/disable circuit breaker
     enabled: bool = True
@@ -42,6 +49,10 @@ class CircuitBreakerConfig:
 
     # Duration to pause after circuit trips (seconds)
     pause_seconds: float = 60.0
+
+    # Block download retries when circuit breaker is tripped
+    # When true, download retry loop waits for circuit breaker recovery
+    block_download_retries: bool = True
 
 
 @dataclass
@@ -215,6 +226,65 @@ class CircuitBreaker:
         self.state.is_open = False
         self.state.opened_at = None
         logger.debug("Circuit breaker: manually reset")
+
+    def get_remaining_pause_time(self) -> float:
+        """Get remaining time until circuit breaker recovers.
+
+        Returns:
+            Remaining pause time in seconds, or 0.0 if not tripped.
+        """
+        if not self.config.enabled or not self.state.is_open:
+            return 0.0
+
+        if self.state.opened_at is None:
+            return 0.0
+
+        elapsed = time.time() - self.state.opened_at
+        remaining = self.config.pause_seconds - elapsed
+        return max(0.0, remaining)
+
+    def wait_for_recovery_if_needed(self, context: str = "") -> float:
+        """Wait for circuit breaker recovery if tripped.
+
+        This is designed for download retry coordination (US-011). Unlike
+        check_and_wait(), this method:
+        - Returns the actual wait time for metrics tracking
+        - Accepts a context string for more specific logging
+        - Does not transition state (caller still needs check_and_wait for state transition)
+
+        Args:
+            context: Optional context string for logging (e.g., "download retry")
+
+        Returns:
+            The number of seconds waited, or 0.0 if no wait was needed.
+        """
+        if not self.config.enabled:
+            return 0.0
+
+        if not self.state.is_open:
+            return 0.0
+
+        remaining = self.get_remaining_pause_time()
+        if remaining <= 0:
+            return 0.0
+
+        # Log the wait with context
+        ctx_str = f" ({context})" if context else ""
+        logger.info(
+            f"Circuit breaker OPEN{ctx_str}: waiting {remaining:.1f}s for recovery "
+            f"(trip #{self.state.total_trips}, "
+            f"{self.state.consecutive_failures} consecutive failures)"
+        )
+
+        time.sleep(remaining)
+        self.state.total_paused_seconds += remaining
+
+        # Transition to half-open state
+        logger.info(f"Circuit breaker: pause complete{ctx_str}, resuming")
+        self.state.is_open = False
+        self.state.opened_at = None
+
+        return remaining
 
     def get_stats(self) -> dict:
         """Get circuit breaker statistics for reporting.

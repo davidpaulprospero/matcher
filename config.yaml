@@ -999,6 +999,10 @@ download:
     enabled: true                       # Enable circuit breaker
     consecutive_failures_threshold: 5   # Failures before tripping (default: 5)
     pause_seconds: 60.0                 # Seconds to pause after tripping (default: 60)
+    block_download_retries: true        # Block download retries when circuit breaker tripped
+                                        # When true, the download retry loop waits for circuit
+                                        # breaker recovery before attempting the next retry.
+                                        # This prevents retries during active rate limiting.
 
   # Batch retry queue for rate-limited videos
   # When rate limiting affects a batch, collect failed videos and retry them
