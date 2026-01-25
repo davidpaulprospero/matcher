@@ -1588,18 +1588,56 @@ Start by reading the config and prompt files, then generate the PRD.
             $process.StandardInput.Write($prompt)
             $process.StandardInput.Close()
 
-            # Phase 3 - Task 3.3: Sample resource usage during execution
+            # Activity-based timeout: reset timeout when progress is detected
             $resourceSamples = @()
-            $sampleIntervalMs = 5000  # Sample every 5 seconds
-            $waitedMs = 0
-            $timeoutMs = $timeout * 1000
+            $checkIntervalSec = 5
+            $timeSinceProgress = 0
+            $totalElapsed = 0
+            $maxTotalMinutes = 60  # Hard cap at 60 min regardless of progress
+            $lastMinuteShown = -1
 
-            while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
-                Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
-                $waitedMs += $sampleIntervalMs
+            # Track file states for activity detection
+            $lastPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
+            $lastProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
+            $lastGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
+            $lastLogSize = if (Test-Path $outFile) { (Get-Item $outFile).Length } else { 0 }
+
+            while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
+                Start-Sleep -Seconds $checkIntervalSec
+                $timeSinceProgress += $checkIntervalSec
+                $totalElapsed += $checkIntervalSec
+
                 if (-not $process.HasExited) {
+                    # Sample resource usage
                     $sample = Get-ProcessMetrics -ProcessId $process.Id
                     $resourceSamples += $sample
+
+                    # Check for activity every iteration
+                    $mins = [math]::Floor($totalElapsed / 60)
+                    $currentPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
+                    $currentProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
+                    $currentGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
+                    $currentLogSize = if (Test-Path $outFile) { (Get-Item $outFile).Length } else { 0 }
+
+                    $prdUpdated = $currentPrdTime -and $lastPrdTime -and ($currentPrdTime -gt $lastPrdTime)
+                    $progressUpdated = $currentProgressTime -and $lastProgressTime -and ($currentProgressTime -gt $lastProgressTime)
+                    $gitChanged = $currentGitStatus -ne $lastGitStatus
+                    $logGrowing = $currentLogSize -gt $lastLogSize
+
+                    if ($prdUpdated -or $progressUpdated -or $gitChanged -or $logGrowing) {
+                        $reason = if ($prdUpdated) { "prd.json" } elseif ($progressUpdated) { "progress.txt" } elseif ($gitChanged) { "git changes" } else { "log output" }
+                        Write-Host "  [$mins min] Activity detected ($reason)" -ForegroundColor DarkGreen
+                        $timeSinceProgress = 0  # Reset timeout on progress
+                        $lastPrdTime = $currentPrdTime
+                        $lastProgressTime = $currentProgressTime
+                        $lastGitStatus = $currentGitStatus
+                        $lastLogSize = $currentLogSize
+                    }
+                    elseif ($mins -gt $lastMinuteShown) {
+                        # Show elapsed time every minute even without activity
+                        Write-Host "  [$mins min] Running..." -ForegroundColor DarkGray
+                        $lastMinuteShown = $mins
+                    }
                 }
             }
 
@@ -1947,18 +1985,56 @@ function Invoke-ClaudeForStory {
             $process.StandardInput.Write($prompt)
             $process.StandardInput.Close()
 
-            # Phase 3 - Task 3.3: Sample resource usage during execution
+            # Activity-based timeout: reset timeout when progress is detected
             $resourceSamples = @()
-            $sampleIntervalMs = 5000  # Sample every 5 seconds
-            $waitedMs = 0
-            $timeoutMs = $timeout * 1000
+            $checkIntervalSec = 5
+            $timeSinceProgress = 0
+            $totalElapsed = 0
+            $maxTotalMinutes = 60  # Hard cap at 60 min regardless of progress
+            $lastMinuteShown = -1
 
-            while (-not $process.HasExited -and $waitedMs -lt $timeoutMs) {
-                Start-Sleep -Milliseconds ([math]::Min($sampleIntervalMs, $timeoutMs - $waitedMs))
-                $waitedMs += $sampleIntervalMs
+            # Track file states for activity detection
+            $lastPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
+            $lastProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
+            $lastGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
+            $lastLogSize = if (Test-Path $outFile) { (Get-Item $outFile).Length } else { 0 }
+
+            while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
+                Start-Sleep -Seconds $checkIntervalSec
+                $timeSinceProgress += $checkIntervalSec
+                $totalElapsed += $checkIntervalSec
+
                 if (-not $process.HasExited) {
+                    # Sample resource usage
                     $sample = Get-ProcessMetrics -ProcessId $process.Id
                     $resourceSamples += $sample
+
+                    # Check for activity every iteration
+                    $mins = [math]::Floor($totalElapsed / 60)
+                    $currentPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
+                    $currentProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
+                    $currentGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
+                    $currentLogSize = if (Test-Path $outFile) { (Get-Item $outFile).Length } else { 0 }
+
+                    $prdUpdated = $currentPrdTime -and $lastPrdTime -and ($currentPrdTime -gt $lastPrdTime)
+                    $progressUpdated = $currentProgressTime -and $lastProgressTime -and ($currentProgressTime -gt $lastProgressTime)
+                    $gitChanged = $currentGitStatus -ne $lastGitStatus
+                    $logGrowing = $currentLogSize -gt $lastLogSize
+
+                    if ($prdUpdated -or $progressUpdated -or $gitChanged -or $logGrowing) {
+                        $reason = if ($prdUpdated) { "prd.json" } elseif ($progressUpdated) { "progress.txt" } elseif ($gitChanged) { "git changes" } else { "log output" }
+                        Write-Host "  [$mins min] Activity detected ($reason)" -ForegroundColor DarkGreen
+                        $timeSinceProgress = 0  # Reset timeout on progress
+                        $lastPrdTime = $currentPrdTime
+                        $lastProgressTime = $currentProgressTime
+                        $lastGitStatus = $currentGitStatus
+                        $lastLogSize = $currentLogSize
+                    }
+                    elseif ($mins -gt $lastMinuteShown) {
+                        # Show elapsed time every minute even without activity
+                        Write-Host "  [$mins min] Running..." -ForegroundColor DarkGray
+                        $lastMinuteShown = $mins
+                    }
                 }
             }
 
