@@ -237,7 +237,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.logger')
     def test_audio_extraction_error_handling(
         self, mock_logger, mock_extract, MockWhisperClient, MockTranscriptCache,
-        mock_cache, mock_config
+        mock_cache, mock_config, sample_raw_segments
     ):
         """Test error handling when audio extraction fails"""
         video_paths = ["/video1.mp4", "/video2.mp4"]
@@ -254,6 +254,10 @@ class TestTranscribeVideosParallel:
 
         mock_extract.side_effect = extract_side_effect
 
+        # Mock successful transcription for video2
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.return_value = sample_raw_segments
+
         with patch('pathlib.Path.unlink'), patch('pathlib.Path.mkdir'), \
              patch('src.transcription.parallel_processor.shutil.rmtree'):
             results = transcribe_videos_parallel(
@@ -261,8 +265,8 @@ class TestTranscribeVideosParallel:
                 show_progress=False
             )
 
-        # Should have logged error
-        assert mock_logger.error.called
+        # Should have logged with logger.exception() (includes traceback)
+        assert mock_logger.exception.called
 
         # Should continue processing video2
         assert len(results) == 1  # Only video2
@@ -297,8 +301,8 @@ class TestTranscribeVideosParallel:
                 show_progress=False
             )
 
-        # Should have logged error
-        assert mock_logger.error.called
+        # Should have logged with logger.exception() (includes traceback)
+        assert mock_logger.exception.called
 
         # Should return empty result for failed video
         assert "/video1.mp4" in results
@@ -746,6 +750,138 @@ class TestTranscribeVoiceoverMedia:
 
         # Should write both SRT and JSON
         assert mock_open.call_count >= 1
+
+
+class TestParallelErrorRecovery:
+    """Test parallel processing error recovery (US-003)"""
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('src.transcription.parallel_processor.logger')
+    def test_audio_extraction_error_logs_full_traceback(
+        self, mock_logger, mock_rmtree, mock_extract,
+        MockWhisperClient, MockTranscriptCache,
+        mock_cache, mock_config, sample_raw_segments
+    ):
+        """Test that audio extraction errors are logged with full traceback via logger.exception()"""
+        video_paths = ["/video1.mp4", "/video2.mp4"]
+
+        # Mock no cached results
+        mock_transcript_cache = MockTranscriptCache.return_value
+        mock_transcript_cache.get.return_value = None
+
+        # Mock extraction failure for video1, success for video2
+        def extract_side_effect(vp, temp_dir):
+            if "video1" in vp:
+                raise RuntimeError("Extraction failed with details")
+            return f"/fake/audio/{Path(vp).stem}.wav"
+
+        mock_extract.side_effect = extract_side_effect
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.return_value = sample_raw_segments
+
+        with patch('pathlib.Path.unlink'), patch('pathlib.Path.mkdir'):
+            results = transcribe_videos_parallel(
+                video_paths, mock_cache, mock_config,
+                show_progress=False
+            )
+
+        # Should have logged with logger.exception() (includes traceback)
+        assert mock_logger.exception.called, "Expected logger.exception() to be called for traceback"
+
+        # Should continue processing video2 despite video1 error
+        assert "/video2.mp4" in results
+        assert len(results["/video2.mp4"]) == 3
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('src.transcription.parallel_processor.logger')
+    def test_transcription_error_logs_full_traceback(
+        self, mock_logger, mock_rmtree, mock_extract,
+        MockWhisperClient, MockTranscriptCache,
+        mock_cache, mock_config, sample_raw_segments
+    ):
+        """Test that transcription errors are logged with full traceback via logger.exception()"""
+        video_paths = ["/video1.mp4", "/video2.mp4"]
+
+        # Mock no cached results
+        mock_transcript_cache = MockTranscriptCache.return_value
+        mock_transcript_cache.get.return_value = None
+
+        # Mock successful extraction for both
+        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/audio/{Path(vp).stem}.wav"
+
+        # Mock transcription failure for video1 only
+        mock_whisper = MockWhisperClient.return_value
+        call_count = [0]
+
+        def transcribe_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("Transcription GPU error")
+            return sample_raw_segments
+
+        mock_whisper.transcribe.side_effect = transcribe_side_effect
+
+        with patch('pathlib.Path.unlink'), patch('pathlib.Path.mkdir'):
+            results = transcribe_videos_parallel(
+                video_paths, mock_cache, mock_config,
+                show_progress=False
+            )
+
+        # Should have logged with logger.exception() (includes traceback)
+        assert mock_logger.exception.called, "Expected logger.exception() to be called for traceback"
+
+        # Failed video should have empty results
+        assert results["/video1.mp4"] == []
+
+        # Video2 should succeed
+        assert len(results["/video2.mp4"]) == 3
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('pathlib.Path.unlink')
+    @patch('pathlib.Path.mkdir')
+    @patch('src.transcription.parallel_processor.logger')
+    def test_cleanup_error_does_not_affect_results(
+        self, mock_logger, mock_mkdir, mock_unlink, mock_rmtree,
+        mock_extract, MockWhisperClient, MockTranscriptCache,
+        mock_cache, mock_config, sample_raw_segments
+    ):
+        """Test that cleanup errors (file unlink, rmtree) don't affect transcription results"""
+        video_paths = ["/video1.mp4"]
+
+        # Mock no cached results
+        mock_transcript_cache = MockTranscriptCache.return_value
+        mock_transcript_cache.get.return_value = None
+
+        # Mock successful extraction and transcription
+        mock_extract.return_value = "/fake/audio/video1.wav"
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.return_value = sample_raw_segments
+
+        # Mock cleanup failures - both unlink and rmtree raise errors
+        mock_unlink.side_effect = OSError("Permission denied")
+        mock_rmtree.side_effect = OSError("Directory in use")
+
+        results = transcribe_videos_parallel(
+            video_paths, mock_cache, mock_config,
+            show_progress=False
+        )
+
+        # Results should be unaffected by cleanup errors
+        assert "/video1.mp4" in results
+        assert len(results["/video1.mp4"]) == 3
+
+        # Should have logged the cleanup errors at debug level
+        debug_calls = [call for call in mock_logger.debug.call_args_list]
+        assert len(debug_calls) >= 1, "Expected cleanup errors to be logged at debug level"
 
 
 class TestGetTranscriptSegments:
