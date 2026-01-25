@@ -36,6 +36,7 @@ $script:SessionId = Get-Date -Format "yyyy-MM-dd_HHmmss"
 $script:IterationCount = 0
 $script:ConsecutiveFailures = 0
 $script:SessionStartTime = Get-Date
+$script:CurrentMode = "Standard"  # "Interview", "Standard", or "TrueAuto"
 
 # Ensure logs directory exists
 if (-not (Test-Path $script:LogDir)) {
@@ -428,7 +429,7 @@ function Invoke-ClaudeForFocusArea {
 
             # Log timeout
             "Timeout after $timeout seconds" | Add-Content $iterationLog
-            Record-Metric -Success $false -Duration $iterationDuration.TotalSeconds -Timeout $true
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true
 
             $script:ConsecutiveFailures++
             return $false
@@ -437,7 +438,7 @@ function Invoke-ClaudeForFocusArea {
         if ($process.ExitCode -eq 0) {
             Write-Host "  Iteration completed successfully" -ForegroundColor Green
             "Completed successfully in $([math]::Round($iterationDuration.TotalSeconds)) seconds" | Add-Content $iterationLog
-            Record-Metric -Success $true -Duration $iterationDuration.TotalSeconds -Timeout $false
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false
 
             $script:ConsecutiveFailures = 0
             return $true
@@ -445,7 +446,7 @@ function Invoke-ClaudeForFocusArea {
         else {
             Write-Host "  Iteration failed with exit code $($process.ExitCode)" -ForegroundColor Red
             "Failed with exit code $($process.ExitCode)" | Add-Content $iterationLog
-            Record-Metric -Success $false -Duration $iterationDuration.TotalSeconds -Timeout $false
+            Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false
 
             $script:ConsecutiveFailures++
             return $false
@@ -454,7 +455,7 @@ function Invoke-ClaudeForFocusArea {
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         "Error: $_" | Add-Content $iterationLog
-        Record-Metric -Success $false -Duration 0 -Timeout $false
+        Record-Metric -StoryId $FocusAreaId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false
 
         $script:ConsecutiveFailures++
         return $false
@@ -525,27 +526,27 @@ function Invoke-ClaudeForStory {
         if (-not $exited) {
             Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
             $process.Kill()
-            Record-Metric -Success $false -Duration $iterationDuration.TotalSeconds -Timeout $true
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true
             $script:ConsecutiveFailures++
             return $false
         }
 
         if ($process.ExitCode -eq 0) {
             Write-Host "  Story completed successfully" -ForegroundColor Green
-            Record-Metric -Success $true -Duration $iterationDuration.TotalSeconds -Timeout $false
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false
             $script:ConsecutiveFailures = 0
             return $true
         }
         else {
             Write-Host "  Story failed with exit code $($process.ExitCode)" -ForegroundColor Red
-            Record-Metric -Success $false -Duration $iterationDuration.TotalSeconds -Timeout $false
+            Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false
             $script:ConsecutiveFailures++
             return $false
         }
     }
     catch {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
-        Record-Metric -Success $false -Duration 0 -Timeout $false
+        Record-Metric -StoryId $StoryId -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false
         $script:ConsecutiveFailures++
         return $false
     }
@@ -557,26 +558,36 @@ function Invoke-ClaudeForStory {
 
 function Record-Metric {
     param(
+        [string]$Session,
+        [string]$Sprint,
+        [string]$StoryId,
+        [string]$Mode,
+        [double]$DurationMin,
         [bool]$Success,
-        [double]$Duration,
-        [bool]$Timeout
+        [bool]$Timeout,
+        [string]$FocusArea
     )
 
     # Ensure metrics file exists with header
     if (-not (Test-Path $script:MetricsFile)) {
-        "timestamp,session,iteration,success,duration,timeout,focus_area" | Out-File $script:MetricsFile
+        "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area" | Set-Content $script:MetricsFile
     }
 
-    $focusArea = ""
-    if (Test-Path $script:PrdFile) {
-        try {
-            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-            $focusArea = $prd.focusArea
+    # Use defaults from script variables if not provided
+    if (-not $Session) { $Session = $script:SessionId }
+    if (-not $Mode) { $Mode = $script:CurrentMode }
+    if (-not $FocusArea) {
+        if (Test-Path $script:PrdFile) {
+            try {
+                $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+                $FocusArea = $prd.focusArea
+            }
+            catch {}
         }
-        catch {}
     }
 
-    $row = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$script:SessionId,$script:IterationCount,$($Success.ToString().ToLower()),$([math]::Round($Duration, 1)),$($Timeout.ToString().ToLower()),$focusArea"
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea"
     Add-Content -Path $script:MetricsFile -Value $row
 }
 
@@ -693,6 +704,7 @@ function Start-InterviewQueueLoop {
         Process focus areas from interview queue
     #>
 
+    $script:CurrentMode = "Interview"
     $context = Get-InterviewContext
     $focusAreas = Get-InterviewFocusAreas
 
@@ -774,6 +786,7 @@ function Start-TrueAutoLoop {
         Continuous improvement mode - work through stories until max iterations
     #>
 
+    $script:CurrentMode = "TrueAuto"
     Write-Host "  TrueAuto mode: Continuous improvement" -ForegroundColor Magenta
     Write-Host ""
 
@@ -828,6 +841,7 @@ function Start-StandardLoop {
         Standard mode - work through stories until sprint complete
     #>
 
+    $script:CurrentMode = "Standard"
     while (-not (Test-MaxIterations)) {
         $status = Get-SprintStatus
 
