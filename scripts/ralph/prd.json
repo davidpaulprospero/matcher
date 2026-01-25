@@ -67,8 +67,8 @@
         "Test that metrics correctly reflect distribution of match confidences"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created MatchQualityMetrics dataclass with avg_confidence, min_confidence, max_confidence, confidence_std, gap_count, match_rate, total_segments, matched_segments. Added calculate_match_quality_metrics() and log_quality_summary() functions. Integrated metrics calculation at end of MATCH stage with log_quality_summary() call. Added quality_metrics to checkpoint data. Created 30 comprehensive tests in 8 test classes covering dataclass, serialization, calculation, logging, and distribution verification."
     },
     {
       "id": "US-005",
@@ -82,8 +82,8 @@
         "Test that generic reasoning like 'good match' is flagged vs specific reasoning"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added validate_llm_reasoning() function with ReasoningValidation dataclass. Implemented _extract_keywords() helper to parse keywords from text. Added GENERIC_REASONING_PHRASES constant for detecting generic phrases like 'good match', 'topic match'. Function checks that LLM reasoning contains at least 3 specific keyword references from voiceover or video text. Logs warning for generic or low-quality reasoning. Created 46 comprehensive tests in 10 test classes covering function signature, dataclass structure, generic detection, specific validation, warning logging, threshold customization, keyword extraction, and real-world examples. All tests pass."
     },
     {
       "id": "US-006",
