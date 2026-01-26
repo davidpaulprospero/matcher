@@ -272,6 +272,8 @@ class VideoDownloader:
             self.cookie_rotator = CookieRotator(cookie_rotation_config)
             if self.cookie_rotator.is_enabled:
                 logger.info(f"Cookie rotation enabled with {self.cookie_rotator.available_cookies} cookies")
+                # Share cookie rotator with audio-first pipeline
+                self.audio_first.cookie_rotator = self.cookie_rotator
         else:
             self.cookie_rotator = None
 

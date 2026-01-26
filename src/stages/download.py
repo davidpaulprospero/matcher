@@ -63,6 +63,12 @@ class DownloadStage(Stage):
                 self._load_existing_videos(state, config)
                 return StageResult.ok({'skipped': True}, warnings)
 
+            # Check if caption-first mode - skip DOWNLOAD, use CAPTION stage for text
+            if self._is_caption_first_enabled(config):
+                print("  >> Skipping download (caption-first mode: captions provide text)")
+                logger.info("Skipping DOWNLOAD stage (caption_first.enabled=true)")
+                return StageResult.ok({'skipped': True, 'reason': 'caption_first'}, warnings)
+
             # Check if audio-first mode
             if self._is_audio_first_enabled(config):
                 return self._run_audio_first(state, config, checkpoint, warnings)
@@ -415,7 +421,22 @@ class DownloadStage(Stage):
     def _is_audio_first_enabled(self, config: 'Config') -> bool:
         """Check if audio-first mode is enabled"""
         audio_config = getattr(config.download, 'audio_first', None)
-        return audio_config and getattr(audio_config, 'enabled', False)
+        if not audio_config:
+            return False
+        # Handle both dict and object config (Rule 6)
+        if isinstance(audio_config, dict):
+            return audio_config.get('enabled', False)
+        return getattr(audio_config, 'enabled', False)
+
+    def _is_caption_first_enabled(self, config: 'Config') -> bool:
+        """Check if caption-first mode is enabled"""
+        caption_config = getattr(config.download, 'caption_first', None)
+        if not caption_config:
+            return False
+        # Handle both dict and object config (Rule 6)
+        if isinstance(caption_config, dict):
+            return caption_config.get('enabled', False)
+        return getattr(caption_config, 'enabled', False)
 
     def _init_global_cache(self, config: 'Config'):
         """Initialize global cache manager if enabled"""

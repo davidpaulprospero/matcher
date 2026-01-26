@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from ..state import AudioDownload
 from .types import MergedSegment, DownloadedSegment
+from .cookie_rotator import CookieRotator
 from . import segment_utils
 from . import utils
 
@@ -45,7 +46,8 @@ class AudioFirstPipeline:
         filter_titles_func,
         cleanup_partial_func,
         tier_download_counts: dict,
-        lock
+        lock,
+        cookie_rotator: Optional[CookieRotator] = None
     ):
         """
         Initialize AudioFirstPipeline.
@@ -58,6 +60,7 @@ class AudioFirstPipeline:
             cleanup_partial_func: Function to clean up partial files
             tier_download_counts: Dict tracking downloads per tier
             lock: Threading lock for tier_download_counts
+            cookie_rotator: Optional CookieRotator for cookie rotation on errors
         """
         self.config = config
         self.download_config = config.download
@@ -67,6 +70,54 @@ class AudioFirstPipeline:
         self._cleanup_partial_files = cleanup_partial_func
         self.tier_download_counts = tier_download_counts
         self._lock = lock
+        self.cookie_rotator = cookie_rotator
+
+        # Log cookie rotation status
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            logger.info(f"AudioFirstPipeline: Cookie rotation enabled ({self.cookie_rotator.available_cookies} cookies)")
+        else:
+            logger.debug("AudioFirstPipeline: Using static cookies")
+
+    def _get_cookie_args(self) -> List[str]:
+        """
+        Get cookie arguments for yt-dlp command.
+
+        Uses CookieRotator if enabled, otherwise falls back to static cookies.
+
+        Returns:
+            List of yt-dlp cookie arguments (e.g., ['--cookies', '/path/to/cookies.txt'])
+        """
+        # Use cookie rotator if enabled
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            current_cookie = self.cookie_rotator.get_current_cookie()
+            if current_cookie:
+                return ['--cookies', current_cookie]
+
+        # Fallback to static cookie configuration
+        return utils.get_cookies_args(self.config)
+
+    def rotate_cookie_on_error(self, error_message: str) -> bool:
+        """
+        Attempt to rotate cookie based on error message.
+
+        Args:
+            error_message: Error message from yt-dlp stderr
+
+        Returns:
+            True if cookie was rotated, False otherwise
+        """
+        if not self.cookie_rotator or not self.cookie_rotator.is_enabled:
+            return False
+
+        if self.cookie_rotator.should_rotate(error_message):
+            new_cookie = self.cookie_rotator.rotate()
+            if new_cookie:
+                logger.info(f"AudioFirstPipeline: Rotated to new cookie: {Path(new_cookie).name}")
+                return True
+            else:
+                logger.warning("AudioFirstPipeline: Cookie rotation exhausted - no more cookies available")
+
+        return False
 
     def download_audio_for_keyword(
         self,
@@ -130,7 +181,7 @@ class AudioFirstPipeline:
 
         # Filter by duration (handle None duration values)
         filtered = [
-            v for v in search_results
+            v for v in search_results.videos
             if (v.get('duration') or 0) >= tier_min
             and (v.get('duration') or 0) <= tier_max
             and not v.get('is_live', False)  # Skip live videos
@@ -205,54 +256,72 @@ class AudioFirstPipeline:
             if ffmpeg_loc:
                 cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
-            # Add cookies
-            cmd.extend(utils.get_cookies_args(self.config))
+            # Get tier-specific timeout
+            tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
+            if isinstance(tier_timeouts, dict):
+                audio_timeout = tier_timeouts.get(tier, 120)
+            else:
+                audio_timeout = getattr(tier_timeouts, tier, 120)
 
-            try:
-                # Use tier-specific timeout
-                tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
-                if isinstance(tier_timeouts, dict):
-                    audio_timeout = tier_timeouts.get(tier, 120)
-                else:
-                    audio_timeout = getattr(tier_timeouts, tier, 120)
+            # Retry loop with cookie rotation
+            max_cookie_rotations = 2  # Try up to 2 cookie rotations per video
+            actual_file = None
 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=audio_timeout
-                )
+            for rotation_attempt in range(max_cookie_rotations + 1):
+                # Rebuild command with current cookie on each attempt
+                download_cmd = cmd.copy()
+                download_cmd.extend(self._get_cookie_args())
 
-                # Find the actual downloaded file
-                actual_file = None
-                if result.returncode == 0:
-                    matches = list(audio_dir.glob(f"{video_id}.*"))
-                    if matches:
-                        actual_file = matches[0]
-                        logger.debug(f"Found audio file: {actual_file.name}")
+                try:
+                    result = subprocess.run(
+                        download_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=audio_timeout
+                    )
 
-                if actual_file:
-                    audio_downloads.append(AudioDownload(
-                        file=str(actual_file),
-                        video_id=video_id,
-                        url=video_url,
-                        title=video_info.get('title', ''),
-                        duration=video_info.get('duration', 0),
-                        keyword=keyword
-                    ))
-                    logger.debug(f"Downloaded audio: {actual_file.name}")
-                else:
-                    err_msg = result.stderr[-500:] if len(result.stderr) > 500 else result.stderr
+                    # Find the actual downloaded file
+                    if result.returncode == 0:
+                        matches = list(audio_dir.glob(f"{video_id}.*"))
+                        if matches:
+                            actual_file = matches[0]
+                            logger.debug(f"Found audio file: {actual_file.name}")
+                            break  # Success, exit retry loop
+
+                    # Check for errors that warrant cookie rotation
+                    err_msg = result.stderr if result.stderr else ''
+                    if self.rotate_cookie_on_error(err_msg):
+                        logger.info(f"Retrying {video_id} with rotated cookie (attempt {rotation_attempt + 2})")
+                        self._cleanup_partial_files(audio_dir, video_id)
+                        time.sleep(2)  # Brief pause before retry
+                        continue  # Try again with new cookie
+
+                    # Non-rotatable error, log and break
+                    err_snippet = err_msg[-500:] if len(err_msg) > 500 else err_msg
                     logger.warning(f"Audio download failed for {video_id} (rc={result.returncode})")
-                    logger.warning(f"  Error output: {err_msg}")
+                    logger.warning(f"  Error output: {err_snippet}")
                     self._cleanup_partial_files(audio_dir, video_id)
+                    break
 
-            except subprocess.TimeoutExpired:
-                logger.warning(f"Audio download timeout for {video_id}")
-                self._cleanup_partial_files(audio_dir, video_id)
-            except Exception as e:
-                logger.warning(f"Audio download error for {video_id}: {e}")
-                self._cleanup_partial_files(audio_dir, video_id)
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Audio download timeout for {video_id}")
+                    self._cleanup_partial_files(audio_dir, video_id)
+                    break  # Don't retry on timeout
+                except Exception as e:
+                    logger.warning(f"Audio download error for {video_id}: {e}")
+                    self._cleanup_partial_files(audio_dir, video_id)
+                    break  # Don't retry on unknown errors
+
+            if actual_file:
+                audio_downloads.append(AudioDownload(
+                    file=str(actual_file),
+                    video_id=video_id,
+                    url=video_url,
+                    title=video_info.get('title', ''),
+                    duration=video_info.get('duration', 0),
+                    keyword=keyword
+                ))
+                logger.debug(f"Downloaded audio: {actual_file.name}")
 
         # Update tier download count
         if audio_downloads:
@@ -354,8 +423,8 @@ class AudioFirstPipeline:
                 end_str = utils.format_time(seg.end_time)
                 section_args.extend(['--download-sections', f'*{start_str}-{end_str}'])
 
-            # Build yt-dlp command
-            cmd = [
+            # Build base yt-dlp command (cookies added in retry loop)
+            base_cmd = [
                 'yt-dlp',
                 video_url,
                 *section_args,
@@ -369,10 +438,7 @@ class AudioFirstPipeline:
             # Add ffmpeg location
             ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
             if ffmpeg_loc:
-                cmd.extend(['--ffmpeg-location', ffmpeg_loc])
-
-            # Add cookies
-            cmd.extend(utils.get_cookies_args(self.config))
+                base_cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
             # Get timeout - use segment-specific timeout (shorter than full video)
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
@@ -396,6 +462,10 @@ class AudioFirstPipeline:
                     # Exponential backoff for subsequent retries
                     retry_delay = min(retry_delay * 2, 60)
 
+                # Build command with current cookies (may have rotated)
+                cmd = base_cmd.copy()
+                cmd.extend(self._get_cookie_args())
+
                 try:
                     result = subprocess.run(
                         cmd,
@@ -406,6 +476,10 @@ class AudioFirstPipeline:
 
                     if result.returncode != 0:
                         last_error = result.stderr[-200:] if result.stderr else 'Unknown error'
+                        # Try cookie rotation first for auth/rate-limit errors
+                        if self.rotate_cookie_on_error(result.stderr or ''):
+                            logger.info(f"Cookie rotated for {video_id}, retrying...")
+                            continue
                         # Check if error is retryable (network issues, rate limiting)
                         if self._is_retryable_error(result.stderr):
                             logger.warning(f"Retryable error for {video_id}: {last_error}")
@@ -514,7 +588,7 @@ class AudioFirstPipeline:
 
         output_file = video_dir / f"{video_id}_0000.mp4"
 
-        cmd = [
+        base_cmd = [
             'yt-dlp',
             video_url,
             '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
@@ -527,50 +601,62 @@ class AudioFirstPipeline:
         # Add ffmpeg location
         ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
         if ffmpeg_loc:
-            cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+            base_cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
-        cmd.extend(utils.get_cookies_args(self.config))
+        # Retry with cookie rotation (1 retry)
+        max_cookie_rotations = 1
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
+        for rotation_attempt in range(max_cookie_rotations + 1):
+            cmd = base_cmd.copy()
+            cmd.extend(self._get_cookie_args())
 
-            if result.returncode == 0 and output_file.exists():
-                # Get video duration
-                video_duration = self._get_video_duration(output_file)
-                if video_duration is None:
-                    # Estimate from segments
-                    video_duration = max(seg.end_time for seg in segments) + 60
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
 
-                # Collect all original matches
-                all_matches = []
-                for seg in segments:
-                    all_matches.extend(seg.original_matches)
+                if result.returncode == 0 and output_file.exists():
+                    # Get video duration
+                    video_duration = self._get_video_duration(output_file)
+                    if video_duration is None:
+                        # Estimate from segments
+                        video_duration = max(seg.end_time for seg in segments) + 60
 
-                logger.info(f"  ✓ Full video fallback success: {video_id}")
-                return [DownloadedSegment(
-                    file=str(output_file),
-                    video_id=video_id,
-                    original_start=0,
-                    original_end=video_duration,
-                    file_duration=video_duration,
-                    matches=all_matches,
-                    keyword=keyword
-                )]
-            else:
-                logger.error(f"Full video fallback failed for {video_id}: {result.stderr[:200]}")
+                    # Collect all original matches
+                    all_matches = []
+                    for seg in segments:
+                        all_matches.extend(seg.original_matches)
+
+                    logger.info(f"  ✓ Full video fallback success: {video_id}")
+                    return [DownloadedSegment(
+                        file=str(output_file),
+                        video_id=video_id,
+                        original_start=0,
+                        original_end=video_duration,
+                        file_duration=video_duration,
+                        matches=all_matches,
+                        keyword=keyword
+                    )]
+                else:
+                    # Try cookie rotation on error
+                    if self.rotate_cookie_on_error(result.stderr or ''):
+                        logger.info(f"Cookie rotated for {video_id} fallback, retrying...")
+                        time.sleep(2)
+                        continue
+                    logger.error(f"Full video fallback failed for {video_id}: {result.stderr[:200]}")
+                    return []
+
+            except subprocess.TimeoutExpired:
+                logger.error(f"Full video fallback timeout for {video_id}")
+                return []
+            except Exception as e:
+                logger.error(f"Full video fallback error for {video_id}: {e}")
                 return []
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"Full video fallback timeout for {video_id}")
-            return []
-        except Exception as e:
-            logger.error(f"Full video fallback error for {video_id}: {e}")
-            return []
+        return []  # All attempts exhausted
 
     def _check_existing_segments(
         self,
