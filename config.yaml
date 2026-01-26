@@ -1025,7 +1025,7 @@ download:
   # When YouTube returns 429 or requires sign-in, automatically switch to a different
   # cookie file. Each cookie should be exported from a different browser profile/account.
   cookie_rotation:
-    enabled: false          # Enable cookie rotation (requires multiple cookie files)
+    enabled: true           # Enable cookie rotation (requires multiple cookie files)
     cookie_files:           # List of cookie file paths to rotate through
       - "cookies/main.txt"
       - "cookies/backup1.txt"
@@ -1035,6 +1035,8 @@ download:
       - "429"
       - "rate limit"
       - "too many requests"
+      - "403"
+      - "forbidden"
       - "sign in"
       - "login required"
       - "confirm your age"
