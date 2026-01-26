@@ -46,7 +46,7 @@ from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager, ImpersonationStats
-from .escalation_manager import EscalationManager, EscalationResult
+from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
@@ -96,6 +96,7 @@ __all__ = [
     'ImpersonationStats',
     'EscalationManager',
     'EscalationResult',
+    'is_escalation_trigger',
     'CookieMethodFallback',
     'VPNManager',
     'DownloadSpeedTracker',
