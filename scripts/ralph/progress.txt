@@ -5673,3 +5673,18 @@ def test_eta_accuracy_batch_50_videos(self):
 - Tests: 134 pass (91 escalation + 43 budget), py_compile OK, main.py --help OK
 - All 6 acceptance criteria met
 
+## Iteration 6 - [US-006] Add speed tracker signal consumption for preemptive escalation
+- Added record_slow_speed(keyword, speed_mbps) method to EscalationManager
+- Tracks per-keyword slow speed count in _slow_speed_counts dict
+- After 3+ calls for same keyword, preemptively escalates one tier (without waiting for 403)
+- Speed escalations do NOT call budget.record_rotation() (preventive, not reactive)
+- Speed escalation counter resets after each trigger, requiring 3 new signals per escalation
+- Stops at max tier (FULL_BYPASS) without error
+- Added _speed_escalations counter and speed_escalations key to get_metrics()
+- reset_all() clears speed counters
+- Wired into core.py _run_download_cmd(): calls record_slow_speed() when detect_rate_limit_signals() fires
+- Added 8 tests in TestSpeedTriggeredEscalation: threshold trigger, budget isolation, metrics counter, counter reset, max tier, keyword isolation, INFO logging, reset_all
+- Files modified: src/downloader/escalation_manager.py, src/downloader/core.py, tests/test_escalation_manager.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Tests: 95 escalation tests pass, 104 related tests pass, py_compile OK, main.py --help OK
+- All 6 acceptance criteria met
+

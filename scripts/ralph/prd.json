@@ -83,7 +83,8 @@
             "id": "US-006",
             "title": "Add speed tracker signal consumption for preemptive escalation",
             "priority": 6,
-            "passes": false,
+            "passes": true,
+            "notes": "Added record_slow_speed(keyword, speed_mbps) to EscalationManager: tracks per-keyword slow speed count, escalates one tier after 3+ signals. Speed escalations do NOT call budget.record_rotation() (preventive, not reactive). Added speed_escalations counter to get_metrics(). Wired into core.py _run_download_cmd() after detect_rate_limit_signals(). Added 8 tests in TestSpeedTriggeredEscalation. 95 escalation + 104 related tests pass.",
             "acceptanceCriteria": [
                 "When DownloadSpeedTracker detects speed below rate_limit threshold (< 0.1 MB/s for 3+ consecutive downloads), call escalation_manager.record_slow_speed(keyword)",
                 "record_slow_speed() method on EscalationManager: if called 3+ times for same keyword, preemptively escalate one tier without waiting for 403",
