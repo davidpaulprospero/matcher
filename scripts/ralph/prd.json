@@ -131,8 +131,8 @@
         "Add stuck_worker_threshold config (default 60s) for slow worker detection",
         "Tests verify ETA calculation accurate within 20% for batch of 50 videos"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation complete. Added WorkerProgress dataclass and WorkerProgressTracker class to src/caption_fetcher.py. Integrated with fetch_captions_batch() to track worker state and include stats in progress callbacks. Added stuck_worker_threshold config to CaptionFirstConfig. Created 30 tests in tests/test_worker_progress.py verifying all acceptance criteria including ETA accuracy within 20%."
     },
     {
       "id": "US-009",

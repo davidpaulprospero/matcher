@@ -994,6 +994,10 @@ download:
     abort_on_error_pattern: "warn"    # Action on error pattern detection (default: warn)
     error_pattern_threshold: 0.3      # Ratio of failures to trigger (30% = 3/10 videos)
     error_pattern_sample_size: 10     # Videos to check before evaluating patterns
+    # Worker progress tracking (US-008 Sprint 8)
+    # Time threshold for considering a worker "stuck" on a video.
+    # Workers exceeding this threshold are reported in progress callbacks.
+    stuck_worker_threshold: 60.0      # Seconds before worker is considered slow (default: 60s)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
