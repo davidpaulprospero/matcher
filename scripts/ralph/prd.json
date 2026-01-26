@@ -51,8 +51,8 @@
             "id": "US-004",
             "title": "Add is_escalation_trigger() helper for 403/bot-detection pattern matching",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added is_escalation_trigger(stderr_output) function with compiled regex (_ESCALATION_TRIGGER_RE) matching 6 patterns: HTTP Error 403, Sign in to confirm, bot, captcha, blocked, verify you are human. Case-insensitive via re.IGNORECASE. Separate from ERROR_SEVERITY_PATTERNS in core.py (unchanged). Exported at module level from __init__.py. All 5 AC verified programmatically.",
             "acceptanceCriteria": [
                 "is_escalation_trigger(stderr_output) function in src/downloader/escalation_manager.py returns True when output matches 403/bot patterns",
                 "Patterns include: 'HTTP Error 403', 'Sign in to confirm', 'bot', 'captcha', 'blocked', 'verify you are human'",

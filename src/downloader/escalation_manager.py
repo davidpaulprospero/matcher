@@ -16,6 +16,7 @@ Thread-safe: uses one threading.Lock per keyword for concurrent download access.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -24,6 +25,43 @@ from typing import Dict, List, Optional, Tuple
 from .types import EscalationState, EscalationTier
 
 logger = logging.getLogger(__name__)
+
+# Compiled regex for 403/bot-detection patterns in yt-dlp stderr output.
+# These are SEPARATE from ERROR_SEVERITY_PATTERNS in core.py, which handles
+# rate-limit severity classification. Escalation triggers specifically detect
+# when yt-dlp is being blocked and a higher bypass tier is needed.
+_ESCALATION_TRIGGER_RE = re.compile(
+    r'HTTP Error 403'
+    r'|Sign in to confirm'
+    r'|bot'
+    r'|captcha'
+    r'|blocked'
+    r'|verify you are human',
+    re.IGNORECASE,
+)
+
+
+def is_escalation_trigger(stderr_output: str) -> bool:
+    """Check if yt-dlp stderr output indicates a 403/bot-detection error.
+
+    This is used by download call sites (core.py, audio_first.py, etc.) to
+    decide whether to call ``record_failure()`` on the EscalationManager.
+
+    Note: This is a separate concern from ``ERROR_SEVERITY_PATTERNS`` in
+    ``core.py``, which classifies error *severity* for backoff timing.
+    ``is_escalation_trigger`` detects whether the error warrants *escalation*
+    to a higher bypass tier.
+
+    Args:
+        stderr_output: Raw stderr text from a yt-dlp subprocess.
+
+    Returns:
+        True if the output matches any 403/bot-detection pattern.
+    """
+    if not stderr_output:
+        return False
+    return bool(_ESCALATION_TRIGGER_RE.search(stderr_output))
+
 
 # Type alias for the config - avoid circular import by using duck typing.
 # Expects: .enabled, .player_clients, .escalation_threshold, .cooldown_seconds, .max_tier
