@@ -3,6 +3,21 @@
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
 
+## Iteration 1 - [US-001] Create EscalationManager class for 3-tier bypass orchestration
+- Created src/downloader/escalation_manager.py with EscalationManager class
+- Per-keyword EscalationState tracking via dict[str, EscalationState]
+- get_escalation_args(keyword) returns EscalationResult dataclass (args, tier, rotate_cookies)
+  - Tier 1: --impersonate only (delegated to ImpersonationManager)
+  - Tier 2: + --extractor-args youtube:player_client=X,Y,Z (rotated per escalation)
+  - Tier 3: + rotate_cookies=True flag for CookieRotator integration
+- record_failure(keyword, error_output): increments 403 counter, auto-escalates at threshold
+- record_success(keyword): resets 403 counter, tier stays sticky (no de-escalation)
+- Thread-safe: per-keyword threading.Lock via _get_lock(), global lock for dict creation
+- EscalationResult dataclass for structured return (args + tier + rotate_cookies)
+- Exported EscalationManager and EscalationResult from src/downloader/__init__.py
+- Files modified: src/downloader/escalation_manager.py (new), src/downloader/__init__.py
+- Tests: py_compile passes, 62 downloader tests pass (3 pre-existing mock failures unrelated)
+
 ## Iteration 1 - [US-001] Create EscalationTier enum and EscalationState dataclass in types.py
 - Added EscalationTier IntEnum to src/downloader/types.py: IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3
 - Added EscalationState dataclass with fields: current_tier, consecutive_403s, last_escalation_time, extractor_args_index, escalation_history
@@ -5501,3 +5516,11 @@ def test_eta_accuracy_batch_50_videos(self):
 - Verified: py_compile OK, dict-to-dataclass conversion works, main.py --help OK
 - Test results: 94/94 config tests pass (test_config.py, test_config_dataclasses.py, test_config_post_init.py)
 - Files modified: src/config/sections/download.py, config.yaml, scripts/ralph/prd.json, scripts/ralph/progress.txt
+
+## Focus Area: download - 2026-01-26 16:15:04
+- Status: In Progress...
+
+
+## Focus Area: download - 2026-01-26 16:26:26
+- Status: In Progress...
+

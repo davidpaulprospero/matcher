@@ -46,6 +46,7 @@ from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager, ImpersonationStats
+from .escalation_manager import EscalationManager, EscalationResult
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
@@ -93,6 +94,8 @@ __all__ = [
     'CookieRotator',
     'ImpersonationManager',
     'ImpersonationStats',
+    'EscalationManager',
+    'EscalationResult',
     'CookieMethodFallback',
     'VPNManager',
     'DownloadSpeedTracker',
