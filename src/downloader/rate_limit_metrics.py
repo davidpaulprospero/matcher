@@ -823,3 +823,174 @@ class RateLimitMetrics:
             json.dump(export_data, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Exported rate limit metrics to {path}")
+
+
+class RateLimitMetricsAggregator:
+    """Unified metrics aggregator collecting from all rate-limiting subsystems.
+
+    Collects metrics from:
+    - EscalationManager: tier escalation state and counts
+    - CookieRotator: cookie rotation status
+    - RateLimitBudget: budget consumption state
+    - CircuitBreaker: circuit breaker trip stats
+
+    Also uses classify_trigger() from escalation_manager to break down
+    trigger categories for granular reporting.
+
+    Implements US-004 Sprint 10: Unified rate-limit metrics aggregation.
+    """
+
+    def __init__(
+        self,
+        escalation_manager=None,
+        cookie_rotator=None,
+        rate_limit_budget=None,
+        circuit_breaker=None,
+    ):
+        """Initialize aggregator with optional subsystem references.
+
+        Args:
+            escalation_manager: EscalationManager instance (has get_metrics())
+            cookie_rotator: CookieRotator instance (has get_status())
+            rate_limit_budget: RateLimitBudget instance (has to_dict())
+            circuit_breaker: CircuitBreaker instance (has get_stats())
+        """
+        self._escalation_manager = escalation_manager
+        self._cookie_rotator = cookie_rotator
+        self._rate_limit_budget = rate_limit_budget
+        self._circuit_breaker = circuit_breaker
+        self._trigger_counts: Dict[str, int] = {}
+
+    def record_trigger(self, stderr_output: str) -> None:
+        """Record a trigger event by classifying its category.
+
+        Uses classify_trigger() from escalation_manager module to
+        categorize the stderr output and increment the corresponding counter.
+
+        Args:
+            stderr_output: Raw stderr text from a yt-dlp subprocess.
+        """
+        from .escalation_manager import classify_trigger
+
+        category = classify_trigger(stderr_output)
+        if category:
+            self._trigger_counts[category] = self._trigger_counts.get(category, 0) + 1
+
+    def aggregate(self) -> Dict[str, Any]:
+        """Collect and return unified metrics from all subsystems.
+
+        Returns:
+            Dict with keys:
+                escalation: Dict from EscalationManager.get_metrics() or empty
+                cookies: Dict from CookieRotator.get_status() or empty
+                budget: Dict from RateLimitBudget.to_dict() or empty
+                circuit_breaker: Dict from CircuitBreaker.get_stats() or empty
+                trigger_categories: Dict with category breakdown
+                    e.g. {'403': 5, '429': 3, 'bot_detection': 1, ...}
+        """
+        result: Dict[str, Any] = {
+            'escalation': {},
+            'cookies': {},
+            'budget': {},
+            'circuit_breaker': {},
+            'trigger_categories': dict(self._trigger_counts),
+        }
+
+        if self._escalation_manager is not None:
+            try:
+                result['escalation'] = self._escalation_manager.get_metrics()
+            except Exception:
+                logger.debug("Failed to collect escalation metrics", exc_info=True)
+
+        if self._cookie_rotator is not None:
+            try:
+                result['cookies'] = self._cookie_rotator.get_status()
+            except Exception:
+                logger.debug("Failed to collect cookie metrics", exc_info=True)
+
+        if self._rate_limit_budget is not None:
+            try:
+                result['budget'] = self._rate_limit_budget.to_dict()
+            except Exception:
+                logger.debug("Failed to collect budget metrics", exc_info=True)
+
+        if self._circuit_breaker is not None:
+            try:
+                result['circuit_breaker'] = self._circuit_breaker.get_stats()
+            except Exception:
+                logger.debug("Failed to collect circuit breaker metrics", exc_info=True)
+
+        return result
+
+    def get_health_status(self) -> str:
+        """Determine overall rate-limiting health status.
+
+        Evaluates escalation tier distribution and budget remaining to
+        return a simple health indicator.
+
+        Returns:
+            'healthy': Most keywords at Tier 1, budget mostly available
+            'degraded': Significant escalation or budget partially consumed
+            'critical': Majority of keywords at max tier or budget exhausted
+        """
+        # Start healthy, downgrade based on signals
+        score = 0  # 0 = healthy, 1 = degraded, 2 = critical
+
+        # Check escalation tier distribution
+        if self._escalation_manager is not None:
+            try:
+                metrics = self._escalation_manager.get_metrics()
+                kw_tiers = metrics.get('keywords_at_each_tier', {})
+                total_keywords = sum(len(kws) for kws in kw_tiers.values())
+
+                if total_keywords > 0:
+                    # Count keywords at max tier (FULL_BYPASS / Tier 3)
+                    max_tier_keywords = len(kw_tiers.get('FULL_BYPASS', []))
+                    max_tier_pct = max_tier_keywords / total_keywords
+
+                    avg_tier = metrics.get('average_tier', 1.0)
+
+                    if max_tier_pct > 0.5 or avg_tier >= 2.5:
+                        score = max(score, 2)  # critical
+                    elif max_tier_pct > 0.2 or avg_tier >= 1.8:
+                        score = max(score, 1)  # degraded
+            except Exception:
+                pass
+
+        # Check budget remaining
+        if self._rate_limit_budget is not None:
+            try:
+                budget_data = self._rate_limit_budget.to_dict()
+                max_rotations = budget_data.get('max_rotations', 10)
+                used_rotations = budget_data.get('rotations_used', 0)
+                max_backoff = budget_data.get('max_backoff_time', 600)
+                used_backoff = budget_data.get('backoff_time_spent', 0)
+
+                if max_rotations > 0:
+                    rotation_pct = used_rotations / max_rotations
+                    if rotation_pct >= 0.9:
+                        score = max(score, 2)
+                    elif rotation_pct >= 0.5:
+                        score = max(score, 1)
+
+                if max_backoff > 0:
+                    backoff_pct = used_backoff / max_backoff
+                    if backoff_pct >= 0.9:
+                        score = max(score, 2)
+                    elif backoff_pct >= 0.5:
+                        score = max(score, 1)
+            except Exception:
+                pass
+
+        # Check circuit breaker state
+        if self._circuit_breaker is not None:
+            try:
+                cb_stats = self._circuit_breaker.get_stats()
+                if cb_stats.get('is_open', False):
+                    score = max(score, 2)  # Open circuit breaker = critical
+                elif cb_stats.get('total_trips', 0) > 3:
+                    score = max(score, 1)  # Multiple trips = degraded
+            except Exception:
+                pass
+
+        return ['healthy', 'degraded', 'critical'][score]

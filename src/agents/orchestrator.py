@@ -116,6 +116,9 @@ class HealingOrchestrator:
         # Escalation metrics from download stage (set via set_escalation_metrics)
         self._escalation_metrics: Optional[Dict[str, Any]] = None
 
+        # Unified aggregated metrics (set via set_aggregated_metrics)
+        self._aggregated_metrics = None
+
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
 
@@ -970,6 +973,14 @@ class HealingOrchestrator:
         """
         self._escalation_metrics = metrics
 
+    def set_aggregated_metrics(self, aggregator) -> None:
+        """Set a RateLimitMetricsAggregator for unified reporting.
+
+        Args:
+            aggregator: RateLimitMetricsAggregator instance
+        """
+        self._aggregated_metrics = aggregator
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)
@@ -1000,8 +1011,56 @@ class HealingOrchestrator:
                 for rec in recommendations:
                     print(f"  - {rec}")
 
-        # Print escalation metrics if available (US-008 Sprint 9)
-        if self._escalation_metrics:
+        # Print aggregated metrics if available (US-004 Sprint 10)
+        if self._aggregated_metrics is not None:
+            try:
+                agg = self._aggregated_metrics.aggregate()
+                health = self._aggregated_metrics.get_health_status()
+
+                print("\n" + "-" * 60)
+                print(f"UNIFIED RATE-LIMIT STATUS: {health.upper()}")
+                print("-" * 60)
+
+                # Escalation summary from aggregated data
+                esc = agg.get('escalation', {})
+                if esc.get('total_escalations', 0) > 0 or esc.get('total_403s', 0) > 0:
+                    print(f"Total 403/bot errors: {esc.get('total_403s', 0)}")
+                    print(f"Total successes: {esc.get('total_successes', 0)}")
+                    print(f"Total escalations: {esc.get('total_escalations', 0)}")
+                    print(f"Average tier: {esc.get('average_tier', 1.0)}")
+
+                    per_tier = esc.get('escalations_per_tier', {})
+                    if per_tier:
+                        tier_str = ", ".join(f"{k}: {v}" for k, v in per_tier.items())
+                        print(f"Escalations by tier: {tier_str}")
+
+                    kw_tiers = esc.get('keywords_at_each_tier', {})
+                    if kw_tiers:
+                        for tier_name, keywords in kw_tiers.items():
+                            print(f"  {tier_name}: {len(keywords)} keywords")
+
+                # Trigger category breakdown
+                triggers = agg.get('trigger_categories', {})
+                if triggers:
+                    trig_str = ", ".join(f"{k}: {v}" for k, v in sorted(triggers.items()))
+                    print(f"Trigger categories: {trig_str}")
+
+                # Budget summary
+                budget = agg.get('budget', {})
+                if budget:
+                    print(f"Budget: rotations {budget.get('rotations_used', 0)}/{budget.get('max_rotations', '?')}, "
+                          f"backoff {budget.get('backoff_time_spent', 0):.0f}s/{budget.get('max_backoff_time', '?')}s")
+
+                # Circuit breaker
+                cb = agg.get('circuit_breaker', {})
+                if cb.get('total_trips', 0) > 0:
+                    print(f"Circuit breaker: {cb['total_trips']} trips, "
+                          f"{cb.get('total_paused_seconds', 0):.0f}s paused")
+            except Exception:
+                pass  # Non-critical
+
+        # Fallback: print escalation metrics if no aggregator (US-008 Sprint 9)
+        elif self._escalation_metrics:
             m = self._escalation_metrics
             if m.get('total_escalations', 0) > 0 or m.get('total_403s', 0) > 0:
                 print("\n" + "-" * 60)
@@ -1032,6 +1091,7 @@ class HealingOrchestrator:
         self._healer_state = {}
         self._rate_limit_metrics = None
         self._escalation_metrics = None
+        self._aggregated_metrics = None
 
         # Reset healers
         for healer in self.healers:

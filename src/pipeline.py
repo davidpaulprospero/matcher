@@ -447,16 +447,27 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
     """Collect escalation metrics from download stages and pass to orchestrator.
 
     Searches pipeline stages for a DownloadStage with a downloader that has
-    an escalation_manager, then passes get_metrics() to the orchestrator for
-    inclusion in the end-of-run report.
+    an escalation_manager, then builds a RateLimitMetricsAggregator and passes
+    unified metrics to the orchestrator for inclusion in the end-of-run report.
     """
     try:
+        from src.downloader.rate_limit_metrics import RateLimitMetricsAggregator
+
         for stage in getattr(pipeline, 'stages', []):
             downloader = getattr(stage, 'downloader', None)
             if downloader is None:
                 continue
             esc_mgr = getattr(downloader, 'escalation_manager', None)
             if esc_mgr is not None and hasattr(esc_mgr, 'get_metrics'):
+                # Build aggregator with all available subsystems
+                aggregator = RateLimitMetricsAggregator(
+                    escalation_manager=esc_mgr,
+                    cookie_rotator=getattr(downloader, 'cookie_rotator', None),
+                    rate_limit_budget=getattr(downloader, '_rate_limit_budget', None),
+                    circuit_breaker=getattr(downloader, '_circuit_breaker', None),
+                )
+                orchestrator.set_aggregated_metrics(aggregator)
+                # Also keep backward-compat escalation metrics
                 orchestrator.set_escalation_metrics(esc_mgr.get_metrics())
                 return
     except Exception:
