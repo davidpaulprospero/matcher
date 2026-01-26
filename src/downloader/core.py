@@ -310,8 +310,10 @@ class VideoDownloader:
                 impersonation_manager=self.impersonation_manager,
                 extractor_args_config=extractor_args_config,
             )
-            # Share escalation manager with audio-first pipeline
+            # Share escalation manager with audio-first pipeline and auxiliary modules
             self.audio_first.escalation_manager = self.escalation_manager
+            self.title_filter.escalation_manager = self.escalation_manager
+            self.speech_screener.escalation_manager = self.escalation_manager
             logger.info("Escalation manager enabled (3-tier bypass)")
         else:
             self.escalation_manager = None

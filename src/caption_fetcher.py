@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .config import Config
     from .config.sections.download import CaptionFirstConfig
     from .downloader.impersonation import ImpersonationManager
+    from .downloader.escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
 
@@ -2818,15 +2819,18 @@ class CaptionFetcher:
         self,
         config: Optional['Config'] = None,
         impersonation_manager: Optional['ImpersonationManager'] = None,
+        escalation_manager: Optional['EscalationManager'] = None,
     ):
         """Initialize the caption fetcher.
 
         Args:
             config: Optional config for cookies and other settings.
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass.
+            escalation_manager: Optional EscalationManager for 3-tier bypass orchestration.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
+        self.escalation_manager = escalation_manager
         self._timeout = 60  # seconds
 
         # Retry settings from config (US-008)
@@ -2859,6 +2863,25 @@ class CaptionFetcher:
                     )
             except AttributeError:
                 pass
+
+    def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> None:
+        """Add escalation or impersonation args to a yt-dlp command.
+
+        Uses EscalationManager when available for 3-tier bypass. Falls back to
+        direct ImpersonationManager when escalation is not configured.
+
+        Args:
+            cmd: The yt-dlp command list to extend in-place.
+            video_id: The video ID for per-keyword escalation tracking.
+        """
+        if self.escalation_manager:
+            esc_result = self.escalation_manager.get_escalation_args(video_id)
+            if esc_result.args:
+                cmd.extend(esc_result.args)
+        elif self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
 
     def apply_adaptive_format_order(
         self,
@@ -2979,11 +3002,8 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        self._add_bypass_args_to_cmd(cmd, video_id)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
@@ -4489,11 +4509,8 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        self._add_bypass_args_to_cmd(cmd, video_id)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
@@ -4968,11 +4985,8 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        self._add_bypass_args_to_cmd(cmd, video_id)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
@@ -5074,11 +5088,8 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        self._add_bypass_args_to_cmd(cmd, video_id)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
@@ -5174,11 +5185,8 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        self._add_bypass_args_to_cmd(cmd, video_id)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())

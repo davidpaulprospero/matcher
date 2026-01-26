@@ -2,6 +2,24 @@
 ## Sprint 12 - 3-Tier Escalation Bypass System
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
+## Iteration 7 - [US-007] Integrate EscalationManager into auxiliary downloaders
+- Added optional `escalation_manager` parameter to TitleFilter.__init__, SpeechScreener.__init__, and CaptionFetcher.__init__ (all backward-compatible, default None)
+- TitleFilter.search_video_metadata(): uses escalation_manager.get_escalation_args(keyword) for --dump-json metadata search calls
+- SpeechScreener.download_audio_clip(): uses escalation_manager.get_escalation_args(video_id) for audio clip downloads
+- CaptionFetcher: added _add_bypass_args_to_cmd(cmd, video_id) helper method, replaces all 6 direct impersonation_manager usage sites:
+  1. list_available_languages() - --list-subs calls
+  2. _fetch_subtitle_with_format() - subtitle download
+  3. is_live_stream() - metadata check
+  4. get_stream_state() - stream state detection
+  5. get_video_metadata() - channel_id metadata
+  6. batch_precheck_by_channel() - channel grouping
+- All three fall back to impersonation_manager.get_impersonate_args() when escalation_manager is None
+- VideoDownloader: shares self.escalation_manager with title_filter and speech_screener at line 315-316
+- CaptionStage: creates its own EscalationManager from impersonation_mgr + extractor_args_config, passes to CaptionFetcher
+- Files modified: src/downloader/title_filter.py, src/downloader/speech_screening.py, src/caption_fetcher.py, src/downloader/core.py, src/stages/caption_stage.py
+- Tests: 81 caption tests pass, 143/147 downloader tests pass (4 pre-existing failures unrelated), 32 escalation tests pass, py_compile OK
+- All 5 acceptance criteria met
+
 ## Iteration 6 - [US-006] Integrate EscalationManager into audio_first.py download commands
 - Added optional `escalation_manager` parameter to AudioFirstPipeline.__init__ (backward-compatible, defaults to None)
 - New `_add_escalation_to_cmd(cmd, video_id)` method mirrors core.py pattern: uses EscalationManager when available, falls back to _add_impersonation_to_cmd()

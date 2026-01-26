@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 if TYPE_CHECKING:
     from ..config import Config
     from .impersonation import ImpersonationManager
+    from .escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class TitleFilter:
         cookies_args: List[str],
         get_tier_value_func,
         impersonation_manager: Optional['ImpersonationManager'] = None,
+        escalation_manager: Optional['EscalationManager'] = None,
     ):
         """
         Initialize TitleFilter.
@@ -63,12 +65,14 @@ class TitleFilter:
             cookies_args: Cookie arguments for yt-dlp
             get_tier_value_func: Function to get tier config values (from CheckpointManager)
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
+            escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
         self._get_tier_value = get_tier_value_func
         self.impersonation_manager = impersonation_manager
+        self.escalation_manager = escalation_manager
 
     def search_video_metadata(
         self,
@@ -106,8 +110,12 @@ class TitleFilter:
             '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
         ]
 
-        # Add impersonation args before cookies for correct argument ordering
-        if self.impersonation_manager:
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        if self.escalation_manager:
+            esc_result = self.escalation_manager.get_escalation_args(keyword)
+            if esc_result.args:
+                cmd.extend(esc_result.args)
+        elif self.impersonation_manager:
             imp_args = self.impersonation_manager.get_impersonate_args()
             if imp_args:
                 cmd.extend(imp_args)
