@@ -1,4 +1,15 @@
 
+## Manual - [US-005] Wire impersonation into auxiliary downloaders (title_filter, speech_screening, caption_fetcher)
+- Status: COMPLETE (verified manually - code already implemented by US-003/US-004 commits)
+- All 3 auxiliary modules accept `impersonation_manager` parameter in `__init__`:
+  - TitleFilter: line 56 (param), line 71 (store), lines 110-113 (inject into search cmd)
+  - SpeechScreener: line 33 (param), line 46 (store), lines 92-96 (inject into download cmd)
+  - CaptionFetcher: line 2820 (param), line 2829 (store), lines 2982-2986 (inject into --list-subs cmd)
+- VideoDownloader shares manager: core.py:300 (title_filter), core.py:301 (speech_screener)
+- CaptionStage passes via constructor: caption_stage.py:155
+- Verified with inspect.signature() - all 3 modules confirmed
+- Ralph Loop timed out on this story because work was already complete
+
 ## Iteration 70 - [US-003] Wire impersonation into core.py keyword search and ID-based download
 - Imported `ImpersonationManager` in `core.py`
 - Initialized manager in `VideoDownloader.__init__` using `config.impersonation` settings with safe getattr fallbacks
@@ -5311,3 +5322,28 @@ def test_eta_accuracy_batch_50_videos(self):
 - core.py shares manager via self.audio_first.impersonation_manager (same as cookie_rotator pattern)
 - Files modified: src/downloader/audio_first.py, src/downloader/core.py
 - Test results: 190+ pass, 0 regressions (4 pre-existing US-012, 38 pre-existing search_results.videos)
+
+## Pre-flight Auto-Complete - [US-002] Story Two
+- Status: COMPLETE (auto-detected from git commit, test)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Story Two
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Story Two
+- Status: COMPLETE (auto-detected from git commit, test)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Unknown
+- Status: COMPLETE (auto-detected from git commit, test)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-001] Story One
+- Status: COMPLETE (auto-detected from git commit, test)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete

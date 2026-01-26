@@ -296,6 +296,9 @@ class VideoDownloader:
             )
             # Share impersonation manager with audio-first pipeline
             self.audio_first.impersonation_manager = self.impersonation_manager
+            # Share with auxiliary modules (title filter, speech screener)
+            self.title_filter.impersonation_manager = self.impersonation_manager
+            self.speech_screener.impersonation_manager = self.impersonation_manager
         else:
             self.impersonation_manager = None
 

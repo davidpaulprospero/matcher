@@ -12,12 +12,33 @@ import os
 import re
 import subprocess
 import logging
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 
 if TYPE_CHECKING:
     from ..config import Config
+    from .impersonation import ImpersonationManager
 
 logger = logging.getLogger(__name__)
+
+
+class SearchResult:
+    """Result of a search operation with metadata about the search itself.
+
+    Attributes:
+        videos: List of video metadata dicts
+        timed_out: True if the search timed out
+        error: Error message if search failed for other reasons
+    """
+    __slots__ = ('videos', 'timed_out', 'error')
+
+    def __init__(self, videos: List[Dict], timed_out: bool = False, error: Optional[str] = None):
+        self.videos = videos
+        self.timed_out = timed_out
+        self.error = error
+
+    def __bool__(self) -> bool:
+        """Returns True if there are videos (for backward compatibility)."""
+        return bool(self.videos)
 
 
 class TitleFilter:
@@ -27,7 +48,13 @@ class TitleFilter:
     Already uses unified LLM client (Rule 9 compliant).
     """
 
-    def __init__(self, config: 'Config', cookies_args: List[str], get_tier_value_func):
+    def __init__(
+        self,
+        config: 'Config',
+        cookies_args: List[str],
+        get_tier_value_func,
+        impersonation_manager: Optional['ImpersonationManager'] = None,
+    ):
         """
         Initialize TitleFilter.
 
@@ -35,18 +62,20 @@ class TitleFilter:
             config: Config object with download.llm_title_filter settings
             cookies_args: Cookie arguments for yt-dlp
             get_tier_value_func: Function to get tier config values (from CheckpointManager)
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
         self._get_tier_value = get_tier_value_func
+        self.impersonation_manager = impersonation_manager
 
     def search_video_metadata(
         self,
         keyword: str,
         tier: str,
         max_results: int = 50
-    ) -> List[Dict]:
+    ) -> SearchResult:
         """
         Search YouTube and get video metadata WITHOUT downloading.
 
@@ -60,7 +89,10 @@ class TitleFilter:
             max_results: Maximum search results
 
         Returns:
-            List of dicts with: id, title, duration, channel, url
+            SearchResult object containing:
+            - videos: List of dicts with: id, title, duration, channel, url
+            - timed_out: True if search timed out
+            - error: Error message if search failed for other reasons
         """
         min_dur = self._get_tier_value(tier, 'min', 0)
         max_dur = self._get_tier_value(tier, 'max', 120)
@@ -74,13 +106,19 @@ class TitleFilter:
             '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
         ]
 
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         cmd.extend(self.cookies_args)
 
         logger.debug(f"Searching YouTube: {keyword} (max_results={max_results}, tier={tier}, {min_dur}-{max_dur}s)")
 
         try:
-            # Use config timeout or default
-            search_timeout = getattr(self.download_config, 'search_timeout', 60)
+            # Use config timeout or default (30s for search, separate from download timeout)
+            search_timeout = getattr(self.download_config, 'search_timeout', 30)
 
             # Use shell=False for better subprocess handling on Windows
             result = subprocess.run(
@@ -128,15 +166,15 @@ class TitleFilter:
                         continue
 
             logger.debug(f"  Parsed {len(videos)} valid videos")
-            return videos
+            return SearchResult(videos=videos, timed_out=False)
 
         except subprocess.TimeoutExpired as e:
-            logger.warning(f"Timeout searching metadata for '{keyword}' (>{search_timeout}s)")
+            logger.warning(f"Search timeout for '{keyword}' (>{search_timeout}s)")
             logger.debug(f"  Command: {' '.join(cmd[:5])}... (cookies arg present: {any('cookie' in arg for arg in cmd)})")
-            return []
+            return SearchResult(videos=[], timed_out=True, error=f"Search timeout after {search_timeout}s")
         except Exception as e:
             logger.warning(f"Error searching metadata: {e}")
-            return []
+            return SearchResult(videos=[], timed_out=False, error=str(e))
 
     def filter_titles_with_llm(
         self,

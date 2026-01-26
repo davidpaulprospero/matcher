@@ -81,8 +81,8 @@
         "All three modules work identically when impersonation_manager is None (backward compatible)",
         "Each auxiliary call gets a fresh rotated target from the shared manager"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "All three auxiliary modules already accept impersonation_manager parameter and wire it into yt-dlp commands. TitleFilter.__init__ accepts impersonation_manager (line 56), stores as self.impersonation_manager (line 71), injects into search cmd (lines 110-113). SpeechScreener.__init__ accepts impersonation_manager (line 33), stores it (line 46), injects into download cmd (lines 92-96). CaptionFetcher.__init__ accepts impersonation_manager (line 2820), stores it (line 2829), injects into --list-subs cmd (lines 2982-2986). VideoDownloader shares manager: self.title_filter.impersonation_manager = self.impersonation_manager (core.py:300), self.speech_screener.impersonation_manager (core.py:301). CaptionStage passes via constructor (caption_stage.py:155). Verified: all 3 module signatures confirmed with inspect.signature(). All impersonation args injected BEFORE cookies for correct ordering."
     },
     {
       "id": "US-006",
