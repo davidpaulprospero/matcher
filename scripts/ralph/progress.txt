@@ -3,6 +3,17 @@
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
 
+## Iteration 2 - [US-002] Add extractor-args command building with player_client rotation
+- Status: COMPLETE (pre-implemented in US-001)
+- All 5 acceptance criteria verified programmatically against existing code:
+  1. _build_extractor_args(state) generates ['--extractor-args', 'youtube:player_client=X,Y,Z'] ✓ (escalation_manager.py:139-163)
+  2. Player client rotation via state.extractor_args_index ✓ (lines 159-161, idx wraps with modulo)
+  3. Tier 2 get_escalation_args() returns impersonate + extractor-args ✓ (lines 122-126)
+  4. Tier 3 returns all Tier 2 args + rotate_cookies=True ✓ (lines 128-130, EscalationResult dataclass)
+  5. Empty player_clients returns no extractor-args ✓ (lines 154-155, early return [])
+- No code changes needed - US-001 implementation included full _build_extractor_args method
+- Files verified: src/downloader/escalation_manager.py, src/downloader/types.py, src/config/sections/download.py
+
 ## Iteration 1 - [US-001] Create EscalationManager class for 3-tier bypass orchestration
 - Created src/downloader/escalation_manager.py with EscalationManager class
 - Per-keyword EscalationState tracking via dict[str, EscalationState]

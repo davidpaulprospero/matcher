@@ -23,8 +23,8 @@
             "id": "US-002",
             "title": "Add extractor-args command building with player_client rotation",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented in US-001. _build_extractor_args(state) already exists in escalation_manager.py:139-163, generates ['--extractor-args', 'youtube:player_client=X,Y,Z'] with rotation via state.extractor_args_index. Tier 2/3 args and rotate_cookies flag all wired in get_escalation_args(). Empty player_clients edge case handled at line 154-155. All 5 AC verified programmatically.",
             "acceptanceCriteria": [
                 "_build_extractor_args(state) generates ['--extractor-args', 'youtube:player_client=X,Y,Z'] from ExtractorArgsConfig.player_clients",
                 "Player client list rotates starting position using state.extractor_args_index (increments on each Tier 2 escalation)",
