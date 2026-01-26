@@ -44,6 +44,10 @@ def mock_config():
     config.download.caption_first.max_parallel_fetches = 4  # US-001: Parallel workers
     config.download.caption_first.min_coverage_threshold = 0.5  # US-004: Coverage threshold
     config.download.caption_first.pre_check_availability = False  # US-008: Pre-check disabled by default in tests
+    config.download.caption_first.max_cache_age_days = 30  # US-004 Sprint 8: Cache staleness
+    config.download.caption_first.cache_dir = '~/.matcher_caption_cache'  # Cache directory
+    config.download.caption_first.cache_validation = 'warn'  # Cache validation mode
+    config.download.caption_first.cache_validation_tolerance = 0.2  # Cache validation tolerance
 
     # No cookies (simplifies testing)
     config.download.cookies_from_browser = ""
@@ -597,21 +601,33 @@ class TestStageOrder:
 
 
 # ============================================================================
-# Test Live Stream Detection (US-002)
+# Test Live Stream Detection (US-002, US-007 Sprint 8)
 # ============================================================================
 
 class TestLiveStreamSkipping:
-    """Test US-002: Live stream detection and skipping in CaptionStage."""
+    """Test US-002/US-007: Stream state detection and skipping in CaptionStage.
+
+    Updated for US-007 Sprint 8: Enhanced stream state classification.
+    Now uses get_stream_state() and StreamStateResult instead of is_live_stream().
+    """
 
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_skips_live_streams_when_enabled(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
         """Test that live streams are skipped when skip_live_streams=True."""
+        from src.caption_fetcher import StreamState, StreamStateResult
+
         # Enable live stream skipping
         mock_config.download.caption_first.skip_live_streams = True
 
-        # Create mock fetcher that detects all videos as live
+        # Create mock fetcher that detects all videos as LIVE
         mock_fetcher = MagicMock()
-        mock_fetcher.is_live_stream.return_value = True  # All videos are live
+        # US-007: Now uses get_stream_state() instead of is_live_stream()
+        mock_fetcher.get_stream_state.return_value = StreamStateResult(
+            state=StreamState.LIVE,
+            video_id="test",
+            is_live=True,
+            live_status='is_live'
+        )
         mock_fetcher._get_cookies_args.return_value = []
         mock_fetcher_class.return_value = mock_fetcher
 
@@ -631,7 +647,7 @@ class TestLiveStreamSkipping:
         mock_config.download.caption_first.skip_live_streams = False
 
         mock_fetcher = MagicMock()
-        # is_live_stream should not be called when disabled
+        # get_stream_state should not be called when disabled
         mock_fetcher.fetch_captions_batch.return_value = {}
         mock_fetcher_class.return_value = mock_fetcher
 
@@ -639,22 +655,38 @@ class TestLiveStreamSkipping:
         result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
 
         assert result.success is True
-        # is_live_stream should never be called
-        mock_fetcher.is_live_stream.assert_not_called()
+        # get_stream_state should never be called when skip_live_streams=False
+        mock_fetcher.get_stream_state.assert_not_called()
         # But fetch_captions_batch should be called
         mock_fetcher.fetch_captions_batch.assert_called_once()
 
     @patch('src.caption_fetcher.CaptionFetcher')
     def test_partial_live_stream_skipping(self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio):
         """Test that only live streams are skipped, regular videos are fetched."""
-        from src.caption_fetcher import CaptionResult, CaptionSegment
+        from src.caption_fetcher import CaptionResult, CaptionSegment, StreamState, StreamStateResult
 
         # Enable live stream skipping
         mock_config.download.caption_first.skip_live_streams = True
 
-        # Create mock fetcher - first video is live, second is not
+        # Create mock fetcher - first video is LIVE, second is VOD
         mock_fetcher = MagicMock()
-        mock_fetcher.is_live_stream.side_effect = lambda vid: vid == "abc123XYZ_0"
+
+        def mock_get_stream_state(vid, **kwargs):
+            if vid == "abc123XYZ_0":
+                return StreamStateResult(
+                    state=StreamState.LIVE,
+                    video_id=vid,
+                    is_live=True,
+                    live_status='is_live'
+                )
+            return StreamStateResult(
+                state=StreamState.VOD,
+                video_id=vid,
+                duration=180.0,
+                live_status='not_live'
+            )
+
+        mock_fetcher.get_stream_state.side_effect = mock_get_stream_state
         mock_fetcher._get_cookies_args.return_value = []
 
         # Second video returns captions
@@ -717,7 +749,8 @@ class TestStreamingProgressOutput:
         # Setup fetcher to capture and invoke progress callback
         mock_fetcher = MagicMock()
 
-        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None):
+        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None, **kwargs):
+            # Note: **kwargs captures batch_checkpoint and other US-005 parameters
             # Simulate progress callbacks
             for idx, vid in enumerate(video_ids):
                 if progress_callback:
@@ -786,7 +819,8 @@ class TestStreamingProgressOutput:
 
         callback_calls = []
 
-        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None):
+        def mock_batch_fetch(video_ids, preferred_language=None, max_workers=None, metrics=None, progress_callback=None, skip_video_ids=None, **kwargs):
+            # Note: **kwargs captures batch_checkpoint and other US-005 parameters
             for idx, vid in enumerate(video_ids):
                 if progress_callback:
                     progress_callback(vid, 'fetching', {'index': idx + 1, 'total': len(video_ids)})
