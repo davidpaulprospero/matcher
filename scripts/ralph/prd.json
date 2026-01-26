@@ -38,7 +38,8 @@
             "id": "US-003",
             "title": "Add RateLimitBudget consultation in core.py retry loop before download attempts",
             "priority": 3,
-            "passes": false,
+            "passes": true,
+            "notes": "Added record_success() and record_failure() to RateLimitBudget with serialization support. Wired budget consultation into _run_download_cmd(): checks get_recommended_escalation() before retry loop (skips keyword if exhausted), checks can_backoff(delay) before each retry (timeout, transient, exception), records record_backoff(delay) after each sleep, records record_success() on successful download. RetryQueue gains set_budget_state()/get_budget_state() methods; budget state passed before batch retry processing. 22 new tests in test_budget_retry_consultation.py, all 136 related tests pass.",
             "acceptanceCriteria": [
                 "Before each retry in _run_download_cmd(), check budget.can_backoff() - if backoff budget exhausted, skip retry and add to batch retry queue",
                 "After each failed download, call budget.record_backoff(delay_seconds) with actual backoff time spent",
