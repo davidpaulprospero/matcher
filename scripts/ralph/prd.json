@@ -80,8 +80,8 @@
             "id": "US-006",
             "title": "Integrate EscalationManager into audio_first.py download commands",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added escalation_manager parameter to AudioFirstPipeline.__init__ (optional, backward-compatible). New _add_escalation_to_cmd(cmd, video_id) method uses EscalationManager when available, falls back to _add_impersonation_to_cmd(). All 3 download sites updated: audio download (line 330), segment download (line 535), full video fallback (line 690). Each site: (1) uses _add_escalation_to_cmd instead of _add_impersonation_to_cmd, (2) handles Tier 3 rotate_cookies flag, (3) records success via record_success(), (4) detects 403/bot via is_escalation_trigger() and calls record_failure(). Core.py already shares escalation_manager at line 314. All 19 escalation tests pass, 119/122 downloader tests pass (3 pre-existing failures in test_stage_download unrelated).",
             "acceptanceCriteria": [
                 "AudioFirstPipeline.__init__ accepts optional escalation_manager parameter (passed from VideoDownloader)",
                 "Audio download (~line 241) uses escalation_manager.get_escalation_args(video_id) when available",

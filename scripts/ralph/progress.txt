@@ -2,6 +2,21 @@
 ## Sprint 12 - 3-Tier Escalation Bypass System
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
+## Iteration 6 - [US-006] Integrate EscalationManager into audio_first.py download commands
+- Added optional `escalation_manager` parameter to AudioFirstPipeline.__init__ (backward-compatible, defaults to None)
+- New `_add_escalation_to_cmd(cmd, video_id)` method mirrors core.py pattern: uses EscalationManager when available, falls back to _add_impersonation_to_cmd()
+- Updated all 3 download call sites:
+  1. Audio download (line 330): escalation + Tier 3 cookie rotation + 403 detection + success recording
+  2. Segment download (line 535): escalation + Tier 3 cookie rotation + 403 detection + success recording
+  3. Full video fallback (line 690): escalation + Tier 3 cookie rotation + 403 detection + success recording
+- Each site: is_escalation_trigger(stderr) -> record_failure() on 403/bot errors; record_success() on successful download
+- Tier 3 rotate_cookies flag triggers self.cookie_rotator.rotate() before building cookie args
+- Import added: `from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger`
+- Escalation status logged at init: "AudioFirstPipeline: Escalation manager enabled (3-tier bypass)"
+- Files modified: src/downloader/audio_first.py, scripts/ralph/prd.json
+- Tests: 19 escalation tests pass, 119/122 downloader tests pass (3 pre-existing failures in test_stage_download), py_compile OK
+- All 6 acceptance criteria met
+
 ## Iteration 5 - [US-005] Integrate EscalationManager into core.py download retry loop
 - Integrated EscalationManager into VideoDownloader.__init__ (creates from ImpersonationManager + ExtractorArgsConfig)
 - Shared escalation_manager with audio_first pipeline (set as attribute)
