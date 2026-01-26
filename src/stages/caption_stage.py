@@ -207,28 +207,99 @@ class CaptionStage(Stage):
             ids_to_fetch = [vid for vid in video_ids if vid not in existing_captions]
 
             # US-002: Check for live streams and skip them
+            # US-007 Sprint 8: Enhanced stream state classification
             skip_live_streams = getattr(caption_config, 'skip_live_streams', True)
+            handle_upcoming = getattr(caption_config, 'handle_upcoming', 'skip')
             live_stream_ids = []
+            upcoming_stream_ids = []
+            pending_streams: List[Dict[str, Any]] = []  # For 'queue' mode
+
             if ids_to_fetch and skip_live_streams:
-                print(f"  Checking {len(ids_to_fetch)} videos for live streams...")
+                # Import StreamState for classification
+                from ..caption_fetcher import StreamState
+
+                print(f"  Checking {len(ids_to_fetch)} videos for stream states...")
                 for video_id in ids_to_fetch:
-                    if self._fetcher.is_live_stream(video_id):
+                    state_result = self._fetcher.get_stream_state(video_id)
+
+                    if state_result.state == StreamState.LIVE:
+                        # Currently live - always skip
                         live_stream_ids.append(video_id)
-                        # Record as skipped in metrics
                         metrics.record_skipped_live_stream(video_id)
-                        # Store as skipped in caption results
                         caption_results[video_id] = {
                             'video_id': video_id,
                             'skipped': True,
                             'reason': 'live_stream',
+                            'stream_state': 'LIVE',
                             'caption_quality': 'low',
                         }
-                        logger.warning(f"Skipping live stream: {video_id}")
+                        logger.warning(f"Skipping live stream: {state_result}")
 
-                # Remove live streams from fetch list
-                if live_stream_ids:
-                    ids_to_fetch = [vid for vid in ids_to_fetch if vid not in live_stream_ids]
-                    print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
+                    elif state_result.state in (StreamState.UPCOMING, StreamState.PREMIERE):
+                        # Scheduled stream/premiere - handle based on config
+                        if handle_upcoming == 'skip':
+                            # Treat like live - skip entirely
+                            upcoming_stream_ids.append(video_id)
+                            metrics.record_skipped_live_stream(video_id)
+                            caption_results[video_id] = {
+                                'video_id': video_id,
+                                'skipped': True,
+                                'reason': 'upcoming_stream',
+                                'stream_state': state_result.state.name,
+                                'scheduled_start': state_result.scheduled_start,
+                                'caption_quality': 'low',
+                            }
+                            logger.info(f"Skipping upcoming: {state_result}")
+
+                        elif handle_upcoming == 'queue':
+                            # Add to pending list for later processing
+                            upcoming_stream_ids.append(video_id)
+                            pending_streams.append({
+                                'video_id': video_id,
+                                'stream_state': state_result.state.name,
+                                'scheduled_start': state_result.scheduled_start,
+                                'live_status': state_result.live_status,
+                            })
+                            caption_results[video_id] = {
+                                'video_id': video_id,
+                                'skipped': True,
+                                'reason': 'queued_upcoming',
+                                'stream_state': state_result.state.name,
+                                'scheduled_start': state_result.scheduled_start,
+                                'caption_quality': 'low',
+                            }
+                            logger.info(f"Queued for later: {state_result}")
+
+                        elif handle_upcoming == 'check_later':
+                            # Skip but don't mark as failed - can retry
+                            upcoming_stream_ids.append(video_id)
+                            caption_results[video_id] = {
+                                'video_id': video_id,
+                                'skipped': True,
+                                'reason': 'check_later',
+                                'stream_state': state_result.state.name,
+                                'scheduled_start': state_result.scheduled_start,
+                                'caption_quality': 'low',
+                            }
+                            logger.info(f"Will check later: {state_result}")
+
+                    # VOD and UNKNOWN proceed to caption fetch
+
+                # Remove live/upcoming streams from fetch list
+                skip_ids = set(live_stream_ids + upcoming_stream_ids)
+                if skip_ids:
+                    ids_to_fetch = [vid for vid in ids_to_fetch if vid not in skip_ids]
+                    # Report separately
+                    if live_stream_ids:
+                        print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
+                    if upcoming_stream_ids:
+                        action = "queued" if handle_upcoming == "queue" else "skipped"
+                        print(f"  ! {action.capitalize()} {len(upcoming_stream_ids)} upcoming/premiere streams")
+
+                # Store pending streams in state if queued
+                if pending_streams:
+                    state.pending_streams = pending_streams
+                    logger.info(f"Added {len(pending_streams)} streams to pending queue")
 
             # US-008: Pre-check caption availability to filter out videos without captions
             # US-006 Sprint 7: Use batch pre-check by channel when enabled

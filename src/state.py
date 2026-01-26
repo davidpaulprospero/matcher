@@ -140,6 +140,7 @@ class PipelineState:
 
     # === CAPTION STATE ===
     caption_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # video_id -> caption data
+    pending_streams: List[Dict[str, Any]] = field(default_factory=list)  # US-007 Sprint 8: queued upcoming streams
 
     # === TRANSCRIPTION STATE ===
     transcripts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)

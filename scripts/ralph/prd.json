@@ -115,8 +115,8 @@
         "Log stream state: 'UCabc: UPCOMING (scheduled 2026-01-27 10:00 UTC)'",
         "Tests verify all 5 stream states detected correctly from mock metadata"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation complete. Added StreamState enum (LIVE, UPCOMING, VOD, PREMIERE, UNKNOWN) and classify_stream_state() function to src/caption_fetcher.py. StreamStateResult dataclass holds classification result with video_id, is_live, was_live, live_status, scheduled_start, duration. get_stream_state() method added to CaptionFetcher. CaptionStage updated to use get_stream_state() with LIVE always skipped, UPCOMING/PREMIERE handled via handle_upcoming config ('skip', 'queue', 'check_later'). state.pending_streams list added for 'queue' mode. Config option caption_first.handle_upcoming added to CaptionFirstConfig and config.yaml. 41 tests in tests/test_stream_state.py verify all stream states."
     },
     {
       "id": "US-008",

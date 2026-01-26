@@ -544,6 +544,203 @@ DEFAULT_RETRY_BUDGETS = {
 }
 
 
+class StreamState(Enum):
+    """Stream state classification for YouTube videos (US-007 Sprint 8).
+
+    Classifies videos into stream states to determine appropriate handling:
+    - LIVE: Currently streaming, captions being generated in real-time
+    - UPCOMING: Scheduled stream/premiere, will have captions when complete
+    - VOD: Regular video-on-demand (completed video with full captions)
+    - PREMIERE: Scheduled premiere (pre-recorded video with countdown)
+    - UNKNOWN: Could not determine state (metadata fetch failed)
+
+    Stream state affects caption handling:
+    - LIVE: Skip (captions incomplete/unavailable)
+    - UPCOMING: Based on config.handle_upcoming ('skip', 'queue', 'check_later')
+    - VOD: Normal caption fetch
+    - PREMIERE: Same as UPCOMING (will become VOD when complete)
+    - UNKNOWN: Assume VOD (default to normal behavior)
+
+    yt-dlp metadata fields used:
+    - is_live: True if currently streaming
+    - was_live: True if video was previously live
+    - live_status: 'is_live', 'is_upcoming', 'was_live', 'post_live', 'not_live'
+    - release_timestamp: Unix timestamp for scheduled premiere/stream
+
+    Example:
+        >>> state = classify_stream_state(metadata)
+        >>> if state == StreamState.LIVE:
+        ...     print("Skipping live stream")
+        >>> elif state == StreamState.UPCOMING:
+        ...     print(f"Queuing for later: scheduled {metadata.get('release_timestamp')}")
+    """
+    LIVE = auto()       # Currently streaming
+    UPCOMING = auto()   # Scheduled stream/premiere (not yet started)
+    VOD = auto()        # Video-on-demand (regular completed video)
+    PREMIERE = auto()   # Scheduled premiere (pre-recorded, with countdown)
+    UNKNOWN = auto()    # Could not determine state
+
+
+@dataclass
+class StreamStateResult:
+    """Result of stream state classification (US-007 Sprint 8).
+
+    Contains the classified state plus metadata for logging and decision-making.
+
+    Attributes:
+        state: The classified StreamState.
+        video_id: YouTube video ID.
+        is_live: Raw is_live field from metadata.
+        was_live: Raw was_live field from metadata.
+        live_status: Raw live_status field from metadata.
+        scheduled_start: ISO 8601 timestamp for scheduled streams (if available).
+        duration: Video duration in seconds (None for live/upcoming).
+    """
+    state: StreamState
+    video_id: str
+    is_live: bool = False
+    was_live: bool = False
+    live_status: Optional[str] = None
+    scheduled_start: Optional[str] = None
+    duration: Optional[float] = None
+
+    def __str__(self) -> str:
+        """Format for logging with scheduled time if applicable."""
+        base = f"{self.video_id}: {self.state.name}"
+        if self.scheduled_start and self.state in (StreamState.UPCOMING, StreamState.PREMIERE):
+            base += f" (scheduled {self.scheduled_start})"
+        if self.live_status:
+            base += f" [live_status={self.live_status}]"
+        return base
+
+
+def classify_stream_state(
+    metadata: Dict[str, Any],
+    video_id: str = ""
+) -> StreamStateResult:
+    """Classify a video's stream state from yt-dlp metadata (US-007 Sprint 8).
+
+    Uses multiple metadata fields to accurately classify the video's state:
+    1. live_status (most reliable when present)
+    2. is_live / was_live boolean flags
+    3. release_timestamp (for scheduled premieres)
+    4. duration (VOD videos have known duration)
+
+    Args:
+        metadata: Dict from yt-dlp --dump-json output.
+        video_id: YouTube video ID for logging (optional).
+
+    Returns:
+        StreamStateResult with classified state and metadata.
+
+    Classification logic:
+        1. live_status='is_live' OR is_live=True -> LIVE
+        2. live_status='is_upcoming' -> UPCOMING or PREMIERE (check release_timestamp)
+        3. live_status in ('was_live', 'post_live') -> VOD (completed live)
+        4. live_status='not_live' with duration -> VOD
+        5. was_live=True with duration -> VOD (archived live stream)
+        6. release_timestamp in future with no duration -> PREMIERE
+        7. Default with duration -> VOD
+        8. Default without duration -> UNKNOWN
+
+    Examples:
+        >>> # Currently live
+        >>> classify_stream_state({'is_live': True, 'live_status': 'is_live'}, 'abc')
+        StreamStateResult(state=StreamState.LIVE, video_id='abc', ...)
+
+        >>> # Scheduled premiere
+        >>> classify_stream_state({
+        ...     'live_status': 'is_upcoming',
+        ...     'release_timestamp': 1706400000
+        ... }, 'xyz')
+        StreamStateResult(state=StreamState.PREMIERE, video_id='xyz', ...)
+
+        >>> # Regular video
+        >>> classify_stream_state({'duration': 300, 'live_status': 'not_live'}, 'def')
+        StreamStateResult(state=StreamState.VOD, video_id='def', ...)
+    """
+    # Extract relevant fields
+    is_live = metadata.get('is_live', False)
+    was_live = metadata.get('was_live', False)
+    live_status = metadata.get('live_status')
+    release_timestamp = metadata.get('release_timestamp')
+    duration = metadata.get('duration')
+
+    # Format scheduled start time if available
+    scheduled_start = None
+    if release_timestamp:
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromtimestamp(float(release_timestamp), tz=timezone.utc)
+            scheduled_start = dt.strftime('%Y-%m-%d %H:%M UTC')
+        except (ValueError, TypeError, OSError, OverflowError):
+            # Invalid timestamp (string, None, out of range), ignore
+            pass
+
+    # Build result with common fields
+    def make_result(state: StreamState) -> StreamStateResult:
+        return StreamStateResult(
+            state=state,
+            video_id=video_id,
+            is_live=bool(is_live),
+            was_live=bool(was_live),
+            live_status=live_status,
+            scheduled_start=scheduled_start,
+            duration=duration,
+        )
+
+    # 1. Check live_status first (most reliable)
+    if live_status:
+        live_status_lower = str(live_status).lower()
+
+        if live_status_lower == 'is_live':
+            return make_result(StreamState.LIVE)
+
+        if live_status_lower == 'is_upcoming':
+            # Distinguish UPCOMING (live stream) vs PREMIERE (pre-recorded)
+            # Premieres typically have a release_timestamp and may have duration
+            if release_timestamp:
+                return make_result(StreamState.PREMIERE)
+            return make_result(StreamState.UPCOMING)
+
+        if live_status_lower in ('was_live', 'post_live'):
+            # Completed live stream - now VOD
+            return make_result(StreamState.VOD)
+
+        if live_status_lower == 'not_live':
+            # Definitely not live - VOD if has duration
+            if duration is not None and duration > 0:
+                return make_result(StreamState.VOD)
+
+    # 2. Check boolean flags if live_status not conclusive
+    if is_live:
+        return make_result(StreamState.LIVE)
+
+    if was_live:
+        # Was live but now complete - VOD with full captions
+        if duration is not None and duration > 0:
+            return make_result(StreamState.VOD)
+        # was_live but no duration - might still be processing
+        return make_result(StreamState.UNKNOWN)
+
+    # 3. Check for scheduled premiere without live_status
+    if release_timestamp and not duration:
+        # Has future release but no duration = not yet available
+        import time
+        try:
+            if float(release_timestamp) > time.time():
+                return make_result(StreamState.PREMIERE)
+        except (ValueError, TypeError):
+            # Invalid release_timestamp, skip this check
+            pass
+
+    # 4. Default: VOD if has duration, UNKNOWN otherwise
+    if duration is not None and duration > 0:
+        return make_result(StreamState.VOD)
+
+    return make_result(StreamState.UNKNOWN)
+
+
 @dataclass
 class BatchRetryBudget:
     """Tracks cumulative errors across all videos in a batch (US-001 Sprint 8).
@@ -4436,6 +4633,113 @@ class CaptionFetcher:
         except Exception as e:
             logger.debug(f"Error checking live stream status for {video_id}: {e}")
             return False
+
+    def get_stream_state(
+        self,
+        video_id: str,
+        timeout: Optional[int] = None
+    ) -> StreamStateResult:
+        """Get detailed stream state classification for a video (US-007 Sprint 8).
+
+        Enhanced version of is_live_stream() that returns detailed state information
+        including scheduled start times for UPCOMING/PREMIERE streams.
+
+        Uses yt-dlp metadata to classify into:
+        - LIVE: Currently streaming
+        - UPCOMING: Scheduled live stream (not yet started)
+        - VOD: Regular video-on-demand
+        - PREMIERE: Scheduled premiere (pre-recorded with countdown)
+        - UNKNOWN: Could not determine (metadata fetch failed)
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            timeout: Timeout for metadata fetch in seconds. If None, uses self._timeout.
+
+        Returns:
+            StreamStateResult with state classification and metadata.
+
+        Example:
+            >>> fetcher = CaptionFetcher()
+            >>> result = fetcher.get_stream_state("dQw4w9WgXcQ")
+            >>> if result.state == StreamState.LIVE:
+            ...     print("Skipping live stream")
+            >>> elif result.state == StreamState.UPCOMING:
+            ...     print(f"Queuing: scheduled {result.scheduled_start}")
+            >>> print(result)  # "dQw4w9WgXcQ: UPCOMING (scheduled 2026-01-27 10:00 UTC)"
+        """
+        if not self._is_valid_video_id(video_id):
+            logger.debug(f"Invalid video ID for stream state check: {video_id}")
+            return StreamStateResult(
+                state=StreamState.UNKNOWN,
+                video_id=video_id,
+            )
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        fetch_timeout = timeout if timeout is not None else self._timeout
+
+        cmd = [
+            'yt-dlp',
+            video_url,
+            '--skip-download',
+            '--dump-json',
+            '--no-playlist',
+            '--no-warnings',
+        ]
+
+        # Add cookies if configured
+        cmd.extend(self._get_cookies_args())
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=fetch_timeout
+            )
+
+            if result.returncode != 0:
+                # Could not fetch metadata
+                logger.debug(
+                    f"Could not fetch metadata for stream state {video_id}: "
+                    f"{result.stderr[:100] if result.stderr else 'no error output'}"
+                )
+                return StreamStateResult(
+                    state=StreamState.UNKNOWN,
+                    video_id=video_id,
+                )
+
+            # Parse JSON output
+            try:
+                metadata = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse metadata JSON for {video_id}: {e}")
+                return StreamStateResult(
+                    state=StreamState.UNKNOWN,
+                    video_id=video_id,
+                )
+
+            # Classify stream state
+            state_result = classify_stream_state(metadata, video_id)
+
+            # Log the classification with details
+            logger.info(f"Stream state: {state_result}")
+
+            return state_result
+
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"Timeout checking stream state for {video_id} (treating as UNKNOWN)"
+            )
+            return StreamStateResult(
+                state=StreamState.UNKNOWN,
+                video_id=video_id,
+            )
+        except Exception as e:
+            logger.debug(f"Error checking stream state for {video_id}: {e}")
+            return StreamStateResult(
+                state=StreamState.UNKNOWN,
+                video_id=video_id,
+            )
 
     def get_video_metadata(
         self,

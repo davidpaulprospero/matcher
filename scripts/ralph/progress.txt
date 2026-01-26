@@ -5111,3 +5111,45 @@ Added sophisticated segment quality scoring to replace the simplistic low/medium
 - tests/test_segment_quality_metrics.py - New file with 22 comprehensive tests
 - scripts/ralph/prd.json - Marked US-006 as passes: true
 
+
+## Iteration N - [US-007] Test Fixture Compatibility Fix
+- Focus: caption
+- Status: COMPLETE
+
+### Context
+US-007 (Enhanced live stream detection with state classification) was already fully implemented.
+However, test fixtures in test_stage_caption.py were broken by US-004 Sprint 8 changes.
+
+### Changes Made
+Fixed test fixtures to support new CaptionCache requirements and updated stream state tests:
+
+1. **mock_config fixture updates:**
+   - Added `max_cache_age_days = 30` (required by US-004 cache staleness)
+   - Added `cache_dir = '~/.matcher_caption_cache'`
+   - Added `cache_validation = 'warn'`
+   - Added `cache_validation_tolerance = 0.2`
+
+2. **TestLiveStreamSkipping test updates:**
+   - Changed from `is_live_stream()` to `get_stream_state()` (US-007 API change)
+   - Updated mocks to return `StreamStateResult` instead of boolean
+   - Tests now verify LIVE vs VOD state handling
+
+3. **mock_batch_fetch functions:**
+   - Added `**kwargs` to accept `batch_checkpoint` parameter (US-005)
+
+### Verification
+- All 137 test_stage_caption.py tests pass
+- All 41 test_stream_state.py tests pass
+- `python main.py --help` runs successfully
+
+### Files Modified
+- tests/test_stage_caption.py - Fixed mock_config fixture and stream state tests
+
+### US-007 Acceptance Criteria Verified
+All 6 criteria already met (implementation was complete):
+1. ✅ StreamState enum: LIVE, UPCOMING, VOD, PREMIERE, UNKNOWN (caption_fetcher.py:547-581)
+2. ✅ classify_stream_state() function (caption_fetcher.py:617-741)
+3. ✅ pending_streams list for UPCOMING (state.py:143, caption_stage.py:254-271)
+4. ✅ handle_upcoming config option (download.py:207-213)
+5. ✅ Log format "video_id: STATE (scheduled ...)" (StreamStateResult.__str__)
+6. ✅ 41 tests verify all 5 states (test_stream_state.py)
