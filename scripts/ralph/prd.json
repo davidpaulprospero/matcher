@@ -109,8 +109,8 @@
             "id": "US-008",
             "title": "Add escalation metrics and structured logging",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added get_metrics() to EscalationManager returning dict with total_escalations, escalations_per_tier, keywords_at_each_tier, total_403s, total_successes, average_tier. Added _total_403s, _total_successes, _total_escalations, _escalations_per_tier counters to EscalationManager tracked in record_failure/record_success. INFO/WARNING/DEBUG logging was already present from US-001. Added set_escalation_metrics() to HealingOrchestrator and BYPASS ESCALATION section to print_report(). Added _collect_escalation_metrics() helper in pipeline.py to wire metrics from DownloadStage's downloader to orchestrator before print_report(). All 5 AC verified programmatically.",
             "acceptanceCriteria": [
                 "EscalationManager.get_metrics() returns dict: total_escalations, escalations_per_tier, keywords_at_each_tier, total_403s, total_successes, average_tier",
                 "Log at INFO on escalation: 'Escalation: keyword={kw} tier {old}->{new} after {n} consecutive 403s'",

@@ -5602,3 +5602,16 @@ def test_eta_accuracy_batch_50_videos(self):
 ## Focus Area: download - 2026-01-26 16:26:26
 - Status: In Progress...
 
+## Iteration 8 - [US-008] Add escalation metrics and structured logging
+- Added get_metrics() method to EscalationManager returning dict with: total_escalations, escalations_per_tier, keywords_at_each_tier, total_403s, total_successes, average_tier
+- Added internal counters: _total_403s, _total_successes, _total_escalations, _escalations_per_tier tracked in record_failure() and record_success()
+- INFO/WARNING/DEBUG logging was already present from US-001 implementation
+- Added set_escalation_metrics() method to HealingOrchestrator
+- Added BYPASS ESCALATION section to HealingOrchestrator.print_report() showing all metrics
+- Added _collect_escalation_metrics() helper in pipeline.py to wire metrics from DownloadStage's downloader.escalation_manager to orchestrator before report printing
+- Updated reset_all() to clear new counters
+- Updated HealingOrchestrator.reset() to clear _escalation_metrics
+- All 5 acceptance criteria verified programmatically
+- Files modified: src/downloader/escalation_manager.py, src/agents/orchestrator.py, src/pipeline.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Test results: 137 passed (orchestrator + rate limit metrics), all compile checks OK
+

@@ -112,6 +112,10 @@ class EscalationManager:
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
+        self._total_403s: int = 0
+        self._total_successes: int = 0
+        self._total_escalations: int = 0
+        self._escalations_per_tier: Dict[str, int] = {}  # tier_name -> count
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -215,11 +219,17 @@ class EscalationManager:
         with lock:
             state = self._get_state(keyword)
             state.consecutive_403s += 1
+            self._total_403s += 1
 
             if self._should_escalate(state):
                 old_tier = state.current_tier
                 n_403s = state.consecutive_403s
                 state.escalate()
+                self._total_escalations += 1
+                tier_name = state.current_tier.name
+                self._escalations_per_tier[tier_name] = (
+                    self._escalations_per_tier.get(tier_name, 0) + 1
+                )
                 # Increment extractor_args_index on Tier 2 escalation
                 if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
                     state.extractor_args_index += 1
@@ -246,6 +256,7 @@ class EscalationManager:
         with lock:
             state = self._get_state(keyword)
             state.record_success()
+            self._total_successes += 1
 
     def _should_escalate(self, state: EscalationState) -> bool:
         """Check if escalation should proceed, considering cooldown.
@@ -327,4 +338,44 @@ class EscalationManager:
         with self._global_lock:
             self._keyword_states.clear()
             self._keyword_locks.clear()
+            self._total_403s = 0
+            self._total_successes = 0
+            self._total_escalations = 0
+            self._escalations_per_tier.clear()
             logger.debug("All escalation states reset")
+
+    def get_metrics(self) -> Dict:
+        """Get escalation metrics summary.
+
+        Returns:
+            Dict with:
+                total_escalations: Total number of tier escalations
+                escalations_per_tier: Dict mapping tier name to escalation count
+                keywords_at_each_tier: Dict mapping tier name to list of keywords
+                total_403s: Total 403/bot-detection errors recorded
+                total_successes: Total successful downloads recorded
+                average_tier: Weighted average tier across all tracked keywords (1.0-3.0)
+        """
+        with self._global_lock:
+            keywords_at_each_tier: Dict[str, List[str]] = {}
+            tier_sum = 0.0
+            keyword_count = 0
+
+            for keyword, state in self._keyword_states.items():
+                tier_name = state.current_tier.name
+                if tier_name not in keywords_at_each_tier:
+                    keywords_at_each_tier[tier_name] = []
+                keywords_at_each_tier[tier_name].append(keyword)
+                tier_sum += float(state.current_tier.value)
+                keyword_count += 1
+
+            average_tier = round(tier_sum / keyword_count, 2) if keyword_count > 0 else 1.0
+
+            return {
+                'total_escalations': self._total_escalations,
+                'escalations_per_tier': dict(self._escalations_per_tier),
+                'keywords_at_each_tier': keywords_at_each_tier,
+                'total_403s': self._total_403s,
+                'total_successes': self._total_successes,
+                'average_tier': average_tier,
+            }

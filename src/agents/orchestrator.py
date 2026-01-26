@@ -113,6 +113,8 @@ class HealingOrchestrator:
 
         # Rate limit metrics from download stage (set via set_rate_limit_metrics)
         self._rate_limit_metrics: Optional[Any] = None
+        # Escalation metrics from download stage (set via set_escalation_metrics)
+        self._escalation_metrics: Optional[Dict[str, Any]] = None
 
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
@@ -960,6 +962,14 @@ class HealingOrchestrator:
         """
         self._rate_limit_metrics = metrics
 
+    def set_escalation_metrics(self, metrics: Dict[str, Any]) -> None:
+        """Set escalation metrics from EscalationManager for inclusion in report.
+
+        Args:
+            metrics: Dict from EscalationManager.get_metrics()
+        """
+        self._escalation_metrics = metrics
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)
@@ -990,6 +1000,28 @@ class HealingOrchestrator:
                 for rec in recommendations:
                     print(f"  - {rec}")
 
+        # Print escalation metrics if available (US-008 Sprint 9)
+        if self._escalation_metrics:
+            m = self._escalation_metrics
+            if m.get('total_escalations', 0) > 0 or m.get('total_403s', 0) > 0:
+                print("\n" + "-" * 60)
+                print("BYPASS ESCALATION")
+                print("-" * 60)
+                print(f"Total 403/bot errors: {m.get('total_403s', 0)}")
+                print(f"Total successes: {m.get('total_successes', 0)}")
+                print(f"Total escalations: {m.get('total_escalations', 0)}")
+                print(f"Average tier: {m.get('average_tier', 1.0)}")
+
+                per_tier = m.get('escalations_per_tier', {})
+                if per_tier:
+                    tier_str = ", ".join(f"{k}: {v}" for k, v in per_tier.items())
+                    print(f"Escalations by tier: {tier_str}")
+
+                kw_tiers = m.get('keywords_at_each_tier', {})
+                if kw_tiers:
+                    for tier_name, keywords in kw_tiers.items():
+                        print(f"  {tier_name}: {len(keywords)} keywords")
+
         print("=" * 60 + "\n")
 
     def reset(self):
@@ -999,6 +1031,7 @@ class HealingOrchestrator:
         self.current_stage = None
         self._healer_state = {}
         self._rate_limit_metrics = None
+        self._escalation_metrics = None
 
         # Reset healers
         for healer in self.healers:

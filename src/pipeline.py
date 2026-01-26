@@ -443,6 +443,26 @@ def create_healing_pipeline(
     return pipeline, orchestrator, runner
 
 
+def _collect_escalation_metrics(pipeline, orchestrator) -> None:
+    """Collect escalation metrics from download stages and pass to orchestrator.
+
+    Searches pipeline stages for a DownloadStage with a downloader that has
+    an escalation_manager, then passes get_metrics() to the orchestrator for
+    inclusion in the end-of-run report.
+    """
+    try:
+        for stage in getattr(pipeline, 'stages', []):
+            downloader = getattr(stage, 'downloader', None)
+            if downloader is None:
+                continue
+            esc_mgr = getattr(downloader, 'escalation_manager', None)
+            if esc_mgr is not None and hasattr(esc_mgr, 'get_metrics'):
+                orchestrator.set_escalation_metrics(esc_mgr.get_metrics())
+                return
+    except Exception:
+        pass  # Non-critical: metrics collection should never break the pipeline
+
+
 def run_pipeline_with_healing(
     config: 'Config',
     project_dir: Path,
@@ -468,6 +488,10 @@ def run_pipeline_with_healing(
     if runner:
         # Run with healing
         success = runner.run_pipeline(pipeline, resume=resume)
+
+        # Collect escalation metrics from download stages (US-008 Sprint 9)
+        if orchestrator:
+            _collect_escalation_metrics(pipeline, orchestrator)
 
         # Print report if configured
         healing_config = getattr(config, 'healing', None)
