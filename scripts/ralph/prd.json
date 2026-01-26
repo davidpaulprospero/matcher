@@ -65,8 +65,8 @@
             "id": "US-005",
             "title": "Integrate EscalationManager into core.py download retry loop",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Integrated EscalationManager into VideoDownloader in core.py. __init__ creates EscalationManager from ImpersonationManager + ExtractorArgsConfig (line 309), shared with audio_first pipeline. New _add_escalation_to_cmd() method (line 753) replaces direct impersonation in keyword search+download (line 1627) and ID-based download (line 1724). Retry loop records failures via is_escalation_trigger() + record_failure() (line 1939-1940). Success path calls record_success() (line 2051). Tier 3 triggers cookie_rotator.rotate() for cookie rotation (line 1944). All 109 downloader tests pass (4 pre-existing failures unrelated).",
             "acceptanceCriteria": [
                 "VideoDownloader.__init__ creates EscalationManager from config (ImpersonationManager + ExtractorArgsConfig) and stores as self.escalation_manager",
                 "Keyword search+download (~line 1517) calls escalation_manager.get_escalation_args(keyword) instead of direct impersonation_manager.get_impersonate_args()",
