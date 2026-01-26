@@ -5627,3 +5627,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Key gotcha: time.time() is called in BOTH escalation_manager.py and types.py - must patch both modules for tier progression tests
 - Files modified: tests/test_escalation_manager.py (new), scripts/ralph/prd.json, scripts/ralph/progress.txt
 - Test results: 40 passed in 0.50s
+
+## Iteration 10 - [US-010] Add integration tests for escalation flow with mock 403 responses
+- Created tests/test_escalation_integration.py with 30 tests across 5 test classes
+- TestFullEscalationFlow (3): end-to-end Tier 1->2->3, multi-keyword independence, metrics verification
+- TestTriggerDetectionRealSamples (11): 6 real 403 stderr parametrized, 8 non-trigger parametrized, multiline stderr, case variations
+- TestSuccessReset (4): counter reset keeps tier, no de-escalation after 20 successes, Tier 3 sticky, alternating success/failure cycle
+- TestExtractorArgsRotation (3): successive escalations rotate extractor_args_index, wrap-around with 3-item list, single keyword rotation
+- TestMockingEnforced (3): MagicMock verification, no subprocess import, network-free flow
+- Key gotcha: _advance_past_cooldown() must anchor base_time to real time.time()+500 because initial escalation uses unmocked time
+- Real yt-dlp stderr samples: 6 trigger patterns (403, bot, captcha, blocked, verify human, sign-in) and 8 non-triggers (404, unavailable, timeout, 429, download progress)
+- Files modified: tests/test_escalation_integration.py (new), scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Test results: 30 passed in 0.44s (integration) + 40 passed in 0.50s (unit)

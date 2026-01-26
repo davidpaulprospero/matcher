@@ -138,8 +138,8 @@
             "id": "US-010",
             "title": "Add integration tests for escalation flow with mock 403 responses",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_escalation_integration.py with 30 tests across 5 test classes: TestFullEscalationFlow (3 tests - end-to-end Tier 1->2->3, multi-keyword independence, metrics verification), TestTriggerDetectionRealSamples (11 tests - 6 real 403 stderr samples, 8 non-trigger samples, multiline stderr, case variations), TestSuccessReset (4 tests - counter reset keeps tier, no de-escalation, Tier 3 sticky, alternating success/failure), TestExtractorArgsRotation (3 tests - successive escalations rotate index, wrap-around, single keyword rotation), TestMockingEnforced (3 tests - mock verification, no subprocess import, network-free flow). All use mocking only. Key gotcha: time mocking for cooldown bypass must use base_time anchored to real time.time() since initial escalation uses unmocked time.",
             "acceptanceCriteria": [
                 "Test file tests/test_escalation_integration.py with pytest markers: fast",
                 "Test full escalation flow: simulate 403 errors -> record_failure -> escalate -> verify args change at each tier",
