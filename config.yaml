@@ -1200,6 +1200,14 @@ download:
     cooldown_seconds: 300.0     # Seconds before de-escalating back to lower tier
     max_tier: 3                 # Maximum tier (1=impersonate, 2=extractor-args, 3=full bypass)
 
+  # Cross-keyword rate limit budget: shared resource limits across all keywords
+  # When one keyword exhausts rotations, other keywords skip directly to VPN
+  rate_limit_budget:
+    enabled: true               # Enable cross-keyword budget sharing
+    max_rotations: 10           # Max cookie rotations per session (0 = unlimited)
+    max_backoff_time: 600.0     # Max total backoff seconds per session (0 = unlimited)
+    max_vpn_switches: 3         # Max VPN switches per session (0 = unlimited)
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"
