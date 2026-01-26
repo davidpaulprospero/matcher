@@ -2,6 +2,18 @@
 ## Sprint 12 - 3-Tier Escalation Bypass System
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
+## Iteration 5 - [US-005] Integrate EscalationManager into core.py download retry loop
+- Integrated EscalationManager into VideoDownloader.__init__ (creates from ImpersonationManager + ExtractorArgsConfig)
+- Shared escalation_manager with audio_first pipeline (set as attribute)
+- New _add_escalation_to_cmd(cmd, keyword) method: uses EscalationManager when available, falls back to direct impersonation
+- Replaced _add_impersonation_to_cmd() calls in keyword search+download and ID-based download with _add_escalation_to_cmd()
+- Retry loop: detects 403/bot-detection via is_escalation_trigger() and calls record_failure() before error classification
+- Tier 3 cookie rotation: when esc_result.rotate_cookies is True, calls cookie_rotator.rotate() and updates cmd
+- Success path: calls record_success() to reset 403 counter (tier stays sticky)
+- Files modified: src/downloader/core.py
+- Tests: 109 pass, 4 pre-existing failures unrelated (CookieRotator mock + path issues), py_compile OK
+- All 6 acceptance criteria verified
+
 ## Iteration 4 - [US-004] Add is_escalation_trigger() helper for 403/bot-detection pattern matching
 - Added is_escalation_trigger(stderr_output) function at module level in escalation_manager.py
 - Compiled regex _ESCALATION_TRIGGER_RE with 6 patterns: HTTP Error 403, Sign in to confirm, bot, captcha, blocked, verify you are human

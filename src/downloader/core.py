@@ -42,6 +42,7 @@ from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .cookie_method_fallback import CookieMethodFallback
 from .impersonation import ImpersonationManager
+from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -301,6 +302,19 @@ class VideoDownloader:
             self.speech_screener.impersonation_manager = self.impersonation_manager
         else:
             self.impersonation_manager = None
+
+        # Escalation manager (3-tier bypass: impersonation → extractor-args → full bypass)
+        extractor_args_config = getattr(self.download_config, 'extractor_args', None)
+        if self.impersonation_manager:
+            self.escalation_manager = EscalationManager(
+                impersonation_manager=self.impersonation_manager,
+                extractor_args_config=extractor_args_config,
+            )
+            # Share escalation manager with audio-first pipeline
+            self.audio_first.escalation_manager = self.escalation_manager
+            logger.info("Escalation manager enabled (3-tier bypass)")
+        else:
+            self.escalation_manager = None
 
         # VPN manager (for IP rotation)
         vpn_config = getattr(self.download_config, 'vpn', None)
@@ -735,6 +749,28 @@ class VideoDownloader:
             args = self.impersonation_manager.get_impersonate_args()
             if args:
                 cmd.extend(args)
+
+    def _add_escalation_to_cmd(self, cmd: list, keyword: str) -> Optional[EscalationResult]:
+        """Add escalation-aware bypass args to yt-dlp command.
+
+        Uses EscalationManager when available (respects current tier per keyword).
+        Falls back to direct impersonation when escalation is not available.
+
+        Args:
+            cmd: The yt-dlp command list to extend.
+            keyword: The download keyword or video ID for per-keyword escalation.
+
+        Returns:
+            EscalationResult if escalation was used, None if fell back to impersonation.
+        """
+        if self.escalation_manager:
+            result = self.escalation_manager.get_escalation_args(keyword)
+            if result.args:
+                cmd.extend(result.args)
+            return result
+        # Fallback: direct impersonation only (no escalation manager)
+        self._add_impersonation_to_cmd(cmd)
+        return None
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
         """Add cookie authentication to yt-dlp command."""
@@ -1588,7 +1624,7 @@ class VideoDownloader:
                 '--no-warnings',
             ]
 
-            self._add_impersonation_to_cmd(cmd)
+            self._add_escalation_to_cmd(cmd, keyword)
             self._add_cookies_to_cmd(cmd)
 
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
@@ -1685,7 +1721,7 @@ class VideoDownloader:
             '--progress',
         ] + urls
 
-        self._add_impersonation_to_cmd(cmd)
+        self._add_escalation_to_cmd(cmd, keyword)
         self._add_cookies_to_cmd(cmd)
 
         newly_downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
@@ -1899,6 +1935,19 @@ class VideoDownloader:
 
                 # Check for errors in stderr
                 if stderr and process.returncode != 0:
+                    # Record escalation trigger (403/bot-detection) before error classification
+                    if self.escalation_manager and is_escalation_trigger(stderr):
+                        self.escalation_manager.record_failure(keyword, stderr)
+                        # Check if Tier 3 reached - trigger cookie rotation
+                        esc_result = self.escalation_manager.get_escalation_args(keyword)
+                        if esc_result.rotate_cookies and self.cookie_rotator and self.cookie_rotator.is_enabled:
+                            new_cookie = self.cookie_rotator.rotate()
+                            if new_cookie:
+                                for i, arg in enumerate(cmd):
+                                    if arg == '--cookies' and i + 1 < len(cmd):
+                                        cmd[i + 1] = new_cookie
+                                        break
+
                     # Check for permanent errors - fail immediately
                     if self._is_permanent_error(stderr):
                         logger.debug(f"Permanent error for '{keyword}' ({tier}): {stderr[:200]}")
@@ -1997,6 +2046,9 @@ class VideoDownloader:
             self.method_fallback.mark_success()
             # Record successful download for metrics
             self.rate_limit_metrics.record_download_success()
+            # Record success for escalation manager (resets 403 counter, keeps tier)
+            if self.escalation_manager:
+                self.escalation_manager.record_success(keyword)
 
             # Record download speed for adaptive timeout tracking
             download_duration = time.time() - download_start_time
