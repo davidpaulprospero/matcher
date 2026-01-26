@@ -1177,6 +1177,29 @@ download:
     detect_at_startup: true     # Auto-detect targets via --list-impersonate-targets
     detection_timeout: 10       # Timeout for detection subprocess (seconds)
 
+  # Extractor args escalation: Tier 2 bypass for YouTube bot detection
+  # When Tier 1 (impersonation) fails repeatedly with 403 errors, escalate by
+  # adding --extractor-args "youtube:player_client=<client>" to yt-dlp commands.
+  #
+  # 3-Tier escalation progression:
+  #   Tier 1: --impersonate only (always-on, handled by ImpersonationManager)
+  #   Tier 2: --impersonate + --extractor-args player_client (this config)
+  #   Tier 3: Both + cookie rotation (handled by CookieRotator)
+  #
+  # Player clients are rotated round-robin per keyword on each Tier 2+ call.
+  # See src/downloader/escalation_manager.py for EscalationManager details.
+  extractor_args:
+    enabled: true               # Enable Tier 2 extractor-args escalation
+    player_clients:             # Player client values to rotate at Tier 2
+      - web_safari              # Safari web client
+      - tv_downgraded           # Downgraded TV client (good for bypasses)
+      - web                     # Standard web client
+      - ios                     # iOS mobile client
+      - android_vr              # Android VR client
+    escalation_threshold: 2     # Consecutive 403s before escalating to next tier
+    cooldown_seconds: 300.0     # Seconds before de-escalating back to lower tier
+    max_tier: 3                 # Maximum tier (1=impersonate, 2=extractor-args, 3=full bypass)
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

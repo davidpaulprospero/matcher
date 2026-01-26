@@ -5475,3 +5475,29 @@ def test_eta_accuracy_batch_50_videos(self):
 - Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
 - Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Focus Area: download - 2026-01-26 15:42:33
+- Status: In Progress...
+
+
+## Focus Area: download - 2026-01-26 15:52:23
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-001] Create EscalationTier enum and EscalationState dataclass
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration - [US-002] Add ExtractorArgsConfig dataclass to download config section
+- Added ExtractorArgsConfig dataclass to src/config/sections/download.py
+- Fields: enabled (bool=True), player_clients (List[str]), escalation_threshold (int=2), cooldown_seconds (float=300.0), max_tier (int=3)
+- Default player_clients: ["web_safari", "tv_downgraded", "web", "ios", "android_vr"]
+- Added extractor_args field to DownloadConfig with default ExtractorArgsConfig()
+- Added __post_init__ dict-to-dataclass conversion (same pattern as impersonation field)
+- Added to __all__ exports
+- Added extractor_args section to config.yaml under download: with documented defaults
+- Comments explain 3-tier escalation progression (Tier 1=impersonate, Tier 2=extractor-args, Tier 3=full bypass)
+- Verified: py_compile OK, dict-to-dataclass conversion works, main.py --help OK
+- Test results: 94/94 config tests pass (test_config.py, test_config_dataclasses.py, test_config_post_init.py)
+- Files modified: src/config/sections/download.py, config.yaml, scripts/ralph/prd.json, scripts/ralph/progress.txt

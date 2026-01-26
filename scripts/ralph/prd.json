@@ -1,203 +1,192 @@
 ﻿{
     "branchName":  "ralph/sprint-2",
-    "sprintNumber":  12,
+    "sprintNumber":  14,
     "focusArea":  "download",
-    "projectContext":  "Sprint 12 implements the 3-tier escalation bypass system for yt-dlp downloads. Tier 1 (always-on impersonation via curl_cffi) was completed in Sprint 9 (US-001-005) and wired into all 8 yt-dlp call sites. This sprint builds Tier 2 (extractor-args player_client rotation on 403/bot detection) and Tier 3 (combined impersonation + extractor-args + cookie rotation). Key gaps: no EscalationManager exists, no extractor-args injection, 403 errors currently only trigger cookie fallback without player_client bypass, no tests for ImpersonationManager or escalation flow. Sprint 10 planned escalation but completed 0/10 stories. Sprint 11 focused on robustness. curl_cffi v0.13.0 is installed with 31 impersonation targets available.",
+    "projectContext":  "Sprint 14 completes the 3-tier escalation bypass system for yt-dlp downloads. Tier 1 (always-on impersonation via curl_cffi) is fully complete from Sprint 9 - ImpersonationManager wired into all 8 yt-dlp call sites with 31 auto-detected targets and round-robin rotation. Sprint 12 completed EscalationTier enum (IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3) and EscalationState dataclass in types.py. Sprints 10-13 repeatedly attempted the remaining escalation work but stalled. This sprint takes a focused, minimal approach: (1) ExtractorArgsConfig dataclass, (2) EscalationManager class, (3) wire into all download paths, (4) metrics/logging, (5) comprehensive tests. Pattern to follow: ImpersonationManager\u0027s thread-safe round-robin with injection pattern in core.py.",
     "userStories":  [
                         {
                             "id":  "US-001",
-                            "title":  "Create EscalationTier enum and EscalationState dataclass in types.py",
-                            "description":  "Define the data model for the 3-tier escalation system. EscalationTier enum represents the three levels (IMPERSONATE_ONLY, EXTRACTOR_ARGS, FULL_BYPASS). EscalationState tracks per-keyword escalation progression with attempt counts and timestamps.",
+                            "title":  "Create EscalationTier enum and EscalationState dataclass",
+                            "description":  "Verify and validate the EscalationTier enum and EscalationState dataclass already created in Sprint 12 US-001 in src/downloader/types.py. Ensure they\u0027re properly exported from src/downloader/__init__.py and compile without errors. This is a verification story - the code exists, just confirm it works.",
                             "priority":  1,
                             "acceptanceCriteria":  [
-                                                       "Add EscalationTier enum to src/downloader/types.py with values: IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3",
-                                                       "Add EscalationState dataclass with fields: current_tier (EscalationTier), consecutive_403s (int), last_escalation_time (Optional[float]), extractor_args_index (int), escalation_history (List[tuple])",
-                                                       "Add EscalationState.should_escalate(threshold: int = 2) method returning bool based on consecutive_403s \u003e= threshold",
-                                                       "Add EscalationState.escalate() method that advances tier and resets consecutive_403s counter",
-                                                       "Add EscalationState.record_success() method that resets consecutive_403s but keeps current tier",
-                                                       "Run: python -m py_compile src/downloader/types.py (no errors)",
-                                                       "Commit: feat: [US-001] Create EscalationTier enum and EscalationState dataclass"
+                                                       "Verify EscalationTier IntEnum exists in src/downloader/types.py with values IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3",
+                                                       "Verify EscalationState dataclass exists with fields: current_tier, consecutive_403s, last_escalation_time, extractor_args_index, escalation_history",
+                                                       "Verify EscalationState has methods: should_escalate(threshold), escalate(), record_success()",
+                                                       "Verify both are exported from src/downloader/__init__.py",
+                                                       "Run: python -c \"from src.downloader import EscalationTier, EscalationState; print(\u0027OK\u0027)\" (no errors)",
+                                                       "Commit: chore: [US-001] Verify EscalationTier and EscalationState from Sprint 12"
                                                    ],
                             "passes":  true,
-                            "notes":  "Implemented EscalationTier IntEnum (IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3) and EscalationState dataclass with should_escalate(), escalate(), record_success() methods. Exported in __init__.py. 71 downloader tests pass, 1 pre-existing failure unrelated."
+                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: 77bf0aa feat: [US-001] Create EscalationTier enum and EscalationState dataclass"
                         },
                         {
                             "id":  "US-002",
                             "title":  "Add ExtractorArgsConfig dataclass to download config section",
-                            "description":  "Add configuration for Tier 2 extractor-args bypass. Defines player_client rotation strategies, escalation thresholds, and cooldown periods. Follows existing ImpersonationConfig pattern in download.py.",
+                            "description":  "Add configuration for Tier 2 extractor-args bypass. Defines player_client rotation options, escalation thresholds, and cooldown periods. Follows existing ImpersonationConfig pattern in src/config/sections/download.py with __post_init__ dict-to-dataclass conversion.",
                             "priority":  2,
                             "acceptanceCriteria":  [
-                                                       "Add ExtractorArgsConfig dataclass to src/config/sections/download.py with fields: enabled (bool=True), player_clients (List[str]=[\u0027web_safari\u0027,\u0027tv_downgraded\u0027,\u0027web\u0027,\u0027ios\u0027,\u0027android_vr\u0027]), escalation_threshold (int=2, consecutive 403s before escalating), cooldown_seconds (float=300.0, time before de-escalating), max_tier (int=3, highest tier allowed)",
-                                                       "Add extractor_args field to DownloadConfig dataclass, wire with __post_init__ dict-to-dataclass conversion",
-                                                       "Add extractor_args section to config.yaml with documented defaults and comments explaining each tier",
+                                                       "Add ExtractorArgsConfig dataclass to src/config/sections/download.py with fields: enabled (bool=True), player_clients (List[str]=[\u0027web_safari\u0027,\u0027tv_downgraded\u0027,\u0027web\u0027,\u0027ios\u0027,\u0027android_vr\u0027]), escalation_threshold (int=2), cooldown_seconds (float=300.0), max_tier (int=3)",
+                                                       "Add extractor_args field to DownloadConfig dataclass with default ExtractorArgsConfig()",
+                                                       "Add __post_init__ conversion in DownloadConfig to handle dict-to-dataclass for extractor_args (same pattern as impersonation field)",
+                                                       "Add extractor_args section to config.yaml under download: with documented defaults and comments explaining each tier",
                                                        "Verify: python -m py_compile src/config/sections/download.py (no errors)",
-                                                       "Run: pytest tests/test_config*.py -v --tb=short (no regressions)",
                                                        "Commit: feat: [US-002] Add ExtractorArgsConfig dataclass for Tier 2 escalation"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Follows ImpersonationConfig pattern. player_clients list matches yt-dlp YouTube extractor client options."
+                            "passes":  true,
+                            "notes":  "Implemented: ExtractorArgsConfig dataclass added to download.py with enabled, player_clients, escalation_threshold, cooldown_seconds, max_tier fields. Wired into DownloadConfig with __post_init__ dict-to-dataclass conversion. Added to config.yaml with documented defaults and tier progression comments. All 94 config tests pass."
                         },
                         {
                             "id":  "US-003",
-                            "title":  "Create EscalationManager with per-keyword tier tracking and extractor-args generation",
-                            "description":  "Build the EscalationManager class that orchestrates the 3-tier bypass progression. Tracks escalation state per keyword, generates appropriate yt-dlp arguments for each tier, and manages cooldown-based de-escalation. Thread-safe for concurrent downloads.",
+                            "title":  "Create EscalationManager class with per-keyword tier tracking",
+                            "description":  "Build the EscalationManager class that orchestrates the 3-tier bypass progression. Tracks escalation state per keyword using EscalationState from types.py, generates yt-dlp --extractor-args for Tier 2+, manages player_client round-robin rotation. Thread-safe with threading.Lock (same pattern as ImpersonationManager).",
                             "priority":  3,
                             "acceptanceCriteria":  [
-                                                       "Create src/downloader/escalation_manager.py with EscalationManager class",
-                                                       "Implement get_tier_args(keyword: str) -\u003e List[str] that returns yt-dlp args based on current tier: Tier 1 returns [] (impersonation handled separately), Tier 2 returns [\u0027--extractor-args\u0027, \u0027youtube:player_client=\u003cnext_client\u003e\u0027], Tier 3 returns Tier 2 args (cookie rotation handled separately)",
-                                                       "Implement record_403(keyword: str) that increments consecutive_403s and auto-escalates when threshold reached",
-                                                       "Implement record_success(keyword: str) that resets 403 counter but maintains tier (sticky escalation within session)",
-                                                       "Implement get_status() -\u003e dict returning per-keyword tier states and escalation event counts",
-                                                       "Use threading.Lock for thread-safety (same pattern as ImpersonationManager)",
-                                                       "Player client rotation: cycle through ExtractorArgsConfig.player_clients round-robin per keyword",
-                                                       "Run: python -m py_compile src/downloader/escalation_manager.py",
+                                                       "Create src/downloader/escalation_manager.py with EscalationManager class accepting ExtractorArgsConfig in __init__",
+                                                       "Implement get_tier_args(keyword: str) -\u003e List[str]: Tier 1 returns [] (impersonation handled separately), Tier 2+ returns [\u0027--extractor-args\u0027, \u0027youtube:player_client=\u003cnext_client\u003e\u0027]",
+                                                       "Implement record_403(keyword: str) that increments consecutive_403s and auto-escalates when threshold reached, logging at WARNING level",
+                                                       "Implement record_success(keyword: str) that resets 403 counter but keeps current tier (sticky escalation within session)",
+                                                       "Implement get_status() -\u003e dict returning per-keyword tier states, escalation counts, and current player_client index",
+                                                       "Use threading.Lock for all state mutations (same pattern as ImpersonationManager)",
+                                                       "Run: python -m py_compile src/downloader/escalation_manager.py (no errors)",
                                                        "Commit: feat: [US-003] Create EscalationManager with per-keyword tier tracking"
                                                    ],
                             "passes":  false,
-                            "notes":  "Core escalation logic. Tier 1 is always-on via ImpersonationManager (separate). EscalationManager handles Tier 2-3 progression only."
+                            "notes":  "Critical path - unblocks all wiring stories. Uses EscalationTier and EscalationState from types.py. Player_client rotation cycles through ExtractorArgsConfig.player_clients round-robin per keyword."
                         },
                         {
                             "id":  "US-004",
                             "title":  "Wire EscalationManager into core.py keyword search and ID-based download",
-                            "description":  "Integrate the EscalationManager into VideoDownloader\u0027s two main download paths in core.py. On every download attempt, call get_tier_args(keyword) and append to yt-dlp command. On 403 error, call record_403(keyword). On success, call record_success(keyword).",
+                            "description":  "Integrate EscalationManager into VideoDownloader\u0027s two main download paths in core.py. Initialize in __init__, inject tier args into both yt-dlp command construction sites, record 403s before cookie fallback, and record successes after download completes.",
                             "priority":  4,
                             "acceptanceCriteria":  [
-                                                       "Import EscalationManager in core.py and initialize in VideoDownloader.__init__ (pass ExtractorArgsConfig from download config)",
-                                                       "In _run_download_cmd (keyword search path ~line 1591): append escalation_manager.get_tier_args(keyword) to yt-dlp command",
-                                                       "In _download_by_id (ID-based path ~line 1688): append escalation_manager.get_tier_args(keyword) to yt-dlp command",
-                                                       "On _is_auth_error() detection in retry loop: call escalation_manager.record_403(keyword) BEFORE existing cookie fallback",
+                                                       "Import EscalationManager in core.py and initialize in VideoDownloader.__init__ (pass ExtractorArgsConfig from self.download_config)",
+                                                       "In keyword search download path: append escalation_manager.get_tier_args(keyword) to yt-dlp command after impersonation args",
+                                                       "In ID-based download path: append escalation_manager.get_tier_args(keyword) to yt-dlp command after impersonation args",
+                                                       "On auth error detection in retry loop: call escalation_manager.record_403(keyword) BEFORE existing cookie fallback logic",
                                                        "On successful download: call escalation_manager.record_success(keyword)",
-                                                       "Log escalation events at WARNING level: \u0027Escalating to Tier {n} for keyword: {kw} (after {count} 403s)\u0027",
-                                                       "Run: pytest tests/test_downloader_core.py tests/test_downloader_core_advanced.py -v --tb=short (no regressions)",
+                                                       "Log at WARNING level when escalation occurs: \u0027Escalating to Tier {n} for keyword: {kw}\u0027",
                                                        "Commit: feat: [US-004] Wire EscalationManager into core.py download paths"
                                                    ],
                             "passes":  false,
-                            "notes":  "Follows same wiring pattern as ImpersonationManager (Sprint 9 US-003). Escalation args are additive."
+                            "notes":  "Follows ImpersonationManager wiring pattern from Sprint 9. Escalation args are additive - appended after impersonation args."
                         },
                         {
                             "id":  "US-005",
-                            "title":  "Wire EscalationManager into audio_first.py download paths",
-                            "description":  "Integrate escalation into AudioFirstPipeline\u0027s 3 yt-dlp command sites: audio download, segment download (--download-sections), and full video fallback. Share the EscalationManager instance from VideoDownloader.",
+                            "title":  "Wire EscalationManager into audio_first.py 3 download paths",
+                            "description":  "Integrate escalation into AudioFirstPipeline\u0027s 3 yt-dlp command sites: audio download, segment download (--download-sections), and full video fallback. Share the EscalationManager instance from VideoDownloader, following the impersonation_manager sharing pattern.",
                             "priority":  5,
                             "acceptanceCriteria":  [
                                                        "Add escalation_manager parameter to AudioFirstPipeline.__init__, store as self.escalation_manager",
-                                                       "Pass VideoDownloader\u0027s escalation_manager to AudioFirstPipeline in core.py where it\u0027s constructed (same pattern as impersonation_manager sharing)",
-                                                       "In audio download (~line 241): append self.escalation_manager.get_tier_args(keyword) to command",
-                                                       "In segment download (~line 427): append escalation args to --download-sections command",
-                                                       "In full video fallback (~line 591): append escalation args to fallback command",
-                                                       "On 403 detection in audio_first.py retry logic: call self.escalation_manager.record_403(keyword)",
-                                                       "Run: pytest tests/test_downloader_core.py tests/test_download*.py -v --tb=short (no regressions)",
+                                                       "Pass VideoDownloader\u0027s escalation_manager to AudioFirstPipeline in core.py where it\u0027s constructed",
+                                                       "In audio download path: append self.escalation_manager.get_tier_args(keyword) to command",
+                                                       "In segment download with --download-sections: append escalation args to command",
+                                                       "In full video fallback: append escalation args to fallback command",
+                                                       "On 403/auth error detection in audio_first.py: call self.escalation_manager.record_403(keyword)",
                                                        "Commit: feat: [US-005] Wire EscalationManager into audio_first.py download paths"
                                                    ],
                             "passes":  false,
-                            "notes":  "AudioFirstPipeline already accepts impersonation_manager; escalation_manager follows identical pattern."
+                            "notes":  "AudioFirstPipeline already accepts impersonation_manager parameter. Escalation_manager follows identical wiring pattern."
                         },
                         {
                             "id":  "US-006",
                             "title":  "Wire EscalationManager into auxiliary downloaders (title_filter, speech_screening, caption_fetcher)",
-                            "description":  "Complete escalation wiring by adding it to the 3 auxiliary modules that make yt-dlp subprocess calls: title filtering (--dump-json), speech screening (sample download), and caption fetching (--list-subs).",
+                            "description":  "Complete escalation wiring by adding it to the 3 auxiliary modules that make yt-dlp subprocess calls. Use \u0027__auxiliary__\u0027 as the tracking keyword since these aren\u0027t keyword-specific downloads.",
                             "priority":  6,
                             "acceptanceCriteria":  [
-                                                       "Add escalation_manager parameter to TitleFilter.__init__ (title_filter.py), store and use in search command (~line 91)",
-                                                       "Add escalation_manager parameter to SpeechScreener.__init__ (speech_screening.py), store and use in sample download (~line 66)",
-                                                       "Add escalation_manager parameter to caption fetcher\u0027s yt-dlp call site (caption_fetcher.py ~line 2966)",
-                                                       "Pass escalation_manager from VideoDownloader when constructing each auxiliary instance (follow impersonation_manager pattern)",
-                                                       "For auxiliary calls: use keyword=\u0027__auxiliary__\u0027 as the tracking key since these aren\u0027t keyword-specific",
-                                                       "Run: pytest tests/test_download*.py tests/test_caption*.py -v --tb=short (no regressions)",
+                                                       "Add escalation_manager parameter to TitleFilter.__init__ (title_filter.py), store and use in search command",
+                                                       "Add escalation_manager parameter to SpeechScreener.__init__ (speech_screening.py), store and use in sample download command",
+                                                       "Add escalation_manager parameter to caption fetcher\u0027s yt-dlp call site in caption_fetcher.py",
+                                                       "Pass escalation_manager from VideoDownloader when constructing each auxiliary instance",
+                                                       "Use keyword=\u0027__auxiliary__\u0027 as the tracking key for all auxiliary calls",
                                                        "Commit: feat: [US-006] Wire EscalationManager into auxiliary downloaders"
                                                    ],
                             "passes":  false,
-                            "notes":  "Auxiliary modules use a single tracking key since they don\u0027t have per-keyword context. Escalation still applies because 403s affect all calls."
+                            "notes":  "All 3 auxiliary modules already accept impersonation_manager. Adding escalation_manager follows identical pattern."
                         },
                         {
                             "id":  "US-007",
-                            "title":  "Add escalation metrics logging and status reporting",
-                            "description":  "Add comprehensive metrics tracking for the escalation system. Log escalation events, tier distribution, and success rates. Include escalation status in pipeline summary output for debugging download failures.",
+                            "title":  "Add EscalationMetrics dataclass and status reporting to EscalationManager",
+                            "description":  "Add metrics aggregation and logging to make escalation observable. Create EscalationMetrics dataclass for structured reporting. Log escalation summary at download stage completion.",
                             "priority":  7,
                             "acceptanceCriteria":  [
-                                                       "Add EscalationMetrics dataclass to types.py with fields: total_403s (int), total_escalations (int), tier_distribution (Dict[int, int]), success_after_escalation (int), keywords_at_tier (Dict[str, int])",
-                                                       "Implement EscalationManager.get_metrics() -\u003e EscalationMetrics that aggregates per-keyword states",
-                                                       "Log escalation summary at end of download stage: \u0027Escalation summary: {n} keywords escalated, Tier distribution: T1={x} T2={y} T3={z}\u0027",
-                                                       "Add escalation_status to VideoDownloader\u0027s status reporting (used by pipeline progress logging)",
+                                                       "Add EscalationMetrics dataclass to src/downloader/types.py with fields: total_403s (int), total_escalations (int), tier_distribution (Dict[int,int]), success_after_escalation (int), keywords_at_tier (Dict[str,int])",
+                                                       "Implement EscalationManager.get_metrics() -\u003e EscalationMetrics that aggregates all per-keyword states",
+                                                       "Add log_summary() method that logs tier distribution and escalation counts at INFO level",
                                                        "If any keyword reached Tier 3, log WARNING: \u0027{n} keywords required full bypass (Tier 3) - consider refreshing cookies\u0027",
-                                                       "Run: pytest tests/test_downloader_core.py -v --tb=short (no regressions)",
+                                                       "Call log_summary() from VideoDownloader at end of download stage",
                                                        "Commit: feat: [US-007] Add escalation metrics logging and status reporting"
                                                    ],
                             "passes":  false,
-                            "notes":  "Observability is critical for debugging 403 issues in production. Metrics help identify whether escalation is effective."
+                            "notes":  "Observability is critical for debugging 403 issues. Metrics help identify whether escalation reduces failures."
                         },
                         {
                             "id":  "US-008",
-                            "title":  "Add unit tests for EscalationManager tier progression and player_client rotation",
-                            "description":  "Create comprehensive test suite for EscalationManager covering tier progression, player_client rotation, per-keyword isolation, thread safety, and cooldown behavior.",
+                            "title":  "Export EscalationManager and EscalationMetrics in downloader __init__.py",
+                            "description":  "Ensure EscalationManager and all escalation types are properly exported from the downloader package. Update __init__.py to include EscalationManager and EscalationMetrics alongside existing EscalationTier and EscalationState exports.",
                             "priority":  8,
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_escalation_manager.py with @pytest.mark.fast tests",
-                                                       "Test initial state: all keywords start at Tier 1 (IMPERSONATE_ONLY), get_tier_args returns []",
-                                                       "Test Tier 2 escalation: after 2 consecutive record_403() calls, get_tier_args returns extractor-args with first player_client",
-                                                       "Test player_client rotation: consecutive Tier 2 calls cycle through player_clients list round-robin",
-                                                       "Test per-keyword isolation: keyword \u0027sunset\u0027 at Tier 2 doesn\u0027t affect keyword \u0027ocean\u0027 at Tier 1",
-                                                       "Test record_success() resets 403 counter but keeps current tier (sticky escalation)",
-                                                       "Test Tier 3 escalation: after threshold 403s at Tier 2, tier advances to FULL_BYPASS (Tier 3 args same as Tier 2)",
-                                                       "Run: pytest tests/test_escalation_manager.py -v --tb=short (all pass)",
-                                                       "Commit: test: [US-008] Add unit tests for EscalationManager tier progression"
+                                                       "Add EscalationManager import and export in src/downloader/__init__.py",
+                                                       "Add EscalationMetrics import and export in src/downloader/__init__.py",
+                                                       "Verify: python -c \"from src.downloader import EscalationManager, EscalationTier, EscalationState, EscalationMetrics; print(\u0027OK\u0027)\" (no errors)",
+                                                       "Run: pytest tests/test_downloader_core.py -v --tb=short -x (no import regressions)",
+                                                       "Commit: chore: [US-008] Export EscalationManager and EscalationMetrics in downloader package"
                                                    ],
                             "passes":  false,
-                            "notes":  "No tests existed for escalation in Sprint 10 (0/10 completed). Cover the critical paths first."
+                            "notes":  "Housekeeping story. EscalationTier and EscalationState already exported from Sprint 12. New exports: EscalationManager (US-003), EscalationMetrics (US-007)."
                         },
                         {
                             "id":  "US-009",
-                            "title":  "Add unit tests for ImpersonationManager target detection and rotation",
-                            "description":  "Create dedicated test suite for the existing ImpersonationManager (from Sprint 9) which currently has zero dedicated tests. Cover auto-detection parsing, round-robin rotation, empty targets fallback, and thread safety.",
+                            "title":  "Add unit tests for EscalationManager tier progression and player_client rotation",
+                            "description":  "Create comprehensive test suite for EscalationManager covering tier progression, player_client rotation, per-keyword isolation, sticky escalation, and disabled config handling. All tests use mocks (no network).",
                             "priority":  9,
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_impersonation_manager.py with @pytest.mark.fast tests",
-                                                       "Test auto-detect parsing: mock subprocess output matching yt-dlp --list-impersonate-targets format, verify targets parsed correctly",
-                                                       "Test round-robin rotation: after N calls to get_next_target(), verify cycling through all targets",
-                                                       "Test empty targets: when detection fails (subprocess error), verify graceful fallback (returns empty args, logs warning)",
-                                                       "Test preferred_targets filter: when ImpersonationConfig.preferred_targets is set, only those targets used",
-                                                       "Test get_impersonate_args() returns [\u0027--impersonate\u0027, \u0027\u003ctarget\u003e\u0027] format",
-                                                       "Test get_status() returns correct stats (calls_made, unique_targets_used)",
-                                                       "Run: pytest tests/test_impersonation_manager.py -v --tb=short (all pass)",
-                                                       "Commit: test: [US-009] Add unit tests for ImpersonationManager target detection and rotation"
+                                                       "Create tests/test_escalation_manager.py with @pytest.mark.fast marker on all tests",
+                                                       "Test initial state: new keywords start at Tier 1, get_tier_args returns []",
+                                                       "Test Tier 2 escalation: after escalation_threshold consecutive record_403() calls, get_tier_args returns [\u0027--extractor-args\u0027, \u0027youtube:player_client=web_safari\u0027]",
+                                                       "Test player_client rotation: consecutive Tier 2 calls cycle through player_clients list round-robin",
+                                                       "Test per-keyword isolation: keyword \u0027sunset\u0027 at Tier 2 does not affect keyword \u0027ocean\u0027 at Tier 1",
+                                                       "Test disabled config: ExtractorArgsConfig.enabled=False means get_tier_args always returns []",
+                                                       "Run: pytest tests/test_escalation_manager.py -v --tb=short (all pass)",
+                                                       "Commit: test: [US-009] Add unit tests for EscalationManager tier progression"
                                                    ],
                             "passes":  false,
-                            "notes":  "Sprint 9 built ImpersonationManager but shipped with zero dedicated tests. This is test debt."
+                            "notes":  "Tests for escalation planned since Sprint 10 but never implemented. Covers core EscalationManager behavior."
                         },
                         {
                             "id":  "US-010",
-                            "title":  "Add integration test for 3-tier escalation flow with mocked 403 errors",
-                            "description":  "Create an end-to-end integration test that simulates the full escalation progression: start at Tier 1 -\u003e hit 403s -\u003e escalate to Tier 2 with extractor-args -\u003e more 403s -\u003e escalate to Tier 3 -\u003e verify combined args. Mock subprocess to simulate yt-dlp 403 responses.",
+                            "title":  "Add unit tests for ImpersonationManager target detection and rotation",
+                            "description":  "Create dedicated test suite for the existing ImpersonationManager from Sprint 9 which has zero dedicated tests. Cover auto-detection parsing, round-robin rotation, empty targets fallback, and preferred_targets filtering.",
                             "priority":  10,
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_escalation_integration.py with @pytest.mark.fast tests (uses mocks, no real network)",
-                                                       "Test full escalation flow: create VideoDownloader with mock config, simulate 403 errors, verify tier progression",
-                                                       "Verify Tier 1 command includes --impersonate but NO --extractor-args",
-                                                       "Verify Tier 2 command includes BOTH --impersonate AND --extractor-args with player_client",
-                                                       "Verify Tier 3 command includes impersonation + extractor-args (cookie rotation triggered separately)",
-                                                       "Verify success at Tier 2 resets 403 counter but stays at Tier 2 for subsequent calls",
-                                                       "Test disabled escalation: when ExtractorArgsConfig.enabled=False, no extractor-args ever added",
-                                                       "Run: pytest tests/test_escalation_integration.py -v --tb=short (all pass)",
-                                                       "Commit: test: [US-010] Add integration test for 3-tier escalation flow"
+                                                       "Create tests/test_impersonation_manager.py with @pytest.mark.fast marker on all tests",
+                                                       "Test auto-detect parsing: mock subprocess.run output matching yt-dlp --list-impersonate-targets tabular format, verify targets parsed",
+                                                       "Test round-robin rotation: after N calls to get_impersonate_args(), verify cycling through all detected targets",
+                                                       "Test empty targets: when subprocess raises error, verify get_impersonate_args() returns [] and logs warning",
+                                                       "Test preferred_targets filter: when ImpersonationConfig.preferred_targets set, only those targets used",
+                                                       "Run: pytest tests/test_impersonation_manager.py -v --tb=short (all pass)",
+                                                       "Commit: test: [US-010] Add unit tests for ImpersonationManager target detection and rotation"
                                                    ],
                             "passes":  false,
-                            "notes":  "Tests the full system working together. Uses mocks for subprocess but real manager instances."
+                            "notes":  "Sprint 9 shipped ImpersonationManager with zero tests. This is test debt that must be addressed."
                         },
                         {
                             "id":  "US-011",
-                            "title":  "Sprint 12 verification: full escalation system validation",
-                            "description":  "Verify all Sprint 12 stories are complete, all tests pass, and the 3-tier escalation system is fully wired and tested.",
+                            "title":  "Add integration test for 3-tier escalation flow with mocked 403 errors",
+                            "description":  "Create an integration test simulating full escalation progression: Tier 1 -\u003e 403s -\u003e Tier 2 (add extractor-args) -\u003e 403s -\u003e Tier 3 (full bypass). Mock subprocess to simulate yt-dlp responses. Verify command construction at each tier.",
                             "priority":  11,
                             "acceptanceCriteria":  [
-                                                       "Verify all Sprint 12 stories US-001 through US-010 are complete",
-                                                       "Run: pytest tests/test_downloader_core.py tests/test_downloader_core_advanced.py tests/test_downloader_core_coverage.py -v --tb=short -x",
-                                                       "Run: pytest tests/test_escalation_manager.py tests/test_impersonation_manager.py tests/test_escalation_integration.py -v --tb=short",
-                                                       "Run: pytest tests/test_download*.py tests/test_caption*.py -v --tb=short (no regressions in existing tests)",
-                                                       "Verify EscalationManager is initialized in VideoDownloader.__init__ and shared to AudioFirstPipeline",
-                                                       "Document escalation architecture in progress.txt"
+                                                       "Create tests/test_escalation_integration.py with @pytest.mark.fast marker (uses mocks, no network)",
+                                                       "Test full escalation flow: create both managers with real configs, simulate 403 progression, verify tier changes",
+                                                       "Verify Tier 1 command includes --impersonate but NO --extractor-args",
+                                                       "Verify Tier 2 command includes BOTH --impersonate AND --extractor-args with player_client value",
+                                                       "Verify Tier 3 command includes impersonation + extractor-args (cookie rotation verified separately)",
+                                                       "Test disabled escalation: ExtractorArgsConfig.enabled=False means no extractor-args at any tier",
+                                                       "Run: pytest tests/test_escalation_integration.py -v --tb=short (all pass)",
+                                                       "Commit: test: [US-011] Add integration test for 3-tier escalation flow"
                                                    ],
                             "passes":  false,
-                            "notes":  "Sprint 12 completes the 3-tier bypass system started in Sprint 9."
+                            "notes":  "Tests both EscalationManager and ImpersonationManager working together. Uses mocks for subprocess but real manager instances."
                         }
                     ]
 }
