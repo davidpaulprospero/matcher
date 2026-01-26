@@ -49,8 +49,8 @@
         "Log impersonation target used: 'Impersonation: Chrome-136:Macos-15' at debug level per download",
         "When impersonation disabled or no targets detected, commands work identically to current behavior"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Imported ImpersonationManager in core.py. Initialized in VideoDownloader.__init__ using config.impersonation settings (enabled, preferred_targets, detect_at_startup, detection_timeout) with getattr fallbacks. Added _add_impersonation_to_cmd() helper method that injects --impersonate args from round-robin rotation. Wired into both yt-dlp command sites: keyword search+download (line ~1586) and _download_by_ids (line ~1683), both BEFORE _add_cookies_to_cmd for correct argument ordering. Debug logging via ImpersonationManager.get_impersonate_args(). When disabled or no targets, commands unchanged (backward compatible). Verified: py_compile passes, main.py --help works, 225 download/caption/rate-limit tests pass with 0 regressions."
     },
     {
       "id": "US-004",

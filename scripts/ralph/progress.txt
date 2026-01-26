@@ -1,4 +1,16 @@
 
+## Iteration 70 - [US-003] Wire impersonation into core.py keyword search and ID-based download
+- Imported `ImpersonationManager` in `core.py`
+- Initialized manager in `VideoDownloader.__init__` using `config.impersonation` settings with safe getattr fallbacks
+- Added `_add_impersonation_to_cmd()` helper method that injects `--impersonate` args via round-robin rotation
+- Wired into both yt-dlp command construction sites:
+  1. Keyword search+download (`ytsearch` command, line ~1586) - before `_add_cookies_to_cmd`
+  2. ID-based download (`_download_by_ids`, line ~1683) - before `_add_cookies_to_cmd`
+- Impersonation args always inserted BEFORE cookie args for correct yt-dlp argument ordering
+- When disabled or no targets detected, commands work identically to current behavior (no-op)
+- Files modified: `src/downloader/core.py`
+- Test results: 225 tests pass, 0 regressions (4 deselected are pre-existing US-012 failures)
+
 ## Iteration 69 - [US-002] Add ImpersonationConfig dataclass to download config section
 - Created `ImpersonationConfig` dataclass in `src/config/sections/download.py`
 - Fields: `enabled: bool = True`, `preferred_targets: List[str] = []`, `detect_at_startup: bool = True`, `detection_timeout: int = 10`
