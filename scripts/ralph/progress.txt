@@ -5615,3 +5615,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: src/downloader/escalation_manager.py, src/agents/orchestrator.py, src/pipeline.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
 - Test results: 137 passed (orchestrator + rate limit metrics), all compile checks OK
 
+## Iteration 9 - [US-009] Add unit tests for EscalationManager core logic
+- Created tests/test_escalation_manager.py with 40 tests across 7 test classes
+- TestTierProgression (6): tier starts at 1, single failure no escalation, threshold escalates 1->2 and 2->3, no crash beyond tier 3, success keeps tier sticky
+- TestEscalationArgs (6): tier 1 impersonate only, tier 2 adds extractor-args, tier 3 adds cookie flag, disabled config, empty player_clients, None config
+- TestCooldown (5): suppression during cooldown, expiry allows escalation, get_cooldown_remaining, zero after expiry, custom cooldown_seconds
+- TestPerKeywordIsolation (5): independent state, tier 3 vs tier 1, success isolation, reset_keyword, reset_all
+- TestThreadSafety (4): concurrent get_escalation_args, concurrent read+write, concurrent different keywords, mixed success+failure
+- TestIsEscalationTrigger (8): parametrized pattern matching for 403, bot, captcha, blocked, case-insensitive, non-trigger rejection
+- TestMetrics (2): initial metrics, metrics after escalation
+- Key gotcha: time.time() is called in BOTH escalation_manager.py and types.py - must patch both modules for tier progression tests
+- Files modified: tests/test_escalation_manager.py (new), scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Test results: 40 passed in 0.50s
