@@ -1,4 +1,44 @@
 
+## Sprint 12 - 3-Tier Escalation Bypass System
+Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
+Stories: US-001 to US-011 (11 stories)
+
+## Iteration 1 - [US-001] Create EscalationTier enum and EscalationState dataclass in types.py
+- Added EscalationTier IntEnum to src/downloader/types.py: IMPERSONATE_ONLY=1, EXTRACTOR_ARGS=2, FULL_BYPASS=3
+- Added EscalationState dataclass with fields: current_tier, consecutive_403s, last_escalation_time, extractor_args_index, escalation_history
+- Implemented should_escalate(threshold=2): returns True when consecutive_403s >= threshold
+- Implemented escalate(): advances tier (capped at FULL_BYPASS), records timestamp in history, resets 403 counter
+- Implemented record_success(): resets 403 counter but keeps current tier (sticky escalation)
+- Exported new types in src/downloader/__init__.py
+- py_compile passes, 71/72 downloader tests pass (1 pre-existing mock failure in test_check_dependencies_ffmpeg_not_found)
+- Files modified: src/downloader/types.py, src/downloader/__init__.py
+
+---
+
+## Sprint 11 - Download Robustness & Wiring Gaps
+Focus: Wire existing but unused modules (RateLimitBudget, CookieMethodFallback), split oversized _run_download_cmd, fix test failures, extract hardcoded timeouts
+Stories: US-001 to US-011 (11 stories)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| US-001 | Fix 4 failing tests in test_downloader_core_coverage.py | Pending |
+| US-002 | Add stderr null guard to subprocess.run() calls | Pending |
+| US-003 | Wire RateLimitBudget into core.py retry loop | Pending |
+| US-004 | Wire CookieMethodFallback into core.py error recovery | Pending |
+| US-005 | Extract _attempt_download helper (split 1/3) | Pending |
+| US-006 | Extract _classify_download_error helper (split 2/3) | Pending |
+| US-007 | Extract _handle_transcode helper (split 3/3) | Pending |
+| US-008 | Add CircuitBreaker to AudioFirstPipeline | Pending |
+| US-009 | Extract configurable timeout constants | Pending |
+| US-010 | Add unit tests for CookieMethodFallback | Pending |
+| US-011 | Sprint 11 verification | Pending |
+
+---
+
+## Sprint 10 (Previous - Escalation, 0/10 completed, superseded by Sprint 11)
+
+## Sprint 9 (Previous - Impersonation Wiring, 5/12 completed)
+
 ## Manual - [US-005] Wire impersonation into auxiliary downloaders (title_filter, speech_screening, caption_fetcher)
 - Status: COMPLETE (verified manually - code already implemented by US-003/US-004 commits)
 - All 3 auxiliary modules accept `impersonation_manager` parameter in `__init__`:
@@ -5345,5 +5385,93 @@ def test_eta_accuracy_batch_50_videos(self):
 
 ## Pre-flight Auto-Complete - [US-001] Story One
 - Status: COMPLETE (auto-detected from git commit, test)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Focus Area: download - 2026-01-26 14:46:57
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-001] Create EscalationManager with 3-tier bypass progression
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Add ExtractorArgsConfig dataclass for player_client escalation settings
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-003] Integrate EscalationManager into core.py retry loops
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-004] Integrate EscalationManager into audio_first.py retry loops
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-005] Add impersonation and escalation metrics with structured logging
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-006] Create ImpersonationHealer for auto-escalation on repeated 403s
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Add stderr null guard to 5 subprocess.run() calls in download modules
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-003] Wire RateLimitBudget into core.py download retry loop
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-006] Extract _classify_download_error helper from _run_download_cmd (split 2 of 3)
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-009] Extract configurable timeout constants from download modules
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Focus Area: download - 2026-01-26 15:27:31
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-002] Add ExtractorArgsConfig dataclass to download config section
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-003] Create EscalationManager with per-keyword tier tracking and extractor-args generation
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-004] Wire EscalationManager into core.py keyword search and ID-based download
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-005] Wire EscalationManager into audio_first.py download paths
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-008] Add unit tests for EscalationManager tier progression and player_client rotation
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-010] Add integration test for 3-tier escalation flow with mocked 403 errors
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
 - Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete

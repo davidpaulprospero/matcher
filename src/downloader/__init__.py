@@ -27,7 +27,9 @@ from .types import (
     MatchedSegment,
     MergedSegment,
     DownloadedSegment,
-    DownloadError
+    DownloadError,
+    EscalationTier,
+    EscalationState
 )
 
 # Checkpoint management
@@ -78,6 +80,8 @@ __all__ = [
     'DownloadedSegment',
     'DownloadCheckpoint',
     'DownloadError',
+    'EscalationTier',
+    'EscalationState',
 
     # Managers
     'CheckpointManager',

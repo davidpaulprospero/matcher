@@ -6,8 +6,90 @@ Migrated from downloader.py lines 71-119.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List
+import time
+from dataclasses import dataclass, field
+from enum import IntEnum
+from typing import List, Optional, Tuple
+
+
+class DownloadError(Exception):
+    """
+    Base exception for download errors with retry context.
+
+    Carries information about retry attempts so healers can make
+    informed decisions about escalation (skip redundant backoff
+    if retries are already exhausted).
+
+    Attributes:
+        message: Error description
+        retry_count: Number of retries already attempted (0 = no retries yet)
+        max_retries: Maximum retries that were configured
+        error_type: Category of error ('transient', 'permanent', 'timeout', 'unknown')
+        original_error: The underlying error message from yt-dlp
+    """
+
+    def __init__(
+        self,
+        message: str,
+        retry_count: int = 0,
+        max_retries: int = 3,
+        error_type: str = 'unknown',
+        original_error: Optional[str] = None
+    ):
+        super().__init__(message)
+        self.message = message
+        self.retry_count = retry_count
+        self.max_retries = max_retries
+        self.error_type = error_type
+        self.original_error = original_error or message
+
+    @property
+    def retries_exhausted(self) -> bool:
+        """Check if all retry attempts have been used."""
+        return self.retry_count >= self.max_retries
+
+    def __str__(self) -> str:
+        if self.retry_count > 0:
+            return f"{self.message} (retried {self.retry_count}/{self.max_retries})"
+        return self.message
+
+
+class EscalationTier(IntEnum):
+    """3-tier escalation levels for yt-dlp bypass."""
+    IMPERSONATE_ONLY = 1
+    EXTRACTOR_ARGS = 2
+    FULL_BYPASS = 3
+
+
+@dataclass
+class EscalationState:
+    """Per-keyword escalation progression state.
+
+    Tracks consecutive 403 errors and manages tier advancement
+    for the 3-tier bypass system.
+    """
+    current_tier: EscalationTier = EscalationTier.IMPERSONATE_ONLY
+    consecutive_403s: int = 0
+    last_escalation_time: Optional[float] = None
+    extractor_args_index: int = 0
+    escalation_history: List[Tuple[float, EscalationTier]] = field(default_factory=list)
+
+    def should_escalate(self, threshold: int = 2) -> bool:
+        """Check if consecutive 403s have reached the escalation threshold."""
+        return self.consecutive_403s >= threshold
+
+    def escalate(self) -> None:
+        """Advance to the next tier and reset the 403 counter."""
+        if self.current_tier < EscalationTier.FULL_BYPASS:
+            self.current_tier = EscalationTier(self.current_tier + 1)
+        now = time.time()
+        self.last_escalation_time = now
+        self.escalation_history.append((now, self.current_tier))
+        self.consecutive_403s = 0
+
+    def record_success(self) -> None:
+        """Reset 403 counter but keep the current tier (sticky escalation)."""
+        self.consecutive_403s = 0
 
 
 @dataclass
