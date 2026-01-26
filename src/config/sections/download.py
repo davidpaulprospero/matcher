@@ -23,6 +23,7 @@ __all__ = [
     'BatchRetryConfig',
     'VPNConfig',
     'ImpersonationConfig',
+    'ExtractorArgsConfig',
     'DownloadConfig',
     'DownloadingConfig',
 ]
@@ -773,6 +774,43 @@ class ImpersonationConfig:
 
 
 @dataclass
+class ExtractorArgsConfig:
+    """Tier 2 extractor-args bypass configuration for yt-dlp.
+
+    When Tier 1 (browser impersonation) fails repeatedly with 403/bot errors,
+    escalate to Tier 2 by adding ``--extractor-args "youtube:player_client=<client>"``
+    to yt-dlp commands. Player clients are rotated round-robin per keyword.
+
+    Tier progression:
+      - Tier 1 (IMPERSONATE_ONLY): --impersonate only (handled by ImpersonationManager)
+      - Tier 2 (EXTRACTOR_ARGS): --impersonate + --extractor-args player_client
+      - Tier 3 (FULL_BYPASS): Both + cookie rotation (handled by CookieRotator)
+
+    See also: ``src/downloader/escalation_manager.py`` for EscalationManager.
+    """
+    # Master switch: enable extractor-args escalation (Tier 2)
+    enabled: bool = True
+
+    # Player client values to rotate through at Tier 2
+    # These are passed as --extractor-args "youtube:player_client=<value>"
+    # Available: web, web_safari, web_embedded, web_music, web_creator,
+    #   mweb, ios, android, android_sdkless, tv, tv_simply, tv_downgraded, tv_embedded
+    player_clients: List[str] = field(default_factory=lambda: [
+        "web_safari", "tv_downgraded", "web", "ios", "android_vr"
+    ])
+
+    # Number of consecutive 403 errors before escalating to next tier
+    escalation_threshold: int = 2
+
+    # Cooldown before de-escalating back to a lower tier (seconds)
+    # After this period without errors, tier may be lowered
+    cooldown_seconds: float = 300.0
+
+    # Maximum escalation tier (1=impersonate, 2=extractor-args, 3=full bypass)
+    max_tier: int = 3
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -878,6 +916,10 @@ class DownloadConfig:
     # Always-on by default (Tier 1). Auto-detects curl_cffi targets at startup.
     impersonation: ImpersonationConfig = field(default_factory=ImpersonationConfig)
 
+    # Extractor args escalation: Tier 2 bypass adds --extractor-args player_client
+    # Activates after repeated 403 errors when impersonation alone isn't enough.
+    extractor_args: ExtractorArgsConfig = field(default_factory=ExtractorArgsConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -920,6 +962,8 @@ class DownloadConfig:
             self.batch_retry = BatchRetryConfig(**self.batch_retry)
         if isinstance(self.impersonation, dict):
             self.impersonation = ImpersonationConfig(**self.impersonation)
+        if isinstance(self.extractor_args, dict):
+            self.extractor_args = ExtractorArgsConfig(**self.extractor_args)
 
 
 @dataclass
