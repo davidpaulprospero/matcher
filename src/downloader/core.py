@@ -522,6 +522,11 @@ class VideoDownloader:
         if self._share_budget_across_keywords:
             logger.debug("Cross-keyword rate limit budget sharing enabled")
 
+        # Wire budget into escalation manager for budget-aware escalation (US-002)
+        if self.escalation_manager is not None:
+            self.escalation_manager._budget = self.rate_limit_budget
+            logger.debug("Rate limit budget wired into escalation manager")
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================

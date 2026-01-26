@@ -143,6 +143,11 @@ try:
 except ImportError:  # pragma: no cover
     ImpersonationManager = None  # type: ignore[misc,assignment]
 
+try:
+    from .rate_limit_budget import RateLimitBudget
+except ImportError:  # pragma: no cover
+    RateLimitBudget = None  # type: ignore[misc,assignment]
+
 
 @dataclass
 class EscalationResult:
@@ -168,15 +173,22 @@ class EscalationManager:
         impersonation_manager: Provides Tier 1 --impersonate args.
         extractor_args_config: Configuration for Tier 2 player_client rotation.
             If None, a default config is used with escalation disabled.
+        budget: Optional RateLimitBudget for budget-aware escalation.
+            When provided, escalation decisions consult the budget:
+            - record_failure() calls budget.record_rotation() on tier advances
+            - If budget is exhausted, skip intermediate tiers to max tier
+            - get_escalation_args() calls budget.record_attempt()
     """
 
     def __init__(
         self,
         impersonation_manager: "ImpersonationManager",
         extractor_args_config: Optional["ExtractorArgsConfig"] = None,
+        budget: Optional["RateLimitBudget"] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
+        self._budget = budget
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
@@ -210,12 +222,19 @@ class EscalationManager:
         Tier 2: --impersonate <target> + --extractor-args "youtube:player_client=X,Y,Z"
         Tier 3: All of Tier 2 + rotate_cookies=True flag
 
+        Also records the attempt in the budget (if available) to track total
+        download attempts across keywords.
+
         Args:
             keyword: The download keyword or video ID.
 
         Returns:
             EscalationResult with args list, tier, and cookie rotation flag.
         """
+        # Track attempt in budget (outside lock - budget has its own thread safety)
+        if self._budget is not None:
+            self._budget.record_attempt(keyword)
+
         lock = self._get_lock(keyword)
         with lock:
             state = self._get_state(keyword)
@@ -277,7 +296,10 @@ class EscalationManager:
         """Record a download failure for a keyword.
 
         Increments the consecutive 403 counter. If the threshold is reached,
-        escalates to the next tier.
+        escalates to the next tier. When a budget is available:
+        - Records a rotation on tier advance (Tier 2 or Tier 3)
+        - If budget is exhausted (can_rotate() is False), skips intermediate
+          tiers and jumps directly to max tier (FULL_BYPASS)
 
         Args:
             keyword: The download keyword or video ID.
@@ -292,6 +314,28 @@ class EscalationManager:
             if self._should_escalate(state):
                 old_tier = state.current_tier
                 n_403s = state.consecutive_403s
+
+                # Budget-aware escalation: if budget exhausted, skip to max tier
+                if self._budget is not None and not self._budget.can_rotate():
+                    if state.current_tier < EscalationTier.FULL_BYPASS:
+                        logger.warning(
+                            f"Budget exhausted for keyword={keyword}: "
+                            f"skipping to FULL_BYPASS (was {state.current_tier.name})"
+                        )
+                        state.current_tier = EscalationTier.FULL_BYPASS
+                        state.last_escalation_time = time.time()
+                        state.escalation_history.append(
+                            (state.last_escalation_time, state.current_tier)
+                        )
+                        state.consecutive_403s = 0
+                        state.extractor_args_index += 1
+                        self._total_escalations += 1
+                        tier_name = state.current_tier.name
+                        self._escalations_per_tier[tier_name] = (
+                            self._escalations_per_tier.get(tier_name, 0) + 1
+                        )
+                        return
+
                 state.escalate()
                 self._total_escalations += 1
                 tier_name = state.current_tier.name
@@ -301,6 +345,10 @@ class EscalationManager:
                 # Increment extractor_args_index on Tier 2 escalation
                 if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
                     state.extractor_args_index += 1
+
+                # Budget tracking: record rotation when advancing to Tier 2 or Tier 3
+                if self._budget is not None and state.current_tier > old_tier:
+                    self._budget.record_rotation(keyword)
 
                 logger.info(
                     f"Escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "

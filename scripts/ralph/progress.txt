@@ -5660,3 +5660,16 @@ def test_eta_accuracy_batch_50_videos(self):
 ## Focus Area: rate-limiting - 2026-01-26 18:45:50
 - Status: In Progress...
 
+## Iteration 2 - [US-002] Wire RateLimitBudget into EscalationManager for budget-aware escalation
+- Added optional `budget` parameter to EscalationManager.__init__ (stored as self._budget), backward-compatible (defaults to None)
+- record_failure() now calls budget.record_rotation(keyword) when escalation advances to a higher tier
+- record_failure() checks budget.can_rotate() before escalating: if exhausted, skips intermediate tiers and jumps directly to FULL_BYPASS with WARNING log
+- get_escalation_args() calls budget.record_attempt(keyword) to track total download attempts across keywords
+- Added record_attempt() method to RateLimitBudget for lightweight attempt tracking
+- VideoDownloader (core.py) wires self.rate_limit_budget into self.escalation_manager._budget after budget initialization (line ~527)
+- Gotcha: cooldown suppression affects test escalation paths - need time.time() mocking for multi-tier tests
+- Added 9 new tests in TestBudgetAwareEscalation class covering all 6 acceptance criteria
+- Files modified: src/downloader/escalation_manager.py, src/downloader/rate_limit_budget.py, src/downloader/core.py, tests/test_escalation_manager.py
+- Tests: 134 pass (91 escalation + 43 budget), py_compile OK, main.py --help OK
+- All 6 acceptance criteria met
+
