@@ -148,6 +148,11 @@ try:
 except ImportError:  # pragma: no cover
     RateLimitBudget = None  # type: ignore[misc,assignment]
 
+try:
+    from .circuit_breaker import CircuitBreaker
+except ImportError:  # pragma: no cover
+    CircuitBreaker = None  # type: ignore[misc,assignment]
+
 
 @dataclass
 class EscalationResult:
@@ -189,6 +194,7 @@ class EscalationManager:
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
         self._budget = budget
+        self._circuit_breaker: Optional["CircuitBreaker"] = None
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
@@ -209,6 +215,17 @@ class EscalationManager:
         if keyword not in self._keyword_states:
             self._keyword_states[keyword] = EscalationState()
         return self._keyword_states[keyword]
+
+    def set_circuit_breaker(self, circuit_breaker: "CircuitBreaker") -> None:
+        """Link a CircuitBreaker for coordinated rate-limiting.
+
+        When linked, get_escalation_args() will return Tier 3 args
+        immediately during circuit breaker pause (skip lower tiers).
+
+        Args:
+            circuit_breaker: The CircuitBreaker to consult.
+        """
+        self._circuit_breaker = circuit_breaker
 
     @property
     def keyword_states(self) -> Dict[str, EscalationState]:
@@ -239,6 +256,19 @@ class EscalationManager:
         with lock:
             state = self._get_state(keyword)
             tier = state.current_tier
+
+            # Circuit breaker shortcut: when circuit breaker is open (paused),
+            # return Tier 3 args immediately to skip lower tiers
+            if (
+                self._circuit_breaker is not None
+                and self._circuit_breaker.is_open
+                and tier < EscalationTier.FULL_BYPASS
+            ):
+                logger.info(
+                    f"Circuit breaker open: shortcutting keyword={keyword} "
+                    f"from {tier.name} to FULL_BYPASS"
+                )
+                tier = EscalationTier.FULL_BYPASS
 
             # Tier 1: impersonation only
             args = self._impersonation_manager.get_impersonate_args()
@@ -459,6 +489,36 @@ class EscalationManager:
             self._total_escalations = 0
             self._escalations_per_tier.clear()
             logger.debug("All escalation states reset")
+
+    def get_active_keyword_count(self) -> int:
+        """Get the number of keywords with tracked escalation state.
+
+        Used by circuit breaker to determine what percentage of keywords
+        are at Tier 3, which informs whether pause duration should be extended.
+
+        Returns:
+            Number of keywords currently tracked.
+        """
+        with self._global_lock:
+            return len(self._keyword_states)
+
+    def get_keywords_at_tier(self, tier: EscalationTier) -> List[str]:
+        """Get list of keywords currently at a specific escalation tier.
+
+        Used by circuit breaker to check how many keywords are at Tier 3
+        and decide whether to extend pause duration.
+
+        Args:
+            tier: The escalation tier to query.
+
+        Returns:
+            List of keyword strings at the given tier.
+        """
+        with self._global_lock:
+            return [
+                kw for kw, state in self._keyword_states.items()
+                if state.current_tier == tier
+            ]
 
     def get_metrics(self) -> Dict:
         """Get escalation metrics summary.

@@ -1,0 +1,13 @@
+
+## Iteration 5 - [US-005] Coordinate circuit breaker with escalation tier state
+- Added bidirectional coordination between CircuitBreaker and EscalationManager
+- CircuitBreaker.set_escalation_manager(manager): links escalation state for pause extension and reset logic
+- EscalationManager.set_circuit_breaker(cb): links circuit breaker for Tier 3 shortcut during pause
+- _get_effective_pause_seconds(): doubles pause duration when >50%% keywords at Tier 3 (FULL_BYPASS)
+- get_escalation_args(): returns Tier 3 args immediately when circuit breaker is open (skip lower tiers)
+- record_success(): requires 3 consecutive successes to close circuit when any keyword at Tier 3
+- Added get_active_keyword_count() and get_keywords_at_tier(tier) to EscalationManager
+- Fixed stale test: 429 moved from non-trigger to trigger list (per US-001 which added 429 patterns)
+- INFO logging: 'Circuit breaker extended: X%% keywords at Tier 3' and 'shortcutting keyword to FULL_BYPASS'
+- Files modified: src/downloader/circuit_breaker.py, src/downloader/escalation_manager.py, tests/test_circuit_breaker_escalation_coordination.py (new), tests/test_escalation_integration.py
+- Test results: 27 new coordination tests, 265 total related tests pass in 2.38s

@@ -68,7 +68,8 @@
             "id": "US-005",
             "title": "Coordinate circuit breaker with escalation tier state",
             "priority": 5,
-            "passes": false,
+            "passes": true,
+            "notes": "Bidirectional coordination: CircuitBreaker.set_escalation_manager() and EscalationManager.set_circuit_breaker(). _get_effective_pause_seconds() doubles pause when >50% keywords at Tier 3. get_escalation_args() returns Tier 3 immediately during circuit break. record_success() requires 3 consecutive successes at Tier 3. Added get_active_keyword_count() and get_keywords_at_tier(tier). Fixed stale test (429 is now a trigger per US-001). 27 new tests, 265 total pass.",
             "acceptanceCriteria": [
                 "When EscalationManager reaches Tier 3 for >50% of active keywords, signal circuit breaker to extend pause duration by 2x",
                 "When circuit breaker is open (paused), EscalationManager.get_escalation_args() returns Tier 3 args immediately (skip lower tiers during circuit break)",
