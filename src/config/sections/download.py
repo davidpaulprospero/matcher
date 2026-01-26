@@ -22,6 +22,7 @@ __all__ = [
     'CircuitBreakerConfig',
     'BatchRetryConfig',
     'VPNConfig',
+    'ImpersonationConfig',
     'DownloadConfig',
     'DownloadingConfig',
 ]
@@ -739,6 +740,39 @@ class VPNConfig:
 
 
 @dataclass
+class ImpersonationConfig:
+    """Browser impersonation configuration for yt-dlp TLS fingerprint bypass.
+
+    Uses curl_cffi impersonation targets to spoof browser TLS fingerprints,
+    defeating YouTube bot detection that relies on TLS ClientHello analysis.
+
+    When enabled (default), every yt-dlp subprocess call includes
+    ``--impersonate <target>`` with round-robin rotation across detected targets.
+
+    Auto-detection runs ``yt-dlp --list-impersonate-targets`` at startup to
+    discover available targets from the installed curl_cffi library.
+
+    See also: ``src/downloader/impersonation.py`` for ImpersonationManager.
+    """
+    # Master switch: enable browser impersonation on all yt-dlp calls (Tier 1)
+    # When True, every yt-dlp command includes --impersonate with a rotated target
+    enabled: bool = True
+
+    # Preferred targets: filter auto-detected targets to only these
+    # Empty list = use all detected targets (recommended for maximum coverage)
+    # Example: ["Chrome-136:Macos-15", "Safari-18.0:Ios-18.0"]
+    preferred_targets: List[str] = field(default_factory=list)
+
+    # Auto-detect available targets at startup via --list-impersonate-targets
+    # When False, relies on preferred_targets list only
+    detect_at_startup: bool = True
+
+    # Timeout for the --list-impersonate-targets subprocess (seconds)
+    # Increase if detection is timing out on slow systems
+    detection_timeout: int = 10
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -840,6 +874,10 @@ class DownloadConfig:
     # Batch retry: collect rate-limited videos and retry after delay
     batch_retry: BatchRetryConfig = field(default_factory=BatchRetryConfig)
 
+    # Browser impersonation: spoof TLS fingerprints to bypass bot detection
+    # Always-on by default (Tier 1). Auto-detects curl_cffi targets at startup.
+    impersonation: ImpersonationConfig = field(default_factory=ImpersonationConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -880,6 +918,8 @@ class DownloadConfig:
             self.circuit_breaker = CircuitBreakerConfig(**self.circuit_breaker)
         if isinstance(self.batch_retry, dict):
             self.batch_retry = BatchRetryConfig(**self.batch_retry)
+        if isinstance(self.impersonation, dict):
+            self.impersonation = ImpersonationConfig(**self.impersonation)
 
 
 @dataclass

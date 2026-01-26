@@ -33,8 +33,8 @@
         "Wire into DownloadConfig as impersonation: ImpersonationConfig with __post_init__ dict conversion",
         "Add impersonation section to config.yaml with inline documentation comments"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created ImpersonationConfig dataclass in src/config/sections/download.py with 4 fields: enabled (bool=True), preferred_targets (List[str]=[]), detect_at_startup (bool=True), detection_timeout (int=10). Wired into DownloadConfig with __post_init__ dict conversion. Added to __all__ exports. Added impersonation section to config.yaml with comprehensive inline documentation. Verified: py_compile passes, config loads correctly with ImpersonationConfig type, main.py --help works, 225+ download/caption/agent tests pass with 0 regressions."
     },
     {
       "id": "US-003",

@@ -1025,7 +1025,7 @@ download:
   # When YouTube returns 429 or requires sign-in, automatically switch to a different
   # cookie file. Each cookie should be exported from a different browser profile/account.
   cookie_rotation:
-    enabled: true           # Enable cookie rotation (requires multiple cookie files)
+    enabled: false          # Enable cookie rotation (requires multiple cookie files)
     cookie_files:           # List of cookie file paths to rotate through
       - "cookies/main.txt"
       - "cookies/backup1.txt"
@@ -1043,6 +1043,13 @@ download:
       - "bot detection"
     cooldown_seconds: 300   # Wait 5 min before reusing a rotated-out cookie
     max_rotations_per_session: 0  # 0 = unlimited
+
+  # Cookie method fallback (automatic, no config needed):
+  # When retries exhaust on auth/rate-limit errors, the pipeline automatically
+  # falls back through cookie methods built from the settings above:
+  #   [browser:<cookies_from_browser>] → [file:<cookie_files[0]>] → ... → [no-cookies] → GIVE UP
+  # Each method gets its own full set of retries. On success, the working method
+  # is remembered as the starting point for subsequent downloads.
 
   # Rate limit backoff: progressive delay before cookie rotation
   # When rate limit errors occur, apply exponential backoff BEFORE escalating to
@@ -1152,6 +1159,23 @@ download:
     respect_circuit_breaker: true       # Wait for circuit breaker recovery before retry
                                         # When true, if circuit breaker is tripped, batch retry
                                         # waits for it to recover before processing the queue
+
+  # Browser impersonation: spoof TLS fingerprints to bypass YouTube bot detection
+  # Uses curl_cffi to impersonate real browser TLS ClientHello signatures.
+  # Always-on by default (Tier 1): every yt-dlp call uses --impersonate with
+  # a round-robin rotated target from Chrome, Firefox, Safari, Edge, etc.
+  #
+  # Available targets are auto-detected at startup via:
+  #   yt-dlp --list-impersonate-targets
+  #
+  # curl_cffi 0.13.0 provides ~31 targets (Chrome, Firefox, Safari, Edge, Tor).
+  # See src/downloader/impersonation.py for ImpersonationManager details.
+  impersonation:
+    enabled: true               # Enable browser impersonation on all yt-dlp calls
+    preferred_targets: []       # Filter to specific targets (empty = use all detected)
+                                # Example: ["Chrome-136:Macos-15", "Safari-18.0:Ios-18.0"]
+    detect_at_startup: true     # Auto-detect targets via --list-impersonate-targets
+    detection_timeout: 10       # Timeout for detection subprocess (seconds)
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
