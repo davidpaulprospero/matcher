@@ -5701,3 +5701,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Tests: 95 escalation tests pass, 104 related tests pass, py_compile OK, main.py --help OK
 - All 6 acceptance criteria met
 
+
+## Iteration 8 - [US-008] Fix DownloadHealer to use shared EscalationManager instead of duplicate CookieRotator
+- DownloadHealer.__init__ now accepts optional escalation_manager parameter (backward-compatible, defaults to None)
+- When escalation_manager is provided, CookieRotator creation is skipped (Tier 3 handles cookie rotation)
+- _handle_rate_limit() calls record_failure(keyword, error_str) to advance tier state, then get_escalation_args(keyword) for current tier args
+- _extract_keyword_from_error() extracts keyword from DownloadError or video ID from error message
+- reset_backoff() calls record_success(keyword) via _last_keyword property tracking (called by ResilientRunner after successful stage)
+- Network error fix() also records failure with escalation manager when fix fails
+- HealingOrchestrator.wire_escalation_manager() method wires shared manager into DownloadHealer via _healer_instances dict
+- Pipeline _collect_escalation_metrics() calls orchestrator.wire_escalation_manager() after finding escalation manager from download stage
+- Added 7 tests in TestSharedEscalationManager: shared manager consultation, success recording on reset, failure recording on rate limit, backward-compat without manager, cookie rotator skipped with manager, orchestrator wire method
+- Files modified: src/agents/healers/download.py, src/agents/orchestrator.py, src/pipeline.py, tests/test_agents/test_download_healer_retry.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Tests: 27 pass (healer retry), 175 pass (related), py_compile OK, main.py --help OK
+- All 6 acceptance criteria met

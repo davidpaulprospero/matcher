@@ -449,6 +449,9 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
     Searches pipeline stages for a DownloadStage with a downloader that has
     an escalation_manager, then builds a RateLimitMetricsAggregator and passes
     unified metrics to the orchestrator for inclusion in the end-of-run report.
+
+    Also wires the shared EscalationManager into the DownloadHealer so it
+    uses the same escalation state instead of a duplicate CookieRotator.
     """
     try:
         from src.downloader.rate_limit_metrics import RateLimitMetricsAggregator
@@ -469,6 +472,9 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
                 orchestrator.set_aggregated_metrics(aggregator)
                 # Also keep backward-compat escalation metrics
                 orchestrator.set_escalation_metrics(esc_mgr.get_metrics())
+                # Wire shared EscalationManager into DownloadHealer
+                if hasattr(orchestrator, 'wire_escalation_manager'):
+                    orchestrator.wire_escalation_manager(esc_mgr)
                 return
     except Exception:
         pass  # Non-critical: metrics collection should never break the pipeline
