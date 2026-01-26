@@ -1,4 +1,21 @@
 
+## Sprint 10 - Rate-Limiting Coordination
+Focus: Wire existing rate-limiting subsystems together into coordinated strategy
+Stories: US-001 to US-010 (10 stories)
+
+## Iteration 1 - [US-001] Expand is_escalation_trigger() to detect 429, IP-blocked, and age-gate patterns
+- Expanded _ESCALATION_TRIGGER_RE with 429/rate-limit patterns: 'HTTP Error 429', '429', 'Too Many Requests', 'rate.?limit'
+- Added IP-blocked patterns: 'IP address', 'ip.*block', 'access denied', 'geo.?block'
+- Added age-gate patterns: 'age.?gate', 'age.?restrict', 'sign.*in.*to.*confirm.*age'
+- All existing 403/bot/captcha patterns preserved unchanged
+- Added classify_trigger(stderr) -> Optional[str] returning: '429', 'age_gate', 'ip_blocked', 'bot_detection', '403', or None
+- Category-specific compiled regexes in _TRIGGER_CATEGORIES list, ordered by specificity (429 > age_gate > ip_blocked > bot_detection > 403)
+- Added 15+ new parametrized test cases: 5 for 429, 5 for IP-blocked, 5 for age-gate patterns
+- Added TestClassifyTrigger class with 7 test methods (17 parametrized cases + priority tests + negative tests)
+- Files modified: src/downloader/escalation_manager.py, tests/test_escalation_manager.py
+- Tests: 78 pass (was 32), py_compile OK, main.py --help OK
+- All 6 acceptance criteria met
+
 ## Sprint 12 - 3-Tier Escalation Bypass System
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
@@ -5639,3 +5656,7 @@ def test_eta_accuracy_batch_50_videos(self):
 - Real yt-dlp stderr samples: 6 trigger patterns (403, bot, captcha, blocked, verify human, sign-in) and 8 non-triggers (404, unavailable, timeout, 429, download progress)
 - Files modified: tests/test_escalation_integration.py (new), scripts/ralph/prd.json, scripts/ralph/progress.txt
 - Test results: 30 passed in 0.44s (integration) + 40 passed in 0.50s (unit)
+
+## Focus Area: rate-limiting - 2026-01-26 18:45:50
+- Status: In Progress...
+
