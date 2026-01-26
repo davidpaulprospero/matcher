@@ -1,171 +1,199 @@
 {
-  "branchName": "ralph/sprint-8",
-  "sprintNumber": 8,
-  "focusArea": "caption",
-  "projectContext": "Sprint 8 focuses on caption system reliability, cross-project cache management, and test coverage gaps. Sprint 7 delivered segment-level error recovery, adaptive format ordering, error categorization with retry budgets, metrics export, standalone validation CLI, batch pre-check optimization, network error pattern detection, timing-based confidence penalties, channel-level patterns, and stress tests. Sprint 8 advances: (1) Adaptive retry budget allocation across batches with pattern-aware backoff, (2) End-to-end timing penalty integration testing, (3) Multilingual caption testing with Unicode and fallback chains, (4) Cache staleness checking with max age enforcement, (5) Pattern-based abort recovery with checkpointing, (6) Segment quality scoring with accuracy heuristics, (7) Enhanced live stream detection with state classification, (8) Worker-level progress tracking with ETA calculation, (9) Edge case test suite for corrupted cache and malformed captions, (10) Config validation warnings for performance-degrading combinations.",
+  "branchName": "ralph/sprint-9",
+  "sprintNumber": 9,
+  "focusArea": "download",
+  "projectContext": "Sprint 9 focuses on browser impersonation bypass using curl_cffi for TLS fingerprint spoofing to defeat YouTube bot detection. curl_cffi v0.13.0 is already installed with 31 impersonation targets available. Sprint 8 completed 9/10 caption stories (adaptive retry budgets, timing penalty integration, multilingual tests, cache staleness, abort recovery, segment quality scoring, live stream detection, worker progress, edge case tests). Sprint 9 implements: (1) ImpersonationManager with auto-detection of available targets via --list-impersonate-targets, (2) Round-robin per-call target rotation across Chrome/Firefox/Safari, (3) ImpersonationConfig dataclass in download config section, (4) Wiring impersonation into core.py yt-dlp commands (keyword search + ID-based download), (5) Wiring into audio_first.py (audio download + segment download + full video fallback), (6) Wiring into auxiliary downloaders (title_filter, speech_screening, caption_fetcher), (7) 3-tier escalation: Tier 1 always-on impersonation, Tier 2 adds extractor-args player_client bypass on 403/bot, Tier 3 combines both with cookie rotation, (8) EscalationManager with state tracking and automatic tier progression, (9) Impersonation metrics and logging, (10) Healer integration for auto-escalation on repeated 403s, (11) Comprehensive unit tests for rotation and auto-detect parsing, (12) Integration tests for escalation tier progression.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add adaptive retry budget allocation across video batches",
-      "description": "Per-category retry budgets (US-003 Sprint 7) work per-video but not across batches. When 30% of videos fail with network errors, remaining videos should reduce retry attempts. Implement batch-level budget tracking that adapts retry strategy based on cumulative failure patterns.",
+      "title": "Create ImpersonationManager with auto-detect and round-robin rotation",
+      "description": "Create a new ImpersonationManager class in src/downloader/impersonation.py that auto-detects available impersonation targets at startup by parsing yt-dlp --list-impersonate-targets output, stores them in a sorted list, and provides thread-safe round-robin rotation returning the next target on each call. This is the foundation for all impersonation features.",
       "priority": 1,
       "acceptanceCriteria": [
-        "Create BatchRetryBudget class tracking cumulative errors across all videos in batch",
-        "Implement budget_remaining(category) method returning reduced retry count when pattern detected",
-        "When >30% network errors, reduce subsequent video retry budget from 3 to 1",
-        "When >50% network errors, disable retries entirely for remaining videos",
-        "Add batch_retry_budget field to CaptionMetrics tracking original vs actual retries used",
-        "Tests verify batch with 40% network errors uses 60% fewer retries on remaining videos"
+        "Create ImpersonationManager class in src/downloader/impersonation.py with detect_targets() method",
+        "detect_targets() runs yt-dlp --list-impersonate-targets, parses output into list of target strings",
+        "Implement get_next_target() with thread-safe round-robin rotation (threading.Lock, wrapping index)",
+        "get_impersonate_args() returns ['--impersonate', target] for the next rotated target",
+        "Handle detection failure gracefully: log warning, return empty list, get_impersonate_args() returns []",
+        "Store detected targets count and rotation stats (calls_made, unique_targets_used) for metrics"
       ],
       "passes": true,
-      "notes": "Implementation complete. Fixed RLock deadlock bug in get_summary() method. All 32 tests pass. BatchRetryBudget class tracks cumulative errors, reduces budget at >30% (to 1) and >50% (to 0) network errors."
+      "notes": "Created ImpersonationManager in src/downloader/impersonation.py with ImpersonationStats dataclass. Auto-detects 31 curl_cffi targets via yt-dlp --list-impersonate-targets. Thread-safe round-robin with threading.Lock. Graceful failure handling (TimeoutExpired, FileNotFoundError, non-zero exit). Preferred targets filtering. Exported from __init__.py. Verified: 100 concurrent threads with 0 errors, sanity check passed, 0 regressions in existing tests."
     },
     {
       "id": "US-002",
-      "title": "Create end-to-end timing penalty integration test",
-      "description": "Timing penalty (US-008 Sprint 7) is calculated in CaptionStage but may not survive pipeline to MatchStage. Create comprehensive integration test verifying timing_penalty flows through text_metadata and applies to final match confidence.",
+      "title": "Add ImpersonationConfig dataclass to download config section",
+      "description": "Add ImpersonationConfig dataclass to src/config/sections/download.py with enabled flag (default True for always-on), target preferences, and escalation settings. Wire into DownloadConfig with __post_init__ dict conversion. Update config.yaml with documented defaults.",
       "priority": 2,
       "acceptanceCriteria": [
-        "Create TestTimingPenaltyPipeline class in tests/test_caption_match_integration.py",
-        "Test verifies CaptionResult.timing_penalty_factor is calculated correctly",
-        "Test verifies timing_penalty stored in text_metadata by CaptionStage",
-        "Test verifies MatchStage retrieves timing_penalty from text_metadata",
-        "Test verifies apply_timing_penalty() reduces confidence: 0.9 * 0.75 penalty = 0.675",
-        "Test uses mock pipeline with real CaptionStage and MatchStage integration"
+        "Create ImpersonationConfig dataclass with enabled: bool = True (always-on by default)",
+        "Add preferred_targets: List[str] field (empty = auto-detect all, non-empty = filter to these)",
+        "Add detect_at_startup: bool = True to control auto-detection behavior",
+        "Add detection_timeout: int = 10 for --list-impersonate-targets subprocess timeout",
+        "Wire into DownloadConfig as impersonation: ImpersonationConfig with __post_init__ dict conversion",
+        "Add impersonation section to config.yaml with inline documentation comments"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Added 19 new tests in 3 classes: TestTimingPenaltyPipeline (13 tests), TestTimingPenaltyEdgeCases (5 tests), TestTimingPenaltyPipelineSmokeTest (1 test). All tests verify the full timing penalty flow from CaptionResult through text_metadata to MatchStage confidence adjustment. Specific test_apply_timing_penalty_reduces_confidence verifies 0.9 * 0.75 = 0.675."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add multilingual caption fetching test suite",
-      "description": "Language fallback chains lack comprehensive testing. Add test suite covering partial failures, Unicode handling, mixed-language videos, and language code case sensitivity.",
+      "title": "Wire impersonation into core.py keyword search and ID-based download",
+      "description": "Integrate ImpersonationManager into VideoDownloader in core.py. Initialize manager in __init__, call get_impersonate_args() and inject into the two yt-dlp command construction sites: keyword search+download (line ~1537) and ID-based download (line ~1637). The impersonation args must be added BEFORE cookies to maintain correct argument ordering.",
       "priority": 3,
       "acceptanceCriteria": [
-        "Create TestMultilingualCaptions class in tests/test_caption_multilingual.py",
-        "Test fallback chain: preferred unavailable, 2nd fallback succeeds (en -> es -> de)",
-        "Test Unicode handling: German umlauts, Chinese characters, Arabic RTL text",
-        "Test mixed-language video: captions in en + es available, preferred en returned",
-        "Test language code normalization: 'EN' treated same as 'en'",
-        "Test empty fallback_languages defaults to 'en' gracefully",
-        "All 6 tests pass with clear assertions on language selection logic"
+        "Initialize ImpersonationManager in VideoDownloader.__init__ with auto-detect if config.impersonation.enabled",
+        "Add impersonation args to keyword search+download cmd at core.py (ytsearch command construction)",
+        "Add impersonation args to ID-based download cmd at core.py (_download_by_ids command construction)",
+        "Impersonation args inserted before cookie args in command list for correct yt-dlp argument order",
+        "Log impersonation target used: 'Impersonation: Chrome-136:Macos-15' at debug level per download",
+        "When impersonation disabled or no targets detected, commands work identically to current behavior"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Created tests/test_caption_multilingual.py with 12 tests in 3 classes: TestMultilingualCaptions (6 tests covering all acceptance criteria), TestMultilingualCaptionValidation (2 tests for config validation), TestMultilingualCaptionSegments (2 tests for Unicode preservation in segments). All tests verify language selection, Unicode handling for German/Chinese/Arabic, and graceful fallback behavior."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Implement cache staleness checking with max age enforcement",
-      "description": "CaptionCache stores results indefinitely with no staleness check. Implement max_cache_age_days enforcement that marks old entries for re-fetch and provides cleanup mechanism.",
+      "title": "Wire impersonation into audio_first.py (3 command sites)",
+      "description": "Integrate ImpersonationManager into AudioFirstPipeline for its three yt-dlp call sites: audio download (line ~241), segment download with --download-sections (line ~427), and full video fallback (line ~591). Share the same ImpersonationManager instance from VideoDownloader to maintain consistent rotation state across all call sites.",
       "priority": 4,
       "acceptanceCriteria": [
-        "Add cached_at timestamp to CaptionCacheEntry when storing results",
-        "Implement is_stale(entry) method checking age against config.cache_validation.max_cache_age_days",
-        "CaptionCache.get() returns None for stale entries when config.cache_validation.mode='strict'",
-        "Add cleanup_stale_entries(max_age_days) method removing entries older than threshold",
-        "Add --cleanup-caption-cache CLI flag that removes stale entries and reports freed space",
-        "Tests verify stale entries skipped in strict mode, returned with warning in warn mode"
+        "Pass ImpersonationManager instance from VideoDownloader to AudioFirstPipeline constructor",
+        "Add impersonation args to audio download command (bestaudio/best -x --audio-format mp3)",
+        "Add impersonation args to segment download command (--download-sections with retry loop)",
+        "Add impersonation args to full video fallback command (bestvideo+bestaudio fallback)",
+        "Each call site gets a freshly rotated target (not the same target for all 3 sites)",
+        "Graceful fallback: if manager is None or has no targets, skip impersonation args silently"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Added is_stale(), get_entry_age_days(), and cleanup_stale_entries() methods to CaptionCache. Overrode _is_valid_entry() to prevent auto-deletion, allowing staleness handling in get_caption() with 3 modes: strict (returns None), warn (returns with warning), skip (no staleness check). Added --cleanup-caption-cache CLI flag with --cleanup-caption-cache-days and --cleanup-caption-cache-dry-run options. Created 16 new tests in 3 classes: TestCacheStaleness (8 tests), TestCleanupStaleEntries (6 tests), TestCacheStalenessIntegration (2 tests). All 81 test_caption_cache.py tests pass."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add pattern-based abort recovery with partial result checkpointing",
-      "description": "Error pattern detection (US-007 Sprint 7) triggers abort but loses partial results. Implement checkpointing that saves successfully fetched captions before abort, allowing resume from partial state.",
+      "title": "Wire impersonation into auxiliary downloaders (title_filter, speech_screening, caption_fetcher)",
+      "description": "Integrate ImpersonationManager into TitleFilter (--dump-json search), SpeechScreener (audio sample download), and CaptionFetcher (--list-subs). These modules receive cookies_args in their constructors; extend to also accept optional impersonation manager for consistent bypass across all YouTube API touchpoints.",
       "priority": 5,
       "acceptanceCriteria": [
-        "Create CaptionBatchCheckpoint class storing video_id -> CaptionResult map",
-        "Save checkpoint every 10 successful fetches during batch operation",
-        "On ErrorPatternAbortError, save checkpoint with abort_reason and pattern_info",
-        "Add resume_from_checkpoint() method to CaptionFetcher loading partial results",
-        "CaptionStage checks for checkpoint and skips already-fetched videos on resume",
-        "Tests verify abort at video 50/100 saves 50 results, resume fetches remaining 50"
+        "Add optional impersonation_manager parameter to TitleFilter constructor, inject into search cmd",
+        "Add optional impersonation_manager parameter to SpeechScreener constructor, inject into download cmd",
+        "Add optional impersonation_manager parameter to CaptionFetcher, inject into --list-subs cmd",
+        "VideoDownloader passes its ImpersonationManager instance to all auxiliary module constructors",
+        "All three modules work identically when impersonation_manager is None (backward compatible)",
+        "Each auxiliary call gets a fresh rotated target from the shared manager"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Created CaptionBatchCheckpoint dataclass with to_dict/from_dict, save/load, update(), mark_aborted() methods. Checkpoint saved to <project>/.cache/caption_checkpoint.json. Added batch_checkpoint and checkpoint_save_interval params to fetch_captions_batch(). CaptionStage loads existing checkpoint on resume, merges with pipeline checkpoint, and handles ErrorPatternAbortError gracefully. 21 new tests in test_caption_batch_checkpoint.py verify all acceptance criteria including abort at 50/100 scenario."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Create sophisticated segment quality scoring heuristics",
-      "description": "Current quality scoring (low/medium/high) is simplistic. Implement accuracy heuristics considering segment density, timing precision, and text completeness for better quality classification.",
+      "title": "Create EscalationManager with 3-tier bypass progression",
+      "description": "Create EscalationManager class in src/downloader/impersonation.py that implements 3-tier escalation: Tier 1 (always): --impersonate only. Tier 2 (on 403/bot-detection): add --extractor-args youtube:player_client=web_safari,tv_downgraded,web. Tier 3 (continued failure): Tier 2 + trigger cookie rotation. Track per-video escalation state and provide get_escalation_args() returning the appropriate yt-dlp args for the current tier.",
       "priority": 6,
       "acceptanceCriteria": [
-        "Add SegmentQualityMetrics dataclass: density_score, timing_precision, text_completeness",
-        "Implement calculate_segment_metrics() analyzing segment timestamps and text",
-        "density_score: segments per minute (normalize to 0-1 scale)",
-        "timing_precision: percentage of segments with exact millisecond timestamps",
-        "text_completeness: average characters per segment vs expected (50-200 chars)",
-        "Combine into quality_score: 0.4*density + 0.3*precision + 0.3*completeness",
-        "Tests verify sparse human captions score higher than dense auto-generated"
+        "Create EscalationManager class with current_tier property (1, 2, or 3) and escalate() method",
+        "Tier 1: get_args() returns impersonation args only (from ImpersonationManager)",
+        "Tier 2: get_args() returns impersonation + ['--extractor-args', 'youtube:player_client=web_safari,tv_downgraded,web']",
+        "Tier 3: get_args() returns Tier 2 args + signals cookie rotation needed via should_rotate_cookie flag",
+        "escalate() called on 403/bot-detection errors, advances tier and logs: 'Escalation: Tier 1 -> Tier 2'",
+        "reset() returns to Tier 1 after successful download, preserving escalation stats for metrics"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Added SegmentQualityMetrics dataclass and calculate_segment_metrics() function to src/caption_fetcher.py. Density score uses bell curve centered at 12 segments/min (optimal). Timing precision detects sub-100ms timestamps (auto-generated pattern). Text completeness scores 1.0 for 50-200 chars/segment avg. Combined quality_score uses weights: 0.4*density + 0.3*precision_quality + 0.3*completeness. Created 22 tests in tests/test_segment_quality_metrics.py in 3 classes: TestSegmentQualityMetrics (4 tests), TestCalculateSegmentMetrics (14 tests), TestSparseHumanVsDenseAuto (4 tests). Key test test_sparse_human_scores_higher_than_dense_auto verifies human captions score higher than auto-generated."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Enhance live stream detection with state classification",
-      "description": "Live stream detection only checks is_live metadata. Enhance to classify stream states (LIVE, UPCOMING, VOD) and handle UPCOMING streams that will have captions when complete.",
+      "title": "Add ExtractorArgsConfig and integrate escalation with retry loops",
+      "description": "Add ExtractorArgsConfig dataclass for player_client options and escalation defaults. Integrate EscalationManager into the retry loops in core.py (_run_download_cmd) and audio_first.py (segment download retry, audio retry). On 403 or bot-detection errors, call escalate() before retry and rebuild the command with escalated args. On success, call reset().",
       "priority": 7,
       "acceptanceCriteria": [
-        "Create StreamState enum: LIVE, UPCOMING, VOD, PREMIERE, UNKNOWN",
-        "Implement classify_stream_state() checking live_status, scheduled_start, duration",
-        "UPCOMING streams added to pending_streams list instead of skipped",
-        "Add config option caption_first.handle_upcoming: 'skip', 'queue', 'check_later'",
-        "Log stream state: 'UCabc: UPCOMING (scheduled 2026-01-27 10:00 UTC)'",
-        "Tests verify all 5 stream states detected correctly from mock metadata"
+        "Create ExtractorArgsConfig in download config with player_clients list and escalation tier thresholds",
+        "Integrate EscalationManager into core.py _run_download_cmd retry loop: escalate on 403/bot-detection",
+        "Integrate into audio_first.py audio download retry loop: escalate on transient auth errors",
+        "Integrate into audio_first.py segment download retry loop: escalate before retry",
+        "Rebuild yt-dlp command with new tier args before each retry attempt (cmd = base_cmd + escalation_args + cookies)",
+        "Reset escalation on successful download; log tier transitions at info level"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Added StreamState enum (LIVE, UPCOMING, VOD, PREMIERE, UNKNOWN) and classify_stream_state() function to src/caption_fetcher.py. StreamStateResult dataclass holds classification result with video_id, is_live, was_live, live_status, scheduled_start, duration. get_stream_state() method added to CaptionFetcher. CaptionStage updated to use get_stream_state() with LIVE always skipped, UPCOMING/PREMIERE handled via handle_upcoming config ('skip', 'queue', 'check_later'). state.pending_streams list added for 'queue' mode. Config option caption_first.handle_upcoming added to CaptionFirstConfig and config.yaml. 41 tests in tests/test_stream_state.py verify all stream states."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Add worker-level progress tracking with ETA calculation",
-      "description": "Progress reporting shows completed count but not per-worker status or ETA. Add detailed tracking showing which workers are stuck and estimated completion time.",
+      "title": "Add impersonation and escalation metrics with structured logging",
+      "description": "Extend RateLimitMetrics (or create ImpersonationMetrics) to track impersonation target usage, escalation events, and per-tier success rates. Log structured metrics that enable post-run analysis of which targets and tiers work best. Add metrics to the existing healing report output.",
       "priority": 8,
       "acceptanceCriteria": [
-        "Create WorkerProgress dataclass: worker_id, current_video, start_time, videos_completed",
-        "Track active workers in CaptionFetcher.worker_progress dict",
-        "Implement calculate_eta() using rolling average of last 10 fetch times",
-        "Progress callback includes worker stats: 'Workers: 8 active, 1 slow (video abc >30s)'",
-        "Add stuck_worker_threshold config (default 60s) for slow worker detection",
-        "Tests verify ETA calculation accurate within 20% for batch of 50 videos"
+        "Track per-target usage counts: {target: call_count, success_count, failure_count}",
+        "Track escalation events: {tier_transitions: [(from, to, reason, video_id)]}",
+        "Track per-tier success rates: {tier: {attempts, successes, failures}}",
+        "Add impersonation_summary() method returning formatted stats for healing report",
+        "Log target rotation at debug level: 'Impersonate: Chrome-136:Macos-15 (#42 of 31 targets)'",
+        "Log escalation transitions at info level: 'Escalation Tier 1→2 for video abc (403 Forbidden)'"
       ],
-      "passes": true,
-      "notes": "Implementation complete. Added WorkerProgress dataclass and WorkerProgressTracker class to src/caption_fetcher.py. Integrated with fetch_captions_batch() to track worker state and include stats in progress callbacks. Added stuck_worker_threshold config to CaptionFirstConfig. Created 30 tests in tests/test_worker_progress.py verifying all acceptance criteria including ETA accuracy within 20%."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Create edge case test suite for cache and caption parsing",
-      "description": "Missing tests for corrupted cache, malformed captions, and unusual filenames. Create comprehensive edge case suite to improve robustness.",
+      "title": "Add healer integration for auto-escalation on repeated 403s",
+      "description": "Create ImpersonationHealer in src/agents/ that detects patterns of 403/bot-detection errors and auto-escalates the default starting tier. If >50% of downloads in the last 10 fail with 403 at Tier 1, start new downloads at Tier 2 directly. Integrates with existing ResilientRunner healer infrastructure.",
       "priority": 9,
       "acceptanceCriteria": [
-        "Create TestCaptionEdgeCases class in tests/test_caption_edge_cases.py",
-        "Test 100+ char video title truncation preserves video ID for matching",
-        "Test video URL with special characters (quotes, ampersands) parsed correctly",
-        "Test corrupted JSON cache file returns None gracefully (no crash)",
-        "Test truncated cache file (partial write) detected and handled",
-        "Test caption segments with 0 duration filtered out during parsing",
-        "Test unsorted caption timestamps reordered correctly",
-        "Test empty segment text (whitespace only) treated as missing",
-        "All 8 edge cases have explicit assertions and cleanup"
+        "Create ImpersonationHealer extending BaseHealer in src/agents/impersonation_healer.py",
+        "Detect pattern: >50% of last N downloads failed with 403/bot-detection at current tier",
+        "On pattern detection, set EscalationManager.default_start_tier to next tier",
+        "Log healing action: 'ImpersonationHealer: Elevating default tier to 2 (7/10 recent 403s)'",
+        "Integrate with ResilientRunner healer registry (register as optional healer)",
+        "Include revert logic: after 10 consecutive successes at elevated tier, try reverting to Tier 1"
       ],
       "passes": false,
       "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add config validation warnings for performance-degrading combinations",
-      "description": "Config allows combinations that degrade performance (50 workers, 5 fallback languages, low timeouts). Add validation that warns users about problematic settings.",
+      "title": "Create unit tests for ImpersonationManager (auto-detect, rotation, errors)",
+      "description": "Comprehensive unit test suite for ImpersonationManager covering target detection parsing, round-robin rotation correctness, thread safety, graceful error handling, and config integration. Mock subprocess calls to avoid actual yt-dlp execution.",
       "priority": 10,
       "acceptanceCriteria": [
-        "Create CaptionConfigWarning dataclass: setting, current_value, recommended, reason",
-        "Implement validate_caption_config_warnings() returning list of warnings",
-        "Warn when max_parallel_fetches > 16 (system thread pool limits)",
-        "Warn when retry_delay < 1s (aggressive retrying)",
-        "Warn when fallback_languages > 3 (slow fetch multiplier)",
-        "Warn when timeout < 5s combined with fallbacks > 1 (timeout cascade)",
-        "Print warnings at pipeline start: 'Caption config warning: max_parallel_fetches=50 exceeds optimal 16'"
+        "Test detect_targets() parses real yt-dlp --list-impersonate-targets output format correctly",
+        "Test get_next_target() round-robin cycles through all targets and wraps around",
+        "Test thread safety: 100 concurrent get_next_target() calls produce valid targets with no crashes",
+        "Test detection failure (subprocess.TimeoutExpired, non-zero exit) returns empty list gracefully",
+        "Test preferred_targets config filters detected targets to only matching entries",
+        "Test get_impersonate_args() returns empty list when no targets available",
+        "All tests use @pytest.mark.fast and mock subprocess.run (no actual yt-dlp calls)"
+      ],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Create integration tests for escalation tier progression",
+      "description": "Integration test suite verifying the full 3-tier escalation flow: Tier 1 impersonation fails with 403, escalates to Tier 2 with extractor-args, escalates to Tier 3 with cookie rotation trigger, and resets on success. Tests verify actual yt-dlp command construction at each tier.",
+      "priority": 11,
+      "acceptanceCriteria": [
+        "Test Tier 1→2 escalation: mock 403 error triggers escalation, verify --extractor-args added to cmd",
+        "Test Tier 2→3 escalation: mock continued 403, verify cookie rotation flag set on escalation",
+        "Test Tier 3 reset on success: verify successful download resets to Tier 1",
+        "Test escalation with retry loop integration: verify _run_download_cmd rebuilds cmd with tier args",
+        "Test healer auto-elevation: verify ImpersonationHealer raises default tier after pattern detection",
+        "Test metrics recording: verify all tier transitions and target usage recorded correctly",
+        "All tests use @pytest.mark.fast, mock subprocess calls, and --non-interactive flag"
+      ],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Fix 4 failing download tests (path fixture alignment)",
+      "description": "Fix the 4 failing tests in test_downloader_core_coverage.py caused by path mismatch between keyword subdirectory and expected output directory. Tests create files in keyword_s/ subdirectory but VideoDownloader expects them in videos/ output directory, causing Path.relative_to() ValueError. Align test fixtures with actual VideoDownloader path behavior.",
+      "priority": 12,
+      "acceptanceCriteria": [
+        "Fix test_check_dependencies_ffmpeg_not_found: align mock path expectations",
+        "Fix test_find_cookies_explicit_path_not_exists: align mock path expectations",
+        "Fix test_transcode_timeout_warning: create files in correct output directory hierarchy",
+        "Fix test_transcode_process_wait_timeout: create files in correct output directory hierarchy",
+        "All 4 tests pass with pytest tests/test_downloader_core_coverage.py -v",
+        "All existing 570 passing download tests remain passing (no regressions)"
       ],
       "passes": false,
       "notes": ""
