@@ -19,6 +19,7 @@ from ..state import AudioDownload
 from .types import MergedSegment, DownloadedSegment
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager
+from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
 from . import segment_utils
 from . import utils
 
@@ -49,7 +50,8 @@ class AudioFirstPipeline:
         tier_download_counts: dict,
         lock,
         cookie_rotator: Optional[CookieRotator] = None,
-        impersonation_manager: Optional[ImpersonationManager] = None
+        impersonation_manager: Optional[ImpersonationManager] = None,
+        escalation_manager: Optional[EscalationManager] = None
     ):
         """
         Initialize AudioFirstPipeline.
@@ -64,6 +66,7 @@ class AudioFirstPipeline:
             lock: Threading lock for tier_download_counts
             cookie_rotator: Optional CookieRotator for cookie rotation on errors
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
+            escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
         """
         self.config = config
         self.download_config = config.download
@@ -75,6 +78,7 @@ class AudioFirstPipeline:
         self._lock = lock
         self.cookie_rotator = cookie_rotator
         self.impersonation_manager = impersonation_manager
+        self.escalation_manager = escalation_manager
 
         # Log cookie rotation status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -87,6 +91,12 @@ class AudioFirstPipeline:
             logger.info(f"AudioFirstPipeline: Impersonation enabled ({self.impersonation_manager.target_count} targets)")
         else:
             logger.debug("AudioFirstPipeline: Impersonation not available")
+
+        # Log escalation status
+        if self.escalation_manager:
+            logger.info("AudioFirstPipeline: Escalation manager enabled (3-tier bypass)")
+        else:
+            logger.debug("AudioFirstPipeline: Escalation manager not available")
 
     def _get_cookie_args(self) -> List[str]:
         """
@@ -120,6 +130,28 @@ class AudioFirstPipeline:
             args = self.impersonation_manager.get_impersonate_args()
             if args:
                 cmd.extend(args)
+
+    def _add_escalation_to_cmd(self, cmd: list, video_id: str) -> Optional[EscalationResult]:
+        """Add escalation-aware bypass args to yt-dlp command.
+
+        Uses EscalationManager when available (respects current tier per video_id).
+        Falls back to direct impersonation when escalation is not available.
+
+        Args:
+            cmd: The yt-dlp command list to extend.
+            video_id: The video ID for per-keyword escalation tracking.
+
+        Returns:
+            EscalationResult if escalation was used, None if fell back to impersonation.
+        """
+        if self.escalation_manager:
+            result = self.escalation_manager.get_escalation_args(video_id)
+            if result.args:
+                cmd.extend(result.args)
+            return result
+        # Fallback: direct impersonation only (no escalation manager)
+        self._add_impersonation_to_cmd(cmd)
+        return None
 
     def rotate_cookie_on_error(self, error_message: str) -> bool:
         """
@@ -293,9 +325,12 @@ class AudioFirstPipeline:
             actual_file = None
 
             for rotation_attempt in range(max_cookie_rotations + 1):
-                # Rebuild command with impersonation + cookie on each attempt
+                # Rebuild command with escalation (or impersonation fallback) + cookie on each attempt
                 download_cmd = cmd.copy()
-                self._add_impersonation_to_cmd(download_cmd)
+                esc_result = self._add_escalation_to_cmd(download_cmd, video_id)
+                # Tier 3: trigger cookie rotation proactively
+                if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                    self.cookie_rotator.rotate()
                 download_cmd.extend(self._get_cookie_args())
 
                 try:
@@ -312,10 +347,17 @@ class AudioFirstPipeline:
                         if matches:
                             actual_file = matches[0]
                             logger.debug(f"Found audio file: {actual_file.name}")
+                            # Record success with escalation manager
+                            if self.escalation_manager:
+                                self.escalation_manager.record_success(video_id)
                             break  # Success, exit retry loop
 
-                    # Check for errors that warrant cookie rotation
+                    # Check for 403/bot errors - record with escalation manager
                     err_msg = result.stderr if result.stderr else ''
+                    if self.escalation_manager and is_escalation_trigger(err_msg):
+                        self.escalation_manager.record_failure(video_id, err_msg)
+
+                    # Check for errors that warrant cookie rotation
                     if self.rotate_cookie_on_error(err_msg):
                         logger.info(f"Retrying {video_id} with rotated cookie (attempt {rotation_attempt + 2})")
                         self._cleanup_partial_files(audio_dir, video_id)
@@ -488,9 +530,12 @@ class AudioFirstPipeline:
                     # Exponential backoff for subsequent retries
                     retry_delay = min(retry_delay * 2, 60)
 
-                # Build command with impersonation + cookies (may have rotated)
+                # Build command with escalation (or impersonation fallback) + cookies
                 cmd = base_cmd.copy()
-                self._add_impersonation_to_cmd(cmd)
+                esc_result = self._add_escalation_to_cmd(cmd, video_id)
+                # Tier 3: trigger cookie rotation proactively
+                if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                    self.cookie_rotator.rotate()
                 cmd.extend(self._get_cookie_args())
 
                 try:
@@ -503,20 +548,27 @@ class AudioFirstPipeline:
 
                     if result.returncode != 0:
                         last_error = result.stderr[-200:] if result.stderr else 'Unknown error'
+                        # Record 403/bot errors with escalation manager
+                        stderr = result.stderr or ''
+                        if self.escalation_manager and is_escalation_trigger(stderr):
+                            self.escalation_manager.record_failure(video_id, stderr)
                         # Try cookie rotation first for auth/rate-limit errors
-                        if self.rotate_cookie_on_error(result.stderr or ''):
+                        if self.rotate_cookie_on_error(stderr):
                             logger.info(f"Cookie rotated for {video_id}, retrying...")
                             continue
                         # Check if error is retryable (network issues, rate limiting)
-                        if self._is_retryable_error(result.stderr):
+                        if self._is_retryable_error(stderr):
                             logger.warning(f"Retryable error for {video_id}: {last_error}")
                             continue
                         else:
                             print(f"      ✗ Failed: {last_error}")
-                            logger.warning(f"Segment download failed for {video_id}: {result.stderr[:200]}")
+                            logger.warning(f"Segment download failed for {video_id}: {stderr[:200]}")
                             break
                     else:
                         segment_success = True
+                        # Record success with escalation manager
+                        if self.escalation_manager:
+                            self.escalation_manager.record_success(video_id)
                         # Rename files from autonumber to timestamp-based names
                         downloaded = segment_utils.rename_segments_with_timing(video_dir, video_id, segments)
 
@@ -635,7 +687,10 @@ class AudioFirstPipeline:
 
         for rotation_attempt in range(max_cookie_rotations + 1):
             cmd = base_cmd.copy()
-            self._add_impersonation_to_cmd(cmd)
+            esc_result = self._add_escalation_to_cmd(cmd, video_id)
+            # Tier 3: trigger cookie rotation proactively
+            if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                self.cookie_rotator.rotate()
             cmd.extend(self._get_cookie_args())
 
             try:
@@ -647,6 +702,10 @@ class AudioFirstPipeline:
                 )
 
                 if result.returncode == 0 and output_file.exists():
+                    # Record success with escalation manager
+                    if self.escalation_manager:
+                        self.escalation_manager.record_success(video_id)
+
                     # Get video duration
                     video_duration = self._get_video_duration(output_file)
                     if video_duration is None:
@@ -669,12 +728,16 @@ class AudioFirstPipeline:
                         keyword=keyword
                     )]
                 else:
+                    # Record 403/bot errors with escalation manager
+                    stderr = result.stderr or ''
+                    if self.escalation_manager and is_escalation_trigger(stderr):
+                        self.escalation_manager.record_failure(video_id, stderr)
                     # Try cookie rotation on error
-                    if self.rotate_cookie_on_error(result.stderr or ''):
+                    if self.rotate_cookie_on_error(stderr):
                         logger.info(f"Cookie rotated for {video_id} fallback, retrying...")
                         time.sleep(2)
                         continue
-                    logger.error(f"Full video fallback failed for {video_id}: {result.stderr[:200]}")
+                    logger.error(f"Full video fallback failed for {video_id}: {stderr[:200]}")
                     return []
 
             except subprocess.TimeoutExpired:
