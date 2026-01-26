@@ -3,6 +3,17 @@
 Focus: Build Tier 2 (extractor-args) and Tier 3 (full bypass) on top of Sprint 9's Tier 1 (impersonation)
 Stories: US-001 to US-011 (11 stories)
 
+## Iteration 3 - [US-003] Add cooldown timer and state reset to EscalationManager
+- Added `_should_escalate(state)` method that checks both threshold AND cooldown timer
+- Cooldown uses `ExtractorArgsConfig.cooldown_seconds` (default 300s) to prevent re-escalation
+- Added `get_cooldown_remaining(keyword)` returning seconds remaining (0.0 if not in cooldown)
+- Added `reset_keyword(keyword)` to clear all state for one keyword (for healer recovery)
+- Added `reset_all()` to clear entire keyword state dict (for session restart)
+- Updated `record_failure()` to use `_should_escalate()` instead of direct `state.should_escalate()`
+- All 5 acceptance criteria verified programmatically
+- Files modified: src/downloader/escalation_manager.py
+- Tests: py_compile passes, 85 downloader tests pass (3 pre-existing mock failures unrelated), 23 cooldown tests pass
+
 ## Iteration 2 - [US-002] Add extractor-args command building with player_client rotation
 - Status: COMPLETE (pre-implemented in US-001)
 - All 5 acceptance criteria verified programmatically against existing code:

@@ -37,8 +37,8 @@
             "id": "US-003",
             "title": "Add cooldown timer and state reset to EscalationManager",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added _should_escalate(state) with cooldown check using ExtractorArgsConfig.cooldown_seconds (default 300s). Added get_cooldown_remaining(keyword), reset_keyword(keyword), reset_all(). Updated record_failure() to use _should_escalate() instead of state.should_escalate() directly. All 5 AC verified programmatically.",
             "acceptanceCriteria": [
                 "Cooldown timer prevents re-escalation within ExtractorArgsConfig.cooldown_seconds (default 300s) per keyword",
                 "Internal _should_escalate(state) returns False during cooldown even if 403 threshold reached",
