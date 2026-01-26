@@ -43,6 +43,8 @@ class RateLimitBudget:
     backoff_time_spent: float = 0.0
     keywords_rate_limited: List[str] = field(default_factory=list)
     last_escalation_level: str = "none"  # none, backoff, cookie, vpn
+    successes: int = 0
+    failures: int = 0
 
     # Budget limits (set from config)
     max_rotations: int = 0  # 0 = unlimited
@@ -82,6 +84,26 @@ class RateLimitBudget:
         # Lightweight tracking - increments are used by EscalationManager
         # to understand overall download volume.
         logger.debug(f"Budget: download attempt recorded (keyword={keyword})")
+
+    def record_success(self, keyword: str = None) -> None:
+        """Record a successful download to track success rate.
+
+        Args:
+            keyword: Keyword that succeeded (optional for tracking)
+        """
+        self.successes += 1
+        logger.debug(f"Budget: success recorded (total: {self.successes}, keyword={keyword})")
+
+    def record_failure(self, keyword: str = None) -> None:
+        """Record a failed download to track failure rate.
+
+        Args:
+            keyword: Keyword that failed (optional for tracking)
+        """
+        self.failures += 1
+        if keyword is not None and keyword not in self.keywords_rate_limited:
+            self.keywords_rate_limited.append(keyword)
+        logger.debug(f"Budget: failure recorded (total: {self.failures}, keyword={keyword})")
 
     def record_backoff(self, seconds: float, keyword: str = None) -> None:
         """Record backoff time spent.
@@ -211,6 +233,8 @@ class RateLimitBudget:
             "keywords_affected": len(self.keywords_rate_limited),
             "last_escalation": self.last_escalation_level,
             "is_exhausted": self.is_exhausted(),
+            "successes": self.successes,
+            "failures": self.failures,
         }
 
     def to_dict(self) -> Dict:
@@ -228,6 +252,8 @@ class RateLimitBudget:
             "max_rotations": self.max_rotations,
             "max_vpn_switches": self.max_vpn_switches,
             "max_backoff_time": self.max_backoff_time,
+            "successes": self.successes,
+            "failures": self.failures,
         }
 
     @classmethod
@@ -249,6 +275,8 @@ class RateLimitBudget:
             backoff_time_spent=data.get("backoff_time_spent", 0.0),
             keywords_rate_limited=data.get("keywords_rate_limited", []),
             last_escalation_level=data.get("last_escalation_level", "none"),
+            successes=data.get("successes", 0),
+            failures=data.get("failures", 0),
         )
 
         # Restore budget limits
@@ -265,4 +293,6 @@ class RateLimitBudget:
         self.backoff_time_spent = 0.0
         self.keywords_rate_limited = []
         self.last_escalation_level = "none"
+        self.successes = 0
+        self.failures = 0
         logger.debug("Rate limit budget cleared")

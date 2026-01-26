@@ -26,6 +26,7 @@ from typing import List, Dict, Optional, Set, TYPE_CHECKING
 if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreaker
     from .cookie_rotator import CookieRotator
+    from .rate_limit_budget import RateLimitBudget
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,7 @@ class RetryQueue:
         self._circuit_breaker_wait_time: float = 0.0  # Total time spent waiting for circuit breaker
         self._cookie_rotator: Optional['CookieRotator'] = None
         self._cookie_cooldown_wait_time: float = 0.0  # Total time spent waiting for cookie cooldown
+        self._budget_state: Optional[Dict] = None  # Budget snapshot when items were queued
 
     def set_circuit_breaker(self, circuit_breaker: 'CircuitBreaker') -> None:
         """Link a circuit breaker to coordinate retry timing.
@@ -157,6 +159,30 @@ class RetryQueue:
         """
         self._cookie_rotator = cookie_rotator
         logger.debug("Retry queue: linked to cookie rotator")
+
+    def set_budget_state(self, budget_summary: Dict) -> None:
+        """Store a snapshot of the rate limit budget state.
+
+        Called before retry processing so the retry queue knows the
+        remaining budget when deciding whether to retry items.
+
+        Args:
+            budget_summary: Dict from RateLimitBudget.get_summary()
+        """
+        self._budget_state = budget_summary
+        logger.debug(
+            f"Retry queue: budget state updated — "
+            f"exhausted={budget_summary.get('is_exhausted', False)}, "
+            f"backoff_remaining={budget_summary.get('backoff_time_remaining', 'N/A')}s"
+        )
+
+    def get_budget_state(self) -> Optional[Dict]:
+        """Get the stored budget state snapshot.
+
+        Returns:
+            Budget summary dict, or None if not set.
+        """
+        return self._budget_state
 
     def _wait_for_cookie_cooldown(self) -> float:
         """Wait for cookie cooldown to expire if all cookies are unavailable.
@@ -479,6 +505,7 @@ class RetryQueue:
             'circuit_breaker_wait_time': round(self._circuit_breaker_wait_time, 1),
             'wait_for_cookie_cooldown': self.config.wait_for_cookie_cooldown,
             'cookie_cooldown_wait_time': round(self._cookie_cooldown_wait_time, 1),
+            'budget_state': self._budget_state,
         }
 
     def to_checkpoint_dict(self) -> dict:
