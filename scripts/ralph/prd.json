@@ -23,7 +23,8 @@
             "id": "US-002",
             "title": "Wire RateLimitBudget into EscalationManager for budget-aware escalation",
             "priority": 2,
-            "passes": false,
+            "passes": true,
+            "notes": "EscalationManager.__init__ accepts optional budget param (stored as self._budget). record_failure() calls budget.record_rotation(keyword) on tier advance, checks budget.can_rotate() and skips to FULL_BYPASS when exhausted. get_escalation_args() calls budget.record_attempt(keyword). Added record_attempt() to RateLimitBudget. VideoDownloader wires budget into escalation manager after init. 9 new tests in TestBudgetAwareEscalation, 134 total tests pass.",
             "acceptanceCriteria": [
                 "EscalationManager constructor accepts optional RateLimitBudget parameter, stores as self._budget",
                 "record_failure() calls budget.record_rotation() when escalation advances to Tier 2 or Tier 3",

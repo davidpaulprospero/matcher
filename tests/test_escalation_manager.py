@@ -681,3 +681,138 @@ class TestClassifyTrigger:
     def test_classify_priority_ip_blocked_over_403(self):
         """IP block patterns match 'ip_blocked', not '403'."""
         assert classify_trigger("ip blocked") == "ip_blocked"
+
+
+# ---------------------------------------------------------------------------
+# Budget-Aware Escalation Tests (US-002)
+# ---------------------------------------------------------------------------
+
+from src.downloader.rate_limit_budget import RateLimitBudget
+
+
+@pytest.fixture
+def budget():
+    """Create a RateLimitBudget with limited rotations for testing."""
+    b = RateLimitBudget()
+    b.max_rotations = 3
+    b.max_backoff_time = 60.0
+    return b
+
+
+@pytest.fixture
+def exhausted_budget():
+    """Create an exhausted budget (can_rotate() returns False)."""
+    b = RateLimitBudget()
+    b.max_rotations = 2
+    b.rotations_used = 2  # At limit
+    b.max_backoff_time = 10.0
+    b.backoff_time_spent = 10.0  # At limit
+    return b
+
+
+@pytest.fixture
+def budget_manager(imp_manager, ext_config, budget):
+    """EscalationManager with a budget attached."""
+    return EscalationManager(imp_manager, ext_config, budget=budget)
+
+
+@pytest.fixture
+def exhausted_budget_manager(imp_manager, ext_config, exhausted_budget):
+    """EscalationManager with an exhausted budget."""
+    return EscalationManager(imp_manager, ext_config, budget=exhausted_budget)
+
+
+class TestBudgetAwareEscalation:
+    """Tests for US-002: Wire RateLimitBudget into EscalationManager."""
+
+    def test_constructor_stores_budget(self, budget_manager, budget):
+        """EscalationManager stores the budget reference."""
+        assert budget_manager._budget is budget
+
+    def test_constructor_budget_none_is_safe(self, imp_manager, ext_config):
+        """EscalationManager works fine without a budget (None)."""
+        mgr = EscalationManager(imp_manager, ext_config, budget=None)
+        assert mgr._budget is None
+        # Normal operations still work
+        result = mgr.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+        mgr.record_failure("kw", "HTTP Error 403")
+        mgr.record_success("kw")
+
+    def test_get_escalation_args_calls_record_attempt(self, imp_manager, ext_config):
+        """get_escalation_args() calls budget.record_attempt()."""
+        mock_budget = MagicMock()
+        mock_budget.can_rotate.return_value = True
+        mgr = EscalationManager(imp_manager, ext_config, budget=mock_budget)
+        mgr.get_escalation_args("sunset")
+        mock_budget.record_attempt.assert_called_once_with("sunset")
+
+    def test_record_failure_records_rotation_on_tier_advance(self, budget_manager, budget):
+        """record_failure() calls budget.record_rotation() when tier advances."""
+        assert budget.rotations_used == 0
+        # Trigger escalation: 2 consecutive failures (threshold=2)
+        budget_manager.record_failure("kw", "HTTP Error 403")
+        budget_manager.record_failure("kw", "HTTP Error 403")
+        # Should have recorded a rotation for the Tier 1 -> Tier 2 advance
+        assert budget.rotations_used == 1
+
+    def test_record_failure_records_rotation_on_each_advance(self, budget_manager, budget):
+        """Each tier advance records a rotation in the budget."""
+        # Escalate Tier 1 -> Tier 2 (2 failures)
+        budget_manager.record_failure("kw", "HTTP Error 403")
+        budget_manager.record_failure("kw", "HTTP Error 403")
+        assert budget.rotations_used == 1
+
+        # Advance past cooldown so second escalation can proceed
+        with patch("src.downloader.escalation_manager.time") as mock_time:
+            mock_time.time.return_value = time.time() + 400  # Past 300s cooldown
+            # Escalate Tier 2 -> Tier 3 (2 more failures)
+            budget_manager.record_failure("kw", "HTTP Error 403")
+            budget_manager.record_failure("kw", "HTTP Error 403")
+        assert budget.rotations_used == 2
+
+    def test_exhausted_budget_skips_to_max_tier(self, exhausted_budget_manager):
+        """When budget is exhausted, record_failure skips to FULL_BYPASS."""
+        mgr = exhausted_budget_manager
+        # Trigger escalation threshold (2 failures)
+        mgr.record_failure("kw", "HTTP Error 403")
+        mgr.record_failure("kw", "HTTP Error 403")
+        # Should have skipped straight to FULL_BYPASS
+        result = mgr.get_escalation_args("kw")
+        assert result.tier == EscalationTier.FULL_BYPASS
+        assert result.rotate_cookies is True
+
+    def test_exhausted_budget_skips_from_tier1_to_tier3(self, exhausted_budget_manager):
+        """Exhausted budget skips from Tier 1 directly to Tier 3."""
+        mgr = exhausted_budget_manager
+        # Verify starts at Tier 1
+        result = mgr.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+        # 2 failures should skip Tier 2 and go directly to Tier 3
+        mgr.record_failure("kw", "HTTP Error 403")
+        mgr.record_failure("kw", "HTTP Error 403")
+        result = mgr.get_escalation_args("kw")
+        assert result.tier == EscalationTier.FULL_BYPASS
+
+    def test_budget_none_normal_escalation(self, manager):
+        """Without budget, escalation proceeds normally through all tiers."""
+        assert manager._budget is None
+        # Tier 1 -> 2
+        manager.record_failure("kw", "HTTP Error 403")
+        manager.record_failure("kw", "HTTP Error 403")
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.EXTRACTOR_ARGS
+        # Advance past cooldown for second escalation
+        with patch("src.downloader.escalation_manager.time") as mock_time:
+            mock_time.time.return_value = time.time() + 400
+            # Tier 2 -> 3
+            manager.record_failure("kw", "HTTP Error 403")
+            manager.record_failure("kw", "HTTP Error 403")
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.FULL_BYPASS
+
+    def test_budget_tracks_rotation_with_keyword(self, budget_manager, budget):
+        """Budget rotation is recorded with the correct keyword."""
+        budget_manager.record_failure("ocean", "HTTP Error 403")
+        budget_manager.record_failure("ocean", "HTTP Error 403")
+        assert "ocean" in budget.keywords_rate_limited
