@@ -53,7 +53,8 @@
             "id": "US-004",
             "title": "Create unified RateLimitMetricsAggregator to consolidate metrics from all subsystems",
             "priority": 4,
-            "passes": false,
+            "passes": true,
+            "notes": "Added RateLimitMetricsAggregator class in rate_limit_metrics.py with aggregate() collecting from EscalationManager, CookieRotator, RateLimitBudget, CircuitBreaker. record_trigger() uses classify_trigger() for category breakdown. get_health_status() returns healthy/degraded/critical based on tier distribution, budget consumption, and circuit breaker state. Wired into pipeline.py _collect_escalation_metrics() and HealingOrchestrator print_report(). 27 new tests in test_metrics_aggregator.py, 154 total related tests pass.",
             "acceptanceCriteria": [
                 "New class RateLimitMetricsAggregator in src/downloader/rate_limit_metrics.py (or new file if needed) that collects from: EscalationManager, CookieRotator, RateLimitBudget, CircuitBreaker",
                 "Method aggregate() returns unified dict: {escalation: {...}, cookies: {...}, budget: {...}, circuit_breaker: {...}, trigger_categories: {...}}",
