@@ -4654,29 +4654,50 @@ function Invoke-ClaudeExploration {
         $process = [System.Diagnostics.Process]::new()
         $process.StartInfo = $psi
 
-        $process.Start() | Out-Null
+        # Async output capture (prevents pipe buffer deadlock)
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
 
-        # Send prompt via stdin
-        $process.StandardInput.Write($Prompt)
-        $process.StandardInput.Close()
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $errHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
 
-        # Wait with timeout (5 minutes for exploration)
-        $completed = $process.WaitForExit(300000)
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
 
-        if (-not $completed) {
-            $process.Kill()
-            Write-Host "  Exploration timed out after 5 minutes" -ForegroundColor Yellow
-            return ""
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            # Send prompt via stdin
+            $process.StandardInput.Write($Prompt)
+            $process.StandardInput.Close()
+
+            # Wait with timeout (5 minutes for exploration)
+            $timeoutMs = 300000
+            $completed = $process.WaitForExit($timeoutMs)
+
+            if (-not $completed) {
+                $process.Kill()
+                Write-Host "  Exploration timed out after 5 minutes" -ForegroundColor Yellow
+            }
+
+            # Small delay to let async handlers flush
+            Start-Sleep -Milliseconds 200
+
+            $output = $outBuilder.ToString()
+            $stderr = $errBuilder.ToString()
+
+            if ($stderr) {
+                $output += "`n$stderr"
+            }
+
+            return $output
         }
-
-        $output = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
-
-        if ($stderr) {
-            $output += "`n$stderr"
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
         }
-
-        return $output
     }
     catch {
         Write-Host "  Exploration failed: $_" -ForegroundColor Red
@@ -5642,39 +5663,60 @@ $pairsList
 
         $process = [System.Diagnostics.Process]::new()
         $process.StartInfo = $psi
-        $process.Start() | Out-Null
 
-        $process.StandardInput.Write($prompt)
-        $process.StandardInput.Close()
+        # Async output capture (prevents pipe buffer deadlock)
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
 
-        # 60 second timeout for simple classification
-        $completed = $process.WaitForExit(60000)
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $errHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
 
-        if (-not $completed) {
-            $process.Kill()
-            Write-Host "    Pre-flight: LLM verification timed out" -ForegroundColor DarkYellow
-            return @()
-        }
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
 
-        $output = $process.StandardOutput.ReadToEnd()
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
 
-        # Parse response for MATCH lines (exclude NO_MATCH)
-        $matchedIds = @()
-        $candidateIds = @($Candidates | ForEach-Object { $_.storyId })
-        foreach ($line in ($output -split "`n")) {
-            $trimmed = $line.Trim()
-            # Skip NO_MATCH lines, then check for MATCH
-            if ($trimmed -match '^NO_MATCH') { continue }
-            if ($trimmed -match 'MATCH\s+(US-\d+)') {
-                $id = $Matches[1]
-                # Only accept IDs that are actual candidates (safety)
-                if ($id -in $candidateIds) {
-                    $matchedIds += $id
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # 60 second timeout for simple classification
+            $completed = $process.WaitForExit(60000)
+
+            if (-not $completed) {
+                $process.Kill()
+                Write-Host "    Pre-flight: LLM verification timed out" -ForegroundColor DarkYellow
+                return @()
+            }
+
+            Start-Sleep -Milliseconds 200
+
+            $output = $outBuilder.ToString()
+
+            # Parse response for MATCH lines (exclude NO_MATCH)
+            $matchedIds = @()
+            $candidateIds = @($Candidates | ForEach-Object { $_.storyId })
+            foreach ($line in ($output -split "`n")) {
+                $trimmed = $line.Trim()
+                # Skip NO_MATCH lines, then check for MATCH
+                if ($trimmed -match '^NO_MATCH') { continue }
+                if ($trimmed -match 'MATCH\s+(US-\d+)') {
+                    $id = $Matches[1]
+                    # Only accept IDs that are actual candidates (safety)
+                    if ($id -in $candidateIds) {
+                        $matchedIds += $id
+                    }
                 }
             }
-        }
 
-        return $matchedIds
+            return $matchedIds
+        }
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+        }
     }
     catch {
         Write-Host "    Pre-flight: LLM verification failed: $_" -ForegroundColor DarkYellow
