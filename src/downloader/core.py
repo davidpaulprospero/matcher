@@ -1293,6 +1293,10 @@ class VideoDownloader:
         if not self.retry_queue.is_enabled or not self.retry_queue.has_pending():
             return [], []
 
+        # US-003: Pass budget state to retry queue so it knows remaining budget
+        if self._share_budget_across_keywords:
+            self.retry_queue.set_budget_state(self.rate_limit_budget.get_summary())
+
         recovered = []
         still_failed = []
 
@@ -1890,6 +1894,27 @@ class VideoDownloader:
         # Record download attempt for metrics
         self.rate_limit_metrics.record_download_attempt()
 
+        # US-003: Check budget before starting retry loop
+        if self._share_budget_across_keywords:
+            recommended = self.rate_limit_budget.get_recommended_escalation()
+            if recommended == "exhausted":
+                logger.error(
+                    f"Rate limit budget exhausted for '{keyword}' ({tier}) — "
+                    f"skipping keyword entirely (backoff: {self.rate_limit_budget.backoff_time_spent:.1f}s / "
+                    f"{self.rate_limit_budget.max_backoff_time:.0f}s, "
+                    f"rotations: {self.rate_limit_budget.rotations_used})"
+                )
+                self.rate_limit_budget.record_failure(keyword=keyword)
+                self.rate_limit_metrics.record_download_failure()
+                # Add to batch retry queue so it can be retried later with fresh budget
+                self.retry_queue.add(
+                    video_id=f"{keyword}|{tier}",
+                    keyword=keyword,
+                    tier=tier,
+                    error_message="Rate limit budget exhausted"
+                )
+                return []
+
         # Reset cookie method fallback to last working method (skip on recursive retry)
         if not _is_method_retry:
             self.method_fallback.reset_for_next_download()
@@ -1921,9 +1946,28 @@ class VideoDownloader:
 
                     if attempt < max_retries:
                         delay = retry_delay * (retry_backoff ** attempt)
+                        # US-003: Check budget before retry backoff
+                        if self._share_budget_across_keywords and not self.rate_limit_budget.can_backoff(delay):
+                            logger.warning(
+                                f"Backoff budget exhausted for '{keyword}' ({tier}) timeout retry — "
+                                f"adding to batch retry queue"
+                            )
+                            self._last_download_rate_limited = True
+                            self.rate_limit_budget.record_failure(keyword=keyword)
+                            self.retry_queue.add(
+                                video_id=f"{keyword}|{tier}",
+                                keyword=keyword,
+                                tier=tier,
+                                error_message="Timeout - backoff budget exhausted"
+                            )
+                            self.rate_limit_metrics.record_download_failure()
+                            return []
                         logger.info(f"Timeout downloading '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
                         self.rate_limit_metrics.record_retry('timeout')
                         time.sleep(delay)
+                        # US-003: Record backoff time in budget
+                        if self._share_budget_across_keywords:
+                            self.rate_limit_budget.record_backoff(delay, keyword=keyword)
                         continue
                     else:
                         logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s - all {max_retries} retries exhausted")
@@ -1992,10 +2036,29 @@ class VideoDownloader:
 
                         if attempt < max_retries:
                             delay = retry_delay * (retry_backoff ** attempt)
+                            # US-003: Check budget before retry backoff
+                            if self._share_budget_across_keywords and not self.rate_limit_budget.can_backoff(delay):
+                                logger.warning(
+                                    f"Backoff budget exhausted for '{keyword}' ({tier}) transient error retry — "
+                                    f"adding to batch retry queue"
+                                )
+                                self._last_download_rate_limited = True
+                                self.rate_limit_budget.record_failure(keyword=keyword)
+                                self.retry_queue.add(
+                                    video_id=f"{keyword}|{tier}",
+                                    keyword=keyword,
+                                    tier=tier,
+                                    error_message="Transient error - backoff budget exhausted"
+                                )
+                                self.rate_limit_metrics.record_download_failure()
+                                return []
                             logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
                             logger.debug(f"  Error: {stderr[:200]}")
                             self.rate_limit_metrics.record_retry('transient')
                             time.sleep(delay)
+                            # US-003: Record backoff time in budget
+                            if self._share_budget_across_keywords:
+                                self.rate_limit_budget.record_backoff(delay, keyword=keyword)
                             continue
                         else:
                             # Exhausted retries — try next cookie method
@@ -2026,9 +2089,28 @@ class VideoDownloader:
                 # Handle unexpected exceptions with retry
                 if attempt < max_retries:
                     delay = retry_delay * (retry_backoff ** attempt)
+                    # US-003: Check budget before retry backoff
+                    if self._share_budget_across_keywords and not self.rate_limit_budget.can_backoff(delay):
+                        logger.warning(
+                            f"Backoff budget exhausted for '{keyword}' ({tier}) exception retry — "
+                            f"adding to batch retry queue"
+                        )
+                        self._last_download_rate_limited = True
+                        self.rate_limit_budget.record_failure(keyword=keyword)
+                        self.retry_queue.add(
+                            video_id=f"{keyword}|{tier}",
+                            keyword=keyword,
+                            tier=tier,
+                            error_message=f"Exception - backoff budget exhausted: {e}"
+                        )
+                        self.rate_limit_metrics.record_download_failure()
+                        return []
                     logger.info(f"Error downloading '{keyword}' ({tier}): {e} - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
                     self.rate_limit_metrics.record_retry('network')
                     time.sleep(delay)
+                    # US-003: Record backoff time in budget
+                    if self._share_budget_across_keywords:
+                        self.rate_limit_budget.record_backoff(delay, keyword=keyword)
                     continue
                 else:
                     logger.error(f"Error downloading '{keyword}' ({tier}): {e} - all {max_retries} retries exhausted")
@@ -2056,6 +2138,9 @@ class VideoDownloader:
             # Record success for escalation manager (resets 403 counter, keeps tier)
             if self.escalation_manager:
                 self.escalation_manager.record_success(keyword)
+            # US-003: Record success in rate limit budget for success rate tracking
+            if self._share_budget_across_keywords:
+                self.rate_limit_budget.record_success(keyword=keyword)
 
             # Record download speed for adaptive timeout tracking
             download_duration = time.time() - download_start_time
