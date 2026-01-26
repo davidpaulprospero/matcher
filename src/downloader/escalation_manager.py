@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -177,14 +178,9 @@ class EscalationManager:
             state = self._get_state(keyword)
             state.consecutive_403s += 1
 
-            threshold = 2
-            if self._extractor_config is not None:
-                threshold = getattr(
-                    self._extractor_config, 'escalation_threshold', 2
-                )
-
-            if state.should_escalate(threshold):
+            if self._should_escalate(state):
                 old_tier = state.current_tier
+                n_403s = state.consecutive_403s
                 state.escalate()
                 # Increment extractor_args_index on Tier 2 escalation
                 if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
@@ -192,7 +188,7 @@ class EscalationManager:
 
                 logger.info(
                     f"Escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "
-                    f"after {threshold} consecutive 403s"
+                    f"after {n_403s} consecutive 403s"
                 )
 
                 if state.current_tier == EscalationTier.FULL_BYPASS:
@@ -212,3 +208,85 @@ class EscalationManager:
         with lock:
             state = self._get_state(keyword)
             state.record_success()
+
+    def _should_escalate(self, state: EscalationState) -> bool:
+        """Check if escalation should proceed, considering cooldown.
+
+        Returns False if the keyword was escalated within the cooldown
+        period, even if the 403 threshold has been reached again.
+
+        Args:
+            state: The per-keyword escalation state.
+
+        Returns:
+            True if escalation should proceed, False if in cooldown.
+        """
+        cooldown = 300.0
+        if self._extractor_config is not None:
+            cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
+
+        threshold = 2
+        if self._extractor_config is not None:
+            threshold = getattr(self._extractor_config, 'escalation_threshold', 2)
+
+        if not state.should_escalate(threshold):
+            return False
+
+        # Check cooldown: if recently escalated, suppress
+        if state.last_escalation_time is not None:
+            elapsed = time.time() - state.last_escalation_time
+            if elapsed < cooldown:
+                logger.debug(
+                    f"Escalation suppressed: cooldown active "
+                    f"({elapsed:.0f}s / {cooldown:.0f}s elapsed)"
+                )
+                return False
+
+        return True
+
+    def get_cooldown_remaining(self, keyword: str) -> float:
+        """Get remaining cooldown seconds for a keyword.
+
+        Args:
+            keyword: The download keyword or video ID.
+
+        Returns:
+            Seconds remaining in cooldown, or 0.0 if not in cooldown.
+        """
+        lock = self._get_lock(keyword)
+        with lock:
+            state = self._get_state(keyword)
+            if state.last_escalation_time is None:
+                return 0.0
+
+            cooldown = 300.0
+            if self._extractor_config is not None:
+                cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
+
+            elapsed = time.time() - state.last_escalation_time
+            remaining = cooldown - elapsed
+            return max(0.0, remaining)
+
+    def reset_keyword(self, keyword: str) -> None:
+        """Clear all escalation state for a keyword.
+
+        Useful for healer or manual recovery scenarios.
+
+        Args:
+            keyword: The download keyword or video ID to reset.
+        """
+        lock = self._get_lock(keyword)
+        with lock:
+            if keyword in self._keyword_states:
+                del self._keyword_states[keyword]
+                logger.debug(f"Escalation state reset for keyword={keyword}")
+
+    def reset_all(self) -> None:
+        """Clear all keyword escalation states.
+
+        Useful for session restart or full recovery.
+        """
+        with self._global_lock:
+            self._keyword_states.clear()
+            self._keyword_locks.clear()
+            logger.debug("All escalation states reset")
