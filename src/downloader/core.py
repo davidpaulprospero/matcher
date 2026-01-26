@@ -40,6 +40,8 @@ from .speech_screening import SpeechScreener
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
+from .cookie_method_fallback import CookieMethodFallback
+from .impersonation import ImpersonationManager
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -276,6 +278,24 @@ class VideoDownloader:
                 self.audio_first.cookie_rotator = self.cookie_rotator
         else:
             self.cookie_rotator = None
+
+        # Cookie method fallback chain (browser → file1 → file2 → no-cookies)
+        self.method_fallback = CookieMethodFallback(self.download_config)
+
+        # Browser impersonation (TLS fingerprint bypass)
+        impersonation_config = getattr(self.download_config, 'impersonation', None)
+        impersonation_enabled = getattr(impersonation_config, 'enabled', False) if impersonation_config else False
+        if impersonation_enabled:
+            preferred = getattr(impersonation_config, 'preferred_targets', []) or []
+            detect_startup = getattr(impersonation_config, 'detect_at_startup', True)
+            timeout = getattr(impersonation_config, 'detection_timeout', 10)
+            self.impersonation_manager = ImpersonationManager(
+                preferred_targets=preferred,
+                detect_at_startup=detect_startup,
+                detection_timeout=timeout,
+            )
+        else:
+            self.impersonation_manager = None
 
         # VPN manager (for IP rotation)
         vpn_config = getattr(self.download_config, 'vpn', None)
@@ -696,6 +716,21 @@ class VideoDownloader:
 
         return None
 
+    def _add_impersonation_to_cmd(self, cmd: list) -> None:
+        """Add browser impersonation args to yt-dlp command.
+
+        Injects --impersonate with the next rotated target from the
+        ImpersonationManager. Must be called BEFORE _add_cookies_to_cmd
+        to maintain correct yt-dlp argument ordering.
+
+        When impersonation is disabled or no targets are available,
+        this is a no-op (command unchanged).
+        """
+        if self.impersonation_manager:
+            args = self.impersonation_manager.get_impersonate_args()
+            if args:
+                cmd.extend(args)
+
     def _add_cookies_to_cmd(self, cmd: list) -> None:
         """Add cookie authentication to yt-dlp command."""
         # Use cookie rotator if enabled, otherwise fall back to static cookie
@@ -710,6 +745,21 @@ class VideoDownloader:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
+
+    def _replace_cookie_args_in_cmd(self, cmd: List[str]) -> List[str]:
+        """Strip existing cookie args from cmd and append current fallback method's args."""
+        cleaned = []
+        skip_next = False
+        for arg in cmd:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg in ('--cookies', '--cookies-from-browser'):
+                skip_next = True  # skip the arg and its value
+                continue
+            cleaned.append(arg)
+        cleaned.extend(self.method_fallback.get_cmd_args())
+        return cleaned
 
     def rotate_cookie_on_error(self, error_message: str, keyword: str = None) -> bool:
         """
@@ -1533,6 +1583,7 @@ class VideoDownloader:
                 '--no-warnings',
             ]
 
+            self._add_impersonation_to_cmd(cmd)
             self._add_cookies_to_cmd(cmd)
 
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
@@ -1629,6 +1680,7 @@ class VideoDownloader:
             '--progress',
         ] + urls
 
+        self._add_impersonation_to_cmd(cmd)
         self._add_cookies_to_cmd(cmd)
 
         newly_downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
@@ -1675,10 +1727,24 @@ class VideoDownloader:
         'account has been terminated',
     ]
 
+    # Auth errors: retrying with the same cookies is futile — advance method immediately
+    AUTH_ERROR_PATTERNS = [
+        'http error 403',
+        '403: forbidden',
+        'sign in to confirm',
+        'login required',
+        'confirm you\'re not a bot',
+    ]
+
     def _is_transient_error(self, stderr: str) -> bool:
         """Check if error is transient (worth retrying)."""
         stderr_lower = stderr.lower()
         return any(pattern in stderr_lower for pattern in self.TRANSIENT_ERROR_PATTERNS)
+
+    def _is_auth_error(self, stderr: str) -> bool:
+        """Check if error is an auth/cookie error (advance method, don't retry)."""
+        stderr_lower = stderr.lower()
+        return any(pattern in stderr_lower for pattern in self.AUTH_ERROR_PATTERNS)
 
     def _is_permanent_error(self, stderr: str) -> bool:
         """Check if error is permanent (should not retry)."""
@@ -1693,7 +1759,8 @@ class VideoDownloader:
         keyword: str,
         tier: str,
         existing_before: set,
-        timeout_override: int = None
+        timeout_override: int = None,
+        _is_method_retry: bool = False
     ) -> List[DownloadedVideo]:
         """
         Execute download command and process results with exponential backoff retry.
@@ -1702,6 +1769,7 @@ class VideoDownloader:
         Handles:
         - Subprocess execution with timeout
         - Exponential backoff retry for transient errors
+        - Cookie method fallback on auth error exhaustion
         - Immediate failure for permanent errors
         - Cleanup of partial downloads
         - Transcoding if DaVinci mode enabled
@@ -1717,6 +1785,7 @@ class VideoDownloader:
             tier: Duration tier
             existing_before: Set of files that existed before download
             timeout_override: Optional timeout override
+            _is_method_retry: Internal flag — True when retrying with a new cookie method
 
         Returns:
             List of DownloadedVideo objects, or empty list on failure/timeout.
@@ -1773,6 +1842,10 @@ class VideoDownloader:
         # Record download attempt for metrics
         self.rate_limit_metrics.record_download_attempt()
 
+        # Reset cookie method fallback to last working method (skip on recursive retry)
+        if not _is_method_retry:
+            self.method_fallback.reset_for_next_download()
+
         # Retry loop with exponential backoff
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             # US-011: Check circuit breaker state before retry attempts (not first attempt)
@@ -1827,9 +1900,25 @@ class VideoDownloader:
                         self.rate_limit_metrics.record_download_failure()
                         return []
 
-                    # Check for transient errors - retry with backoff + cookie rotation
+                    # Auth errors (403/sign-in): advance cookie method immediately, no retries
+                    if self._is_auth_error(stderr):
+                        logger.info(f"Auth error for '{keyword}' ({tier}) — advancing cookie method (retries won't help)")
+                        if self.method_fallback.advance():
+                            cmd = self._replace_cookie_args_in_cmd(cmd)
+                            return self._run_download_cmd(
+                                cmd, keyword_dir, output_dir, keyword, tier,
+                                existing_before, timeout_override,
+                                _is_method_retry=True
+                            )
+                        # All cookie methods exhausted
+                        logger.warning(f"Auth error for '{keyword}' ({tier}) — all cookie methods exhausted")
+                        self._last_download_rate_limited = True
+                        self.rate_limit_metrics.record_retries_exhausted()
+                        self.rate_limit_metrics.record_download_failure()
+                        return []
+
+                    # Other transient errors (429, network): retry with backoff
                     if self._is_transient_error(stderr):
-                        # Try cookie rotation via handle_rate_limit_error (backoff + rotate)
                         self.handle_rate_limit_error(stderr, tier=tier, keyword=keyword)
                         # Update cmd with new cookie if rotated
                         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -1848,8 +1937,16 @@ class VideoDownloader:
                             time.sleep(delay)
                             continue
                         else:
-                            # Exhausted retries on transient error - mark for batch retry
-                            logger.warning(f"Rate limit error for '{keyword}' ({tier}) after {max_retries} retries - added to batch retry queue")
+                            # Exhausted retries — try next cookie method
+                            if self.method_fallback.advance():
+                                cmd = self._replace_cookie_args_in_cmd(cmd)
+                                return self._run_download_cmd(
+                                    cmd, keyword_dir, output_dir, keyword, tier,
+                                    existing_before, timeout_override,
+                                    _is_method_retry=True
+                                )
+                            # All cookie methods exhausted - mark for batch retry
+                            logger.warning(f"Rate limit error for '{keyword}' ({tier}) after {max_retries} retries and all cookie methods - added to batch retry queue")
                             self._last_download_rate_limited = True
                             self.rate_limit_metrics.record_retries_exhausted()
                             self.rate_limit_metrics.record_download_failure()
@@ -1891,6 +1988,8 @@ class VideoDownloader:
             logger.debug(f"    Downloaded {len(new_videos)} video(s)")
             # Reset rate limit backoff on successful download
             self._reset_rate_limit_backoff()
+            # Remember working cookie method for next download
+            self.method_fallback.mark_success()
             # Record successful download for metrics
             self.rate_limit_metrics.record_download_success()
 
