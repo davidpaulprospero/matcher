@@ -65,8 +65,8 @@
         "Each call site gets a freshly rotated target (not the same target for all 3 sites)",
         "Graceful fallback: if manager is None or has no targets, skip impersonation args silently"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Imported ImpersonationManager in audio_first.py. Added optional impersonation_manager parameter to AudioFirstPipeline.__init__ with logging. Added _add_impersonation_to_cmd() helper method matching core.py pattern. Wired impersonation into all 3 yt-dlp command sites: (1) audio download retry loop, (2) segment download retry loop, (3) full video fallback retry loop - all BEFORE cookie args for correct argument ordering. Each call gets a freshly rotated target via round-robin. Graceful no-op when manager is None or has no targets. core.py shares ImpersonationManager instance via self.audio_first.impersonation_manager = self.impersonation_manager (same pattern as cookie_rotator sharing). Verified: py_compile passes, main.py --help works, 190+ download/caption/rate-limit tests pass with 0 regressions (4 pre-existing failures from US-012 path fixture issues, 38 pre-existing search_results.videos attribute errors)."
     },
     {
       "id": "US-005",
