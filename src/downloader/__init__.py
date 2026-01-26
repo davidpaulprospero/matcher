@@ -52,7 +52,7 @@ from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
-from .rate_limit_metrics import RateLimitMetrics
+from .rate_limit_metrics import RateLimitMetrics, RateLimitMetricsAggregator
 
 # Segment utilities (public helpers)
 from . import segment_utils
@@ -109,6 +109,7 @@ __all__ = [
     'BatchRetryConfig',
     'RetryItem',
     'RateLimitMetrics',
+    'RateLimitMetricsAggregator',
 
     # Segment utilities
     'collect_matched_segments',
