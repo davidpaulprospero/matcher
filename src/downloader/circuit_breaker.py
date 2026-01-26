@@ -16,7 +16,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +104,8 @@ class CircuitBreaker:
         """
         self.config = config or CircuitBreakerConfig()
         self.state = CircuitBreakerState()
+        self._escalation_manager: Optional[EscalationManager] = None
+        self._consecutive_successes: int = 0
 
     @property
     def is_enabled(self) -> bool:
@@ -111,6 +116,78 @@ class CircuitBreaker:
     def is_open(self) -> bool:
         """Check if circuit is currently open (tripped)."""
         return self.state.is_open
+
+    def set_escalation_manager(self, manager: EscalationManager) -> None:
+        """Link an EscalationManager for coordinated rate-limiting.
+
+        When linked, the circuit breaker:
+        - Extends pause duration by 2x when >50% of keywords are at Tier 3
+        - Requires 3 consecutive successes to close when escalation is at Tier 3
+
+        Args:
+            manager: The EscalationManager to consult for tier state.
+        """
+        self._escalation_manager = manager
+
+    def _get_effective_pause_seconds(self) -> float:
+        """Get the effective pause duration, possibly extended by escalation state.
+
+        If an EscalationManager is linked and >50% of active keywords are at
+        Tier 3 (FULL_BYPASS), the pause duration is doubled.
+
+        Returns:
+            Effective pause duration in seconds.
+        """
+        base_pause = self.config.pause_seconds
+
+        if self._escalation_manager is None:
+            return base_pause
+
+        try:
+            from .types import EscalationTier
+        except ImportError:
+            return base_pause
+
+        total_keywords = self._escalation_manager.get_active_keyword_count()
+        if total_keywords == 0:
+            return base_pause
+
+        tier3_keywords = self._escalation_manager.get_keywords_at_tier(
+            EscalationTier.FULL_BYPASS
+        )
+        tier3_pct = len(tier3_keywords) / total_keywords
+
+        if tier3_pct > 0.5:
+            extended = base_pause * 2.0
+            logger.info(
+                f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
+                f"(pause {base_pause:.0f}s -> {extended:.0f}s)"
+            )
+            return extended
+
+        return base_pause
+
+    def _is_escalation_at_tier3(self) -> bool:
+        """Check if escalation is at Tier 3 for any tracked keyword.
+
+        Used to determine if extended reset (3 consecutive successes)
+        is required instead of the default 1.
+
+        Returns:
+            True if any keyword is at Tier 3, False otherwise.
+        """
+        if self._escalation_manager is None:
+            return False
+
+        try:
+            from .types import EscalationTier
+        except ImportError:
+            return False
+
+        tier3_keywords = self._escalation_manager.get_keywords_at_tier(
+            EscalationTier.FULL_BYPASS
+        )
+        return len(tier3_keywords) > 0
 
     def check_and_wait(self) -> bool:
         """Check circuit state and wait if necessary.
@@ -133,8 +210,10 @@ class CircuitBreaker:
             return True
 
         # Circuit is open - check if pause duration has elapsed
+        # Use effective pause which may be extended by escalation state
+        effective_pause = self._get_effective_pause_seconds()
         elapsed = time.time() - self.state.opened_at
-        remaining = self.config.pause_seconds - elapsed
+        remaining = effective_pause - elapsed
 
         if remaining > 0:
             # Still in pause period - wait for remaining time
@@ -158,10 +237,26 @@ class CircuitBreaker:
         """Record a successful search.
 
         Resets the consecutive failure counter and closes the circuit.
+        When escalation is at Tier 3, requires 3 consecutive successes
+        instead of 1 to close the circuit.
+
         Call after any search that returns results.
         """
         if not self.config.enabled:
             return
+
+        self._consecutive_successes += 1
+
+        # When escalation is at Tier 3, require 3 consecutive successes to close
+        required_successes = 1
+        if self._is_escalation_at_tier3():
+            required_successes = 3
+            if self._consecutive_successes < required_successes:
+                logger.debug(
+                    f"Circuit breaker: success {self._consecutive_successes}/{required_successes} "
+                    f"(extended reset: escalation at Tier 3)"
+                )
+                return
 
         if self.state.consecutive_failures > 0:
             logger.debug(
@@ -172,6 +267,7 @@ class CircuitBreaker:
         self.state.consecutive_failures = 0
         self.state.is_open = False
         self.state.opened_at = None
+        self._consecutive_successes = 0
 
     def record_failure(self) -> bool:
         """Record a search failure.
@@ -187,6 +283,7 @@ class CircuitBreaker:
             return False
 
         self.state.consecutive_failures += 1
+        self._consecutive_successes = 0  # Reset success streak on failure
 
         logger.debug(
             f"Circuit breaker: search failure "
@@ -205,14 +302,16 @@ class CircuitBreaker:
 
         Called internally when consecutive failures reach threshold.
         Logs clearly at INFO level so users can see the pause happening.
+        Uses effective pause duration (which may be extended by escalation state).
         """
         self.state.is_open = True
         self.state.opened_at = time.time()
         self.state.total_trips += 1
 
+        effective_pause = self._get_effective_pause_seconds()
         logger.info(
             f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
-            f"search failures. Pausing for {self.config.pause_seconds:.0f}s before "
+            f"search failures. Pausing for {effective_pause:.0f}s before "
             f"allowing new searches. (trip #{self.state.total_trips})"
         )
 
@@ -230,6 +329,8 @@ class CircuitBreaker:
     def get_remaining_pause_time(self) -> float:
         """Get remaining time until circuit breaker recovers.
 
+        Uses effective pause duration which may be extended by escalation state.
+
         Returns:
             Remaining pause time in seconds, or 0.0 if not tripped.
         """
@@ -239,8 +340,9 @@ class CircuitBreaker:
         if self.state.opened_at is None:
             return 0.0
 
+        effective_pause = self._get_effective_pause_seconds()
         elapsed = time.time() - self.state.opened_at
-        remaining = self.config.pause_seconds - elapsed
+        remaining = effective_pause - elapsed
         return max(0.0, remaining)
 
     def wait_for_recovery_if_needed(self, context: str = "") -> float:

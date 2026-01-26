@@ -110,8 +110,7 @@ REAL_STDERR_NON_TRIGGER_SAMPLES = [
     "ERROR: [youtube] priv456: Video unavailable. This video is private.",
     # Network timeout
     "ERROR: [youtube] slow789: Connection timed out after 30 seconds",
-    # Rate limit (different from 403/bot)
-    "ERROR: [youtube] rate001: HTTP Error 429: Too Many Requests",
+    # Note: 429 is NOW an escalation trigger (added in Sprint 10 US-001)
     # Successful download output
     "[download] 100% of 5.23MiB in 00:02",
     # Metadata extraction
