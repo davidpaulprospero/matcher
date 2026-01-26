@@ -816,3 +816,143 @@ class TestBudgetAwareEscalation:
         budget_manager.record_failure("ocean", "HTTP Error 403")
         budget_manager.record_failure("ocean", "HTTP Error 403")
         assert "ocean" in budget.keywords_rate_limited
+
+
+# ---------------------------------------------------------------------------
+# US-006: Speed tracker signal consumption for preemptive escalation
+# ---------------------------------------------------------------------------
+
+class TestSpeedTriggeredEscalation:
+    """Tests for record_slow_speed() preemptive escalation."""
+
+    def test_three_slow_speed_signals_escalate_tier(self, manager):
+        """3+ slow speed signals for same keyword escalate one tier."""
+        # Starts at Tier 1
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # 1st and 2nd signals: no escalation yet
+        manager.record_slow_speed("kw", speed_mbps=0.05)
+        manager.record_slow_speed("kw", speed_mbps=0.03)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # 3rd signal: triggers escalation to Tier 2
+        manager.record_slow_speed("kw", speed_mbps=0.08)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_speed_signals_do_not_affect_budget(self, imp_manager, ext_config):
+        """Speed-triggered escalations do NOT call budget.record_rotation()."""
+        budget = MagicMock()
+        budget.can_rotate.return_value = True
+        mgr = EscalationManager(imp_manager, ext_config, budget=budget)
+
+        # Trigger 3 slow speed signals -> escalation
+        mgr.record_slow_speed("kw", speed_mbps=0.05)
+        mgr.record_slow_speed("kw", speed_mbps=0.05)
+        mgr.record_slow_speed("kw", speed_mbps=0.05)
+
+        # Budget should NOT have record_rotation called
+        budget.record_rotation.assert_not_called()
+
+    def test_speed_escalations_counter_in_metrics(self, manager):
+        """speed_escalations counter appears in get_metrics()."""
+        metrics = manager.get_metrics()
+        assert 'speed_escalations' in metrics
+        assert metrics['speed_escalations'] == 0
+
+        # Trigger a speed escalation
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+
+        metrics = manager.get_metrics()
+        assert metrics['speed_escalations'] == 1
+
+    def test_speed_escalation_resets_counter_after_trigger(self, manager):
+        """After speed escalation, counter resets so 3 more signals needed."""
+        # First escalation: Tier 1 -> 2
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # 1-2 more signals: no escalation yet
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # 3rd signal after reset: Tier 2 -> 3
+        manager.record_slow_speed("kw", 0.05)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.FULL_BYPASS
+
+    def test_speed_escalation_stops_at_max_tier(self, manager):
+        """Speed escalation does not go beyond FULL_BYPASS."""
+        # Escalate to Tier 3 via two rounds of speed signals
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.FULL_BYPASS
+
+        # More speed signals don't crash or go beyond Tier 3
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.FULL_BYPASS
+
+        # Counter should be 2 (two successful speed escalations: 1->2, 2->3)
+        metrics = manager.get_metrics()
+        assert metrics['speed_escalations'] == 2
+
+    def test_speed_signals_per_keyword_isolation(self, manager):
+        """Speed signals are tracked per-keyword independently."""
+        # 2 signals for kw1
+        manager.record_slow_speed("kw1", 0.05)
+        manager.record_slow_speed("kw1", 0.05)
+
+        # 3 signals for kw2 -> triggers escalation for kw2 only
+        manager.record_slow_speed("kw2", 0.05)
+        manager.record_slow_speed("kw2", 0.05)
+        manager.record_slow_speed("kw2", 0.05)
+
+        r1 = manager.get_escalation_args("kw1")
+        r2 = manager.get_escalation_args("kw2")
+        assert r1.tier == EscalationTier.IMPERSONATE_ONLY
+        assert r2.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_speed_escalation_logged_at_info(self, manager):
+        """Speed-triggered escalation is logged at INFO level."""
+        with patch("src.downloader.escalation_manager.logger") as mock_logger:
+            manager.record_slow_speed("kw", 0.05)
+            manager.record_slow_speed("kw", 0.05)
+            manager.record_slow_speed("kw", 0.05)
+
+            # Check that INFO log was emitted with expected message
+            mock_logger.info.assert_called()
+            log_msg = mock_logger.info.call_args[0][0]
+            assert "Preemptive escalation" in log_msg
+            assert "kw" in log_msg
+            assert "low speed" in log_msg
+
+    def test_reset_all_clears_speed_state(self, manager):
+        """reset_all() clears speed counters and escalation count."""
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        assert manager.get_metrics()['speed_escalations'] == 1
+
+        manager.reset_all()
+
+        assert manager.get_metrics()['speed_escalations'] == 0
+        # After reset, 3 more signals needed for escalation
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        # Only 2 signals - should still be at Tier 1
+        r = manager.get_escalation_args("kw")
+        assert r.tier == EscalationTier.IMPERSONATE_ONLY

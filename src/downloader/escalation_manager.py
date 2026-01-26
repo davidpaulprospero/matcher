@@ -202,6 +202,8 @@ class EscalationManager:
         self._total_successes: int = 0
         self._total_escalations: int = 0
         self._escalations_per_tier: Dict[str, int] = {}  # tier_name -> count
+        self._slow_speed_counts: Dict[str, int] = {}  # keyword -> consecutive slow count
+        self._speed_escalations: int = 0  # Total speed-triggered escalations
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -404,6 +406,54 @@ class EscalationManager:
             state.record_success()
             self._total_successes += 1
 
+    def record_slow_speed(self, keyword: str, speed_mbps: float = 0.0) -> None:
+        """Record a slow download speed signal for preemptive escalation.
+
+        When called 3+ times for the same keyword, preemptively escalates
+        one tier without waiting for a 403 error. Speed-triggered escalations
+        do NOT count toward budget rotations (they are preventive, not reactive).
+
+        Args:
+            keyword: The download keyword or video ID.
+            speed_mbps: The detected download speed in MB/s (for logging).
+        """
+        lock = self._get_lock(keyword)
+        with lock:
+            # Increment slow speed count for this keyword
+            count = self._slow_speed_counts.get(keyword, 0) + 1
+            self._slow_speed_counts[keyword] = count
+
+            if count >= 3:
+                state = self._get_state(keyword)
+                if state.current_tier < EscalationTier.FULL_BYPASS:
+                    old_tier = state.current_tier
+                    state.escalate()
+                    self._speed_escalations += 1
+                    self._total_escalations += 1
+                    tier_name = state.current_tier.name
+                    self._escalations_per_tier[tier_name] = (
+                        self._escalations_per_tier.get(tier_name, 0) + 1
+                    )
+
+                    logger.info(
+                        f"Preemptive escalation for {keyword}: sustained low speed "
+                        f"({speed_mbps:.3f} MB/s) - "
+                        f"{old_tier.name} -> {state.current_tier.name} "
+                        f"(after {count} slow speed signals)"
+                    )
+
+                    # Reset slow speed count after escalation
+                    self._slow_speed_counts[keyword] = 0
+                    # NOTE: No budget.record_rotation() here - speed signals
+                    # are preventive, not reactive, so they don't consume budget
+                else:
+                    logger.debug(
+                        f"Slow speed for {keyword} ({speed_mbps:.3f} MB/s) "
+                        f"but already at max tier"
+                    )
+                    # Reset counter since we can't escalate further
+                    self._slow_speed_counts[keyword] = 0
+
     def _should_escalate(self, state: EscalationState) -> bool:
         """Check if escalation should proceed, considering cooldown.
 
@@ -488,6 +538,8 @@ class EscalationManager:
             self._total_successes = 0
             self._total_escalations = 0
             self._escalations_per_tier.clear()
+            self._slow_speed_counts.clear()
+            self._speed_escalations = 0
             logger.debug("All escalation states reset")
 
     def get_active_keyword_count(self) -> int:
@@ -531,6 +583,7 @@ class EscalationManager:
                 total_403s: Total 403/bot-detection errors recorded
                 total_successes: Total successful downloads recorded
                 average_tier: Weighted average tier across all tracked keywords (1.0-3.0)
+                speed_escalations: Total escalations triggered by slow speed signals
         """
         with self._global_lock:
             keywords_at_each_tier: Dict[str, List[str]] = {}
@@ -554,4 +607,5 @@ class EscalationManager:
                 'total_403s': self._total_403s,
                 'total_successes': self._total_successes,
                 'average_tier': average_tier,
+                'speed_escalations': self._speed_escalations,
             }

@@ -2182,6 +2182,11 @@ class VideoDownloader:
                         )
                         self.circuit_breaker.record_failure()
 
+                    # Signal escalation manager for preemptive tier escalation (US-006)
+                    if hasattr(self, 'escalation_manager') and self.escalation_manager is not None:
+                        avg_speed = self.speed_tracker.get_average_speed_mbps()
+                        self.escalation_manager.record_slow_speed(keyword, speed_mbps=avg_speed)
+
         downloaded = []
 
         for idx, video_file in enumerate(new_videos, 1):
