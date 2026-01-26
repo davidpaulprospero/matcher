@@ -1,4 +1,15 @@
 
+## Iteration 69 - [US-002] Add ImpersonationConfig dataclass to download config section
+- Created `ImpersonationConfig` dataclass in `src/config/sections/download.py`
+- Fields: `enabled: bool = True`, `preferred_targets: List[str] = []`, `detect_at_startup: bool = True`, `detection_timeout: int = 10`
+- Wired into `DownloadConfig` with `__post_init__` dict-to-dataclass conversion
+- Added to `__all__` exports for proper module interface
+- Added `impersonation` section to `config.yaml` with comprehensive inline documentation
+- Verified: py_compile OK, config loads with correct `ImpersonationConfig` type, `main.py --help` OK
+- Tests: 225+ download/caption/agent tests pass, 0 regressions from this change
+- Pre-existing failures: 4 tests in `test_downloader_core_coverage.py` (covered by US-012), 1 in `test_otio.py`
+- Files modified: `src/config/sections/download.py`, `config.yaml`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`
+
 ## Iteration 68 - [US-001] Create ImpersonationManager with auto-detect and round-robin rotation
 - Created `src/downloader/impersonation.py` with `ImpersonationManager` and `ImpersonationStats`
 - Auto-detects 31 curl_cffi impersonation targets via `yt-dlp --list-impersonate-targets`
