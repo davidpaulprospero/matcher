@@ -294,6 +294,8 @@ class VideoDownloader:
                 detect_at_startup=detect_startup,
                 detection_timeout=timeout,
             )
+            # Share impersonation manager with audio-first pipeline
+            self.audio_first.impersonation_manager = self.impersonation_manager
         else:
             self.impersonation_manager = None
 

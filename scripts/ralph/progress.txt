@@ -5297,3 +5297,17 @@ def test_eta_accuracy_batch_50_videos(self):
 ## Focus Area: download - 2026-01-26 11:52:56
 - Status: In Progress...
 
+
+## Focus Area: download - 2026-01-26 13:35:30
+- Status: In Progress...
+
+
+## Iteration 4 - [US-004] Wire impersonation into audio_first.py (3 command sites)
+- Imported ImpersonationManager and added optional parameter to AudioFirstPipeline.__init__
+- Added _add_impersonation_to_cmd() helper method (mirrors core.py pattern)
+- Wired impersonation into 3 yt-dlp command sites: audio download, segment download, full video fallback
+- All 3 sites inject --impersonate BEFORE --cookies for correct argument ordering
+- Each call gets freshly rotated target via shared ImpersonationManager round-robin
+- core.py shares manager via self.audio_first.impersonation_manager (same as cookie_rotator pattern)
+- Files modified: src/downloader/audio_first.py, src/downloader/core.py
+- Test results: 190+ pass, 0 regressions (4 pre-existing US-012, 38 pre-existing search_results.videos)

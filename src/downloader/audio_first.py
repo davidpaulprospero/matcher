@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 from ..state import AudioDownload
 from .types import MergedSegment, DownloadedSegment
 from .cookie_rotator import CookieRotator
+from .impersonation import ImpersonationManager
 from . import segment_utils
 from . import utils
 
@@ -47,7 +48,8 @@ class AudioFirstPipeline:
         cleanup_partial_func,
         tier_download_counts: dict,
         lock,
-        cookie_rotator: Optional[CookieRotator] = None
+        cookie_rotator: Optional[CookieRotator] = None,
+        impersonation_manager: Optional[ImpersonationManager] = None
     ):
         """
         Initialize AudioFirstPipeline.
@@ -61,6 +63,7 @@ class AudioFirstPipeline:
             tier_download_counts: Dict tracking downloads per tier
             lock: Threading lock for tier_download_counts
             cookie_rotator: Optional CookieRotator for cookie rotation on errors
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
         """
         self.config = config
         self.download_config = config.download
@@ -71,12 +74,19 @@ class AudioFirstPipeline:
         self.tier_download_counts = tier_download_counts
         self._lock = lock
         self.cookie_rotator = cookie_rotator
+        self.impersonation_manager = impersonation_manager
 
         # Log cookie rotation status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
             logger.info(f"AudioFirstPipeline: Cookie rotation enabled ({self.cookie_rotator.available_cookies} cookies)")
         else:
             logger.debug("AudioFirstPipeline: Using static cookies")
+
+        # Log impersonation status
+        if self.impersonation_manager and self.impersonation_manager.target_count > 0:
+            logger.info(f"AudioFirstPipeline: Impersonation enabled ({self.impersonation_manager.target_count} targets)")
+        else:
+            logger.debug("AudioFirstPipeline: Impersonation not available")
 
     def _get_cookie_args(self) -> List[str]:
         """
@@ -95,6 +105,21 @@ class AudioFirstPipeline:
 
         # Fallback to static cookie configuration
         return utils.get_cookies_args(self.config)
+
+    def _add_impersonation_to_cmd(self, cmd: list) -> None:
+        """Add browser impersonation args to yt-dlp command.
+
+        Injects --impersonate with the next rotated target from the
+        shared ImpersonationManager. Must be called BEFORE cookie args
+        to maintain correct yt-dlp argument ordering.
+
+        When impersonation is unavailable or no targets detected,
+        this is a no-op (command unchanged).
+        """
+        if self.impersonation_manager:
+            args = self.impersonation_manager.get_impersonate_args()
+            if args:
+                cmd.extend(args)
 
     def rotate_cookie_on_error(self, error_message: str) -> bool:
         """
@@ -268,8 +293,9 @@ class AudioFirstPipeline:
             actual_file = None
 
             for rotation_attempt in range(max_cookie_rotations + 1):
-                # Rebuild command with current cookie on each attempt
+                # Rebuild command with impersonation + cookie on each attempt
                 download_cmd = cmd.copy()
+                self._add_impersonation_to_cmd(download_cmd)
                 download_cmd.extend(self._get_cookie_args())
 
                 try:
@@ -462,8 +488,9 @@ class AudioFirstPipeline:
                     # Exponential backoff for subsequent retries
                     retry_delay = min(retry_delay * 2, 60)
 
-                # Build command with current cookies (may have rotated)
+                # Build command with impersonation + cookies (may have rotated)
                 cmd = base_cmd.copy()
+                self._add_impersonation_to_cmd(cmd)
                 cmd.extend(self._get_cookie_args())
 
                 try:
@@ -608,6 +635,7 @@ class AudioFirstPipeline:
 
         for rotation_attempt in range(max_cookie_rotations + 1):
             cmd = base_cmd.copy()
+            self._add_impersonation_to_cmd(cmd)
             cmd.extend(self._get_cookie_args())
 
             try:
