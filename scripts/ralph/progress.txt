@@ -5715,3 +5715,16 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: src/agents/healers/download.py, src/agents/orchestrator.py, src/pipeline.py, tests/test_agents/test_download_healer_retry.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
 - Tests: 27 pass (healer retry), 175 pass (related), py_compile OK, main.py --help OK
 - All 6 acceptance criteria met
+
+
+## Iteration 9 - [US-009] Add RateLimitBudget initialization from config and test coverage
+- Added RateLimitBudgetConfig dataclass to src/config/sections/download.py with fields: enabled (default true), max_rotations (default 10), max_backoff_time (default 600s), max_vpn_switches (default 3)
+- Added rate_limit_budget section to config.yaml with documented defaults
+- Added RateLimitBudget.from_config(budget_config) classmethod that reads limits from RateLimitBudgetConfig
+- Updated DownloadConfig __post_init__ to convert rate_limit_budget dict to RateLimitBudgetConfig (Rule 2)
+- Updated VideoDownloader.__init__ to use from_config() with dedicated RateLimitBudgetConfig, legacy fallback preserved
+- Added RateLimitBudgetConfig to __all__ exports in download.py
+- Added 8 new tests in TestConfigLoading class: from_config with dataclass, defaults, None fallback, clean state, nested in DownloadConfig, __post_init__ dict conversion, functional limits, serialization roundtrip
+- Files modified: src/config/sections/download.py, src/downloader/rate_limit_budget.py, src/downloader/core.py, config.yaml, tests/test_rate_limit_budget.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
+- Tests: 55 pass (test_rate_limit_budget), 219 pass (related), 84 pass (config coverage), py_compile OK, main.py --help OK
+- All 5 acceptance criteria met

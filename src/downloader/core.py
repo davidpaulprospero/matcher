@@ -493,31 +493,34 @@ class VideoDownloader:
         # Rate limiting metrics tracking (US-010)
         self.rate_limit_metrics = RateLimitMetrics()
 
-        # Cross-keyword rate limit budget tracking (US-004)
-        # Check if budget sharing is enabled in config
-        self._share_budget_across_keywords = getattr(
-            rate_limit_config, 'share_budget_across_keywords', True
-        ) if rate_limit_config else True
+        # Cross-keyword rate limit budget tracking (US-004, US-009)
+        # Read from dedicated RateLimitBudgetConfig if available, fall back to scattered configs
+        budget_config = getattr(self.download_config, 'rate_limit_budget', None)
+        if budget_config is not None:
+            # New path: use dedicated RateLimitBudgetConfig (US-009)
+            self._share_budget_across_keywords = getattr(budget_config, 'enabled', True)
+            self.rate_limit_budget = RateLimitBudget.from_config(budget_config)
+        else:
+            # Legacy path: read limits from scattered config sections
+            self._share_budget_across_keywords = getattr(
+                rate_limit_config, 'share_budget_across_keywords', True
+            ) if rate_limit_config else True
 
-        # Initialize budget with limits from config
-        self.rate_limit_budget = RateLimitBudget()
-        if rate_limit_config:
-            # Get max backoff budget from config
-            try:
-                max_backoff_budget = float(getattr(rate_limit_config, 'max_backoff_budget', 300.0))
-            except (TypeError, ValueError):
-                max_backoff_budget = 300.0
-            self.rate_limit_budget.max_backoff_time = max_backoff_budget
+            self.rate_limit_budget = RateLimitBudget()
+            if rate_limit_config:
+                try:
+                    max_backoff_budget = float(getattr(rate_limit_config, 'max_backoff_budget', 300.0))
+                except (TypeError, ValueError):
+                    max_backoff_budget = 300.0
+                self.rate_limit_budget.max_backoff_time = max_backoff_budget
 
-        # Get rotation limit from cookie rotator config
-        if cookie_rotation_config:
-            max_rotations = getattr(cookie_rotation_config, 'max_rotations_per_session', 0)
-            self.rate_limit_budget.max_rotations = max_rotations
+            if cookie_rotation_config:
+                max_rotations = getattr(cookie_rotation_config, 'max_rotations_per_session', 0)
+                self.rate_limit_budget.max_rotations = max_rotations
 
-        # Get VPN switch limit from vpn config
-        if vpn_config:
-            max_vpn_switches = getattr(vpn_config, 'max_switches_per_session', 10)
-            self.rate_limit_budget.max_vpn_switches = max_vpn_switches
+            if vpn_config:
+                max_vpn_switches = getattr(vpn_config, 'max_switches_per_session', 10)
+                self.rate_limit_budget.max_vpn_switches = max_vpn_switches
 
         if self._share_budget_across_keywords:
             logger.debug("Cross-keyword rate limit budget sharing enabled")

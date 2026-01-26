@@ -51,6 +51,31 @@ class RateLimitBudget:
     max_vpn_switches: int = 10
     max_backoff_time: float = 300.0  # 5 minutes total backoff budget
 
+    @classmethod
+    def from_config(cls, budget_config) -> "RateLimitBudget":
+        """Create a RateLimitBudget from a RateLimitBudgetConfig dataclass.
+
+        Args:
+            budget_config: RateLimitBudgetConfig instance or dict with budget settings.
+                           If None, returns default budget.
+
+        Returns:
+            RateLimitBudget with limits set from config.
+        """
+        budget = cls()
+        if budget_config is None:
+            return budget
+
+        budget.max_rotations = int(getattr(budget_config, 'max_rotations', 10))
+        budget.max_backoff_time = float(getattr(budget_config, 'max_backoff_time', 600.0))
+        budget.max_vpn_switches = int(getattr(budget_config, 'max_vpn_switches', 3))
+        logger.debug(
+            f"Budget initialized from config: max_rotations={budget.max_rotations}, "
+            f"max_backoff_time={budget.max_backoff_time}s, "
+            f"max_vpn_switches={budget.max_vpn_switches}"
+        )
+        return budget
+
     def record_rotation(self, keyword: str = None) -> None:
         """Record a cookie rotation.
 

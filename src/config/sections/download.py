@@ -18,6 +18,7 @@ __all__ = [
     'SpeechScreeningConfig',
     'CookieRotationConfig',
     'RateLimitConfig',
+    'RateLimitBudgetConfig',
     'SpeedTrackingConfig',
     'CircuitBreakerConfig',
     'BatchRetryConfig',
@@ -543,6 +544,36 @@ class RateLimitConfig:
 
 
 @dataclass
+class RateLimitBudgetConfig:
+    """Cross-keyword rate limit budget configuration.
+
+    Controls shared resource limits for rate limit recovery across all keywords
+    in a download session. When one keyword exhausts a resource (e.g., cookie
+    rotations), other keywords see the reduced budget and can skip to the next
+    escalation level immediately.
+
+    Example: If max_rotations=10 and keyword A uses 10 rotations, keyword B
+    sees can_rotate()=False and skips directly to VPN switching.
+    """
+    # Enable cross-keyword budget sharing
+    # When False, each keyword manages its own rate limit state independently
+    enabled: bool = True
+
+    # Maximum cookie rotations per session (0 = unlimited)
+    # After this many rotations, skip directly to VPN switching
+    max_rotations: int = 10
+
+    # Maximum total backoff time per session (seconds)
+    # After this much delay, skip backoff and escalate immediately
+    # 0 = unlimited
+    max_backoff_time: float = 600.0  # 10 minutes
+
+    # Maximum VPN switches per session (0 = unlimited)
+    # After this many switches, mark budget as exhausted
+    max_vpn_switches: int = 3
+
+
+@dataclass
 class SpeedTrackingConfig:
     """Download speed monitoring for adaptive timeouts and rate limit detection.
 
@@ -920,6 +951,10 @@ class DownloadConfig:
     # Activates after repeated 403 errors when impersonation alone isn't enough.
     extractor_args: ExtractorArgsConfig = field(default_factory=ExtractorArgsConfig)
 
+    # Cross-keyword rate limit budget: shared resource limits across keywords
+    # Controls how many rotations, backoff time, and VPN switches are available per session
+    rate_limit_budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
@@ -964,6 +999,8 @@ class DownloadConfig:
             self.impersonation = ImpersonationConfig(**self.impersonation)
         if isinstance(self.extractor_args, dict):
             self.extractor_args = ExtractorArgsConfig(**self.extractor_args)
+        if isinstance(self.rate_limit_budget, dict):
+            self.rate_limit_budget = RateLimitBudgetConfig(**self.rate_limit_budget)
 
 
 @dataclass

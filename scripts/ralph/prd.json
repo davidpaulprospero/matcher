@@ -128,7 +128,8 @@
             "id": "US-009",
             "title": "Add RateLimitBudget initialization from config and test coverage",
             "priority": 9,
-            "passes": false,
+            "passes": true,
+            "notes": "Added RateLimitBudgetConfig dataclass (enabled, max_rotations=10, max_backoff_time=600s, max_vpn_switches=3) to download.py with __post_init__ dict conversion. Added rate_limit_budget section to config.yaml. Added RateLimitBudget.from_config() classmethod. Updated VideoDownloader to use from_config() with legacy fallback. 55 tests pass (47 existing + 8 new config loading tests).",
             "acceptanceCriteria": [
                 "Add RateLimitBudgetConfig dataclass to src/config/sections/download.py with fields: max_rotations (default 10), max_backoff_time (default 600s), max_vpn_switches (default 3), enabled (default true)",
                 "Add rate_limit_budget section to config.yaml with documented defaults",
