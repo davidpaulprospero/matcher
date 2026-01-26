@@ -95,8 +95,8 @@
             "id": "US-007",
             "title": "Integrate EscalationManager into auxiliary downloaders",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added optional escalation_manager parameter to TitleFilter, SpeechScreener, and CaptionFetcher __init__ (all backward-compatible). TitleFilter.search_video_metadata() uses get_escalation_args(keyword) for --dump-json calls. SpeechScreener.download_audio_clip() uses get_escalation_args(video_id) for audio downloads. CaptionFetcher adds _add_bypass_args_to_cmd() helper used in all 6 yt-dlp call sites (list_available_languages, _fetch_subtitle_with_format, is_live_stream, get_stream_state, get_video_metadata, and batch_precheck). All three fall back to impersonation_manager when escalation_manager is None. VideoDownloader shares self.escalation_manager with title_filter and speech_screener at init. CaptionStage creates its own EscalationManager for CaptionFetcher. All 81 caption tests pass, 143/147 downloader tests pass (4 pre-existing failures unrelated).",
             "acceptanceCriteria": [
                 "TitleFilter.__init__ accepts optional escalation_manager, uses get_escalation_args() for --dump-json calls",
                 "SpeechScreener.__init__ accepts optional escalation_manager, uses get_escalation_args() for audio clip downloads",

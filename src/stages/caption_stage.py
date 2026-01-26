@@ -150,9 +150,20 @@ class CaptionStage(Stage):
                     detection_timeout=det_timeout,
                 )
 
+            # Create escalation manager if impersonation is available (US-007 Sprint 9)
+            escalation_mgr = None
+            if impersonation_mgr:
+                extractor_args_config = getattr(config.download, 'extractor_args', None)
+                from ..downloader.escalation_manager import EscalationManager
+                escalation_mgr = EscalationManager(
+                    impersonation_manager=impersonation_mgr,
+                    extractor_args_config=extractor_args_config,
+                )
+
             self._fetcher = CaptionFetcher(
                 config=config,
                 impersonation_manager=impersonation_mgr,
+                escalation_manager=escalation_mgr,
             )
             self._fetcher._timeout = timeout
 
