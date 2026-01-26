@@ -1,152 +1,147 @@
 {
-    "branchName": "ralph/sprint-9",
-    "sprintNumber": 9,
-    "focusArea": "download",
-    "projectContext": "yt-dlp browser impersonation bypass sprint. Tier 1 is COMPLETE: ImpersonationManager (auto-detect, round-robin), ImpersonationConfig, wired into all 8 call sites (core.py x2, audio_first.py x3, title_filter.py, speech_screening.py, caption_fetcher.py). Tier 2 config is COMPLETE: ExtractorArgsConfig dataclass, EscalationTier enum, EscalationState dataclass (all in src/downloader/types.py and src/config/sections/download.py). This sprint builds the EscalationManager that orchestrates 3-tier bypass progression, integrates escalation into actual download retry loops, adds 403 detection patterns, metrics/logging, healer integration, and comprehensive tests. curl_cffi 0.13.0 installed with 31 targets available.",
+    "branchName": "ralph/sprint-10",
+    "sprintNumber": 10,
+    "focusArea": "rate-limiting",
+    "projectContext": "Sprint 9 (download) completed the 3-tier escalation system: ImpersonationManager (Tier 1), EscalationManager with ExtractorArgs (Tier 2), and cookie rotation flag (Tier 3). All 8 yt-dlp call sites wired. This sprint focuses on rate-limiting COORDINATION gaps: RateLimitBudget is created but never consulted, escalation trigger patterns miss 429/IP-blocked, circuit breaker and escalation are independent, speed tracker signals are ignored, and cross-subsystem metrics are fragmented. Goal: wire existing subsystems together into a coordinated rate-limiting strategy where budget informs escalation decisions, speed signals trigger preemptive action, and metrics are unified.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Create EscalationManager class for 3-tier bypass orchestration",
+            "title": "Expand is_escalation_trigger() to detect 429, IP-blocked, and age-gate patterns",
             "priority": 1,
             "passes": true,
-            "notes": "Created EscalationManager in src/downloader/escalation_manager.py with per-keyword EscalationState tracking, get_escalation_args() returning EscalationResult (args + tier + rotate_cookies flag), record_failure/record_success, thread-safe per-keyword locks. Exported from __init__.py. All 6 acceptance criteria verified with end-to-end and thread safety tests.",
+            "notes": "Added 429/rate-limit, IP-blocked, and age-gate patterns to _ESCALATION_TRIGGER_RE. Added classify_trigger() function returning category strings ('429', 'ip_blocked', 'age_gate', 'bot_detection', '403', None). 78 tests pass including 15+ new parametrized test cases.",
             "acceptanceCriteria": [
-                "EscalationManager class in src/downloader/escalation_manager.py with per-keyword EscalationState tracking via dict[str, EscalationState]",
-                "get_escalation_args(keyword) method returns list of yt-dlp args for current tier (Tier 1: --impersonate only, Tier 2: + --extractor-args, Tier 3: + cookie rotation flag)",
-                "record_failure(keyword, error_output) increments consecutive_403s on EscalationState and calls escalate() when threshold reached",
-                "record_success(keyword) resets 403 counter but keeps tier sticky (no de-escalation mid-session)",
-                "Constructor accepts ImpersonationManager and ExtractorArgsConfig, delegates Tier 1 args to ImpersonationManager.get_impersonate_args()",
-                "Thread-safe: uses threading.Lock per keyword for concurrent download access"
+                "Add patterns to _ESCALATION_TRIGGER_RE: 'HTTP Error 429', '429', 'Too Many Requests', 'rate limit' (case-insensitive)",
+                "Add patterns: 'IP address', 'ip.*block', 'access denied', 'geo.?block' for IP-based restrictions",
+                "Add patterns: 'age.?gate', 'age.?restrict', 'sign.*in.*to.*confirm.*age' for age-verification triggers",
+                "Existing 403/bot/captcha patterns preserved unchanged",
+                "Add parametrized tests in test_escalation_manager.py for all new patterns (at least 8 new test cases)",
+                "Add classify_trigger(stderr) -> str returning trigger category ('403', '429', 'ip_blocked', 'bot_detection', 'age_gate', None) for metrics granularity"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add extractor-args command building with player_client rotation",
+            "title": "Wire RateLimitBudget into EscalationManager for budget-aware escalation",
             "priority": 2,
-            "passes": true,
-            "notes": "Pre-implemented in US-001. _build_extractor_args(state) already exists in escalation_manager.py:139-163, generates ['--extractor-args', 'youtube:player_client=X,Y,Z'] with rotation via state.extractor_args_index. Tier 2/3 args and rotate_cookies flag all wired in get_escalation_args(). Empty player_clients edge case handled at line 154-155. All 5 AC verified programmatically.",
+            "passes": false,
             "acceptanceCriteria": [
-                "_build_extractor_args(state) generates ['--extractor-args', 'youtube:player_client=X,Y,Z'] from ExtractorArgsConfig.player_clients",
-                "Player client list rotates starting position using state.extractor_args_index (increments on each Tier 2 escalation)",
-                "Tier 2 get_escalation_args() returns impersonation args + extractor-args in correct yt-dlp ordering",
-                "Tier 3 get_escalation_args() returns all Tier 2 args plus a rotate_cookies=True flag in a result tuple/dataclass",
-                "Handles edge case: empty player_clients list returns no extractor-args (Tier 2 same as Tier 1)"
+                "EscalationManager constructor accepts optional RateLimitBudget parameter, stores as self._budget",
+                "record_failure() calls budget.record_rotation() when escalation advances to Tier 2 or Tier 3",
+                "Before escalating, check budget.can_rotate() - if exhausted, log WARNING and skip to max tier immediately (skip intermediate tiers)",
+                "get_escalation_args() calls budget.record_attempt() to track total download attempts across keywords",
+                "VideoDownloader passes self._rate_limit_budget to EscalationManager constructor in core.py __init__",
+                "Add 4+ tests: budget exhausted skips to max tier, budget tracks rotation on escalation, budget None is safe fallback"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add cooldown timer and state reset to EscalationManager",
+            "title": "Add RateLimitBudget consultation in core.py retry loop before download attempts",
             "priority": 3,
-            "passes": true,
-            "notes": "Added _should_escalate(state) with cooldown check using ExtractorArgsConfig.cooldown_seconds (default 300s). Added get_cooldown_remaining(keyword), reset_keyword(keyword), reset_all(). Updated record_failure() to use _should_escalate() instead of state.should_escalate() directly. All 5 AC verified programmatically.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Cooldown timer prevents re-escalation within ExtractorArgsConfig.cooldown_seconds (default 300s) per keyword",
-                "Internal _should_escalate(state) returns False during cooldown even if 403 threshold reached",
-                "get_cooldown_remaining(keyword) returns seconds remaining for logging (0.0 if not in cooldown)",
-                "reset_keyword(keyword) clears all EscalationState for a keyword (for healer or manual recovery)",
-                "reset_all() clears entire keyword state dict (for session restart)"
+                "Before each retry in _run_download_cmd(), check budget.can_backoff() - if backoff budget exhausted, skip retry and add to batch retry queue",
+                "After each failed download, call budget.record_backoff(delay_seconds) with actual backoff time spent",
+                "budget.get_recommended_escalation() checked when retry loop starts - if 'exhausted', log error and skip keyword entirely",
+                "Add budget.record_success() on successful download to track success rate",
+                "Batch retry queue receives budget state so it knows remaining budget when retrying later",
+                "Add 3+ tests verifying budget consultation in retry flow (mock budget, verify method calls)"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add is_escalation_trigger() helper for 403/bot-detection pattern matching",
+            "title": "Create unified RateLimitMetricsAggregator to consolidate metrics from all subsystems",
             "priority": 4,
-            "passes": true,
-            "notes": "Added is_escalation_trigger(stderr_output) function with compiled regex (_ESCALATION_TRIGGER_RE) matching 6 patterns: HTTP Error 403, Sign in to confirm, bot, captcha, blocked, verify you are human. Case-insensitive via re.IGNORECASE. Separate from ERROR_SEVERITY_PATTERNS in core.py (unchanged). Exported at module level from __init__.py. All 5 AC verified programmatically.",
+            "passes": false,
             "acceptanceCriteria": [
-                "is_escalation_trigger(stderr_output) function in src/downloader/escalation_manager.py returns True when output matches 403/bot patterns",
-                "Patterns include: 'HTTP Error 403', 'Sign in to confirm', 'bot', 'captcha', 'blocked', 'verify you are human'",
-                "Pattern matching is case-insensitive using re.IGNORECASE",
-                "Existing ERROR_SEVERITY_PATTERNS in core.py preserved unchanged - escalation triggers are a separate concern",
-                "Function exported at module level for use by core.py, audio_first.py, and tests"
+                "New class RateLimitMetricsAggregator in src/downloader/rate_limit_metrics.py (or new file if needed) that collects from: EscalationManager, CookieRotator, RateLimitBudget, CircuitBreaker",
+                "Method aggregate() returns unified dict: {escalation: {...}, cookies: {...}, budget: {...}, circuit_breaker: {...}, trigger_categories: {...}}",
+                "trigger_categories dict uses classify_trigger() from US-001 to show breakdown: {403: N, 429: N, bot: N, ip_blocked: N, age_gate: N}",
+                "Pipeline print_report() uses aggregator instead of separate escalation metrics (replaces _collect_escalation_metrics in pipeline.py)",
+                "Add get_health_status() -> str returning 'healthy', 'degraded', or 'critical' based on escalation tier distribution and budget remaining",
+                "Add 3+ tests for aggregation logic and health status thresholds"
             ]
         },
         {
             "id": "US-005",
-            "title": "Integrate EscalationManager into core.py download retry loop",
+            "title": "Coordinate circuit breaker with escalation tier state",
             "priority": 5,
-            "passes": true,
-            "notes": "Integrated EscalationManager into VideoDownloader in core.py. __init__ creates EscalationManager from ImpersonationManager + ExtractorArgsConfig (line 309), shared with audio_first pipeline. New _add_escalation_to_cmd() method (line 753) replaces direct impersonation in keyword search+download (line 1627) and ID-based download (line 1724). Retry loop records failures via is_escalation_trigger() + record_failure() (line 1939-1940). Success path calls record_success() (line 2051). Tier 3 triggers cookie_rotator.rotate() for cookie rotation (line 1944). All 109 downloader tests pass (4 pre-existing failures unrelated).",
+            "passes": false,
             "acceptanceCriteria": [
-                "VideoDownloader.__init__ creates EscalationManager from config (ImpersonationManager + ExtractorArgsConfig) and stores as self.escalation_manager",
-                "Keyword search+download (~line 1517) calls escalation_manager.get_escalation_args(keyword) instead of direct impersonation_manager.get_impersonate_args()",
-                "ID-based download (~line 1617) calls escalation_manager.get_escalation_args(video_id) instead of direct impersonation args",
-                "On subprocess returncode != 0 with is_escalation_trigger(stderr)==True, calls record_failure() before retry",
-                "On successful download (returncode == 0), calls record_success() to reset 403 counter",
-                "Tier 3 cookie rotation flag triggers existing CookieRotator.rotate_on_errors() call"
+                "When EscalationManager reaches Tier 3 for >50% of active keywords, signal circuit breaker to extend pause duration by 2x",
+                "When circuit breaker is open (paused), EscalationManager.get_escalation_args() returns Tier 3 args immediately (skip lower tiers during circuit break)",
+                "Circuit breaker reset_after_success() checks if escalation is at Tier 3 - if so, require 3 consecutive successes instead of 1 to close circuit",
+                "Add get_active_keyword_count() and get_keywords_at_tier(tier) methods to EscalationManager for circuit breaker consultation",
+                "Log INFO when circuit breaker adjusts based on escalation state: 'Circuit breaker extended: {pct}% keywords at Tier 3'",
+                "Add 4+ tests: circuit breaker extension trigger, Tier 3 shortcut during pause, extended reset requirement"
             ]
         },
         {
             "id": "US-006",
-            "title": "Integrate EscalationManager into audio_first.py download commands",
+            "title": "Add speed tracker signal consumption for preemptive escalation",
             "priority": 6,
-            "passes": true,
-            "notes": "Added escalation_manager parameter to AudioFirstPipeline.__init__ (optional, backward-compatible). New _add_escalation_to_cmd(cmd, video_id) method uses EscalationManager when available, falls back to _add_impersonation_to_cmd(). All 3 download sites updated: audio download (line 330), segment download (line 535), full video fallback (line 690). Each site: (1) uses _add_escalation_to_cmd instead of _add_impersonation_to_cmd, (2) handles Tier 3 rotate_cookies flag, (3) records success via record_success(), (4) detects 403/bot via is_escalation_trigger() and calls record_failure(). Core.py already shares escalation_manager at line 314. All 19 escalation tests pass, 119/122 downloader tests pass (3 pre-existing failures in test_stage_download unrelated).",
+            "passes": false,
             "acceptanceCriteria": [
-                "AudioFirstPipeline.__init__ accepts optional escalation_manager parameter (passed from VideoDownloader)",
-                "Audio download (~line 241) uses escalation_manager.get_escalation_args(video_id) when available",
-                "Segment download (~line 427) uses escalation_manager.get_escalation_args(video_id) when available",
-                "Full video fallback (~line 591) uses escalation_manager.get_escalation_args(video_id) when available",
-                "Falls back to impersonation_manager.get_impersonate_args() when escalation_manager is None (backward compatible)",
-                "403 errors detected via is_escalation_trigger() trigger record_failure() before retry"
+                "When DownloadSpeedTracker detects speed below rate_limit threshold (< 0.1 MB/s for 3+ consecutive downloads), call escalation_manager.record_slow_speed(keyword)",
+                "record_slow_speed() method on EscalationManager: if called 3+ times for same keyword, preemptively escalate one tier without waiting for 403",
+                "Speed-triggered escalation logged at INFO: 'Preemptive escalation for {keyword}: sustained low speed ({speed} MB/s)'",
+                "Speed signals do NOT count toward budget rotations (they are preventive, not reactive)",
+                "Add speed_escalations counter to EscalationManager.get_metrics() dict",
+                "Add 3+ tests: speed threshold triggers escalation, speed signals don't affect budget, speed counter in metrics"
             ]
         },
         {
             "id": "US-007",
-            "title": "Integrate EscalationManager into auxiliary downloaders",
+            "title": "Add escalation state persistence to checkpoint for resume support",
             "priority": 7,
-            "passes": true,
-            "notes": "Added optional escalation_manager parameter to TitleFilter, SpeechScreener, and CaptionFetcher __init__ (all backward-compatible). TitleFilter.search_video_metadata() uses get_escalation_args(keyword) for --dump-json calls. SpeechScreener.download_audio_clip() uses get_escalation_args(video_id) for audio downloads. CaptionFetcher adds _add_bypass_args_to_cmd() helper used in all 6 yt-dlp call sites (list_available_languages, _fetch_subtitle_with_format, is_live_stream, get_stream_state, get_video_metadata, and batch_precheck). All three fall back to impersonation_manager when escalation_manager is None. VideoDownloader shares self.escalation_manager with title_filter and speech_screener at init. CaptionStage creates its own EscalationManager for CaptionFetcher. All 81 caption tests pass, 143/147 downloader tests pass (4 pre-existing failures unrelated).",
+            "passes": false,
             "acceptanceCriteria": [
-                "TitleFilter.__init__ accepts optional escalation_manager, uses get_escalation_args() for --dump-json calls",
-                "SpeechScreener.__init__ accepts optional escalation_manager, uses get_escalation_args() for audio clip downloads",
-                "CaptionFetcher accepts optional escalation_manager, uses get_escalation_args() for --list-subs and caption downloads",
-                "All three fall back to impersonation_manager.get_impersonate_args() when escalation_manager is None",
-                "VideoDownloader passes self.escalation_manager to all three during initialization"
+                "EscalationManager.to_dict() serializes all keyword states: {keyword: {tier, consecutive_403s, total_403s, extractor_args_index, last_escalation_time}}",
+                "EscalationManager.from_dict(data, impersonation_manager, config) class method restores state from checkpoint data",
+                "VideoDownloader saves escalation state to checkpoint via checkpoint_manager during DOWNLOAD stage completion",
+                "VideoDownloader restores escalation state from checkpoint on --resume (before starting downloads)",
+                "Stale state handling: if checkpoint escalation data is >1 hour old, de-escalate all keywords by one tier (YouTube may have relaxed blocking)",
+                "Add 4+ tests: serialize/deserialize round-trip, stale data de-escalation, missing checkpoint data safe fallback"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add escalation metrics and structured logging",
+            "title": "Fix DownloadHealer to use shared EscalationManager instead of duplicate CookieRotator",
             "priority": 8,
-            "passes": true,
-            "notes": "Added get_metrics() to EscalationManager returning dict with total_escalations, escalations_per_tier, keywords_at_each_tier, total_403s, total_successes, average_tier. Added _total_403s, _total_successes, _total_escalations, _escalations_per_tier counters to EscalationManager tracked in record_failure/record_success. INFO/WARNING/DEBUG logging was already present from US-001. Added set_escalation_metrics() to HealingOrchestrator and BYPASS ESCALATION section to print_report(). Added _collect_escalation_metrics() helper in pipeline.py to wire metrics from DownloadStage's downloader to orchestrator before print_report(). All 5 AC verified programmatically.",
+            "passes": false,
             "acceptanceCriteria": [
-                "EscalationManager.get_metrics() returns dict: total_escalations, escalations_per_tier, keywords_at_each_tier, total_403s, total_successes, average_tier",
-                "Log at INFO on escalation: 'Escalation: keyword={kw} tier {old}->{new} after {n} consecutive 403s'",
-                "Log at WARNING on max tier: 'Max escalation reached for keyword={kw}, engaging full bypass'",
-                "Log at DEBUG for each get_escalation_args() call: tier, impersonate target, extractor-args included",
-                "Pipeline end-of-run summary includes escalation metrics alongside existing impersonation stats"
+                "DownloadHealer.__init__ accepts optional escalation_manager parameter from pipeline's VideoDownloader",
+                "Remove duplicate CookieRotator creation in DownloadHealer - use escalation_manager's cookie rotation instead",
+                "Healer's fix attempts consult escalation_manager.get_escalation_args() to use current tier args when retrying",
+                "When healer fixes a download, call escalation_manager.record_success() to update tier state",
+                "When healer fails to fix, call escalation_manager.record_failure() to advance escalation for that keyword",
+                "Add 3+ tests: healer uses shared escalation manager, healer records success/failure, healer without escalation_manager still works"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add unit tests for EscalationManager core logic",
+            "title": "Add RateLimitBudget initialization from config and test coverage",
             "priority": 9,
-            "passes": true,
-            "notes": "Created tests/test_escalation_manager.py with 40 tests across 7 test classes: TestTierProgression (6 tests), TestEscalationArgs (6 tests), TestCooldown (5 tests), TestPerKeywordIsolation (5 tests), TestThreadSafety (4 tests), TestIsEscalationTrigger (8 parametrized tests), TestMetrics (2 tests). All 6 acceptance criteria covered. Time mocking patches both src.downloader.escalation_manager.time and src.downloader.types.time for tier progression through cooldown.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test file tests/test_escalation_manager.py with pytest and --non-interactive support",
-                "Test tier progression: record_failure() x threshold triggers escalate(), advancing Tier 1->2->3",
-                "Test get_escalation_args() returns correct args per tier (Tier 1: impersonate only, Tier 2: + extractor-args, Tier 3: + cookie flag)",
-                "Test cooldown: escalation suppressed during cooldown period, allowed after expiry (mock time.time())",
-                "Test per-keyword isolation: keyword_a at Tier 3 does not affect keyword_b at Tier 1",
-                "Test thread safety: concurrent get_escalation_args() calls from multiple threads do not corrupt state"
+                "Add RateLimitBudgetConfig dataclass to src/config/sections/download.py with fields: max_rotations (default 10), max_backoff_time (default 600s), max_vpn_switches (default 3), enabled (default true)",
+                "Add rate_limit_budget section to config.yaml with documented defaults",
+                "RateLimitBudget constructor reads limits from RateLimitBudgetConfig instead of hardcoded values",
+                "Add __post_init__ to DownloadConfig for nested RateLimitBudgetConfig (follow Rule 2)",
+                "Create tests/test_rate_limit_budget.py with 8+ tests covering: can_rotate/can_backoff boundary conditions, record methods, get_recommended_escalation logic, config loading, serialization"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add integration tests for escalation flow with mock 403 responses",
+            "title": "Add integration tests for coordinated rate-limiting subsystem interactions",
             "priority": 10,
-            "passes": true,
-            "notes": "Created tests/test_escalation_integration.py with 30 tests across 5 test classes: TestFullEscalationFlow (3 tests - end-to-end Tier 1->2->3, multi-keyword independence, metrics verification), TestTriggerDetectionRealSamples (11 tests - 6 real 403 stderr samples, 8 non-trigger samples, multiline stderr, case variations), TestSuccessReset (4 tests - counter reset keeps tier, no de-escalation, Tier 3 sticky, alternating success/failure), TestExtractorArgsRotation (3 tests - successive escalations rotate index, wrap-around, single keyword rotation), TestMockingEnforced (3 tests - mock verification, no subprocess import, network-free flow). All use mocking only. Key gotcha: time mocking for cooldown bypass must use base_time anchored to real time.time() since initial escalation uses unmocked time.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test file tests/test_escalation_integration.py with pytest markers: fast",
-                "Test full escalation flow: simulate 403 errors -> record_failure -> escalate -> verify args change at each tier",
-                "Test is_escalation_trigger() correctly identifies 403 patterns from real yt-dlp stderr samples",
-                "Test success reset: after escalation to Tier 2, record_success resets 403 counter but tier stays at 2",
-                "Test extractor-args rotation: multiple Tier 2 escalations produce different player_client starting positions",
-                "All tests use mocking (no real subprocess calls or network access)"
+                "Test file tests/test_rate_limit_coordination.py with pytest markers: fast",
+                "Test full coordination flow: speed signal -> preemptive escalation -> budget tracking -> circuit breaker adjustment",
+                "Test budget exhaustion path: repeated 403s exhaust budget -> skip to max tier -> circuit breaker extends pause",
+                "Test checkpoint round-trip: escalation state saved -> resume -> state restored -> correct tier used",
+                "Test metrics aggregation: all subsystems contribute to unified report via RateLimitMetricsAggregator",
+                "All tests use mocking (no real subprocess calls, no network access, uses --non-interactive)"
             ]
         }
     ]

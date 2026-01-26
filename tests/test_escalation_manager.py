@@ -19,6 +19,7 @@ import pytest
 from src.downloader.escalation_manager import (
     EscalationManager,
     EscalationResult,
+    classify_trigger,
     is_escalation_trigger,
 )
 from src.downloader.types import EscalationState, EscalationTier
@@ -543,6 +544,39 @@ class TestIsEscalationTrigger:
     def test_matches_known_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is True
 
+    # -- New: 429 / rate-limit patterns --
+    @pytest.mark.parametrize("stderr", [
+        "ERROR: HTTP Error 429: Too Many Requests",
+        "HTTP Error 429",
+        "Too Many Requests",
+        "rate limit exceeded for this IP",
+        "rate-limit reached",
+    ])
+    def test_matches_429_rate_limit_patterns(self, stderr):
+        assert is_escalation_trigger(stderr) is True
+
+    # -- New: IP-blocked patterns --
+    @pytest.mark.parametrize("stderr", [
+        "Your IP address has been blocked",
+        "ip blocked due to abuse",
+        "access denied from your region",
+        "geo-blocked content",
+        "geoblock: video not available in your country",
+    ])
+    def test_matches_ip_blocked_patterns(self, stderr):
+        assert is_escalation_trigger(stderr) is True
+
+    # -- New: Age-gate patterns --
+    @pytest.mark.parametrize("stderr", [
+        "This video is age-gated",
+        "age-restricted content",
+        "Sign in to confirm your age. This video may be inappropriate",
+        "age gate verification required",
+        "agerestricted: please sign in",
+    ])
+    def test_matches_age_gate_patterns(self, stderr):
+        assert is_escalation_trigger(stderr) is True
+
     @pytest.mark.parametrize("stderr", [
         "ERROR: HTTP Error 404: Not Found",
         "ERROR: Video unavailable",
@@ -586,3 +620,64 @@ class TestMetrics:
         assert metrics["total_escalations"] == 1
         assert "EXTRACTOR_ARGS" in metrics["escalations_per_tier"]
         assert "kw" in metrics["keywords_at_each_tier"].get("EXTRACTOR_ARGS", [])
+
+
+# ---------------------------------------------------------------------------
+# classify_trigger() tests
+# ---------------------------------------------------------------------------
+
+class TestClassifyTrigger:
+    """Verify classify_trigger() returns correct category strings."""
+
+    @pytest.mark.parametrize("stderr,expected", [
+        # 429 / rate-limit
+        ("ERROR: HTTP Error 429: Too Many Requests", "429"),
+        ("Too Many Requests", "429"),
+        ("rate limit exceeded", "429"),
+        ("rate-limit reached for this IP", "429"),
+        # IP-blocked
+        ("Your IP address has been blocked", "ip_blocked"),
+        ("ip blocked due to abuse", "ip_blocked"),
+        ("access denied from your region", "ip_blocked"),
+        ("geo-blocked content", "ip_blocked"),
+        # Bot detection
+        ("you're not a bot, are you?", "bot_detection"),
+        ("captcha verification required", "bot_detection"),
+        ("Please verify you are human", "bot_detection"),
+        # Age-gate
+        ("This video is age-gated", "age_gate"),
+        ("age-restricted content", "age_gate"),
+        ("Sign in to confirm your age", "age_gate"),
+        # Bot detection (contains 'bot')
+        ("Sign in to confirm you're not a bot", "bot_detection"),
+        # 403 (generic blocking)
+        ("ERROR: HTTP Error 403: Forbidden", "403"),
+        ("Request blocked", "403"),
+        ("Sign in to confirm identity", "403"),
+    ])
+    def test_classify_known_patterns(self, stderr, expected):
+        assert classify_trigger(stderr) == expected
+
+    def test_classify_returns_none_for_non_triggers(self):
+        assert classify_trigger("") is None
+        assert classify_trigger("ERROR: HTTP Error 404: Not Found") is None
+        assert classify_trigger("Download complete") is None
+        assert classify_trigger("Video unavailable") is None
+
+    def test_classify_case_insensitive(self):
+        assert classify_trigger("HTTP ERROR 429") == "429"
+        assert classify_trigger("AGE-GATED VIDEO") == "age_gate"
+        assert classify_trigger("ACCESS DENIED") == "ip_blocked"
+
+    def test_classify_priority_429_over_403(self):
+        """429 patterns match '429' category, not '403'."""
+        assert classify_trigger("HTTP Error 429") == "429"
+
+    def test_classify_priority_age_gate_over_403(self):
+        """'Sign in to confirm your age' matches 'age_gate', not '403'."""
+        # This matches age_gate because age_gate is checked before 403
+        assert classify_trigger("Sign in to confirm your age") == "age_gate"
+
+    def test_classify_priority_ip_blocked_over_403(self):
+        """IP block patterns match 'ip_blocked', not '403'."""
+        assert classify_trigger("ip blocked") == "ip_blocked"

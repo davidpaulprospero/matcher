@@ -31,14 +31,55 @@ logger = logging.getLogger(__name__)
 # rate-limit severity classification. Escalation triggers specifically detect
 # when yt-dlp is being blocked and a higher bypass tier is needed.
 _ESCALATION_TRIGGER_RE = re.compile(
+    # 403 patterns (original)
     r'HTTP Error 403'
+    # Bot/captcha patterns (original)
     r'|Sign in to confirm'
     r'|bot'
     r'|captcha'
     r'|blocked'
-    r'|verify you are human',
+    r'|verify you are human'
+    # 429 / rate-limit patterns
+    r'|HTTP Error 429'
+    r'|429'
+    r'|Too Many Requests'
+    r'|rate.?limit'
+    # IP-based restriction patterns
+    r'|IP address'
+    r'|ip.*block'
+    r'|access denied'
+    r'|geo.?block'
+    # Age-gate patterns
+    r'|age.?gate'
+    r'|age.?restrict'
+    r'|sign.*in.*to.*confirm.*age',
     re.IGNORECASE,
 )
+
+# Category-specific compiled regexes for classify_trigger().
+# Order matters: more specific patterns checked first.
+_TRIGGER_CATEGORIES: List[Tuple[str, "re.Pattern[str]"]] = [
+    ('429', re.compile(
+        r'HTTP Error 429|Too Many Requests|rate.?limit',
+        re.IGNORECASE,
+    )),
+    ('age_gate', re.compile(
+        r'age.?gate|age.?restrict|sign.*in.*to.*confirm.*age',
+        re.IGNORECASE,
+    )),
+    ('ip_blocked', re.compile(
+        r'IP address|ip.*block|access denied|geo.?block',
+        re.IGNORECASE,
+    )),
+    ('bot_detection', re.compile(
+        r'bot|captcha|verify you are human',
+        re.IGNORECASE,
+    )),
+    ('403', re.compile(
+        r'HTTP Error 403|Sign in to confirm|blocked',
+        re.IGNORECASE,
+    )),
+]
 
 
 def is_escalation_trigger(stderr_output: str) -> bool:
@@ -61,6 +102,33 @@ def is_escalation_trigger(stderr_output: str) -> bool:
     if not stderr_output:
         return False
     return bool(_ESCALATION_TRIGGER_RE.search(stderr_output))
+
+
+def classify_trigger(stderr_output: str) -> Optional[str]:
+    """Classify the escalation trigger category from yt-dlp stderr output.
+
+    Returns a specific category string for metrics granularity, or None
+    if the output does not match any known escalation trigger.
+
+    Categories (checked in order of specificity):
+        - ``'429'``: Rate-limit / HTTP 429 / Too Many Requests
+        - ``'age_gate'``: Age verification required
+        - ``'ip_blocked'``: IP-based blocking / geo-blocking / access denied
+        - ``'bot_detection'``: Bot / captcha / human verification
+        - ``'403'``: HTTP 403 / sign-in / generic blocking
+
+    Args:
+        stderr_output: Raw stderr text from a yt-dlp subprocess.
+
+    Returns:
+        Category string or None if no trigger matched.
+    """
+    if not stderr_output:
+        return None
+    for category, pattern in _TRIGGER_CATEGORIES:
+        if pattern.search(stderr_output):
+            return category
+    return None
 
 
 # Type alias for the config - avoid circular import by using duck typing.
