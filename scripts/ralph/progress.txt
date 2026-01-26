@@ -3,6 +3,19 @@
 Focus: Wire existing rate-limiting subsystems together into coordinated strategy
 Stories: US-001 to US-010 (10 stories)
 
+## Iteration 7 - [US-007] Add escalation state persistence to checkpoint for resume support
+- Added EscalationManager.to_dict() serializing per-keyword states (tier, consecutive_403s, extractor_args_index, last_escalation_time) plus global counters and saved_at timestamp
+- Added EscalationManager.from_dict() class method with stale_threshold parameter (default 3600s / 1 hour)
+- Stale data handling: if checkpoint is >1 hour old, all keywords de-escalated by one tier (YouTube may have relaxed blocking)
+- Invalid tier values clamped to valid range (1-3) during restoration
+- Added escalation_state Optional[Dict] field to DownloadCheckpoint with backward-compatible from_dict()
+- VideoDownloader._save_checkpoint() includes escalation_manager.to_dict() when manager is not None
+- VideoDownloader.download_videos() resume path restores escalation manager via from_dict() and re-shares with audio_first, title_filter, speech_screener
+- 8 new tests in TestEscalationCheckpointPersistence: empty manager, keyword states, round-trip, stale de-escalation, stale Tier 1 floor, safe fallback (None/empty/invalid), tier clamping, speed_escalations persistence
+- Files modified: src/downloader/escalation_manager.py, src/downloader/checkpoint.py, src/downloader/core.py, tests/test_escalation_manager.py
+- Tests: 220 pass (escalation + checkpoint tests), py_compile OK, main.py --help OK
+- All 6 acceptance criteria met
+
 ## Iteration 1 - [US-001] Expand is_escalation_trigger() to detect 429, IP-blocked, and age-gate patterns
 - Expanded _ESCALATION_TRIGGER_RE with 429/rate-limit patterns: 'HTTP Error 429', '429', 'Too Many Requests', 'rate.?limit'
 - Added IP-blocked patterns: 'IP address', 'ip.*block', 'access denied', 'geo.?block'

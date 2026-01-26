@@ -98,7 +98,8 @@
             "id": "US-007",
             "title": "Add escalation state persistence to checkpoint for resume support",
             "priority": 7,
-            "passes": false,
+            "passes": true,
+            "notes": "Added to_dict() serializing keyword_states (tier, consecutive_403s, extractor_args_index, last_escalation_time) plus global counters and saved_at timestamp. Added from_dict() class method with stale_threshold (default 3600s) that de-escalates keywords by one tier when data is older than threshold. Invalid tier values clamped to valid range. Added escalation_state field to DownloadCheckpoint with backward-compatible from_dict(). VideoDownloader._save_checkpoint() includes escalation state, download_videos() resume path restores via EscalationManager.from_dict() and re-shares with auxiliary modules. 8 new tests in TestEscalationCheckpointPersistence. 220 tests pass.",
             "acceptanceCriteria": [
                 "EscalationManager.to_dict() serializes all keyword states: {keyword: {tier, consecutive_403s, total_403s, extractor_args_index, last_escalation_time}}",
                 "EscalationManager.from_dict(data, impersonation_manager, config) class method restores state from checkpoint data",

@@ -956,3 +956,217 @@ class TestSpeedTriggeredEscalation:
         # Only 2 signals - should still be at Tier 1
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.IMPERSONATE_ONLY
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint Persistence (Sprint 10 US-007)
+# ---------------------------------------------------------------------------
+
+class TestEscalationCheckpointPersistence:
+    """Tests for to_dict() / from_dict() serialization and resume support."""
+
+    def test_to_dict_empty_manager(self, imp_manager, ext_config):
+        """to_dict() with no keyword states returns valid structure."""
+        manager = EscalationManager(imp_manager, ext_config)
+        data = manager.to_dict()
+
+        assert 'keyword_states' in data
+        assert data['keyword_states'] == {}
+        assert data['total_403s'] == 0
+        assert data['total_successes'] == 0
+        assert data['total_escalations'] == 0
+        assert 'saved_at' in data
+        assert isinstance(data['saved_at'], float)
+
+    def test_to_dict_with_keyword_states(self, imp_manager, ext_config):
+        """to_dict() serializes per-keyword tier, 403 count, etc."""
+        manager = EscalationManager(imp_manager, ext_config)
+        # Escalate "alpha" to Tier 2
+        manager.record_failure("alpha")
+        manager.record_failure("alpha")
+        # "beta" stays at Tier 1
+        manager.record_success("beta")
+
+        data = manager.to_dict()
+
+        assert "alpha" in data['keyword_states']
+        assert "beta" in data['keyword_states']
+        alpha = data['keyword_states']['alpha']
+        assert alpha['tier'] == EscalationTier.EXTRACTOR_ARGS.value  # 2
+        assert alpha['consecutive_403s'] == 0  # reset after escalation
+        assert 'extractor_args_index' in alpha
+        assert 'last_escalation_time' in alpha
+
+        beta = data['keyword_states']['beta']
+        assert beta['tier'] == EscalationTier.IMPERSONATE_ONLY.value  # 1
+        assert beta['consecutive_403s'] == 0  # reset on success
+
+        assert data['total_403s'] == 2
+        assert data['total_successes'] == 1
+        assert data['total_escalations'] == 1
+
+    def test_round_trip_serialize_deserialize(self, imp_manager):
+        """Serialize then deserialize preserves all keyword states and counters."""
+        # Use 0s cooldown to allow rapid escalation in test
+        no_cooldown_config = FakeExtractorArgsConfig(cooldown_seconds=0.0)
+        manager = EscalationManager(imp_manager, no_cooldown_config)
+        # Escalate "kw1" to Tier 2, "kw2" to Tier 3
+        manager.record_failure("kw1")
+        manager.record_failure("kw1")  # -> Tier 2
+        manager.record_failure("kw2")
+        manager.record_failure("kw2")  # -> Tier 2
+        manager.record_failure("kw2")
+        manager.record_failure("kw2")  # -> Tier 3
+        manager.record_success("kw1")
+
+        data = manager.to_dict()
+
+        # Restore
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=no_cooldown_config,
+            stale_threshold=999999.0,  # Not stale
+        )
+
+        # Check kw1 is still at Tier 2
+        r1 = restored.get_escalation_args("kw1")
+        assert r1.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Check kw2 is still at Tier 3
+        r2 = restored.get_escalation_args("kw2")
+        assert r2.tier == EscalationTier.FULL_BYPASS
+        assert r2.rotate_cookies is True
+
+        # Check global counters
+        metrics = restored.get_metrics()
+        assert metrics['total_403s'] == 6  # 2 (kw1) + 4 (kw2)
+        assert metrics['total_successes'] == 1
+        assert metrics['total_escalations'] == 3  # kw1 once, kw2 twice
+
+    def test_stale_data_de_escalates_by_one_tier(self, imp_manager):
+        """If checkpoint is >1 hour old, all keywords de-escalate by one tier."""
+        no_cooldown_config = FakeExtractorArgsConfig(cooldown_seconds=0.0)
+        manager = EscalationManager(imp_manager, no_cooldown_config)
+        # Escalate "kw1" to Tier 2, "kw2" to Tier 3
+        manager.record_failure("kw1")
+        manager.record_failure("kw1")  # -> Tier 2
+        manager.record_failure("kw2")
+        manager.record_failure("kw2")  # -> Tier 2
+        manager.record_failure("kw2")
+        manager.record_failure("kw2")  # -> Tier 3
+
+        data = manager.to_dict()
+        # Simulate stale data: saved_at = 2 hours ago
+        data['saved_at'] = time.time() - 7200
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=3600.0,  # 1 hour
+        )
+
+        # kw1 was Tier 2, should be Tier 1 now
+        r1 = restored.get_escalation_args("kw1")
+        assert r1.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # kw2 was Tier 3, should be Tier 2 now
+        r2 = restored.get_escalation_args("kw2")
+        assert r2.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_stale_tier1_stays_at_tier1(self, imp_manager, ext_config):
+        """Stale de-escalation does not go below Tier 1."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.record_success("kw1")  # Tier 1
+
+        data = manager.to_dict()
+        data['saved_at'] = time.time() - 7200  # Stale
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=3600.0,
+        )
+
+        r = restored.get_escalation_args("kw1")
+        assert r.tier == EscalationTier.IMPERSONATE_ONLY  # Still Tier 1
+
+    def test_missing_checkpoint_data_safe_fallback(self, imp_manager, ext_config):
+        """from_dict() with None/empty/invalid data returns fresh manager."""
+        # None data
+        m1 = EscalationManager.from_dict(
+            data=None,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+        )
+        assert m1.get_metrics()['total_403s'] == 0
+        r = m1.get_escalation_args("test")
+        assert r.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # Empty dict
+        m2 = EscalationManager.from_dict(
+            data={},
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+        )
+        assert m2.get_metrics()['total_403s'] == 0
+
+        # Invalid type
+        m3 = EscalationManager.from_dict(
+            data="not a dict",
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+        )
+        assert m3.get_metrics()['total_403s'] == 0
+
+    def test_from_dict_with_invalid_tier_value_clamped(self, imp_manager, ext_config):
+        """Invalid tier values in checkpoint are clamped to valid range."""
+        data = {
+            'keyword_states': {
+                'kw_high': {'tier': 99, 'consecutive_403s': 0, 'extractor_args_index': 0, 'last_escalation_time': None},
+                'kw_low': {'tier': -5, 'consecutive_403s': 0, 'extractor_args_index': 0, 'last_escalation_time': None},
+            },
+            'total_403s': 0,
+            'total_successes': 0,
+            'total_escalations': 0,
+            'escalations_per_tier': {},
+            'speed_escalations': 0,
+            'saved_at': time.time(),
+        }
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=999999.0,
+        )
+
+        # High value clamped to FULL_BYPASS (3)
+        r_high = restored.get_escalation_args("kw_high")
+        assert r_high.tier == EscalationTier.FULL_BYPASS
+
+        # Low value clamped to IMPERSONATE_ONLY (1)
+        r_low = restored.get_escalation_args("kw_low")
+        assert r_low.tier == EscalationTier.IMPERSONATE_ONLY
+
+    def test_speed_escalations_counter_persisted(self, imp_manager, ext_config):
+        """speed_escalations counter survives round-trip."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)
+        manager.record_slow_speed("kw", 0.05)  # Triggers speed escalation
+
+        data = manager.to_dict()
+        assert data['speed_escalations'] == 1
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=999999.0,
+        )
+
+        metrics = restored.get_metrics()
+        assert metrics['speed_escalations'] == 1

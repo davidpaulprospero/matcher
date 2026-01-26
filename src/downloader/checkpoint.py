@@ -45,6 +45,8 @@ class DownloadCheckpoint:
     rate_limit_budget: Optional[Dict] = None
     # VPN manager state for switch count persistence (US-005)
     vpn_manager_state: Optional[Dict] = None
+    # Escalation manager state for resume support (Sprint 10 US-007)
+    escalation_state: Optional[Dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,6 +70,9 @@ class DownloadCheckpoint:
         # Handle checkpoints created before VPN manager state was added (US-005)
         if 'vpn_manager_state' not in data:
             data['vpn_manager_state'] = None
+        # Handle checkpoints created before escalation state was added (Sprint 10 US-007)
+        if 'escalation_state' not in data:
+            data['escalation_state'] = None
         return cls(**data)
 
 
