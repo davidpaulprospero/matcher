@@ -41,6 +41,7 @@ from .cache import BaseCache, CacheEntry
 if TYPE_CHECKING:
     from .config import Config
     from .config.sections.download import CaptionFirstConfig
+    from .downloader.impersonation import ImpersonationManager
 
 logger = logging.getLogger(__name__)
 
@@ -2813,13 +2814,19 @@ class CaptionFetcher:
             print(f"Caption fetch failed after retries: {e}")
     """
 
-    def __init__(self, config: Optional['Config'] = None):
+    def __init__(
+        self,
+        config: Optional['Config'] = None,
+        impersonation_manager: Optional['ImpersonationManager'] = None,
+    ):
         """Initialize the caption fetcher.
 
         Args:
             config: Optional config for cookies and other settings.
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass.
         """
         self.config = config
+        self.impersonation_manager = impersonation_manager
         self._timeout = 60  # seconds
 
         # Retry settings from config (US-008)
@@ -2971,6 +2978,12 @@ class CaptionFetcher:
             '--no-playlist',
             '--no-warnings',
         ]
+
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
@@ -4476,6 +4489,12 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
 
@@ -4949,6 +4968,12 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
 
@@ -5049,6 +5074,12 @@ class CaptionFetcher:
             '--no-warnings',
         ]
 
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())
 
@@ -5142,6 +5173,12 @@ class CaptionFetcher:
             '--no-playlist',
             '--no-warnings',
         ]
+
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
 
         # Add cookies if configured
         cmd.extend(self._get_cookies_args())

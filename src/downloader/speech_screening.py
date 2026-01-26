@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from ..config import Config
+    from .impersonation import ImpersonationManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +26,24 @@ class SpeechScreener:
     Migrated from VideoDownloader speech screening methods.
     """
 
-    def __init__(self, config: 'Config', cookies_args: List[str]):
+    def __init__(
+        self,
+        config: 'Config',
+        cookies_args: List[str],
+        impersonation_manager: Optional['ImpersonationManager'] = None,
+    ):
         """
         Initialize SpeechScreener.
 
         Args:
             config: Config object with download.speech_screening settings
             cookies_args: Cookie arguments for yt-dlp (from utils.get_cookies_args)
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
+        self.impersonation_manager = impersonation_manager
 
     def download_audio_clip(
         self,
@@ -80,6 +88,12 @@ class SpeechScreener:
         ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
         if ffmpeg_loc:
             cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+
+        # Add impersonation args before cookies for correct argument ordering
+        if self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
 
         # Add cookies
         cmd.extend(self.cookies_args)

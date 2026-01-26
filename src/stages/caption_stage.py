@@ -136,7 +136,24 @@ class CaptionStage(Stage):
                 determine_caption_quality,
             )
 
-            self._fetcher = CaptionFetcher(config=config)
+            # Create impersonation manager if enabled (US-005 Sprint 9)
+            impersonation_mgr = None
+            impersonation_config = getattr(config.download, 'impersonation', None)
+            if impersonation_config and getattr(impersonation_config, 'enabled', False):
+                from ..downloader.impersonation import ImpersonationManager
+                preferred = getattr(impersonation_config, 'preferred_targets', []) or []
+                detect_startup = getattr(impersonation_config, 'detect_at_startup', True)
+                det_timeout = getattr(impersonation_config, 'detection_timeout', 10)
+                impersonation_mgr = ImpersonationManager(
+                    preferred_targets=preferred,
+                    detect_at_startup=detect_startup,
+                    detection_timeout=det_timeout,
+                )
+
+            self._fetcher = CaptionFetcher(
+                config=config,
+                impersonation_manager=impersonation_mgr,
+            )
             self._fetcher._timeout = timeout
 
             # Initialize metrics tracker (US-011, US-001: thread-safe)
