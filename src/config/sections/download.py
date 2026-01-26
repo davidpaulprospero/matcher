@@ -444,6 +444,8 @@ class CookieRotationConfig:
         "429",
         "rate limit",
         "too many requests",
+        "403",
+        "forbidden",
         "sign in",
         "login required",
         "confirm your age",

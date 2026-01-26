@@ -1642,6 +1642,8 @@ class VideoDownloader:
         '429',                  # Rate limit
         'rate limit',
         'too many requests',
+        'http error 403',       # Forbidden - cookie/auth issue
+        '403: forbidden',
         'connection reset',
         'connection refused',
         'connection timed out',
@@ -1825,8 +1827,19 @@ class VideoDownloader:
                         self.rate_limit_metrics.record_download_failure()
                         return []
 
-                    # Check for transient errors - retry with backoff
+                    # Check for transient errors - retry with backoff + cookie rotation
                     if self._is_transient_error(stderr):
+                        # Try cookie rotation via handle_rate_limit_error (backoff + rotate)
+                        self.handle_rate_limit_error(stderr, tier=tier, keyword=keyword)
+                        # Update cmd with new cookie if rotated
+                        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+                            current_cookie = self.cookie_rotator.get_current_cookie()
+                            if current_cookie:
+                                for i, arg in enumerate(cmd):
+                                    if arg == '--cookies' and i + 1 < len(cmd):
+                                        cmd[i + 1] = current_cookie
+                                        break
+
                         if attempt < max_retries:
                             delay = retry_delay * (retry_backoff ** attempt)
                             logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
