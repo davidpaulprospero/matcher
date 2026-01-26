@@ -5153,3 +5153,80 @@ All 6 criteria already met (implementation was complete):
 4. ✅ handle_upcoming config option (download.py:207-213)
 5. ✅ Log format "video_id: STATE (scheduled ...)" (StreamStateResult.__str__)
 6. ✅ 41 tests verify all 5 states (test_stream_state.py)
+
+## Iteration - US-008: Add worker-level progress tracking with ETA calculation
+- Focus: caption
+- Status: COMPLETE
+
+### Implementation Summary
+Added worker-level progress tracking to parallel caption fetching operations with
+ETA calculation based on rolling average of last 10 fetch times.
+
+### New Classes (src/caption_fetcher.py)
+
+1. **WorkerProgress** (lines 1056-1164)
+   - Tracks individual worker state: worker_id, current_video, start_time
+   - Methods: start_video(), complete_video(), get_elapsed(), is_stuck()
+   - Rolling window of fetch_times for average calculation
+
+2. **WorkerProgressTracker** (lines 1167-1359)
+   - Manages pool of WorkerProgress instances
+   - Thread-safe with RLock for concurrent access
+   - Methods: calculate_eta(), get_worker_stats(), get_slow_workers()
+   - format_progress_message() returns "Workers: 8 active, 1 slow (video abc >30s)"
+
+### Config Changes
+
+1. **src/config/sections/download.py** (line 334-338)
+   - Added `stuck_worker_threshold: float = 60.0` to CaptionFirstConfig
+   - Workers exceeding this threshold reported as "slow" in progress
+
+2. **config.yaml** (lines 997-1000)
+   - Added `stuck_worker_threshold: 60.0` with documentation
+
+### Integration with fetch_captions_batch()
+
+Updated fetch_single() and progress callbacks to:
+- Track worker_id using thread ident mapping
+- Call worker_tracker.worker_start() at fetch start
+- Call worker_tracker.worker_complete() on success/failure
+- Include worker_stats in all progress callback details:
+  - active_count, slow_count, slow_workers list
+  - avg_fetch_time, eta_seconds
+  - completed, total
+
+### Tests (tests/test_worker_progress.py)
+
+Created 30 comprehensive tests in 5 classes:
+- TestWorkerProgress (13 tests) - individual worker tracking
+- TestWorkerProgressTracker (12 tests) - aggregate tracking
+- TestWorkerProgressTrackerThreadSafety (1 test) - concurrent access
+- TestETAAccuracy (4 tests) - verify ETA within 20% tolerance
+
+Key ETA accuracy test:
+```python
+def test_eta_accuracy_batch_50_videos(self):
+    # 10 videos completed at ~2s each, 40 remaining, 8 workers
+    # Expected: (40 * 1.93) / 8 = ~9.65s
+    # Verified within 20% tolerance
+```
+
+### Verification
+- All 30 test_worker_progress.py tests pass
+- All 81 test_caption_cache.py tests pass (no regressions)
+- `python main.py --help` runs successfully
+- Syntax verified for all modified files
+
+### Files Modified
+- src/caption_fetcher.py - Added WorkerProgress, WorkerProgressTracker, integration
+- src/config/sections/download.py - Added stuck_worker_threshold config
+- config.yaml - Added stuck_worker_threshold with docs
+- tests/test_worker_progress.py - New test file with 30 tests
+
+### US-008 Acceptance Criteria Verified
+1. ✅ WorkerProgress dataclass: worker_id, current_video, start_time, videos_completed
+2. ✅ worker_progress tracked in WorkerProgressTracker.workers dict
+3. ✅ calculate_eta() uses rolling average of last 10 fetch times
+4. ✅ Progress callback includes: "Workers: 8 active, 1 slow (video abc >30s)"
+5. ✅ stuck_worker_threshold config (default 60s) in CaptionFirstConfig
+6. ✅ Tests verify ETA accurate within 20% for batch of 50 videos

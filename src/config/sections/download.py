@@ -331,6 +331,12 @@ class CaptionFirstConfig:
     # Lower = faster detection, higher = more confidence in pattern.
     error_pattern_sample_size: int = 10
 
+    # Worker-level progress tracking (US-008 Sprint 8)
+    # Time threshold in seconds for considering a worker "stuck" on a video.
+    # Workers exceeding this threshold are reported in progress callbacks.
+    # Set higher for slow networks or videos with many caption tracks.
+    stuck_worker_threshold: float = 60.0
+
 
 @dataclass
 class AudioFirstConfig:
