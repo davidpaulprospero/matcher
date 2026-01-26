@@ -204,6 +204,14 @@ class CaptionFirstConfig:
     # Live streams can hang indefinitely during caption fetch
     skip_live_streams: bool = True
 
+    # Upcoming stream handling (US-007 Sprint 8)
+    # How to handle UPCOMING and PREMIERE videos (scheduled but not yet live/available):
+    # - 'skip': Skip these videos entirely (same as live streams)
+    # - 'queue': Add to pending_streams list for processing later
+    # - 'check_later': Skip for now but don't mark as failed (can retry next run)
+    # UPCOMING streams will have captions available once they complete/premiere.
+    handle_upcoming: str = "skip"
+
     # Coverage threshold (US-004)
     # Minimum coverage ratio (0.0-1.0) for caption quality
     # Videos below this threshold are flagged for potential transcription fallback
