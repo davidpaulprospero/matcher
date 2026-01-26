@@ -1,4 +1,17 @@
 
+## Iteration 68 - [US-001] Create ImpersonationManager with auto-detect and round-robin rotation
+- Created `src/downloader/impersonation.py` with `ImpersonationManager` and `ImpersonationStats`
+- Auto-detects 31 curl_cffi impersonation targets via `yt-dlp --list-impersonate-targets`
+- Parses tabular output (Client/OS/Source columns) into `Client:OS` format strings
+- Thread-safe round-robin rotation using `threading.Lock` with wrapping index
+- `get_impersonate_args()` returns `['--impersonate', target]` or `[]` when unavailable
+- Graceful failure handling: TimeoutExpired, FileNotFoundError, non-zero exit code
+- Optional `preferred_targets` filtering (reduces full set to user-specified subset)
+- `ImpersonationStats` dataclass tracks `calls_made` and per-target usage counts
+- Exported from `src/downloader/__init__.py`
+- Files modified: `src/downloader/impersonation.py` (new), `src/downloader/__init__.py`
+- Test results: 100 concurrent threads = 0 errors, `main.py --help` OK, 37/37 advanced tests pass, 4 pre-existing failures unchanged (US-012)
+
 ## Iteration 1 - 2026-01-25 16:17:18
 - Focus: quality
 - Status: PRD Generated
@@ -5230,3 +5243,34 @@ def test_eta_accuracy_batch_50_videos(self):
 4. ✅ Progress callback includes: "Workers: 8 active, 1 slow (video abc >30s)"
 5. ✅ stuck_worker_threshold config (default 60s) in CaptionFirstConfig
 6. ✅ Tests verify ETA accurate within 20% for batch of 50 videos
+
+## Iteration 9 - [US-009] Create edge case test suite for cache and caption parsing
+- Created tests/test_caption_edge_cases.py with TestCaptionEdgeCases class (18 tests)
+- Tests cover all 8 acceptance criteria plus additional boundary conditions
+- Discovered floating-point precision issue in duration comparison (15.1 - 15.0 = 0.0999... not 0.1)
+- CaptionNormalizer extends zero-duration segments to min_segment_duration rather than filtering
+- BaseCache._load_index() catches JSONDecodeError and IOError, starts fresh on corruption
+- CachedCaption.from_dict() uses **kwargs filtering that fails on missing required fields
+- CaptionCache.get_caption() catches all exceptions from from_dict(), returns None
+
+### Files Modified
+- tests/test_caption_edge_cases.py - New file with 18 edge case tests
+
+### Test Results
+- 18/18 new tests pass
+- 81/81 existing caption cache tests pass (no regressions)
+
+### US-009 Acceptance Criteria Verified
+1. ✅ TestCaptionEdgeCases class in tests/test_caption_edge_cases.py
+2. ✅ 100+ char video title truncation preserves video ID (2 tests)
+3. ✅ Video URL with special characters parsed correctly (2 tests)
+4. ✅ Corrupted JSON cache file returns None gracefully (2 tests)
+5. ✅ Truncated cache file (partial write) detected and handled (2 tests)
+6. ✅ Caption segments with 0 duration fixed during normalization (2 tests)
+7. ✅ Unsorted caption timestamps reordered correctly (2 tests)
+8. ✅ Empty segment text (whitespace only) treated as missing (2 tests)
+9. ✅ All edge cases have explicit assertions and cleanup (setup_method/teardown_method)
+
+## Focus Area: download - 2026-01-26 11:52:56
+- Status: In Progress...
+

@@ -43,6 +43,8 @@ from .title_filter import TitleFilter
 from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
+from .impersonation import ImpersonationManager, ImpersonationStats
+from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -85,6 +87,9 @@ __all__ = [
     'SearchOptimizer',
     'AudioFirstPipeline',
     'CookieRotator',
+    'ImpersonationManager',
+    'ImpersonationStats',
+    'CookieMethodFallback',
     'VPNManager',
     'DownloadSpeedTracker',
     'DownloadSpeedConfig',
