@@ -123,8 +123,8 @@
             "id": "US-009",
             "title": "Add unit tests for EscalationManager core logic",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_escalation_manager.py with 40 tests across 7 test classes: TestTierProgression (6 tests), TestEscalationArgs (6 tests), TestCooldown (5 tests), TestPerKeywordIsolation (5 tests), TestThreadSafety (4 tests), TestIsEscalationTrigger (8 parametrized tests), TestMetrics (2 tests). All 6 acceptance criteria covered. Time mocking patches both src.downloader.escalation_manager.time and src.downloader.types.time for tier progression through cooldown.",
             "acceptanceCriteria": [
                 "Test file tests/test_escalation_manager.py with pytest and --non-interactive support",
                 "Test tier progression: record_failure() x threshold triggers escalate(), advancing Tier 1->2->3",
