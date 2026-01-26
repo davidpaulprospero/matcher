@@ -981,6 +981,21 @@ class HealingOrchestrator:
         """
         self._aggregated_metrics = aggregator
 
+    def wire_escalation_manager(self, escalation_manager) -> None:
+        """Wire a shared EscalationManager into the DownloadHealer.
+
+        Called by the pipeline after the download stage's VideoDownloader
+        is initialized, so the healer uses the same escalation state
+        instead of creating a duplicate CookieRotator.
+
+        Args:
+            escalation_manager: EscalationManager from VideoDownloader
+        """
+        healer = self._healer_instances.get('download-healer')
+        if healer is not None:
+            healer.escalation_manager = escalation_manager
+            logger.info("Orchestrator: Wired shared EscalationManager into DownloadHealer")
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)

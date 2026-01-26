@@ -29,6 +29,7 @@ from ...downloader.types import DownloadError
 if TYPE_CHECKING:
     from ...config import Config
     from ...state import PipelineState
+    from ...downloader.escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
 
@@ -77,21 +78,29 @@ class DownloadHealer(Healer):
     MAX_BACKOFF = 600.0  # 10 minutes
     BACKOFF_MULTIPLIER = 2.0
 
-    def __init__(self, config, project_dir):
+    def __init__(self, config, project_dir, escalation_manager: Optional['EscalationManager'] = None):
         super().__init__(config, project_dir)
         self.backoff_time = self.INITIAL_BACKOFF
         self.retry_count = 0
         self.skipped_videos: Set[str] = set()
 
-        # Initialize cookie rotator if configured
+        # Store shared escalation manager from pipeline's VideoDownloader
+        self.escalation_manager: Optional['EscalationManager'] = escalation_manager
+        if self.escalation_manager:
+            logger.info("DownloadHealer: Using shared EscalationManager from pipeline")
+
+        # Initialize cookie rotator only if no escalation manager is provided.
+        # When escalation_manager is available, its Tier 3 handles cookie rotation,
+        # so we skip creating a duplicate CookieRotator here.
         self.cookie_rotator: Optional[CookieRotator] = None
         download_config = getattr(config, 'download', None)
-        if download_config:
-            cookie_rotation_config = getattr(download_config, 'cookie_rotation', None)
-            if cookie_rotation_config and getattr(cookie_rotation_config, 'enabled', False):
-                self.cookie_rotator = CookieRotator(cookie_rotation_config)
-                if self.cookie_rotator.is_enabled:
-                    logger.info(f"DownloadHealer: Cookie rotation enabled with {self.cookie_rotator.available_cookies} cookies")
+        if not self.escalation_manager:
+            if download_config:
+                cookie_rotation_config = getattr(download_config, 'cookie_rotation', None)
+                if cookie_rotation_config and getattr(cookie_rotation_config, 'enabled', False):
+                    self.cookie_rotator = CookieRotator(cookie_rotation_config)
+                    if self.cookie_rotator.is_enabled:
+                        logger.info(f"DownloadHealer: Cookie rotation enabled with {self.cookie_rotator.available_cookies} cookies")
 
         # Initialize VPN manager if configured
         self.vpn_manager: Optional[VPNManager] = None
@@ -129,6 +138,9 @@ class DownloadHealer(Healer):
         Checks for retry context from DownloadError to avoid redundant backoff.
         If retries are already exhausted by the core retry mechanism, proceeds
         directly to escalation (cookie rotation, VPN switch) without additional backoff.
+
+        When an escalation_manager is available, records success/failure to
+        update the shared escalation tier state.
         """
         error_str = str(error).lower()
 
@@ -151,7 +163,13 @@ class DownloadHealer(Healer):
 
         # Network/timeout errors
         if any(p in error_str for p in ["timeout", "connection", "network"]):
-            return self._handle_network_error(error, state, retries_exhausted)
+            result = self._handle_network_error(error, state, retries_exhausted)
+            # Record failure with escalation manager for network errors
+            # (these may indicate rate limiting or IP blocking)
+            if self.escalation_manager and not result.success:
+                keyword = self._extract_keyword_from_error(error)
+                self.escalation_manager.record_failure(keyword, str(error))
+            return result
 
         # Partial/incomplete download
         if any(p in error_str for p in ["incomplete", "partial", "corrupt"]):
@@ -160,6 +178,22 @@ class DownloadHealer(Healer):
         # Generic download error - try with backoff
         return self._handle_generic_error(error, state, retries_exhausted)
 
+    def _extract_keyword_from_error(self, error: Exception) -> Optional[str]:
+        """
+        Extract keyword or video ID from error for escalation manager tracking.
+
+        Falls back to 'unknown' if no keyword can be extracted.
+        """
+        # Try to extract from DownloadError attributes
+        if isinstance(error, DownloadError):
+            keyword = getattr(error, 'keyword', None)
+            if keyword:
+                return keyword
+
+        # Try to extract video ID from error message
+        video_id = self._extract_video_id(str(error))
+        return video_id or 'healer_unknown'
+
     def _handle_rate_limit(
         self,
         error: Exception,
@@ -167,12 +201,13 @@ class DownloadHealer(Healer):
         retries_exhausted: bool = False
     ) -> HealerResult:
         """
-        Handle YouTube rate limiting with cookie rotation, VPN, then backoff.
+        Handle YouTube rate limiting with escalation manager, cookie rotation, VPN, then backoff.
 
         Recovery order:
-        1. Try cookie rotation (if enabled and available)
-        2. Try VPN switch (if enabled and cookies exhausted)
-        3. Fall back to exponential backoff (SKIPPED if retries already exhausted)
+        1. Consult escalation manager for current tier args (if available)
+        2. Try cookie rotation (if enabled and available, skipped when escalation manager handles it)
+        3. Try VPN switch (if enabled and cookies exhausted)
+        4. Fall back to exponential backoff (SKIPPED if retries already exhausted)
 
         Args:
             error: The exception that occurred
@@ -180,8 +215,35 @@ class DownloadHealer(Healer):
             retries_exhausted: If True, core retry already exhausted - skip additional backoff
         """
         error_str = str(error)
+        keyword = self._extract_keyword_from_error(error)
+        self._last_keyword = keyword  # Track for success recording on reset_backoff
 
-        # 1. Try cookie rotation first
+        # 0. Record failure with escalation manager (advances tier state)
+        if self.escalation_manager:
+            self.escalation_manager.record_failure(keyword, error_str)
+            self.log_attempt(f"Recorded failure with EscalationManager for '{keyword}'")
+
+        # 1. Consult escalation manager for current tier args
+        if self.escalation_manager:
+            escalation_result = self.escalation_manager.get_escalation_args(keyword)
+            tier_name = escalation_result.tier.name if hasattr(escalation_result.tier, 'name') else str(escalation_result.tier)
+            self.log_attempt(f"EscalationManager recommends tier {tier_name} for '{keyword}'")
+
+            # Cookie rotation is handled by escalation manager at Tier 3
+            if escalation_result.rotate_cookies:
+                self.log_attempt("Escalation tier 3: cookie rotation delegated to EscalationManager")
+
+            return HealerResult.fixed(
+                f"Rate limit: escalation tier {tier_name} applied for retry",
+                action=HealerAction.RETRY,
+                escalation_tier=tier_name,
+                escalation_args=escalation_result.args,
+                rotate_cookies=escalation_result.rotate_cookies,
+                retry_count=self.retry_count,
+                core_retries_exhausted=retries_exhausted
+            )
+
+        # 2. Try cookie rotation first (fallback when no escalation manager)
         if self._try_cookie_rotation(error_str):
             return HealerResult.fixed(
                 "Rate limit: rotated to new cookie",
@@ -191,7 +253,7 @@ class DownloadHealer(Healer):
                 core_retries_exhausted=retries_exhausted
             )
 
-        # 2. Try VPN switch if cookies exhausted
+        # 3. Try VPN switch if cookies exhausted
         if self._try_vpn_switch():
             return HealerResult.fixed(
                 "Rate limit: switched VPN server",
@@ -201,7 +263,7 @@ class DownloadHealer(Healer):
                 core_retries_exhausted=retries_exhausted
             )
 
-        # 3. Fall back to exponential backoff
+        # 4. Fall back to exponential backoff
         # SKIP if core retry already exhausted - avoid redundant waiting
         if retries_exhausted:
             self.log_attempt("Skipping healer backoff (core retry already exhausted)")
@@ -470,9 +532,29 @@ class DownloadHealer(Healer):
         return None
 
     def reset_backoff(self):
-        """Reset backoff state."""
+        """Reset backoff state.
+
+        Called by ResilientRunner after a successful stage run.
+        If an escalation_manager is available, records success for
+        any keywords the healer was tracking.
+        """
         self.backoff_time = self.INITIAL_BACKOFF
         self.retry_count = 0
+
+        # Record success with escalation manager to update tier state
+        if self.escalation_manager and self._last_keyword:
+            self.escalation_manager.record_success(self._last_keyword)
+            logger.debug(f"DownloadHealer: Recorded success for '{self._last_keyword}'")
+            self._last_keyword = None
+
+    @property
+    def _last_keyword(self) -> Optional[str]:
+        """Last keyword the healer operated on (for success tracking)."""
+        return getattr(self, '_tracked_keyword', None)
+
+    @_last_keyword.setter
+    def _last_keyword(self, value: Optional[str]):
+        self._tracked_keyword = value
 
     def get_skipped_videos(self) -> Set[str]:
         """Get set of skipped video IDs."""

@@ -113,7 +113,8 @@
             "id": "US-008",
             "title": "Fix DownloadHealer to use shared EscalationManager instead of duplicate CookieRotator",
             "priority": 8,
-            "passes": false,
+            "passes": true,
+            "notes": "DownloadHealer.__init__ accepts optional escalation_manager param. When present, skips CookieRotator creation (Tier 3 handles it). _handle_rate_limit() calls record_failure() then get_escalation_args() for current tier. reset_backoff() calls record_success() via _last_keyword tracking. HealingOrchestrator.wire_escalation_manager() method added. Pipeline _collect_escalation_metrics() wires shared manager. 7 new tests in TestSharedEscalationManager. 27 tests pass (healer retry), 175 total related tests pass.",
             "acceptanceCriteria": [
                 "DownloadHealer.__init__ accepts optional escalation_manager parameter from pipeline's VideoDownloader",
                 "Remove duplicate CookieRotator creation in DownloadHealer - use escalation_manager's cookie rotation instead",
