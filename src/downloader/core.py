@@ -552,6 +552,9 @@ class VideoDownloader:
             # Include VPN manager state for switch count persistence (US-005)
             if self.vpn_manager and self.vpn_manager.is_enabled:
                 self.checkpoint.vpn_manager_state = self.vpn_manager.to_checkpoint_state()
+            # Include escalation manager state for resume support (Sprint 10 US-007)
+            if self.escalation_manager is not None:
+                self.checkpoint.escalation_state = self.escalation_manager.to_dict()
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -1178,6 +1181,27 @@ class VideoDownloader:
                 # Restore VPN manager state for switch count persistence (US-005)
                 if self.vpn_manager and self.checkpoint.vpn_manager_state:
                     self.vpn_manager.restore_from_checkpoint(self.checkpoint.vpn_manager_state)
+                # Restore escalation manager state for resume support (Sprint 10 US-007)
+                if self.checkpoint.escalation_state and self.escalation_manager is not None:
+                    restored_mgr = EscalationManager.from_dict(
+                        data=self.checkpoint.escalation_state,
+                        impersonation_manager=self.impersonation_manager,
+                        extractor_args_config=getattr(self.download_config, 'extractor_args', None),
+                        budget=getattr(self, 'rate_limit_budget', None),
+                    )
+                    self.escalation_manager = restored_mgr
+                    # Re-share with auxiliary modules
+                    if hasattr(self, 'audio_first') and self.audio_first:
+                        self.audio_first.escalation_manager = self.escalation_manager
+                    if hasattr(self, 'title_filter') and self.title_filter:
+                        self.title_filter.escalation_manager = self.escalation_manager
+                    if hasattr(self, 'speech_screener') and self.speech_screener:
+                        self.speech_screener.escalation_manager = self.escalation_manager
+                    metrics = self.escalation_manager.get_metrics()
+                    logger.info(
+                        f"Restored escalation state: {metrics['total_403s']} 403s, "
+                        f"{metrics['total_escalations']} escalations"
+                    )
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(

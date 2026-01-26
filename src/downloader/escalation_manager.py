@@ -572,6 +572,124 @@ class EscalationManager:
                 if state.current_tier == tier
             ]
 
+    def to_dict(self) -> Dict:
+        """Serialize all keyword escalation states for checkpoint persistence.
+
+        Returns:
+            Dict with keyword states, global counters, and a timestamp.
+            Format: {
+                'keyword_states': {keyword: {tier, consecutive_403s, total_403s,
+                    extractor_args_index, last_escalation_time}},
+                'total_403s': int,
+                'total_successes': int,
+                'total_escalations': int,
+                'escalations_per_tier': {tier_name: count},
+                'speed_escalations': int,
+                'saved_at': float (epoch timestamp)
+            }
+        """
+        with self._global_lock:
+            keyword_states = {}
+            for keyword, state in self._keyword_states.items():
+                keyword_states[keyword] = {
+                    'tier': state.current_tier.value,
+                    'consecutive_403s': state.consecutive_403s,
+                    'extractor_args_index': state.extractor_args_index,
+                    'last_escalation_time': state.last_escalation_time,
+                }
+            return {
+                'keyword_states': keyword_states,
+                'total_403s': self._total_403s,
+                'total_successes': self._total_successes,
+                'total_escalations': self._total_escalations,
+                'escalations_per_tier': dict(self._escalations_per_tier),
+                'speed_escalations': self._speed_escalations,
+                'saved_at': time.time(),
+            }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Dict,
+        impersonation_manager: "ImpersonationManager",
+        extractor_args_config: Optional["ExtractorArgsConfig"] = None,
+        budget: Optional["RateLimitBudget"] = None,
+        stale_threshold: float = 3600.0,
+    ) -> "EscalationManager":
+        """Restore an EscalationManager from checkpoint data.
+
+        Handles stale state: if the checkpoint data is older than
+        ``stale_threshold`` seconds, all keywords are de-escalated by one tier
+        (YouTube may have relaxed blocking since the last session).
+
+        Args:
+            data: Dict previously returned by ``to_dict()``.
+            impersonation_manager: Provides Tier 1 --impersonate args.
+            extractor_args_config: Configuration for Tier 2 player_client rotation.
+            budget: Optional RateLimitBudget for budget-aware escalation.
+            stale_threshold: Seconds after which saved data is considered stale
+                and keywords are de-escalated by one tier. Default: 3600 (1 hour).
+
+        Returns:
+            A new EscalationManager with restored keyword states.
+        """
+        manager = cls(
+            impersonation_manager=impersonation_manager,
+            extractor_args_config=extractor_args_config,
+            budget=budget,
+        )
+
+        if not data or not isinstance(data, dict):
+            logger.warning("Empty or invalid escalation checkpoint data, starting fresh")
+            return manager
+
+        # Check staleness
+        saved_at = data.get('saved_at', 0.0)
+        age = time.time() - saved_at
+        is_stale = age > stale_threshold
+
+        if is_stale:
+            logger.info(
+                f"Escalation checkpoint is stale ({age:.0f}s > {stale_threshold:.0f}s threshold), "
+                f"de-escalating all keywords by one tier"
+            )
+
+        # Restore keyword states
+        keyword_states = data.get('keyword_states', {})
+        for keyword, state_data in keyword_states.items():
+            tier_value = state_data.get('tier', EscalationTier.IMPERSONATE_ONLY.value)
+            # Clamp to valid tier range
+            tier_value = max(
+                EscalationTier.IMPERSONATE_ONLY.value,
+                min(tier_value, EscalationTier.FULL_BYPASS.value),
+            )
+
+            if is_stale and tier_value > EscalationTier.IMPERSONATE_ONLY.value:
+                tier_value -= 1
+
+            state = EscalationState(
+                current_tier=EscalationTier(tier_value),
+                consecutive_403s=state_data.get('consecutive_403s', 0),
+                last_escalation_time=state_data.get('last_escalation_time'),
+                extractor_args_index=state_data.get('extractor_args_index', 0),
+            )
+            manager._keyword_states[keyword] = state
+
+        # Restore global counters
+        manager._total_403s = data.get('total_403s', 0)
+        manager._total_successes = data.get('total_successes', 0)
+        manager._total_escalations = data.get('total_escalations', 0)
+        manager._escalations_per_tier = dict(data.get('escalations_per_tier', {}))
+        manager._speed_escalations = data.get('speed_escalations', 0)
+
+        restored_count = len(keyword_states)
+        logger.info(
+            f"Restored escalation state for {restored_count} keywords"
+            f"{' (de-escalated due to stale data)' if is_stale else ''}"
+        )
+
+        return manager
+
     def get_metrics(self) -> Dict:
         """Get escalation metrics summary.
 
