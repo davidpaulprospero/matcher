@@ -717,6 +717,12 @@ class BatchRetryConfig:
     # If False, proceed with retry even if cookies are in cooldown
     wait_for_cookie_cooldown: bool = True
 
+    # Maximum combined wait time (seconds) when both circuit breaker and cookie
+    # cooldown are blocking simultaneously. If exceeded, force-process the retry
+    # queue with the current best-available cookie method instead of waiting
+    # for both to clear. Prevents deadlock when CB and cooldown overlap.
+    max_combined_wait_seconds: float = 300.0
+
 
 @dataclass
 class VPNConfig:

@@ -1,153 +1,144 @@
-﻿{
-    "branchName":  "ralph/sprint-12",
-    "sprintNumber":  12,
-    "focusArea":  "rate-limiting",
-    "projectContext":  "Sprint 10 (rate-limiting) built the 3-tier escalation system: ImpersonationManager, EscalationManager, CookieMethodFallback, RateLimitBudget, RateLimitMetrics, and wired all 8 yt-dlp call sites. Sprint 11 (testing) added unit tests for ImpersonationManager, CookieMethodFallback, compilation modules, and centralized download fixtures. However, several rate-limiting features remain incomplete: preemptive speed-based escalation exists but is never called, adaptive backoff severity multipliers are classified but not applied, per-tier backoff state is not persisted in checkpoints, budget-aware circuit breaker pause scaling is missing, cookie fallback chain doesn\u0027t validate files on init, and retry queue + circuit breaker can deadlock. This sprint closes those gaps and adds rate limit window estimation, per-keyword escalation history export, and error-pattern-to-tier correlation tracking to improve escalation intelligence.",
-    "userStories":  [
-                        {
-                            "id":  "US-001",
-                            "title":  "Integrate preemptive speed-based escalation into download loop",
-                            "priority":  1,
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Call escalation_manager.record_slow_speed(keyword) from core.py _run_download_cmd when speed_tracker detects rate_limit_signal (speed \u003c rate_limit_signal_threshold for consecutive_slow_samples)",
-                                                       "Wire the same call in audio_first.py for audio download and segment download paths",
-                                                       "Speed escalation advances tier by 1 (same as 403-based escalation) but uses \u0027speed\u0027 trigger category in metrics",
-                                                       "Add speed_escalations count to RateLimitMetrics.get_summary() output alongside existing 403-based escalation counts",
-                                                       "Unit test: mock speed_tracker to return slow samples, verify record_slow_speed() called and tier advances",
-                                                       "Unit test: verify speed escalation respects cooldown_seconds (no double-escalation within cooldown window)"
-                                                   ],
-                            "notes":  "Pre-implemented in Sprint 10. core.py:2435 calls record_slow_speed() when detect_rate_limit_signals() fires. audio_first.py:955 has _check_speed_escalation() called from lines 417 and 655. RateLimitMetrics includes speed_escalations in get_summary() (line 489) and export (line 709). 11 unit tests pass (TestSpeedTriggeredEscalation: 8, TestSpeedEscalationCooldown: 3)."
-                        },
-                        {
-                            "id":  "US-002",
-                            "title":  "Activate adaptive backoff severity multipliers in retry logic",
-                            "priority":  2,
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In core.py backoff calculation, apply SEVERITY_MULTIPLIERS from classify_error_severity() to the base backoff delay (high=3.0x, medium=2.0x, low=1.5x current delay)",
-                                                       "Only apply when download.rate_limit.adaptive_multiplier config is true (existing flag, currently unused)",
-                                                       "Record severity-adjusted backoff in metrics via record_backoff(seconds, severity) with the actual severity used",
-                                                       "Add config recommendation: if \u003e50% of backoff events are high-severity, suggest increasing initial_backoff_seconds",
-                                                       "Unit test: verify backoff delay is multiplied by severity factor (e.g., 5s base * 3.0 high = 15s)",
-                                                       "Unit test: verify adaptive_multiplier=false uses standard multiplier without severity adjustment"
-                                                   ],
-                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: b343eb5 test: [US-002] Create dedicated unit tests for CookieMethodFallback"
-                        },
-                        {
-                            "id":  "US-003",
-                            "title":  "Add per-tier backoff state persistence to checkpoint",
-                            "priority":  3,
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Serialize TierRateLimitState dict (per-keyword, per-tier backoff_delay and consecutive_failures) to checkpoint under \u0027tier_backoff_state\u0027 key",
-                                                       "Restore tier backoff state from checkpoint on resume, applying staleness de-escalation (reduce backoff by 50% if checkpoint older than 30 minutes)",
-                                                       "Handle missing/malformed tier_backoff_state gracefully (log warning, start fresh — no crash)",
-                                                       "Include tier_backoff_state in VideoDownloader._save_checkpoint() alongside existing escalation_manager state",
-                                                       "Unit test: save checkpoint with tier state, restore and verify backoff delays preserved",
-                                                       "Unit test: restore stale checkpoint (\u003e30min), verify backoff delays halved"
-                                                   ],
-                            "notes":  "Added tier_backoff_state field to DownloadCheckpoint. _save_checkpoint() serializes all TierRateLimitState dicts with saved_at timestamp. _restore_tier_backoff_state() in download_all() resume path restores states with 50% staleness de-escalation for checkpoints >30min old. Graceful handling for missing/malformed/corrupt data. 18 tests in test_tier_backoff_checkpoint.py (all pass)."
-                        },
-                        {
-                            "id":  "US-004",
-                            "title":  "Add budget-aware circuit breaker pause scaling",
-                            "priority":  4,
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "When circuit breaker trips AND rate_limit_budget.is_nearly_exhausted() (\u003e80% of any resource used), extend pause_seconds by 1.5x",
-                                                       "When budget.is_exhausted(), extend pause_seconds by 2.5x (aggressive backoff since no recovery resources remain)",
-                                                       "Add is_nearly_exhausted() method to RateLimitBudget that checks if any single resource exceeds 80% usage",
-                                                       "Log the pause extension reason: \u0027Circuit breaker pause extended {original}s -\u003e {extended}s (budget {status})\u0027",
-                                                       "Unit test: verify 1.5x extension when budget nearly exhausted, 2.5x when fully exhausted, 1.0x when budget healthy",
-                                                       "Unit test: verify pause extension does not exceed max_pause_seconds cap (add max_pause_seconds=300 to CircuitBreakerConfig)"
-                                                   ],
-                            "notes":  "Added is_nearly_exhausted() to RateLimitBudget (checks >80% usage on any resource). Added set_budget() to CircuitBreaker. Modified _get_effective_pause_seconds() to apply 1.5x (nearly exhausted) or 2.5x (exhausted) multiplier, composing with existing escalation 2x. Added max_pause_seconds=300 to CircuitBreakerConfig (both circuit_breaker.py and config/sections/download.py). Updated config.yaml. 30 tests in test_budget_circuit_breaker_pause_scaling.py (all pass). 199 existing related tests still pass."
-                        },
-                        {
-                            "id":  "US-005",
-                            "title":  "Add cookie fallback chain validation on initialization",
-                            "priority":  5,
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In CookieMethodFallback.__init__(), validate all file-based methods: check file exists and is readable (os.access with R_OK)",
-                                                       "Skip invalid file methods during chain construction (log warning per skipped file: \u0027Cookie file not found, skipping: {path}\u0027)",
-                                                       "If all file methods invalid, chain degrades to [browser, none] or [none] — never includes broken file entries",
-                                                       "Add get_chain_health() method returning dict with total_methods, valid_methods, skipped_files list",
-                                                       "Log chain health summary at INFO level on init: \u0027Cookie fallback chain: {valid}/{total} methods available\u0027",
-                                                       "Unit test: construct chain with mix of existing/missing files, verify only valid entries in chain"
-                                                   ],
-                            "notes":  "Added os.access(R_OK) validation alongside Path.exists() in _build_chain(). Skipped files logged as warnings and tracked in _skipped_files list. _build_chain() now returns (chain, skipped_files) tuple. Added get_chain_health() returning {total_methods, valid_methods, skipped_files}. Chain health summary logged at INFO on init. 9 new tests in TestChainValidation class (mix existing/missing, degrade to browser+none or none-only, exists-but-not-readable, health counts, warning logging, info logging). All 44 tests pass."
-                        },
-                        {
-                            "id":  "US-006",
-                            "title":  "Fix retry queue and circuit breaker deadlock scenario",
-                            "priority":  6,
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add max_combined_wait_seconds config to BatchRetryConfig (default: 300) — total wait cap when both CB and cooldown are blocking",
-                                                       "When retry queue waits for circuit breaker AND cookie cooldown simultaneously, use min(cb_remaining, cooldown_remaining) + buffer instead of waiting for both sequentially",
-                                                       "If max_combined_wait_seconds exceeded, force-process retry queue with current-best cookie method (skip waiting for preferred cookie)",
-                                                       "Log deadlock detection: \u0027Retry queue waited {elapsed}s for CB+cooldown — forcing retry with best-available cookie method\u0027",
-                                                       "Unit test: mock both CB open and cookie cooldown active, verify combined wait respects max_combined_wait_seconds",
-                                                       "Unit test: verify forced retry uses current best cookie method (not exhausted/cooled-down one)"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-007",
-                            "title":  "Add rate limit window duration estimation",
-                            "priority":  7,
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Track success timestamps after rate-limited failures in EscalationManager: store (failure_time, recovery_time) pairs per keyword",
-                                                       "Calculate estimated_window_seconds as median of (recovery_time - failure_time) across recent pairs (last 10)",
-                                                       "Expose get_estimated_rate_limit_window() returning median window duration or None if insufficient data (\u003c3 pairs)",
-                                                       "Add window estimate to RateLimitMetrics export under \u0027rate_limiting.estimated_window_seconds\u0027",
-                                                       "Add config recommendation: if estimated window \u003e 120s, suggest increasing batch_retry.delay_seconds to match",
-                                                       "Unit test: feed alternating failure/success timestamps, verify median calculation correct"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-008",
-                            "title":  "Add per-keyword escalation history export to metrics",
-                            "priority":  8,
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add get_keyword_escalation_timeline() to EscalationManager returning dict keyed by keyword with list of {timestamp, from_tier, to_tier, trigger_category} events",
-                                                       "Include timeline in RateLimitMetrics.export_to_json() under \u0027escalation.keyword_timelines\u0027",
-                                                       "Limit timeline to last 20 events per keyword to bound export size",
-                                                       "Add get_hot_keywords() returning keywords with \u003e3 escalations in last 30 minutes (sorted by escalation count desc)",
-                                                       "Include hot_keywords list in metrics export for quick debugging",
-                                                       "Unit test: record escalation events for 3 keywords, verify timeline structure and hot_keywords threshold"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-009",
-                            "title":  "Add error-pattern-to-tier success correlation tracking",
-                            "priority":  9,
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Track (trigger_category, tier_used, outcome) tuples in EscalationManager — outcome is \u0027success\u0027 or \u0027failure\u0027 on next download attempt after escalation",
-                                                       "Add get_tier_effectiveness() returning dict of {trigger_category: {tier_1: success_rate, tier_2: success_rate, tier_3: success_rate}} based on collected data",
-                                                       "If a trigger category has \u003e80% success rate at Tier 1, recommend NOT escalating for that category in config recommendations",
-                                                       "If a trigger category has \u003c20% success rate at Tier 2 but \u003e60% at Tier 3, recommend skipping Tier 2 for that pattern",
-                                                       "Include tier_effectiveness summary in RateLimitMetrics.export_to_json() under \u0027escalation.tier_effectiveness\u0027",
-                                                       "Unit test: simulate mixed success/failure outcomes across tiers and categories, verify rates calculated correctly"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-010",
-                            "title":  "Add auto-scaling budget limits based on keyword count",
-                            "priority":  10,
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add auto_scale_budget option to RateLimitBudgetConfig (default: false) — when true, multiply base limits by ceil(keyword_count / 5)",
-                                                       "Scale max_rotations, max_backoff_time proportionally (e.g., 10 keywords = 2x base budget; 25 keywords = 5x)",
-                                                       "Cap auto-scaled values at 5x base to prevent runaway resource usage (max_rotations capped at 50, max_backoff_time at 3000s)",
-                                                       "Log scaled budget at pipeline start: \u0027Rate limit budget auto-scaled for {n} keywords: rotations={x}, backoff={y}s\u0027",
-                                                       "Add scale_for_keywords(count) method to RateLimitBudget that applies scaling and returns new limits",
-                                                       "Unit test: verify scaling factor for 1, 5, 10, 25 keywords and cap enforcement at 5x"
-                                                   ]
-                        }
-                    ]
+{
+    "branchName": "ralph/sprint-13",
+    "sprintNumber": 13,
+    "focusArea": "testing",
+    "projectContext": "Sprint 12 (rate-limiting) completed US-001 through US-005: wired speed-based escalation into audio_first + core.py, activated adaptive backoff severity multipliers, added per-tier backoff state checkpoint persistence, budget-aware circuit breaker pause scaling, and cookie fallback chain init validation. US-006 through US-010 remain incomplete: retry queue + circuit breaker deadlock fix, rate limit window estimation, per-keyword escalation history export, error-pattern-to-tier correlation tracking, and auto-scaling budget limits. This testing sprint adds comprehensive test coverage for those incomplete features and their supporting modules, ensuring rate-limiting intelligence is reliable before further feature development.",
+    "userStories": [
+        {
+            "id": "US-001",
+            "title": "Add retry queue deadlock prevention tests",
+            "priority": 1,
+            "passes": true,
+            "notes": "Implemented _wait_combined() with deadlock detection + max_combined_wait_seconds config. Added _get_cb_remaining() and _get_cookie_cooldown_remaining() non-blocking helpers. 32 new tests in test_retry_queue_deadlock.py covering all acceptance criteria. Updated 3 existing tests that mocked old sequential wait methods.",
+            "acceptanceCriteria": [
+                "Test _wait_combined() when both circuit breaker AND cookie cooldown are blocking simultaneously — verify it waits min(cb_remaining, cooldown_remaining) + 5s buffer",
+                "Test _wait_combined() when combined estimate exceeds max_combined_wait_seconds (300) — verify _forced_retry flag is set and wait returns 0",
+                "Test _wait_combined() when only circuit breaker blocks (cooldown clear) — verify it waits only for CB recovery",
+                "Test _wait_combined() when only cookie cooldown blocks (CB closed) — verify it waits only for cooldown",
+                "Test start_retry_pass() end-to-end: add items, mock CB open + cooldown active, verify pass completes within max_combined_wait_seconds",
+                "Test that forced retry uses current best cookie method by verifying cookie_rotator state is not advanced when _forced_retry is True"
+            ]
+        },
+        {
+            "id": "US-002",
+            "title": "Add rate limit window duration estimation tests",
+            "priority": 2,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test get_estimated_rate_limit_window() returns None when fewer than 3 failure/recovery pairs exist",
+                "Test median calculation with 5 alternating failure/success timestamps (e.g., gaps of 30s, 60s, 45s, 90s, 120s) — verify median is 60s",
+                "Test window estimation with exactly 3 pairs at minimum threshold — verify valid result returned",
+                "Test that only last 10 pairs are used when more data exists (verify oldest pairs discarded)",
+                "Test per-keyword window isolation — keyword A's pairs don't affect keyword B's estimate",
+                "Test window estimate included in RateLimitMetrics.export_to_json() under 'rate_limiting.estimated_window_seconds'"
+            ]
+        },
+        {
+            "id": "US-003",
+            "title": "Add per-keyword escalation timeline export tests",
+            "priority": 3,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test get_keyword_escalation_timeline() returns dict keyed by keyword with list of {timestamp, from_tier, to_tier, trigger_category} events",
+                "Test timeline is limited to last 20 events per keyword — record 25 events, verify only last 20 returned",
+                "Test get_hot_keywords() returns keywords with >3 escalations in last 30 minutes, sorted by count descending",
+                "Test get_hot_keywords() excludes keywords with <=3 escalations or escalations older than 30 minutes",
+                "Test timeline and hot_keywords included in RateLimitMetrics.export_to_json() under 'escalation.keyword_timelines' and 'escalation.hot_keywords'"
+            ]
+        },
+        {
+            "id": "US-004",
+            "title": "Add error-pattern-to-tier success correlation tests",
+            "priority": 4,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test get_tier_effectiveness() returns {trigger_category: {tier_1: rate, tier_2: rate, tier_3: rate}} structure with correct success rates",
+                "Test mixed outcomes: 10 attempts at Tier 1 (8 success) → 80% rate; 10 at Tier 2 (3 success) → 30% rate",
+                "Test recommendation: trigger category with >80% Tier 1 success rate generates 'skip escalation for {category}' recommendation",
+                "Test recommendation: category with <20% Tier 2 but >60% Tier 3 generates 'skip Tier 2 for {category}' recommendation",
+                "Test tier_effectiveness included in RateLimitMetrics.export_to_json() under 'escalation.tier_effectiveness'",
+                "Test empty data returns empty dict (no division-by-zero or KeyError)"
+            ]
+        },
+        {
+            "id": "US-005",
+            "title": "Add auto-scaling budget limits tests",
+            "priority": 5,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test scale_for_keywords(1) returns base limits unchanged (ceil(1/5) = 1x multiplier)",
+                "Test scale_for_keywords(10) returns 2x base limits (ceil(10/5) = 2x)",
+                "Test scale_for_keywords(25) returns 5x base limits (ceil(25/5) = 5x)",
+                "Test scale_for_keywords(100) is capped at 5x (not 20x) — max_rotations <= 50, max_backoff_time <= 3000",
+                "Test auto_scale_budget=false ignores keyword count and uses base limits",
+                "Test scaled budget logged at INFO level: 'Rate limit budget auto-scaled for {n} keywords: rotations={x}, backoff={y}s'"
+            ]
+        },
+        {
+            "id": "US-006",
+            "title": "Add EscalationManager stale checkpoint restoration tests",
+            "priority": 6,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test from_dict() with checkpoint saved_at > 1 hour ago: verify all tiers de-escalated by one level (Tier 3 → 2, Tier 2 → 1, Tier 1 stays)",
+                "Test from_dict() with checkpoint saved_at < 1 hour ago: verify tiers preserved exactly",
+                "Test from_dict() with missing 'saved_at' key: verify graceful fallback (treat as stale, de-escalate)",
+                "Test from_dict() with corrupted tier values (e.g., tier=5, tier=-1): verify clamped to valid EscalationTier range (1-3)",
+                "Test from_dict() with empty keyword states dict: verify returns fresh EscalationManager (no crash)"
+            ]
+        },
+        {
+            "id": "US-007",
+            "title": "Add RateLimitMetrics recommendation engine tests",
+            "priority": 7,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test recommendation triggered when rate_limit_events > 10% of total_downloads ('increase backoff or add cookies')",
+                "Test recommendation triggered when retry_exhaustion > 20% ('increase max_retries')",
+                "Test recommendation triggered when circuit_breaker_trips > 3 ('increase pause or use VPN')",
+                "Test recommendation triggered when rate limits detected but no cookie_rotations ('enable rotation')",
+                "Test no recommendations when all metrics are healthy (below thresholds)",
+                "Test get_config_recommendations() returns list of strings (not None, not empty dict) even when no recommendations apply"
+            ]
+        },
+        {
+            "id": "US-008",
+            "title": "Add RateLimitMetricsAggregator health status tests",
+            "priority": 8,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test get_health_status() returns 'healthy' when no keywords at Tier 2+ and budget > 50% remaining",
+                "Test get_health_status() returns 'degraded' when >30% keywords at Tier 2+ OR budget between 20-50% remaining",
+                "Test get_health_status() returns 'critical' when >50% keywords at Tier 3 OR budget < 20% remaining OR circuit breaker open",
+                "Test aggregate() correctly pulls metrics from EscalationManager, CookieRotator, RateLimitBudget, and CircuitBreaker",
+                "Test health status transitions: healthy → degraded → critical as failures accumulate"
+            ]
+        },
+        {
+            "id": "US-009",
+            "title": "Add circuit breaker pause scaling composition tests",
+            "priority": 9,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget nearly exhausted (1.5x) apply — verify multiplicative composition (base * 2.0 * 1.5)",
+                "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget exhausted (2.5x) apply — verify multiplicative composition (base * 2.0 * 2.5)",
+                "Test effective pause never exceeds max_pause_seconds (300) even with maximum multipliers",
+                "Test half-open state requires 3 consecutive successes when escalation at Tier 3 (extended reset)",
+                "Test half-open state requires only 1 success when escalation below Tier 3 (normal reset)"
+            ]
+        },
+        {
+            "id": "US-010",
+            "title": "Add speed tracker rate limit signal detection tests",
+            "priority": 10,
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test detect_rate_limit_signals() returns True when consecutive_slow_samples >= threshold (default 3) AND speed < rate_limit_signal_threshold",
+                "Test detect_rate_limit_signals() returns False when speed is above threshold (even with many samples)",
+                "Test speed sample averaging: record 5 samples, verify avg_speed computed correctly with rolling window",
+                "Test that a single fast sample resets consecutive_slow_samples counter",
+                "Test speed tracking per-keyword isolation — keyword A's slow samples don't affect keyword B"
+            ]
+        }
+    ]
 }

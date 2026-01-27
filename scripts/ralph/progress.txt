@@ -5836,3 +5836,20 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_budget_circuit_breaker_pause_scaling.py (30 tests across 7 test classes)
 - Test results: 30 new tests passed in 0.55s; 199 existing related tests still pass
 - All 6 acceptance criteria met
+
+## Focus Area: testing - 2026-01-27 23:20:19
+- Status: In Progress...
+
+
+## Iteration US-001 - Add retry queue deadlock prevention tests
+- Implemented _wait_combined() method in RetryQueue that uses min(cb_remaining, cooldown_remaining) + 5s buffer instead of sequential waits
+- Added max_combined_wait_seconds config (default: 300) to BatchRetryConfig in both src/config/sections/download.py and src/downloader/retry_queue.py
+- Added _get_cb_remaining() and _get_cookie_cooldown_remaining() non-blocking helpers for calculating remaining wait without sleeping
+- When combined estimate exceeds max_combined_wait_seconds, sets _forced_retry=True and returns 0 (force-processes with best-available cookie)
+- Added forced_retry property and _forced_retry tracking through clear() and get_stats()
+- Updated start_retry_pass() to use _wait_combined() instead of sequential _wait_for_circuit_breaker() + _wait_for_cookie_cooldown()
+- Updated config.yaml with wait_for_cookie_cooldown and max_combined_wait_seconds settings
+- Created tests/test_retry_queue_deadlock.py with 32 tests covering all 6 acceptance criteria
+- Fixed 3 existing tests in test_cookie_cooldown_sync.py and test_circuit_breaker_retry_coordination.py that mocked old sequential methods
+- Files modified: src/downloader/retry_queue.py, src/config/sections/download.py, config.yaml, tests/test_retry_queue_deadlock.py (new), tests/test_cookie_cooldown_sync.py, tests/test_circuit_breaker_retry_coordination.py
+- Test results: 32 new + 248 related = all passing. Full suite: 1736 passed, 1 pre-existing failure (caption integration, unrelated)
