@@ -21,20 +21,9 @@ BeforeAll {
         New-Item -ItemType Directory -Path $script:TestDataDir -Force | Out-Null
     }
 
-    # Source functions into global scope
-    if (Test-Path $script:RalphScript) {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:RalphScript, [ref]$null, [ref]$null)
-        $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
-
-        foreach ($func in $functions) {
-            $funcDef = $func.Extent.Text
-            $globalFuncDef = $funcDef -replace '^function\s+([A-Za-z0-9_-]+)', 'function global:$1'
-            try {
-                Invoke-Expression $globalFuncDef
-            }
-            catch {}
-        }
-    }
+    # Source all functions from ralph.ps1 and lib/*.ps1 into global scope
+    . (Join-Path $PSScriptRoot 'test-helper.ps1')
+    Import-RalphFunctions -RalphDir $script:RalphDir -GlobalScope
 
     # Set up script-level variables
     $script:SessionId = "e2e-test-session"

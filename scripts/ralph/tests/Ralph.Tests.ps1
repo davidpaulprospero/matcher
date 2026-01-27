@@ -24,22 +24,9 @@ BeforeAll {
         New-Item -ItemType Directory -Path $script:TestDataDir -Force | Out-Null
     }
 
-    # Source the functions from ralph.ps1 without running the main script
-    # We'll extract functions using AST parsing
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:RalphScript, [ref]$null, [ref]$null)
-    $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
-
-    # Define each function in the GLOBAL scope so Pester can see them
-    foreach ($func in $functions) {
-        $funcDef = $func.Extent.Text
-        # Replace 'function Name' with 'function global:Name' to make it visible
-        $globalFuncDef = $funcDef -replace '^function\s+([A-Za-z0-9_-]+)', 'function global:$1'
-        try {
-            Invoke-Expression $globalFuncDef
-        } catch {
-            # Skip functions that fail to load (may have syntax issues or dependencies)
-        }
-    }
+    # Source all functions from ralph.ps1 and lib/*.ps1 into global scope
+    . (Join-Path $PSScriptRoot 'test-helper.ps1')
+    Import-RalphFunctions -RalphDir $script:RalphDir -GlobalScope
 
     # Set up script-level variables that the functions expect
     $script:SessionId = "test-session-001"
