@@ -5866,3 +5866,18 @@ def test_eta_accuracy_batch_50_videos(self):
 - Fixed 3 existing tests in test_cookie_cooldown_sync.py and test_circuit_breaker_retry_coordination.py that mocked old sequential methods
 - Files modified: src/downloader/retry_queue.py, src/config/sections/download.py, config.yaml, tests/test_retry_queue_deadlock.py (new), tests/test_cookie_cooldown_sync.py, tests/test_circuit_breaker_retry_coordination.py
 - Test results: 32 new + 248 related = all passing. Full suite: 1736 passed, 1 pre-existing failure (caption integration, unrelated)
+
+## Iteration US-003 (Sprint 13) - Add per-keyword escalation timeline export tests
+- Added `_escalation_timeline` dict to EscalationManager for tracking per-keyword escalation events
+- Added `_record_timeline_event()` helper recording {timestamp, from_tier, to_tier, trigger_category}
+- Modified `record_failure()` to call `classify_trigger()` on error_output and record timeline events
+- Both normal escalation and budget-exhausted shortcut paths record timeline events
+- Implemented `get_keyword_escalation_timeline()` returning last 20 events per keyword
+- Implemented `get_hot_keywords()` returning keywords with >3 escalations in last 30 minutes, sorted desc
+- Added optional `escalation_manager` parameter to `RateLimitMetrics.export_to_json()`
+- Timeline data exported under `escalation.keyword_timelines` and `escalation.hot_keywords`
+- Timeline cleared on `reset_all()`
+- 26 new tests across 6 test classes in `tests/test_escalation_timeline.py`
+- Files modified: `src/downloader/escalation_manager.py`, `src/downloader/rate_limit_metrics.py`
+- Files created: `tests/test_escalation_timeline.py`
+- Test results: 26 passed (new), 259 passed (existing escalation + metrics), 0 failures
