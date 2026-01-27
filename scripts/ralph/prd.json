@@ -111,7 +111,8 @@
             "id": "US-008",
             "title": "Add RateLimitMetricsAggregator health status tests",
             "priority": 8,
-            "passes": false,
+            "passes": true,
+            "notes": "Added 5 new tests to TestHealthStatus class: test_healthy_no_tier2_and_budget_above_50_pct (AC1 explicit), test_degraded_budget_between_50_and_90_pct_consumed (AC2 budget), test_degraded_over_30_pct_keywords_at_tier2_plus (AC2 escalation), test_critical_budget_under_20_pct_remaining (AC3 budget), test_health_transitions_healthy_to_degraded_to_critical (AC5 progressive). Pre-existing tests already covered AC3 (critical CB open, critical high escalation), AC4 (aggregate all subsystems). Total: 32 tests in test_metrics_aggregator.py, all passing.",
             "acceptanceCriteria": [
                 "Test get_health_status() returns 'healthy' when no keywords at Tier 2+ and budget > 50% remaining",
                 "Test get_health_status() returns 'degraded' when >30% keywords at Tier 2+ OR budget between 20-50% remaining",

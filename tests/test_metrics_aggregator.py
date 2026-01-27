@@ -327,6 +327,132 @@ class TestHealthStatus:
         )
         assert agg.get_health_status() == 'critical'
 
+    def test_healthy_no_tier2_and_budget_above_50_pct(self):
+        """AC1: 'healthy' when no keywords at Tier 2+ AND budget > 50% remaining."""
+        mock_esc = MagicMock()
+        mock_esc.get_metrics.return_value = {
+            'average_tier': 1.0,
+            'keywords_at_each_tier': {
+                'IMPERSONATE': ['kw1', 'kw2', 'kw3', 'kw4', 'kw5'],
+            },
+        }
+        mock_budget = MagicMock()
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 2,
+            'max_rotations': 10,
+            'backoff_time_spent': 100.0,
+            'max_backoff_time': 600,
+        }
+
+        agg = RateLimitMetricsAggregator(
+            escalation_manager=mock_esc,
+            rate_limit_budget=mock_budget,
+        )
+        assert agg.get_health_status() == 'healthy'
+
+    def test_degraded_budget_between_50_and_90_pct_consumed(self):
+        """AC2: 'degraded' when budget between 50-90% consumed (20-50% remaining)."""
+        mock_budget = MagicMock()
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 7,
+            'max_rotations': 10,
+            'backoff_time_spent': 200.0,
+            'max_backoff_time': 600,
+        }
+
+        agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
+        assert agg.get_health_status() == 'degraded'
+
+    def test_degraded_over_30_pct_keywords_at_tier2_plus(self):
+        """AC2: 'degraded' when >30% keywords at Tier 2+ (avg_tier >= 1.8)."""
+        mock_esc = MagicMock()
+        mock_esc.get_metrics.return_value = {
+            'average_tier': 1.8,
+            'keywords_at_each_tier': {
+                'IMPERSONATE': ['kw1', 'kw2', 'kw3'],
+                'EXTRACTOR_ARGS': ['kw4', 'kw5'],
+            },
+        }
+
+        agg = RateLimitMetricsAggregator(escalation_manager=mock_esc)
+        assert agg.get_health_status() == 'degraded'
+
+    def test_critical_budget_under_20_pct_remaining(self):
+        """AC3: 'critical' when budget < 20% remaining (>80% consumed)."""
+        mock_budget = MagicMock()
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 9,
+            'max_rotations': 10,
+            'backoff_time_spent': 560.0,
+            'max_backoff_time': 600,
+        }
+
+        agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
+        assert agg.get_health_status() == 'critical'
+
+    def test_health_transitions_healthy_to_degraded_to_critical(self):
+        """AC5: Health transitions as failures accumulate."""
+        mock_esc = MagicMock()
+        mock_budget = MagicMock()
+        mock_cb = MagicMock()
+
+        agg = RateLimitMetricsAggregator(
+            escalation_manager=mock_esc,
+            rate_limit_budget=mock_budget,
+            circuit_breaker=mock_cb,
+        )
+
+        # Phase 1: Healthy — all keywords at Tier 1, budget fresh, CB closed
+        mock_esc.get_metrics.return_value = {
+            'average_tier': 1.0,
+            'keywords_at_each_tier': {
+                'IMPERSONATE': ['kw1', 'kw2', 'kw3', 'kw4'],
+            },
+        }
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 1, 'max_rotations': 10,
+            'backoff_time_spent': 50.0, 'max_backoff_time': 600,
+        }
+        mock_cb.get_stats.return_value = {
+            'is_open': False, 'total_trips': 0,
+        }
+        assert agg.get_health_status() == 'healthy'
+
+        # Phase 2: Degraded — escalation climbs, budget consumed halfway
+        mock_esc.get_metrics.return_value = {
+            'average_tier': 2.0,
+            'keywords_at_each_tier': {
+                'IMPERSONATE': ['kw1', 'kw2'],
+                'EXTRACTOR_ARGS': ['kw3'],
+                'FULL_BYPASS': ['kw4'],
+            },
+        }
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 6, 'max_rotations': 10,
+            'backoff_time_spent': 350.0, 'max_backoff_time': 600,
+        }
+        mock_cb.get_stats.return_value = {
+            'is_open': False, 'total_trips': 2,
+        }
+        assert agg.get_health_status() == 'degraded'
+
+        # Phase 3: Critical — majority at Tier 3, budget exhausted, CB open
+        mock_esc.get_metrics.return_value = {
+            'average_tier': 2.8,
+            'keywords_at_each_tier': {
+                'IMPERSONATE': ['kw1'],
+                'FULL_BYPASS': ['kw2', 'kw3', 'kw4'],
+            },
+        }
+        mock_budget.to_dict.return_value = {
+            'rotations_used': 9, 'max_rotations': 10,
+            'backoff_time_spent': 580.0, 'max_backoff_time': 600,
+        }
+        mock_cb.get_stats.return_value = {
+            'is_open': True, 'total_trips': 5,
+        }
+        assert agg.get_health_status() == 'critical'
+
     def test_health_safe_with_failing_subsystem(self):
         """get_health_status() doesn't crash when subsystem raises."""
         mock_esc = MagicMock()
