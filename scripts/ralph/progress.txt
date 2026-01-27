@@ -1,7 +1,25 @@
 
-## Sprint 10 - Rate-Limiting Coordination
+## Sprint 2 - Rate-Limiting Test Coverage & Robustness
+Focus: Fix stale tests, fill coverage gaps, add jitter, unify error classification
+Stories: US-011 to US-019 (9 new stories)
+
+| Story | Title | Type |
+|-------|-------|------|
+| US-011 | Fix stale tier-specific timeout test assertion | Bug fix |
+| US-012 | Add CookieMethodFallback tests | Testing |
+| US-013 | Add SpeedTracker tests | Testing |
+| US-014 | Add MetricsAggregator export tests | Testing |
+| US-015 | Add end-to-end escalation integration test | Testing |
+| US-016 | Add random jitter to backoff delays | Feature |
+| US-017 | Unify error classification modules | Refactoring |
+| US-018 | Add stale checkpoint de-escalation tests | Testing |
+| US-019 | Sprint 2 verification | Verification |
+
+---
+
+## Sprint 1 (prev Sprint 10) - Rate-Limiting Coordination
 Focus: Wire existing rate-limiting subsystems together into coordinated strategy
-Stories: US-001 to US-010 (10 stories)
+Stories: US-001 to US-010 (10 stories, all complete)
 
 ## Iteration 7 - [US-007] Add escalation state persistence to checkpoint for resume support
 - Added EscalationManager.to_dict() serializing per-keyword states (tier, consecutive_403s, extractor_args_index, last_escalation_time) plus global counters and saved_at timestamp
@@ -5728,3 +5746,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: src/config/sections/download.py, src/downloader/rate_limit_budget.py, src/downloader/core.py, config.yaml, tests/test_rate_limit_budget.py, scripts/ralph/prd.json, scripts/ralph/progress.txt
 - Tests: 55 pass (test_rate_limit_budget), 219 pass (related), 84 pass (config coverage), py_compile OK, main.py --help OK
 - All 5 acceptance criteria met
+
+## Pre-flight Auto-Complete - [US-010] Add integration tests for coordinated rate-limiting subsystem interactions
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Focus Area: testing - 2026-01-27 17:54:46
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-004] Add centralized download-related fixtures to conftest.py
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
