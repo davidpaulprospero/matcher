@@ -204,7 +204,7 @@ function Get-StoryFailureContext {
     $context += "This story has been attempted before and failed."
 
     # Check for last output file
-    $prevIteration = $script:IterationCount  # Current iteration (we're building prompt for next)
+    $prevIteration = $script:State.IterationCount  # Current iteration (we're building prompt for next)
     $outFile = Join-Path $script:SessionLogDir "claude_stdout_$prevIteration.txt"
     $errFile = Join-Path $script:SessionLogDir "claude_stderr_$prevIteration.txt"
 

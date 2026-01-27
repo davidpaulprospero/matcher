@@ -606,18 +606,18 @@ Keep response under 500 words. This is context-gathering, not implementation.
     $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -FullExplore:$FullExplore
 
     # Cache the summary for use in story prompts
-    $script:LastExplorationSummary = $result
-    $script:LastExplorationTime = Get-Date
+    $script:State.LastExplorationSummary = $result
+    $script:State.LastExplorationTime = Get-Date
 
     # For sprint-start, also update the context file
     if ($FullExplore -and $result) {
         # Try to read what Claude wrote to the file
         if (Test-Path $script:ExplorationContextFile) {
-            $script:SprintExplorationContext = Get-Content $script:ExplorationContextFile -Raw -ErrorAction SilentlyContinue
+            $script:State.SprintExplorationContext = Get-Content $script:ExplorationContextFile -Raw -ErrorAction SilentlyContinue
         }
-        if (-not $script:SprintExplorationContext) {
+        if (-not $script:State.SprintExplorationContext) {
             # Fall back to the output if file wasn't written
-            $script:SprintExplorationContext = $result
+            $script:State.SprintExplorationContext = $result
         }
     }
 
@@ -655,7 +655,7 @@ function Test-ShouldExplore {
     $intervalStories = $explorationConfig.periodic.intervalStories
     if (-not $intervalStories) { $intervalStories = 3 }
 
-    if ($script:StoriesSinceExploration -ge $intervalStories) {
+    if ($script:State.StoriesSinceExploration -ge $intervalStories) {
         return @{ ShouldExplore = $true; Reason = "interval" }
     }
 
@@ -666,11 +666,11 @@ function Test-ShouldExplore {
             $relevantFiles = $config.relevantFiles.$FocusArea
         }
 
-        if ($relevantFiles.Count -gt 0 -and $script:LastExplorationCommit) {
+        if ($relevantFiles.Count -gt 0 -and $script:State.LastExplorationCommit) {
             try {
                 # Compare against the commit from last exploration, not HEAD~1
                 # This prevents triggering on every iteration since Ralph commits after each story
-                $changedFiles = git diff --name-only $script:LastExplorationCommit HEAD 2>$null
+                $changedFiles = git diff --name-only $script:State.LastExplorationCommit HEAD 2>$null
                 if ($changedFiles) {
                     foreach ($changed in ($changedFiles -split "`n")) {
                         foreach ($pattern in $relevantFiles) {
@@ -704,7 +704,7 @@ function Invoke-PeriodicExplorationIfNeeded {
     )
 
     # Increment story counter
-    $script:StoriesSinceExploration++
+    $script:State.StoriesSinceExploration++
 
     # Check if exploration needed
     $check = Test-ShouldExplore -FocusArea $FocusArea
@@ -718,8 +718,8 @@ function Invoke-PeriodicExplorationIfNeeded {
         $result = Invoke-FocusAreaExploration -FocusArea $FocusArea -Reason $check.Reason
 
         # Reset counter and update git baseline
-        $script:StoriesSinceExploration = 0
-        $script:LastExplorationCommit = (git rev-parse HEAD 2>$null)
+        $script:State.StoriesSinceExploration = 0
+        $script:State.LastExplorationCommit = (git rev-parse HEAD 2>$null)
 
         return $true
     }

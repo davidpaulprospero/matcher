@@ -38,24 +38,22 @@ $script:ArchiveDir = Join-Path $script:RalphDir "archive"
 $script:SprintHistoryFile = Join-Path $script:RalphDir "sprint_history.json"
 $script:ExplorationContextFile = Join-Path $script:RalphDir "exploration_context.md"
 
-# Session tracking
-$script:SessionId = Get-Date -Format "yyyy-MM-dd_HHmmss"
-$script:IterationCount = 0
-$script:ConsecutiveFailures = 0
-$script:SessionStartTime = Get-Date
-$script:CurrentMode = "Standard"  # "Interview", "Standard", or "TrueAuto"
-
-# Retry tracking
-$script:CurrentRetryCount = 0      # Attempts on current focus area/story
-$script:LastFocusAreaId = ""       # Track when focus area changes
-$script:LastStoryId = ""           # Track when story changes
-
-# Exploration tracking
-$script:StoriesSinceExploration = 0        # Counter for periodic exploration
-$script:LastExplorationSummary = ""        # Cached exploration summary
-$script:LastExplorationTime = $null        # When last exploration ran
-$script:SprintExplorationContext = ""      # Sprint-start exploration context
-$script:LastExplorationCommit = (git rev-parse HEAD 2>$null)  # Commit hash at last exploration (init to current HEAD)
+# Mutable session state (consolidated hashtable)
+$script:State = @{
+    SessionId               = (Get-Date -Format 'yyyy-MM-dd_HHmmss')
+    IterationCount          = 0
+    ConsecutiveFailures     = 0
+    SessionStartTime        = Get-Date
+    CurrentMode             = 'Standard'   # "Interview", "Standard", or "TrueAuto"
+    CurrentRetryCount       = 0            # Attempts on current focus area/story
+    LastFocusAreaId          = ''           # Track when focus area changes
+    LastStoryId             = ''           # Track when story changes
+    StoriesSinceExploration = 0            # Counter for periodic exploration
+    LastExplorationSummary  = ''           # Cached exploration summary
+    LastExplorationTime     = $null        # When last exploration ran
+    SprintExplorationContext = ''          # Sprint-start exploration context
+    LastExplorationCommit   = (git rev-parse HEAD 2>$null)  # Commit hash at last exploration
+}
 
 # Ensure logs directory exists
 if (-not (Test-Path $script:LogDir)) {
@@ -63,7 +61,7 @@ if (-not (Test-Path $script:LogDir)) {
 }
 
 # Create session log directory
-$script:SessionLogDir = Join-Path $script:LogDir $script:SessionId
+$script:SessionLogDir = Join-Path $script:LogDir $script:State.SessionId
 New-Item -ItemType Directory -Path $script:SessionLogDir -Force | Out-Null
 
 # Ensure archive directory exists
@@ -114,7 +112,7 @@ function Write-RalphBanner {
         Write-Host "  Mode: Standard" -ForegroundColor White
     }
 
-    Write-Host "  Session: $script:SessionId" -ForegroundColor DarkGray
+    Write-Host "  Session: $($script:State.SessionId)" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -309,15 +307,15 @@ function Invoke-ClaudeProcess {
     $lastTrackingVar = if ($isStoryWork) { 'LastStoryId' } else { 'LastFocusAreaId' }
     $lastTracking = Get-Variable -Name $lastTrackingVar -Scope Script -ErrorAction SilentlyContinue
     if (-not $lastTracking -or $lastTracking.Value -ne $trackingId) {
-        $script:CurrentRetryCount = 0
+        $script:State.CurrentRetryCount = 0
         Set-Variable -Name $lastTrackingVar -Value $trackingId -Scope Script
     }
-    $script:CurrentRetryCount++
+    $script:State.CurrentRetryCount++
 
-    $script:IterationCount++
+    $script:State.IterationCount++
     $iterationStart = Get-Date
 
-    Write-IterationBanner -Iteration $script:IterationCount -FocusArea $focusAreaId -StoryId $storyId
+    Write-IterationBanner -Iteration $script:State.IterationCount -FocusArea $focusAreaId -StoryId $storyId
 
     # Get Claude path
     $claudePath = Get-ClaudePath
@@ -341,7 +339,7 @@ function Invoke-ClaudeProcess {
     Log-StateTransition -From "idle" -To "running" -Reason "Starting: $displayPrompt" -Context $transitionContext
 
     # Log timeline event: iteration start
-    $timelineData = @{ iteration = $script:IterationCount; focusArea = $focusAreaId; promptType = $PromptType }
+    $timelineData = @{ iteration = $script:State.IterationCount; focusArea = $focusAreaId; promptType = $PromptType }
     if ($storyId) { $timelineData.storyId = $storyId }
     Append-SessionTimeline -Event "iteration_start" -Data $timelineData
 
@@ -354,9 +352,9 @@ function Invoke-ClaudeProcess {
         }
 
         # Output file paths
-        $outFile = Join-Path $script:SessionLogDir "claude_out_$($script:IterationCount).log"
-        $errFile = Join-Path $script:SessionLogDir "claude_err_$($script:IterationCount).log"
-        $promptFile = Join-Path $script:SessionLogDir "prompt_$($script:IterationCount).txt"
+        $outFile = Join-Path $script:SessionLogDir "claude_out_$($script:State.IterationCount).log"
+        $errFile = Join-Path $script:SessionLogDir "claude_err_$($script:State.IterationCount).log"
+        $promptFile = Join-Path $script:SessionLogDir "prompt_$($script:State.IterationCount).txt"
 
         # Write prompt to file
         $Prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
@@ -492,13 +490,13 @@ function Invoke-ClaudeProcess {
             $timedOut = $true
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $true
 
-            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Timeout after ${timeout}s" -Iteration $script:IterationCount
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Timeout after ${timeout}s" -Iteration $script:State.IterationCount
             Log-StateTransition -From "running" -To "failed" -Reason "Timeout after ${timeout}s" -Context $transitionContext
 
-            Record-Metric -StoryId $Identifier -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
+            Record-Metric -StoryId $Identifier -Mode $script:State.CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $true -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:State.CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
-            if ($StoryObj) { Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:IterationCount -Passed $false }
-            $script:ConsecutiveFailures++
+            if ($StoryObj) { Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:State.IterationCount -Passed $false }
+            $script:State.ConsecutiveFailures++
         }
         elseif ($exitCode -eq 0) {
             $successMsg = if ($isStoryWork) { "Story completed successfully" } else { "Iteration completed successfully" }
@@ -539,10 +537,10 @@ function Invoke-ClaudeProcess {
                 }
             }
 
-            Record-Metric -StoryId $Identifier -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
+            Record-Metric -StoryId $Identifier -Mode $script:State.CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $true -Timeout $false -TokensUsed $tokensUsed -ErrorCategory "" -TestResults $testResults -RetryCount $script:State.CurrentRetryCount -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
             if ($StoryObj) {
-                Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:IterationCount -Passed $true -ClaudeOutput $claudeOutput -DiffOutput $diffOutput
+                Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:State.IterationCount -Passed $true -ClaudeOutput $claudeOutput -DiffOutput $diffOutput
                 Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $storyId; passed = $true }
 
                 # Story 2.1: Independent code review (enhanced from Story 1.1)
@@ -581,8 +579,8 @@ function Invoke-ClaudeProcess {
                 # Story 4.1: Save story progress (completed milestone)
                 try {
                     Save-StoryProgress -StoryId $storyId -Milestone "completed" -Data @{
-                        iteration = $script:IterationCount
-                        retryCount = $script:CurrentRetryCount
+                        iteration = $script:State.IterationCount
+                        retryCount = $script:State.CurrentRetryCount
                         tokensUsed = $tokensUsed
                     }
                 } catch {}
@@ -593,7 +591,7 @@ function Invoke-ClaudeProcess {
                         type = "story_success"
                         storyId = $storyId
                         focusArea = $focusAreaId
-                        retryCount = $script:CurrentRetryCount
+                        retryCount = $script:State.CurrentRetryCount
                         tokensUsed = $tokensUsed
                         linesAdded = $gitStats.Added
                         linesDeleted = $gitStats.Deleted
@@ -602,7 +600,7 @@ function Invoke-ClaudeProcess {
                     }
                 } catch {}
             }
-            $script:ConsecutiveFailures = 0
+            $script:State.ConsecutiveFailures = 0
         }
         else {
             $exitCodeStr = if ($null -ne $exitCode) { $exitCode } else { "unknown" }
@@ -611,12 +609,12 @@ function Invoke-ClaudeProcess {
             $iterationStatus = "failed"
             $errorCategory = Get-ErrorCategory -Output $claudeOutput -TimedOut $false
 
-            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCodeStr" -Iteration $script:IterationCount
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCodeStr" -Iteration $script:State.IterationCount
             Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $exitCodeStr" -Context $transitionContext
 
-            Record-Metric -StoryId $Identifier -Mode $script:CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
+            Record-Metric -StoryId $Identifier -Mode $script:State.CurrentMode -DurationMin ([math]::Round($iterationDuration.TotalMinutes, 0)) -Success $false -Timeout $false -TokensUsed $tokensUsed -ErrorCategory $errorCategory -TestResults $testResults -RetryCount $script:State.CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs $phaseTimings.read_ms -PhaseAnalyzeMs $phaseTimings.analyze_ms -PhaseImplementMs $phaseTimings.implement_ms -PhaseTestMs $phaseTimings.test_ms -PhaseCommitMs $phaseTimings.commit_ms
 
-            if ($StoryObj) { Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:IterationCount -Passed $false }
+            if ($StoryObj) { Log-StoryVerification -StoryId $storyId -Story $StoryObj -Iteration $script:State.IterationCount -Passed $false }
 
             # Story 4.3: Update learning database on failure
             if ($storyId) {
@@ -626,32 +624,32 @@ function Invoke-ClaudeProcess {
                         storyId = $storyId
                         focusArea = $focusAreaId
                         errorCategory = $errorCategory
-                        retryCount = $script:CurrentRetryCount
+                        retryCount = $script:State.CurrentRetryCount
                         exitCode = $exitCodeStr
                     }
                 } catch {}
             }
 
-            $script:ConsecutiveFailures++
+            $script:State.ConsecutiveFailures++
         }
 
         # === COMPREHENSIVE LOGGING ===
-        Log-ClaudeInvocation -Iteration $script:IterationCount -ClaudePath $claudePath -Arguments $claudeArgs -PromptFile $promptFile -PromptType $PromptType -ProcessId $process.Id -StartTime $executionStart -EndTime $executionEnd -ExitCode $(if ($null -ne $exitCode) { $exitCode } else { -1 }) -TimedOut $timedOut
+        Log-ClaudeInvocation -Iteration $script:State.IterationCount -ClaudePath $claudePath -Arguments $claudeArgs -PromptFile $promptFile -PromptType $PromptType -ProcessId $process.Id -StartTime $executionStart -EndTime $executionEnd -ExitCode $(if ($null -ne $exitCode) { $exitCode } else { -1 }) -TimedOut $timedOut
 
-        Log-IterationManifest -Iteration $script:IterationCount -StoryId $storyId -FocusArea $focusAreaId -Status $iterationStatus -StartTime $iterationStart -EndTime (Get-Date) -PromptFile $promptFile -GitBefore $gitStateBefore -GitAfter $gitStateAfter -FileOps $fileOps -Commits $commits -TestResults $testResults -TokensEstimated $tokensUsed -RetryCount $script:CurrentRetryCount
+        Log-IterationManifest -Iteration $script:State.IterationCount -StoryId $storyId -FocusArea $focusAreaId -Status $iterationStatus -StartTime $iterationStart -EndTime (Get-Date) -PromptFile $promptFile -GitBefore $gitStateBefore -GitAfter $gitStateAfter -FileOps $fileOps -Commits $commits -TestResults $testResults -TokensEstimated $tokensUsed -RetryCount $script:State.CurrentRetryCount
 
-        Log-FileOperations -Iteration $script:IterationCount -FileOps $fileOps
-        Log-GitOperations -Iteration $script:IterationCount -Branch $gitStateAfter.branch -Commits $commits -BeforeState $gitStateBefore -AfterState $gitStateAfter
+        Log-FileOperations -Iteration $script:State.IterationCount -FileOps $fileOps
+        Log-GitOperations -Iteration $script:State.IterationCount -Branch $gitStateAfter.branch -Commits $commits -BeforeState $gitStateBefore -AfterState $gitStateAfter
 
-        $completeData = @{ iteration = $script:IterationCount; status = $iterationStatus; success = $success; durationSec = [int]$iterationDuration.TotalSeconds }
+        $completeData = @{ iteration = $script:State.IterationCount; status = $iterationStatus; success = $success; durationSec = [int]$iterationDuration.TotalSeconds }
         if ($storyId) { $completeData.storyId = $storyId }
         Append-SessionTimeline -Event "iteration_complete" -Data $completeData
 
         # Phase 3 logging
-        if ($claudeOutput) { Log-TestDetails -Iteration $script:IterationCount -Output $claudeOutput }
-        if ($resourceSamples.Count -gt 0) { Log-ResourceUsage -Iteration $script:IterationCount -ProcessId $process.Id -Samples $resourceSamples }
+        if ($claudeOutput) { Log-TestDetails -Iteration $script:State.IterationCount -Output $claudeOutput }
+        if ($resourceSamples.Count -gt 0) { Log-ResourceUsage -Iteration $script:State.IterationCount -ProcessId $process.Id -Samples $resourceSamples }
 
-        $effectiveness = Get-PromptEffectiveness -Success $success -RetryCount $script:CurrentRetryCount
+        $effectiveness = Get-PromptEffectiveness -Success $success -RetryCount $script:State.CurrentRetryCount
         $promptContent = Get-Content $promptFile -Raw -ErrorAction SilentlyContinue
         $promptHashShort = ""
         if ($promptContent) {
@@ -660,7 +658,7 @@ function Invoke-ClaudeProcess {
             $hashBytes = $md5.ComputeHash($bytes)
             $promptHashShort = ([BitConverter]::ToString($hashBytes) -replace '-', '').Substring(0, 16)
         }
-        Log-PromptEffectiveness -Iteration $script:IterationCount -PromptType $PromptType -Effectiveness $effectiveness -PromptHash $promptHashShort
+        Log-PromptEffectiveness -Iteration $script:State.IterationCount -PromptType $PromptType -Effectiveness $effectiveness -PromptHash $promptHashShort
 
         return $success
     }
@@ -668,16 +666,16 @@ function Invoke-ClaudeProcess {
         Write-Host "  Error invoking Claude: $_" -ForegroundColor Red
         $errorCategory = Get-ErrorCategory -Output $_.ToString() -TimedOut $false
 
-        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails $_.ToString() -Iteration $script:IterationCount
+        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails $_.ToString() -Iteration $script:State.IterationCount
         Log-StateTransition -From "running" -To "error" -Reason $_.ToString() -Context $transitionContext
 
-        Record-Metric -StoryId $Identifier -Mode $script:CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs 0 -PhaseAnalyzeMs 0 -PhaseImplementMs 0 -PhaseTestMs 0 -PhaseCommitMs 0
+        Record-Metric -StoryId $Identifier -Mode $script:State.CurrentMode -DurationMin 0 -Success $false -Timeout $false -TokensUsed 0 -ErrorCategory $errorCategory -TestResults "" -RetryCount $script:State.CurrentRetryCount -LinesAdded 0 -LinesDeleted 0 -PhaseReadMs 0 -PhaseAnalyzeMs 0 -PhaseImplementMs 0 -PhaseTestMs 0 -PhaseCommitMs 0
 
-        $errorData = @{ iteration = $script:IterationCount; error = $_.ToString() }
+        $errorData = @{ iteration = $script:State.IterationCount; error = $_.ToString() }
         if ($storyId) { $errorData.storyId = $storyId }
         Append-SessionTimeline -Event "iteration_error" -Data $errorData
 
-        $script:ConsecutiveFailures++
+        $script:State.ConsecutiveFailures++
         return $false
     }
 }
@@ -755,7 +753,7 @@ function Invoke-ClaudeForFocusArea {
             $explorationResult = Invoke-FocusAreaExploration -FocusArea $FocusAreaId -Reason "sprint_start" -FullExplore
 
             # Reset stories counter since we're starting fresh
-            $script:StoriesSinceExploration = 0
+            $script:State.StoriesSinceExploration = 0
 
             Write-Host ""
         }
@@ -765,11 +763,11 @@ function Invoke-ClaudeForFocusArea {
     if ($GeneratePRD) {
         # Build exploration context section for PRD prompt
         $explorationSection = ""
-        if ($script:SprintExplorationContext) {
+        if ($script:State.SprintExplorationContext) {
             $explorationSection = @"
 
 ## Exploration Context (Fresh Scan)
-$script:SprintExplorationContext
+$script:State.SprintExplorationContext
 
 Use this exploration context to inform story generation. Prioritize:
 - Issues discovered during exploration
@@ -1179,7 +1177,7 @@ function Complete-StoryAutomatically {
         $metricsFile = Join-Path $script:RalphDir "metrics.csv"
         if (Test-Path $metricsFile) {
             $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-            $sessionId = if ($script:SessionId) { $script:SessionId } else { "preflight" }
+            $sessionId = if ($script:State.SessionId) { $script:State.SessionId } else { "preflight" }
             $sprintName = "sprint-$($script:SprintNumber)"
             $focusArea = ""
             if (Test-Path $script:PrdFile) {
@@ -1234,7 +1232,7 @@ function Invoke-ClaudeForStory {
     }
 
     # Story 3.1: Adaptive prompt builder (consolidates Stories 1.2, 1.3, 1.6, 2.5, 3.3)
-    $prompt = Build-StoryPrompt -StoryId $StoryId -Story $storyObj -FocusArea $focusArea -RetryCount $script:CurrentRetryCount
+    $prompt = Build-StoryPrompt -StoryId $StoryId -Story $storyObj -FocusArea $focusArea -RetryCount $script:State.CurrentRetryCount
 
     # Invoke the common process handler
     return Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj
@@ -1403,9 +1401,9 @@ function Test-ShouldAbort {
         $maxFailures = $script:Config.autonomy.fastFail.consecutiveFailures
     }
 
-    if ($script:ConsecutiveFailures -ge $maxFailures) {
+    if ($script:State.ConsecutiveFailures -ge $maxFailures) {
         Write-Host ""
-        Write-Host "  FAST-FAIL: $script:ConsecutiveFailures consecutive failures" -ForegroundColor Red
+        Write-Host "  FAST-FAIL: $($script:State.ConsecutiveFailures) consecutive failures" -ForegroundColor Red
         Write-Host "  Aborting to prevent wasted iterations" -ForegroundColor Red
         Write-Host ""
         return $true
@@ -1430,7 +1428,7 @@ function Test-MaxIterations {
         $maxIterations = $script:Config.maxIterations
     }
 
-    if ($script:IterationCount -ge $maxIterations) {
+    if ($script:State.IterationCount -ge $maxIterations) {
         Write-Host ""
         Write-Host "  MAX ITERATIONS: Reached $maxIterations iterations" -ForegroundColor Yellow
         Write-Host ""
@@ -1579,7 +1577,7 @@ function Start-InterviewQueueLoop {
         Process focus areas from interview queue
     #>
 
-    $script:CurrentMode = "Interview"
+    $script:State.CurrentMode = "Interview"
     $context = Get-InterviewContext
     $focusAreas = Get-InterviewFocusAreas
 
@@ -1750,7 +1748,7 @@ function Start-TrueAutoLoop {
         Continuous improvement mode - work through stories until max iterations
     #>
 
-    $script:CurrentMode = "TrueAuto"
+    $script:State.CurrentMode = "TrueAuto"
     Write-Host "  TrueAuto mode: Continuous improvement" -ForegroundColor Magenta
     Write-Host ""
 
@@ -1820,7 +1818,7 @@ function Start-TrueAutoLoop {
 
     Write-Host ""
     Write-Host "  TrueAuto session complete" -ForegroundColor Magenta
-    Write-Host "  Iterations: $script:IterationCount" -ForegroundColor DarkGray
+    Write-Host "  Iterations: $($script:State.IterationCount)" -ForegroundColor DarkGray
 }
 
 function Start-StandardLoop {
@@ -1830,7 +1828,7 @@ function Start-StandardLoop {
         After sprint complete, checks queue.json for pending focus areas and advances
     #>
 
-    $script:CurrentMode = "Standard"
+    $script:State.CurrentMode = "Standard"
 
     # Check if we need to generate a new PRD for the queued focus area
     # Read queue directly (inline) for reliability - Get-NextQueuedFocusArea has been unreliable
@@ -2264,7 +2262,7 @@ function Start-RalphsChoiceLoop {
         Ralph's Choice mode - Ralph decides focus areas, user confirms each
     #>
 
-    $script:CurrentMode = "RalphsChoice"
+    $script:State.CurrentMode = "RalphsChoice"
     Write-Host "  Ralph's Choice mode: Ralph decides, you confirm" -ForegroundColor Magenta
     Write-Host ""
 
@@ -2385,7 +2383,7 @@ function Start-RalphsChoiceAutoLoop {
         Ralph's Choice Auto mode - fully autonomous with countdown
     #>
 
-    $script:CurrentMode = "RalphsChoiceAuto"
+    $script:State.CurrentMode = "RalphsChoiceAuto"
     Write-Host "  Ralph's Choice Auto: Fully autonomous" -ForegroundColor Magenta
     Write-Host ""
 
@@ -2618,20 +2616,20 @@ else {
 }
 
 # Session summary
-$duration = (Get-Date) - $script:SessionStartTime
+$duration = (Get-Date) - $script:State.SessionStartTime
 
 # Log session end event
 Append-SessionTimeline -Event "session_end" -Data @{
-    iterations = $script:IterationCount
+    iterations = $script:State.IterationCount
     durationMin = [math]::Round($duration.TotalMinutes, 1)
-    consecutiveFailures = $script:ConsecutiveFailures
+    consecutiveFailures = $script:State.ConsecutiveFailures
 }
 Write-Host ""
 Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  Session Summary" -ForegroundColor Cyan
 Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Session ID: $script:SessionId" -ForegroundColor DarkGray
-Write-Host "  Iterations: $script:IterationCount" -ForegroundColor DarkGray
+Write-Host "  Session ID: $($script:State.SessionId)" -ForegroundColor DarkGray
+Write-Host "  Iterations: $($script:State.IterationCount)" -ForegroundColor DarkGray
 Write-Host "  Duration: $([math]::Round($duration.TotalMinutes, 1)) minutes" -ForegroundColor DarkGray
 Write-Host "  Logs: $script:SessionLogDir" -ForegroundColor DarkGray
 Write-Host ""

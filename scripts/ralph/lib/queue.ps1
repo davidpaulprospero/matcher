@@ -152,7 +152,7 @@ function Update-QueueProgress {
         # Update session info
         if ($queue.session) {
             $queue.session.lastActivityAt = $timestamp
-            $queue.session.iterationCount = $script:IterationCount
+            $queue.session.iterationCount = $script:State.IterationCount
         }
 
         Save-Queue -Queue $queue
@@ -194,10 +194,10 @@ function Show-CompletionChoice {
     }
 
     # Show session stats
-    $duration = (Get-Date) - $script:SessionStartTime
+    $duration = (Get-Date) - $script:State.SessionStartTime
     Write-Host ""
     Write-Host "  Session Stats:" -ForegroundColor DarkGray
-    Write-Host "    Iterations: $script:IterationCount" -ForegroundColor DarkGray
+    Write-Host "    Iterations: $($script:State.IterationCount)" -ForegroundColor DarkGray
     Write-Host "    Duration: $([math]::Round($duration.TotalMinutes, 1)) minutes" -ForegroundColor DarkGray
 
     Write-Host ""
