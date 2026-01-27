@@ -1,4 +1,16 @@
 
+## Iteration US-005 - Add cookie fallback chain validation on initialization
+- Added `os.access(R_OK)` validation alongside `Path.exists()` in `_build_chain()` for proper readability checks
+- Skipped files now logged as warnings: "Cookie file not found, skipping: {path}"
+- `_build_chain()` returns `(chain, skipped_files)` tuple; skipped files tracked in `_skipped_files`
+- Added `get_chain_health()` method returning `{total_methods, valid_methods, skipped_files}`
+- Chain health summary logged at INFO level on init: "Cookie fallback chain: {valid}/{total} methods available"
+- If all file methods invalid, chain degrades to `[browser, none]` or `[none]` — never includes broken file entries
+- Added 9 new tests in `TestChainValidation` class covering all acceptance criteria
+- Updated `_build_fallback` test helper to support `files_readable` param and patch `os.access`
+- Files modified: `src/downloader/cookie_method_fallback.py`, `tests/test_cookie_method_fallback.py`
+- Test results: 44 passed in 0.49s (35 existing + 9 new)
+
 ## Iteration US-001 - Integrate preemptive speed-based escalation into download loop
 - Wired speed_tracker + record_slow_speed() in audio_first.py for audio download and segment download paths
 - Added speed_escalations count to RateLimitMetrics.summary() alongside cookie_rotations and vpn_switches
