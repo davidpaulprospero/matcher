@@ -56,20 +56,14 @@ function Get-InterviewFocusAreas {
         return @()
     }
 
-    # Interview format: focusAreas array with completed flag
-    if ($queue.focusAreas) {
-        $result = @($queue.focusAreas | Where-Object { -not $_.completed })
-        Write-Host "  [debug:GetFocusAreas] Found $($queue.focusAreas.Count) areas, $($result.Count) incomplete" -ForegroundColor DarkGray
-        return $result
+    if (-not $queue.focusAreas) {
+        Write-Host "  [debug:GetFocusAreas] No focusAreas found in queue" -ForegroundColor Red
+        return @()
     }
 
-    # Legacy format: queue array with completedAreas
-    if ($queue.queue -and $queue.completedAreas) {
-        return @($queue.queue | Where-Object { $queue.completedAreas -notcontains $_ } | ForEach-Object { @{ id = $_; completed = $false } })
-    }
-
-    Write-Host "  [debug:GetFocusAreas] No focusAreas or queue format found" -ForegroundColor Red
-    return @()
+    $result = @($queue.focusAreas | Where-Object { -not $_.completed })
+    Write-Host "  [debug:GetFocusAreas] Found $($queue.focusAreas.Count) areas, $($result.Count) incomplete" -ForegroundColor DarkGray
+    return $result
 }
 
 function Get-InterviewContext {
@@ -127,7 +121,7 @@ function Get-NextQueuedFocusArea {
 function Update-QueueProgress {
     <#
     .SYNOPSIS
-        Mark a focus area as completed in queue.json (handles both formats)
+        Mark a focus area as completed in queue.json
     .PARAMETER AreaId
         The focus area ID to mark as completed
     .PARAMETER Silent
@@ -145,7 +139,7 @@ function Update-QueueProgress {
     try {
         $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
 
-        # Update interview format (focusAreas array)
+        # Update focusAreas array
         if ($queue.focusAreas) {
             foreach ($area in $queue.focusAreas) {
                 if ($area.id -eq $AreaId) {
@@ -153,17 +147,6 @@ function Update-QueueProgress {
                     $area.completedAt = $timestamp
                 }
             }
-        }
-
-        # Update legacy format (completedAreas array)
-        if ($null -ne $queue.completedAreas -and $queue.completedAreas -notcontains $AreaId) {
-            $queue.completedAreas += $AreaId
-        }
-
-        # Update currentIndex for legacy format
-        if ($queue.queue) {
-            $idx = [array]::IndexOf($queue.queue, $AreaId)
-            if ($idx -ge 0) { $queue.currentIndex = $idx + 1 }
         }
 
         # Update session info
@@ -182,10 +165,6 @@ function Update-QueueProgress {
         Write-Host "  Warning: Could not update queue.json" -ForegroundColor Yellow
     }
 }
-
-# Aliases for backward compatibility
-function Update-InterviewProgress { param([string]$AreaId) Update-QueueProgress -AreaId $AreaId }
-function Update-LegacyQueueProgress { param([string]$CompletedArea) Update-QueueProgress -AreaId $CompletedArea -Silent }
 
 function Show-CompletionChoice {
     <#
