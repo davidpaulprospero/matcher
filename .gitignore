@@ -25,6 +25,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!scripts/ralph/lib/
 lib64/
 parts/
 sdist/
