@@ -375,3 +375,73 @@ class DownloadSpeedTracker:
     def clear(self) -> None:
         """Clear all speed records."""
         self._records.clear()
+
+
+class PerKeywordSpeedTracker:
+    """Manages per-keyword DownloadSpeedTracker instances for isolation.
+
+    Each keyword gets its own independent speed tracker so that slow downloads
+    for one keyword don't affect rate limit signal detection for another.
+
+    Example:
+        tracker = PerKeywordSpeedTracker(config)
+        tracker.record_download("cats", "video1", 10*1024*1024, 5.0, "short")
+        tracker.record_download("dogs", "video2", 500*1024, 10.0, "short")
+
+        # "dogs" being slow doesn't affect "cats"
+        signal_cats = tracker.detect_rate_limit_signals("cats")
+        signal_dogs = tracker.detect_rate_limit_signals("dogs")
+    """
+
+    def __init__(self, config: DownloadSpeedConfig = None):
+        self.config = config or DownloadSpeedConfig()
+        self._trackers: Dict[str, DownloadSpeedTracker] = {}
+
+    def _get_tracker(self, keyword: str) -> DownloadSpeedTracker:
+        """Get or create a tracker for the given keyword."""
+        if keyword not in self._trackers:
+            self._trackers[keyword] = DownloadSpeedTracker(self.config)
+        return self._trackers[keyword]
+
+    def record_download(
+        self,
+        keyword: str,
+        video_id: str,
+        bytes_downloaded: int,
+        duration_seconds: float,
+        tier: str = "unknown"
+    ) -> None:
+        """Record a download for a specific keyword."""
+        self._get_tracker(keyword).record_download(
+            video_id, bytes_downloaded, duration_seconds, tier
+        )
+
+    def detect_rate_limit_signals(self, keyword: str) -> RateLimitSignal:
+        """Detect rate limit signals for a specific keyword."""
+        if keyword not in self._trackers:
+            return RateLimitSignal(
+                detected=False,
+                consecutive_slow_count=0,
+                recent_speeds=[],
+                threshold=self.config.rate_limit_signal_threshold,
+                message=f"No data for keyword '{keyword}'"
+            )
+        return self._get_tracker(keyword).detect_rate_limit_signals()
+
+    def get_average_speed_mbps(self, keyword: str) -> float:
+        """Get average speed for a specific keyword."""
+        if keyword not in self._trackers:
+            return 0.0
+        return self._get_tracker(keyword).get_average_speed_mbps()
+
+    def get_keywords(self) -> List[str]:
+        """Get list of tracked keywords."""
+        return list(self._trackers.keys())
+
+    def clear(self, keyword: str = None) -> None:
+        """Clear records for a keyword, or all keywords if None."""
+        if keyword is not None:
+            if keyword in self._trackers:
+                self._trackers[keyword].clear()
+        else:
+            self._trackers.clear()

@@ -5956,3 +5956,16 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files: tests/test_budget_circuit_breaker_pause_scaling.py, tests/test_circuit_breaker_escalation_coordination.py
 - Test results: 57 tests passed across both files, 0 failures
 - No code changes needed - marked as pre-implemented
+
+## Iteration US-010 (Sprint 13) - Add speed tracker rate limit signal detection tests
+- Added PerKeywordSpeedTracker class to src/downloader/speed_tracker.py for per-keyword isolation
+- PerKeywordSpeedTracker manages Dict[str, DownloadSpeedTracker] with keyword-keyed instances
+- Methods: record_download(keyword, ...), detect_rate_limit_signals(keyword), get_average_speed_mbps(keyword), get_keywords(), clear(keyword)
+- Added 11 new tests across 3 test classes:
+  - TestRollingWindowAverage: 5-sample average (AC3) and rolling window drop-oldest verification
+  - TestFastSampleResetsCounter: single fast sample resets consecutive count (AC4), fast-at-end clears detection
+  - TestPerKeywordIsolation: keyword A/B isolation (AC5), per-keyword avg speed, unknown keyword handling, get_keywords, clear per-keyword/all
+- Pre-existing tests covered AC1 (signal detected with consecutive slow) and AC2 (no signal when fast)
+- Files modified: src/downloader/speed_tracker.py, tests/test_speed_tracker.py
+- Test results: 59 passed (48 existing + 11 new), 0 failures
+- All 5 acceptance criteria met

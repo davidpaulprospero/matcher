@@ -8,7 +8,8 @@ from src.downloader.speed_tracker import (
     DownloadSpeedTracker,
     DownloadSpeedConfig,
     DownloadRecord,
-    RateLimitSignal
+    RateLimitSignal,
+    PerKeywordSpeedTracker
 )
 
 
@@ -789,3 +790,205 @@ class TestSignalEdgeCases:
         signal = tracker.detect_rate_limit_signals()
         assert signal.detected is True
         assert signal.threshold == 1.0
+
+
+# ============================================================================
+# US-010: Speed tracker rate limit signal detection tests
+# ============================================================================
+
+
+class TestRollingWindowAverage:
+    """AC3: Test speed sample averaging with 5 samples and rolling window."""
+
+    def test_five_sample_rolling_window_average(self):
+        """Record 5 samples, verify avg_speed computed correctly with rolling window."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record 5 samples with known sizes and durations:
+        # Sample 1: 10 MB in 5s = 2.0 MB/s
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+        # Sample 2: 20 MB in 10s = 2.0 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")
+        # Sample 3: 5 MB in 5s = 1.0 MB/s
+        tracker.record_download("v3", 5 * 1024 * 1024, 5.0, "short")
+        # Sample 4: 15 MB in 5s = 3.0 MB/s
+        tracker.record_download("v4", 15 * 1024 * 1024, 5.0, "short")
+        # Sample 5: 50 MB in 25s = 2.0 MB/s
+        tracker.record_download("v5", 50 * 1024 * 1024, 25.0, "short")
+
+        # Total: (10+20+5+15+50) MB / (5+10+5+5+25) s = 100 MB / 50s = 2.0 MB/s
+        assert len(tracker._records) == 5
+        assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
+
+    def test_rolling_window_drops_oldest(self):
+        """Record 7 samples with window_size=5, verify only last 5 used."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = DownloadSpeedTracker(config)
+
+        # First 2 samples (will be dropped by window)
+        tracker.record_download("v1", 1 * 1024 * 1024, 10.0, "short")  # 0.1 MB/s (slow)
+        tracker.record_download("v2", 1 * 1024 * 1024, 10.0, "short")  # 0.1 MB/s (slow)
+
+        # Next 5 samples (will be kept)
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v5", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v6", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v7", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+
+        assert len(tracker._records) == 5
+        # Only the fast samples are in the window now
+        assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
+
+        # Verify the slow samples were dropped
+        video_ids = [r.video_id for r in tracker._records]
+        assert "v1" not in video_ids
+        assert "v2" not in video_ids
+
+
+class TestFastSampleResetsCounter:
+    """AC4: Test that a single fast sample resets consecutive_slow_samples counter."""
+
+    def test_single_fast_sample_resets_slow_counter(self):
+        """A fast sample between slow samples resets the consecutive count."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,
+            window_size=10
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 2 slow samples
+        tracker.record_download("v1", 50 * 1024, 10.0, "short")  # 0.005 MB/s
+        tracker.record_download("v2", 50 * 1024, 10.0, "short")  # 0.005 MB/s
+
+        # 1 fast sample — resets counter
+        tracker.record_download("v3", 10 * 1024 * 1024, 10.0, "short")  # 1.0 MB/s
+
+        # 2 more slow samples (not enough for 3 consecutive)
+        tracker.record_download("v4", 50 * 1024, 10.0, "short")  # 0.005 MB/s
+        tracker.record_download("v5", 50 * 1024, 10.0, "short")  # 0.005 MB/s
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False
+        assert signal.consecutive_slow_count == 2  # Only last 2 are slow
+
+    def test_fast_sample_at_end_clears_detection(self):
+        """Even after many slow samples, one fast sample at end clears detection."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,
+            window_size=10
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 5 slow samples (would trigger detection)
+        for i in range(5):
+            tracker.record_download(f"slow{i}", 50 * 1024, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is True
+
+        # 1 fast sample resets
+        tracker.record_download("fast1", 10 * 1024 * 1024, 10.0, "short")
+
+        signal = tracker.detect_rate_limit_signals()
+        assert signal.detected is False
+        assert signal.consecutive_slow_count == 0
+
+
+class TestPerKeywordIsolation:
+    """AC5: Test speed tracking per-keyword isolation."""
+
+    def test_keyword_a_slow_does_not_affect_keyword_b(self):
+        """Keyword A's slow samples don't affect keyword B's signal detection."""
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,
+            window_size=5
+        )
+        tracker = PerKeywordSpeedTracker(config)
+
+        # Keyword A: 3 slow downloads (should trigger signal)
+        tracker.record_download("cats", "v1", 50 * 1024, 10.0, "short")
+        tracker.record_download("cats", "v2", 50 * 1024, 10.0, "short")
+        tracker.record_download("cats", "v3", 50 * 1024, 10.0, "short")
+
+        # Keyword B: 3 fast downloads (should NOT trigger signal)
+        tracker.record_download("dogs", "v4", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("dogs", "v5", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("dogs", "v6", 10 * 1024 * 1024, 10.0, "short")
+
+        signal_a = tracker.detect_rate_limit_signals("cats")
+        signal_b = tracker.detect_rate_limit_signals("dogs")
+
+        assert signal_a.detected is True
+        assert signal_b.detected is False
+
+    def test_per_keyword_average_speed_isolated(self):
+        """Each keyword has independent average speed."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = PerKeywordSpeedTracker(config)
+
+        # Keyword A: 1 MB/s
+        tracker.record_download("cats", "v1", 10 * 1024 * 1024, 10.0, "short")
+
+        # Keyword B: 5 MB/s
+        tracker.record_download("dogs", "v2", 50 * 1024 * 1024, 10.0, "short")
+
+        avg_a = tracker.get_average_speed_mbps("cats")
+        avg_b = tracker.get_average_speed_mbps("dogs")
+
+        assert avg_a == pytest.approx(1.0, rel=0.01)
+        assert avg_b == pytest.approx(5.0, rel=0.01)
+
+    def test_unknown_keyword_returns_no_signal(self):
+        """Unknown keyword returns no signal without error."""
+        tracker = PerKeywordSpeedTracker()
+
+        signal = tracker.detect_rate_limit_signals("unknown_keyword")
+        assert signal.detected is False
+        assert signal.consecutive_slow_count == 0
+        assert "No data" in signal.message
+
+    def test_unknown_keyword_average_returns_zero(self):
+        """Unknown keyword returns 0.0 average speed."""
+        tracker = PerKeywordSpeedTracker()
+        assert tracker.get_average_speed_mbps("nonexistent") == 0.0
+
+    def test_get_keywords_returns_tracked(self):
+        """get_keywords() returns only keywords with recorded data."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = PerKeywordSpeedTracker(config)
+
+        tracker.record_download("cats", "v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("dogs", "v2", 10 * 1024 * 1024, 5.0, "short")
+
+        keywords = tracker.get_keywords()
+        assert set(keywords) == {"cats", "dogs"}
+
+    def test_clear_specific_keyword(self):
+        """Clearing one keyword doesn't affect another."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = PerKeywordSpeedTracker(config)
+
+        tracker.record_download("cats", "v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("dogs", "v2", 10 * 1024 * 1024, 5.0, "short")
+
+        tracker.clear("cats")
+
+        assert tracker.get_average_speed_mbps("cats") == 0.0
+        assert tracker.get_average_speed_mbps("dogs") == pytest.approx(2.0, rel=0.01)
+
+    def test_clear_all_keywords(self):
+        """Clearing all keywords removes everything."""
+        config = DownloadSpeedConfig(window_size=5)
+        tracker = PerKeywordSpeedTracker(config)
+
+        tracker.record_download("cats", "v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("dogs", "v2", 10 * 1024 * 1024, 5.0, "short")
+
+        tracker.clear()
+
+        assert tracker.get_keywords() == []
