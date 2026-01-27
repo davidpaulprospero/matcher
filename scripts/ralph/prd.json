@@ -38,7 +38,8 @@
                             "id":  "US-003",
                             "title":  "Create unit tests for compilation modules (stages and timeline)",
                             "priority":  3,
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Created tests/test_compilation.py with 43 tests across 5 classes: TestGapAnalyzer (5 tests: empty/complete/partial tracks, empty track detection, multi-clip sum), TestTopicBroadener (8 tests: JSON/embedded/fallback parsing, limit, fallback keywords, exclusion, broaden filtering, LLM failure fallback), TestGapCheckStage (3 tests: name, complete report, max retries), TestDownloadStage (10 tests: name, sanitize dirname 3 cases, video ID extract 2 cases, ffprobe duration 3 cases, run with no candidates/grouped keywords/errors), TestCompilationTimelineBuilder (15 tests: empty/one-track/enabled/metadata/start-time/video-id/keyword/path-format/frame-rate/stats/title-truncation/fallback-id/deep-copy/naming). All @pytest.mark.fast. Uses sys.modules bootstrap to inject fake state.py since it doesn't exist yet.",
                             "acceptanceCriteria":  [
                                                        "Create tests/test_compilation.py with @pytest.mark.fast marker covering src/compilation/stages/download.py, src/compilation/stages/gap_check.py, and src/compilation/timeline/builder.py",
                                                        "Test gap_check module: detect gaps in timeline, identify missing segments, report gap durations and positions",
