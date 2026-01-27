@@ -23,7 +23,8 @@
                             "id":  "US-002",
                             "title":  "Create dedicated unit tests for CookieMethodFallback",
                             "priority":  2,
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Created tests/test_cookie_method_fallback.py with 35 tests across 8 classes: TestCookieMethod (4 tests for get_cmd_args per kind), TestFallbackChainOrdering (6 tests: full chain, no-browser, no-files, cookies_path after rotation, dedup, none-always-last), TestAdvance (4 tests: advance until exhausted, is_exhausted, methods_remaining, current_method changes), TestReset (3 tests: reset-to-zero, reset-after-success-rotation, reset-after-exhaustion), TestGetCmdArgs (5 tests: browser/file/none args, exhausted returns empty, args change after advance), TestFileBasedMethods (5 tests: missing skipped, all missing, cookies_path missing, path preserved, multiple existing), TestMarkSuccess (4 tests: rotation, skip-none, single-auth stays, no-op exhausted), TestGetStatus (4 tests). All @pytest.mark.fast.",
                             "acceptanceCriteria":  [
                                                        "Create tests/test_cookie_method_fallback.py with @pytest.mark.fast marker",
                                                        "Test fallback chain ordering: browser:firefox -\u003e file:main.txt -\u003e file:backup1.txt -\u003e none (verify exact sequence)",

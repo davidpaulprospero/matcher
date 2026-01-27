@@ -1,4 +1,18 @@
 
+## Iteration US-002 - Create dedicated unit tests for CookieMethodFallback
+- Created tests/test_cookie_method_fallback.py with 35 tests across 8 test classes
+- TestCookieMethod: 4 tests for CookieMethod.get_cmd_args() per kind (browser, file, none, unknown)
+- TestFallbackChainOrdering: 6 tests verifying exact chain sequence (browser -> files -> none), dedup, cookies_path position
+- TestAdvance: 4 tests for advance() walking through chain, is_exhausted, methods_remaining
+- TestReset: 3 tests for reset_for_next_download() returning to correct position (zero or last-success rotation)
+- TestGetCmdArgs: 5 tests verifying correct yt-dlp args per method type and after advance
+- TestFileBasedMethods: 5 tests for missing file handling (skipped), path preservation, multiple files
+- TestMarkSuccess: 4 tests for proactive rotation, skip-none, single-auth, no-op when exhausted
+- TestGetStatus: 4 tests for status dict content
+- All tests use @pytest.mark.fast, Path.exists() patched for file existence control
+- Files created: tests/test_cookie_method_fallback.py
+- Test results: 35 passed in 0.49s
+
 ## Sprint 2 - Rate-Limiting Test Coverage & Robustness
 Focus: Fix stale tests, fill coverage gaps, add jitter, unify error classification
 Stories: US-011 to US-019 (9 new stories)
