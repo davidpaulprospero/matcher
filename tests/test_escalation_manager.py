@@ -1267,3 +1267,93 @@ class TestEscalationCheckpointPersistence:
 
         metrics = restored.get_metrics()
         assert metrics['speed_escalations'] == 1
+
+    def test_from_dict_missing_saved_at_treats_as_stale(self, imp_manager, ext_config):
+        """Missing 'saved_at' key defaults to epoch 0, treating data as stale and de-escalating."""
+        data = {
+            'keyword_states': {
+                'kw_tier2': {'tier': 2, 'consecutive_403s': 1, 'extractor_args_index': 1, 'last_escalation_time': None},
+                'kw_tier3': {'tier': 3, 'consecutive_403s': 0, 'extractor_args_index': 2, 'last_escalation_time': None},
+                'kw_tier1': {'tier': 1, 'consecutive_403s': 0, 'extractor_args_index': 0, 'last_escalation_time': None},
+            },
+            'total_403s': 5,
+            'total_successes': 2,
+            'total_escalations': 3,
+            'escalations_per_tier': {},
+            'speed_escalations': 0,
+            # NOTE: no 'saved_at' key — should default to 0.0 (epoch), making it very stale
+        }
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=3600.0,
+        )
+
+        # Tier 2 → Tier 1 (de-escalated by 1)
+        r2 = restored.get_escalation_args("kw_tier2")
+        assert r2.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # Tier 3 → Tier 2 (de-escalated by 1)
+        r3 = restored.get_escalation_args("kw_tier3")
+        assert r3.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Tier 1 stays at Tier 1 (can't go below)
+        r1 = restored.get_escalation_args("kw_tier1")
+        assert r1.tier == EscalationTier.IMPERSONATE_ONLY
+
+    def test_from_dict_recent_saved_at_preserves_tiers(self, imp_manager, ext_config):
+        """Checkpoint saved within stale_threshold preserves tiers exactly."""
+        data = {
+            'keyword_states': {
+                'kw_tier2': {'tier': 2, 'consecutive_403s': 1, 'extractor_args_index': 1, 'last_escalation_time': None},
+                'kw_tier3': {'tier': 3, 'consecutive_403s': 0, 'extractor_args_index': 2, 'last_escalation_time': None},
+            },
+            'total_403s': 4,
+            'total_successes': 1,
+            'total_escalations': 2,
+            'escalations_per_tier': {},
+            'speed_escalations': 0,
+            'saved_at': time.time() - 60,  # 1 minute ago, well within 1 hour threshold
+        }
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+            stale_threshold=3600.0,
+        )
+
+        # Tiers preserved exactly
+        r2 = restored.get_escalation_args("kw_tier2")
+        assert r2.tier == EscalationTier.EXTRACTOR_ARGS
+
+        r3 = restored.get_escalation_args("kw_tier3")
+        assert r3.tier == EscalationTier.FULL_BYPASS
+
+    def test_from_dict_empty_keyword_states_returns_fresh(self, imp_manager, ext_config):
+        """from_dict() with empty keyword_states dict returns working manager with no crash."""
+        data = {
+            'keyword_states': {},
+            'total_403s': 0,
+            'total_successes': 0,
+            'total_escalations': 0,
+            'escalations_per_tier': {},
+            'speed_escalations': 0,
+            'saved_at': time.time(),
+        }
+
+        restored = EscalationManager.from_dict(
+            data=data,
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config,
+        )
+
+        # Should have no tracked keywords
+        assert restored.get_active_keyword_count() == 0
+        assert restored.get_metrics()['total_403s'] == 0
+
+        # Should still be functional for new keywords
+        result = restored.get_escalation_args("new_keyword")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
