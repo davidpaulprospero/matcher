@@ -22,6 +22,55 @@ function Save-StateFile {
     Move-Item -Path $tempPath -Destination $Path -Force
 }
 
+function Get-Sprint {
+    <#
+    .SYNOPSIS
+        Load sprint/PRD data from JSON file
+    #>
+    param([string]$Path = $script:PrdFile)
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Warning "Failed to parse sprint file: $Path"
+        return $null
+    }
+}
+
+function Save-Sprint {
+    <#
+    .SYNOPSIS
+        Save sprint/PRD data atomically
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Sprint,
+        [string]$Path = $script:PrdFile
+    )
+    Save-StateFile -Path $Path -Data $Sprint
+}
+
+function Update-StoryStatus {
+    <#
+    .SYNOPSIS
+        Update a story's pass/fail status and notes in the sprint file
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [bool]$Passes = $false,
+        [string]$Notes = '',
+        [string]$Path = $script:PrdFile
+    )
+    $sprint = Get-Sprint -Path $Path
+    if (-not $sprint) { return }
+    foreach ($story in $sprint.userStories) {
+        if ($story.id -eq $StoryId) {
+            $story.passes = $Passes
+            if ($Notes) { $story.notes = $Notes }
+        }
+    }
+    Save-Sprint -Sprint $sprint -Path $Path
+}
+
 function Get-RalphConfig {
     <#
     .SYNOPSIS
