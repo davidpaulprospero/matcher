@@ -25,8 +25,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.audio_first import AudioFirstPipeline
+from src.downloader.title_filter import SearchResult
 from src.downloader.types import MergedSegment, DownloadedSegment, MatchedSegment
 from src.state import AudioDownload
+from src.config.sections.download import DownloadConfig, AudioFirstConfig
+
+
+def _sr(videos):
+    """Wrap video list in SearchResult for mock return values."""
+    return SearchResult(videos=videos)
 
 
 # ============================================================================
@@ -42,11 +49,15 @@ def temp_dir():
 
 @pytest.fixture
 def mock_config():
-    """Create mock config with audio_first settings"""
+    """Create mock config with audio_first settings.
+
+    Uses spec=AudioFirstConfig and spec=DownloadConfig to catch phantom attributes.
+    Attributes that should be absent are explicitly set to None or empty string.
+    """
     config = Mock()
 
-    # Audio-first config
-    audio_first = Mock()
+    # Audio-first config - use spec to validate attribute names
+    audio_first = Mock(spec=AudioFirstConfig)
     audio_first.enabled = True
     audio_first.buffer_seconds = 30.0
     audio_first.merge_gap_seconds = 15.0
@@ -55,14 +66,16 @@ def mock_config():
     audio_first.fallback_full_video = True
     audio_first.audio_quality = 5
 
-    download = Mock()
+    download = Mock(spec=DownloadConfig)
     download.audio_first = audio_first
     download.download_timeouts = {'short': 60, 'medium': 120, 'long': 300}
     download.max_keyword_len = 50
     download.ffmpeg_location = ''
-    download.llm_title_filter = None
-    download.cookies_from_browser = None
-    download.cookies_path = None
+    download.llm_title_filter = None  # Explicitly None - not auto-created by MagicMock
+    download.cookies_from_browser = ''  # Empty string, not None (real attr type is str)
+    download.cookies_path = ''  # Empty string, not None (real attr type is str)
+    download.max_retries = 3
+    download.retry_delay = 2.0
 
     config.download = download
     return config
@@ -162,9 +175,9 @@ class TestPartFileCleanup:
         part_file3.write_text("stale download 3")
 
         # Mock search to return results that match keyword/tier naming
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120, 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr="failed")
@@ -183,9 +196,9 @@ class TestPartFileCleanup:
         part_file1 = audio_dir / "vid1.part"
         part_file1.write_text("stale download")
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120, 'is_live': False}
-        ])
+        ]))
 
         # Make the part file read-only to trigger exception on unlink
         # Note: On Windows this might not raise an exception, so we handle gracefully
@@ -213,10 +226,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp3"
         existing_file.write_bytes(b'existing audio content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -237,10 +250,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.m4a"
         existing_file.write_bytes(b'existing m4a content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -257,10 +270,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.opus"
         existing_file.write_bytes(b'existing opus content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -277,10 +290,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.webm"
         existing_file.write_bytes(b'existing webm content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -296,10 +309,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp4"
         existing_file.write_bytes(b'existing mp4 audio')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -315,10 +328,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.wav"
         existing_file.write_bytes(b'existing wav content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -334,10 +347,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.ogg"
         existing_file.write_bytes(b'existing ogg content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -353,7 +366,7 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp3"
         existing_file.write_bytes(b'existing audio')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {
                 'id': 'vid1',
                 'title': 'My Travel Video',
@@ -361,7 +374,7 @@ class TestExistingFileDetection:
                 'webpage_url': 'https://youtube.com/watch?v=vid1',
                 'is_live': False
             }
-        ])
+        ]))
 
         with patch('subprocess.run'):
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -395,10 +408,10 @@ class TestTimeoutFromObjectAttribute:
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Use a unique video ID that doesn't already have an audio file
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'newvid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=newvid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             # Create the expected file AFTER subprocess.run is called
@@ -425,10 +438,10 @@ class TestTimeoutFromObjectAttribute:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'newvid2', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=newvid2', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def side_effect(*args, **kwargs):
@@ -456,10 +469,10 @@ class TestDownloadFailureHandling:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr='Download failed: Error 403')
@@ -474,10 +487,10 @@ class TestDownloadFailureHandling:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         # Create stderr longer than 500 chars
         long_stderr = 'X' * 1000
@@ -495,10 +508,10 @@ class TestDownloadFailureHandling:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=60)
@@ -513,10 +526,10 @@ class TestDownloadFailureHandling:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = OSError("Disk full")
@@ -532,10 +545,10 @@ class TestDownloadFailureHandling:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             # Return code 0 but don't create any file
@@ -788,10 +801,10 @@ class TestFfmpegLocationConfig:
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Use unique video ID to avoid existing file detection
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'ffmpegvid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=ffmpegvid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def side_effect(*args, **kwargs):
@@ -924,10 +937,10 @@ class TestLLMTitleFilter:
         llm_filter.enabled = True
         audio_pipeline.download_config.llm_title_filter = llm_filter
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video 1', 'duration': 60, 'is_live': False},
             {'id': 'vid2', 'title': 'Video 2', 'duration': 60, 'is_live': False}
-        ])
+        ]))
 
         audio_pipeline._filter_titles_with_llm = Mock(return_value=[
             {'id': 'vid1', 'title': 'Video 1', 'duration': 60, 'is_live': False}
@@ -947,9 +960,9 @@ class TestLLMTitleFilter:
         llm_filter.enabled = False
         audio_pipeline.download_config.llm_title_filter = llm_filter
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60, 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr='')
@@ -974,12 +987,12 @@ class TestTierDownloadCountTracking:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False},
             {'id': 'vid2', 'title': 'Video 2', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid2', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def create_file(*args, **kwargs):
