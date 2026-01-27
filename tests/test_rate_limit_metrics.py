@@ -389,6 +389,74 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('batch' in r.lower() for r in recommendations)
 
+    def test_returns_list_of_strings_when_no_recommendations(self):
+        """AC6: get_config_recommendations() returns list of strings even when empty."""
+        metrics = RateLimitMetrics()
+        recommendations = metrics.get_config_recommendations()
+        assert isinstance(recommendations, list)
+        assert recommendations is not None
+        # Verify it's not an empty dict or None
+        assert not isinstance(recommendations, dict)
+        assert len(recommendations) == 0
+
+    def test_returns_list_of_strings_when_recommendations_present(self):
+        """AC6: All items in recommendations are strings."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            rate_limit_events=20,
+            max_retry_count_reached=25,
+            circuit_breaker_trips=5,
+            cookie_rotations=0,
+        )
+        recommendations = metrics.get_config_recommendations()
+        assert isinstance(recommendations, list)
+        assert len(recommendations) > 0
+        for rec in recommendations:
+            assert isinstance(rec, str), f"Expected str, got {type(rec)}: {rec}"
+
+    def test_recommendation_rate_limit_mentions_backoff_or_cookies(self):
+        """AC1: Rate limit recommendation suggests increasing backoff or adding cookies."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            rate_limit_events=15,  # 15% > 10%
+        )
+        recommendations = metrics.get_config_recommendations()
+        rate_rec = [r for r in recommendations if 'rate limiting' in r.lower()]
+        assert len(rate_rec) == 1
+        assert 'backoff' in rate_rec[0].lower() or 'cookie' in rate_rec[0].lower()
+
+    def test_recommendation_retry_mentions_max_retries(self):
+        """AC2: Retry exhaustion recommendation suggests increasing max_retries."""
+        metrics = RateLimitMetrics(
+            total_downloads=100,
+            max_retry_count_reached=25,  # 25% > 20%
+        )
+        recommendations = metrics.get_config_recommendations()
+        retry_rec = [r for r in recommendations if 'retry' in r.lower() and 'exhaustion' in r.lower()]
+        assert len(retry_rec) == 1
+        assert 'max_retries' in retry_rec[0] or 'retry' in retry_rec[0].lower()
+
+    def test_recommendation_cb_mentions_pause_or_vpn(self):
+        """AC3: Circuit breaker recommendation suggests longer pauses or VPN."""
+        metrics = RateLimitMetrics(
+            circuit_breaker_trips=5,
+        )
+        recommendations = metrics.get_config_recommendations()
+        cb_rec = [r for r in recommendations if 'circuit' in r.lower()]
+        assert len(cb_rec) == 1
+        assert 'pause' in cb_rec[0].lower() or 'vpn' in cb_rec[0].lower()
+
+    def test_recommendation_no_cookies_mentions_enable_rotation(self):
+        """AC4: No cookie rotation recommendation suggests enabling rotation."""
+        metrics = RateLimitMetrics(
+            rate_limit_events=10,
+            cookie_rotations=0,
+        )
+        recommendations = metrics.get_config_recommendations()
+        cookie_rec = [r for r in recommendations if 'cookie' in r.lower()]
+        assert len(cookie_rec) >= 1
+        assert any('rotation' in r.lower() or 'enable' in r.lower() for r in cookie_rec)
+
 
 class TestSummary:
     """Test summary generation."""
