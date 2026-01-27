@@ -52,7 +52,8 @@
             "id": "US-004",
             "title": "Add error-pattern-to-tier success correlation tests",
             "priority": 4,
-            "passes": false,
+            "passes": true,
+            "notes": "Added _tier_outcomes tracking dict to EscalationManager. Implemented record_outcome(trigger_category, tier, success) for per-category per-tier outcome tracking. Added get_tier_effectiveness() returning {category: {tier_N: rate}} structure. Added get_tier_recommendations() with 'skip escalation' (>80% T1) and 'skip Tier 2' (<20% T2 + >60% T3) logic. Integrated tier_effectiveness and tier_recommendations into export_to_json() under 'escalation'. Added _tier_outcomes.clear() to reset_all(). 28 new tests in test_tier_effectiveness.py covering all 6 ACs. All 185 related tests pass.",
             "acceptanceCriteria": [
                 "Test get_tier_effectiveness() returns {trigger_category: {tier_1: rate, tier_2: rate, tier_3: rate}} structure with correct success rates",
                 "Test mixed outcomes: 10 attempts at Tier 1 (8 success) → 80% rate; 10 at Tier 2 (3 success) → 30% rate",

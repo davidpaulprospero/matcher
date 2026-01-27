@@ -206,6 +206,8 @@ class EscalationManager:
         self._speed_escalations: int = 0  # Total speed-triggered escalations
         # Per-keyword escalation timeline: keyword -> [{timestamp, from_tier, to_tier, trigger_category}]
         self._escalation_timeline: Dict[str, List[Dict]] = {}
+        # Tier outcome tracking: {trigger_category: {tier_value: {'successes': N, 'attempts': N}}}
+        self._tier_outcomes: Dict[str, Dict[int, Dict[str, int]]] = {}
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -606,6 +608,7 @@ class EscalationManager:
             self._slow_speed_counts.clear()
             self._speed_escalations = 0
             self._escalation_timeline.clear()
+            self._tier_outcomes.clear()
             logger.debug("All escalation states reset")
 
     def get_active_keyword_count(self) -> int:
@@ -839,3 +842,94 @@ class EscalationManager:
                     })
             hot.sort(key=lambda x: x['escalation_count'], reverse=True)
             return hot
+
+    def record_outcome(
+        self, trigger_category: str, tier: EscalationTier, success: bool
+    ) -> None:
+        """Record a download outcome for tier effectiveness tracking.
+
+        Each call records whether a download attempt at a specific escalation
+        tier succeeded or failed for a given trigger category. This data is
+        used by ``get_tier_effectiveness()`` to compute success rates per
+        trigger category per tier.
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+            tier: The escalation tier used for this attempt.
+            success: True if the download succeeded, False if it failed.
+        """
+        with self._global_lock:
+            if trigger_category not in self._tier_outcomes:
+                self._tier_outcomes[trigger_category] = {}
+            tier_val = tier.value
+            if tier_val not in self._tier_outcomes[trigger_category]:
+                self._tier_outcomes[trigger_category][tier_val] = {
+                    'successes': 0, 'attempts': 0,
+                }
+            self._tier_outcomes[trigger_category][tier_val]['attempts'] += 1
+            if success:
+                self._tier_outcomes[trigger_category][tier_val]['successes'] += 1
+
+    def get_tier_effectiveness(self) -> Dict[str, Dict[str, float]]:
+        """Get success rate per trigger category per escalation tier.
+
+        Returns a dict keyed by trigger category, where each value maps
+        tier names ('tier_1', 'tier_2', 'tier_3') to their success rate
+        (0.0 to 1.0). Only tiers with recorded attempts are included.
+
+        Returns:
+            Dict mapping trigger_category to {tier_name: success_rate}.
+            Empty dict if no outcomes have been recorded.
+        """
+        with self._global_lock:
+            if not self._tier_outcomes:
+                return {}
+
+            result: Dict[str, Dict[str, float]] = {}
+            for category, tiers in self._tier_outcomes.items():
+                tier_rates: Dict[str, float] = {}
+                for tier_val, counts in tiers.items():
+                    attempts = counts['attempts']
+                    if attempts > 0:
+                        rate = counts['successes'] / attempts
+                        tier_rates[f'tier_{tier_val}'] = round(rate, 4)
+                if tier_rates:
+                    result[category] = tier_rates
+            return result
+
+    def get_tier_recommendations(self) -> List[str]:
+        """Generate recommendations based on tier effectiveness data.
+
+        Analyzes per-category, per-tier success rates and returns
+        actionable recommendations:
+        - If a category has >80% Tier 1 success: 'skip escalation for {category}'
+        - If a category has <20% Tier 2 but >60% Tier 3: 'skip Tier 2 for {category}'
+
+        Returns:
+            List of recommendation strings. Empty list if no data or
+            no recommendations apply.
+        """
+        recommendations: List[str] = []
+        effectiveness = self.get_tier_effectiveness()
+
+        for category, tier_rates in effectiveness.items():
+            tier_1_rate = tier_rates.get('tier_1', None)
+            tier_2_rate = tier_rates.get('tier_2', None)
+            tier_3_rate = tier_rates.get('tier_3', None)
+
+            # Recommend skipping escalation if Tier 1 is highly effective
+            if tier_1_rate is not None and tier_1_rate > 0.80:
+                recommendations.append(
+                    f"skip escalation for {category}"
+                )
+
+            # Recommend skipping Tier 2 if it's ineffective but Tier 3 works
+            if (
+                tier_2_rate is not None and tier_2_rate < 0.20
+                and tier_3_rate is not None and tier_3_rate > 0.60
+            ):
+                recommendations.append(
+                    f"skip Tier 2 for {category}"
+                )
+
+        return recommendations

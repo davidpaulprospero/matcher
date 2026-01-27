@@ -834,6 +834,12 @@ class RateLimitMetrics:
                 export_data["escalation"]["hot_keywords"] = (
                     escalation_manager.get_hot_keywords()
                 )
+                export_data["escalation"]["tier_effectiveness"] = (
+                    escalation_manager.get_tier_effectiveness()
+                )
+                export_data["escalation"]["tier_recommendations"] = (
+                    escalation_manager.get_tier_recommendations()
+                )
             except Exception:
                 logger.debug("Failed to include escalation timeline in export", exc_info=True)
 
