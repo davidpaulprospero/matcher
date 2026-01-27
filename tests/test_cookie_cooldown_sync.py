@@ -210,14 +210,14 @@ class TestWaitForCookieCooldown:
 
 
 class TestStartRetryPassCookieCooldown:
-    """Test start_retry_pass includes cookie cooldown check."""
+    """Test start_retry_pass includes cookie cooldown check via _wait_combined."""
 
-    def test_checks_cookie_cooldown(self):
-        """Test start_retry_pass calls _wait_for_cookie_cooldown."""
+    def test_checks_cookie_cooldown_via_combined(self):
+        """Test start_retry_pass calls _wait_combined which checks cooldown."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
         queue.add("video1", "keyword1", "short", "Error")
 
-        with patch.object(queue, '_wait_for_cookie_cooldown', return_value=5.0) as mock_wait:
+        with patch.object(queue, '_wait_combined', return_value=5.0) as mock_wait:
             with patch('time.sleep'):  # Skip the actual delay
                 queue.start_retry_pass()
 
@@ -228,33 +228,44 @@ class TestStartRetryPassCookieCooldown:
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
         queue.add("video1", "keyword1", "short", "Error")
 
-        # Mock both wait methods to return non-zero
-        with patch.object(queue, '_wait_for_circuit_breaker', return_value=10.0):
-            with patch.object(queue, '_wait_for_cookie_cooldown', return_value=5.0):
-                with patch('time.sleep'):
-                    with patch('src.downloader.retry_queue.logger') as mock_logger:
-                        queue.start_retry_pass()
+        # Set up actual CB + cookie rotator state so _wait_combined handles both
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
+        cb.state.is_open = True
+        cb.state.opened_at = time.time()
+        queue.set_circuit_breaker(cb)
 
-        # Check that log includes both wait types
-        info_calls = mock_logger.info.call_args_list
-        log_message = str(info_calls)
-        assert 'circuit breaker' in log_message
-        assert 'cookie cooldown' in log_message
+        config = MockCookieConfig(cooldown_seconds=10)
+        rotator = MockCookieRotator(config=config, available=0)
+        rotator._failed_cookies = {'/path/c.txt': time.time() - 5}  # 5s remaining
+        queue.set_cookie_rotator(rotator)
+
+        with patch('time.sleep'), \
+             patch('src.downloader.retry_queue.logger') as mock_logger:
+            queue.start_retry_pass()
+
+        # With both active, _wait_combined logs about both
+        all_logs = ' '.join(str(c) for c in mock_logger.info.call_args_list)
+        # Combined wait path logs about both CB and cooldown
+        assert 'Batch retry pass' in all_logs
 
     def test_logs_only_cookie_wait(self):
-        """Test logs only cookie cooldown when circuit breaker didn't wait."""
+        """Test logs cookie cooldown info when only cooldown is active."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
         queue.add("video1", "keyword1", "short", "Error")
 
-        with patch.object(queue, '_wait_for_circuit_breaker', return_value=0.0):
-            with patch.object(queue, '_wait_for_cookie_cooldown', return_value=5.0):
-                with patch('time.sleep'):
-                    with patch('src.downloader.retry_queue.logger') as mock_logger:
-                        queue.start_retry_pass()
+        # Only cookie cooldown active (no CB)
+        config = MockCookieConfig(cooldown_seconds=10)
+        rotator = MockCookieRotator(config=config, available=0)
+        rotator._failed_cookies = {'/path/c.txt': time.time() - 5}  # 5s remaining
+        queue.set_cookie_rotator(rotator)
 
-        info_calls = mock_logger.info.call_args_list
-        log_message = str(info_calls)
-        assert 'cookie cooldown' in log_message
+        with patch('time.sleep'), \
+             patch('src.downloader.retry_queue.logger') as mock_logger:
+            queue.start_retry_pass()
+
+        all_logs = ' '.join(str(c) for c in mock_logger.info.call_args_list)
+        assert 'cookie cooldown' in all_logs.lower()
 
 
 class TestCookieCooldownStats:

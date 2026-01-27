@@ -1169,6 +1169,9 @@ download:
     respect_circuit_breaker: true       # Wait for circuit breaker recovery before retry
                                         # When true, if circuit breaker is tripped, batch retry
                                         # waits for it to recover before processing the queue
+    wait_for_cookie_cooldown: true      # Wait for cookie cooldown expiry before retry
+    max_combined_wait_seconds: 300.0    # Max total wait when both CB and cooldown block
+                                        # If exceeded, force retry with best-available cookie
 
   # Browser impersonation: spoof TLS fingerprints to bypass YouTube bot detection
   # Uses curl_cffi to impersonate real browser TLS ClientHello signatures.

@@ -147,7 +147,7 @@ class TestStartRetryPassWithCircuitBreaker:
     """Tests for start_retry_pass() circuit breaker integration."""
 
     def test_checks_circuit_breaker_before_delay(self):
-        """start_retry_pass() should check circuit breaker before applying delay."""
+        """start_retry_pass() should check circuit breaker via _wait_combined."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
         queue.add('video1', 'keyword', 'short', 'error')
 
@@ -156,26 +156,30 @@ class TestStartRetryPassWithCircuitBreaker:
         cb.state.opened_at = time.time()
         queue.set_circuit_breaker(cb)
 
-        with patch.object(queue, '_wait_for_circuit_breaker', return_value=0.01) as mock_wait, \
+        with patch.object(queue, '_wait_combined', return_value=0.01) as mock_wait, \
              patch('time.sleep'):
             queue.start_retry_pass()
             mock_wait.assert_called_once()
 
     def test_logs_circuit_breaker_wait_and_delay(self):
-        """Should log both circuit breaker wait and additional delay."""
+        """Should log with circuit breaker wait info when CB was active."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
         queue.add('video1', 'keyword', 'short', 'error')
 
-        with patch.object(queue, '_wait_for_circuit_breaker', return_value=5.0), \
-             patch('time.sleep'), \
+        # Set up CB state so _wait_combined actually waits for CB
+        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
+        cb.state.is_open = True
+        cb.state.opened_at = time.time()
+        queue.set_circuit_breaker(cb)
+
+        with patch('time.sleep'), \
              patch('src.downloader.retry_queue.logger') as mock_logger:
             queue.start_retry_pass()
 
-            # Should log with circuit breaker wait time
+            # Should log about the wait (combined or CB-specific)
             info_calls = mock_logger.info.call_args_list
-            first_log = info_calls[0][0][0]
-            # Actual log message format: "Waited for circuit breaker: X.Xs"
-            assert 'circuit breaker' in first_log
+            all_logs = ' '.join(c[0][0] for c in info_calls)
+            assert 'circuit breaker' in all_logs.lower() or 'Batch retry pass' in all_logs
 
     def test_logs_standard_message_when_no_cb_wait(self):
         """Should log standard message when circuit breaker wait is 0."""

@@ -73,6 +73,12 @@ class BatchRetryConfig:
     # If False, proceed with retry even if cookies are in cooldown
     wait_for_cookie_cooldown: bool = True
 
+    # Maximum combined wait time (seconds) when both circuit breaker and cookie
+    # cooldown are blocking simultaneously. If exceeded, force-process the retry
+    # queue with the current best-available cookie method instead of waiting
+    # for both to clear. Prevents deadlock when CB and cooldown overlap.
+    max_combined_wait_seconds: float = 300.0
+
 
 @dataclass
 class RetryItem:
@@ -132,6 +138,7 @@ class RetryQueue:
         self._cookie_rotator: Optional['CookieRotator'] = None
         self._cookie_cooldown_wait_time: float = 0.0  # Total time spent waiting for cookie cooldown
         self._budget_state: Optional[Dict] = None  # Budget snapshot when items were queued
+        self._forced_retry: bool = False  # True when deadlock forced a retry without full wait
 
     def set_circuit_breaker(self, circuit_breaker: 'CircuitBreaker') -> None:
         """Link a circuit breaker to coordinate retry timing.
@@ -184,14 +191,12 @@ class RetryQueue:
         """
         return self._budget_state
 
-    def _wait_for_cookie_cooldown(self) -> float:
-        """Wait for cookie cooldown to expire if all cookies are unavailable.
-
-        Checks if all cookies are in cooldown. If so, calculates the shortest
-        remaining cooldown time and waits for it to expire.
+    def _get_cookie_cooldown_remaining(self) -> float:
+        """Get remaining cookie cooldown time without waiting.
 
         Returns:
-            The number of seconds waited (0 if cookies were available).
+            Remaining seconds until shortest cookie cooldown expires,
+            or 0.0 if cookies are available or cooldown check disabled.
         """
         if not self._cookie_rotator:
             return 0.0
@@ -207,14 +212,12 @@ class RetryQueue:
             return 0.0
 
         # All cookies are in cooldown - find the shortest remaining cooldown
-        # Access the internal _failed_cookies dict to find cooldown times
         if not self._cookie_rotator._failed_cookies:
             return 0.0
 
         cooldown_seconds = self._cookie_rotator.config.cooldown_seconds
         now = time.time()
 
-        # Find the cookie with the shortest remaining cooldown
         min_remaining = float('inf')
         for cookie_path, failed_time in self._cookie_rotator._failed_cookies.items():
             elapsed = now - failed_time
@@ -225,24 +228,14 @@ class RetryQueue:
         if min_remaining == float('inf') or min_remaining <= 0:
             return 0.0
 
-        # Log and wait for cookie cooldown to expire
-        logger.info(
-            f"Batch retry: waiting {min_remaining:.1f}s for cookie cooldown to expire "
-            f"before processing retry queue"
-        )
-        time.sleep(min_remaining)
-        self._cookie_cooldown_wait_time += min_remaining
-
         return min_remaining
 
-    def _wait_for_circuit_breaker(self) -> float:
-        """Wait for circuit breaker to recover if tripped.
-
-        Checks if the circuit breaker is open (tripped) and if so, waits for
-        the remaining pause duration before returning.
+    def _get_cb_remaining(self) -> float:
+        """Get remaining circuit breaker pause time without waiting.
 
         Returns:
-            The number of seconds waited (0 if circuit breaker was not tripped).
+            Remaining seconds until circuit breaker recovers,
+            or 0.0 if CB is not tripped or check disabled.
         """
         if not self._circuit_breaker:
             return 0.0
@@ -256,10 +249,44 @@ class RetryQueue:
         if not self._circuit_breaker.is_open:
             return 0.0
 
-        # Circuit breaker is tripped - calculate remaining wait time
         elapsed = time.time() - self._circuit_breaker.state.opened_at
         remaining = self._circuit_breaker.config.pause_seconds - elapsed
 
+        return max(0.0, remaining)
+
+    def _wait_for_cookie_cooldown(self) -> float:
+        """Wait for cookie cooldown to expire if all cookies are unavailable.
+
+        Checks if all cookies are in cooldown. If so, calculates the shortest
+        remaining cooldown time and waits for it to expire.
+
+        Returns:
+            The number of seconds waited (0 if cookies were available).
+        """
+        remaining = self._get_cookie_cooldown_remaining()
+        if remaining <= 0:
+            return 0.0
+
+        # Log and wait for cookie cooldown to expire
+        logger.info(
+            f"Batch retry: waiting {remaining:.1f}s for cookie cooldown to expire "
+            f"before processing retry queue"
+        )
+        time.sleep(remaining)
+        self._cookie_cooldown_wait_time += remaining
+
+        return remaining
+
+    def _wait_for_circuit_breaker(self) -> float:
+        """Wait for circuit breaker to recover if tripped.
+
+        Checks if the circuit breaker is open (tripped) and if so, waits for
+        the remaining pause duration before returning.
+
+        Returns:
+            The number of seconds waited (0 if circuit breaker was not tripped).
+        """
+        remaining = self._get_cb_remaining()
         if remaining <= 0:
             return 0.0
 
@@ -272,6 +299,67 @@ class RetryQueue:
         self._circuit_breaker_wait_time += remaining
 
         return remaining
+
+    def _wait_combined(self) -> float:
+        """Wait for both circuit breaker and cookie cooldown using combined strategy.
+
+        Instead of waiting for CB and cooldown sequentially (which can deadlock),
+        uses min(cb_remaining, cooldown_remaining) + small buffer. If both are
+        blocking and the total wait would exceed max_combined_wait_seconds,
+        forces a retry with the best-available cookie method.
+
+        Sets self._forced_retry = True if the max combined wait was exceeded.
+
+        Returns:
+            Total seconds waited.
+        """
+        cb_remaining = self._get_cb_remaining()
+        cooldown_remaining = self._get_cookie_cooldown_remaining()
+
+        # Neither blocking — no wait needed
+        if cb_remaining <= 0 and cooldown_remaining <= 0:
+            self._forced_retry = False
+            return 0.0
+
+        # Only one is blocking — wait for it normally
+        if cb_remaining > 0 and cooldown_remaining <= 0:
+            self._forced_retry = False
+            return self._wait_for_circuit_breaker()
+
+        if cooldown_remaining > 0 and cb_remaining <= 0:
+            self._forced_retry = False
+            return self._wait_for_cookie_cooldown()
+
+        # Both are blocking — potential deadlock scenario
+        # Use min(cb_remaining, cooldown_remaining) + 5s buffer
+        combined_estimate = min(cb_remaining, cooldown_remaining) + 5.0
+        max_wait = self.config.max_combined_wait_seconds
+
+        if combined_estimate > max_wait:
+            # Deadlock detected — force retry with best-available cookie
+            logger.warning(
+                f"Retry queue waited {combined_estimate:.0f}s for CB+cooldown "
+                f"— forcing retry with best-available cookie method "
+                f"(max_combined_wait={max_wait:.0f}s, "
+                f"cb_remaining={cb_remaining:.1f}s, "
+                f"cooldown_remaining={cooldown_remaining:.1f}s)"
+            )
+            self._forced_retry = True
+            return 0.0
+
+        # Wait for the shorter of the two blockers + buffer
+        wait_time = combined_estimate
+        logger.info(
+            f"Batch retry: CB and cookie cooldown both active — "
+            f"waiting {wait_time:.1f}s "
+            f"(min of CB {cb_remaining:.1f}s / cooldown {cooldown_remaining:.1f}s + 5s buffer)"
+        )
+        time.sleep(wait_time)
+        self._circuit_breaker_wait_time += min(cb_remaining, wait_time)
+        self._cookie_cooldown_wait_time += max(0.0, wait_time - cb_remaining)
+        self._forced_retry = False
+
+        return wait_time
 
     @property
     def is_enabled(self) -> bool:
@@ -373,6 +461,11 @@ class RetryQueue:
                 f"(attempt {self.items[video_id].retry_count})"
             )
 
+    @property
+    def forced_retry(self) -> bool:
+        """True if the last retry pass was forced due to combined wait timeout."""
+        return self._forced_retry
+
     def start_retry_pass(self) -> int:
         """Start a new retry pass.
 
@@ -380,11 +473,10 @@ class RetryQueue:
         cooldowns, applies the delay, and logs the start. Should be called before
         processing items in the queue.
 
-        If a circuit breaker is linked and respect_circuit_breaker is enabled,
-        waits for the circuit breaker to recover before applying the retry delay.
-
-        If a cookie rotator is linked and wait_for_cookie_cooldown is enabled,
-        waits for cookie cooldowns to expire if all cookies are unavailable.
+        When both circuit breaker AND cookie cooldown are active simultaneously,
+        uses a combined wait strategy: wait for min(cb, cooldown) + buffer instead
+        of waiting for both sequentially. If the combined wait would exceed
+        max_combined_wait_seconds, forces retry with best-available cookie method.
 
         The circuit breaker and cookie cooldown wait times are additional to the
         retry delay (not subtracted from it).
@@ -397,28 +489,35 @@ class RetryQueue:
 
         self.current_pass += 1
 
-        # Check circuit breaker before starting retry pass
-        # If circuit breaker is tripped, wait for it to recover first
-        cb_wait = self._wait_for_circuit_breaker()
-
-        # Check cookie cooldown before starting retry pass
-        # If all cookies are in cooldown, wait for the shortest cooldown to expire
-        cookie_wait = self._wait_for_cookie_cooldown()
+        # Use combined wait strategy to avoid deadlock when both CB and
+        # cookie cooldown are active simultaneously
+        combined_wait = self._wait_combined()
 
         # Calculate effective delay
-        # If circuit breaker was tripped or cookies were in cooldown, we already waited
-        # The batch retry delay is additional time to let rate limits clear further
         effective_delay = self.config.delay_seconds
 
         # Build wait info message
         wait_parts = []
-        if cb_wait > 0:
-            wait_parts.append(f"circuit breaker: {cb_wait:.1f}s")
-        if cookie_wait > 0:
-            wait_parts.append(f"cookie cooldown: {cookie_wait:.1f}s")
+        if combined_wait > 0:
+            cb_rem = self._get_cb_remaining()
+            cookie_rem = self._get_cookie_cooldown_remaining()
+            if cb_rem > 0 or self._circuit_breaker_wait_time > 0:
+                wait_parts.append(f"circuit breaker: {self._circuit_breaker_wait_time:.1f}s")
+            if cookie_rem > 0 or self._cookie_cooldown_wait_time > 0:
+                wait_parts.append(f"cookie cooldown: {self._cookie_cooldown_wait_time:.1f}s")
+            if not wait_parts:
+                wait_parts.append(f"combined: {combined_wait:.1f}s")
 
         # Log at INFO level so users can see the retry happening
-        if wait_parts:
+        if self._forced_retry:
+            logger.info(
+                f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
+                f"{len(self.items)} videos queued. "
+                f"FORCED — skipping wait (CB+cooldown deadlock exceeded "
+                f"{self.config.max_combined_wait_seconds:.0f}s cap). "
+                f"Retrying with best-available cookie method..."
+            )
+        elif wait_parts:
             logger.info(
                 f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
                 f"{len(self.items)} videos queued. "
@@ -471,6 +570,7 @@ class RetryQueue:
         self._total_retried = 0
         self._circuit_breaker_wait_time = 0.0
         self._cookie_cooldown_wait_time = 0.0
+        self._forced_retry = False
         logger.debug("Retry queue: cleared for new session")
 
     def get_stats(self) -> dict:
@@ -505,6 +605,8 @@ class RetryQueue:
             'circuit_breaker_wait_time': round(self._circuit_breaker_wait_time, 1),
             'wait_for_cookie_cooldown': self.config.wait_for_cookie_cooldown,
             'cookie_cooldown_wait_time': round(self._cookie_cooldown_wait_time, 1),
+            'max_combined_wait_seconds': self.config.max_combined_wait_seconds,
+            'forced_retry': self._forced_retry,
             'budget_state': self._budget_state,
         }
 
