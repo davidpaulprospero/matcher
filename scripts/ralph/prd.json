@@ -38,7 +38,7 @@
                             "id":  "US-003",
                             "title":  "Add per-tier backoff state persistence to checkpoint",
                             "priority":  3,
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Serialize TierRateLimitState dict (per-keyword, per-tier backoff_delay and consecutive_failures) to checkpoint under \u0027tier_backoff_state\u0027 key",
                                                        "Restore tier backoff state from checkpoint on resume, applying staleness de-escalation (reduce backoff by 50% if checkpoint older than 30 minutes)",
@@ -46,7 +46,8 @@
                                                        "Include tier_backoff_state in VideoDownloader._save_checkpoint() alongside existing escalation_manager state",
                                                        "Unit test: save checkpoint with tier state, restore and verify backoff delays preserved",
                                                        "Unit test: restore stale checkpoint (\u003e30min), verify backoff delays halved"
-                                                   ]
+                                                   ],
+                            "notes":  "Added tier_backoff_state field to DownloadCheckpoint. _save_checkpoint() serializes all TierRateLimitState dicts with saved_at timestamp. _restore_tier_backoff_state() in download_all() resume path restores states with 50% staleness de-escalation for checkpoints >30min old. Graceful handling for missing/malformed/corrupt data. 18 tests in test_tier_backoff_checkpoint.py (all pass)."
                         },
                         {
                             "id":  "US-004",

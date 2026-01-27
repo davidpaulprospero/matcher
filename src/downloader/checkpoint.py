@@ -47,6 +47,8 @@ class DownloadCheckpoint:
     vpn_manager_state: Optional[Dict] = None
     # Escalation manager state for resume support (Sprint 10 US-007)
     escalation_state: Optional[Dict] = None
+    # Per-tier backoff state for resume support (Sprint 12 US-003)
+    tier_backoff_state: Optional[Dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -73,6 +75,9 @@ class DownloadCheckpoint:
         # Handle checkpoints created before escalation state was added (Sprint 10 US-007)
         if 'escalation_state' not in data:
             data['escalation_state'] = None
+        # Handle checkpoints created before tier backoff state was added (Sprint 12 US-003)
+        if 'tier_backoff_state' not in data:
+            data['tier_backoff_state'] = None
         return cls(**data)
 
 
