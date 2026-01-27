@@ -139,7 +139,8 @@
             "id": "US-010",
             "title": "Add speed tracker rate limit signal detection tests",
             "priority": 10,
-            "passes": false,
+            "passes": true,
+            "notes": "Added PerKeywordSpeedTracker class to speed_tracker.py for per-keyword isolation. Added 11 new tests: TestRollingWindowAverage (2 tests for AC3), TestFastSampleResetsCounter (2 tests for AC4), TestPerKeywordIsolation (7 tests for AC5). Pre-existing tests covered AC1 and AC2. All 59 speed tracker tests pass.",
             "acceptanceCriteria": [
                 "Test detect_rate_limit_signals() returns True when consecutive_slow_samples >= threshold (default 3) AND speed < rate_limit_signal_threshold",
                 "Test detect_rate_limit_signals() returns False when speed is above threshold (even with many samples)",
