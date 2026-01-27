@@ -71,6 +71,15 @@ if (-not (Test-Path $script:ArchiveDir)) {
     New-Item -ItemType Directory -Path $script:ArchiveDir -Force | Out-Null
 }
 
+# Load domain modules
+$script:LibPath = Join-Path $PSScriptRoot 'lib'
+. "$script:LibPath\sprint.ps1"
+. "$script:LibPath\scoring.ps1"
+. "$script:LibPath\queue.ps1"
+. "$script:LibPath\metrics.ps1"
+. "$script:LibPath\quality.ps1"
+. "$script:LibPath\prompts.ps1"
+
 # ============================================================================
 # CONFIG LOADING
 # ============================================================================
