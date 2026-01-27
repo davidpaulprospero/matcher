@@ -13,6 +13,7 @@ This prevents wasting resources:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Optional, List
@@ -75,6 +76,41 @@ class RateLimitBudget:
             f"max_vpn_switches={budget.max_vpn_switches}"
         )
         return budget
+
+    def scale_for_keywords(self, keyword_count: int, auto_scale: bool = True) -> None:
+        """Scale budget limits based on keyword count.
+
+        When processing many keywords, the base budget limits may be too low.
+        This scales limits proportionally: ceil(keyword_count / 5), capped at 5x.
+
+        Args:
+            keyword_count: Number of keywords being processed
+            auto_scale: If False, do nothing (config override)
+        """
+        if not auto_scale:
+            return
+
+        multiplier = min(math.ceil(keyword_count / 5), 5)
+
+        if multiplier <= 1:
+            return  # No scaling needed
+
+        base_rotations = self.max_rotations
+        base_backoff = self.max_backoff_time
+        base_vpn = self.max_vpn_switches
+
+        # Scale limits (only non-zero/unlimited limits)
+        if self.max_rotations > 0:
+            self.max_rotations = self.max_rotations * multiplier
+        if self.max_backoff_time > 0:
+            self.max_backoff_time = self.max_backoff_time * multiplier
+        if self.max_vpn_switches > 0:
+            self.max_vpn_switches = self.max_vpn_switches * multiplier
+
+        logger.info(
+            f"Rate limit budget auto-scaled for {keyword_count} keywords: "
+            f"rotations={self.max_rotations}, backoff={self.max_backoff_time}s"
+        )
 
     def record_rotation(self, keyword: str = None) -> None:
         """Record a cookie rotation.

@@ -67,7 +67,8 @@
             "id": "US-005",
             "title": "Add auto-scaling budget limits tests",
             "priority": 5,
-            "passes": false,
+            "passes": true,
+            "notes": "Added scale_for_keywords() method to RateLimitBudget with ceil(n/5) multiplier capped at 5x. Added auto_scale_budget config field to RateLimitBudgetConfig (default: True). Unlimited resources (max=0) are preserved during scaling. 25 new tests in test_auto_scaling_budget.py across 8 test classes covering all 6 acceptance criteria. Updated config.yaml with auto_scale_budget setting.",
             "acceptanceCriteria": [
                 "Test scale_for_keywords(1) returns base limits unchanged (ceil(1/5) = 1x multiplier)",
                 "Test scale_for_keywords(10) returns 2x base limits (ceil(10/5) = 2x)",
