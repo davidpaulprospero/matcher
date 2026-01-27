@@ -1,4 +1,16 @@
 
+## Iteration US-008 (Sprint 13) - Add RateLimitMetricsAggregator health status tests
+- Pre-existing implementation in `rate_limit_metrics.py` (RateLimitMetricsAggregator class, lines 948-1116)
+- Pre-existing test file had 27 tests covering most acceptance criteria
+- Added 5 new targeted tests for missing AC coverage:
+  - AC1: `test_healthy_no_tier2_and_budget_above_50_pct` - healthy with both good escalation AND budget
+  - AC2: `test_degraded_budget_between_50_and_90_pct_consumed` - degraded budget range
+  - AC2: `test_degraded_over_30_pct_keywords_at_tier2_plus` - degraded escalation threshold
+  - AC3: `test_critical_budget_under_20_pct_remaining` - critical budget exhaustion
+  - AC5: `test_health_transitions_healthy_to_degraded_to_critical` - progressive transition test
+- Files modified: `tests/test_metrics_aggregator.py`
+- Test results: 32 passed (test_metrics_aggregator.py), 199 passed (related test files), 0 failures
+
 ## Iteration US-002 (Sprint 13) - Add rate limit window duration estimation tests
 - Implemented `get_estimated_rate_limit_window(keyword)` in `rate_limit_metrics.py`
 - Tracks per-keyword failure/recovery timestamp pairs via `record_rate_limit_failure()` and `record_rate_limit_recovery()`
