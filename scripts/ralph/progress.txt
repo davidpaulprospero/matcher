@@ -5881,3 +5881,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: `src/downloader/escalation_manager.py`, `src/downloader/rate_limit_metrics.py`
 - Files created: `tests/test_escalation_timeline.py`
 - Test results: 26 passed (new), 259 passed (existing escalation + metrics), 0 failures
+
+## Iteration US-004 (Sprint 13) - Add error-pattern-to-tier success correlation tests
+- Added _tier_outcomes dict to EscalationManager tracking {trigger_category: {tier_value: {successes, attempts}}}
+- Added record_outcome(trigger_category, tier, success) method for per-category per-tier outcome recording
+- Implemented get_tier_effectiveness() returning {category: {tier_N: success_rate}} with 0.0-1.0 float rates
+- Implemented get_tier_recommendations() with two rules:
+  - >80% Tier 1 success generates skip escalation for {category}
+  - <20% Tier 2 + >60% Tier 3 generates skip Tier 2 for {category}
+- Integrated tier_effectiveness and tier_recommendations into export_to_json() under escalation key
+- Added _tier_outcomes.clear() to reset_all() for proper cleanup
+- Files modified: src/downloader/escalation_manager.py, src/downloader/rate_limit_metrics.py
+- Files created: tests/test_tier_effectiveness.py (28 tests across 6 test classes)
+- Test results: 28 new passed, 185 related passed, 0 failures
+- All 6 acceptance criteria met
