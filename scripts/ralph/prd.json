@@ -23,7 +23,8 @@
             "id": "US-002",
             "title": "Add rate limit window duration estimation tests",
             "priority": 2,
-            "passes": false,
+            "passes": true,
+            "notes": "Implemented get_estimated_rate_limit_window() with failure/recovery pair tracking, median calculation, 3-pair minimum threshold, last-10-pairs capping. Added record_rate_limit_failure/recovery methods, _get_all_estimated_windows helper, integrated into export_to_json under rate_limiting.estimated_window_seconds. 21 new tests in test_rate_limit_window_estimation.py covering all 6 acceptance criteria. All 127 existing rate limit metrics tests pass.",
             "acceptanceCriteria": [
                 "Test get_estimated_rate_limit_window() returns None when fewer than 3 failure/recovery pairs exist",
                 "Test median calculation with 5 alternating failure/success timestamps (e.g., gaps of 30s, 60s, 45s, 90s, 120s) — verify median is 60s",
