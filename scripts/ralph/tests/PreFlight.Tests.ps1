@@ -129,7 +129,13 @@ Describe "Complete-StoryAutomatically" {
         # Point script variables at test directory
         $script:RalphDir = $script:TestDataDir
         $script:PrdFile = $script:TestPrdFile
-        $script:SessionId = "test-session"
+        $script:State = @{
+            SessionId = 'test-session'; IterationCount = 0; ConsecutiveFailures = 0
+            SessionStartTime = Get-Date; CurrentMode = 'Standard'; CurrentRetryCount = 0
+            LastFocusAreaId = ''; LastStoryId = ''; StoriesSinceExploration = 0
+            LastExplorationSummary = ''; LastExplorationTime = $null
+            SprintExplorationContext = ''; LastExplorationCommit = ''
+        }
         $script:SprintNumber = 99
     }
 
@@ -193,7 +199,13 @@ Describe "Invoke-BatchPreFlight" {
         # Point script variables at test directory
         $script:RalphDir = $script:TestDataDir
         $script:PrdFile = $script:TestPrdFile
-        $script:SessionId = "test-session"
+        $script:State = @{
+            SessionId = 'test-session'; IterationCount = 0; ConsecutiveFailures = 0
+            SessionStartTime = Get-Date; CurrentMode = 'Standard'; CurrentRetryCount = 0
+            LastFocusAreaId = ''; LastStoryId = ''; StoriesSinceExploration = 0
+            LastExplorationSummary = ''; LastExplorationTime = $null
+            SprintExplorationContext = ''; LastExplorationCommit = ''
+        }
         $script:SprintNumber = 99
     }
 
