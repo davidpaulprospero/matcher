@@ -1650,7 +1650,7 @@ function Start-InterviewQueueLoop {
             if ($status.complete) {
                 Write-Host "  Sprint complete for $areaId!" -ForegroundColor Green
                 $sprintComplete = $true
-                Update-InterviewProgress -AreaId $areaId
+                Update-QueueProgress -AreaId $areaId
                 $completedAreas += $area
 
                 # Check for graceful stop before moving to next focus area
@@ -1931,7 +1931,7 @@ function Start-StandardLoop {
 
             # Mark current area as complete BEFORE checking for next
             if ($status.focusArea) {
-                Update-LegacyQueueProgress -CompletedArea $status.focusArea
+                Update-QueueProgress -AreaId $status.focusArea -Silent
             }
 
             # Check for pending queue items (inline for reliability)
@@ -1979,7 +1979,7 @@ function Start-StandardLoop {
             else {
                 # Update interview progress (queue already marked above)
                 if ($status.focusArea) {
-                    Update-InterviewProgress -AreaId $status.focusArea
+                    Update-QueueProgress -AreaId $status.focusArea
                 }
                 Write-Host "  Queue complete! All focus areas done." -ForegroundColor Green
                 break
