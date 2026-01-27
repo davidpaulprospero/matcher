@@ -1,23 +1,46 @@
 # scripts/ralph/lib/queue.ps1
 # Interview queue: focus area processing, progress tracking, completion flow
 
+function Get-Queue {
+    <#
+    .SYNOPSIS
+        Load queue data from JSON file
+    #>
+    param([string]$Path = $script:QueueFile)
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Warning "Failed to parse queue file: $Path"
+        return $null
+    }
+}
+
+function Save-Queue {
+    <#
+    .SYNOPSIS
+        Save queue data atomically
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Queue,
+        [string]$Path = $script:QueueFile
+    )
+    Save-StateFile -Path $Path -Data $Queue
+}
+
 function Get-QueueData {
     <#
     .SYNOPSIS
         Read and parse queue.json. Returns $null if file doesn't exist or is invalid.
+        Wraps Get-Queue with debug output.
     #>
-    if (-not (Test-Path $script:QueueFile)) {
+    $data = Get-Queue
+    if (-not $data -and -not (Test-Path $script:QueueFile)) {
         Write-Host "  [debug:GetQueueData] File not found: $($script:QueueFile)" -ForegroundColor Red
-        return $null
+    } elseif (-not $data) {
+        Write-Host "  [debug:GetQueueData] Parse error" -ForegroundColor Red
     }
-    try {
-        $data = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
-        return $data
-    }
-    catch {
-        Write-Host "  [debug:GetQueueData] Parse error: $_" -ForegroundColor Red
-        return $null
-    }
+    return $data
 }
 
 function Get-InterviewFocusAreas {
@@ -76,7 +99,7 @@ function Update-ContextFromPRD {
             $queue = Get-QueueData
             if ($queue) {
                 $queue.interviewContext = $prd.projectContext
-                Write-JsonNoBom -Path $script:QueueFile -Content ($queue | ConvertTo-Json -Depth 10)
+                Save-Queue -Queue $queue
                 Write-Host "  Context updated for focus area: $($prd.focusArea)" -ForegroundColor DarkGray
             }
         }
@@ -149,7 +172,7 @@ function Update-QueueProgress {
             $queue.session.iterationCount = $script:IterationCount
         }
 
-        Write-JsonNoBom -Path $script:QueueFile -Content ($queue | ConvertTo-Json -Depth 10)
+        Save-Queue -Queue $queue
 
         if (-not $Silent) {
             Write-Host "  Marked '$AreaId' as completed" -ForegroundColor Green
