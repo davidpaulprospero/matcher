@@ -230,6 +230,33 @@ class RateLimitBudget:
         # All options exhausted
         return "exhausted"
 
+    def is_nearly_exhausted(self) -> bool:
+        """Check if any single resource exceeds 80% usage.
+
+        Used by the circuit breaker to extend pause duration when budget
+        is running low but not yet fully exhausted.
+
+        Returns:
+            True if any resource (rotations, VPN switches, or backoff time)
+            exceeds 80% of its budget limit.
+        """
+        # Check rotation budget (only if limited)
+        if self.max_rotations > 0:
+            if self.rotations_used / self.max_rotations > 0.8:
+                return True
+
+        # Check VPN switches budget (only if limited)
+        if self.max_vpn_switches > 0:
+            if self.vpn_switches_used / self.max_vpn_switches > 0.8:
+                return True
+
+        # Check backoff time budget (only if limited)
+        if self.max_backoff_time > 0:
+            if self.backoff_time_spent / self.max_backoff_time > 0.8:
+                return True
+
+        return False
+
     def is_exhausted(self) -> bool:
         """Check if all rate limit budget is exhausted.
 

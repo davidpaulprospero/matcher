@@ -5807,3 +5807,20 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_tier_backoff_checkpoint.py (18 tests)
 - Test results: 18 passed in 0.62s; 109 existing checkpoint/tier tests still pass
 - All 6 acceptance criteria met
+
+## Iteration US-004 - Add budget-aware circuit breaker pause scaling
+- Added `is_nearly_exhausted()` method to RateLimitBudget: checks if any single resource (rotations, vpn_switches, backoff_time) exceeds 80% of its budget limit. Unlimited resources (max=0) are skipped.
+- Added `set_budget(budget)` method to CircuitBreaker to link a RateLimitBudget instance
+- Modified `_get_effective_pause_seconds()` to apply budget-aware scaling after escalation scaling:
+  - Healthy budget: 1.0x (no change)
+  - Nearly exhausted (>80%): 1.5x multiplier
+  - Fully exhausted: 2.5x multiplier
+  - Composes multiplicatively with existing escalation 2x (Tier 3)
+- Added `max_pause_seconds` field (default: 300.0) to CircuitBreakerConfig in both `src/downloader/circuit_breaker.py` and `src/config/sections/download.py`
+- Updated `config.yaml` with `max_pause_seconds: 300.0` under `circuit_breaker` section
+- Pause extension is capped at `max_pause_seconds` to prevent runaway scaling
+- Logging: INFO-level log when budget causes extension, format: "Circuit breaker pause extended {original}s -> {extended}s (budget {status})"
+- Files modified: src/downloader/rate_limit_budget.py, src/downloader/circuit_breaker.py, src/config/sections/download.py, config.yaml
+- Files created: tests/test_budget_circuit_breaker_pause_scaling.py (30 tests across 7 test classes)
+- Test results: 30 new tests passed in 0.55s; 199 existing related tests still pass
+- All 6 acceptance criteria met

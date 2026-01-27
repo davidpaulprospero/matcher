@@ -53,7 +53,7 @@
                             "id":  "US-004",
                             "title":  "Add budget-aware circuit breaker pause scaling",
                             "priority":  4,
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "When circuit breaker trips AND rate_limit_budget.is_nearly_exhausted() (\u003e80% of any resource used), extend pause_seconds by 1.5x",
                                                        "When budget.is_exhausted(), extend pause_seconds by 2.5x (aggressive backoff since no recovery resources remain)",
@@ -61,7 +61,8 @@
                                                        "Log the pause extension reason: \u0027Circuit breaker pause extended {original}s -\u003e {extended}s (budget {status})\u0027",
                                                        "Unit test: verify 1.5x extension when budget nearly exhausted, 2.5x when fully exhausted, 1.0x when budget healthy",
                                                        "Unit test: verify pause extension does not exceed max_pause_seconds cap (add max_pause_seconds=300 to CircuitBreakerConfig)"
-                                                   ]
+                                                   ],
+                            "notes":  "Added is_nearly_exhausted() to RateLimitBudget (checks >80% usage on any resource). Added set_budget() to CircuitBreaker. Modified _get_effective_pause_seconds() to apply 1.5x (nearly exhausted) or 2.5x (exhausted) multiplier, composing with existing escalation 2x. Added max_pause_seconds=300 to CircuitBreakerConfig (both circuit_breaker.py and config/sections/download.py). Updated config.yaml. 30 tests in test_budget_circuit_breaker_pause_scaling.py (all pass). 199 existing related tests still pass."
                         },
                         {
                             "id":  "US-005",
