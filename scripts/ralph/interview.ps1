@@ -12,6 +12,13 @@ $script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
 $script:QueueFile = Join-Path $script:RalphDir "queue.json"
 $script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
 
+# Load domain modules for shared state access
+$script:LibPath = Join-Path $script:RalphDir 'lib'
+if (Test-Path $script:LibPath) {
+    . "$script:LibPath\sprint.ps1"   # Save-StateFile
+    . "$script:LibPath\queue.ps1"    # Get-Queue, Save-Queue
+}
+
 # Load config if it exists
 $config = $null
 if (Test-Path $script:ConfigFile) {
@@ -203,7 +210,7 @@ function Ask-WorkType {
     .SYNOPSIS
         Asks user what kind of work they want to do
     .RETURNS
-        "bug", "feature", "improvement", or "client"
+        "bug", "feature", "improvement", "client", or "queue"
     #>
 
     Write-Host "  What kind of work?" -ForegroundColor Cyan
@@ -212,6 +219,7 @@ function Ask-WorkType {
     Write-Host "  [F] Feature" -ForegroundColor White
     Write-Host "  [I] Improvement (default)" -ForegroundColor White
     Write-Host "  [C] Client feedback" -ForegroundColor White
+    Write-Host "  [Q] Queue focus areas" -ForegroundColor Magenta
     Write-Host ""
 
     $response = Read-Host "  Choice"
@@ -220,6 +228,7 @@ function Ask-WorkType {
         "^[Bb]" { return "bug" }
         "^[Ff]" { return "feature" }
         "^[Cc]" { return "client" }
+        "^[Qq]" { return "queue" }
         default { return "improvement" }
     }
 }
@@ -291,6 +300,13 @@ function Ask-Area {
 
     Write-Host ""
     $response = Read-Host "  "
+
+    # If user pressed Enter without input, show Ralph's Choice preview
+    if ([string]::IsNullOrWhiteSpace($response)) {
+        Show-RalphsChoicePreview | Out-Null
+        Write-Host "  (Ralph will use these to pick the best focus area)" -ForegroundColor DarkGray
+    }
+
     return $response
 }
 
@@ -417,6 +433,243 @@ function Start-Interview {
     return $context
 }
 
+function Start-QueueMode {
+    <#
+    .SYNOPSIS
+        Direct queue mode - skip interview, pick focus areas directly
+    .DESCRIPTION
+        Shows all available focus areas with descriptions and lets
+        users select which ones to queue one at a time, showing a
+        running list of selections.
+    .RETURNS
+        Array of selected focus area IDs
+    #>
+
+    # Load focus areas from config
+    $configPath = Join-Path $PSScriptRoot "ralph-config.json"
+    $focusConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+
+    $selected = [System.Collections.ArrayList]::new()
+
+    while ($true) {
+        # Clear and show header
+        Write-Host ""
+        Write-Host "  Available focus areas:" -ForegroundColor Cyan
+        Write-Host ""
+
+        # Display numbered list with selection status
+        $i = 1
+        foreach ($area in $focusConfig.focusAreas) {
+            $num = $i.ToString().PadLeft(2)
+            $isSelected = $selected -contains $area.id
+
+            if ($isSelected) {
+                Write-Host "  [$num] " -ForegroundColor DarkGray -NoNewline
+                Write-Host "$($area.id)" -ForegroundColor Green -NoNewline
+                Write-Host " - $($area.description)" -ForegroundColor DarkGray -NoNewline
+                Write-Host " [queued]" -ForegroundColor Green
+            } else {
+                Write-Host "  [$num] $($area.id)" -ForegroundColor White -NoNewline
+                Write-Host " - $($area.description)" -ForegroundColor DarkGray
+            }
+            $i++
+        }
+
+        # Show current queue
+        Write-Host ""
+        if ($selected.Count -gt 0) {
+            Write-Host "  Queue: " -ForegroundColor Yellow -NoNewline
+            Write-Host "$($selected -join ' -> ')" -ForegroundColor Green
+        } else {
+            Write-Host "  Queue: (empty)" -ForegroundColor DarkGray
+        }
+
+        Write-Host ""
+        Write-Host "  Enter number or name to add/remove, [D]one when finished" -ForegroundColor Yellow
+        Write-Host ""
+
+        $response = Read-Host "  "
+
+        # Check for done
+        if ($response -match '^[Dd]' -or ($response -eq '' -and $selected.Count -gt 0)) {
+            break
+        }
+
+        # Skip empty input when queue is empty
+        if ($response -eq '') {
+            Write-Host "    Add at least one area first" -ForegroundColor Red
+            continue
+        }
+
+        $input = $response.Trim()
+
+        # Check if it's a number
+        if ($input -match '^\d+$') {
+            $idx = [int]$input - 1
+            if ($idx -ge 0 -and $idx -lt $focusConfig.focusAreas.Count) {
+                $areaId = $focusConfig.focusAreas[$idx].id
+                if ($selected -contains $areaId) {
+                    # Toggle off
+                    [void]$selected.Remove($areaId)
+                    Write-Host "    Removed: $areaId" -ForegroundColor Yellow
+                } else {
+                    # Add
+                    [void]$selected.Add($areaId)
+                    Write-Host "    Added: $areaId" -ForegroundColor Green
+                }
+            } else {
+                Write-Host "    Invalid number: $input" -ForegroundColor Red
+            }
+        } else {
+            # Treat as area name
+            $areaId = $input.ToLower()
+            $match = $focusConfig.focusAreas | Where-Object { $_.id -eq $areaId }
+            if ($match) {
+                if ($selected -contains $areaId) {
+                    # Toggle off
+                    [void]$selected.Remove($areaId)
+                    Write-Host "    Removed: $areaId" -ForegroundColor Yellow
+                } else {
+                    # Add
+                    [void]$selected.Add($areaId)
+                    Write-Host "    Added: $areaId" -ForegroundColor Green
+                }
+            } else {
+                Write-Host "    Unknown area: $input" -ForegroundColor Red
+            }
+        }
+
+        Start-Sleep -Milliseconds 300
+    }
+
+    if ($selected.Count -eq 0) {
+        Write-Host ""
+        Write-Host "  No areas selected. Defaulting to 'pipeline'." -ForegroundColor Yellow
+        $selected = [System.Collections.ArrayList]@("pipeline")
+    }
+
+    Write-InterviewLog "Queue mode selected areas: $($selected -join ', ')"
+
+    return $selected.ToArray()
+}
+
+# ============================================================================
+# RALPH'S CHOICE SCORING (LIGHTWEIGHT VERSION FOR INTERVIEW)
+# ============================================================================
+
+function Get-InterviewSprintHistory {
+    <#
+    .SYNOPSIS
+        Load sprint history for scoring
+    #>
+    $historyFile = Join-Path $script:RalphDir "sprint_history.json"
+    if (Test-Path $historyFile) {
+        try {
+            return Get-Content $historyFile -Raw | ConvertFrom-Json
+        } catch {
+            # Return empty structure on parse error
+        }
+    }
+    return @{
+        totalSprintsCompleted = 0
+        focusAreaBreakdown = @{}
+        sprints = @()
+    }
+}
+
+function Get-RalphsChoiceRecommendations {
+    <#
+    .SYNOPSIS
+        Get Ralph's Choice recommendations for interview mode
+    .DESCRIPTION
+        Lightweight scoring based on neglected areas and category balance.
+        Skips git activity analysis for speed.
+    .RETURNS
+        Array of top 5 focus area IDs sorted by score
+    #>
+
+    $sprintHistory = Get-InterviewSprintHistory
+
+    if (-not $config -or -not $config.focusAreas) {
+        return @("pipeline", "testing", "quality", "agents", "caption")
+    }
+
+    $scores = @()
+    $totalSprints = [int]$sprintHistory.totalSprintsCompleted
+
+    foreach ($area in $config.focusAreas) {
+        $areaId = $area.id
+
+        # Neglected score (0-1): areas with 0 sprints get 1.0
+        $sprintsDone = 0
+        if ($sprintHistory.focusAreaBreakdown -and $sprintHistory.focusAreaBreakdown.$areaId) {
+            $sprintsDone = [int]$sprintHistory.focusAreaBreakdown.$areaId.sprints
+        }
+
+        $neglectedScore = if ($sprintsDone -eq 0) { 1.0 } else {
+            # Find days since last sprint
+            $daysSince = 14
+            $areaSprints = $sprintHistory.sprints | Where-Object { $_.focusArea -eq $areaId } | Sort-Object completedAt -Descending
+            if ($areaSprints -and $areaSprints.Count -gt 0) {
+                $lastSprint = $areaSprints | Select-Object -First 1
+                if ($lastSprint.completedAt) {
+                    $daysSince = [math]::Min(((Get-Date) - [datetime]$lastSprint.completedAt).Days, 14)
+                }
+            }
+            $daysSince / 14.0
+        }
+
+        # Category balance score (0-1)
+        $areaCategory = $area.category
+        $categorySprintCount = 0
+
+        if ($areaCategory -and $config.focusAreaCategories.$areaCategory) {
+            foreach ($catArea in $config.focusAreaCategories.$areaCategory.areas) {
+                if ($sprintHistory.focusAreaBreakdown -and $sprintHistory.focusAreaBreakdown.$catArea) {
+                    $categorySprintCount += [int]$sprintHistory.focusAreaBreakdown.$catArea.sprints
+                }
+            }
+        }
+
+        $categoryRatio = if ($totalSprints -gt 0) { $categorySprintCount / $totalSprints } else { 0 }
+        $balanceScore = 1.0 - $categoryRatio
+
+        # Combined score (weight neglected higher since we skip git activity)
+        $total = ($neglectedScore * 0.6) + ($balanceScore * 0.4)
+
+        $scores += @{
+            areaId = $areaId
+            total = [math]::Round($total, 2)
+            sprintsDone = $sprintsDone
+        }
+    }
+
+    # Sort by score descending and return top 5 IDs
+    $sorted = $scores | Sort-Object -Property total -Descending | Select-Object -First 5
+    return @($sorted | ForEach-Object { $_.areaId })
+}
+
+function Show-RalphsChoicePreview {
+    <#
+    .SYNOPSIS
+        Show a brief Ralph's Choice preview in interview mode
+    #>
+    $recommendations = Get-RalphsChoiceRecommendations
+
+    Write-Host ""
+    Write-Host "  Ralph's Choice recommendations:" -ForegroundColor Magenta
+    $i = 1
+    foreach ($areaId in $recommendations) {
+        $area = $config.focusAreas | Where-Object { $_.id -eq $areaId } | Select-Object -First 1
+        $name = if ($area -and $area.name) { $area.name } else { $areaId }
+        Write-Host "    $i. $areaId ($name)" -ForegroundColor White
+        $i++
+    }
+    Write-Host ""
+
+    return $recommendations
+}
+
 # ============================================================================
 # FOCUS AREA SUGGESTION FUNCTIONS
 # ============================================================================
@@ -427,12 +680,15 @@ function Get-SuggestedFocusAreas {
         Suggests focus areas based on interview context
     .PARAMETER Context
         The interview context hashtable from Start-Interview
+    .PARAMETER UseRalphsChoice
+        If true, use Ralph's Choice scoring instead of keyword matching
     .RETURNS
         Array of suggested focus area IDs (max 5)
     #>
     param(
         [Parameter(Mandatory=$true)]
-        [hashtable]$Context
+        [hashtable]$Context,
+        [switch]$UseRalphsChoice
     )
 
     $suggestions = @()
@@ -442,10 +698,18 @@ function Get-SuggestedFocusAreas {
         $suggestions += $Context.area.Trim().ToLower()
     }
 
+    # If no area specified and UseRalphsChoice, use Ralph's Choice scoring
+    if ($suggestions.Count -eq 0 -and $UseRalphsChoice) {
+        Write-Host "  Using Ralph's Choice to find best focus areas..." -ForegroundColor Magenta
+        $ralphSuggestions = Get-RalphsChoiceRecommendations
+        return $ralphSuggestions
+    }
+
     # Keyword matching from details (lowercase)
     $keywordMap = @{
         "otio|timeline|edl|xml|davinci|resolve" = "otio"
         "download|youtube|yt-dlp|429|rate limit|cookie" = "rate-limiting"
+        "impersonate|curl_cffi|tls|fingerprint|bypass|403|bot detect" = "download"
         "match|confidence|score|quality|poor" = "quality"
         "caption|subtitle|srt|transcript" = "caption"
         "config|yaml|setting" = "config"
@@ -467,21 +731,12 @@ function Get-SuggestedFocusAreas {
         }
     }
 
-    # If < 3 suggestions, add defaults based on work type
+    # If < 3 suggestions, use Ralph's Choice to fill in
     if ($suggestions.Count -lt 3) {
-        $defaults = @{
-            "bug" = @("agents", "testing")
-            "feature" = @("pipeline", "config")
-            "improvement" = @("quality", "speed")
-            "client" = @("client-learning", "quality")
-        }
-
-        $workTypeDefaults = $defaults[$Context.workType]
-        if ($workTypeDefaults) {
-            foreach ($defaultArea in $workTypeDefaults) {
-                if ($suggestions -notcontains $defaultArea -and $suggestions.Count -lt 5) {
-                    $suggestions += $defaultArea
-                }
+        $ralphSuggestions = Get-RalphsChoiceRecommendations
+        foreach ($area in $ralphSuggestions) {
+            if ($suggestions -notcontains $area -and $suggestions.Count -lt 5) {
+                $suggestions += $area
             }
         }
     }
@@ -660,8 +915,8 @@ function Save-InterviewQueue {
         sessionId = [guid]::NewGuid().ToString().Substring(0, 8)
     }
 
-    # Save to queue.json
-    $queue | ConvertTo-Json -Depth 10 | Set-Content -Path $script:QueueFile -Encoding UTF8
+    # Save to queue.json (atomic write)
+    Save-StateFile -Path $script:QueueFile -Data $queue
 
     Write-Host "  Saved queue with $($FocusAreas.Count) focus areas" -ForegroundColor Green
     Write-InterviewLog "Queue saved - Session: $($queue.sessionId), Areas: $($FocusAreas.Count)"
@@ -739,25 +994,108 @@ if (-not $script:ResumeMode) {
     Write-Host "  Let's figure out what you need." -ForegroundColor White
     Write-Host ""
 
-    $interviewContext = Start-Interview
+    # First ask work type to determine flow
+    $workType = Ask-WorkType
+    Write-InterviewLog "Work type selected: $workType"
 
-    Write-Host ""
-    Write-Host "  Got it. Let me suggest some focus areas..." -ForegroundColor Green
-    Write-Host ""
-
-    # Get suggested focus areas based on interview context
-    $suggestions = Get-SuggestedFocusAreas -Context $interviewContext
-
-    # Let user approve/modify the suggestions
-    $approvedAreas = Get-ApprovedAreas -Suggestions $suggestions
-
-    # If user chose to restart, re-run the script
-    if ($null -eq $approvedAreas) {
+    if ($workType -eq "queue") {
+        # Queue mode - direct area selection, skip interview
         Write-Host ""
-        Write-Host "  Restarting interview..." -ForegroundColor Yellow
+        $selectedAreas = Start-QueueMode
+
         Write-Host ""
-        & $PSCommandPath
-        return
+        Write-Host "  Confirm your selections:" -ForegroundColor Green
+        Write-Host ""
+
+        # Let user approve/modify the selections
+        $approvedAreas = Get-ApprovedAreas -Suggestions $selectedAreas
+
+        # If user chose to restart, re-run the script
+        if ($null -eq $approvedAreas) {
+            Write-Host ""
+            Write-Host "  Restarting interview..." -ForegroundColor Yellow
+            Write-Host ""
+            & $PSCommandPath
+            return
+        }
+
+        # Ask for optional work description
+        Write-Host ""
+        Write-Host "  What should Ralph work on? (Enter to use default)" -ForegroundColor Cyan
+        Write-Host "  Default: Find issues, add tests, improve code quality" -ForegroundColor DarkGray
+        Write-Host ""
+        $queueDescription = Read-Host "  "
+
+        if ([string]::IsNullOrWhiteSpace($queueDescription)) {
+            $queueDescription = "Find and fix issues, add missing tests, improve code quality and documentation"
+        }
+        Write-InterviewLog "Queue description: $queueDescription"
+
+        # Create context for queue mode with actual work description
+        $interviewContext = @{
+            workType  = "queue"
+            details   = $queueDescription
+            area      = ""
+            client    = ""
+            priority  = "normal"
+            timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+        }
+    } else {
+        # Normal interview flow - continue with remaining questions
+        # Create context with the already-answered workType
+        $interviewContext = @{
+            workType  = $workType
+            details   = ""
+            area      = ""
+            client    = ""
+            priority  = "normal"
+            timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+        }
+
+        # ---- ALWAYS ASK: Details ----
+        $interviewContext.details = Ask-Details -WorkType $workType
+        Write-InterviewLog "Details provided: $($interviewContext.details)"
+
+        # ---- DYNAMIC: Area (if vague description) ----
+        if ($interviewContext.details.Length -lt 20) {
+            $interviewContext.area = Ask-Area -WorkType $workType -Details $interviewContext.details
+            Write-InterviewLog "Area specified: $($interviewContext.area)"
+        }
+
+        # ---- DYNAMIC: Client (if client work type or client-related keywords) ----
+        $clientPattern = "client|theresa|stu|feedback"
+        if ($workType -eq "client" -or $interviewContext.details -match $clientPattern) {
+            $interviewContext.client = Ask-Client
+            Write-InterviewLog "Client specified: $($interviewContext.client)"
+        }
+
+        # ---- DYNAMIC: Priority (if bug or urgency keywords) ----
+        $urgencyPattern = "urgent|critical|asap|broken"
+        if ($workType -eq "bug" -or $interviewContext.details -match $urgencyPattern) {
+            $interviewContext.priority = Ask-Priority
+            Write-InterviewLog "Priority set: $($interviewContext.priority)"
+        }
+
+        Write-Host ""
+        Write-Host "  Got it. Let me suggest some focus areas..." -ForegroundColor Green
+        Write-Host ""
+
+        # Get suggested focus areas based on interview context
+        # Use Ralph's Choice scoring when user didn't specify an area
+        $useRalphsChoice = [string]::IsNullOrWhiteSpace($interviewContext.area)
+        $suggestions = Get-SuggestedFocusAreas -Context $interviewContext -UseRalphsChoice:$useRalphsChoice
+
+        # Let user approve/modify the suggestions
+        $approvedAreas = Get-ApprovedAreas -Suggestions $suggestions
+
+        # If user chose to restart, re-run the script
+        if ($null -eq $approvedAreas) {
+            Write-Host ""
+            Write-Host "  Restarting interview..." -ForegroundColor Yellow
+            Write-Host ""
+            & $PSCommandPath
+            return
+        }
     }
 
     # Save the queue
