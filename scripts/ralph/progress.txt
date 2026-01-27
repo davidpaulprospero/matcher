@@ -5919,3 +5919,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Pre-existing tests already covered AC1 (stale de-escalation) and AC4 (corrupted tier clamping)
 - Files modified: tests/test_escalation_manager.py
 - Test results: 109 passed in test_escalation_manager.py, 72 passed in related test files
+
+## Iteration US-007 (Sprint 13) - Add RateLimitMetrics recommendation engine tests
+- Implementation already existed in get_config_recommendations() at rate_limit_metrics.py:427
+- Existing 7 tests covered core scenarios (high rate limiting, retry exhaustion, CB trips, no cookies, timeouts, batch retry, healthy metrics)
+- Added 6 new tests to TestConfigRecommendations for explicit AC coverage:
+  - test_returns_list_of_strings_when_no_recommendations: verifies list return type, not None/dict (AC6)
+  - test_returns_list_of_strings_when_recommendations_present: all items are str type (AC6)
+  - test_recommendation_rate_limit_mentions_backoff_or_cookies: AC1 text verification
+  - test_recommendation_retry_mentions_max_retries: AC2 text verification
+  - test_recommendation_cb_mentions_pause_or_vpn: AC3 text verification
+  - test_recommendation_no_cookies_mentions_enable_rotation: AC4 text verification
+- Files modified: tests/test_rate_limit_metrics.py
+- Test results: 13 recommendation tests passed, 133 total rate limit metrics tests passed, 0 failures
+- All 6 acceptance criteria met
