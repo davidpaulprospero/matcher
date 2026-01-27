@@ -2,8 +2,9 @@
 Unit tests for CookieMethodFallback.
 
 US-002: Create dedicated unit tests for CookieMethodFallback.
+US-005: Add chain validation on init, get_chain_health(), os.access checks.
 Tests the ordered fallback chain, advance/reset lifecycle, yt-dlp arg generation,
-and file-based method handling (path resolution, missing files).
+and file-based method handling (path resolution, missing files, readability).
 """
 
 import pytest
@@ -45,19 +46,30 @@ def _make_download_config(
     return config, files_exist
 
 
-def _build_fallback(browser="", cookie_files=None, cookies_path="", files_exist=None):
-    """Convenience: build config + CookieMethodFallback in one call."""
+def _build_fallback(browser="", cookie_files=None, cookies_path="", files_exist=None,
+                    files_readable=None):
+    """Convenience: build config + CookieMethodFallback in one call.
+
+    Args:
+        files_readable: set of path strings for which os.access(R_OK) returns True.
+                        If None, defaults to same as files_exist (all existing files readable).
+    """
     config, exist_set = _make_download_config(
         browser=browser,
         cookie_files=cookie_files,
         cookies_path=cookies_path,
         files_exist=files_exist,
     )
+    readable_set = files_readable if files_readable is not None else exist_set
 
     def fake_exists(self):
         return str(self) in exist_set
 
-    with patch.object(Path, "exists", fake_exists):
+    def fake_access(path, mode):
+        return path in readable_set or str(Path(path)) in readable_set
+
+    with patch.object(Path, "exists", fake_exists), \
+         patch("src.downloader.cookie_method_fallback.os.access", fake_access):
         fb = CookieMethodFallback(config)
     return fb
 
@@ -422,3 +434,145 @@ class TestGetStatus:
         assert fb.get_status()["last_success"] is None
         fb.mark_success()
         assert fb.get_status()["last_success"] is not None
+
+
+# ===========================================================================
+# Test: Chain validation on init (US-005)
+# ===========================================================================
+
+
+@pytest.mark.fast
+class TestChainValidation:
+    """Test init-time chain validation: file existence, readability, health reporting."""
+
+    def test_mix_existing_and_missing_files(self):
+        """Only valid (existing + readable) files appear in the chain."""
+        fb = _build_fallback(
+            cookie_files=["cookies/main.txt", "cookies/missing.txt", "cookies/backup1.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt",
+                         "cookies\\backup1.txt", "cookies/backup1.txt"},
+        )
+        labels = [m.label for m in fb._chain]
+        assert "file:main.txt" in labels
+        assert "file:backup1.txt" in labels
+        assert "file:missing.txt" not in labels
+
+    def test_all_files_invalid_degrades_to_browser_and_none(self):
+        """If all file methods invalid, chain is [browser, none]."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/missing1.txt", "cookies/missing2.txt"],
+            files_exist=set(),
+        )
+        labels = [m.label for m in fb._chain]
+        assert labels == ["browser:firefox", "no-cookies"]
+
+    def test_all_files_invalid_no_browser_degrades_to_none(self):
+        """If all file methods invalid and no browser, chain is [none]."""
+        fb = _build_fallback(
+            cookie_files=["cookies/missing1.txt", "cookies/missing2.txt"],
+            files_exist=set(),
+        )
+        labels = [m.label for m in fb._chain]
+        assert labels == ["no-cookies"]
+
+    def test_file_exists_but_not_readable_skipped(self):
+        """A file that exists but isn't readable (R_OK) is skipped."""
+        fb = _build_fallback(
+            cookie_files=["cookies/main.txt", "cookies/locked.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt",
+                         "cookies\\locked.txt", "cookies/locked.txt"},
+            # locked.txt exists but is NOT in the readable set
+            files_readable={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        labels = [m.label for m in fb._chain]
+        assert "file:main.txt" in labels
+        assert "file:locked.txt" not in labels
+
+    def test_get_chain_health_all_valid(self):
+        """get_chain_health() reports correct counts when all files valid."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        health = fb.get_chain_health()
+        # Chain: browser:firefox, file:main.txt, no-cookies = 3 valid, 0 skipped
+        assert health["valid_methods"] == 3
+        assert health["total_methods"] == 3
+        assert health["skipped_files"] == []
+
+    def test_get_chain_health_with_skipped(self):
+        """get_chain_health() reports skipped files."""
+        fb = _build_fallback(
+            cookie_files=["cookies/main.txt", "cookies/missing.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        health = fb.get_chain_health()
+        # Chain: file:main.txt, no-cookies = 2 valid; missing.txt = 1 skipped
+        assert health["valid_methods"] == 2
+        assert health["total_methods"] == 3
+        assert len(health["skipped_files"]) == 1
+        assert "cookies/missing.txt" in health["skipped_files"]
+
+    def test_get_chain_health_all_files_skipped(self):
+        """get_chain_health() when all file methods are invalid."""
+        fb = _build_fallback(
+            cookie_files=["cookies/a.txt", "cookies/b.txt"],
+            cookies_path="cookies/c.txt",
+            files_exist=set(),
+        )
+        health = fb.get_chain_health()
+        # Chain: no-cookies = 1 valid; a.txt, b.txt, c.txt = 3 skipped
+        assert health["valid_methods"] == 1
+        assert health["total_methods"] == 4
+        assert len(health["skipped_files"]) == 3
+
+    def test_skipped_files_logged_as_warnings(self):
+        """Each skipped file produces a logger.warning call."""
+        config, exist_set = _make_download_config(
+            cookie_files=["cookies/missing1.txt", "cookies/missing2.txt"],
+            files_exist=set(),
+        )
+
+        def fake_exists(self):
+            return str(self) in exist_set
+
+        def fake_access(path, mode):
+            return False
+
+        with patch.object(Path, "exists", fake_exists), \
+             patch("src.downloader.cookie_method_fallback.os.access", fake_access), \
+             patch("src.downloader.cookie_method_fallback.logger") as mock_logger:
+            CookieMethodFallback(config)
+
+        # Two missing files = two warning calls
+        warning_calls = [
+            call for call in mock_logger.warning.call_args_list
+            if "Cookie file not found, skipping:" in str(call)
+        ]
+        assert len(warning_calls) == 2
+
+    def test_health_summary_logged_at_info(self):
+        """Chain health summary is logged at INFO level on init."""
+        config, exist_set = _make_download_config(
+            browser="firefox",
+            cookie_files=["cookies/main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+
+        def fake_exists(self):
+            return str(self) in exist_set
+
+        def fake_access(path, mode):
+            return True
+
+        with patch.object(Path, "exists", fake_exists), \
+             patch("src.downloader.cookie_method_fallback.os.access", fake_access), \
+             patch("src.downloader.cookie_method_fallback.logger") as mock_logger:
+            CookieMethodFallback(config)
+
+        # Look for the health summary INFO log
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        health_log = [c for c in info_calls if "methods available" in c]
+        assert len(health_log) >= 1, f"Expected health summary log, got: {info_calls}"

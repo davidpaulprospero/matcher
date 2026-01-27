@@ -68,7 +68,7 @@
                             "id":  "US-005",
                             "title":  "Add cookie fallback chain validation on initialization",
                             "priority":  5,
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "In CookieMethodFallback.__init__(), validate all file-based methods: check file exists and is readable (os.access with R_OK)",
                                                        "Skip invalid file methods during chain construction (log warning per skipped file: \u0027Cookie file not found, skipping: {path}\u0027)",
@@ -76,7 +76,8 @@
                                                        "Add get_chain_health() method returning dict with total_methods, valid_methods, skipped_files list",
                                                        "Log chain health summary at INFO level on init: \u0027Cookie fallback chain: {valid}/{total} methods available\u0027",
                                                        "Unit test: construct chain with mix of existing/missing files, verify only valid entries in chain"
-                                                   ]
+                                                   ],
+                            "notes":  "Added os.access(R_OK) validation alongside Path.exists() in _build_chain(). Skipped files logged as warnings and tracked in _skipped_files list. _build_chain() now returns (chain, skipped_files) tuple. Added get_chain_health() returning {total_methods, valid_methods, skipped_files}. Chain health summary logged at INFO on init. 9 new tests in TestChainValidation class (mix existing/missing, degrade to browser+none or none-only, exists-but-not-readable, health counts, warning logging, info logging). All 44 tests pass."
                         },
                         {
                             "id":  "US-006",
