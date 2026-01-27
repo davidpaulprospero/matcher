@@ -1,4 +1,17 @@
 
+## Iteration US-002 (Sprint 13) - Add rate limit window duration estimation tests
+- Implemented `get_estimated_rate_limit_window(keyword)` in `rate_limit_metrics.py`
+- Tracks per-keyword failure/recovery timestamp pairs via `record_rate_limit_failure()` and `record_rate_limit_recovery()`
+- Returns median gap duration from failure→recovery pairs; requires ≥3 pairs
+- Only last 10 pairs used for current estimate (oldest discarded)
+- Added `_get_all_estimated_windows()` helper for export
+- Integrated into `export_to_json()` under `rate_limiting.estimated_window_seconds`
+- Added `_rate_limit_events_log` field, cleared on `clear()`
+- 21 new tests across 7 test classes in `tests/test_rate_limit_window_estimation.py`
+- Files modified: `src/downloader/rate_limit_metrics.py`
+- Files created: `tests/test_rate_limit_window_estimation.py`
+- Test results: 21 passed (new), 127 passed (existing rate limit metrics), 0 failures
+
 ## Iteration US-005 - Add cookie fallback chain validation on initialization
 - Added `os.access(R_OK)` validation alongside `Path.exists()` in `_build_chain()` for proper readability checks
 - Skipped files now logged as warnings: "Cookie file not found, skipping: {path}"

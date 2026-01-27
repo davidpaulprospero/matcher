@@ -79,9 +79,11 @@ from __future__ import annotations
 
 import json
 import logging
+import statistics
+import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +160,12 @@ class RateLimitMetrics:
     avg_speed_mbps: float = 0.0
     timeout_extensions: int = 0
     speed_escalations: int = 0  # US-001 Sprint 12: speed-triggered tier escalations
+
+    # Rate limit window estimation (US-002 Sprint 13)
+    # Per-keyword list of (timestamp, event_type) where event_type is 'failure' or 'recovery'
+    _rate_limit_events_log: Dict[str, List[Tuple[float, str]]] = field(
+        default_factory=dict, repr=False
+    )
 
     # Session metadata
     session_start_time: Optional[str] = None
@@ -281,6 +289,85 @@ class RateLimitMetrics:
     def record_speed_escalation(self) -> None:
         """Record a speed-triggered tier escalation."""
         self.speed_escalations += 1
+
+    def record_rate_limit_failure(self, keyword: str) -> None:
+        """Record a rate limit failure event with timestamp for window estimation.
+
+        Args:
+            keyword: The keyword that experienced the rate limit failure.
+        """
+        if keyword not in self._rate_limit_events_log:
+            self._rate_limit_events_log[keyword] = []
+        self._rate_limit_events_log[keyword].append((time.time(), 'failure'))
+
+    def record_rate_limit_recovery(self, keyword: str) -> None:
+        """Record a rate limit recovery event with timestamp for window estimation.
+
+        Args:
+            keyword: The keyword that recovered from rate limiting.
+        """
+        if keyword not in self._rate_limit_events_log:
+            self._rate_limit_events_log[keyword] = []
+        self._rate_limit_events_log[keyword].append((time.time(), 'recovery'))
+
+    def get_estimated_rate_limit_window(self, keyword: str) -> Optional[float]:
+        """Estimate the rate limit window duration for a keyword.
+
+        Analyzes alternating failure/recovery timestamp pairs to compute
+        the median time gap between a failure event and its subsequent
+        recovery event. Requires at least 3 failure/recovery pairs.
+
+        Only the last 10 pairs are used to keep the estimate current.
+
+        Args:
+            keyword: The keyword to estimate for.
+
+        Returns:
+            Median window duration in seconds, or None if fewer than 3 pairs exist.
+        """
+        events = self._rate_limit_events_log.get(keyword, [])
+        if not events:
+            return None
+
+        # Extract failure/recovery pairs: find each failure followed by a recovery
+        pairs: List[float] = []
+        i = 0
+        while i < len(events):
+            if events[i][1] == 'failure':
+                # Find the next recovery after this failure
+                j = i + 1
+                while j < len(events):
+                    if events[j][1] == 'recovery':
+                        gap = events[j][0] - events[i][0]
+                        pairs.append(gap)
+                        i = j + 1
+                        break
+                    j += 1
+                else:
+                    # No recovery found after this failure
+                    i += 1
+            else:
+                i += 1
+
+        if len(pairs) < 3:
+            return None
+
+        # Use only the last 10 pairs for current estimate
+        recent_pairs = pairs[-10:]
+        return statistics.median(recent_pairs)
+
+    def _get_all_estimated_windows(self) -> Dict[str, Optional[float]]:
+        """Get estimated rate limit windows for all tracked keywords.
+
+        Returns:
+            Dict mapping keyword to estimated window in seconds (or None if insufficient data).
+        """
+        result: Dict[str, Optional[float]] = {}
+        for keyword in self._rate_limit_events_log:
+            estimate = self.get_estimated_rate_limit_window(keyword)
+            if estimate is not None:
+                result[keyword] = round(estimate, 2)
+        return result
 
     @property
     def avg_retry_count(self) -> float:
@@ -630,6 +717,7 @@ class RateLimitMetrics:
         self.avg_speed_mbps = 0.0
         self.timeout_extensions = 0
         self.speed_escalations = 0
+        self._rate_limit_events_log = {}  # US-002 Sprint 13
         self.session_start_time = None
         self.session_end_time = None
         self.session_count = 1  # Reset to 1 for new session (US-006)
@@ -695,6 +783,7 @@ class RateLimitMetrics:
                 "percentage_of_downloads": self.rate_limit_percentage,
                 "by_tier": dict(self.tier_rate_limit_events),
                 "by_keyword": dict(self.keyword_rate_limit_events),
+                "estimated_window_seconds": self._get_all_estimated_windows(),
                 "backoff": {
                     "total_attempts": self.backoff_attempts,
                     "total_seconds": round(self.time_spent_backing_off, 2),
