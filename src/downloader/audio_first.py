@@ -20,6 +20,7 @@ from .types import MergedSegment, DownloadedSegment
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager
 from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
+from .speed_tracker import DownloadSpeedTracker
 from . import segment_utils
 from . import utils
 
@@ -51,7 +52,8 @@ class AudioFirstPipeline:
         lock,
         cookie_rotator: Optional[CookieRotator] = None,
         impersonation_manager: Optional[ImpersonationManager] = None,
-        escalation_manager: Optional[EscalationManager] = None
+        escalation_manager: Optional[EscalationManager] = None,
+        speed_tracker: Optional[DownloadSpeedTracker] = None
     ):
         """
         Initialize AudioFirstPipeline.
@@ -67,6 +69,7 @@ class AudioFirstPipeline:
             cookie_rotator: Optional CookieRotator for cookie rotation on errors
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
             escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
+            speed_tracker: Optional DownloadSpeedTracker for speed-based escalation
         """
         self.config = config
         self.download_config = config.download
@@ -79,6 +82,7 @@ class AudioFirstPipeline:
         self.cookie_rotator = cookie_rotator
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
+        self.speed_tracker = speed_tracker
 
         # Log cookie rotation status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -297,6 +301,7 @@ class AudioFirstPipeline:
             # Build yt-dlp command for audio only
             cmd = [
                 'yt-dlp',
+                '--ignore-config',
                 video_url,
                 '-f', 'bestaudio/best',
                 '-x',  # Extract/convert audio
@@ -334,12 +339,16 @@ class AudioFirstPipeline:
                 download_cmd.extend(self._get_cookie_args())
 
                 try:
+                    dl_start_time = time.time()
                     result = subprocess.run(
                         download_cmd,
                         capture_output=True,
                         text=True,
-                        timeout=audio_timeout
+                        timeout=audio_timeout,
+                        encoding='utf-8',
+                        errors='replace'
                     )
+                    dl_elapsed = time.time() - dl_start_time
 
                     # Find the actual downloaded file
                     if result.returncode == 0:
@@ -381,6 +390,19 @@ class AudioFirstPipeline:
                     break  # Don't retry on unknown errors
 
             if actual_file:
+                # Record download speed for speed-based escalation
+                if self.speed_tracker and self.speed_tracker.config.enabled:
+                    try:
+                        file_size = Path(actual_file).stat().st_size
+                        self.speed_tracker.record_download(
+                            video_id=video_id,
+                            bytes_downloaded=file_size,
+                            duration_seconds=dl_elapsed,
+                            tier=tier
+                        )
+                    except (OSError, NameError):
+                        pass  # File stat failed or dl_elapsed not set, skip
+
                 audio_downloads.append(AudioDownload(
                     file=str(actual_file),
                     video_id=video_id,
@@ -390,6 +412,9 @@ class AudioFirstPipeline:
                     keyword=keyword
                 ))
                 logger.debug(f"Downloaded audio: {actual_file.name}")
+
+        # Check for rate limit signals from speed tracker
+        self._check_speed_escalation(keyword)
 
         # Update tier download count
         if audio_downloads:
@@ -494,6 +519,7 @@ class AudioFirstPipeline:
             # Build base yt-dlp command (cookies added in retry loop)
             base_cmd = [
                 'yt-dlp',
+                '--ignore-config',
                 video_url,
                 *section_args,
                 '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
@@ -539,12 +565,16 @@ class AudioFirstPipeline:
                 cmd.extend(self._get_cookie_args())
 
                 try:
+                    seg_dl_start = time.time()
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
                         text=True,
-                        timeout=timeout
+                        timeout=timeout,
+                        encoding='utf-8',
+                        errors='replace'
                     )
+                    seg_dl_elapsed = time.time() - seg_dl_start
 
                     if result.returncode != 0:
                         last_error = result.stderr[-200:] if result.stderr else 'Unknown error'
@@ -573,10 +603,15 @@ class AudioFirstPipeline:
                         downloaded = segment_utils.rename_segments_with_timing(video_dir, video_id, segments)
 
                         success_count = 0
+                        total_bytes = 0
                         for seg, file_path in zip(segments, downloaded):
                             if file_path and Path(file_path).exists():
                                 success_count += 1
                                 file_duration = seg.end_time - seg.start_time
+                                try:
+                                    total_bytes += Path(file_path).stat().st_size
+                                except OSError:
+                                    pass
 
                                 downloaded_segments.append(DownloadedSegment(
                                     file=str(file_path),
@@ -587,6 +622,15 @@ class AudioFirstPipeline:
                                     matches=seg.original_matches,
                                     keyword=keyword
                                 ))
+
+                        # Record download speed for speed-based escalation
+                        if self.speed_tracker and self.speed_tracker.config.enabled and total_bytes > 0:
+                            self.speed_tracker.record_download(
+                                video_id=video_id,
+                                bytes_downloaded=total_bytes,
+                                duration_seconds=seg_dl_elapsed,
+                                tier="segment"
+                            )
 
                         print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
                         break  # Success, exit retry loop
@@ -606,6 +650,9 @@ class AudioFirstPipeline:
             # Log final failure if all retries exhausted
             if not segment_success and last_error:
                 logger.error(f"All {max_retries} attempts failed for {video_id}: {last_error}")
+
+            # Check for rate limit signals from speed tracker after each video
+            self._check_speed_escalation(keyword)
 
             # Fallback to full video if segment download failed
             if not segment_success and fallback_full:
@@ -669,6 +716,7 @@ class AudioFirstPipeline:
 
         base_cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
             '--merge-output-format', 'mp4',
@@ -698,7 +746,9 @@ class AudioFirstPipeline:
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=timeout
+                    timeout=timeout,
+                    encoding='utf-8',
+                    errors='replace'
                 )
 
                 if result.returncode == 0 and output_file.exists():
@@ -808,7 +858,9 @@ class AudioFirstPipeline:
                  '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                encoding='utf-8',
+                errors='replace'
             )
             if result.returncode == 0:
                 return float(result.stdout.strip())
@@ -899,3 +951,23 @@ class AudioFirstPipeline:
 
         # Default: retry unknown errors once
         return True
+
+    def _check_speed_escalation(self, keyword: str) -> None:
+        """Check speed tracker for rate limit signals and trigger escalation.
+
+        Detects slow download speeds that often precede hard rate limit errors
+        and preemptively escalates the keyword's bypass tier via the escalation
+        manager's record_slow_speed() method.
+
+        Args:
+            keyword: The download keyword or video ID to escalate.
+        """
+        if not self.speed_tracker or not self.speed_tracker.config.enabled:
+            return
+        if not self.escalation_manager:
+            return
+
+        signal = self.speed_tracker.detect_rate_limit_signals()
+        if signal.detected:
+            avg_speed = self.speed_tracker.get_average_speed_mbps()
+            self.escalation_manager.record_slow_speed(keyword, speed_mbps=avg_speed)

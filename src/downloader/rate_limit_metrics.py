@@ -157,6 +157,7 @@ class RateLimitMetrics:
     speed_samples: int = 0
     avg_speed_mbps: float = 0.0
     timeout_extensions: int = 0
+    speed_escalations: int = 0  # US-001 Sprint 12: speed-triggered tier escalations
 
     # Session metadata
     session_start_time: Optional[str] = None
@@ -276,6 +277,10 @@ class RateLimitMetrics:
     def record_timeout_extension(self) -> None:
         """Record that a timeout was extended due to slow speed."""
         self.timeout_extensions += 1
+
+    def record_speed_escalation(self) -> None:
+        """Record a speed-triggered tier escalation."""
+        self.speed_escalations += 1
 
     @property
     def avg_retry_count(self) -> float:
@@ -481,6 +486,8 @@ class RateLimitMetrics:
             escalations.append(f"cookie rotations: {self.cookie_rotations}")
         if self.vpn_switches > 0:
             escalations.append(f"VPN switches: {self.vpn_switches}")
+        if self.speed_escalations > 0:
+            escalations.append(f"speed-triggered: {self.speed_escalations}")
         if escalations:
             lines.append(f"Escalations: {', '.join(escalations)}")
 
@@ -552,6 +559,7 @@ class RateLimitMetrics:
             speed_samples=data.get('speed_samples', 0),
             avg_speed_mbps=data.get('avg_speed_mbps', 0.0),
             timeout_extensions=data.get('timeout_extensions', 0),
+            speed_escalations=data.get('speed_escalations', 0),
             session_start_time=data.get('session_start_time'),
             session_end_time=data.get('session_end_time'),
             session_count=data.get('session_count', 1),
@@ -621,6 +629,7 @@ class RateLimitMetrics:
         self.speed_samples = 0
         self.avg_speed_mbps = 0.0
         self.timeout_extensions = 0
+        self.speed_escalations = 0
         self.session_start_time = None
         self.session_end_time = None
         self.session_count = 1  # Reset to 1 for new session (US-006)
@@ -697,6 +706,7 @@ class RateLimitMetrics:
             "escalation": {
                 "cookie_rotations": self.cookie_rotations,
                 "vpn_switches": self.vpn_switches,
+                "speed_escalations": self.speed_escalations,
             },
 
             # Circuit breaker statistics

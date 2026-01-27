@@ -400,6 +400,9 @@ class VideoDownloader:
         else:
             self.speed_tracker = DownloadSpeedTracker(DownloadSpeedConfig(enabled=False))
 
+        # Share speed tracker with audio-first pipeline for speed-based escalation
+        self.audio_first.speed_tracker = self.speed_tracker
+
         # Circuit breaker (for search failure protection)
         circuit_breaker_config = getattr(self.download_config, 'circuit_breaker', None)
         circuit_breaker_enabled = False
@@ -558,6 +561,12 @@ class VideoDownloader:
             # Include escalation manager state for resume support (Sprint 10 US-007)
             if self.escalation_manager is not None:
                 self.checkpoint.escalation_state = self.escalation_manager.to_dict()
+            # Include per-tier backoff state for resume support (Sprint 12 US-003)
+            if self._per_tier_isolation:
+                self.checkpoint.tier_backoff_state = {
+                    'tiers': {k: v.to_dict() for k, v in self._tier_rate_limit_states.items()},
+                    'saved_at': datetime.now().isoformat()
+                }
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -628,6 +637,11 @@ class VideoDownloader:
             status = self.vpn_manager.get_status()
             self.rate_limit_metrics.vpn_switches = status.get('switches', 0)
 
+        # Get speed escalation count from escalation manager
+        if hasattr(self, 'escalation_manager') and self.escalation_manager is not None:
+            esc_metrics = self.escalation_manager.get_metrics()
+            self.rate_limit_metrics.speed_escalations = esc_metrics.get('speed_escalations', 0)
+
         return self.rate_limit_metrics
 
     def get_speed_stats(self) -> dict:
@@ -665,7 +679,7 @@ class VideoDownloader:
 
         # Check yt-dlp
         try:
-            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True)
+            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace')
             messages.append(f"✓ yt-dlp {result.stdout.strip()}")
         except FileNotFoundError:
             return False, "✗ yt-dlp not found! Install with: pip install yt-dlp"
@@ -1069,6 +1083,56 @@ class VideoDownloader:
             self._rate_limit_backoff_count = 0
             self._rate_limit_total_delay = 0.0
 
+    def _restore_tier_backoff_state(self, tier_state_data: dict) -> None:
+        """Restore per-tier backoff state from checkpoint with staleness de-escalation.
+
+        If checkpoint is older than 30 minutes, backoff delays are halved (staleness
+        de-escalation), since YouTube rate limits may have relaxed.
+
+        Args:
+            tier_state_data: Dict with 'tiers' and 'saved_at' keys from checkpoint
+        """
+        try:
+            tiers_data = tier_state_data.get('tiers', {})
+            saved_at_str = tier_state_data.get('saved_at')
+
+            # Calculate staleness factor
+            staleness_factor = 1.0
+            if saved_at_str:
+                try:
+                    saved_at = datetime.fromisoformat(saved_at_str)
+                    age_minutes = (datetime.now() - saved_at).total_seconds() / 60
+                    if age_minutes > 30:
+                        staleness_factor = 0.5
+                        logger.info(
+                            f"Tier backoff state is {age_minutes:.0f}min old — "
+                            f"applying 50% staleness de-escalation"
+                        )
+                except (ValueError, TypeError):
+                    logger.warning("Invalid saved_at in tier_backoff_state, using fresh state")
+                    return
+
+            restored_count = 0
+            for tier_name, state_data in tiers_data.items():
+                if tier_name in self._tier_rate_limit_states:
+                    state = TierRateLimitState.from_dict(state_data)
+                    # Apply staleness de-escalation
+                    if staleness_factor < 1.0:
+                        state.total_delay *= staleness_factor
+                    self._tier_rate_limit_states[tier_name] = state
+                    if state.backoff_count > 0:
+                        restored_count += 1
+
+            if restored_count > 0:
+                logger.info(
+                    f"Restored tier backoff state: "
+                    f"{restored_count} tiers with active backoff"
+                )
+            else:
+                logger.debug("Restored tier backoff state: all tiers clean")
+        except Exception as e:
+            logger.warning(f"Could not restore tier backoff state: {e} — starting fresh")
+
     def _check_rate_limit_cooldown(self, checkpoint: DownloadCheckpoint) -> bool:
         """
         Check if last rate limit was within cooldown period.
@@ -1205,6 +1269,9 @@ class VideoDownloader:
                         f"Restored escalation state: {metrics['total_403s']} 403s, "
                         f"{metrics['total_escalations']} escalations"
                     )
+                # Restore per-tier backoff state (Sprint 12 US-003)
+                if self._per_tier_isolation and self.checkpoint.tier_backoff_state:
+                    self._restore_tier_backoff_state(self.checkpoint.tier_backoff_state)
 
         if not self.checkpoint:
             self.checkpoint = DownloadCheckpoint(
@@ -1645,6 +1712,7 @@ class VideoDownloader:
 
             cmd = [
                 'yt-dlp',
+                '--ignore-config',
                 f'ytsearch{search_pool}:{keyword}',
                 '-f', self._build_format_string(),
                 '--match-filter', self._build_filter_string(tier),
@@ -1654,12 +1722,16 @@ class VideoDownloader:
                 '--write-info-json',
                 '--restrict-filenames',
                 '--no-overwrites',
-                '--no-continue',
+                '--socket-timeout', '10',
+                '--retries', '10',
+                '--fragment-retries', '10',
+                '--throttled-rate', '100K',
+                '--force-ipv4',
+                '--http-chunk-size', '10M',
+                '--skip-unavailable-fragments',
                 '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
                 '--progress',
                 '--newline',
-                '--quiet',
-                '--no-warnings',
             ]
 
             self._add_escalation_to_cmd(cmd, keyword)
@@ -1746,17 +1818,23 @@ class VideoDownloader:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             '-f', self._build_format_string(),
             '--merge-output-format', 'mp4',
             '--no-playlist',
             '--write-info-json',
             '--restrict-filenames',
             '--no-overwrites',
-            '--no-continue',
+            '--socket-timeout', '10',
+            '--retries', '10',
+            '--fragment-retries', '10',
+            '--throttled-rate', '100K',
+            '--force-ipv4',
+            '--http-chunk-size', '10M',
+            '--skip-unavailable-fragments',
             '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
-            '--quiet',
-            '--no-warnings',
             '--progress',
+            '--newline',
         ] + urls
 
         self._add_escalation_to_cmd(cmd, keyword)
@@ -1829,6 +1907,171 @@ class VideoDownloader:
         """Check if error is permanent (should not retry)."""
         stderr_lower = stderr.lower()
         return any(pattern in stderr_lower for pattern in self.PERMANENT_ERROR_PATTERNS)
+
+    def _wait_for_process_with_progress(
+        self,
+        process: subprocess.Popen,
+        stall_timeout: int,
+        max_timeout: int,
+        keyword: str,
+        tier: str
+    ) -> Tuple[str, str, bool]:
+        """Wait for process with progress-aware timeout.
+
+        Instead of a hard total timeout (subprocess.communicate), this monitors
+        stderr output from yt-dlp. The process is only killed if:
+        1. No stderr output for stall_timeout seconds (download stalled), OR
+        2. Total elapsed time exceeds max_timeout (absolute cap)
+
+        This allows slow-but-progressing downloads to continue instead of being
+        killed by a fixed timeout.
+
+        Args:
+            process: Running subprocess
+            stall_timeout: Seconds of no output before declaring stall
+            max_timeout: Absolute maximum seconds to wait
+            keyword: For logging
+            tier: For logging
+
+        Returns:
+            tuple: (stdout, stderr, timeout_type) where timeout_type is
+                None (no timeout), 'stall' (no output), or 'max_timeout' (too slow).
+                Both string values are truthy for backward-compatible `if timed_out:` checks.
+        """
+        stderr_lines = []
+        stdout_lines = []
+        last_activity = time.time()
+        lock = threading.Lock()
+        stderr_done = threading.Event()
+        stdout_done = threading.Event()
+
+        def read_stderr():
+            nonlocal last_activity
+            try:
+                while True:
+                    line = process.stderr.readline()
+                    if not isinstance(line, str) or not line:
+                        break
+                    with lock:
+                        stderr_lines.append(line)
+                        last_activity = time.time()
+            except (OSError, ValueError, UnicodeDecodeError):
+                pass  # Pipe closed, invalid, or encoding error
+            finally:
+                stderr_done.set()
+
+        def read_stdout():
+            """Drain stdout to prevent pipe deadlock."""
+            try:
+                while True:
+                    line = process.stdout.readline()
+                    if not isinstance(line, str) or not line:
+                        break
+                    with lock:
+                        stdout_lines.append(line)
+                        last_activity = time.time()
+            except (OSError, ValueError, UnicodeDecodeError):
+                pass  # Pipe closed, invalid, or encoding error
+            finally:
+                stdout_done.set()
+
+        stderr_reader = threading.Thread(target=read_stderr, daemon=True)
+        stdout_reader = threading.Thread(target=read_stdout, daemon=True)
+        stderr_reader.start()
+        stdout_reader.start()
+
+        logger.debug(
+            f"Download process started for '{keyword}' ({tier}) — "
+            f"stall_timeout={stall_timeout}s, max_timeout={max_timeout}s, pid={process.pid}"
+        )
+
+        start_time = time.time()
+        timeout_type = None  # None, 'stall', or 'max_timeout'
+
+        while process.poll() is None:
+            time.sleep(1)
+            now = time.time()
+
+            with lock:
+                stall_duration = now - last_activity
+                lines_so_far = len(stderr_lines) + len(stdout_lines)
+
+            if stall_duration > stall_timeout:
+                logger.info(
+                    f"Download stalled for '{keyword}' ({tier}) — "
+                    f"no output for {stall_timeout}s (received {lines_so_far} lines before stall), "
+                    f"killing pid {process.pid}"
+                )
+                timeout_type = 'stall'
+                break
+
+            if now - start_time > max_timeout:
+                logger.info(
+                    f"Download hit max timeout for '{keyword}' ({tier}) — "
+                    f"{int(now - start_time)}s total ({lines_so_far} lines received), "
+                    f"killing pid {process.pid}"
+                )
+                timeout_type = 'max_timeout'
+                break
+
+        if timeout_type:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # Close pipes BEFORE joining reader threads — unblocks readline()
+            # which may hang indefinitely on Windows after process.kill()
+            try:
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+            except Exception:
+                pass
+            # Log what stderr/stdout we did receive for debugging
+            with lock:
+                if stderr_lines:
+                    last_stderr = stderr_lines[-1].strip()
+                    logger.debug(f"Last stderr before kill: {last_stderr[:200]}")
+                if stdout_lines:
+                    last_stdout = stdout_lines[-1].strip()
+                    logger.debug(f"Last stdout before kill: {last_stdout[:200]}")
+                if not stderr_lines and not stdout_lines:
+                    logger.info(
+                        f"yt-dlp produced ZERO output for '{keyword}' ({tier}) — "
+                        f"process may be hanging during connection/metadata extraction"
+                    )
+        else:
+            # Process finished normally — wait for it to fully clean up
+            process.wait()
+            elapsed = time.time() - start_time
+            with lock:
+                lines_total = len(stderr_lines) + len(stdout_lines)
+            logger.debug(
+                f"Download process finished for '{keyword}' ({tier}) in {elapsed:.1f}s "
+                f"({lines_total} output lines, exit code {process.returncode})"
+            )
+
+        # Wait for reader threads to finish
+        stderr_done.wait(timeout=5)
+        stdout_done.wait(timeout=5)
+        stderr_reader.join(timeout=2)
+        stdout_reader.join(timeout=2)
+
+        # Close pipes to avoid ResourceWarning (no-op if already closed above)
+        try:
+            if process.stdout and not process.stdout.closed:
+                process.stdout.close()
+            if process.stderr and not process.stderr.closed:
+                process.stderr.close()
+        except Exception:
+            pass
+
+        stderr = ''.join(stderr_lines)
+        stdout = ''.join(stdout_lines)
+
+        return stdout, stderr, timeout_type
 
     def _run_download_cmd(
         self,
@@ -1956,22 +2199,47 @@ class VideoDownloader:
                 if wait_time > 0:
                     self.rate_limit_metrics.record_circuit_breaker_wait(wait_time)
             try:
+                # Log the actual command for debugging stalls
+                safe_cmd = ' '.join(cmd[:6])  # First 6 args (yt-dlp, url/search, -f, format)
+                logger.debug(f"yt-dlp command for '{keyword}' ({tier}): {safe_cmd} ... ({len(cmd)} args total)")
+
                 process = subprocess.Popen(
                     cmd,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
                 )
 
-                try:
-                    stdout, stderr = process.communicate(timeout=download_timeout)
-                    last_stderr = stderr
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.communicate()
+                # Verify encoding is applied (debug charmap issue)
+                logger.debug(f"Popen stderr encoding: {process.stderr.encoding}, errors: {process.stderr.errors}")
 
-                    if attempt < max_retries:
+                # Use progress-aware timeout: only kill if download stalls
+                # (no stderr/stdout output for stall_timeout seconds), not on total elapsed time.
+                # stall_timeout=0 means use the tier timeout as the stall timeout.
+                # max_timeout is 1.5x tier timeout as an absolute cap.
+                # With resume-on-retry, we kill stuck downloads sooner and
+                # resume from the last completed fragment on the next attempt.
+                configured_stall = getattr(self.download_config, 'stall_timeout', 0)
+                stall_timeout = configured_stall if configured_stall > 0 else download_timeout
+                max_timeout = int(download_timeout * 1.5)
+                stdout, stderr, timeout_type = self._wait_for_process_with_progress(
+                    process, stall_timeout, max_timeout, keyword, tier
+                )
+                last_stderr = stderr
+
+                if timeout_type:
+                    # max_timeout means download was progressing but too slow —
+                    # retrying won't help much since speed won't improve.
+                    # Cap at 1 retry (resume may finish a nearly-done download).
+                    # Stall timeout means download stopped producing output —
+                    # resume-on-retry can recover, so use full max_retries.
+                    effective_max_retries = 1 if timeout_type == 'max_timeout' else max_retries
+                    timeout_label = 'max timeout' if timeout_type == 'max_timeout' else 'stall'
+
+                    if attempt < effective_max_retries:
                         delay = retry_delay * (retry_backoff ** attempt)
                         # US-003: Check budget before retry backoff
                         if self._share_budget_across_keywords and not self.rate_limit_budget.can_backoff(delay):
@@ -1989,7 +2257,11 @@ class VideoDownloader:
                             )
                             self.rate_limit_metrics.record_download_failure()
                             return []
-                        logger.info(f"Timeout downloading '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                        logger.info(
+                            f"Timeout downloading '{keyword}' ({tier}) — "
+                            f"{timeout_label} after {stall_timeout if timeout_type == 'stall' else max_timeout}s, "
+                            f"retry {attempt + 1}/{effective_max_retries} in {delay:.1f}s"
+                        )
                         self.rate_limit_metrics.record_retry('timeout')
                         time.sleep(delay)
                         # US-003: Record backoff time in budget
@@ -1997,19 +2269,15 @@ class VideoDownloader:
                             self.rate_limit_budget.record_backoff(delay, keyword=keyword)
                         continue
                     else:
-                        logger.warning(f"Timeout downloading '{keyword}' ({tier}) after {download_timeout}s - all {max_retries} retries exhausted")
+                        logger.warning(
+                            f"Timeout downloading '{keyword}' ({tier}) — "
+                            f"{timeout_label}, all {effective_max_retries} retries exhausted "
+                            f"(tier timeout: {download_timeout}s)"
+                        )
                         self._last_download_timed_out = True
                         self.rate_limit_metrics.record_retries_exhausted()
                         self.rate_limit_metrics.record_download_failure()
                         return []
-                finally:
-                    # Ensure process is cleaned up
-                    if process is not None and process.poll() is None:
-                        process.kill()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            pass
 
                 # Check for errors in stderr
                 if stderr and process.returncode != 0:
@@ -2113,6 +2381,17 @@ class VideoDownloader:
                 break
 
             except Exception as e:
+                # Ensure process is cleaned up on unexpected exception
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                # Log full traceback for encoding errors to find the source
+                if isinstance(e, UnicodeDecodeError):
+                    import traceback
+                    logger.error(f"UnicodeDecodeError traceback for '{keyword}':\n{traceback.format_exc()}")
                 # Handle unexpected exceptions with retry
                 if attempt < max_retries:
                     delay = retry_delay * (retry_backoff ** attempt)
@@ -2224,9 +2503,9 @@ class VideoDownloader:
             metadata = {}
             if info_file.exists():
                 try:
-                    with open(info_file, 'r') as f:
+                    with open(info_file, 'r', encoding='utf-8') as f:
                         metadata = json.load(f)
-                except (OSError, IOError, json.JSONDecodeError) as e:
+                except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError) as e:
                     # JSON metadata is optional - log and continue without it
                     logger.debug(f"Could not load metadata from {info_file}: {e}")
 
@@ -2253,7 +2532,9 @@ class VideoDownloader:
                             stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE,
-                            text=True
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace'
                         )
 
                         try:

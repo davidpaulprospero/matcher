@@ -1,4 +1,16 @@
 
+## Iteration US-001 - Integrate preemptive speed-based escalation into download loop
+- Wired speed_tracker + record_slow_speed() in audio_first.py for audio download and segment download paths
+- Added speed_escalations count to RateLimitMetrics.summary() alongside cookie_rotations and vpn_switches
+- Added cooldown check to record_slow_speed() via _is_past_cooldown() to prevent double-escalation within cooldown window
+- Added speed_escalations field to RateLimitMetrics (serialization, clear, export_to_json, from_dict)
+- Shared speed_tracker from core.py to audio_first pipeline (core.py:404)
+- Pulled speed_escalations from EscalationManager into RateLimitMetrics.get_rate_limit_metrics() (core.py:636)
+- Updated 2 existing tests (test_speed_escalation_resets_counter, test_speed_escalation_stops_at_max_tier) to respect cooldown
+- Added 3 new cooldown tests in TestSpeedEscalationCooldown: blocked during cooldown, proceeds after, zero allows immediate
+- Files modified: audio_first.py, core.py, escalation_manager.py, rate_limit_metrics.py, test_escalation_manager.py
+- Test results: 273 passed (downloader), 387 passed (metrics), 0 failures
+
 ## Iteration US-002 - Create dedicated unit tests for CookieMethodFallback
 - Created tests/test_cookie_method_fallback.py with 35 tests across 8 test classes
 - TestCookieMethod: 4 tests for CookieMethod.get_cmd_args() per kind (browser, file, none, unknown)
