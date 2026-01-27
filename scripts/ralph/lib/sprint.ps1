@@ -1,6 +1,27 @@
 # scripts/ralph/lib/sprint.ps1
 # Sprint lifecycle: PRD generation, archive, history, learning, dependencies
 
+function Save-StateFile {
+    <#
+    .SYNOPSIS
+        Atomic write: data -> temp file -> rename to target path
+    .PARAMETER Path
+        Target file path
+    .PARAMETER Data
+        Object to serialize as JSON
+    .PARAMETER Depth
+        ConvertTo-Json depth (default 10)
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Data,
+        [int]$Depth = 10
+    )
+    $tempPath = "$Path.tmp"
+    $Data | ConvertTo-Json -Depth $Depth | Set-Content -Path $tempPath -Encoding UTF8
+    Move-Item -Path $tempPath -Destination $Path -Force
+}
+
 function Get-RalphConfig {
     <#
     .SYNOPSIS
@@ -309,9 +330,10 @@ function Write-JsonNoBom {
         [string]$Content
     )
 
-    # Use .NET to write without BOM
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+    # Atomic write: temp file -> rename (no BOM via .NET)
+    $tempPath = "$Path.tmp"
+    [System.IO.File]::WriteAllText($tempPath, $Content)
+    Move-Item -Path $tempPath -Destination $Path -Force
 }
 
 function New-SeedPRD {
