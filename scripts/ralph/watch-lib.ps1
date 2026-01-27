@@ -20,21 +20,17 @@ function Show-QueueStatus {
 
     try {
         $queue = Get-Content $QueuePath -Raw | ConvertFrom-Json
-        $isInterviewFormat = $null -ne $queue.focusAreas
-        $isLegacyFormat = $null -ne $queue.queue
 
-        if (-not ($isInterviewFormat -or $isLegacyFormat)) { return $false }
-
-        if ($isInterviewFormat) {
-            $allAreas = $queue.focusAreas
-            $queueTotal = $allAreas.Count
-            $completed = @($allAreas | Where-Object { $_.completed -eq $true })
-            $queueCompleted = $completed.Count
-            $currentArea = $allAreas | Where-Object { -not $_.completed } | Select-Object -First 1
-        } else {
-            $queueTotal = $queue.queue.Count
-            $queueCompleted = if ($queue.completedAreas) { $queue.completedAreas.Count } else { 0 }
+        if (-not $queue.focusAreas) {
+            Write-Host "  [!] Legacy queue format detected - run interview.ps1 to create new format" -ForegroundColor Yellow
+            return $false
         }
+
+        $allAreas = $queue.focusAreas
+        $queueTotal = $allAreas.Count
+        $completed = @($allAreas | Where-Object { $_.completed -eq $true })
+        $queueCompleted = $completed.Count
+        $currentArea = $allAreas | Where-Object { -not $_.completed } | Select-Object -First 1
 
         if ($queueTotal -eq 0) { return $false }
 
@@ -51,29 +47,13 @@ function Show-QueueStatus {
         Write-Host ""
 
         # Show areas
-        if ($isInterviewFormat) {
-            foreach ($area in $allAreas) {
-                if ($area.completed) {
-                    Write-Host "    [DONE] $($area.id)" -ForegroundColor Green
-                } elseif ($currentArea -and $area.id -eq $currentArea.id) {
-                    Write-Host "    [>>  ] $($area.id) (current)" -ForegroundColor Cyan
-                } else {
-                    Write-Host "    [    ] $($area.id)" -ForegroundColor DarkGray
-                }
-            }
-        } else {
-            for ($i = 0; $i -lt $queueTotal; $i++) {
-                $area = $queue.queue[$i]
-                if ($queue.completedAreas -contains $area) {
-                    Write-Host "    [DONE] $area" -ForegroundColor Green
-                } elseif ($queue.skippedAreas | Where-Object { $_.area -eq $area }) {
-                    $skipInfo = $queue.skippedAreas | Where-Object { $_.area -eq $area } | Select-Object -First 1
-                    Write-Host "    [SKIP] $area ($($skipInfo.reason))" -ForegroundColor Yellow
-                } elseif ($i -eq $queue.currentIndex) {
-                    Write-Host "    [>>  ] $area (current)" -ForegroundColor Cyan
-                } else {
-                    Write-Host "    [    ] $area" -ForegroundColor DarkGray
-                }
+        foreach ($area in $allAreas) {
+            if ($area.completed) {
+                Write-Host "    [DONE] $($area.id)" -ForegroundColor Green
+            } elseif ($currentArea -and $area.id -eq $currentArea.id) {
+                Write-Host "    [>>  ] $($area.id) (current)" -ForegroundColor Cyan
+            } else {
+                Write-Host "    [    ] $($area.id)" -ForegroundColor DarkGray
             }
         }
         Write-Host ""
