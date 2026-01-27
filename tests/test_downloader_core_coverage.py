@@ -25,8 +25,13 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.core import VideoDownloader
+from src.downloader.title_filter import SearchResult
 from src.state import DownloadedVideo
 from src.config import Config
+from src.config.sections.download import (
+    LLMTitleFilterConfig,
+    SpeechScreeningConfig,
+)
 
 
 @pytest.fixture
@@ -127,7 +132,6 @@ class TestCheckDependenciesCoverage:
     @patch('subprocess.run')
     def test_check_dependencies_ffmpeg_not_found(self, mock_run, mock_config, temp_dir):
         """Test check_dependencies when ffmpeg is not found."""
-        mock_config.download = Mock()
         mock_config.download.davinci_mode = True
 
         # yt-dlp succeeds, ffmpeg fails
@@ -172,7 +176,7 @@ class TestFindCookiesCoverage:
         config = Config()
         config.cache_dir = str(temp_dir / ".cache")
         config.downloaded_videos_dir = str(temp_dir / "videos")
-        config.download = Mock()
+        config.project_dir = str(temp_dir)
         config.download.cookies_path = str(temp_dir / "nonexistent_cookies.txt")
         config.download.cookies_from_browser = ""
 
@@ -421,9 +425,9 @@ class TestDownloadSingleCoverage:
 
     def test_download_single_speech_screening_filters_all(self, mock_config, temp_dir):
         """Test when speech screening filters all videos."""
-        # Properly configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
-        mock_config.download.speech_screening = Mock(enabled=True, tiers=['short', 'long'])
+        # Use spec-based mocks for config sub-objects to catch phantom attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
+        mock_config.download.speech_screening = Mock(spec=SpeechScreeningConfig, enabled=True, tiers=['short', 'long'])
         mock_config.download.title_blacklist = []
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
@@ -433,10 +437,10 @@ class TestDownloadSingleCoverage:
         # Mock methods
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[
             {'id': 'v1', 'title': 'Video 1'},
             {'id': 'v2', 'title': 'Video 2'},
-        ])
+        ]))
         downloader.title_filter.filter_titles_with_llm = Mock(return_value=[
             {'id': 'v1', 'title': 'Video 1'},
             {'id': 'v2', 'title': 'Video 2'},
@@ -460,8 +464,8 @@ class TestDownloadSingleCoverage:
 
     def test_download_single_no_search_results(self, mock_config, temp_dir):
         """Test _download_single when search returns no results."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
 
@@ -469,7 +473,7 @@ class TestDownloadSingleCoverage:
 
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[])
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[]))
 
         output_dir = temp_dir / "videos"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -485,8 +489,8 @@ class TestDownloadSingleCoverage:
 
     def test_download_single_llm_filter_rejects_all(self, mock_config, temp_dir):
         """Test _download_single when LLM filter rejects all videos."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
         mock_config.download.title_blacklist = []
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
@@ -495,9 +499,9 @@ class TestDownloadSingleCoverage:
 
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[
             {'id': 'v1', 'title': 'Video 1'}
-        ])
+        ]))
         downloader.title_filter.filter_titles_with_llm = Mock(return_value=[])
         downloader.search_optimizer.record_search_pass_rate = Mock()
 
@@ -523,8 +527,8 @@ class TestDownloadAllCoverage:
 
     def test_download_all_llm_filter_logging(self, mock_config, temp_dir):
         """Test download_all logs LLM filter status."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True, provider="gemini")
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True, provider="gemini")
         mock_config.download.title_blacklist = ["spam", "clickbait"]
 
         downloader = VideoDownloader(mock_config)
@@ -697,10 +701,10 @@ class TestTranscodeTimeoutCoverage:
         import logging
         caplog.set_level(logging.DEBUG)
 
-        keyword_dir = temp_dir / "keyword_s"
-        keyword_dir.mkdir(exist_ok=True)
         output_dir = temp_dir / "videos"
         output_dir.mkdir(exist_ok=True)
+        keyword_dir = output_dir / "keyword_s"
+        keyword_dir.mkdir(exist_ok=True)
 
         # Create a video file and info.json
         video_file = keyword_dir / "test_abc123.mp4"
@@ -725,7 +729,10 @@ class TestTranscodeTimeoutCoverage:
 
         # Transcode process that times out
         mock_transcode_process = Mock()
-        mock_transcode_process.communicate.side_effect = subprocess.TimeoutExpired(cmd=['ffmpeg'], timeout=120)
+        mock_transcode_process.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=['ffmpeg'], timeout=120),  # First call times out
+            ("", "")  # Second call after kill succeeds
+        ]
         mock_transcode_process.poll.return_value = None  # Still running
         mock_transcode_process.wait.return_value = None
 
@@ -754,10 +761,10 @@ class TestTranscodeTimeoutCoverage:
 
     def test_transcode_process_wait_timeout(self, downloader, temp_dir):
         """Test TimeoutExpired in process.wait after transcode (lines 925-926)."""
-        keyword_dir = temp_dir / "keyword_s"
-        keyword_dir.mkdir(exist_ok=True)
         output_dir = temp_dir / "videos"
         output_dir.mkdir(exist_ok=True)
+        keyword_dir = output_dir / "keyword_s"
+        keyword_dir.mkdir(exist_ok=True)
 
         # Create video and info
         video_file = keyword_dir / "test_xyz789.mp4"

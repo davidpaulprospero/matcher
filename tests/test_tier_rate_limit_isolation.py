@@ -20,6 +20,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
+from src.config.sections.download import (
+    DownloadConfig,
+    RateLimitConfig as RealRateLimitConfig,
+    ImpersonationConfig,
+    ExtractorArgsConfig,
+    RateLimitBudgetConfig,
+    CircuitBreakerConfig,
+)
+
 
 @dataclass
 class MockRateLimitConfig:
@@ -32,14 +41,18 @@ class MockRateLimitConfig:
 
 
 def create_mock_config(tmp_path, rate_limit_config=None, **overrides):
-    """Create a mock config for testing."""
+    """Create a mock config for testing.
+
+    Uses spec=DownloadConfig on the download mock to catch phantom attributes.
+    Attributes that should NOT exist are explicitly set to None.
+    """
     mock_config = MagicMock()
     mock_config.cache_dir = str(tmp_path / ".cache")
     mock_config.downloaded_videos_dir = str(tmp_path / "videos")
-    mock_config.download = MagicMock()
+    mock_config.download = MagicMock(spec=DownloadConfig)
     mock_config.download.davinci_mode = False
-    mock_config.download.cookies = None
-    mock_config.download.cookies_from_browser = None
+    mock_config.download.cookies_path = ""  # Real attribute (was 'cookies' - phantom)
+    mock_config.download.cookies_from_browser = ""  # Real attribute, use empty string not None
     mock_config.download.download_timeout = 120
     mock_config.download.download_timeouts = {}
     mock_config.download.delete_original = False
@@ -49,6 +62,13 @@ def create_mock_config(tmp_path, rate_limit_config=None, **overrides):
     mock_config.download.rate_limit = rate_limit_config or MockRateLimitConfig()
     mock_config.download.cookie_rotation = None
     mock_config.download.vpn = None
+    mock_config.download.rate_limit_budget = None
+    mock_config.download.impersonation = MagicMock(spec=ImpersonationConfig)
+    mock_config.download.impersonation.enabled = False
+    mock_config.download.extractor_args = MagicMock(spec=ExtractorArgsConfig)
+    mock_config.download.extractor_args.enabled = False
+    mock_config.download.circuit_breaker = MagicMock(spec=CircuitBreakerConfig)
+    mock_config.download.circuit_breaker.enabled = False
     mock_config.llm = MagicMock()
     mock_config.llm.provider = 'gemini'
     mock_config.llm.model = 'gemini-pro'

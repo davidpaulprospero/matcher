@@ -68,7 +68,8 @@
                             "id":  "US-005",
                             "title":  "Fix MagicMock auto-attribute anti-patterns in downloader tests",
                             "priority":  5,
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Audited all 4 files. Fixed phantom attribute 'cookies' -> 'cookies_path' (real attr) in test_rate_limit_backoff.py and test_tier_rate_limit_isolation.py. Changed cookies_from_browser from None to '' (correct type). Added spec=DownloadConfig to download mocks in 3 files (test_rate_limit_backoff.py, test_tier_rate_limit_isolation.py, test_audio_first_coverage.py). Added spec=ImpersonationConfig, spec=ExtractorArgsConfig, spec=CircuitBreakerConfig to sub-config mocks in rate limit test files. Added spec=AudioFirstConfig in test_audio_first_coverage.py. Added spec=LLMTitleFilterConfig (4x) and spec=SpeechScreeningConfig (1x) in test_downloader_core_coverage.py. Total 16 spec= additions across 4 files. All 593 tests pass (1 pre-existing failure in test_downloader_core_advanced.py unrelated to these changes).",
                             "acceptanceCriteria":  [
                                                        "Audit test_downloader_core_coverage.py, test_rate_limit_backoff.py, test_tier_rate_limit_isolation.py, test_audio_first_coverage.py for MagicMock auto-attribute usage",
                                                        "Replace direct attribute assignment on MagicMock (e.g., mock._field = value) with explicit mock.configure_mock() or spec-based mocks that validate attribute existence",
