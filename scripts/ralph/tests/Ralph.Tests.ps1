@@ -29,11 +29,24 @@ BeforeAll {
     Import-RalphFunctions -RalphDir $script:RalphDir -GlobalScope
 
     # Set up script-level variables that the functions expect
-    $script:SessionId = "test-session-001"
+    $script:State = @{
+        SessionId               = 'test-session-001'
+        IterationCount          = 1
+        ConsecutiveFailures     = 0
+        SessionStartTime        = Get-Date
+        CurrentMode             = 'Standard'
+        CurrentRetryCount       = 0
+        LastFocusAreaId          = ''
+        LastStoryId             = ''
+        StoriesSinceExploration = 0
+        LastExplorationSummary  = ''
+        LastExplorationTime     = $null
+        SprintExplorationContext = ''
+        LastExplorationCommit   = ''
+    }
+    $global:State = $script:State
     $script:SessionLogDir = Join-Path $script:TestDataDir "logs"
     $script:RalphDir = $script:TestDataDir
-    $script:IterationCount = 1
-    $script:CurrentRetryCount = 0
     $script:MetricsFile = Join-Path $script:TestDataDir "metrics.csv"
     $script:ProgressFile = Join-Path $script:TestDataDir "progress.txt"
     $script:PrdFile = Join-Path $script:TestDataDir "prd.json"
@@ -43,9 +56,6 @@ BeforeAll {
     $global:SessionLogDir = $script:SessionLogDir
     $global:MetricsFile = $script:MetricsFile
     $global:RalphDir = $script:TestDataDir
-    $global:SessionId = $script:SessionId
-    $global:IterationCount = 1
-    $global:CurrentRetryCount = 0
     $global:ProjectRoot = $script:TestDataDir
     $global:ProgressFile = $script:ProgressFile
     $global:PrdFile = $script:PrdFile
@@ -327,8 +337,8 @@ Describe "Log-StateTransition" -Tag "Unit", "Logging" {
                 from = $From
                 to = $To
                 reason = $Reason
-                iteration = $script:IterationCount
-                session = $script:SessionId
+                iteration = $script:State.IterationCount
+                session = $script:State.SessionId
             }
             foreach ($key in $Context.Keys) { $entry[$key] = $Context[$key] }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $stateFile -Encoding UTF8
@@ -386,7 +396,7 @@ Describe "Log-ErrorEvolution" -Tag "Unit", "Logging" {
                 category = $ErrorCategory
                 details = $ErrorDetails
                 iteration = $Iteration
-                session = $script:SessionId
+                session = $script:State.SessionId
             }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $errorFile -Encoding UTF8
         }
@@ -420,7 +430,7 @@ Describe "Log-ConfigChange" -Tag "Unit", "Logging" {
             $configAuditFile = Join-Path $script:RalphDir "config_audit.jsonl"
             $entry = @{
                 ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-                session = $script:SessionId
+                session = $script:State.SessionId
                 field = $Field
                 old = $OldValue
                 new = $NewValue
@@ -485,7 +495,7 @@ Describe "Log-TestDetails" -Tag "Unit", "Logging" {
     }
 
     BeforeEach {
-        $script:IterationCount = 1
+        $script:State.IterationCount = 1
     }
 
     It "creates test details file" {
@@ -630,12 +640,12 @@ Describe "Log-Skip" -Tag "Unit", "Logging" {
             $skipFile = Join-Path $script:SessionLogDir "skips_blockers.jsonl"
             $entry = @{
                 ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-                session = $script:SessionId
+                session = $script:State.SessionId
                 itemId = $ItemId
                 itemType = $ItemType
                 reason = $Reason
                 blockerType = $BlockerType
-                iteration = $script:IterationCount
+                iteration = $script:State.IterationCount
             }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $skipFile -Encoding UTF8
         }
@@ -674,7 +684,7 @@ Describe "Record-Metric" -Tag "Unit", "Metrics" {
             )
             $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"
             if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }
-            if (-not $Session) { $Session = $script:SessionId }
+            if (-not $Session) { $Session = $script:State.SessionId }
             if (-not $Mode) { $Mode = "Standard" }
             if ($HourOfDay -eq -1) { $HourOfDay = (Get-Date).Hour }
             $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -740,8 +750,8 @@ Describe "Append-SessionTimeline" -Tag "Unit", "Timeline" {
             $entry = @{
                 ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
                 event = $Event
-                session = $script:SessionId
-                iteration = $script:IterationCount
+                session = $script:State.SessionId
+                iteration = $script:State.IterationCount
             }
             foreach ($key in $Data.Keys) { $entry[$key] = $Data[$key] }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $timelineFile -Encoding UTF8
@@ -978,14 +988,14 @@ Describe "Full Iteration Logging Flow" -Tag "Integration" {
             param([string]$From, [string]$To, [string]$Reason, [hashtable]$Context = @{})
             if (-not $script:SessionLogDir -or -not (Test-Path $script:SessionLogDir)) { return }
             $stateFile = Join-Path $script:SessionLogDir "state_transitions.jsonl"
-            $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); from = $From; to = $To; reason = $Reason; iteration = $script:IterationCount; session = $script:SessionId }
+            $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); from = $From; to = $To; reason = $Reason; iteration = $script:State.IterationCount; session = $script:State.SessionId }
             foreach ($key in $Context.Keys) { $entry[$key] = $Context[$key] }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $stateFile -Encoding UTF8
         }
         function Append-SessionTimeline {
             param([string]$Event, [hashtable]$Data = @{})
             $timelineFile = Join-Path $script:SessionLogDir "session_timeline.jsonl"
-            $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:SessionId; iteration = $script:IterationCount }
+            $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:State.SessionId; iteration = $script:State.IterationCount }
             foreach ($key in $Data.Keys) { $entry[$key] = $Data[$key] }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $timelineFile -Encoding UTF8
         }
@@ -1017,7 +1027,7 @@ Describe "Full Iteration Logging Flow" -Tag "Integration" {
         function Log-PromptEffectiveness { param([int]$Iteration, [string]$PromptType, [double]$Effectiveness, [string]$PromptHash = ""); $file = Join-Path $script:SessionLogDir "prompt_effectiveness.jsonl"; $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); iteration = $Iteration; promptType = $PromptType; effectiveness = $Effectiveness; promptHash = $PromptHash }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
         function Log-ErrorEvolution { param([string]$ErrorCategory, [string]$ErrorDetails = "", [int]$Iteration); $file = Join-Path $script:SessionLogDir "error_evolution.jsonl"; $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); category = $ErrorCategory; details = $ErrorDetails; iteration = $Iteration }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
         function Log-Skip { param([string]$ItemId, [string]$ItemType, [string]$Reason, [string]$BlockerType = "unknown"); $file = Join-Path $script:SessionLogDir "skips_blockers.jsonl"; $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); itemId = $ItemId; itemType = $ItemType; reason = $Reason; blockerType = $BlockerType }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
-        function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true, [string]$FocusArea, [int]$TokensUsed = 0, [string]$ErrorCategory = "", [int]$PhaseReadMs = 0, [int]$PhaseImplementMs = 0); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$script:SessionId,,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),false,$FocusArea,$TokensUsed,$ErrorCategory,$(Get-Date).Hour,,,0,0,$PhaseReadMs,0,$PhaseImplementMs,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
+        function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true, [string]$FocusArea, [int]$TokensUsed = 0, [string]$ErrorCategory = "", [int]$PhaseReadMs = 0, [int]$PhaseImplementMs = 0); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$($script:State.SessionId),,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),false,$FocusArea,$TokensUsed,$ErrorCategory,$(Get-Date).Hour,,,0,0,$PhaseReadMs,0,$PhaseImplementMs,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
     }
 
     BeforeEach {
@@ -1166,11 +1176,11 @@ Describe "Concurrent File Access" -Tag "Integration", "Concurrency" {
         function Append-SessionTimeline {
             param([string]$Event, [hashtable]$Data = @{})
             $timelineFile = Join-Path $script:SessionLogDir "session_timeline.jsonl"
-            $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:SessionId; iteration = $script:IterationCount }
+            $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:State.SessionId; iteration = $script:State.IterationCount }
             foreach ($key in $Data.Keys) { $entry[$key] = $Data[$key] }
             $entry | ConvertTo-Json -Compress | Add-Content -Path $timelineFile -Encoding UTF8
         }
-        function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$script:SessionId,,$StoryId,Standard,$DurationMin,$($Success.ToString().ToLower()),false,,,,,,,0,0,0,0,0,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
+        function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$($script:State.SessionId),,$StoryId,Standard,$DurationMin,$($Success.ToString().ToLower()),false,,,,,,,0,0,0,0,0,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
     }
 
     It "handles rapid appends to timeline" {

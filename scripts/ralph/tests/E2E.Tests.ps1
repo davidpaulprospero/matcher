@@ -26,12 +26,24 @@ BeforeAll {
     Import-RalphFunctions -RalphDir $script:RalphDir -GlobalScope
 
     # Set up script-level variables
-    $script:SessionId = "e2e-test-session"
+    $script:State = @{
+        SessionId               = 'e2e-test-session'
+        IterationCount          = 0
+        ConsecutiveFailures     = 0
+        SessionStartTime        = Get-Date
+        CurrentMode             = 'Standard'
+        CurrentRetryCount       = 0
+        LastFocusAreaId          = ''
+        LastStoryId             = ''
+        StoriesSinceExploration = 0
+        LastExplorationSummary  = ''
+        LastExplorationTime     = $null
+        SprintExplorationContext = ''
+        LastExplorationCommit   = ''
+    }
+    $global:State = $script:State
     $script:SessionLogDir = Join-Path $script:TestDataDir "logs"
     $script:RalphDir = $script:TestDataDir
-    $script:IterationCount = 0
-    $script:CurrentRetryCount = 0
-    $script:ConsecutiveFailures = 0
     $script:MetricsFile = Join-Path $script:TestDataDir "metrics.csv"
     $script:ProgressFile = Join-Path $script:TestDataDir "progress.txt"
     $script:PrdFile = Join-Path $script:TestDataDir "prd.json"
@@ -41,10 +53,6 @@ BeforeAll {
     $global:SessionLogDir = $script:SessionLogDir
     $global:MetricsFile = $script:MetricsFile
     $global:RalphDir = $script:TestDataDir
-    $global:SessionId = $script:SessionId
-    $global:IterationCount = 0
-    $global:CurrentRetryCount = 0
-    $global:ConsecutiveFailures = 0
     $global:ProjectRoot = $script:TestDataDir
     $global:ProgressFile = $script:ProgressFile
     $global:PrdFile = $script:PrdFile
@@ -59,14 +67,14 @@ BeforeAll {
         param([string]$From, [string]$To, [string]$Reason, [hashtable]$Context = @{})
         if (-not $script:SessionLogDir -or -not (Test-Path $script:SessionLogDir)) { return }
         $stateFile = Join-Path $script:SessionLogDir "state_transitions.jsonl"
-        $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); from = $From; to = $To; reason = $Reason; iteration = $script:IterationCount; session = $script:SessionId }
+        $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); from = $From; to = $To; reason = $Reason; iteration = $script:State.IterationCount; session = $script:State.SessionId }
         foreach ($key in $Context.Keys) { $entry[$key] = $Context[$key] }
         $entry | ConvertTo-Json -Compress | Add-Content -Path $stateFile -Encoding UTF8
     }
     function Append-SessionTimeline {
         param([string]$Event, [hashtable]$Data = @{})
         $timelineFile = Join-Path $script:SessionLogDir "session_timeline.jsonl"
-        $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:SessionId; iteration = $script:IterationCount }
+        $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); event = $Event; session = $script:State.SessionId; iteration = $script:State.IterationCount }
         foreach ($key in $Data.Keys) { $entry[$key] = $Data[$key] }
         $entry | ConvertTo-Json -Compress | Add-Content -Path $timelineFile -Encoding UTF8
     }
@@ -95,7 +103,7 @@ BeforeAll {
     function Log-PromptEffectiveness { param([int]$Iteration, [string]$PromptType, [double]$Effectiveness, [string]$PromptHash = ""); $file = Join-Path $script:SessionLogDir "prompt_effectiveness.jsonl"; $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); iteration = $Iteration; promptType = $PromptType; effectiveness = $Effectiveness; promptHash = $PromptHash }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
     function Log-ErrorEvolution { param([string]$ErrorCategory, [string]$ErrorDetails = "", [int]$Iteration); $file = Join-Path $script:SessionLogDir "error_evolution.jsonl"; $entry = @{ timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); category = $ErrorCategory; details = $ErrorDetails; iteration = $Iteration }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
     function Log-Skip { param([string]$ItemId, [string]$ItemType, [string]$Reason, [string]$BlockerType = "unknown"); $file = Join-Path $script:SessionLogDir "skips_blockers.jsonl"; $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); itemId = $ItemId; itemType = $ItemType; reason = $Reason; blockerType = $BlockerType }; $entry | ConvertTo-Json -Compress | Add-Content -Path $file -Encoding UTF8 }
-    function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true, [string]$FocusArea, [int]$TokensUsed = 0, [string]$ErrorCategory = "", [int]$PhaseReadMs = 0, [int]$PhaseImplementMs = 0); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$script:SessionId,,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),false,$FocusArea,$TokensUsed,$ErrorCategory,$(Get-Date).Hour,,,0,0,$PhaseReadMs,0,$PhaseImplementMs,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
+    function Record-Metric { param([string]$StoryId, [string]$Mode, [double]$DurationMin, [bool]$Success = $true, [string]$FocusArea, [int]$TokensUsed = 0, [string]$ErrorCategory = "", [int]$PhaseReadMs = 0, [int]$PhaseImplementMs = 0); $v2Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms"; if (-not (Test-Path $script:MetricsFile)) { $v2Header | Set-Content $script:MetricsFile -Encoding UTF8 }; $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; $row = "$timestamp,$($script:State.SessionId),,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),false,$FocusArea,$TokensUsed,$ErrorCategory,$(Get-Date).Hour,,,0,0,$PhaseReadMs,0,$PhaseImplementMs,0,0"; Add-Content -Path $script:MetricsFile -Value $row }
 
     # Helper function to simulate a complete iteration
     function Invoke-SimulatedIteration {
@@ -107,7 +115,7 @@ BeforeAll {
             [int]$TokensUsed = 10000
         )
 
-        $script:IterationCount++
+        $script:State.IterationCount++
 
         # Simulate Claude output
         $output = if ($Success) {
@@ -135,7 +143,7 @@ SyntaxError: invalid syntax
 
         # Append timeline
         Append-SessionTimeline -Event "iteration_start" -Data @{
-            iteration = $script:IterationCount
+            iteration = $script:State.IterationCount
             storyId = $StoryId
             focusArea = $FocusArea
         }
@@ -146,11 +154,11 @@ SyntaxError: invalid syntax
 
         if ($Success) {
             # Log test details
-            $null = Log-TestDetails -Iteration $script:IterationCount -Output $output
+            $null = Log-TestDetails -Iteration $script:State.IterationCount -Output $output
 
             # Log effectiveness
-            $effectiveness = Get-PromptEffectiveness -Success $true -RetryCount $script:CurrentRetryCount
-            Log-PromptEffectiveness -Iteration $script:IterationCount -PromptType "story_work" -Effectiveness $effectiveness -PromptHash "SIMHASH"
+            $effectiveness = Get-PromptEffectiveness -Success $true -RetryCount $script:State.CurrentRetryCount
+            Log-PromptEffectiveness -Iteration $script:State.IterationCount -PromptType "story_work" -Effectiveness $effectiveness -PromptHash "SIMHASH"
 
             # State transition to completed
             Log-StateTransition -From "running" -To "completed" -Reason "Success"
@@ -160,13 +168,13 @@ SyntaxError: invalid syntax
                 -FocusArea $FocusArea -TokensUsed $TokensUsed `
                 -PhaseReadMs $phaseTimings.read_ms -PhaseImplementMs $phaseTimings.implement_ms
 
-            $script:ConsecutiveFailures = 0
+            $script:State.ConsecutiveFailures = 0
         }
         else {
             $errorCategory = Get-ErrorCategory -Output $output -TimedOut $false
 
             # Log error evolution
-            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Simulated failure" -Iteration $script:IterationCount
+            Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Simulated failure" -Iteration $script:State.IterationCount
 
             # State transition to failed
             Log-StateTransition -From "running" -To "failed" -Reason $errorCategory
@@ -175,12 +183,12 @@ SyntaxError: invalid syntax
             Record-Metric -StoryId $StoryId -Mode "Standard" -DurationMin $DurationMin -Success $false `
                 -FocusArea $FocusArea -TokensUsed $TokensUsed -ErrorCategory $errorCategory
 
-            $script:ConsecutiveFailures++
+            $script:State.ConsecutiveFailures++
         }
 
         # Complete timeline
         Append-SessionTimeline -Event "iteration_complete" -Data @{
-            iteration = $script:IterationCount
+            iteration = $script:State.IterationCount
             storyId = $StoryId
             success = $Success
         }
@@ -229,9 +237,9 @@ AfterAll {
 Describe "Complete Sprint Simulation" -Tag "E2E", "Sprint" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -285,17 +293,17 @@ Describe "Complete Sprint Simulation" -Tag "E2E", "Sprint" {
     It "tracks consecutive failures correctly" {
         # Three consecutive failures
         Invoke-SimulatedIteration -StoryId "US-001" -FocusArea "testing" -Success $false
-        $script:ConsecutiveFailures | Should -Be 1
+        $script:State.ConsecutiveFailures | Should -Be 1
 
         Invoke-SimulatedIteration -StoryId "US-002" -FocusArea "testing" -Success $false
-        $script:ConsecutiveFailures | Should -Be 2
+        $script:State.ConsecutiveFailures | Should -Be 2
 
         Invoke-SimulatedIteration -StoryId "US-003" -FocusArea "testing" -Success $false
-        $script:ConsecutiveFailures | Should -Be 3
+        $script:State.ConsecutiveFailures | Should -Be 3
 
         # Success resets counter
         Invoke-SimulatedIteration -StoryId "US-004" -FocusArea "testing" -Success $true
-        $script:ConsecutiveFailures | Should -Be 0
+        $script:State.ConsecutiveFailures | Should -Be 0
     }
 }
 
@@ -306,9 +314,9 @@ Describe "Complete Sprint Simulation" -Tag "E2E", "Sprint" {
 Describe "Queue Mode Progression" -Tag "E2E", "Queue" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -327,7 +335,7 @@ Describe "Queue Mode Progression" -Tag "E2E", "Queue" {
                 @{ id = "speed"; completed = $false }
             )
             interviewContext = "E2E test"
-            session = @{ id = $script:SessionId }
+            session = @{ id = $script:State.SessionId }
         }
         $queue | ConvertTo-Json -Depth 5 | Set-Content $script:queuePath
 
@@ -364,9 +372,9 @@ Describe "Queue Mode Progression" -Tag "E2E", "Queue" {
 Describe "Error Recovery Scenarios" -Tag "E2E", "ErrorRecovery" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -377,10 +385,10 @@ Describe "Error Recovery Scenarios" -Tag "E2E", "ErrorRecovery" {
     It "recovers from transient failures with retry" {
         # Fail twice, then succeed
         Invoke-SimulatedIteration -StoryId "US-001" -FocusArea "testing" -Success $false
-        $script:CurrentRetryCount++
+        $script:State.CurrentRetryCount++
 
         Invoke-SimulatedIteration -StoryId "US-001" -FocusArea "testing" -Success $false
-        $script:CurrentRetryCount++
+        $script:State.CurrentRetryCount++
 
         Invoke-SimulatedIteration -StoryId "US-001" -FocusArea "testing" -Success $true
 
@@ -412,9 +420,9 @@ Describe "Error Recovery Scenarios" -Tag "E2E", "ErrorRecovery" {
 Describe "Metrics Aggregation" -Tag "E2E", "Metrics" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -475,9 +483,9 @@ Describe "Metrics Aggregation" -Tag "E2E", "Metrics" {
 Describe "State Machine Verification" -Tag "E2E", "StateMachine" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -515,9 +523,9 @@ Describe "State Machine Verification" -Tag "E2E", "StateMachine" {
 Describe "Prompt Effectiveness Tracking" -Tag "E2E", "Effectiveness" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -527,11 +535,11 @@ Describe "Prompt Effectiveness Tracking" -Tag "E2E", "Effectiveness" {
 
     It "calculates effectiveness scores correctly" {
         # First try success
-        $script:CurrentRetryCount = 1
+        $script:State.CurrentRetryCount = 1
         Invoke-SimulatedIteration -StoryId "US-001" -FocusArea "testing" -Success $true
 
         # Success after retries
-        $script:CurrentRetryCount = 3
+        $script:State.CurrentRetryCount = 3
         Invoke-SimulatedIteration -StoryId "US-002" -FocusArea "testing" -Success $true
 
         $effectiveness = Get-Content (Join-Path $script:SessionLogDir "prompt_effectiveness.jsonl") | ForEach-Object { $_ | ConvertFrom-Json }
@@ -548,9 +556,9 @@ Describe "Prompt Effectiveness Tracking" -Tag "E2E", "Effectiveness" {
 Describe "Timeline Integrity" -Tag "E2E", "Timeline" {
     BeforeEach {
         # Reset state
-        $script:IterationCount = 0
-        $script:CurrentRetryCount = 0
-        $script:ConsecutiveFailures = 0
+        $script:State.IterationCount = 0
+        $script:State.CurrentRetryCount = 0
+        $script:State.ConsecutiveFailures = 0
 
         # Clean files
         Get-ChildItem $script:SessionLogDir -File -ErrorAction SilentlyContinue | Remove-Item -Force

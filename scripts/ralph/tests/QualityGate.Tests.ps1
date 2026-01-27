@@ -192,7 +192,13 @@ Describe "Get-StoryFailureContext" -Tag "Unit", "QualityGate", "Phase1" {
     BeforeAll {
         $script:SessionLogDir = $script:TestDataDir
         $script:MetricsFile = Join-Path $script:TestDataDir "metrics.csv"
-        $script:IterationCount = 5
+        $script:State = @{
+            SessionId = 'test-session'; IterationCount = 5; ConsecutiveFailures = 0
+            SessionStartTime = Get-Date; CurrentMode = 'Standard'; CurrentRetryCount = 0
+            LastFocusAreaId = ''; LastStoryId = ''; StoriesSinceExploration = 0
+            LastExplorationSummary = ''; LastExplorationTime = $null
+            SprintExplorationContext = ''; LastExplorationCommit = ''
+        }
     }
 
     Context "First attempt" {
@@ -489,7 +495,13 @@ Describe "Get-SprintTokenBudget" -Tag "Unit", "QualityGate", "Phase1" {
     Context "Budget enabled" {
         BeforeAll {
             $script:MetricsFile = Join-Path $script:TestDataDir "budget_metrics.csv"
-            $script:SessionId = "test-session"
+            $script:State = @{
+                SessionId = 'test-session'; IterationCount = 0; ConsecutiveFailures = 0
+                SessionStartTime = Get-Date; CurrentMode = 'Standard'; CurrentRetryCount = 0
+                LastFocusAreaId = ''; LastStoryId = ''; StoriesSinceExploration = 0
+                LastExplorationSummary = ''; LastExplorationTime = $null
+                SprintExplorationContext = ''; LastExplorationCommit = ''
+            }
         }
 
         It "Returns budget status with zero usage when no metrics" {

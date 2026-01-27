@@ -20,7 +20,13 @@ BeforeAll {
     $script:RalphDir = $TestDrive
     $script:ConfigFile = Join-Path $TestDrive 'ralph-config.json'
     $script:MetricsFile = Join-Path $TestDrive 'metrics.csv'
-    $script:SessionId = 'test-session'
+    $script:State = @{
+        SessionId = 'test-session'; IterationCount = 0; ConsecutiveFailures = 0
+        SessionStartTime = Get-Date; CurrentMode = 'Standard'; CurrentRetryCount = 0
+        LastFocusAreaId = ''; LastStoryId = ''; StoriesSinceExploration = 0
+        LastExplorationSummary = ''; LastExplorationTime = $null
+        SprintExplorationContext = ''; LastExplorationCommit = ''
+    }
     $script:SessionLogDir = Join-Path $TestDrive 'session_logs'
     $script:ProjectRoot = $TestDrive
     New-Item -ItemType Directory -Path $script:SessionLogDir -Force | Out-Null
