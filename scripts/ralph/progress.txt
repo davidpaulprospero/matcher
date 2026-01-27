@@ -5945,3 +5945,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: tests/test_rate_limit_metrics.py
 - Test results: 13 recommendation tests passed, 133 total rate limit metrics tests passed, 0 failures
 - All 6 acceptance criteria met
+
+## Iteration 9 - [US-009] Add circuit breaker pause scaling composition tests
+- Pre-flight check: All 5 acceptance criteria already implemented in prior sprints
+- AC1 (escalation 2.0x + budget 1.5x = 180): TestCombinedScaling::test_escalation_and_budget_compose
+- AC2 (escalation 2.0x + budget 2.5x = 300): TestCombinedScaling::test_escalation_and_exhausted_budget_compose
+- AC3 (max_pause_seconds cap): TestCombinedScaling::test_combined_scaling_capped
+- AC4 (3 successes at Tier 3): TestExtendedReset::test_three_successes_close_at_tier3
+- AC5 (1 success below Tier 3): TestExtendedReset::test_single_success_closes_without_tier3
+- Files: tests/test_budget_circuit_breaker_pause_scaling.py, tests/test_circuit_breaker_escalation_coordination.py
+- Test results: 57 tests passed across both files, 0 failures
+- No code changes needed - marked as pre-implemented

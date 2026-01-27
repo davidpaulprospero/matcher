@@ -125,7 +125,8 @@
             "id": "US-009",
             "title": "Add circuit breaker pause scaling composition tests",
             "priority": 9,
-            "passes": false,
+            "passes": true,
+            "notes": "All 5 ACs pre-implemented across two existing test files: test_budget_circuit_breaker_pause_scaling.py (AC1-AC3: TestCombinedScaling class with multiplicative composition 2.0x*1.5x=180, 2.0x*2.5x=300, and max_pause_seconds cap) and test_circuit_breaker_escalation_coordination.py (AC4-AC5: TestExtendedReset class with 3-success Tier 3 requirement and 1-success normal reset). All 57 tests pass.",
             "acceptanceCriteria": [
                 "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget nearly exhausted (1.5x) apply — verify multiplicative composition (base * 2.0 * 1.5)",
                 "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget exhausted (2.5x) apply — verify multiplicative composition (base * 2.0 * 2.5)",
