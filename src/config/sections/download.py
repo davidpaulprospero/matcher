@@ -572,6 +572,11 @@ class RateLimitBudgetConfig:
     # After this many switches, mark budget as exhausted
     max_vpn_switches: int = 3
 
+    # Auto-scale budget limits based on keyword count
+    # When True, budget limits scale with ceil(keyword_count / 5), capped at 5x
+    # This ensures larger keyword sets have proportionally larger recovery budgets
+    auto_scale_budget: bool = True
+
 
 @dataclass
 class SpeedTrackingConfig:
