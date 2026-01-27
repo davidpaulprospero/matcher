@@ -451,6 +451,7 @@ keyword:
   # Extraction settings
   max_keywords: 30
   min_keyword_length: 3
+  max_keyword_words: 8  # Max words per keyword (rejects "too long" phrases)
   
   # List-based keyword detection
   # Detects numbered lists (e.g., "Number 10 Austin, Texas") and ensures
@@ -873,12 +874,18 @@ download:
   search_timeout: 30         # Timeout for search metadata subprocess (triggers remix on timeout)
   download_timeout: 120      # Default timeout per video download (used for 'short' tier)
 
+  # Stall timeout: seconds of no download progress (no yt-dlp output) before killing.
+  # Unlike download_timeout which is a hard total, this allows slow downloads to
+  # continue as long as they're making progress. 0 = use tier timeout as stall timeout
+  # (NOT recommended — a medium tier video would wait 480s with zero output).
+  stall_timeout: 60
+
   # Tier-specific download timeouts (longer videos need more time)
   download_timeouts:
-    short: 120     # 2 min timeout for videos <2 min
-    medium: 300    # 5 min timeout for videos 2-10 min
-    long: 600      # 10 min timeout for videos 10-25 min
-    longer: 900    # 15 min timeout for videos 25-50 min
+    short: 180     # 3 min timeout for videos <2 min
+    medium: 480    # 8 min timeout for videos 2-10 min
+    long: 900      # 15 min timeout for videos 10-25 min
+    longer: 1200   # 20 min timeout for videos 25-50 min
 
   # Audio-First Mode - Dramatically reduces download time
   # How it works:
@@ -1141,6 +1148,9 @@ download:
                                         # When true, the download retry loop waits for circuit
                                         # breaker recovery before attempting the next retry.
                                         # This prevents retries during active rate limiting.
+    max_pause_seconds: 300.0            # Maximum pause duration cap (seconds). Prevents
+                                        # budget-aware scaling from creating excessively long
+                                        # pauses. Default: 300 (5 minutes).
 
   # Batch retry queue for rate-limited videos
   # When rate limiting affects a batch, collect failed videos and retry them
@@ -1215,7 +1225,7 @@ download:
   # Retry settings for failed downloads
   # When a video/audio download fails, retry with exponential backoff
   # Useful for handling temporary network issues or rate limiting
-  max_retries: 3          # Maximum retry attempts per video (default: 3)
+  max_retries: 6          # Maximum retry attempts per video (default: 3, increased for SABR stalling)
   retry_delay: 2.0        # Base delay between retries in seconds (default: 2.0)
   retry_backoff: 2.0      # Exponential backoff multiplier (default: 2.0)
                           # Example: 3 retries with delay=2, backoff=2 → waits 2s, 4s, 8s

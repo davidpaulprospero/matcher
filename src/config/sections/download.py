@@ -665,6 +665,9 @@ class CircuitBreakerConfig:
     # When true, download retry loop waits for circuit breaker recovery
     block_download_retries: bool = True
 
+    # Maximum pause duration cap (seconds) to prevent runaway pause scaling
+    max_pause_seconds: float = 300.0
+
 
 @dataclass
 class BatchRetryConfig:
@@ -901,6 +904,12 @@ class DownloadConfig:
     # Search timeout: If YouTube search takes longer, trigger keyword remix (max 2 attempts)
     search_timeout: int = 30  # Seconds for search metadata subprocess (triggers remix on timeout)
     download_timeout: int = 120  # Default seconds per video download (used for 'short' tier)
+
+    # Stall timeout: seconds of no download progress before killing the process.
+    # Unlike download_timeout (total time), this only triggers when yt-dlp produces
+    # no output, allowing slow-but-progressing downloads to continue.
+    # Default: same as tier timeout (uses download_timeout/download_timeouts values)
+    stall_timeout: int = 60  # Seconds of zero yt-dlp output before killing (0 = tier timeout, not recommended)
 
     # Tier-specific download timeouts (longer videos need more time)
     # Keys: 'short', 'medium', 'long', 'longer'

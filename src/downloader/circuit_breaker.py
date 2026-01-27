@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
+    from .rate_limit_budget import RateLimitBudget
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ class CircuitBreakerConfig:
     # Block download retries when circuit breaker is tripped
     # When true, download retry loop waits for circuit breaker recovery
     block_download_retries: bool = True
+
+    # Maximum pause duration cap (seconds) to prevent runaway pause scaling
+    max_pause_seconds: float = 300.0
 
 
 @dataclass
@@ -105,6 +109,7 @@ class CircuitBreaker:
         self.config = config or CircuitBreakerConfig()
         self.state = CircuitBreakerState()
         self._escalation_manager: Optional[EscalationManager] = None
+        self._budget: Optional[RateLimitBudget] = None
         self._consecutive_successes: int = 0
 
     @property
@@ -129,43 +134,86 @@ class CircuitBreaker:
         """
         self._escalation_manager = manager
 
-    def _get_effective_pause_seconds(self) -> float:
-        """Get the effective pause duration, possibly extended by escalation state.
+    def set_budget(self, budget: RateLimitBudget) -> None:
+        """Link a RateLimitBudget for budget-aware pause scaling.
 
-        If an EscalationManager is linked and >50% of active keywords are at
-        Tier 3 (FULL_BYPASS), the pause duration is doubled.
+        When linked, the circuit breaker extends pause duration based on
+        budget state:
+        - Nearly exhausted (>80% of any resource): pause * 1.5x
+        - Fully exhausted: pause * 2.5x
+        - Healthy: no extension (1.0x)
+
+        The resulting pause is capped at max_pause_seconds.
+
+        Args:
+            budget: The RateLimitBudget to consult for resource state.
+        """
+        self._budget = budget
+
+    def _get_effective_pause_seconds(self) -> float:
+        """Get the effective pause duration, possibly extended by escalation and budget state.
+
+        Extensions applied (multiplicative):
+        - EscalationManager: 2x when >50% of active keywords are at Tier 3
+        - RateLimitBudget: 1.5x when nearly exhausted (>80%), 2.5x when fully exhausted
+
+        The final result is capped at max_pause_seconds.
 
         Returns:
             Effective pause duration in seconds.
         """
         base_pause = self.config.pause_seconds
+        pause = base_pause
 
-        if self._escalation_manager is None:
-            return base_pause
+        # Escalation-based extension
+        if self._escalation_manager is not None:
+            try:
+                from .types import EscalationTier
 
-        try:
-            from .types import EscalationTier
-        except ImportError:
-            return base_pause
+                total_keywords = self._escalation_manager.get_active_keyword_count()
+                if total_keywords > 0:
+                    tier3_keywords = self._escalation_manager.get_keywords_at_tier(
+                        EscalationTier.FULL_BYPASS
+                    )
+                    tier3_pct = len(tier3_keywords) / total_keywords
 
-        total_keywords = self._escalation_manager.get_active_keyword_count()
-        if total_keywords == 0:
-            return base_pause
+                    if tier3_pct > 0.5:
+                        pause = pause * 2.0
+                        logger.info(
+                            f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
+                            f"(pause {base_pause:.0f}s -> {pause:.0f}s)"
+                        )
+            except ImportError:
+                pass
 
-        tier3_keywords = self._escalation_manager.get_keywords_at_tier(
-            EscalationTier.FULL_BYPASS
-        )
-        tier3_pct = len(tier3_keywords) / total_keywords
+        # Budget-aware extension
+        if self._budget is not None:
+            original_pause = pause
+            if self._budget.is_exhausted():
+                pause = pause * 2.5
+                budget_status = "exhausted"
+            elif self._budget.is_nearly_exhausted():
+                pause = pause * 1.5
+                budget_status = "nearly exhausted"
+            else:
+                budget_status = None
 
-        if tier3_pct > 0.5:
-            extended = base_pause * 2.0
-            logger.info(
-                f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
-                f"(pause {base_pause:.0f}s -> {extended:.0f}s)"
+            if budget_status is not None:
+                logger.info(
+                    f"Circuit breaker pause extended {original_pause:.0f}s -> "
+                    f"{pause:.0f}s (budget {budget_status})"
+                )
+
+        # Cap at max_pause_seconds
+        max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
+        if pause > max_pause:
+            logger.debug(
+                f"Circuit breaker pause capped: {pause:.0f}s -> {max_pause:.0f}s "
+                f"(max_pause_seconds={max_pause:.0f})"
             )
-            return extended
+            pause = max_pause
 
-        return base_pause
+        return pause
 
     def _is_escalation_at_tier3(self) -> bool:
         """Check if escalation is at Tier 3 for any tracked keyword.
