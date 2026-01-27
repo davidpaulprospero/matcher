@@ -1,151 +1,149 @@
 ﻿{
-    "branchName":  "ralph/sprint-11",
-    "sprintNumber":  11,
-    "focusArea":  "testing",
-    "projectContext":  "Sprint 10 (rate-limiting) completed all 10 stories: expanded escalation triggers, wired RateLimitBudget into EscalationManager, unified metrics aggregator, circuit breaker coordination, speed tracker signals, checkpoint persistence, healer integration, and config-driven budget. Sprints 9-10 added 6 new modules to src/downloader/ (impersonation.py, escalation_manager.py, cookie_method_fallback.py, rate_limit_budget.py, rate_limit_metrics.py, types.py) but only escalation_manager and rate_limit_budget/metrics have dedicated test files. This sprint addresses critical testing debt: missing unit tests for new modules, MagicMock anti-patterns causing false positives, skipped test bodies hiding coverage gaps, duplicate test code that should be parametrized, conftest.py lacking centralized download fixtures, and no compilation module tests. Goal: close gaps from sprint 9-10 feature work and improve overall test infrastructure quality.",
+    "branchName":  "ralph/sprint-12",
+    "sprintNumber":  12,
+    "focusArea":  "rate-limiting",
+    "projectContext":  "Sprint 10 (rate-limiting) built the 3-tier escalation system: ImpersonationManager, EscalationManager, CookieMethodFallback, RateLimitBudget, RateLimitMetrics, and wired all 8 yt-dlp call sites. Sprint 11 (testing) added unit tests for ImpersonationManager, CookieMethodFallback, compilation modules, and centralized download fixtures. However, several rate-limiting features remain incomplete: preemptive speed-based escalation exists but is never called, adaptive backoff severity multipliers are classified but not applied, per-tier backoff state is not persisted in checkpoints, budget-aware circuit breaker pause scaling is missing, cookie fallback chain doesn\u0027t validate files on init, and retry queue + circuit breaker can deadlock. This sprint closes those gaps and adds rate limit window estimation, per-keyword escalation history export, and error-pattern-to-tier correlation tracking to improve escalation intelligence.",
     "userStories":  [
                         {
                             "id":  "US-001",
-                            "title":  "Create dedicated unit tests for ImpersonationManager",
+                            "title":  "Integrate preemptive speed-based escalation into download loop",
                             "priority":  1,
                             "passes":  true,
-                            "notes":  "Created tests/test_impersonation_manager.py with 29 tests across 6 test classes: TestParseTargetsOutput (6 tests, 3+ format variations), TestRoundRobinRotation (5 tests, wrap-around verified), TestThreadSafety (3 tests, 4-8 threads), TestEmptyAndInvalidTargets (8 tests, None/empty/error cases), TestPreferredTargetsFiltering (4 tests), TestImpersonationStats (3 tests). All @pytest.mark.fast.",
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_impersonation_manager.py with @pytest.mark.fast marker on all tests",
-                                                       "Test auto-detect target parsing: parse_list_impersonate_output() with real yt-dlp --list-impersonate-targets sample output (at least 3 format variations)",
-                                                       "Test round-robin rotation: get_impersonate_args() cycles through all available targets and wraps around correctly after exhausting the list",
-                                                       "Test thread-safety: concurrent calls to get_impersonate_args() from 4+ threads return valid targets without duplicates within same rotation cycle",
-                                                       "Test empty/invalid target list: constructor handles empty list, None, and malformed target strings gracefully (returns empty args, logs warning)",
-                                                       "Test preferred_targets filtering: when ImpersonationConfig.preferred_targets is set, only matching targets are used in rotation"
-                                                   ]
+                                                       "Call escalation_manager.record_slow_speed(keyword) from core.py _run_download_cmd when speed_tracker detects rate_limit_signal (speed \u003c rate_limit_signal_threshold for consecutive_slow_samples)",
+                                                       "Wire the same call in audio_first.py for audio download and segment download paths",
+                                                       "Speed escalation advances tier by 1 (same as 403-based escalation) but uses \u0027speed\u0027 trigger category in metrics",
+                                                       "Add speed_escalations count to RateLimitMetrics.get_summary() output alongside existing 403-based escalation counts",
+                                                       "Unit test: mock speed_tracker to return slow samples, verify record_slow_speed() called and tier advances",
+                                                       "Unit test: verify speed escalation respects cooldown_seconds (no double-escalation within cooldown window)"
+                                                   ],
+                            "notes":  "Pre-implemented in Sprint 10. core.py:2435 calls record_slow_speed() when detect_rate_limit_signals() fires. audio_first.py:955 has _check_speed_escalation() called from lines 417 and 655. RateLimitMetrics includes speed_escalations in get_summary() (line 489) and export (line 709). 11 unit tests pass (TestSpeedTriggeredEscalation: 8, TestSpeedEscalationCooldown: 3)."
                         },
                         {
                             "id":  "US-002",
-                            "title":  "Create dedicated unit tests for CookieMethodFallback",
+                            "title":  "Activate adaptive backoff severity multipliers in retry logic",
                             "priority":  2,
                             "passes":  true,
-                            "notes":  "Created tests/test_cookie_method_fallback.py with 35 tests across 8 classes: TestCookieMethod (4 tests for get_cmd_args per kind), TestFallbackChainOrdering (6 tests: full chain, no-browser, no-files, cookies_path after rotation, dedup, none-always-last), TestAdvance (4 tests: advance until exhausted, is_exhausted, methods_remaining, current_method changes), TestReset (3 tests: reset-to-zero, reset-after-success-rotation, reset-after-exhaustion), TestGetCmdArgs (5 tests: browser/file/none args, exhausted returns empty, args change after advance), TestFileBasedMethods (5 tests: missing skipped, all missing, cookies_path missing, path preserved, multiple existing), TestMarkSuccess (4 tests: rotation, skip-none, single-auth stays, no-op exhausted), TestGetStatus (4 tests). All @pytest.mark.fast.",
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_cookie_method_fallback.py with @pytest.mark.fast marker",
-                                                       "Test fallback chain ordering: browser:firefox -\u003e file:main.txt -\u003e file:backup1.txt -\u003e none (verify exact sequence)",
-                                                       "Test get_next_method() advances through chain on each call and returns None when exhausted",
-                                                       "Test reset() returns to beginning of chain after exhaustion",
-                                                       "Test get_cookie_args() returns correct yt-dlp args for each method type (--cookies-from-browser for browser, --cookies for file, empty for none)",
-                                                       "Test file-based methods: verify cookie file path resolution and handling of missing cookie files (skip to next method)"
-                                                   ]
+                                                       "In core.py backoff calculation, apply SEVERITY_MULTIPLIERS from classify_error_severity() to the base backoff delay (high=3.0x, medium=2.0x, low=1.5x current delay)",
+                                                       "Only apply when download.rate_limit.adaptive_multiplier config is true (existing flag, currently unused)",
+                                                       "Record severity-adjusted backoff in metrics via record_backoff(seconds, severity) with the actual severity used",
+                                                       "Add config recommendation: if \u003e50% of backoff events are high-severity, suggest increasing initial_backoff_seconds",
+                                                       "Unit test: verify backoff delay is multiplied by severity factor (e.g., 5s base * 3.0 high = 15s)",
+                                                       "Unit test: verify adaptive_multiplier=false uses standard multiplier without severity adjustment"
+                                                   ],
+                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: b343eb5 test: [US-002] Create dedicated unit tests for CookieMethodFallback"
                         },
                         {
                             "id":  "US-003",
-                            "title":  "Create unit tests for compilation modules (stages and timeline)",
+                            "title":  "Add per-tier backoff state persistence to checkpoint",
                             "priority":  3,
-                            "passes":  true,
-                            "notes":  "Created tests/test_compilation.py with 43 tests across 5 classes: TestGapAnalyzer (5 tests: empty/complete/partial tracks, empty track detection, multi-clip sum), TestTopicBroadener (8 tests: JSON/embedded/fallback parsing, limit, fallback keywords, exclusion, broaden filtering, LLM failure fallback), TestGapCheckStage (3 tests: name, complete report, max retries), TestDownloadStage (10 tests: name, sanitize dirname 3 cases, video ID extract 2 cases, ffprobe duration 3 cases, run with no candidates/grouped keywords/errors), TestCompilationTimelineBuilder (15 tests: empty/one-track/enabled/metadata/start-time/video-id/keyword/path-format/frame-rate/stats/title-truncation/fallback-id/deep-copy/naming). All @pytest.mark.fast. Uses sys.modules bootstrap to inject fake state.py since it doesn't exist yet.",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_compilation.py with @pytest.mark.fast marker covering src/compilation/stages/download.py, src/compilation/stages/gap_check.py, and src/compilation/timeline/builder.py",
-                                                       "Test gap_check module: detect gaps in timeline, identify missing segments, report gap durations and positions",
-                                                       "Test download stage: mock subprocess calls, verify correct yt-dlp args for compilation downloads, test error handling on download failure",
-                                                       "Test timeline builder: verify OTIO clip creation from compilation data, test track assembly with correct source references",
-                                                       "All tests use mocking for subprocess and filesystem operations (no real downloads or file creation outside tmp_path)",
-                                                       "At least 15 test functions total across all compilation modules"
+                                                       "Serialize TierRateLimitState dict (per-keyword, per-tier backoff_delay and consecutive_failures) to checkpoint under \u0027tier_backoff_state\u0027 key",
+                                                       "Restore tier backoff state from checkpoint on resume, applying staleness de-escalation (reduce backoff by 50% if checkpoint older than 30 minutes)",
+                                                       "Handle missing/malformed tier_backoff_state gracefully (log warning, start fresh — no crash)",
+                                                       "Include tier_backoff_state in VideoDownloader._save_checkpoint() alongside existing escalation_manager state",
+                                                       "Unit test: save checkpoint with tier state, restore and verify backoff delays preserved",
+                                                       "Unit test: restore stale checkpoint (\u003e30min), verify backoff delays halved"
                                                    ]
                         },
                         {
                             "id":  "US-004",
-                            "title":  "Add centralized download-related fixtures to conftest.py",
+                            "title":  "Add budget-aware circuit breaker pause scaling",
                             "priority":  4,
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Add mock_download_config fixture to tests/conftest.py with ImpersonationConfig, ExtractorArgsConfig, CookieMethodFallback, RateLimitBudgetConfig, CircuitBreakerConfig subsections",
-                                                       "Add mock_escalation_manager fixture that returns a properly configured EscalationManager with mock ImpersonationManager",
-                                                       "Add mock_video_downloader fixture that provides a VideoDownloader with all rate-limiting subsystems mocked",
-                                                       "All new fixtures use spec= parameter on MagicMock (e.g., MagicMock(spec=ImpersonationConfig)) to catch attribute errors when real classes change",
-                                                       "Update at least 3 existing test files (test_downloader_core_coverage.py, test_rate_limit_backoff.py, test_tier_rate_limit_isolation.py) to use the new centralized fixtures instead of local mock setup",
-                                                       "Verify all updated tests still pass after fixture migration"
-                                                   ],
-                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: 8642cd4 docs: [US-004] Mark story as passing with implementation notes"
+                                                       "When circuit breaker trips AND rate_limit_budget.is_nearly_exhausted() (\u003e80% of any resource used), extend pause_seconds by 1.5x",
+                                                       "When budget.is_exhausted(), extend pause_seconds by 2.5x (aggressive backoff since no recovery resources remain)",
+                                                       "Add is_nearly_exhausted() method to RateLimitBudget that checks if any single resource exceeds 80% usage",
+                                                       "Log the pause extension reason: \u0027Circuit breaker pause extended {original}s -\u003e {extended}s (budget {status})\u0027",
+                                                       "Unit test: verify 1.5x extension when budget nearly exhausted, 2.5x when fully exhausted, 1.0x when budget healthy",
+                                                       "Unit test: verify pause extension does not exceed max_pause_seconds cap (add max_pause_seconds=300 to CircuitBreakerConfig)"
+                                                   ]
                         },
                         {
                             "id":  "US-005",
-                            "title":  "Fix MagicMock auto-attribute anti-patterns in downloader tests",
+                            "title":  "Add cookie fallback chain validation on initialization",
                             "priority":  5,
-                            "passes":  true,
-                            "notes":  "Audited all 4 files. Fixed phantom attribute 'cookies' -> 'cookies_path' (real attr) in test_rate_limit_backoff.py and test_tier_rate_limit_isolation.py. Changed cookies_from_browser from None to '' (correct type). Added spec=DownloadConfig to download mocks in 3 files (test_rate_limit_backoff.py, test_tier_rate_limit_isolation.py, test_audio_first_coverage.py). Added spec=ImpersonationConfig, spec=ExtractorArgsConfig, spec=CircuitBreakerConfig to sub-config mocks in rate limit test files. Added spec=AudioFirstConfig in test_audio_first_coverage.py. Added spec=LLMTitleFilterConfig (4x) and spec=SpeechScreeningConfig (1x) in test_downloader_core_coverage.py. Total 16 spec= additions across 4 files. All 593 tests pass (1 pre-existing failure in test_downloader_core_advanced.py unrelated to these changes).",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Audit test_downloader_core_coverage.py, test_rate_limit_backoff.py, test_tier_rate_limit_isolation.py, test_audio_first_coverage.py for MagicMock auto-attribute usage",
-                                                       "Replace direct attribute assignment on MagicMock (e.g., mock._field = value) with explicit mock.configure_mock() or spec-based mocks that validate attribute existence",
-                                                       "For attributes that should NOT exist on mocks, explicitly set mock.attr = None rather than relying on MagicMock auto-creation returning truthy Mock objects",
-                                                       "Add spec= parameter to at least 5 MagicMock() calls that mock Config, DownloadConfig, or VideoDownloader objects",
-                                                       "Run the full downloader test suite (pytest tests/test_downloader*.py tests/test_rate_limit*.py tests/test_audio_first*.py -v) and verify zero regressions"
+                                                       "In CookieMethodFallback.__init__(), validate all file-based methods: check file exists and is readable (os.access with R_OK)",
+                                                       "Skip invalid file methods during chain construction (log warning per skipped file: \u0027Cookie file not found, skipping: {path}\u0027)",
+                                                       "If all file methods invalid, chain degrades to [browser, none] or [none] — never includes broken file entries",
+                                                       "Add get_chain_health() method returning dict with total_methods, valid_methods, skipped_files list",
+                                                       "Log chain health summary at INFO level on init: \u0027Cookie fallback chain: {valid}/{total} methods available\u0027",
+                                                       "Unit test: construct chain with mix of existing/missing files, verify only valid entries in chain"
                                                    ]
                         },
                         {
                             "id":  "US-006",
-                            "title":  "Replace skipped test bodies with real implementations in test_downloader_core_advanced.py",
+                            "title":  "Fix retry queue and circuit breaker deadlock scenario",
                             "priority":  6,
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Implement test_download_by_ids_skip_existing: mock existing files in tmp_path, verify download is skipped and existing paths returned",
-                                                       "Implement test_download_by_ids_all_existing: mock all target files as existing, verify no subprocess calls made",
-                                                       "Implement test_run_download_cmd_success: mock subprocess.Popen to return success, verify file creation check and return value",
-                                                       "Implement test_run_download_cmd_timeout: mock subprocess with side_effect that simulates stall_timeout expiry, verify TimeoutError handling",
-                                                       "Remove all empty \u0027pass\u0027 bodies and \u0027# Skip this test\u0027 comments from the file",
-                                                       "All new test implementations use proper mocking (no real subprocess calls) and pass pytest -v"
+                                                       "Add max_combined_wait_seconds config to BatchRetryConfig (default: 300) — total wait cap when both CB and cooldown are blocking",
+                                                       "When retry queue waits for circuit breaker AND cookie cooldown simultaneously, use min(cb_remaining, cooldown_remaining) + buffer instead of waiting for both sequentially",
+                                                       "If max_combined_wait_seconds exceeded, force-process retry queue with current-best cookie method (skip waiting for preferred cookie)",
+                                                       "Log deadlock detection: \u0027Retry queue waited {elapsed}s for CB+cooldown — forcing retry with best-available cookie method\u0027",
+                                                       "Unit test: mock both CB open and cookie cooldown active, verify combined wait respects max_combined_wait_seconds",
+                                                       "Unit test: verify forced retry uses current best cookie method (not exhausted/cooled-down one)"
                                                    ]
                         },
                         {
                             "id":  "US-007",
-                            "title":  "Convert duplicate test cases to parametrized tests in audio_first and rate_limit files",
+                            "title":  "Add rate limit window duration estimation",
                             "priority":  7,
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "In test_audio_first_coverage.py: consolidate duplicate file-extension skip tests (mp3, m4a, wav, ogg, etc.) into a single @pytest.mark.parametrize test with extension parameter",
-                                                       "In test_rate_limit_backoff.py: identify 3+ test functions with identical structure but different input values, convert to parametrized tests",
-                                                       "In test_tier_rate_limit_isolation.py: identify and parametrize tests that repeat the same pattern for different tier levels (Tier 1, 2, 3)",
-                                                       "Each parametrized test retains clear test IDs via pytest.param(..., id=\u0027descriptive_name\u0027)",
-                                                       "Net reduction of at least 30 lines of duplicate test code across the three files",
-                                                       "All parametrized tests pass: pytest tests/test_audio_first_coverage.py tests/test_rate_limit_backoff.py tests/test_tier_rate_limit_isolation.py -v"
+                                                       "Track success timestamps after rate-limited failures in EscalationManager: store (failure_time, recovery_time) pairs per keyword",
+                                                       "Calculate estimated_window_seconds as median of (recovery_time - failure_time) across recent pairs (last 10)",
+                                                       "Expose get_estimated_rate_limit_window() returning median window duration or None if insufficient data (\u003c3 pairs)",
+                                                       "Add window estimate to RateLimitMetrics export under \u0027rate_limiting.estimated_window_seconds\u0027",
+                                                       "Add config recommendation: if estimated window \u003e 120s, suggest increasing batch_retry.delay_seconds to match",
+                                                       "Unit test: feed alternating failure/success timestamps, verify median calculation correct"
                                                    ]
                         },
                         {
                             "id":  "US-008",
-                            "title":  "Add custom assertion messages to critical test files",
+                            "title":  "Add per-keyword escalation history export to metrics",
                             "priority":  8,
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Add descriptive assertion messages to all assert statements in test_escalation_manager.py (tier transitions, cooldown checks, metric counts)",
-                                                       "Add descriptive assertion messages to test_rate_limit_budget.py (budget boundary conditions, rotation counts, exhaustion state)",
-                                                       "Add descriptive assertion messages to test_circuit_breaker_escalation_coordination.py (pause durations, reset requirements, signal counts)",
-                                                       "Format: assert condition, f\u0027Expected {expected} but got {actual} when {context}\u0027 - include relevant variable values",
-                                                       "At least 30 assertions updated across the three files",
-                                                       "All tests still pass after message additions"
+                                                       "Add get_keyword_escalation_timeline() to EscalationManager returning dict keyed by keyword with list of {timestamp, from_tier, to_tier, trigger_category} events",
+                                                       "Include timeline in RateLimitMetrics.export_to_json() under \u0027escalation.keyword_timelines\u0027",
+                                                       "Limit timeline to last 20 events per keyword to bound export size",
+                                                       "Add get_hot_keywords() returning keywords with \u003e3 escalations in last 30 minutes (sorted by escalation count desc)",
+                                                       "Include hot_keywords list in metrics export for quick debugging",
+                                                       "Unit test: record escalation events for 3 keywords, verify timeline structure and hot_keywords threshold"
                                                    ]
                         },
                         {
                             "id":  "US-009",
-                            "title":  "Add EscalationManager edge case tests for stale checkpoint and concurrent keyword scenarios",
+                            "title":  "Add error-pattern-to-tier success correlation tracking",
                             "priority":  9,
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Test from_dict() with checkpoint data older than stale_threshold: verify all keywords de-escalated by exactly one tier (Tier 3 -\u003e 2, Tier 2 -\u003e 1, Tier 1 stays)",
-                                                       "Test from_dict() with invalid tier values in checkpoint data (negative, \u003e3, non-integer): verify clamped to valid range without exception",
-                                                       "Test concurrent record_failure() calls for same keyword from 4 threads: verify tier advances exactly as expected (no double-escalation from race condition)",
-                                                       "Test concurrent record_failure() for different keywords: verify per-keyword isolation (keyword A escalation doesn\u0027t affect keyword B)",
-                                                       "Test get_escalation_args() during active circuit break: verify returns Tier 3 args immediately regardless of keyword\u0027s actual tier",
-                                                       "All tests in tests/test_escalation_manager.py (or new test class), marked @pytest.mark.fast"
+                                                       "Track (trigger_category, tier_used, outcome) tuples in EscalationManager — outcome is \u0027success\u0027 or \u0027failure\u0027 on next download attempt after escalation",
+                                                       "Add get_tier_effectiveness() returning dict of {trigger_category: {tier_1: success_rate, tier_2: success_rate, tier_3: success_rate}} based on collected data",
+                                                       "If a trigger category has \u003e80% success rate at Tier 1, recommend NOT escalating for that category in config recommendations",
+                                                       "If a trigger category has \u003c20% success rate at Tier 2 but \u003e60% at Tier 3, recommend skipping Tier 2 for that pattern",
+                                                       "Include tier_effectiveness summary in RateLimitMetrics.export_to_json() under \u0027escalation.tier_effectiveness\u0027",
+                                                       "Unit test: simulate mixed success/failure outcomes across tiers and categories, verify rates calculated correctly"
                                                    ]
                         },
                         {
                             "id":  "US-010",
-                            "title":  "Add test infrastructure health check script",
+                            "title":  "Add auto-scaling budget limits based on keyword count",
                             "priority":  10,
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Create tests/test_infrastructure_health.py with @pytest.mark.fast marker",
-                                                       "Test that all src/downloader/*.py modules have at least one corresponding test file (assert mapping exists)",
-                                                       "Test that tests/conftest.py provides mock_download_config, mock_escalation_manager fixtures (verify fixture availability)",
-                                                       "Test that no test file contains bare \u0027pass\u0027 as the only statement in a test function (scan for empty test bodies using AST parsing)",
-                                                       "Test that tests/fixtures/__init__.py create_mock_config() returns a mock with all expected Config sections (cache, output, download, matching, etc.)",
-                                                       "All health check tests are self-describing: failure messages explain what infrastructure gap was found and how to fix it"
+                                                       "Add auto_scale_budget option to RateLimitBudgetConfig (default: false) — when true, multiply base limits by ceil(keyword_count / 5)",
+                                                       "Scale max_rotations, max_backoff_time proportionally (e.g., 10 keywords = 2x base budget; 25 keywords = 5x)",
+                                                       "Cap auto-scaled values at 5x base to prevent runaway resource usage (max_rotations capped at 50, max_backoff_time at 3000s)",
+                                                       "Log scaled budget at pipeline start: \u0027Rate limit budget auto-scaled for {n} keywords: rotations={x}, backoff={y}s\u0027",
+                                                       "Add scale_for_keywords(count) method to RateLimitBudget that applies scaling and returns new limits",
+                                                       "Unit test: verify scaling factor for 1, 5, 10, 25 keywords and cap enforcement at 5x"
                                                    ]
                         }
                     ]
