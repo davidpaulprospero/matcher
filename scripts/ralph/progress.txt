@@ -5795,3 +5795,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
 - Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration US-003 - Add per-tier backoff state persistence to checkpoint
+- Added `tier_backoff_state` Optional[Dict] field to DownloadCheckpoint dataclass in src/downloader/checkpoint.py
+- Added backward-compatible from_dict() handling for checkpoints without tier_backoff_state
+- Extended _save_checkpoint() in core.py to serialize all TierRateLimitState dicts with saved_at timestamp under 'tier_backoff_state' key
+- Added _restore_tier_backoff_state() method to core.py with staleness de-escalation: halves total_delay if checkpoint >30min old
+- Restoration called from download_all() resume path after escalation manager restore
+- Graceful handling for: missing 'tiers' key, empty data, malformed saved_at, unknown tier names, corrupt tier data
+- Files modified: src/downloader/checkpoint.py, src/downloader/core.py
+- Files created: tests/test_tier_backoff_checkpoint.py (18 tests)
+- Test results: 18 passed in 0.62s; 109 existing checkpoint/tier tests still pass
+- All 6 acceptance criteria met
