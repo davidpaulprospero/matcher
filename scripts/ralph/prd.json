@@ -82,7 +82,8 @@
             "id": "US-006",
             "title": "Add EscalationManager stale checkpoint restoration tests",
             "priority": 6,
-            "passes": false,
+            "passes": true,
+            "notes": "Added 3 new tests to TestEscalationCheckpointPersistence class in test_escalation_manager.py: test_from_dict_missing_saved_at_treats_as_stale (AC3), test_from_dict_recent_saved_at_preserves_tiers (AC2 explicit), test_from_dict_empty_keyword_states_returns_fresh (AC5 explicit). Pre-existing tests already covered AC1 (test_stale_data_de_escalates_by_one_tier + test_stale_tier1_stays_at_tier1) and AC4 (test_from_dict_with_invalid_tier_value_clamped). All 109 escalation manager tests pass.",
             "acceptanceCriteria": [
                 "Test from_dict() with checkpoint saved_at > 1 hour ago: verify all tiers de-escalated by one level (Tier 3 → 2, Tier 2 → 1, Tier 1 stays)",
                 "Test from_dict() with checkpoint saved_at < 1 hour ago: verify tiers preserved exactly",

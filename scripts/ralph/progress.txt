@@ -5910,3 +5910,12 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_auto_scaling_budget.py (25 tests across 8 test classes)
 - Test results: 25 new passed, 148 existing related passed, 0 failures
 - All 6 acceptance criteria met
+
+## Iteration US-006 (Sprint 13) - Add EscalationManager stale checkpoint restoration tests
+- Added 3 new tests to TestEscalationCheckpointPersistence in test_escalation_manager.py
+- test_from_dict_missing_saved_at_treats_as_stale: verifies missing saved_at defaults to epoch 0, treating data as stale and de-escalating Tier 3→2, Tier 2→1, Tier 1 stays (AC3)
+- test_from_dict_recent_saved_at_preserves_tiers: verifies saved_at within threshold preserves tiers exactly (AC2 explicit)
+- test_from_dict_empty_keyword_states_returns_fresh: verifies empty keyword_states returns working fresh manager (AC5 explicit)
+- Pre-existing tests already covered AC1 (stale de-escalation) and AC4 (corrupted tier clamping)
+- Files modified: tests/test_escalation_manager.py
+- Test results: 109 passed in test_escalation_manager.py, 72 passed in related test files
