@@ -158,7 +158,7 @@ function Append-Jsonl {
         return
     }
 
-    $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); session = $script:SessionId }
+    $entry = @{ ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ"); session = $script:State.SessionId }
     foreach ($key in $Data.Keys) { $entry[$key] = $Data[$key] }
     $entry | ConvertTo-Json -Compress | Add-Content -Path $File -Encoding UTF8
 }
@@ -594,7 +594,7 @@ function Get-SprintTokenBudget {
     if (Test-Path $script:MetricsFile) {
         try {
             $metrics = @(Import-Csv $script:MetricsFile -ErrorAction SilentlyContinue)
-            $sessionMetrics = @($metrics | Where-Object { $_.session -eq $script:SessionId })
+            $sessionMetrics = @($metrics | Where-Object { $_.session -eq $script:State.SessionId })
             $sumResult = ($sessionMetrics | Measure-Object -Property tokens_used -Sum).Sum
             if ($sumResult) { $totalUsed = [int]$sumResult }
         }
@@ -961,7 +961,7 @@ function Log-StateTransition {
         Log state machine transitions for debugging
     #>
     param([string]$From, [string]$To, [string]$Reason, [hashtable]$Context = @{})
-    $Context.from = $From; $Context.to = $To; $Context.reason = $Reason; $Context.iteration = $script:IterationCount
+    $Context.from = $From; $Context.to = $To; $Context.reason = $Reason; $Context.iteration = $script:State.IterationCount
     Append-Jsonl -File (Join-Path $script:SessionLogDir "state_transitions.jsonl") -Data $Context
 }
 
@@ -1338,8 +1338,8 @@ function Record-Metric {
     }
 
     # Use defaults from script variables if not provided
-    if (-not $Session) { $Session = $script:SessionId }
-    if (-not $Mode) { $Mode = $script:CurrentMode }
+    if (-not $Session) { $Session = $script:State.SessionId }
+    if (-not $Mode) { $Mode = $script:State.CurrentMode }
     if (-not $FocusArea -or -not $Sprint) {
         if (Test-Path $script:PrdFile) {
             try {
