@@ -65,6 +65,23 @@ def manager(imp_manager, ext_config):
     return EscalationManager(imp_manager, ext_config)
 
 
+def _advance_past_cooldown(base_time: float = None):
+    """Return a callable that returns time values well past the 300s cooldown.
+
+    Uses a base_time anchored to real time.time() so that elapsed calculations
+    from earlier (real) escalation timestamps always exceed the cooldown.
+    """
+    if base_time is None:
+        base_time = time.time() + 500  # 500s past now, well beyond 300s cooldown
+    counter = [0]
+
+    def advancing_time():
+        counter[0] += 1
+        return base_time + counter[0] * 400
+
+    return advancing_time
+
+
 # ---------------------------------------------------------------------------
 # AC 1: Test tier progression - record_failure() x threshold triggers escalate
 # ---------------------------------------------------------------------------
@@ -878,24 +895,38 @@ class TestSpeedTriggeredEscalation:
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.EXTRACTOR_ARGS
 
-        # 1-2 more signals: no escalation yet
-        manager.record_slow_speed("kw", 0.05)
-        manager.record_slow_speed("kw", 0.05)
-        r = manager.get_escalation_args("kw")
-        assert r.tier == EscalationTier.EXTRACTOR_ARGS
+        # Advance past cooldown for second escalation
+        advancing = _advance_past_cooldown()
+        with patch("src.downloader.escalation_manager.time") as em_time, \
+             patch("src.downloader.types.time") as types_time:
+            em_time.time.side_effect = lambda: advancing()
+            types_time.time.side_effect = lambda: advancing()
 
-        # 3rd signal after reset: Tier 2 -> 3
-        manager.record_slow_speed("kw", 0.05)
+            # 1-2 more signals: no escalation yet
+            manager.record_slow_speed("kw", 0.05)
+            manager.record_slow_speed("kw", 0.05)
+            r = manager.get_escalation_args("kw")
+            assert r.tier == EscalationTier.EXTRACTOR_ARGS
+
+            # 3rd signal after reset: Tier 2 -> 3
+            manager.record_slow_speed("kw", 0.05)
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.FULL_BYPASS
 
     def test_speed_escalation_stops_at_max_tier(self, manager):
         """Speed escalation does not go beyond FULL_BYPASS."""
-        # Escalate to Tier 3 via two rounds of speed signals
+        # Escalate to Tier 3 via two rounds of speed signals (with cooldown advance)
         for _ in range(3):
             manager.record_slow_speed("kw", 0.05)
-        for _ in range(3):
-            manager.record_slow_speed("kw", 0.05)
+
+        advancing = _advance_past_cooldown()
+        with patch("src.downloader.escalation_manager.time") as em_time, \
+             patch("src.downloader.types.time") as types_time:
+            em_time.time.side_effect = lambda: advancing()
+            types_time.time.side_effect = lambda: advancing()
+
+            for _ in range(3):
+                manager.record_slow_speed("kw", 0.05)
 
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.FULL_BYPASS
@@ -956,6 +987,72 @@ class TestSpeedTriggeredEscalation:
         # Only 2 signals - should still be at Tier 1
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.IMPERSONATE_ONLY
+
+
+# ---------------------------------------------------------------------------
+# Speed escalation cooldown (Sprint 12 US-001)
+# ---------------------------------------------------------------------------
+
+class TestSpeedEscalationCooldown:
+    """Verify record_slow_speed() respects the cooldown window."""
+
+    def test_speed_escalation_blocked_during_cooldown(self, imp_manager):
+        """Speed escalation after initial escalation is suppressed within cooldown."""
+        config = FakeExtractorArgsConfig(cooldown_seconds=300.0)
+        manager = EscalationManager(imp_manager, config)
+
+        # First round: escalate Tier 1 -> 2 via 3 slow signals
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
+        assert manager.get_metrics()['speed_escalations'] == 1
+
+        # Second round immediately (still in cooldown): should NOT escalate
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        # Tier should still be EXTRACTOR_ARGS (not FULL_BYPASS)
+        assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
+        assert manager.get_metrics()['speed_escalations'] == 1
+
+    def test_speed_escalation_proceeds_after_cooldown(self, imp_manager):
+        """Speed escalation proceeds once cooldown has elapsed."""
+        config = FakeExtractorArgsConfig(cooldown_seconds=300.0)
+        manager = EscalationManager(imp_manager, config)
+
+        # First escalation: Tier 1 -> 2
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Advance past cooldown
+        advancing = _advance_past_cooldown()
+        with patch("src.downloader.escalation_manager.time") as em_time, \
+             patch("src.downloader.types.time") as types_time:
+            em_time.time.side_effect = lambda: advancing()
+            types_time.time.side_effect = lambda: advancing()
+
+            # Second escalation after cooldown: Tier 2 -> 3
+            for _ in range(3):
+                manager.record_slow_speed("kw", 0.05)
+
+        assert manager.get_escalation_args("kw").tier == EscalationTier.FULL_BYPASS
+        assert manager.get_metrics()['speed_escalations'] == 2
+
+    def test_speed_cooldown_zero_allows_immediate_escalation(self, imp_manager):
+        """With cooldown_seconds=0, speed escalation is never suppressed."""
+        config = FakeExtractorArgsConfig(cooldown_seconds=0.0)
+        manager = EscalationManager(imp_manager, config)
+
+        # First: Tier 1 -> 2
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Immediately: Tier 2 -> 3
+        for _ in range(3):
+            manager.record_slow_speed("kw", 0.05)
+        assert manager.get_escalation_args("kw").tier == EscalationTier.FULL_BYPASS
+        assert manager.get_metrics()['speed_escalations'] == 2
 
 
 # ---------------------------------------------------------------------------

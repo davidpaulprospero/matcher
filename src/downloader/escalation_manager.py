@@ -426,6 +426,15 @@ class EscalationManager:
             if count >= 3:
                 state = self._get_state(keyword)
                 if state.current_tier < EscalationTier.FULL_BYPASS:
+                    # Respect cooldown: don't escalate if recently escalated
+                    if not self._is_past_cooldown(state):
+                        logger.debug(
+                            f"Speed escalation suppressed for {keyword}: cooldown active"
+                        )
+                        # Reset counter so signals accumulate again after cooldown
+                        self._slow_speed_counts[keyword] = 0
+                        return
+
                     old_tier = state.current_tier
                     state.escalate()
                     self._speed_escalations += 1
@@ -488,6 +497,28 @@ class EscalationManager:
                 return False
 
         return True
+
+    def _is_past_cooldown(self, state: EscalationState) -> bool:
+        """Check if enough time has passed since the last escalation.
+
+        Used by record_slow_speed() to prevent rapid speed-triggered
+        escalations within the cooldown window.
+
+        Args:
+            state: The per-keyword escalation state.
+
+        Returns:
+            True if past cooldown (or never escalated), False if in cooldown.
+        """
+        if state.last_escalation_time is None:
+            return True
+
+        cooldown = 300.0
+        if self._extractor_config is not None:
+            cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
+
+        elapsed = time.time() - state.last_escalation_time
+        return elapsed >= cooldown
 
     def get_cooldown_remaining(self, keyword: str) -> float:
         """Get remaining cooldown seconds for a keyword.
