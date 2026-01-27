@@ -987,3 +987,249 @@ function Invoke-StoryRollback {
         return $false
     }
 }
+
+# ============================================================================
+# CODE REVIEW & PRE-FLIGHT (moved from ralph.ps1)
+# ============================================================================
+
+function Invoke-CodeReview {
+    <#
+    .SYNOPSIS
+        Independent code review agent (Story 2.1)
+    .DESCRIPTION
+        Invokes a separate Claude session with read-only tools to perform
+        comprehensive code review of story changes. Uses Format-ReviewPrompt
+        for structured review. Returns parsed review result.
+    .PARAMETER StoryId
+        Story identifier
+    .PARAMETER Story
+        Full story object from PRD
+    .PARAMETER DiffOutput
+        Git diff output string
+    .PARAMETER FileOps
+        File operations hashtable
+    .PARAMETER ClaudeOutput
+        Full Claude output from story execution
+    .RETURNS
+        Hashtable with score, passed, issues, or $null if review disabled/failed
+    #>
+    param(
+        [string]$StoryId,
+        [object]$Story,
+        [string]$DiffOutput,
+        [hashtable]$FileOps = @{},
+        [string]$ClaudeOutput = ""
+    )
+
+    $config = Get-RalphConfig
+
+    # Check if review is enabled (use Phase 1 flag OR review.enabled)
+    $reviewEnabled = $false
+    if ($config.flags -and $config.flags.llmAsJudgeQuality) { $reviewEnabled = $true }
+    if ($config.review -and $config.review.enabled) { $reviewEnabled = $true }
+
+    if (-not $reviewEnabled) {
+        return $null
+    }
+
+    $timeout = if ($config.review -and $config.review.timeout) { $config.review.timeout } else { 180 }
+    $minScore = if ($config.review -and $config.review.minScoreToPass) { $config.review.minScoreToPass } else { 6 }
+    $model = if ($config.review -and $config.review.model) { $config.review.model } else { "sonnet" }
+
+    # Build comprehensive review prompt
+    $reviewPrompt = Format-ReviewPrompt -StoryId $StoryId -Story $Story -DiffOutput $DiffOutput -FileOps $FileOps
+
+    Write-Host "  Code review: Starting independent review..." -ForegroundColor DarkCyan
+
+    $reviewFile = Join-Path $script:SessionLogDir "review_${StoryId}.json"
+
+    try {
+        # Write prompt to temp file
+        $promptFile = Join-Path $env:TEMP "ralph_review_${StoryId}.md"
+        $reviewPrompt | Set-Content $promptFile -Encoding UTF8
+
+        # Invoke separate Claude session (read-only)
+        $reviewCmd = "claude --model $model --print `"Review the code changes described in $promptFile and output ONLY the JSON review object, no other text.`""
+
+        $reviewProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c $reviewCmd" `
+            -RedirectStandardOutput (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") `
+            -RedirectStandardError (Join-Path $env:TEMP "ralph_review_err_${StoryId}.txt") `
+            -NoNewWindow -PassThru
+
+        $reviewProcess.WaitForExit($timeout * 1000) | Out-Null
+
+        if (-not $reviewProcess.HasExited) {
+            $reviewProcess.Kill()
+            Write-Host "  Code review: Timed out after ${timeout}s" -ForegroundColor Yellow
+            return $null
+        }
+
+        $reviewOutput = Get-Content (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") -Raw -ErrorAction SilentlyContinue
+
+        # Clean up temp files
+        Remove-Item $promptFile -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $env:TEMP "ralph_review_err_${StoryId}.txt") -ErrorAction SilentlyContinue
+
+        if (-not $reviewOutput) {
+            Write-Host "  Code review: No output from review agent" -ForegroundColor Yellow
+            return $null
+        }
+
+        # Extract JSON from output
+        $jsonMatch = [regex]::Match($reviewOutput, '\{[\s\S]*"overallScore"[\s\S]*\}')
+        if (-not $jsonMatch.Success) {
+            Write-Host "  Code review: Could not parse JSON from review output" -ForegroundColor Yellow
+            return $null
+        }
+
+        $review = $jsonMatch.Value | ConvertFrom-Json
+
+        $score = if ($review.overallScore) { $review.overallScore } else { 0 }
+        $passed = $score -ge $minScore
+
+        $result = @{
+            score = $score
+            passed = $passed
+            minScore = $minScore
+            scores = if ($review.scores) { $review.scores } else { @{} }
+            criteriaResults = if ($review.criteriaResults) { $review.criteriaResults } else { @() }
+            issues = if ($review.issues) { $review.issues } else { @() }
+            recommendation = if ($review.recommendation) { $review.recommendation } else { if ($passed) { "pass" } else { "revise" } }
+        }
+
+        # Save review result
+        Write-JsonNoBom -Path $reviewFile -Content ($result | ConvertTo-Json -Depth 5)
+
+        $statusColor = if ($passed) { "Green" } else { "Red" }
+        $statusText = if ($passed) { "PASSED" } else { "NEEDS REVISION" }
+        Write-Host "  Code review: Score $score/$minScore - $statusText" -ForegroundColor $statusColor
+
+        if ($result.issues.Count -gt 0) {
+            $errors = @($result.issues | Where-Object { $_.severity -eq "error" })
+            $warnings = @($result.issues | Where-Object { $_.severity -eq "warning" })
+            if ($errors.Count -gt 0) {
+                Write-Host "  Code review: $($errors.Count) error(s), $($warnings.Count) warning(s)" -ForegroundColor Yellow
+            }
+        }
+
+        return $result
+    }
+    catch {
+        Write-Host "  Code review: Error - $_" -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Invoke-BatchPreFlight {
+    <#
+    .SYNOPSIS
+        Batch pre-flight check at sprint start: show done stories and scan incomplete ones for existing commits
+    .DESCRIPTION
+        Runs once at the beginning of a Ralph Loop session. Shows already-done stories,
+        then iterates through incomplete stories and checks if a matching git commit exists.
+        Phase 0: Display stories already marked as passes=true (done).
+        Phase 1: Find candidates by story ID match in git log (cheap).
+        Phase 2: LLM-verify that commit semantically matches the story (prevents cross-sprint false positives).
+        Phase 3: Auto-complete only LLM-confirmed matches.
+    .RETURNS
+        Number of stories auto-completed
+    #>
+
+    if (-not (Test-Path $script:PrdFile)) {
+        return 0
+    }
+
+    try {
+        $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+    }
+    catch {
+        return 0
+    }
+
+    $allStories = @($prd.userStories)
+    $doneStories = @($allStories | Where-Object { $_.passes })
+    $incompleteStories = @($allStories | Where-Object { -not $_.passes })
+
+    Write-Host ""
+
+    # Show done stories
+    if ($doneStories.Count -gt 0) {
+        Write-Host "  Pre-flight: $($doneStories.Count)/$($allStories.Count) stories already done" -ForegroundColor Green
+        foreach ($done in $doneStories) {
+            Write-Host "    $($done.id): $($done.title)" -ForegroundColor DarkGreen
+        }
+    }
+
+    if ($incompleteStories.Count -eq 0) {
+        Write-Host "  Pre-flight: all stories complete" -ForegroundColor Green
+        Write-Host ""
+        return 0
+    }
+
+    Write-Host "  Pre-flight scan: checking $($incompleteStories.Count) incomplete stories against git..." -ForegroundColor Cyan
+
+    # Phase 1: Find candidates (stories with matching commit IDs)
+    $candidates = @()
+    foreach ($story in $incompleteStories) {
+        if (-not $story.id -or -not $story.title) { continue }
+
+        try {
+            $gitLog = git log --oneline --all --grep="\[$($story.id)\]" 2>$null
+            if (-not $gitLog) {
+                $gitLog = git log --oneline --all --grep="($($story.id))" 2>$null
+            }
+            if ($gitLog) {
+                $commitLine = ($gitLog -split "`n" | Where-Object { $_ } | Select-Object -First 1)
+                $candidates += @{
+                    storyId    = $story.id
+                    storyTitle = $story.title
+                    commitMsg  = $commitLine
+                    storyObj   = $story
+                }
+                Write-Host "    $($story.id): found commit candidate" -ForegroundColor DarkGray
+            }
+        }
+        catch {}
+    }
+
+    if ($candidates.Count -eq 0) {
+        Write-Host "  Pre-flight: no prior commits found, all stories need implementation" -ForegroundColor DarkGray
+        Write-Host ""
+        return 0
+    }
+
+    Write-Host "  Pre-flight: $($candidates.Count) candidates found, verifying with LLM..." -ForegroundColor Cyan
+
+    # Phase 2: LLM verification (single call for all candidates)
+    $matchedIds = Confirm-CommitMatchesStory -Candidates $candidates
+
+    # Phase 3: Auto-complete verified matches
+    $autoCompleted = 0
+    foreach ($id in $matchedIds) {
+        $candidate = $candidates | Where-Object { $_.storyId -eq $id } | Select-Object -First 1
+        if ($candidate) {
+            Write-Host "    Pre-flight: LLM confirmed $id matches commit" -ForegroundColor Green
+            Write-Host "      $($candidate.commitMsg)" -ForegroundColor DarkCyan
+            Complete-StoryAutomatically -StoryId $id -Story $candidate.storyObj -Reason "git-commit-detected"
+            $autoCompleted++
+        }
+    }
+
+    # Log rejections
+    $rejectedCandidates = $candidates | Where-Object { $_.storyId -notin $matchedIds }
+    foreach ($r in $rejectedCandidates) {
+        Write-Host "    Pre-flight: LLM rejected $($r.storyId) - different sprint's work" -ForegroundColor DarkYellow
+        Write-Host "      Story: $($r.storyTitle)" -ForegroundColor DarkYellow
+        Write-Host "      Commit: $($r.commitMsg)" -ForegroundColor DarkYellow
+    }
+
+    if ($autoCompleted -gt 0) {
+        Write-Host "  Pre-flight: auto-completed $autoCompleted/$($incompleteStories.Count) stories from prior commits" -ForegroundColor Green
+    } else {
+        Write-Host "  Pre-flight: LLM found no genuine matches among $($candidates.Count) candidates" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    return $autoCompleted
+}

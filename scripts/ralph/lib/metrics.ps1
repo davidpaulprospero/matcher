@@ -1364,3 +1364,332 @@ function Record-Metric {
 # ============================================================================
 # FAST-FAIL DETECTION
 # ============================================================================
+
+# ============================================================================
+# GIT/ANALYSIS FUNCTIONS (moved from ralph.ps1)
+# ============================================================================
+
+function Confirm-CommitMatchesStory {
+    <#
+    .SYNOPSIS
+        LLM-verify that git commits semantically match their user stories
+    .DESCRIPTION
+        Sends a single LLM call with all candidate story/commit pairs.
+        The LLM determines if each commit actually implements the described story
+        (not just a coincidental ID match from a different sprint).
+    .PARAMETER Candidates
+        Array of hashtables with: storyId, storyTitle, commitMsg
+    .RETURNS
+        Array of story IDs that the LLM confirms as genuine matches
+    #>
+    param(
+        [array]$Candidates = @()
+    )
+
+    if (-not $Candidates -or $Candidates.Count -eq 0) { return @() }
+
+    $claudePath = Get-ClaudePath
+    if (-not $claudePath) {
+        Write-Host "    Pre-flight: Claude not available, skipping LLM verification" -ForegroundColor DarkYellow
+        return @()
+    }
+
+    # Build verification prompt
+    $pairsList = ""
+    foreach ($c in $Candidates) {
+        $pairsList += "- $($c.storyId): Story=`"$($c.storyTitle)`" | Commit=`"$($c.commitMsg)`"`n"
+    }
+
+    $prompt = @"
+You are verifying if git commits implement specific user stories.
+IMPORTANT: Different sprints reuse story IDs (US-001, US-002, etc.), so the commit might be from a DIFFERENT sprint with COMPLETELY DIFFERENT work despite having the same ID.
+
+A commit matches a story ONLY if the commit message describes the SAME WORK as the story title.
+Example MATCH: Story="Add retry logic to downloader" | Commit="feat: [US-003] Add retry logic to downloader"
+Example NO MATCH: Story="Add retry logic to downloader" | Commit="feat: [US-003] Wire impersonation into core.py"
+
+For each pair, reply MATCH or NO_MATCH followed by the story ID. Nothing else.
+
+$pairsList
+"@
+
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $claudePath
+        $psi.Arguments = "--print --dangerously-skip-permissions --model haiku"
+        $psi.WorkingDirectory = $script:ProjectRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+
+        # Async output capture (prevents pipe buffer deadlock)
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
+
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $errHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
+
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # 60 second timeout for simple classification
+            $completed = $process.WaitForExit(60000)
+
+            if (-not $completed) {
+                $process.Kill()
+                Write-Host "    Pre-flight: LLM verification timed out" -ForegroundColor DarkYellow
+                return @()
+            }
+
+            Start-Sleep -Milliseconds 200
+
+            $output = $outBuilder.ToString()
+
+            # Parse response for MATCH lines (exclude NO_MATCH)
+            $matchedIds = @()
+            $candidateIds = @($Candidates | ForEach-Object { $_.storyId })
+            foreach ($line in ($output -split "`n")) {
+                $trimmed = $line.Trim()
+                # Skip NO_MATCH lines, then check for MATCH
+                if ($trimmed -match '^NO_MATCH') { continue }
+                if ($trimmed -match 'MATCH\s+(US-\d+)') {
+                    $id = $Matches[1]
+                    # Only accept IDs that are actual candidates (safety)
+                    if ($id -in $candidateIds) {
+                        $matchedIds += $id
+                    }
+                }
+            }
+
+            return $matchedIds
+        }
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+        Write-Host "    Pre-flight: LLM verification failed: $_" -ForegroundColor DarkYellow
+        return @()
+    }
+}
+
+function Test-StoryAlreadyCommitted {
+    <#
+    .SYNOPSIS
+        Per-story pre-flight check (used as guard in Invoke-ClaudeForStory)
+    .DESCRIPTION
+        Checks if a story was already committed by finding the commit via ID match,
+        then LLM-verifying the commit semantically matches the story title.
+        Falls back conservatively (returns false) if LLM is unavailable.
+    .PARAMETER StoryId
+        Story identifier (e.g., US-005)
+    .PARAMETER Story
+        Story object from PRD (required for verification)
+    .RETURNS
+        $true if story is confirmed already committed, $false otherwise
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$StoryId,
+        [object]$Story = $null
+    )
+
+    if (-not $Story -or -not $Story.title) {
+        return $false
+    }
+
+    try {
+        $gitLog = git log --oneline --all --grep="\[$StoryId\]" 2>$null
+        if (-not $gitLog) {
+            $gitLog = git log --oneline --all --grep="($StoryId)" 2>$null
+        }
+        if (-not $gitLog) {
+            return $false
+        }
+
+        $commitLine = ($gitLog -split "`n" | Where-Object { $_ } | Select-Object -First 1)
+
+        # LLM-verify the match
+        $matchedIds = Confirm-CommitMatchesStory -Candidates @(
+            @{
+                storyId    = $StoryId
+                storyTitle = $Story.title
+                commitMsg  = $commitLine
+            }
+        )
+
+        if ($StoryId -in $matchedIds) {
+            Write-Host "    Pre-flight: LLM confirmed $StoryId already committed" -ForegroundColor Green
+            Write-Host "      $commitLine" -ForegroundColor DarkCyan
+            return $true
+        }
+        else {
+            Write-Host "    Pre-flight: commit for $StoryId is from a different sprint - skipping" -ForegroundColor DarkYellow
+        }
+    }
+    catch {
+        Write-Host "    Pre-flight: git check failed, proceeding normally" -ForegroundColor DarkYellow
+    }
+
+    return $false
+}
+
+function Get-GitDiffStats {
+    <#
+    .SYNOPSIS
+    Gets lines added/deleted since last commit using git diff
+    #>
+
+    try {
+        # Get diff stats for staged and unstaged changes
+        $diffOutput = git diff --numstat HEAD~1 2>$null
+
+        if (-not $diffOutput) {
+            return @{ Added = 0; Deleted = 0 }
+        }
+
+        $totalAdded = 0
+        $totalDeleted = 0
+
+        foreach ($line in $diffOutput -split "`n") {
+            if ($line -match '^(\d+)\s+(\d+)\s+') {
+                $totalAdded += [int]$Matches[1]
+                $totalDeleted += [int]$Matches[2]
+            }
+        }
+
+        return @{ Added = $totalAdded; Deleted = $totalDeleted }
+    }
+    catch {
+        return @{ Added = 0; Deleted = 0 }
+    }
+}
+
+function Get-TestResults {
+    <#
+    .SYNOPSIS
+        Parse pytest output to extract pass/fail counts
+    .PARAMETER Output
+        The output text to analyze
+    .RETURNS
+        String like "41/41 pass" or "38/41 pass, 3 fail", or empty string if no test results found
+    #>
+    param(
+        [string]$Output
+    )
+
+    if (-not $Output) {
+        return ""
+    }
+
+    $passed = 0
+    $failed = 0
+
+    # Pattern: "X passed" or "X passed,"
+    if ($Output -match '(\d+)\s+passed') {
+        $passed = [int]$Matches[1]
+    }
+
+    # Pattern: "X failed"
+    if ($Output -match '(\d+)\s+failed') {
+        $failed = [int]$Matches[1]
+    }
+
+    # Pattern: "X error" (collection errors)
+    if ($Output -match '(\d+)\s+error') {
+        $failed += [int]$Matches[1]
+    }
+
+    $total = $passed + $failed
+
+    if ($total -eq 0) {
+        return ""  # No test results found
+    }
+
+    if ($failed -eq 0) {
+        return "$passed/$total pass"
+    }
+    else {
+        return "$passed/$total pass, $failed fail"
+    }
+}
+
+function Get-ErrorCategory {
+    <#
+    .SYNOPSIS
+        Categorize error type from Claude output
+    .PARAMETER Output
+        The output text to analyze
+    .PARAMETER TimedOut
+        Whether the iteration timed out
+    .RETURNS
+        Error category string
+    #>
+    param(
+        [string]$Output,
+        [bool]$TimedOut
+    )
+
+    if ($TimedOut) { return "Timeout" }
+    if ($Output -match "SyntaxError|parse error|unexpected token") { return "SyntaxError" }
+    if ($Output -match "FAILED|AssertionError|test.*failed") { return "TestFailure" }
+    if ($Output -match "cannot be loaded|compilation|ImportError") { return "CompileError" }
+    if ($Output -match "ValidationError|schema") { return "ValidationError" }
+    if ($Output -match "API|rate.?limit|quota|429") { return "APIError" }
+    return "Unknown"
+}
+
+function Get-EstimatedTokens {
+    <#
+    .SYNOPSIS
+        Estimate token count from output length (Story 1.8: improved estimation)
+    .DESCRIPTION
+        First tries to parse actual token usage from Claude's stderr output.
+        Falls back to character-based estimation (~4 chars per token).
+    .PARAMETER Output
+        The output text to estimate tokens from
+    .RETURNS
+        Estimated token count (capped at 200000)
+    #>
+    param(
+        [string]$Output
+    )
+
+    if (-not $Output -or $Output.Length -eq 0) {
+        return 0
+    }
+
+    # Try to parse actual token usage from Claude output
+    # Claude CLI may output usage info like "Input tokens: 1234" or "Total tokens: 5678"
+    if ($Output -match 'total[_\s]?tokens[:\s]+(\d+)') {
+        return [int]$Matches[1]
+    }
+    if ($Output -match 'input[_\s]?tokens[:\s]+(\d+)') {
+        $inputTokens = [int]$Matches[1]
+        # Also check for output tokens
+        $outputTokens = 0
+        if ($Output -match 'output[_\s]?tokens[:\s]+(\d+)') {
+            $outputTokens = [int]$Matches[1]
+        }
+        return $inputTokens + $outputTokens
+    }
+
+    # Fallback: estimate from output length (~4 chars per token)
+    $estimatedTokens = [math]::Round($Output.Length / 4)
+    # Cap at reasonable max for a single interaction
+    return [math]::Min($estimatedTokens, 200000)
+}
