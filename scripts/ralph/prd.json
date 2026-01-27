@@ -38,7 +38,8 @@
             "id": "US-003",
             "title": "Add per-keyword escalation timeline export tests",
             "priority": 3,
-            "passes": false,
+            "passes": true,
+            "notes": "Added _escalation_timeline dict and _record_timeline_event() to EscalationManager. Implemented get_keyword_escalation_timeline() (last 20 per keyword) and get_hot_keywords() (>3 in 30min, sorted desc). record_failure() now calls classify_trigger() to capture trigger_category. Added escalation_manager param to export_to_json() for keyword_timelines and hot_keywords. 26 new tests in test_escalation_timeline.py. 259 existing tests pass.",
             "acceptanceCriteria": [
                 "Test get_keyword_escalation_timeline() returns dict keyed by keyword with list of {timestamp, from_tier, to_tier, trigger_category} events",
                 "Test timeline is limited to last 20 events per keyword — record 25 events, verify only last 20 returned",

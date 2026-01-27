@@ -722,7 +722,7 @@ class RateLimitMetrics:
         self.session_end_time = None
         self.session_count = 1  # Reset to 1 for new session (US-006)
 
-    def export_to_json(self, config: Any = None) -> dict:
+    def export_to_json(self, config: Any = None, escalation_manager: Any = None) -> dict:
         """Export metrics to structured JSON format for external monitoring tools.
 
         Creates a well-structured export with all metrics, timestamps, session info,
@@ -734,6 +734,9 @@ class RateLimitMetrics:
                     If provided, exports download.rate_limit, download.circuit_breaker,
                     download.batch_retry, download.speed_tracking, download.cookie_rotation,
                     and download.vpn config sections.
+            escalation_manager: Optional EscalationManager to include per-keyword
+                    escalation timelines and hot keywords in the export under
+                    'escalation.keyword_timelines' and 'escalation.hot_keywords'.
 
         Returns:
             Dict with structured metrics data ready for JSON serialization.
@@ -821,6 +824,18 @@ class RateLimitMetrics:
             # Recommendations
             "recommendations": self.get_config_recommendations(),
         }
+
+        # Include escalation timeline and hot keywords if escalation_manager provided
+        if escalation_manager is not None:
+            try:
+                export_data["escalation"]["keyword_timelines"] = (
+                    escalation_manager.get_keyword_escalation_timeline()
+                )
+                export_data["escalation"]["hot_keywords"] = (
+                    escalation_manager.get_hot_keywords()
+                )
+            except Exception:
+                logger.debug("Failed to include escalation timeline in export", exc_info=True)
 
         # Include config snapshot if provided
         if config is not None:

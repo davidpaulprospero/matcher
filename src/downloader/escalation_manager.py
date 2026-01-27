@@ -204,6 +204,8 @@ class EscalationManager:
         self._escalations_per_tier: Dict[str, int] = {}  # tier_name -> count
         self._slow_speed_counts: Dict[str, int] = {}  # keyword -> consecutive slow count
         self._speed_escalations: int = 0  # Total speed-triggered escalations
+        # Per-keyword escalation timeline: keyword -> [{timestamp, from_tier, to_tier, trigger_category}]
+        self._escalation_timeline: Dict[str, List[Dict]] = {}
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -324,6 +326,27 @@ class EscalationManager:
 
         return ['--extractor-args', f'youtube:player_client={client_str}']
 
+    def _record_timeline_event(
+        self, keyword: str, from_tier: EscalationTier, to_tier: EscalationTier,
+        trigger_category: Optional[str] = None,
+    ) -> None:
+        """Record an escalation event in the per-keyword timeline.
+
+        Args:
+            keyword: The keyword that escalated.
+            from_tier: Tier before escalation.
+            to_tier: Tier after escalation.
+            trigger_category: Category from classify_trigger() or None.
+        """
+        if keyword not in self._escalation_timeline:
+            self._escalation_timeline[keyword] = []
+        self._escalation_timeline[keyword].append({
+            'timestamp': time.time(),
+            'from_tier': from_tier.value,
+            'to_tier': to_tier.value,
+            'trigger_category': trigger_category or 'unknown',
+        })
+
     def record_failure(self, keyword: str, error_output: str = "") -> None:
         """Record a download failure for a keyword.
 
@@ -337,6 +360,9 @@ class EscalationManager:
             keyword: The download keyword or video ID.
             error_output: stderr output from the failed subprocess.
         """
+        # Classify trigger category for timeline tracking
+        trigger_category = classify_trigger(error_output) if error_output else None
+
         lock = self._get_lock(keyword)
         with lock:
             state = self._get_state(keyword)
@@ -366,6 +392,9 @@ class EscalationManager:
                         self._escalations_per_tier[tier_name] = (
                             self._escalations_per_tier.get(tier_name, 0) + 1
                         )
+                        self._record_timeline_event(
+                            keyword, old_tier, state.current_tier, trigger_category
+                        )
                         return
 
                 state.escalate()
@@ -381,6 +410,11 @@ class EscalationManager:
                 # Budget tracking: record rotation when advancing to Tier 2 or Tier 3
                 if self._budget is not None and state.current_tier > old_tier:
                     self._budget.record_rotation(keyword)
+
+                # Record timeline event
+                self._record_timeline_event(
+                    keyword, old_tier, state.current_tier, trigger_category
+                )
 
                 logger.info(
                     f"Escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "
@@ -571,6 +605,7 @@ class EscalationManager:
             self._escalations_per_tier.clear()
             self._slow_speed_counts.clear()
             self._speed_escalations = 0
+            self._escalation_timeline.clear()
             logger.debug("All escalation states reset")
 
     def get_active_keyword_count(self) -> int:
@@ -758,3 +793,49 @@ class EscalationManager:
                 'average_tier': average_tier,
                 'speed_escalations': self._speed_escalations,
             }
+
+    def get_keyword_escalation_timeline(self) -> Dict[str, List[Dict]]:
+        """Get per-keyword escalation event timeline.
+
+        Returns a dict keyed by keyword, where each value is a list of
+        escalation event dicts with keys: timestamp, from_tier, to_tier,
+        trigger_category. Limited to the last 20 events per keyword.
+
+        Returns:
+            Dict mapping keyword to list of event dicts.
+        """
+        with self._global_lock:
+            result: Dict[str, List[Dict]] = {}
+            for keyword, events in self._escalation_timeline.items():
+                # Limit to last 20 events per keyword
+                result[keyword] = list(events[-20:])
+            return result
+
+    def get_hot_keywords(self, window_seconds: float = 1800.0) -> List[Dict]:
+        """Get keywords with frequent escalations in a recent time window.
+
+        A keyword is "hot" if it has more than 3 escalation events within
+        the specified window (default 30 minutes). Results are sorted by
+        escalation count descending.
+
+        Args:
+            window_seconds: Time window in seconds (default: 1800 = 30 min).
+
+        Returns:
+            List of dicts with 'keyword' and 'escalation_count', sorted by
+            count descending. Only includes keywords with >3 escalations.
+        """
+        cutoff = time.time() - window_seconds
+        with self._global_lock:
+            hot: List[Dict] = []
+            for keyword, events in self._escalation_timeline.items():
+                recent_count = sum(
+                    1 for e in events if e['timestamp'] > cutoff
+                )
+                if recent_count > 3:
+                    hot.append({
+                        'keyword': keyword,
+                        'escalation_count': recent_count,
+                    })
+            hot.sort(key=lambda x: x['escalation_count'], reverse=True)
+            return hot
