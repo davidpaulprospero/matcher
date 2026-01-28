@@ -126,8 +126,8 @@
             "id": "US-009",
             "title": "Add LLM client _normalize_confidence and _is_permanent_error unit tests",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "52 tests across 5 dedicated US-009 test classes in test_llm_client_us009.py: TestNormalizeConfidenceStringLabelsUS009 (9 tests, AC1), TestNormalizeConfidenceNumericUS009 (13 tests, AC2), TestIsPermanentErrorTrueUS009 (11 tests, AC3), TestIsPermanentErrorFalseUS009 (9 tests, AC4), TestNormalizeConfidenceEdgeCasesUS009 (10 tests, AC5). All 52 tests pass in 0.46s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test _normalize_confidence() converts string labels: 'high'->0.9, 'medium'->0.7, 'low'->0.5, 'very_high'->0.95, 'very_low'->0.3 — verify exact float values for each label",
                 "Test _normalize_confidence() parses numeric strings ('0.85' -> 0.85), passes through float/int values, returns None for invalid input (None, empty string, 'invalid', non-numeric string)",
