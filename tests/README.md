@@ -107,15 +107,39 @@ See `conftest.py` for full factory documentation.
 
 ## Coverage Requirements
 
-Target: 80% coverage for critical modules
+Target: 85% overall coverage (configured in `.coveragerc`)
 
-- `src/matching/` - Matching logic
-- `src/agents/` - Self-healing agents
-- `src/compilation/` - Compilation pipeline
+### Critical Modules
 
-Check coverage locally:
+| Module | Purpose | Target |
+|--------|---------|--------|
+| `src/matching/` | Video-to-voiceover matching | 85% |
+| `src/agents/` | Self-healing pipeline agents | 85% |
+| `src/compilation/` | Keyword compilation pipeline | 85% |
+
+### Check Coverage Locally
 
 ```bash
-pytest tests/ --cov=src --cov-report=html
-open htmlcov/index.html  # View report
+# Full coverage report
+pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+open htmlcov/index.html  # View report (macOS)
+start htmlcov/index.html  # View report (Windows)
+
+# Per-module coverage
+pytest tests/ --cov=src/matching --cov-report=term-missing
+pytest tests/ --cov=src/agents --cov-report=term-missing
+pytest tests/ --cov=src/compilation --cov-report=term-missing
+
+# Generate coverage badge URL
+python scripts/generate_coverage_badge.py --verbose
+
+# CI also uploads to Codecov (see .github/workflows/tests.yml)
 ```
+
+### Coverage Configuration
+
+Coverage settings are in `.coveragerc`:
+- `fail_under = 85` - CI fails if coverage drops below 85%
+- HTML reports go to `htmlcov/`
+- XML reports go to `coverage.xml`
+- Excludes: legacy modules, test files, type-checking blocks

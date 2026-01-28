@@ -6598,3 +6598,12 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC4: test_try_heal_action_abort verifies False return propagates to failure
 - AC5: test_reset_healers + test_reset_healers_missing_method — verifies healer reset
 - Test results: 2 new tests + 25 pre-existing tests passed
+
+## Iteration US-010 (Sprint 19) - Add test coverage reporting and threshold enforcement
+- Pre-implemented: .coveragerc has HTML/XML reports configured with fail_under=85
+- AC1: .coveragerc [html] and [xml] sections configured
+- AC2: .coveragerc fail_under = 85 (exceeds 80% requirement)
+- AC3: Created scripts/generate_coverage_badge.py for shields.io badges
+- AC4: tests/README.md has per-module coverage commands for matching/agents/compilation
+- AC5: tests/README.md updated with comprehensive coverage documentation
+- CI: .github/workflows/tests.yml uploads to Codecov and archives HTML reports
