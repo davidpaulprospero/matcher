@@ -7274,3 +7274,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Gotcha: Timing-sensitive tests were replaced with source inspection tests to avoid flakiness in CI
 - Files created: tests/test_downloader_stall_detection.py (906 lines)
 - Test results: 22 tests passed in 39.10s
+
+## Iteration - [US-008] Add XML export special character handling tests
+- Added 32 tests in TestXMLSpecialCharacterHandling class to test_otio_xml_export.py
+- AC1 (Ampersands): 3 tests verify escape_xml() correctly escapes & as &amp;
+- AC2 (Quotes): 4 tests verify both double quotes (&quot;) and apostrophes (&apos;) are escaped
+- AC3 (Angle brackets): 5 tests verify <, >, pairs, and HTML-like tags are properly escaped
+- AC4 (Long paths): 5 tests verify paths over 200 chars generate valid XML
+- AC5 (Unicode): 11 tests verify CJK, Japanese, Korean, emoji, Arabic RTL, Hebrew RTL, Cyrillic, and European accents are preserved
+- Edge cases: 4 tests for UTF-8 encoding declaration, pathurl format, unicode passthrough
+- Design note: escape_xml() is used for clip <name> elements; pathurl preserves raw paths per DaVinci Resolve requirements
+- Files modified: tests/test_otio_xml_export.py (+578 lines)
+- All 32 tests pass in 0.57s

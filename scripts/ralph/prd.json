@@ -106,8 +106,8 @@
             "id": "US-008",
             "title": "Add XML export special character handling tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "32 tests added in tests/test_otio_xml_export.py::TestXMLSpecialCharacterHandling. AC1: 3 tests for ampersand escaping in clip names. AC2: 4 tests for quote escaping (double, single, mixed). AC3: 5 tests for angle bracket escaping (<, >, pairs, HTML-like tags). AC4: 5 tests for long paths (200+, 250, nested, long filename, boundary). AC5: 11 tests for Unicode (CJK, Japanese, Korean, emoji, Arabic RTL, Hebrew RTL, Cyrillic, European accents, mixed). Edge cases: 4 tests (encoding declaration, pathurl format, unicode passthrough, combined). Note: escape_xml() is used for clip <name> elements; pathurl uses format_path_url() which preserves raw paths per DaVinci Resolve requirements. All 32 tests pass in 0.57s.",
             "acceptanceCriteria": [
                 "Test XML export escapes ampersands in file paths correctly",
                 "Test XML export escapes quotes in metadata fields correctly",
