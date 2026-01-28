@@ -140,8 +140,8 @@
             "id": "US-010",
             "title": "Add calculate_match_quality_metrics edge case and gap detection tests",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: tests/test_match_quality_metrics.py has 30 tests covering all 6 AC. AC1: test_counts_gaps verifies has_gap=True increments gap_count. AC2: TestCalculateMatchQualityMetrics tests verify primary_match.confidence extraction. AC3: test_handles_direct_match_objects verifies Match.confidence access. AC4: test_match_rate_calculation verifies matched_segments/total_segments. AC5: test_calculates_std_deviation uses statistics.stdev, test_single_match_no_std verifies 0.0 for single value. AC6: test_empty_matches_returns_metrics verifies zero metrics when matches=[] and total_segments>0. All 30 tests pass in 0.47s.",
             "acceptanceCriteria": [
                 "Test calculate_match_quality_metrics() counts gaps correctly — verify has_gap=True on matches increments gap_count",
                 "Test calculate_match_quality_metrics() handles MatchResult structure with primary_match attribute — extract confidence correctly",
