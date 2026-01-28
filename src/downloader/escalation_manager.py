@@ -645,15 +645,17 @@ class EscalationManager:
         """Serialize all keyword escalation states for checkpoint persistence.
 
         Returns:
-            Dict with keyword states, global counters, and a timestamp.
+            Dict with keyword states, global counters, timeline, outcomes, and a timestamp.
             Format: {
-                'keyword_states': {keyword: {tier, consecutive_403s, total_403s,
+                'keyword_states': {keyword: {tier, consecutive_403s,
                     extractor_args_index, last_escalation_time}},
                 'total_403s': int,
                 'total_successes': int,
                 'total_escalations': int,
                 'escalations_per_tier': {tier_name: count},
                 'speed_escalations': int,
+                'timeline': {keyword: [{timestamp, from_tier, to_tier, trigger_category}]},
+                'tier_outcomes': {trigger_category: {tier_value: {successes, attempts}}},
                 'saved_at': float (epoch timestamp)
             }
         """
@@ -666,6 +668,19 @@ class EscalationManager:
                     'extractor_args_index': state.extractor_args_index,
                     'last_escalation_time': state.last_escalation_time,
                 }
+            # Deep-copy timeline events (list of dicts per keyword)
+            timeline = {
+                kw: list(events)
+                for kw, events in self._escalation_timeline.items()
+            }
+            # Deep-copy tier outcomes (nested dicts)
+            tier_outcomes = {
+                cat: {
+                    tier_val: dict(counts)
+                    for tier_val, counts in tiers.items()
+                }
+                for cat, tiers in self._tier_outcomes.items()
+            }
             return {
                 'keyword_states': keyword_states,
                 'total_403s': self._total_403s,
@@ -673,6 +688,8 @@ class EscalationManager:
                 'total_escalations': self._total_escalations,
                 'escalations_per_tier': dict(self._escalations_per_tier),
                 'speed_escalations': self._speed_escalations,
+                'timeline': timeline,
+                'tier_outcomes': tier_outcomes,
                 'saved_at': time.time(),
             }
 
@@ -750,6 +767,31 @@ class EscalationManager:
         manager._total_escalations = data.get('total_escalations', 0)
         manager._escalations_per_tier = dict(data.get('escalations_per_tier', {}))
         manager._speed_escalations = data.get('speed_escalations', 0)
+
+        # Restore escalation timeline (per-keyword event history)
+        saved_timeline = data.get('timeline', {})
+        if isinstance(saved_timeline, dict):
+            for kw, events in saved_timeline.items():
+                if isinstance(events, list):
+                    manager._escalation_timeline[kw] = list(events)
+
+        # Restore tier outcomes (per-category, per-tier success/attempt counts)
+        saved_outcomes = data.get('tier_outcomes', {})
+        if isinstance(saved_outcomes, dict):
+            for category, tiers in saved_outcomes.items():
+                if isinstance(tiers, dict):
+                    manager._tier_outcomes[category] = {}
+                    for tier_val, counts in tiers.items():
+                        if isinstance(counts, dict):
+                            # tier_val may be string from JSON; convert to int
+                            try:
+                                tier_key = int(tier_val)
+                            except (ValueError, TypeError):
+                                continue
+                            manager._tier_outcomes[category][tier_key] = {
+                                'successes': counts.get('successes', 0),
+                                'attempts': counts.get('attempts', 0),
+                            }
 
         restored_count = len(keyword_states)
         logger.info(
