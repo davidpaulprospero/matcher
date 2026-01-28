@@ -296,3 +296,51 @@
 2026-01-28 00:27:39,2026-01-27_231506,sprint-13,US-009,RalphsChoiceAuto,2,true,false,testing,129,,0,,1,2281,3777,0,26954,26954,80863,0,false,,0
 2026-01-28 00:32:13,2026-01-27_231506,sprint-13,US-010,RalphsChoiceAuto,4,true,false,testing,212,,0,59/59 pass,1,2558,3778,0,60583,0,181750,0,false,,0
 2026-01-28 10:51:22,2026-01-28_103724,sprint-14,testing,RalphsChoiceAuto,9,true,false,testing,425,,10,,1,3110,4142,0,524520,0,0,0,false,,0
+2026-01-28 11:03:08,2026-01-28_103724,sprint-14,US-001,RalphsChoiceAuto,11,true,false,testing,246,,11,"0/403 pass, 403 fail",1,666,1,0,167706,0,503117,0,false,,0
+2026-01-28 11:09:09,2026-01-28_103724,sprint-14,US-002,RalphsChoiceAuto,5,true,false,testing,193,,11,,1,577,7,0,69775,0,209324,0,false,,0
+2026-01-28 11:14:06,2026-01-28_103724,sprint-14,US-003,RalphsChoiceAuto,4,true,false,testing,356,,11,52/52 pass,1,275,8,0,210856,0,0,0,false,,0
+2026-01-28 11:20:55,2026-01-28_103724,sprint-14,US-004,RalphsChoiceAuto,4,true,false,testing,225,,11,,1,489,9,0,59235,0,177704,0,false,,0
+2026-01-28 11:28:00,2026-01-28_103724,sprint-14,US-005,RalphsChoiceAuto,6,true,false,testing,365,,11,,1,82,11,0,72174,72174,216521,0,false,,0
+2026-01-28 11:33:50,2026-01-28_103724,sprint-14,US-006,RalphsChoiceAuto,5,true,false,testing,216,,11,,1,763,13,0,74668,0,224002,0,false,,0
+2026-01-28 11:40:11,2026-01-28_103724,sprint-14,US-007,RalphsChoiceAuto,5,true,false,testing,368,,11,38/38 pass,1,436,15,0,59835,59835,179504,0,false,,0
+2026-01-28 11:46:14,2026-01-28_103724,sprint-14,US-008,RalphsChoiceAuto,5,true,false,testing,312,,11,,1,764,17,0,77066,0,231197,0,false,,0
+2026-01-28 11:52:36,2026-01-28_103724,sprint-14,US-009,RalphsChoiceAuto,5,true,false,testing,257,,11,,1,626,20,0,77536,0,232606,0,false,,0
+2026-01-28 11:57:40,2026-01-28_103724,sprint-14,US-010,RalphsChoiceAuto,4,true,false,testing,217,,11,,1,649,22,0,60342,0,181027,0,false,,0
+2026-01-28 14:13:38,2026-01-28_140132,sprint-15,testing,RalphsChoiceAuto,7,true,false,testing,349,,14,,1,732,114,0,412816,0,0,0,false,,0
+2026-01-28 14:17:21,2026-01-28_140132,sprint-15,US-001,RalphsChoiceAuto,3,true,false,testing,219,,14,,1,856,113,0,75166,0,112750,0,false,,0
+2026-01-28 14:21:23,2026-01-28_140132,sprint-15,US-002,RalphsChoiceAuto,4,true,false,testing,332,,14,,1,666,43,0,86252,0,129379,0,false,,0
+2026-01-28 14:24:31,2026-01-28_140132,sprint-15,US-003,RalphsChoiceAuto,3,true,false,testing,204,,14,,1,951,43,0,40021,0,120064,0,false,,0
+2026-01-28 14:28:17,2026-01-28_140132,sprint-15,US-004,RalphsChoiceAuto,3,true,false,testing,208,,14,,1,974,43,0,42693,0,128079,0,false,,0
+2026-01-28 14:32:40,2026-01-28_140132,sprint-15,US-005,RalphsChoiceAuto,4,true,false,testing,197,,14,,1,1155,43,0,59589,0,178766,0,false,,0
+2026-01-28 14:37:32,2026-01-28_140132,sprint-15,US-006,RalphsChoiceAuto,4,true,false,testing,210,,14,,1,1169,43,0,66267,0,198802,0,false,,0
+2026-01-28 14:42:07,2026-01-28_140132,sprint-15,US-007,RalphsChoiceAuto,4,true,false,testing,196,,14,,1,934,43,0,53509,0,160528,0,false,,0
+2026-01-28 14:46:33,2026-01-28_140132,sprint-15,US-008,RalphsChoiceAuto,4,true,false,testing,256,,14,,1,1197,43,0,95750,0,143626,0,false,,0
+2026-01-28 14:50:06,2026-01-28_140132,sprint-15,US-009,RalphsChoiceAuto,3,true,false,testing,215,,14,,1,755,43,0,46538,0,139615,0,false,,0
+2026-01-28 14:54:18,2026-01-28_140132,sprint-15,US-010,RalphsChoiceAuto,3,true,false,testing,195,,14,,1,772,43,0,66670,33335,100004,0,false,,0
+2026-01-28 15:08:19,2026-01-28_140132,sprint-16,testing,RalphsChoiceAuto,9,true,false,testing,336,,15,,2,951,123,0,518670,0,0,0,false,,0
+2026-01-28 15:10:48,2026-01-28_140132,sprint-16,US-001,RalphsChoiceAuto,2,true,false,testing,137,,15,,1,947,124,0,22784,22784,68352,0,false,,0
+2026-01-28 15:16:43,2026-01-28_140132,sprint-16,US-002,RalphsChoiceAuto,5,true,false,testing,298,,15,,1,1321,44,0,82374,0,247124,0,false,,0
+2026-01-28 15:47:48,2026-01-28_153419,sprint-17,testing,RalphsChoiceAuto,8,true,false,testing,502,,15,,1,1450,133,0,492404,0,0,0,false,,0
+2026-01-28 15:51:17,2026-01-28_153419,sprint-17,US-001,RalphsChoiceAuto,3,true,false,testing,78,,15,,1,1167,134,0,43569,0,130708,0,false,,0
+2026-01-28 16:06:43,2026-01-28_153419,sprint-17,US-002,RalphsChoiceAuto,15,false,true,testing,0,Timeout,16,,1,0,0,0,0,0,0,0,false,,0
+2026-01-28 16:09:53,2026-01-28_153419,sprint-17,US-002,RalphsChoiceAuto,3,true,false,testing,62,,16,,2,1664,60,0,32638,32638,97915,0,false,,0
+2026-01-28 16:16:49,2026-01-28_153419,sprint-17,US-003,RalphsChoiceAuto,7,true,false,testing,198,,16,,1,2159,61,0,97705,0,293114,0,false,,0
+2026-01-28 16:22:55,2026-01-28_153419,sprint-17,US-004,RalphsChoiceAuto,5,true,false,testing,240,,16,,1,1708,61,0,72976,0,218928,0,false,,0
+2026-01-28 16:27:56,2026-01-28_153419,sprint-17,US-005,RalphsChoiceAuto,5,true,false,testing,305,,16,,1,1875,61,0,68684,0,206051,0,false,,0
+2026-01-28 16:53:04,2026-01-28_153419,sprint-17,US-006,RalphsChoiceAuto,25,true,false,testing,274,,16,,1,1198,63,0,296484,296484,889451,0,false,,0
+2026-01-28 16:58:22,2026-01-28_153419,sprint-17,US-007,RalphsChoiceAuto,4,true,false,testing,184,,16,,1,1484,61,0,60374,0,181123,0,false,,0
+2026-01-28 17:16:33,2026-01-28_153419,sprint-17,US-008,RalphsChoiceAuto,18,false,true,testing,104,Timeout,17,,1,0,0,0,1063208,0,0,0,false,,0
+2026-01-28 17:20:10,2026-01-28_153419,sprint-17,US-009,RalphsChoiceAuto,3,true,false,testing,224,,17,,1,1398,61,0,47533,0,142598,0,false,,0
+2026-01-28 17:26:08,2026-01-28_153419,sprint-17,US-010,RalphsChoiceAuto,5,true,false,testing,205,,17,,1,1629,61,0,68390,0,205170,0,false,,0
+2026-01-28 17:41:55,2026-01-28_153419,sprint-17,testing,RalphsChoiceAuto,10,false,true,testing,0,Timeout,17,,2,0,0,0,0,0,0,0,false,,0
+2026-01-28 19:56:38,2026-01-28_194540,sprint-18,testing,RalphsChoiceAuto,6,true,false,quality,321,,19,,1,1925,245,0,345189,0,0,0,false,,0
+2026-01-28 19:58:52,2026-01-28_194540,sprint-18,US-001,RalphsChoiceAuto,2,true,false,quality,188,,19,,1,1476,229,0,19901,19901,59703,0,false,,0
+2026-01-28 20:01:51,2026-01-28_194540,sprint-18,US-002,RalphsChoiceAuto,3,true,false,quality,257,,20,,1,1390,141,0,30788,30788,92364,0,false,,0
+2026-01-28 20:03:55,2026-01-28_194540,sprint-18,US-003,RalphsChoiceAuto,2,true,false,quality,274,,20,,1,1399,139,0,19488,19488,58464,0,false,,0
+2026-01-28 20:07:35,2026-01-28_194540,sprint-18,US-004,RalphsChoiceAuto,3,true,false,quality,214,,20,,1,1470,139,0,40832,0,122498,0,false,,0
+2026-01-28 20:10:24,2026-01-28_194540,sprint-18,US-005,RalphsChoiceAuto,2,true,false,quality,226,,20,,1,1493,139,0,35780,0,107341,0,false,,0
+2026-01-28 20:12:56,2026-01-28_194540,sprint-18,US-006,RalphsChoiceAuto,2,true,false,quality,213,,20,,1,1437,139,0,25210,25210,75631,0,false,,0
+2026-01-28 20:16:16,2026-01-28_194540,sprint-18,US-007,RalphsChoiceAuto,2,true,false,quality,194,,20,34/34 pass,1,1449,139,0,21615,21615,64846,0,false,,0
+2026-01-28 20:18:23,2026-01-28_194540,sprint-18,US-008,RalphsChoiceAuto,2,true,false,quality,213,,20,,1,1463,139,0,20449,20449,61348,0,false,,0
+2026-01-28 20:21:52,2026-01-28_194540,sprint-18,US-009,RalphsChoiceAuto,3,true,false,quality,288,,20,211/211 pass,1,1477,139,0,35842,35842,107527,0,false,,0
+2026-01-28 20:35:17,2026-01-28_194540,sprint-19,testing,RalphsChoiceAuto,7,true,false,testing,304,,20,,2,1645,224,0,174716,0,262073,0,false,,0

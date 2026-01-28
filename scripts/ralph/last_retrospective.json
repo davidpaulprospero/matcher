@@ -3,7 +3,7 @@
                           {
                               "lesson":  "Story US-003 required 17 retries - may need story decomposition",
                               "storyId":  "US-003",
-                              "attempts":  38,
+                              "attempts":  42,
                               "failures":  17
                           },
                           {
@@ -13,10 +13,10 @@
                               "failures":  4
                           },
                           {
-                              "lesson":  "Story US-002 required 4 retries - may need story decomposition",
+                              "lesson":  "Story US-002 required 5 retries - may need story decomposition",
                               "storyId":  "US-002",
-                              "attempts":  33,
-                              "failures":  4
+                              "attempts":  39,
+                              "failures":  5
                           }
                       ],
     "highChurnStories":  [
@@ -925,6 +925,252 @@
                                  "linesDeleted":  3778,
                                  "totalChurn":  6336,
                                  "linesAdded":  2558
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  4142,
+                                 "totalChurn":  7252,
+                                 "linesAdded":  3110
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  1,
+                                 "totalChurn":  667,
+                                 "linesAdded":  666
+                             },
+                             {
+                                 "storyId":  "US-002",
+                                 "linesDeleted":  7,
+                                 "totalChurn":  584,
+                                 "linesAdded":  577
+                             },
+                             {
+                                 "storyId":  "US-006",
+                                 "linesDeleted":  13,
+                                 "totalChurn":  776,
+                                 "linesAdded":  763
+                             },
+                             {
+                                 "storyId":  "US-008",
+                                 "linesDeleted":  17,
+                                 "totalChurn":  781,
+                                 "linesAdded":  764
+                             },
+                             {
+                                 "storyId":  "US-009",
+                                 "linesDeleted":  20,
+                                 "totalChurn":  646,
+                                 "linesAdded":  626
+                             },
+                             {
+                                 "storyId":  "US-010",
+                                 "linesDeleted":  22,
+                                 "totalChurn":  671,
+                                 "linesAdded":  649
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  114,
+                                 "totalChurn":  846,
+                                 "linesAdded":  732
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  113,
+                                 "totalChurn":  969,
+                                 "linesAdded":  856
+                             },
+                             {
+                                 "storyId":  "US-002",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  709,
+                                 "linesAdded":  666
+                             },
+                             {
+                                 "storyId":  "US-003",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  994,
+                                 "linesAdded":  951
+                             },
+                             {
+                                 "storyId":  "US-004",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  1017,
+                                 "linesAdded":  974
+                             },
+                             {
+                                 "storyId":  "US-005",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  1198,
+                                 "linesAdded":  1155
+                             },
+                             {
+                                 "storyId":  "US-006",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  1212,
+                                 "linesAdded":  1169
+                             },
+                             {
+                                 "storyId":  "US-007",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  977,
+                                 "linesAdded":  934
+                             },
+                             {
+                                 "storyId":  "US-008",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  1240,
+                                 "linesAdded":  1197
+                             },
+                             {
+                                 "storyId":  "US-009",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  798,
+                                 "linesAdded":  755
+                             },
+                             {
+                                 "storyId":  "US-010",
+                                 "linesDeleted":  43,
+                                 "totalChurn":  815,
+                                 "linesAdded":  772
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  123,
+                                 "totalChurn":  1074,
+                                 "linesAdded":  951
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  124,
+                                 "totalChurn":  1071,
+                                 "linesAdded":  947
+                             },
+                             {
+                                 "storyId":  "US-002",
+                                 "linesDeleted":  44,
+                                 "totalChurn":  1365,
+                                 "linesAdded":  1321
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  133,
+                                 "totalChurn":  1583,
+                                 "linesAdded":  1450
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  134,
+                                 "totalChurn":  1301,
+                                 "linesAdded":  1167
+                             },
+                             {
+                                 "storyId":  "US-002",
+                                 "linesDeleted":  60,
+                                 "totalChurn":  1724,
+                                 "linesAdded":  1664
+                             },
+                             {
+                                 "storyId":  "US-003",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  2220,
+                                 "linesAdded":  2159
+                             },
+                             {
+                                 "storyId":  "US-004",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  1769,
+                                 "linesAdded":  1708
+                             },
+                             {
+                                 "storyId":  "US-005",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  1936,
+                                 "linesAdded":  1875
+                             },
+                             {
+                                 "storyId":  "US-006",
+                                 "linesDeleted":  63,
+                                 "totalChurn":  1261,
+                                 "linesAdded":  1198
+                             },
+                             {
+                                 "storyId":  "US-007",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  1545,
+                                 "linesAdded":  1484
+                             },
+                             {
+                                 "storyId":  "US-009",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  1459,
+                                 "linesAdded":  1398
+                             },
+                             {
+                                 "storyId":  "US-010",
+                                 "linesDeleted":  61,
+                                 "totalChurn":  1690,
+                                 "linesAdded":  1629
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  245,
+                                 "totalChurn":  2170,
+                                 "linesAdded":  1925
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  229,
+                                 "totalChurn":  1705,
+                                 "linesAdded":  1476
+                             },
+                             {
+                                 "storyId":  "US-002",
+                                 "linesDeleted":  141,
+                                 "totalChurn":  1531,
+                                 "linesAdded":  1390
+                             },
+                             {
+                                 "storyId":  "US-003",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1538,
+                                 "linesAdded":  1399
+                             },
+                             {
+                                 "storyId":  "US-004",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1609,
+                                 "linesAdded":  1470
+                             },
+                             {
+                                 "storyId":  "US-005",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1632,
+                                 "linesAdded":  1493
+                             },
+                             {
+                                 "storyId":  "US-006",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1576,
+                                 "linesAdded":  1437
+                             },
+                             {
+                                 "storyId":  "US-007",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1588,
+                                 "linesAdded":  1449
+                             },
+                             {
+                                 "storyId":  "US-008",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1602,
+                                 "linesAdded":  1463
+                             },
+                             {
+                                 "storyId":  "US-009",
+                                 "linesDeleted":  139,
+                                 "totalChurn":  1616,
+                                 "linesAdded":  1477
                              }
                          ],
     "qualityTrends":  [
@@ -932,9 +1178,9 @@
                       ],
     "failurePatterns":  [
                             {
-                                "lesson":  "Recurring \u0027Timeout\u0027 errors (17x) - consider adding targeted error handling",
+                                "lesson":  "Recurring \u0027Timeout\u0027 errors (20x) - consider adding targeted error handling",
                                 "category":  "Timeout",
-                                "count":  17
+                                "count":  20
                             },
                             {
                                 "lesson":  "Recurring \u00270\u0027 errors (16x) - consider adding targeted error handling",
@@ -948,10 +1194,10 @@
                             }
                         ],
     "recommendations":  [
-                            "17 timeouts detected - consider increasing timeout or breaking stories into smaller tasks"
+                            "20 timeouts detected - consider increasing timeout or breaking stories into smaller tasks"
                         ],
     "lessons":  [
-                    "Most common failure: Timeout (17x)",
+                    "Most common failure: Timeout (20x)",
                     "Stories requiring excessive retries: US-003, quality, US-002",
                     "Sprint pass rate: 100% (10/10)"
                 ]

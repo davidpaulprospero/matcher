@@ -387,3 +387,345 @@ Describe "Sprint Completion Edge Cases" -Tag "Unit", "SprintCompletion" {
         }
     }
 }
+
+# =============================================================================
+# Sync-QueueFromHistory Tests
+# =============================================================================
+
+Describe "Sync-QueueFromHistory" -Tag "Unit", "SprintCompletion", "QueueSync" {
+    BeforeEach { Reset-TestData }
+
+    Context "When sprint history contains completed queued areas" {
+        It "Should mark queued area as completed if found in sprint history" {
+            # Set up queue with incomplete area
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = "2026-01-26T17:44:27" }
+                    @{ id = "rate-limiting"; completed = $false; startedAt = $null; completedAt = $null }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            # Set up sprint history with rate-limiting completed
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 2
+                totalStoriesCompleted = 20
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                    "rate-limiting" = @{ sprints = 1; stories = 10 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            # Run sync
+            Sync-QueueFromHistory -Silent
+
+            # Verify queue updated
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $rl = $updated.focusAreas | Where-Object { $_.id -eq "rate-limiting" }
+            $rl.completed | Should -BeTrue
+            $rl.completedAt | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should not modify already-completed areas" {
+            $originalTimestamp = "2026-01-26T17:44:27"
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = $originalTimestamp }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 1
+                totalStoriesCompleted = 10
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $dl = $updated.focusAreas | Where-Object { $_.id -eq "download" }
+            $dl.completed | Should -BeTrue
+            $dl.completedAt | Should -Be $originalTimestamp
+        }
+    }
+
+    Context "When sprint history has no matching areas" {
+        It "Should leave queue unchanged but add history areas" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "otio"; completed = $false; startedAt = $null; completedAt = $null }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 1
+                totalStoriesCompleted = 10
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $otio = $updated.focusAreas | Where-Object { $_.id -eq "otio" }
+            $otio.completed | Should -BeFalse
+
+            # download from history should be added as completed
+            $dl = $updated.focusAreas | Where-Object { $_.id -eq "download" }
+            $dl | Should -Not -BeNullOrEmpty
+            $dl.completed | Should -BeTrue
+        }
+    }
+
+    Context "When history has areas not in queue" {
+        It "Should add missing areas from sprint history" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = "2026-01-26T17:44:27" }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 3
+                totalStoriesCompleted = 30
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                    "rate-limiting" = @{ sprints = 1; stories = 10 }
+                    testing = @{ sprints = 1; stories = 10 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            @($updated.focusAreas).Count | Should -Be 3
+
+            $rl = $updated.focusAreas | Where-Object { $_.id -eq "rate-limiting" }
+            $rl | Should -Not -BeNullOrEmpty
+            $rl.completed | Should -BeTrue
+
+            $test = $updated.focusAreas | Where-Object { $_.id -eq "testing" }
+            $test | Should -Not -BeNullOrEmpty
+            $test.completed | Should -BeTrue
+        }
+    }
+
+    Context "When current PRD has untracked focus area" {
+        It "Should add current PRD focus area as in-progress" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = "2026-01-26T17:44:27" }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            # No sprint history needed for this test
+
+            # Create PRD with untracked focus area
+            $prd = @{
+                sprintNumber = 15
+                focusArea = "quality"
+                userStories = @()
+            }
+            $prd | ConvertTo-Json -Depth 5 | Set-Content $script:PrdFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $quality = $updated.focusAreas | Where-Object { $_.id -eq "quality" }
+            $quality | Should -Not -BeNullOrEmpty
+            $quality.completed | Should -BeFalse
+            $quality.startedAt | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context "When current PRD re-opens a completed area" {
+        It "Should re-open completed area if PRD has incomplete stories" {
+            # testing was completed in history
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = "2026-01-26T17:44:27" }
+                    @{ id = "testing"; completed = $true; completedAt = "2026-01-28T12:00:00" }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 3
+                totalStoriesCompleted = 30
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                    testing = @{ sprints = 2; stories = 20 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            # Active PRD with incomplete stories for testing
+            $prd = @{
+                sprintNumber = 16
+                focusArea = "testing"
+                userStories = @(
+                    @{ id = "US-001"; passes = $false }
+                    @{ id = "US-002"; passes = $false }
+                )
+            }
+            $prd | ConvertTo-Json -Depth 5 | Set-Content $script:PrdFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $testing = $updated.focusAreas | Where-Object { $_.id -eq "testing" }
+            $testing.completed | Should -BeFalse
+            $testing.completedAt | Should -BeNullOrEmpty
+        }
+
+        It "Should NOT re-open if all PRD stories are complete" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "testing"; completed = $true; completedAt = "2026-01-28T12:00:00" }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            # PRD with all stories complete
+            $prd = @{
+                sprintNumber = 15
+                focusArea = "testing"
+                userStories = @(
+                    @{ id = "US-001"; passes = $true }
+                    @{ id = "US-002"; passes = $true }
+                )
+            }
+            $prd | ConvertTo-Json -Depth 5 | Set-Content $script:PrdFile -Encoding UTF8
+
+            Sync-QueueFromHistory -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $testing = $updated.focusAreas | Where-Object { $_.id -eq "testing" }
+            $testing.completed | Should -BeTrue
+        }
+    }
+
+    Context "When no sprint history exists" {
+        It "Should not crash and leave queue unchanged" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "testing"; completed = $false }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            # No sprint history file created
+            { Sync-QueueFromHistory -Silent } | Should -Not -Throw
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            $testing = $updated.focusAreas | Where-Object { $_.id -eq "testing" }
+            $testing.completed | Should -BeFalse
+        }
+    }
+
+    Context "When no queue exists" {
+        It "Should not crash" {
+            # No queue file created, but sprint history exists
+            $history = @{
+                version = 1
+                totalSprintsCompleted = 1
+                totalStoriesCompleted = 10
+                focusAreaBreakdown = @{
+                    download = @{ sprints = 1; stories = 10 }
+                }
+                sprints = @()
+            }
+            $history | ConvertTo-Json -Depth 5 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+
+            { Sync-QueueFromHistory -Silent } | Should -Not -Throw
+        }
+    }
+}
+
+# =============================================================================
+# Update-QueueProgress Auto-Add Tests
+# =============================================================================
+
+Describe "Update-QueueProgress Auto-Add" -Tag "Unit", "SprintCompletion", "QueueSync" {
+    BeforeEach { Reset-TestData }
+
+    Context "When completing an area not in queue" {
+        It "Should add and mark new area as completed" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "download"; completed = $true; completedAt = "2026-01-26T17:44:27" }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            Update-QueueProgress -AreaId "testing" -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            @($updated.focusAreas).Count | Should -Be 2
+
+            $testing = $updated.focusAreas | Where-Object { $_.id -eq "testing" }
+            $testing | Should -Not -BeNullOrEmpty
+            $testing.completed | Should -BeTrue
+            $testing.completedAt | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context "When completing an area already in queue" {
+        It "Should mark existing area as completed" {
+            $queue = @{
+                focusAreas = @(
+                    @{ id = "testing"; completed = $false; startedAt = "2026-01-27T23:34:10"; completedAt = $null }
+                )
+                sessionId = "test-session"
+                createdAt = "2026-01-26T12:00:00Z"
+            }
+            $queue | ConvertTo-Json -Depth 5 | Set-Content $script:QueueFile -Encoding UTF8
+
+            Update-QueueProgress -AreaId "testing" -Silent
+
+            $updated = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
+            @($updated.focusAreas).Count | Should -Be 1
+            $updated.focusAreas[0].completed | Should -BeTrue
+            $updated.focusAreas[0].completedAt | Should -Not -BeNullOrEmpty
+        }
+    }
+}

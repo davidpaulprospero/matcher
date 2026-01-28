@@ -393,6 +393,77 @@ class TestTopicBroadener:
             assert isinstance(result, list)
             assert len(result) > 0, "Fallback should produce at least one keyword"
 
+    @pytest.mark.fast
+    def test_broaden_lazy_loads_llm_client(self):
+        """broaden() should lazy-load LLM client only when first needed."""
+        mock_config = MagicMock()
+        broadener = TopicBroadener(mock_config)
+
+        # Before any property access, _llm_client should be None
+        assert broadener._llm_client is None, "LLM client should not be loaded initially"
+
+        # Set up the private attribute directly to avoid actually calling get_llm_client
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = '["new keyword"]'
+
+        # Verify the property caches the client once set
+        broadener._llm_client = mock_llm
+
+        # Now access via property - should return the cached client
+        client1 = broadener.llm_client
+        client2 = broadener.llm_client
+
+        assert client1 is mock_llm, "Property should return cached _llm_client"
+        assert client2 is client1, "Multiple accesses should return same instance"
+
+        # The property should not have replaced our mock
+        assert broadener._llm_client is mock_llm
+
+    @pytest.mark.fast
+    def test_broaden_limits_to_five_keywords(self):
+        """broaden() should limit returned keywords to 5."""
+        broadener = TopicBroadener(MagicMock())
+        with patch.object(
+            type(broadener), 'llm_client',
+            new_callable=PropertyMock,
+        ) as mock_llm_prop:
+            mock_llm = MagicMock()
+            # LLM returns more than 5 keywords
+            mock_llm.generate.return_value = '["kw1", "kw2", "kw3", "kw4", "kw5", "kw6", "kw7"]'
+            mock_llm_prop.return_value = mock_llm
+
+            result = broadener.broaden(
+                topic="cats",
+                used_keywords=[],
+                shortfall_seconds=120.0,
+                compilation_config={'llm': {'provider': 'gemini'}},
+            )
+
+            assert len(result) <= 5, "Should limit to 5 keywords maximum"
+
+    @pytest.mark.fast
+    def test_broaden_returns_list_on_invalid_json(self):
+        """broaden() should return fallback list when LLM returns invalid JSON."""
+        broadener = TopicBroadener(MagicMock())
+        with patch.object(
+            type(broadener), 'llm_client',
+            new_callable=PropertyMock,
+        ) as mock_llm_prop:
+            mock_llm = MagicMock()
+            # LLM returns unparseable content
+            mock_llm.generate.return_value = 'This is not JSON at all {{{invalid'
+            mock_llm_prop.return_value = mock_llm
+
+            result = broadener.broaden(
+                topic="cats",
+                used_keywords=[],
+                shortfall_seconds=120.0,
+                compilation_config={'llm': {'provider': 'gemini'}},
+            )
+
+            # Should use fallback parsing (newline split) which still returns a list
+            assert isinstance(result, list)
+
 
 class TestGapCheckStage:
     """Tests for GapCheckStage.run()."""

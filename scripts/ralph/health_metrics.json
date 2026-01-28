@@ -1,0 +1,20 @@
+{
+    "measuredAt":  "2026-01-28T20:22:46.8990485+08:00",
+    "techDebt":  {
+                     "todoCount":  0,
+                     "fixmeCount":  0,
+                     "hackCount":  0,
+                     "complexFunctions":  0
+                 },
+    "tests":  {
+                  "failed":  0,
+                  "passRate":  0,
+                  "total":  0,
+                  "passed":  0
+              },
+    "codebase":  {
+                     "pyFiles":  184,
+                     "totalLines":  73487,
+                     "ps1Files":  8
+                 }
+}

@@ -1,0 +1,1421 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="516" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="4" invalid="0" date="2026-01-28" time="15:33:17">
+  <environment clr-version="4.0.30319.42000" user-domain="DESKTOP-5TDDHGC" cwd="D:\_Projects\voiceover-matcher-subtitle" platform="Microsoft Windows 10 IoT Enterprise LTSC|C:\WINDOWS|\Device\Harddisk1\Partition3" machine-name="DESKTOP-5TDDHGC" nunit-version="2.5.8.0" os-version="10.0.19044" user="daves" />
+  <culture-info current-culture="en-PH" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Ignored" success="True" time="16.1069" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\AdaptivePrompt.Tests.ps1" executed="True" result="Success" success="True" time="2.5743" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\AdaptivePrompt.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Build-StoryPrompt" executed="True" result="Success" success="True" time="0.2981" asserts="0" description="Build-StoryPrompt">
+            <results>
+              <test-case description="Returns basic prompt when no features enabled" name="Build-StoryPrompt.Returns basic prompt when no features enabled" time="0.1744" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes acceptance criteria when backpressure enabled" name="Build-StoryPrompt.Includes acceptance criteria when backpressure enabled" time="0.0478" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Truncates prompt at maxLength" name="Build-StoryPrompt.Truncates prompt at maxLength" time="0.0282" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-RelevantFilesForStory" executed="True" result="Success" success="True" time="0.3866" asserts="0" description="Get-RelevantFilesForStory">
+            <results>
+              <test-case description="Returns empty array for null story" name="Get-RelevantFilesForStory.Returns empty array for null story" time="0.0419" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty array when no keywords found" name="Get-RelevantFilesForStory.Returns empty array when no keywords found" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Finds files matching story keywords" name="Get-RelevantFilesForStory.Finds files matching story keywords" time="0.031" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Measure-CodebaseHealth" executed="True" result="Success" success="True" time="1.55" asserts="0" description="Measure-CodebaseHealth">
+            <results>
+              <test-case description="Returns null when health tracking disabled" name="Measure-CodebaseHealth.Returns null when health tracking disabled" time="0.0324" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns health metrics structure when enabled" name="Measure-CodebaseHealth.Returns health metrics structure when enabled" time="1.1236" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Compare-HealthMetrics" executed="True" result="Success" success="True" time="1.6123" asserts="0" description="Compare-HealthMetrics">
+            <results>
+              <test-case description="Returns baseline when no previous data" name="Compare-HealthMetrics.Returns baseline when no previous data" time="0.0239" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects test regression" name="Compare-HealthMetrics.Detects test regression" time="0.032" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-TokenBudget" executed="True" result="Success" success="True" time="1.6845" asserts="0" description="Test-TokenBudget">
+            <results>
+              <test-case description="Returns false when budget not enabled" name="Test-TokenBudget.Returns false when budget not enabled" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns false when budget enabled but not exceeded" name="Test-TokenBudget.Returns false when budget enabled but not exceeded" time="0.0557" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-PromptEffectivenessHistory" executed="True" result="Success" success="True" time="1.7224" asserts="0" description="Get-PromptEffectivenessHistory">
+            <results>
+              <test-case description="Returns empty array when no file exists" name="Get-PromptEffectivenessHistory.Returns empty array when no file exists" time="0.0145" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Reads JSONL records" name="Get-PromptEffectivenessHistory.Reads JSONL records" time="0.0172" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-PromptRecommendation" executed="True" result="Success" success="True" time="1.7653" asserts="0" description="Get-PromptRecommendation">
+            <results>
+              <test-case description="Returns defaults when adaptive disabled" name="Get-PromptRecommendation.Returns defaults when adaptive disabled" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns defaults with insufficient history" name="Get-PromptRecommendation.Returns defaults with insufficient history" time="0.0163" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Archive.Tests.ps1" executed="True" result="Ignored" success="True" time="0.8069" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Archive.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-SprintHistory" executed="True" result="Success" success="True" time="0.0492" asserts="0" description="Get-SprintHistory">
+            <results>
+              <test-suite type="TestFixture" name="Get-SprintHistory.When no history file exists" executed="True" result="Success" success="True" time="0.0242" asserts="0" description="Get-SprintHistory.When no history file exists">
+                <results>
+                  <test-case description="Should return empty structure" name="Get-SprintHistory.When no history file exists.Should return empty structure" time="0.0198" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-SprintHistory.When history file exists" executed="True" result="Success" success="True" time="0.0442" asserts="0" description="Get-SprintHistory.When history file exists">
+                <results>
+                  <test-case description="Should load existing history" name="Get-SprintHistory.When history file exists.Should load existing history" time="0.0152" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Update-SprintHistory" executed="True" result="Ignored" success="True" time="0.1248" asserts="0" description="Update-SprintHistory">
+            <results>
+              <test-suite type="TestFixture" name="Update-SprintHistory.When updating history" executed="True" result="Ignored" success="True" time="0.0684" asserts="0" description="Update-SprintHistory.When updating history">
+                <results>
+                  <test-case description="Should increment totalSprintsCompleted" name="Update-SprintHistory.When updating history.Should increment totalSprintsCompleted" time="0.0531" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should track focus area breakdown" name="Update-SprintHistory.When updating history.Should track focus area breakdown" time="0.0072" asserts="0" success="False" result="Ignored" executed="False" />
+                  <test-case description="Should accumulate across multiple updates" name="Update-SprintHistory.When updating history.Should accumulate across multiple updates" time="0.0033" asserts="0" success="False" result="Ignored" executed="False" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Save-SprintArchive" executed="True" result="Success" success="True" time="0.3593" asserts="0" description="Save-SprintArchive">
+            <results>
+              <test-suite type="TestFixture" name="Save-SprintArchive.When no PRD exists" executed="True" result="Success" success="True" time="0.0277" asserts="0" description="Save-SprintArchive.When no PRD exists">
+                <results>
+                  <test-case description="Should not create archive" name="Save-SprintArchive.When no PRD exists.Should not create archive" time="0.0184" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Save-SprintArchive.When PRD exists with stories" executed="True" result="Success" success="True" time="0.1781" asserts="0" description="Save-SprintArchive.When PRD exists with stories">
+                <results>
+                  <test-case description="Should create archive directory if not exists" name="Save-SprintArchive.When PRD exists with stories.Should create archive directory if not exists" time="0.0591" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should create archive file with correct name" name="Save-SprintArchive.When PRD exists with stories.Should create archive file with correct name" time="0.0228" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should add archive metadata to PRD" name="Save-SprintArchive.When PRD exists with stories.Should add archive metadata to PRD" time="0.0374" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should update sprint history" name="Save-SprintArchive.When PRD exists with stories.Should update sprint history" time="0.0256" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Save-SprintArchive.When archive file already exists" executed="True" result="Success" success="True" time="0.2117" asserts="0" description="Save-SprintArchive.When archive file already exists">
+                <results>
+                  <test-case description="Should create archive with timestamp suffix" name="Save-SprintArchive.When archive file already exists.Should create archive with timestamp suffix" time="0.029" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Save-SprintArchive.When PRD has empty stories array" executed="True" result="Success" success="True" time="0.2299" asserts="0" description="Save-SprintArchive.When PRD has empty stories array">
+                <results>
+                  <test-case description="Should skip archive for empty PRD" name="Save-SprintArchive.When PRD has empty stories array.Should skip archive for empty PRD" time="0.0137" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-ShouldGenerateNewPRD" executed="True" result="Success" success="True" time="0.448" asserts="0" description="Test-ShouldGenerateNewPRD">
+            <results>
+              <test-suite type="TestFixture" name="Test-ShouldGenerateNewPRD.When no PRD exists" executed="True" result="Success" success="True" time="0.0201" asserts="0" description="Test-ShouldGenerateNewPRD.When no PRD exists">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true" name="Test-ShouldGenerateNewPRD.When no PRD exists.Should return ShouldGenerate=true" time="0.0154" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldGenerateNewPRD.When PRD exists with incomplete sprint, same focus area" executed="True" result="Success" success="True" time="0.0341" asserts="0" description="Test-ShouldGenerateNewPRD.When PRD exists with incomplete sprint, same focus area">
+                <results>
+                  <test-case description="Should return ShouldGenerate=false to continue" name="Test-ShouldGenerateNewPRD.When PRD exists with incomplete sprint, same focus area.Should return ShouldGenerate=false to continue" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldGenerateNewPRD.When PRD exists with complete sprint, same focus area" executed="True" result="Success" success="True" time="0.0668" asserts="0" description="Test-ShouldGenerateNewPRD.When PRD exists with complete sprint, same focus area">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true for new stories" name="Test-ShouldGenerateNewPRD.When PRD exists with complete sprint, same focus area.Should return ShouldGenerate=true for new stories" time="0.0284" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldGenerateNewPRD.When PRD exists with different focus area" executed="True" result="Success" success="True" time="0.0809" asserts="0" description="Test-ShouldGenerateNewPRD.When PRD exists with different focus area">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true for different area" name="Test-ShouldGenerateNewPRD.When PRD exists with different focus area.Should return ShouldGenerate=true for different area" time="0.0098" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\E2E.Tests.ps1" executed="True" result="Success" success="True" time="0.9274" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\E2E.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Complete Sprint Simulation" executed="True" result="Success" success="True" time="0.2837" asserts="0" description="Complete Sprint Simulation">
+            <results>
+              <test-case description="simulates a successful sprint with 5 stories" name="Complete Sprint Simulation.simulates a successful sprint with 5 stories" time="0.1597" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="simulates a sprint with mixed success/failure" name="Complete Sprint Simulation.simulates a sprint with mixed success/failure" time="0.0707" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="tracks consecutive failures correctly" name="Complete Sprint Simulation.tracks consecutive failures correctly" time="0.0475" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Queue Mode Progression" executed="True" result="Success" success="True" time="0.3707" asserts="0" description="Queue Mode Progression">
+            <results>
+              <test-case description="simulates queue progression through multiple focus areas" name="Queue Mode Progression.simulates queue progression through multiple focus areas" time="0.0821" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Error Recovery Scenarios" executed="True" result="Success" success="True" time="0.4505" asserts="0" description="Error Recovery Scenarios">
+            <results>
+              <test-case description="recovers from transient failures with retry" name="Error Recovery Scenarios.recovers from transient failures with retry" time="0.038" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs skip when story is abandoned" name="Error Recovery Scenarios.logs skip when story is abandoned" time="0.0359" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Metrics Aggregation" executed="True" result="Success" success="True" time="0.566" asserts="0" description="Metrics Aggregation">
+            <results>
+              <test-case description="aggregates metrics by focus area" name="Metrics Aggregation.aggregates metrics by focus area" time="0.0475" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates correct success rate per area" name="Metrics Aggregation.calculates correct success rate per area" time="0.0626" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="State Machine Verification" executed="True" result="Success" success="True" time="0.6422" asserts="0" description="State Machine Verification">
+            <results>
+              <test-case description="logs correct state transitions for success" name="State Machine Verification.logs correct state transitions for success" time="0.0457" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs correct state transitions for failure" name="State Machine Verification.logs correct state transitions for failure" time="0.0239" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Prompt Effectiveness Tracking" executed="True" result="Success" success="True" time="0.6831" asserts="0" description="Prompt Effectiveness Tracking">
+            <results>
+              <test-case description="calculates effectiveness scores correctly" name="Prompt Effectiveness Tracking.calculates effectiveness scores correctly" time="0.0365" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Timeline Integrity" executed="True" result="Success" success="True" time="0.8734" asserts="0" description="Timeline Integrity">
+            <results>
+              <test-case description="maintains chronological order" name="Timeline Integrity.maintains chronological order" time="0.1633" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes all expected events" name="Timeline Integrity.includes all expected events" time="0.0225" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Exploration.Tests.ps1" executed="True" result="Success" success="True" time="0.4783" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Exploration.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Test-ShouldExplore" executed="True" result="Success" success="True" time="0.1314" asserts="0" description="Test-ShouldExplore">
+            <results>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.When exploration is disabled" executed="True" result="Success" success="True" time="0.0232" asserts="0" description="Test-ShouldExplore.When exploration is disabled">
+                <results>
+                  <test-case description="returns ShouldExplore false with reason exploration_disabled" name="Test-ShouldExplore.When exploration is disabled.returns ShouldExplore false with reason exploration_disabled" time="0.0174" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.When exploration config is missing" executed="True" result="Success" success="True" time="0.0403" asserts="0" description="Test-ShouldExplore.When exploration config is missing">
+                <results>
+                  <test-case description="returns ShouldExplore false with reason exploration_disabled" name="Test-ShouldExplore.When exploration config is missing.returns ShouldExplore false with reason exploration_disabled" time="0.0123" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.When periodic exploration is disabled" executed="True" result="Success" success="True" time="0.0554" asserts="0" description="Test-ShouldExplore.When periodic exploration is disabled">
+                <results>
+                  <test-case description="returns ShouldExplore false with reason periodic_disabled" name="Test-ShouldExplore.When periodic exploration is disabled.returns ShouldExplore false with reason periodic_disabled" time="0.01" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.When interval threshold is reached" executed="True" result="Success" success="True" time="0.0899" asserts="0" description="Test-ShouldExplore.When interval threshold is reached">
+                <results>
+                  <test-case description="returns ShouldExplore true when stories &gt;= interval" name="Test-ShouldExplore.When interval threshold is reached.returns ShouldExplore true when stories &gt;= interval" time="0.016" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="returns ShouldExplore true when stories &gt; interval" name="Test-ShouldExplore.When interval threshold is reached.returns ShouldExplore true when stories &gt; interval" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="returns ShouldExplore false when stories &lt; interval" name="Test-ShouldExplore.When interval threshold is reached.returns ShouldExplore false when stories &lt; interval" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.When using default interval" executed="True" result="Success" success="True" time="0.1114" asserts="0" description="Test-ShouldExplore.When using default interval">
+                <results>
+                  <test-case description="uses default interval of 3 stories" name="Test-ShouldExplore.When using default interval.uses default interval of 3 stories" time="0.0058" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="does not trigger at 2 stories with default interval" name="Test-ShouldExplore.When using default interval.does not trigger at 2 stories with default interval" time="0.011" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldExplore.With custom interval setting" executed="True" result="Success" success="True" time="0.1269" asserts="0" description="Test-ShouldExplore.With custom interval setting">
+                <results>
+                  <test-case description="respects intervalStories = 5" name="Test-ShouldExplore.With custom interval setting.respects intervalStories = 5" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="respects intervalStories = 1 (every story)" name="Test-ShouldExplore.With custom interval setting.respects intervalStories = 1 (every story)" time="0.0043" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Exploration Config Parsing" executed="True" result="Success" success="True" time="0.1947" asserts="0" description="Exploration Config Parsing">
+            <results>
+              <test-case description="loads exploration config from ralph-config.json" name="Exploration Config Parsing.loads exploration config from ralph-config.json" time="0.0117" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has exploration.enabled field" name="Exploration Config Parsing.has exploration.enabled field" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has sprintStart config section" name="Exploration Config Parsing.has sprintStart config section" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has periodic config section" name="Exploration Config Parsing.has periodic config section" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has intervalStories as positive integer" name="Exploration Config Parsing.has intervalStories as positive integer" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="has outputFile for sprint start exploration" name="Exploration Config Parsing.has outputFile for sprint start exploration" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Exploration Tracking Variables" executed="True" result="Success" success="True" time="0.2718" asserts="0" description="Exploration Tracking Variables">
+            <results>
+              <test-case description="initializes StoriesSinceExploration to 0" name="Exploration Tracking Variables.initializes StoriesSinceExploration to 0" time="0.0115" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="increments StoriesSinceExploration correctly" name="Exploration Tracking Variables.increments StoriesSinceExploration correctly" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="resets StoriesSinceExploration after exploration" name="Exploration Tracking Variables.resets StoriesSinceExploration after exploration" time="0.0057" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stores exploration summary" name="Exploration Tracking Variables.stores exploration summary" time="0.0081" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="updates exploration timestamp" name="Exploration Tracking Variables.updates exploration timestamp" time="0.0272" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="initializes SprintExplorationContext as empty" name="Exploration Tracking Variables.initializes SprintExplorationContext as empty" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-PeriodicExplorationIfNeeded Logic" executed="True" result="Success" success="True" time="0.3241" asserts="0" description="Invoke-PeriodicExplorationIfNeeded Logic">
+            <results>
+              <test-case description="increments story counter on each call" name="Invoke-PeriodicExplorationIfNeeded Logic.increments story counter on each call" time="0.0126" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="executes exploration when triggered" name="Invoke-PeriodicExplorationIfNeeded Logic.executes exploration when triggered" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="resets counter after exploration" name="Invoke-PeriodicExplorationIfNeeded Logic.resets counter after exploration" time="0.0049" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not execute exploration when not triggered" name="Invoke-PeriodicExplorationIfNeeded Logic.does not execute exploration when not triggered" time="0.0049" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves counter when exploration not triggered" name="Invoke-PeriodicExplorationIfNeeded Logic.preserves counter when exploration not triggered" time="0.0053" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="captures focus area for exploration" name="Invoke-PeriodicExplorationIfNeeded Logic.captures focus area for exploration" time="0.0081" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="captures exploration reason" name="Invoke-PeriodicExplorationIfNeeded Logic.captures exploration reason" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Sprint-Start Exploration Logic" executed="True" result="Success" success="True" time="0.3543" asserts="0" description="Sprint-Start Exploration Logic">
+            <results>
+              <test-case description="returns true when fully enabled" name="Sprint-Start Exploration Logic.returns true when fully enabled" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when exploration disabled" name="Sprint-Start Exploration Logic.returns false when exploration disabled" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when sprintStart disabled" name="Sprint-Start Exploration Logic.returns false when sprintStart disabled" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when exploration config missing" name="Sprint-Start Exploration Logic.returns false when exploration config missing" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when sprintStart section missing" name="Sprint-Start Exploration Logic.returns false when sprintStart section missing" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Metrics V3 Schema with Exploration" executed="True" result="Success" success="True" time="0.3867" asserts="0" description="Metrics V3 Schema with Exploration">
+            <results>
+              <test-case description="has 24 columns in v3 schema" name="Metrics V3 Schema with Exploration.has 24 columns in v3 schema" time="0.0079" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes exploration_triggered column" name="Metrics V3 Schema with Exploration.includes exploration_triggered column" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes exploration_reason column" name="Metrics V3 Schema with Exploration.includes exploration_reason column" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes exploration_tokens column" name="Metrics V3 Schema with Exploration.includes exploration_tokens column" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="exploration columns are at the end" name="Metrics V3 Schema with Exploration.exploration columns are at the end" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Exploration Context File Handling" executed="True" result="Success" success="True" time="0.4163" asserts="0" description="Exploration Context File Handling">
+            <results>
+              <test-case description="can write exploration context to file" name="Exploration Context File Handling.can write exploration context to file" time="0.0112" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="can read exploration context from file" name="Exploration Context File Handling.can read exploration context from file" time="0.0072" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles missing exploration context file gracefully" name="Exploration Context File Handling.handles missing exploration context file gracefully" time="0.0064" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\GracefulStop.Tests.ps1" executed="True" result="Success" success="True" time="0.6514" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\GracefulStop.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Graceful Stop Signal File" executed="True" result="Success" success="True" time="0.0726" asserts="0" description="Graceful Stop Signal File">
+            <results>
+              <test-suite type="TestFixture" name="Graceful Stop Signal File.Signal file creation" executed="True" result="Success" success="True" time="0.0493" asserts="0" description="Graceful Stop Signal File.Signal file creation">
+                <results>
+                  <test-case description="Should create signal file with valid JSON" name="Graceful Stop Signal File.Signal file creation.Should create signal file with valid JSON" time="0.0141" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should store ISO 8601 timestamp" name="Graceful Stop Signal File.Signal file creation.Should store ISO 8601 timestamp" time="0.0309" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Graceful Stop Signal File.Signal file detection" executed="True" result="Success" success="True" time="0.068" asserts="0" description="Graceful Stop Signal File.Signal file detection">
+                <results>
+                  <test-case description="Should detect when signal file exists" name="Graceful Stop Signal File.Signal file detection.Should detect when signal file exists" time="0.0085" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should detect when signal file does not exist" name="Graceful Stop Signal File.Signal file detection.Should detect when signal file does not exist" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-GracefulStopRequested" executed="True" result="Success" success="True" time="0.1256" asserts="0" description="Test-GracefulStopRequested">
+            <results>
+              <test-suite type="TestFixture" name="Test-GracefulStopRequested.When signal file exists" executed="True" result="Success" success="True" time="0.0352" asserts="0" description="Test-GracefulStopRequested.When signal file exists">
+                <results>
+                  <test-case description="Should return true" name="Test-GracefulStopRequested.When signal file exists.Should return true" time="0.0154" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle malformed JSON gracefully" name="Test-GracefulStopRequested.When signal file exists.Should handle malformed JSON gracefully" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-GracefulStopRequested.When signal file does not exist" executed="True" result="Success" success="True" time="0.0458" asserts="0" description="Test-GracefulStopRequested.When signal file does not exist">
+                <results>
+                  <test-case description="Should return false" name="Test-GracefulStopRequested.When signal file does not exist.Should return false" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Clear-GracefulStopSignal" executed="True" result="Success" success="True" time="0.1581" asserts="0" description="Clear-GracefulStopSignal">
+            <results>
+              <test-suite type="TestFixture" name="Clear-GracefulStopSignal.When signal file exists" executed="True" result="Success" success="True" time="0.0174" asserts="0" description="Clear-GracefulStopSignal.When signal file exists">
+                <results>
+                  <test-case description="Should remove the signal file" name="Clear-GracefulStopSignal.When signal file exists.Should remove the signal file" time="0.0134" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Clear-GracefulStopSignal.When signal file does not exist" executed="True" result="Success" success="True" time="0.0288" asserts="0" description="Clear-GracefulStopSignal.When signal file does not exist">
+                <results>
+                  <test-case description="Should not throw an error" name="Clear-GracefulStopSignal.When signal file does not exist.Should not throw an error" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Request-GracefulStop" executed="True" result="Success" success="True" time="0.211" asserts="0" description="Request-GracefulStop">
+            <results>
+              <test-suite type="TestFixture" name="Request-GracefulStop.Signal creation" executed="True" result="Success" success="True" time="0.0485" asserts="0" description="Request-GracefulStop.Signal creation">
+                <results>
+                  <test-case description="Should create signal file" name="Request-GracefulStop.Signal creation.Should create signal file" time="0.0128" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should use default reason when not provided" name="Request-GracefulStop.Signal creation.Should use default reason when not provided" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should use custom reason when provided" name="Request-GracefulStop.Signal creation.Should use custom reason when provided" time="0.0079" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should include timestamp" name="Request-GracefulStop.Signal creation.Should include timestamp" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="graceful-stop.ps1 Utility Script" executed="True" result="Success" success="True" time="0.2646" asserts="0" description="graceful-stop.ps1 Utility Script">
+            <results>
+              <test-suite type="TestFixture" name="graceful-stop.ps1 Utility Script.Script file" executed="True" result="Success" success="True" time="0.0231" asserts="0" description="graceful-stop.ps1 Utility Script.Script file">
+                <results>
+                  <test-case description="Should exist" name="graceful-stop.ps1 Utility Script.Script file.Should exist" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should be valid PowerShell" name="graceful-stop.ps1 Utility Script.Script file.Should be valid PowerShell" time="0.0094" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="graceful-stop.ps1 Utility Script.Status check" executed="True" result="Success" success="True" time="0.0484" asserts="0" description="graceful-stop.ps1 Utility Script.Status check">
+                <results>
+                  <test-case description="Should not throw error when checking status with no pending stop" name="graceful-stop.ps1 Utility Script.Status check.Should not throw error when checking status with no pending stop" time="0.0212" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Graceful Stop Integration" executed="True" result="Success" success="True" time="0.2981" asserts="0" description="Graceful Stop Integration">
+            <results>
+              <test-suite type="TestFixture" name="Graceful Stop Integration.Full workflow" executed="True" result="Success" success="True" time="0.0295" asserts="0" description="Graceful Stop Integration.Full workflow">
+                <results>
+                  <test-case description="Should complete request -&gt; check -&gt; clear cycle" name="Graceful Stop Integration.Full workflow.Should complete request -&gt; check -&gt; clear cycle" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle multiple requests" name="Graceful Stop Integration.Full workflow.Should handle multiple requests" time="0.0094" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Healing.Tests.ps1" executed="True" result="Success" success="True" time="3.4141" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Healing.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Invoke-FastHealthCheck (Tier 1)" executed="True" result="Success" success="True" time="0.8512" asserts="0" description="Invoke-FastHealthCheck (Tier 1)">
+            <results>
+              <test-case description="returns clean when no changed files" name="Invoke-FastHealthCheck (Tier 1).returns clean when no changed files" time="0.5755" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects syntax errors via py_compile" name="Invoke-FastHealthCheck (Tier 1).detects syntax errors via py_compile" time="0.0649" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects missing critical files" name="Invoke-FastHealthCheck (Tier 1).detects missing critical files" time="0.0187" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes when critical files exist" name="Invoke-FastHealthCheck (Tier 1).passes when critical files exist" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="tracks checks run" name="Invoke-FastHealthCheck (Tier 1).tracks checks run" time="0.0212" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects config validation failures" name="Invoke-FastHealthCheck (Tier 1).detects config validation failures" time="0.0232" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects merge conflicts from git ls-files" name="Invoke-FastHealthCheck (Tier 1).detects merge conflicts from git ls-files" time="0.0262" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports multiple syntax errors from different files" name="Invoke-FastHealthCheck (Tier 1).reports multiple syntax errors from different files" time="0.066" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips py_compile for non-python changed files" name="Invoke-FastHealthCheck (Tier 1).skips py_compile for non-python changed files" time="0.0278" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-CollectionHealthCheck (Tier 2)" executed="True" result="Success" success="True" time="0.9648" asserts="0" description="Invoke-CollectionHealthCheck (Tier 2)">
+            <results>
+              <test-case description="returns clean when collect-only succeeds" name="Invoke-CollectionHealthCheck (Tier 2).returns clean when collect-only succeeds" time="0.0237" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects import errors from collect-only" name="Invoke-CollectionHealthCheck (Tier 2).detects import errors from collect-only" time="0.0177" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles pytest unavailable gracefully" name="Invoke-CollectionHealthCheck (Tier 2).handles pytest unavailable gracefully" time="0.0174" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="captures raw output" name="Invoke-CollectionHealthCheck (Tier 2).captures raw output" time="0.0151" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses ERROR line with no dash separator" name="Invoke-CollectionHealthCheck (Tier 2).parses ERROR line with no dash separator" time="0.0189" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns clean on empty output" name="Invoke-CollectionHealthCheck (Tier 2).returns clean on empty output" time="0.0128" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-FullHealthCheck (Tier 3)" executed="True" result="Success" success="True" time="1.161" asserts="0" description="Invoke-FullHealthCheck (Tier 3)">
+            <results>
+              <test-case description="returns clean when all tests pass" name="Invoke-FullHealthCheck (Tier 3).returns clean when all tests pass" time="0.0211" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects test failures" name="Invoke-FullHealthCheck (Tier 3).detects test failures" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects collection errors from full run" name="Invoke-FullHealthCheck (Tier 3).detects collection errors from full run" time="0.0166" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns clean when no tests found" name="Invoke-FullHealthCheck (Tier 3).returns clean when no tests found" time="0.0124" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="captures summary line" name="Invoke-FullHealthCheck (Tier 3).captures summary line" time="0.0215" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects mixed failures and collection errors" name="Invoke-FullHealthCheck (Tier 3).detects mixed failures and collection errors" time="0.0795" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles pytest exception gracefully" name="Invoke-FullHealthCheck (Tier 3).handles pytest exception gracefully" time="0.0245" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-TieredHealthCheck (orchestrator)" executed="True" result="Success" success="True" time="1.6658" asserts="0" description="Invoke-TieredHealthCheck (orchestrator)">
+            <results>
+              <test-case description="stops at Tier 1 when syntax error found" name="Invoke-TieredHealthCheck (orchestrator).stops at Tier 1 when syntax error found" time="0.1586" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="escalates to Tier 2 when Tier 1 clean" name="Invoke-TieredHealthCheck (orchestrator).escalates to Tier 2 when Tier 1 clean" time="0.0441" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="runs Tier 3 on cadence (every Nth iteration)" name="Invoke-TieredHealthCheck (orchestrator).runs Tier 3 on cadence (every Nth iteration)" time="0.0525" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips Tier 3 off cadence" name="Invoke-TieredHealthCheck (orchestrator).skips Tier 3 off cadence" time="0.0404" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="always runs Tier 3 on first iteration" name="Invoke-TieredHealthCheck (orchestrator).always runs Tier 3 on first iteration" time="0.045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops at Tier 2 when collection errors found" name="Invoke-TieredHealthCheck (orchestrator).stops at Tier 2 when collection errors found" time="0.032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="forces Tier 3 with ForceFullRun switch" name="Invoke-TieredHealthCheck (orchestrator).forces Tier 3 with ForceFullRun switch" time="0.0373" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles missing $State gracefully (defaults to iteration 1)" name="Invoke-TieredHealthCheck (orchestrator).handles missing $State gracefully (defaults to iteration 1)" time="0.0462" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips Tier 3 when Tier 2 is skipped (pytest unavailable)" name="Invoke-TieredHealthCheck (orchestrator).skips Tier 3 when Tier 2 is skipped (pytest unavailable)" time="0.0432" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Build-TierDiagnostics" executed="True" result="Success" success="True" time="1.7151" asserts="0" description="Build-TierDiagnostics">
+            <results>
+              <test-case description="formats syntax errors" name="Build-TierDiagnostics.formats syntax errors" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats merge conflicts" name="Build-TierDiagnostics.formats merge conflicts" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats missing files" name="Build-TierDiagnostics.formats missing files" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats collection errors" name="Build-TierDiagnostics.formats collection errors" time="0.0051" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats test failures" name="Build-TierDiagnostics.formats test failures" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes raw output when present" name="Build-TierDiagnostics.includes raw output when present" time="0.0062" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats config errors" name="Build-TierDiagnostics.formats config errors" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles tier result with all error types populated" name="Build-TierDiagnostics.handles tier result with all error types populated" time="0.0058" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-HealingEvent" executed="True" result="Success" success="True" time="1.7998" asserts="0" description="Log-HealingEvent">
+            <results>
+              <test-case description="creates healing log file on first write" name="Log-HealingEvent.creates healing log file on first write" time="0.0225" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="appends multiple events to log" name="Log-HealingEvent.appends multiple events to log" time="0.0151" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes thought process in healing_resolved events" name="Log-HealingEvent.includes thought process in healing_resolved events" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records session context in every event" name="Log-HealingEvent.records session context in every event" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles missing $State gracefully" name="Log-HealingEvent.handles missing $State gracefully" time="0.01" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="supports healing_skipped event type" name="Log-HealingEvent.supports healing_skipped event type" time="0.0088" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Suspend-SprintForHealing" executed="True" result="Success" success="True" time="1.9432" asserts="0" description="Suspend-SprintForHealing">
+            <results>
+              <test-case description="creates healing_state.json with tier and sprint context" name="Suspend-SprintForHealing.creates healing_state.json with tier and sprint context" time="0.0442" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs healing_started event with tier info" name="Suspend-SprintForHealing.logs healing_started event with tier info" time="0.0369" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="overwrites existing healing_state.json" name="Suspend-SprintForHealing.overwrites existing healing_state.json" time="0.0283" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles empty StoryId and FocusArea" name="Suspend-SprintForHealing.handles empty StoryId and FocusArea" time="0.0265" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Resume-SprintFromHealing" executed="True" result="Success" success="True" time="2.0227" asserts="0" description="Resume-SprintFromHealing">
+            <results>
+              <test-case description="clears healing_state.json on resume" name="Resume-SprintFromHealing.clears healing_state.json on resume" time="0.0228" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs healing_resolved on successful fix" name="Resume-SprintFromHealing.logs healing_resolved on successful fix" time="0.0199" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs healing_failed when fix unsuccessful" name="Resume-SprintFromHealing.logs healing_failed when fix unsuccessful" time="0.0157" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles already-removed state file gracefully" name="Resume-SprintFromHealing.handles already-removed state file gracefully" time="0.0154" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-HealingInProgress" executed="True" result="Success" success="True" time="2.0662" asserts="0" description="Test-HealingInProgress">
+            <results>
+              <test-case description="returns false when no healing state file" name="Test-HealingInProgress.returns false when no healing state file" time="0.0092" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns true when healing is paused" name="Test-HealingInProgress.returns true when healing is paused" time="0.0072" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when file exists but paused is false" name="Test-HealingInProgress.returns false when file exists but paused is false" time="0.0086" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns false when state file has corrupt JSON" name="Test-HealingInProgress.returns false when state file has corrupt JSON" time="0.0101" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Build-HealingPrompt" executed="True" result="Success" success="True" time="2.1296" asserts="0" description="Build-HealingPrompt">
+            <results>
+              <test-case description="includes tier-specific diagnostics" name="Build-HealingPrompt.includes tier-specific diagnostics" time="0.0252" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes previous attempt context on retry" name="Build-HealingPrompt.includes previous attempt context on retry" time="0.0101" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="omits previous output on first attempt" name="Build-HealingPrompt.omits previous output on first attempt" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="maps all three tier names correctly" name="Build-HealingPrompt.maps all three tier names correctly" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="truncates long previous output to 1000 chars" name="Build-HealingPrompt.truncates long previous output to 1000 chars" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-HealingSession" executed="True" result="Success" success="True" time="2.601" asserts="0" description="Invoke-HealingSession">
+            <results>
+              <test-case description="attempts healing and succeeds on first try" name="Invoke-HealingSession.attempts healing and succeeds on first try" time="0.0905" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails after max attempts exceeded" name="Invoke-HealingSession.fails after max attempts exceeded" time="0.0561" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="logs each attempt to healing_log.jsonl" name="Invoke-HealingSession.logs each attempt to healing_log.jsonl" time="0.0458" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns failure when no healing state exists" name="Invoke-HealingSession.returns failure when no healing state exists" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles Claude subprocess timeout gracefully" name="Invoke-HealingSession.handles Claude subprocess timeout gracefully" time="0.034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="updates diagnostics between retry attempts" name="Invoke-HealingSession.updates diagnostics between retry attempts" time="0.0526" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="retries on Claude non-zero exit code" name="Invoke-HealingSession.retries on Claude non-zero exit code" time="0.0479" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="continues on Record-Metric failure" name="Invoke-HealingSession.continues on Record-Metric failure" time="0.0651" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes Build-HealingPrompt the previous output on retries" name="Invoke-HealingSession.passes Build-HealingPrompt the previous output on retries" time="0.0644" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-PostIterationHealing" executed="True" result="Success" success="True" time="2.8274" asserts="0" description="Invoke-PostIterationHealing">
+            <results>
+              <test-case description="does nothing when all tiers pass" name="Invoke-PostIterationHealing.does nothing when all tiers pass" time="0.0391" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips healing when disabled in config" name="Invoke-PostIterationHealing.skips healing when disabled in config" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="runs full healing flow when tier 1 errors detected" name="Invoke-PostIterationHealing.runs full healing flow when tier 1 errors detected" time="0.0541" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns failure when healing cannot fix errors" name="Invoke-PostIterationHealing.returns failure when healing cannot fix errors" time="0.0347" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips after failure when runAfterFailure is false" name="Invoke-PostIterationHealing.skips after failure when runAfterFailure is false" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips after success when runAfterSuccess is false" name="Invoke-PostIterationHealing.skips after success when runAfterSuccess is false" time="0.0152" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes changed files to tiered health check" name="Invoke-PostIterationHealing.passes changed files to tiered health check" time="0.0173" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles null selfHealing config gracefully" name="Invoke-PostIterationHealing.handles null selfHealing config gracefully" time="0.0179" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uses default fullRunCadence when not in config" name="Invoke-PostIterationHealing.uses default fullRunCadence when not in config" time="0.0153" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Self-healing config" executed="True" result="Success" success="True" time="2.8717" asserts="0" description="Self-healing config">
+            <results>
+              <test-case description="ralph-config.json has selfHealing section with tiered settings" name="Self-healing config.ralph-config.json has selfHealing section with tiered settings" time="0.0404" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Healing metrics recording" executed="True" result="Success" success="True" time="2.9593" asserts="0" description="Healing metrics recording">
+            <results>
+              <test-case description="records healing iteration as mode=Healing in metrics CSV" name="Healing metrics recording.records healing iteration as mode=Healing in metrics CSV" time="0.0783" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-HealingSummary" executed="True" result="Success" success="True" time="3.0608" asserts="0" description="Get-HealingSummary">
+            <results>
+              <test-case description="summarizes healing activity from log" name="Get-HealingSummary.summarizes healing activity from log" time="0.0259" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns empty summary when no log exists" name="Get-HealingSummary.returns empty summary when no log exists" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="counts tier breakdown correctly" name="Get-HealingSummary.counts tier breakdown correctly" time="0.0142" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="counts failed sessions" name="Get-HealingSummary.counts failed sessions" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips corrupt JSONL lines without crashing" name="Get-HealingSummary.skips corrupt JSONL lines without crashing" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="counts attempts from resolved and failed events" name="Get-HealingSummary.counts attempts from resolved and failed events" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles healing_skipped events without counting as session" name="Get-HealingSummary.handles healing_skipped events without counting as session" time="0.009" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Interview.Tests.ps1" executed="True" result="Success" success="True" time="0.3279" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Interview.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-SuggestedFocusAreas" executed="True" result="Success" success="True" time="0.0653" asserts="0" description="Get-SuggestedFocusAreas">
+            <results>
+              <test-case description="suggests testing area for test-related description" name="Get-SuggestedFocusAreas.suggests testing area for test-related description" time="0.0128" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="suggests pipeline area for pipeline-related description" name="Get-SuggestedFocusAreas.suggests pipeline area for pipeline-related description" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="suggests speed area for performance-related description" name="Get-SuggestedFocusAreas.suggests speed area for performance-related description" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="suggests multiple areas for multi-keyword description" name="Get-SuggestedFocusAreas.suggests multiple areas for multi-keyword description" time="0.0054" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns empty for unrelated description" name="Get-SuggestedFocusAreas.returns empty for unrelated description" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles case insensitivity" name="Get-SuggestedFocusAreas.handles case insensitivity" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Focus Area Validation" executed="True" result="Success" success="True" time="0.0876" asserts="0" description="Focus Area Validation">
+            <results>
+              <test-case description="validates existing focus area" name="Focus Area Validation.validates existing focus area" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects non-existent focus area" name="Focus Area Validation.rejects non-existent focus area" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is case insensitive for area IDs (PowerShell default)" name="Focus Area Validation.is case insensitive for area IDs (PowerShell default)" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Queue Management" executed="True" result="Success" success="True" time="0.1349" asserts="0" description="Queue Management">
+            <results>
+              <test-case description="creates new queue with focus areas" name="Queue Management.creates new queue with focus areas" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="marks focus area as completed" name="Queue Management.marks focus area as completed" time="0.0137" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="finds next incomplete focus area" name="Queue Management.finds next incomplete focus area" time="0.0096" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects when all areas are complete" name="Queue Management.detects when all areas are complete" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Interview Context" executed="True" result="Success" success="True" time="0.1599" asserts="0" description="Interview Context">
+            <results>
+              <test-case description="stores interview context in queue" name="Interview Context.stores interview context in queue" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves context across queue operations" name="Interview Context.preserves context across queue operations" time="0.0137" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Keyword Matching Algorithm" executed="True" result="Success" success="True" time="0.1907" asserts="0" description="Keyword Matching Algorithm">
+            <results>
+              <test-case description="finds exact keyword match" name="Keyword Matching Algorithm.finds exact keyword match" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="finds partial word match" name="Keyword Matching Algorithm.finds partial word match" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles multiple keywords" name="Keyword Matching Algorithm.handles multiple keywords" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns empty for no matches" name="Keyword Matching Algorithm.returns empty for no matches" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles special regex characters" name="Keyword Matching Algorithm.handles special regex characters" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Priority Ordering" executed="True" result="Success" success="True" time="0.2146" asserts="0" description="Priority Ordering">
+            <results>
+              <test-case description="orders focus areas by priority" name="Priority Ordering.orders focus areas by priority" time="0.0147" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles equal priorities" name="Priority Ordering.handles equal priorities" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Resume Functionality" executed="True" result="Success" success="True" time="0.2471" asserts="0" description="Resume Functionality">
+            <results>
+              <test-case description="detects existing queue for resume" name="Resume Functionality.detects existing queue for resume" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates resume position correctly" name="Resume Functionality.calculates resume position correctly" time="0.0081" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles resume when all complete" name="Resume Functionality.handles resume when all complete" time="0.0102" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Input Validation" executed="True" result="Success" success="True" time="0.2701" asserts="0" description="Input Validation">
+            <results>
+              <test-case description="trims whitespace from input" name="Input Validation.trims whitespace from input" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="converts input to lowercase for comparison" name="Input Validation.converts input to lowercase for comparison" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles empty input" name="Input Validation.handles empty input" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles whitespace-only input" name="Input Validation.handles whitespace-only input" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Launcher.Tests.ps1" executed="True" result="Success" success="True" time="0.3581" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Launcher.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Launcher Configuration" executed="True" result="Success" success="True" time="0.105" asserts="0" description="Launcher Configuration">
+            <results>
+              <test-suite type="TestFixture" name="Launcher Configuration.ralph-config.json structure" executed="True" result="Success" success="True" time="0.1009" asserts="0" description="Launcher Configuration.ralph-config.json structure">
+                <results>
+                  <test-case description="Should have focusAreaCategories" name="Launcher Configuration.ralph-config.json structure.Should have focusAreaCategories" time="0.0081" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have categoryOrder array" name="Launcher Configuration.ralph-config.json structure.Should have categoryOrder array" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have all expected categories" name="Launcher Configuration.ralph-config.json structure.Should have all expected categories" time="0.0197" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have focusAreas with category field" name="Launcher Configuration.ralph-config.json structure.Should have focusAreas with category field" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have all focus areas assigned to valid categories" name="Launcher Configuration.ralph-config.json structure.Should have all focus areas assigned to valid categories" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have at least 17 focus areas" name="Launcher Configuration.ralph-config.json structure.Should have at least 17 focus areas" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have new focus areas from plan" name="Launcher Configuration.ralph-config.json structure.Should have new focus areas from plan" time="0.0133" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have flags section" name="Launcher Configuration.ralph-config.json structure.Should have flags section" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have phaseTracking flag" name="Launcher Configuration.ralph-config.json structure.Should have phaseTracking flag" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Focus Area Categories" executed="True" result="Success" success="True" time="0.1734" asserts="0" description="Focus Area Categories">
+            <results>
+              <test-suite type="TestFixture" name="Focus Area Categories.Category structure" executed="True" result="Success" success="True" time="0.0368" asserts="0" description="Focus Area Categories.Category structure">
+                <results>
+                  <test-case description="Should have name property for each category" name="Focus Area Categories.Category structure.Should have name property for each category" time="0.012" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have description for each category" name="Focus Area Categories.Category structure.Should have description for each category" time="0.0114" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have areas array for each category" name="Focus Area Categories.Category structure.Should have areas array for each category" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Focus Area Categories.Category content validation" executed="True" result="Success" success="True" time="0.062" asserts="0" description="Focus Area Categories.Category content validation">
+                <results>
+                  <test-case description="Core should contain pipeline and config" name="Focus Area Categories.Category content validation.Core should contain pipeline and config" time="0.0062" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Acquisition should contain rate-limiting, caption, download" name="Focus Area Categories.Category content validation.Acquisition should contain rate-limiting, caption, download" time="0.0057" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Meta should contain testing focus areas" name="Focus Area Categories.Category content validation.Meta should contain testing focus areas" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Launcher Files" executed="True" result="Success" success="True" time="0.2034" asserts="0" description="Launcher Files">
+            <results>
+              <test-suite type="TestFixture" name="Launcher Files.File existence" executed="True" result="Success" success="True" time="0.0264" asserts="0" description="Launcher Files.File existence">
+                <results>
+                  <test-case description="Should have launcher.ps1" name="Launcher Files.File existence.Should have launcher.ps1" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have sleep-thats-where-im-a-viking.bat" name="Launcher Files.File existence.Should have sleep-thats-where-im-a-viking.bat" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should NOT have old numbered bat files" name="Launcher Files.File existence.Should NOT have old numbered bat files" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Launcher Functions" executed="True" result="Success" success="True" time="0.2432" asserts="0" description="Launcher Functions">
+            <results>
+              <test-suite type="TestFixture" name="Launcher Functions.Get-RalphConfig" executed="True" result="Success" success="True" time="0.0177" asserts="0" description="Launcher Functions.Get-RalphConfig">
+                <results>
+                  <test-case description="Should load configuration successfully" name="Launcher Functions.Get-RalphConfig.Should load configuration successfully" time="0.0128" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Launcher Functions.Get-EmojiForCategory" executed="True" result="Success" success="True" time="0.03" asserts="0" description="Launcher Functions.Get-EmojiForCategory">
+                <results>
+                  <test-case description="Should return prefix for known categories" name="Launcher Functions.Get-EmojiForCategory.Should return prefix for known categories" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Mode Selection" executed="True" result="Success" success="True" time="0.2962" asserts="0" description="Mode Selection">
+            <results>
+              <test-suite type="TestFixture" name="Mode Selection.Available modes" executed="True" result="Success" success="True" time="0.0474" asserts="0" description="Mode Selection.Available modes">
+                <results>
+                  <test-case description="Should support standard mode" name="Mode Selection.Available modes.Should support standard mode" time="0.0089" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support trueauto mode" name="Mode Selection.Available modes.Should support trueauto mode" time="0.0049" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support resume mode" name="Mode Selection.Available modes.Should support resume mode" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support smartqueue mode" name="Mode Selection.Available modes.Should support smartqueue mode" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support status mode" name="Mode Selection.Available modes.Should support status mode" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support morning mode" name="Mode Selection.Available modes.Should support morning mode" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support logs mode" name="Mode Selection.Available modes.Should support logs mode" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support recovery mode" name="Mode Selection.Available modes.Should support recovery mode" time="0.0043" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support watch mode" name="Mode Selection.Available modes.Should support watch mode" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\ParallelExecution.Tests.ps1" executed="True" result="Success" success="True" time="0.7149" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\ParallelExecution.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-StoryProgress" executed="True" result="Success" success="True" time="0.1122" asserts="0" description="Get-StoryProgress">
+            <results>
+              <test-case description="Returns empty milestones when no progress file exists" name="Get-StoryProgress.Returns empty milestones when no progress file exists" time="0.0377" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns saved milestones from progress file" name="Get-StoryProgress.Returns saved milestones from progress file" time="0.0403" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty milestones for unknown story in existing file" name="Get-StoryProgress.Returns empty milestones for unknown story in existing file" time="0.0294" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Save-StoryProgress" executed="True" result="Success" success="True" time="0.1605" asserts="0" description="Save-StoryProgress">
+            <results>
+              <test-case description="Creates progress file when none exists" name="Save-StoryProgress.Creates progress file when none exists" time="0.0179" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Updates existing story milestones" name="Save-StoryProgress.Updates existing story milestones" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Saves completed milestone" name="Save-StoryProgress.Saves completed milestone" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Build-ResumePrompt" executed="True" result="Success" success="True" time="0.1974" asserts="0" description="Build-ResumePrompt">
+            <results>
+              <test-case description="Returns null when no milestones reached" name="Build-ResumePrompt.Returns null when no milestones reached" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns resume context with completed steps" name="Build-ResumePrompt.Returns resume context with completed steps" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Shows remaining steps" name="Build-ResumePrompt.Shows remaining steps" time="0.0053" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-IndependentStories" executed="True" result="Success" success="True" time="0.2352" asserts="0" description="Get-IndependentStories">
+            <results>
+              <test-case description="Returns empty when no stories provided" name="Get-IndependentStories.Returns empty when no stories provided" time="0.014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns stories when parallel enabled and none conflict" name="Get-IndependentStories.Returns stories when parallel enabled and none conflict" time="0.0127" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty when parallel disabled" name="Get-IndependentStories.Returns empty when parallel disabled" time="0.0062" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Update-LearningDb" executed="True" result="Success" success="True" time="0.2742" asserts="0" description="Update-LearningDb">
+            <results>
+              <test-case description="Creates learning DB file when none exists" name="Update-LearningDb.Creates learning DB file when none exists" time="0.0217" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Appends to existing learning DB" name="Update-LearningDb.Appends to existing learning DB" time="0.0123" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-LearningContext" executed="True" result="Success" success="True" time="0.311" asserts="0" description="Get-LearningContext">
+            <results>
+              <test-case description="Returns empty array when no DB exists" name="Get-LearningContext.Returns empty array when no DB exists" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters by focus area" name="Get-LearningContext.Filters by focus area" time="0.0124" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters by error category" name="Get-LearningContext.Filters by error category" time="0.0092" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-CanRollback" executed="True" result="Success" success="True" time="0.3746" asserts="0" description="Test-CanRollback">
+            <results>
+              <test-case description="Returns canRollback=false when autoRollback disabled" name="Test-CanRollback.Returns canRollback=false when autoRollback disabled" time="0.0141" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns canRollback=false when no git repo in TestDrive" name="Test-CanRollback.Returns canRollback=false when no git repo in TestDrive" time="0.045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Build-DependencyGraph" executed="True" result="Success" success="True" time="0.4178" asserts="0" description="Build-DependencyGraph">
+            <results>
+              <test-case description="Returns empty graph for no stories" name="Build-DependencyGraph.Returns empty graph for no stories" time="0.0115" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns graph with no deps for independent stories" name="Build-DependencyGraph.Returns graph with no deps for independent stories" time="0.0102" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Captures explicit dependsOn" name="Build-DependencyGraph.Captures explicit dependsOn" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects implicit dependencies from title keywords" name="Build-DependencyGraph.Detects implicit dependencies from title keywords" time="0.0049" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-ExecutableStories" executed="True" result="Success" success="True" time="0.4618" asserts="0" description="Get-ExecutableStories">
+            <results>
+              <test-case description="Returns all stories when no dependencies" name="Get-ExecutableStories.Returns all stories when no dependencies" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters stories with unmet dependencies" name="Get-ExecutableStories.Filters stories with unmet dependencies" time="0.0154" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Unblocks stories when dependencies are met" name="Get-ExecutableStories.Unblocks stories when dependencies are met" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Excludes already-passed stories" name="Get-ExecutableStories.Excludes already-passed stories" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\PreFlight.Tests.ps1" executed="True" result="Success" success="True" time="1.307" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\PreFlight.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Confirm-CommitMatchesStory" executed="True" result="Success" success="True" time="0.0269" asserts="0" description="Confirm-CommitMatchesStory">
+            <results>
+              <test-case description="Returns empty array when no candidates provided" name="Confirm-CommitMatchesStory.Returns empty array when no candidates provided" time="0.0114" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty array when Claude is not available" name="Confirm-CommitMatchesStory.Returns empty array when Claude is not available" time="0.0104" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-StoryAlreadyCommitted" executed="True" result="Success" success="True" time="0.3196" asserts="0" description="Test-StoryAlreadyCommitted">
+            <results>
+              <test-case description="Returns false for non-existent story ID" name="Test-StoryAlreadyCommitted.Returns false for non-existent story ID" time="0.0777" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns false when Story parameter is null (safety guard)" name="Test-StoryAlreadyCommitted.Returns false when Story parameter is null (safety guard)" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true when LLM confirms commit matches story" name="Test-StoryAlreadyCommitted.Returns true when LLM confirms commit matches story" time="0.1034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns false when LLM rejects cross-sprint story" name="Test-StoryAlreadyCommitted.Returns false when LLM rejects cross-sprint story" time="0.0913" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Handles git errors gracefully" name="Test-StoryAlreadyCommitted.Handles git errors gracefully" time="0.0112" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Complete-StoryAutomatically" executed="True" result="Success" success="True" time="0.5373" asserts="0" description="Complete-StoryAutomatically">
+            <results>
+              <test-case description="Updates prd.json to mark story as passes: true" name="Complete-StoryAutomatically.Updates prd.json to mark story as passes: true" time="0.0548" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Writes notes with reason" name="Complete-StoryAutomatically.Writes notes with reason" time="0.0468" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Appends to progress.txt" name="Complete-StoryAutomatically.Appends to progress.txt" time="0.0542" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Does not throw on missing prd file" name="Complete-StoryAutomatically.Does not throw on missing prd file" time="0.0124" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Does not modify already-passed stories" name="Complete-StoryAutomatically.Does not modify already-passed stories" time="0.0451" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Invoke-BatchPreFlight" executed="True" result="Success" success="True" time="1.0434" asserts="0" description="Invoke-BatchPreFlight">
+            <results>
+              <test-case description="Returns 0 when prd file does not exist" name="Invoke-BatchPreFlight.Returns 0 when prd file does not exist" time="0.0176" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns 0 when all stories already pass" name="Invoke-BatchPreFlight.Returns 0 when all stories already pass" time="0.0153" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Auto-completes stories when LLM confirms match" name="Invoke-BatchPreFlight.Auto-completes stories when LLM confirms match" time="0.2296" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Does not auto-complete when LLM rejects cross-sprint stories" name="Invoke-BatchPreFlight.Does not auto-complete when LLM rejects cross-sprint stories" time="0.1107" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns 0 when LLM is unavailable (conservative fallback)" name="Invoke-BatchPreFlight.Returns 0 when LLM is unavailable (conservative fallback)" time="0.1136" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Does not throw on malformed prd.json" name="Invoke-BatchPreFlight.Does not throw on malformed prd.json" time="0.0145" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\QualityGate.Tests.ps1" executed="True" result="Success" success="True" time="0.9708" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\QualityGate.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-DiffQualityScore" executed="True" result="Success" success="True" time="0.15" asserts="0" description="Get-DiffQualityScore">
+            <results>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Empty diff" executed="True" result="Success" success="True" time="0.0312" asserts="0" description="Get-DiffQualityScore.Empty diff">
+                <results>
+                  <test-case description="Returns default metrics for empty diff" name="Get-DiffQualityScore.Empty diff.Returns default metrics for empty diff" time="0.018" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Returns default metrics for null diff" name="Get-DiffQualityScore.Empty diff.Returns default metrics for null diff" time="0.009" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Implementation-only diff" executed="True" result="Success" success="True" time="0.0538" asserts="0" description="Get-DiffQualityScore.Implementation-only diff">
+                <results>
+                  <test-case description="Computes zero test ratio for implementation-only changes" name="Get-DiffQualityScore.Implementation-only diff.Computes zero test ratio for implementation-only changes" time="0.0182" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Mixed diff with tests" executed="True" result="Success" success="True" time="0.0666" asserts="0" description="Get-DiffQualityScore.Mixed diff with tests">
+                <results>
+                  <test-case description="Computes correct test ratio" name="Get-DiffQualityScore.Mixed diff with tests.Computes correct test ratio" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Pure test changes" executed="True" result="Success" success="True" time="0.0791" asserts="0" description="Get-DiffQualityScore.Pure test changes">
+                <results>
+                  <test-case description="Returns testRatio of 1.0" name="Get-DiffQualityScore.Pure test changes.Returns testRatio of 1.0" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Size limits" executed="True" result="Success" success="True" time="0.1272" asserts="0" description="Get-DiffQualityScore.Size limits">
+                <results>
+                  <test-case description="Flags oversized diffs" name="Get-DiffQualityScore.Size limits.Flags oversized diffs" time="0.0438" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-DiffQualityScore.Churn risk" executed="True" result="Success" success="True" time="0.1456" asserts="0" description="Get-DiffQualityScore.Churn risk">
+                <results>
+                  <test-case description="Detects high churn from many files" name="Get-DiffQualityScore.Churn risk.Detects high churn from many files" time="0.0079" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Detects medium churn from moderate file count" name="Get-DiffQualityScore.Churn risk.Detects medium churn from moderate file count" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-StoryFailureContext" executed="True" result="Success" success="True" time="0.2199" asserts="0" description="Get-StoryFailureContext">
+            <results>
+              <test-suite type="TestFixture" name="Get-StoryFailureContext.First attempt" executed="True" result="Success" success="True" time="0.025" asserts="0" description="Get-StoryFailureContext.First attempt">
+                <results>
+                  <test-case description="Returns empty string for first attempt" name="Get-StoryFailureContext.First attempt.Returns empty string for first attempt" time="0.0155" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Returns empty string for zero retry count" name="Get-StoryFailureContext.First attempt.Returns empty string for zero retry count" time="0.0051" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-StoryFailureContext.Retry with context" executed="True" result="Success" success="True" time="0.0653" asserts="0" description="Get-StoryFailureContext.Retry with context">
+                <results>
+                  <test-case description="Returns retry context for retry count &gt; 1" name="Get-StoryFailureContext.Retry with context.Returns retry context for retry count &gt; 1" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes previous verification failures" name="Get-StoryFailureContext.Retry with context.Includes previous verification failures" time="0.0163" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes review feedback from previous attempt" name="Get-StoryFailureContext.Retry with context.Includes review feedback from previous attempt" time="0.0122" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test Baseline Functions" executed="True" result="Success" success="True" time="0.4068" asserts="0" description="Test Baseline Functions">
+            <results>
+              <test-suite type="TestFixture" name="Test Baseline Functions.Compare-TestBaseline" executed="True" result="Success" success="True" time="0.0535" asserts="0" description="Test Baseline Functions.Compare-TestBaseline">
+                <results>
+                  <test-case description="Returns null when no baseline exists" name="Test Baseline Functions.Compare-TestBaseline.Returns null when no baseline exists" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Detects no regression when tests improve" name="Test Baseline Functions.Compare-TestBaseline.Detects no regression when tests improve" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Detects regression when failures increase" name="Test Baseline Functions.Compare-TestBaseline.Detects regression when failures increase" time="0.0119" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Returns null when regression detection disabled" name="Test Baseline Functions.Compare-TestBaseline.Returns null when regression detection disabled" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test Baseline Functions.Compare-TestBaseline subset detection" executed="True" result="Success" success="True" time="0.1296" asserts="0" description="Test Baseline Functions.Compare-TestBaseline subset detection">
+                <results>
+                  <test-case description="Does not flag regression for subset runs (fewer tests, all passing)" name="Test Baseline Functions.Compare-TestBaseline subset detection.Does not flag regression for subset runs (fewer tests, all passing)" time="0.0136" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Flags regression for subset runs with new failures" name="Test Baseline Functions.Compare-TestBaseline subset detection.Flags regression for subset runs with new failures" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Flags regression for comparable runs with fewer passing" name="Test Baseline Functions.Compare-TestBaseline subset detection.Flags regression for comparable runs with fewer passing" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Does not flag subset when current total is at threshold" name="Test Baseline Functions.Compare-TestBaseline subset detection.Does not flag subset when current total is at threshold" time="0.0102" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes currentTotal and baselineTotal in result" name="Test Baseline Functions.Compare-TestBaseline subset detection.Includes currentTotal and baselineTotal in result" time="0.0213" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test Baseline Functions.Update-TestBaseline" executed="True" result="Success" success="True" time="0.1826" asserts="0" description="Test Baseline Functions.Update-TestBaseline">
+                <results>
+                  <test-case description="Creates baseline file from test results" name="Test Baseline Functions.Update-TestBaseline.Creates baseline file from test results" time="0.0176" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Skips update for empty results" name="Test Baseline Functions.Update-TestBaseline.Skips update for empty results" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Does not downgrade baseline from subset runs" name="Test Baseline Functions.Update-TestBaseline.Does not downgrade baseline from subset runs" time="0.0132" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Updates baseline when comparable or larger run" name="Test Baseline Functions.Update-TestBaseline.Updates baseline when comparable or larger run" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Human Feedback Functions" executed="True" result="Success" success="True" time="0.4976" asserts="0" description="Human Feedback Functions">
+            <results>
+              <test-suite type="TestFixture" name="Human Feedback Functions.Import-HumanFeedback" executed="True" result="Success" success="True" time="0.0329" asserts="0" description="Human Feedback Functions.Import-HumanFeedback">
+                <results>
+                  <test-case description="Returns empty array when no feedback file" name="Human Feedback Functions.Import-HumanFeedback.Returns empty array when no feedback file" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Reads feedback entries from file" name="Human Feedback Functions.Import-HumanFeedback.Reads feedback entries from file" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Handles malformed JSON gracefully" name="Human Feedback Functions.Import-HumanFeedback.Handles malformed JSON gracefully" time="0.0096" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Human Feedback Functions.Get-FeedbackForStory" executed="True" result="Success" success="True" time="0.0865" asserts="0" description="Human Feedback Functions.Get-FeedbackForStory">
+                <results>
+                  <test-case description="Matches by story ID" name="Human Feedback Functions.Get-FeedbackForStory.Matches by story ID" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Matches by focus area" name="Human Feedback Functions.Get-FeedbackForStory.Matches by focus area" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes global feedback (no filters)" name="Human Feedback Functions.Get-FeedbackForStory.Includes global feedback (no filters)" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Returns empty when no feedback matches" name="Human Feedback Functions.Get-FeedbackForStory.Returns empty when no feedback matches" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-EstimatedTokens" executed="True" result="Success" success="True" time="0.556" asserts="0" description="Get-EstimatedTokens">
+            <results>
+              <test-suite type="TestFixture" name="Get-EstimatedTokens.Empty input" executed="True" result="Success" success="True" time="0.0199" asserts="0" description="Get-EstimatedTokens.Empty input">
+                <results>
+                  <test-case description="Returns 0 for empty string" name="Get-EstimatedTokens.Empty input.Returns 0 for empty string" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Returns 0 for null" name="Get-EstimatedTokens.Empty input.Returns 0 for null" time="0.0047" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-EstimatedTokens.Character-based estimation" executed="True" result="Success" success="True" time="0.0342" asserts="0" description="Get-EstimatedTokens.Character-based estimation">
+                <results>
+                  <test-case description="Estimates tokens from character count" name="Get-EstimatedTokens.Character-based estimation.Estimates tokens from character count" time="0.0096" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-EstimatedTokens.Token parsing from Claude output" executed="True" result="Success" success="True" time="0.0543" asserts="0" description="Get-EstimatedTokens.Token parsing from Claude output">
+                <results>
+                  <test-case description="Parses total_tokens from output" name="Get-EstimatedTokens.Token parsing from Claude output.Parses total_tokens from output" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Parses input + output tokens" name="Get-EstimatedTokens.Token parsing from Claude output.Parses input + output tokens" time="0.0089" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-SprintTokenBudget" executed="True" result="Success" success="True" time="0.5894" asserts="0" description="Get-SprintTokenBudget">
+            <results>
+              <test-suite type="TestFixture" name="Get-SprintTokenBudget.Budget disabled" executed="True" result="Success" success="True" time="0.0126" asserts="0" description="Get-SprintTokenBudget.Budget disabled">
+                <results>
+                  <test-case description="Returns null when budget is disabled" name="Get-SprintTokenBudget.Budget disabled.Returns null when budget is disabled" time="0.0086" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-SprintTokenBudget.Budget enabled" executed="True" result="Success" success="True" time="0.0289" asserts="0" description="Get-SprintTokenBudget.Budget enabled">
+                <results>
+                  <test-case description="Returns budget status with zero usage when no metrics" name="Get-SprintTokenBudget.Budget enabled.Returns budget status with zero usage when no metrics" time="0.0115" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-SprintReport" executed="True" result="Success" success="True" time="0.6911" asserts="0" description="New-SprintReport">
+            <results>
+              <test-suite type="TestFixture" name="New-SprintReport.Report generation" executed="True" result="Success" success="True" time="0.0936" asserts="0" description="New-SprintReport.Report generation">
+                <results>
+                  <test-case description="Returns null for null PRD" name="New-SprintReport.Report generation.Returns null for null PRD" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Generates report for completed sprint" name="New-SprintReport.Report generation.Generates report for completed sprint" time="0.0223" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes incomplete stories section" name="New-SprintReport.Report generation.Includes incomplete stories section" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes healing summary when healing events exist" name="New-SprintReport.Report generation.Includes healing summary when healing events exist" time="0.0226" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Omits healing section when no healing events" name="New-SprintReport.Report generation.Omits healing section when no healing events" time="0.0218" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Ralph.Tests.ps1" executed="True" result="Success" success="True" time="1.4307" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Ralph.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-EstimatedTokens" executed="True" result="Success" success="True" time="0.0328" asserts="0" description="Get-EstimatedTokens">
+            <results>
+              <test-case description="returns 0 for empty output" name="Get-EstimatedTokens.returns 0 for empty output" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 0 for null output" name="Get-EstimatedTokens.returns 0 for null output" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="estimates tokens based on character count" name="Get-EstimatedTokens.estimates tokens based on character count" time="0.0077" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="caps at reasonable maximum" name="Get-EstimatedTokens.caps at reasonable maximum" time="0.0054" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles multiline output" name="Get-EstimatedTokens.handles multiline output" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-TestResults" executed="True" result="Success" success="True" time="0.0634" asserts="0" description="Get-TestResults">
+            <results>
+              <test-case description="returns empty string for output without test results" name="Get-TestResults.returns empty string for output without test results" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts passed test count" name="Get-TestResults.extracts passed test count" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts failed test count" name="Get-TestResults.extracts failed test count" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles pytest verbose output" name="Get-TestResults.handles pytest verbose output" time="0.0088" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-ErrorCategory" executed="True" result="Success" success="True" time="0.0918" asserts="0" description="Get-ErrorCategory">
+            <results>
+              <test-case description="returns Timeout for timed out operations" name="Get-ErrorCategory.returns Timeout for timed out operations" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="identifies TestFailure from pytest output" name="Get-ErrorCategory.identifies TestFailure from pytest output" time="0.0043" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="identifies SyntaxError" name="Get-ErrorCategory.identifies SyntaxError" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="identifies APIError for rate limiting" name="Get-ErrorCategory.identifies APIError for rate limiting" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns Unknown for unrecognized errors" name="Get-ErrorCategory.returns Unknown for unrecognized errors" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Measure-PhaseTimings" executed="True" result="Success" success="True" time="0.1495" asserts="0" description="Measure-PhaseTimings">
+            <results>
+              <test-case description="returns zero timings for empty output" name="Measure-PhaseTimings.returns zero timings for empty output" time="0.0117" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns zero timings for zero duration" name="Measure-PhaseTimings.returns zero timings for zero duration" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allocates time to read phase when file reading is detected" name="Measure-PhaseTimings.allocates time to read phase when file reading is detected" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allocates time to implement phase when editing is detected" name="Measure-PhaseTimings.allocates time to implement phase when editing is detected" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allocates time to test phase when pytest is detected" name="Measure-PhaseTimings.allocates time to test phase when pytest is detected" time="0.0057" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allocates time to commit phase when git is detected" name="Measure-PhaseTimings.allocates time to commit phase when git is detected" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="total of all phases equals input duration" name="Measure-PhaseTimings.total of all phases equals input duration" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-PromptEffectiveness" executed="True" result="Success" success="True" time="0.1758" asserts="0" description="Get-PromptEffectiveness">
+            <results>
+              <test-case description="returns 0.0 for failed attempts" name="Get-PromptEffectiveness.returns 0.0 for failed attempts" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 1.0 for first-try success" name="Get-PromptEffectiveness.returns 1.0 for first-try success" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 0.5 for success after few retries" name="Get-PromptEffectiveness.returns 0.5 for success after few retries" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns 0.25 for success after many retries" name="Get-PromptEffectiveness.returns 0.25 for success after many retries" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-StateTransition" executed="True" result="Success" success="True" time="0.232" asserts="0" description="Log-StateTransition">
+            <results>
+              <test-case description="creates state transition file" name="Log-StateTransition.creates state transition file" time="0.0143" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes valid JSON" name="Log-StateTransition.writes valid JSON" time="0.0079" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes all required fields" name="Log-StateTransition.includes all required fields" time="0.0097" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes optional context" name="Log-StateTransition.includes optional context" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="appends to existing file" name="Log-StateTransition.appends to existing file" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-ErrorEvolution" executed="True" result="Success" success="True" time="0.256" asserts="0" description="Log-ErrorEvolution">
+            <results>
+              <test-case description="creates error evolution file" name="Log-ErrorEvolution.creates error evolution file" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes category and details" name="Log-ErrorEvolution.includes category and details" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-ConfigChange" executed="True" result="Success" success="True" time="0.2854" asserts="0" description="Log-ConfigChange">
+            <results>
+              <test-case description="creates config audit file" name="Log-ConfigChange.creates config audit file" time="0.0132" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records old and new values" name="Log-ConfigChange.records old and new values" time="0.0117" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-TestDetails" executed="True" result="Success" success="True" time="0.3367" asserts="0" description="Log-TestDetails">
+            <results>
+              <test-case description="creates test details file" name="Log-TestDetails.creates test details file" time="0.0158" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses passed tests" name="Log-TestDetails.parses passed tests" time="0.0163" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses failed tests" name="Log-TestDetails.parses failed tests" time="0.0064" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts duration" name="Log-TestDetails.extracts duration" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-ResourceUsage" executed="True" result="Success" success="True" time="0.3899" asserts="0" description="Log-ResourceUsage">
+            <results>
+              <test-case description="creates resource usage file" name="Log-ResourceUsage.creates resource usage file" time="0.0234" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates averages correctly" name="Log-ResourceUsage.calculates averages correctly" time="0.0101" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="finds peak memory" name="Log-ResourceUsage.finds peak memory" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-PromptEffectiveness" executed="True" result="Success" success="True" time="0.4117" asserts="0" description="Log-PromptEffectiveness">
+            <results>
+              <test-case description="logs effectiveness score" name="Log-PromptEffectiveness.logs effectiveness score" time="0.0174" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-Skip" executed="True" result="Success" success="True" time="0.4277" asserts="0" description="Log-Skip">
+            <results>
+              <test-case description="logs skip with reason" name="Log-Skip.logs skip with reason" time="0.0117" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Record-Metric" executed="True" result="Success" success="True" time="0.4988" asserts="0" description="Record-Metric">
+            <results>
+              <test-case description="creates metrics file with header" name="Record-Metric.creates metrics file with header" time="0.0239" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records success metrics" name="Record-Metric.records success metrics" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records failure metrics" name="Record-Metric.records failure metrics" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes phase timing columns" name="Record-Metric.includes phase timing columns" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="appends to existing file" name="Record-Metric.appends to existing file" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Append-SessionTimeline" executed="True" result="Success" success="True" time="0.5383" asserts="0" description="Append-SessionTimeline">
+            <results>
+              <test-case description="creates timeline file" name="Append-SessionTimeline.creates timeline file" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes event name and timestamp" name="Append-SessionTimeline.includes event name and timestamp" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="merges additional data" name="Append-SessionTimeline.merges additional data" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="appends multiple events" name="Append-SessionTimeline.appends multiple events" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-IterationManifest" executed="True" result="Success" success="True" time="0.5748" asserts="0" description="Log-IterationManifest">
+            <results>
+              <test-case description="creates manifest file" name="Log-IterationManifest.creates manifest file" time="0.0213" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes all required fields" name="Log-IterationManifest.includes all required fields" time="0.0109" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-GitState" executed="True" result="Success" success="True" time="0.931" asserts="0" description="Get-GitState">
+            <results>
+              <test-case description="returns current git hash" name="Get-GitState.returns current git hash" time="0.119" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns current branch" name="Get-GitState.returns current branch" time="0.1175" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns clean status" name="Get-GitState.returns clean status" time="0.1155" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-GitCommits" executed="True" result="Success" success="True" time="0.9883" asserts="0" description="Get-GitCommits">
+            <results>
+              <test-case description="returns commits since hash" name="Get-GitCommits.returns commits since hash" time="0.0523" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-ProcessMetrics" executed="True" result="Success" success="True" time="1.0871" asserts="0" description="Get-ProcessMetrics">
+            <results>
+              <test-case description="returns metrics for current process" name="Get-ProcessMetrics.returns metrics for current process" time="0.0392" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns zero metrics for invalid process" name="Get-ProcessMetrics.returns zero metrics for invalid process" time="0.0252" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes timestamp" name="Get-ProcessMetrics.includes timestamp" time="0.0288" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Full Iteration Logging Flow" executed="True" result="Success" success="True" time="1.1566" asserts="0" description="Full Iteration Logging Flow">
+            <results>
+              <test-case description="simulates complete successful iteration" name="Full Iteration Logging Flow.simulates complete successful iteration" time="0.0422" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="simulates failed iteration with error tracking" name="Full Iteration Logging Flow.simulates failed iteration with error tracking" time="0.0218" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Edge Cases" executed="True" result="Success" success="True" time="1.2979" asserts="0" description="Edge Cases">
+            <results>
+              <test-case description="handles special characters in output" name="Edge Cases.handles special characters in output" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles very long output" name="Edge Cases.handles very long output" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles unicode in output" name="Edge Cases.handles unicode in output" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles empty git state gracefully" name="Edge Cases.handles empty git state gracefully" time="0.1199" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Concurrent File Access" executed="True" result="Success" success="True" time="1.3476" asserts="0" description="Concurrent File Access">
+            <results>
+              <test-case description="handles rapid appends to timeline" name="Concurrent File Access.handles rapid appends to timeline" time="0.0277" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles rapid metric recording" name="Concurrent File Access.handles rapid metric recording" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\ReviewAgent.Tests.ps1" executed="True" result="Success" success="True" time="0.6502" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\ReviewAgent.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Format-ReviewPrompt" executed="True" result="Success" success="True" time="0.053" asserts="0" description="Format-ReviewPrompt">
+            <results>
+              <test-case description="Includes story ID and title" name="Format-ReviewPrompt.Includes story ID and title" time="0.0153" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes acceptance criteria numbered list" name="Format-ReviewPrompt.Includes acceptance criteria numbered list" time="0.006" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes file operations context" name="Format-ReviewPrompt.Includes file operations context" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Truncates large diffs" name="Format-ReviewPrompt.Truncates large diffs" time="0.0094" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes review focus areas" name="Format-ReviewPrompt.Includes review focus areas" time="0.0057" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-OptimalNextStory" executed="True" result="Success" success="True" time="0.107" asserts="0" description="Get-OptimalNextStory">
+            <results>
+              <test-case description="Returns first incomplete when smart ordering disabled" name="Get-OptimalNextStory.Returns first incomplete when smart ordering disabled" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns null when all stories complete" name="Get-OptimalNextStory.Returns null when all stories complete" time="0.0052" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Prefers test stories when smart ordering enabled" name="Get-OptimalNextStory.Prefers test stories when smart ordering enabled" time="0.0181" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Penalizes stories with failure history" name="Get-OptimalNextStory.Penalizes stories with failure history" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-StoryFileTouches" executed="True" result="Success" success="True" time="0.1319" asserts="0" description="Get-StoryFileTouches">
+            <results>
+              <test-case description="Returns empty hashtable with no logs" name="Get-StoryFileTouches.Returns empty hashtable with no logs" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Maps files from iteration logs" name="Get-StoryFileTouches.Maps files from iteration logs" time="0.0134" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-FileConflict" executed="True" result="Success" success="True" time="0.1758" asserts="0" description="Test-FileConflict">
+            <results>
+              <test-case description="Returns no conflict when no logs exist" name="Test-FileConflict.Returns no conflict when no logs exist" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects file overlap between stories" name="Test-FileConflict.Detects file overlap between stories" time="0.0199" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses predictive matching from story title" name="Test-FileConflict.Uses predictive matching from story title" time="0.0127" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Search-CriterionEvidence" executed="True" result="Success" success="True" time="0.234" asserts="0" description="Search-CriterionEvidence">
+            <results>
+              <test-case description="Returns not found with empty inputs" name="Search-CriterionEvidence.Returns not found with empty inputs" time="0.0224" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Finds evidence in Claude output by keyword matching" name="Search-CriterionEvidence.Finds evidence in Claude output by keyword matching" time="0.0131" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Finds evidence in git diff" name="Search-CriterionEvidence.Finds evidence in git diff" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects completion signals" name="Search-CriterionEvidence.Detects completion signals" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns low confidence when no keywords match" name="Search-CriterionEvidence.Returns low confidence when no keywords match" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Log-StoryVerification (Evidence-Based)" executed="True" result="Success" success="True" time="0.2879" asserts="0" description="Log-StoryVerification (Evidence-Based)">
+            <results>
+              <test-case description="Searches output for per-criterion evidence when passed" name="Log-StoryVerification (Evidence-Based).Searches output for per-criterion evidence when passed" time="0.0301" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Falls back to simple verification without output" name="Log-StoryVerification (Evidence-Based).Falls back to simple verification without output" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Marks all criteria as unverified when story failed" name="Log-StoryVerification (Evidence-Based).Marks all criteria as unverified when story failed" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-SprintRetrospective" executed="True" result="Success" success="True" time="0.3553" asserts="0" description="Get-SprintRetrospective">
+            <results>
+              <test-case description="Returns empty retrospective with no metrics" name="Get-SprintRetrospective.Returns empty retrospective with no metrics" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects recurring failure patterns" name="Get-SprintRetrospective.Detects recurring failure patterns" time="0.0234" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Detects excessive retry patterns" name="Get-SprintRetrospective.Detects excessive retry patterns" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Generates lessons and recommendations for low pass rate" name="Get-SprintRetrospective.Generates lessons and recommendations for low pass rate" time="0.0094" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-RetrospectiveContext" executed="True" result="Success" success="True" time="0.388" asserts="0" description="Get-RetrospectiveContext">
+            <results>
+              <test-case description="Returns empty string with no data" name="Get-RetrospectiveContext.Returns empty string with no data" time="0.0127" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Formats lessons into markdown context" name="Get-RetrospectiveContext.Formats lessons into markdown context" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty for null input" name="Get-RetrospectiveContext.Returns empty for null input" time="0.0059" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\SmartQueue.Tests.ps1" executed="True" result="Success" success="True" time="0.2747" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\SmartQueue.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Smart Queue File Structure" executed="True" result="Success" success="True" time="0.0596" asserts="0" description="Smart Queue File Structure">
+            <results>
+              <test-suite type="TestFixture" name="Smart Queue File Structure.Queue JSON structure" executed="True" result="Success" success="True" time="0.0558" asserts="0" description="Smart Queue File Structure.Queue JSON structure">
+                <results>
+                  <test-case description="Should have focusAreas array" name="Smart Queue File Structure.Queue JSON structure.Should have focusAreas array" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have sessionId" name="Smart Queue File Structure.Queue JSON structure.Should have sessionId" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have interviewContext starting with 'Smart Queue:'" name="Smart Queue File Structure.Queue JSON structure.Should have interviewContext starting with 'Smart Queue:'" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have interviewDetails for story generation" name="Smart Queue File Structure.Queue JSON structure.Should have interviewDetails for story generation" time="0.0145" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have focus areas with id and completed fields" name="Smart Queue File Structure.Queue JSON structure.Should have focus areas with id and completed fields" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Smart Queue Focus Area Mapping" executed="True" result="Success" success="True" time="0.0969" asserts="0" description="Smart Queue Focus Area Mapping">
+            <results>
+              <test-suite type="TestFixture" name="Smart Queue Focus Area Mapping.Input to focus area mapping" executed="True" result="Success" success="True" time="0.0325" asserts="0" description="Smart Queue Focus Area Mapping.Input to focus area mapping">
+                <results>
+                  <test-case description="Should map 'download reliability' to rate-limiting or download" name="Smart Queue Focus Area Mapping.Input to focus area mapping.Should map 'download reliability' to rate-limiting or download" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should map 'flaky tests' to testing" name="Smart Queue Focus Area Mapping.Input to focus area mapping.Should map 'flaky tests' to testing" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should map 'OTIO edge cases' to otio" name="Smart Queue Focus Area Mapping.Input to focus area mapping.Should map 'OTIO edge cases' to otio" time="0.0077" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should map 'match accuracy' to quality" name="Smart Queue Focus Area Mapping.Input to focus area mapping.Should map 'match accuracy' to quality" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should map 'error messages' to ux" name="Smart Queue Focus Area Mapping.Input to focus area mapping.Should map 'error messages' to ux" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Smart Queue Validation" executed="True" result="Success" success="True" time="0.1375" asserts="0" description="Smart Queue Validation">
+            <results>
+              <test-suite type="TestFixture" name="Smart Queue Validation.Invalid inputs" executed="True" result="Success" success="True" time="0.0165" asserts="0" description="Smart Queue Validation.Invalid inputs">
+                <results>
+                  <test-case description="Should handle empty user input" name="Smart Queue Validation.Invalid inputs.Should handle empty user input" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle whitespace-only input" name="Smart Queue Validation.Invalid inputs.Should handle whitespace-only input" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Smart Queue Validation.Valid focus area IDs" executed="True" result="Success" success="True" time="0.0364" asserts="0" description="Smart Queue Validation.Valid focus area IDs">
+                <results>
+                  <test-case description="Should recognize all 17 focus area IDs" name="Smart Queue Validation.Valid focus area IDs.Should recognize all 17 focus area IDs" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should include new focus areas" name="Smart Queue Validation.Valid focus area IDs.Should include new focus areas" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Smart Queue Creation" executed="True" result="Success" success="True" time="0.1704" asserts="0" description="Smart Queue Creation">
+            <results>
+              <test-suite type="TestFixture" name="Smart Queue Creation.Creating queue from focus areas" executed="True" result="Success" success="True" time="0.029" asserts="0" description="Smart Queue Creation.Creating queue from focus areas">
+                <results>
+                  <test-case description="Should create queue with correct structure" name="Smart Queue Creation.Creating queue from focus areas.Should create queue with correct structure" time="0.0139" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should preserve user input in interviewContext" name="Smart Queue Creation.Creating queue from focus areas.Should preserve user input in interviewContext" time="0.0109" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Smart Queue Claude Response Parsing" executed="True" result="Success" success="True" time="0.2191" asserts="0" description="Smart Queue Claude Response Parsing">
+            <results>
+              <test-suite type="TestFixture" name="Smart Queue Claude Response Parsing.Valid JSON responses" executed="True" result="Success" success="True" time="0.0187" asserts="0" description="Smart Queue Claude Response Parsing.Valid JSON responses">
+                <results>
+                  <test-case description="Should parse standard response" name="Smart Queue Claude Response Parsing.Valid JSON responses.Should parse standard response" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle single focus area" name="Smart Queue Claude Response Parsing.Valid JSON responses.Should handle single focus area" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Smart Queue Claude Response Parsing.Invalid JSON responses" executed="True" result="Success" success="True" time="0.0448" asserts="0" description="Smart Queue Claude Response Parsing.Invalid JSON responses">
+                <results>
+                  <test-case description="Should fail on invalid JSON" name="Smart Queue Claude Response Parsing.Invalid JSON responses.Should fail on invalid JSON" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle markdown-wrapped JSON" name="Smart Queue Claude Response Parsing.Invalid JSON responses.Should handle markdown-wrapped JSON" time="0.0059" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\SprintCompletion.Tests.ps1" executed="True" result="Ignored" success="True" time="0.8642" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\SprintCompletion.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Same Focus Area - Continuous Iteration" executed="True" result="Success" success="True" time="0.0662" asserts="0" description="Same Focus Area - Continuous Iteration">
+            <results>
+              <test-suite type="TestFixture" name="Same Focus Area - Continuous Iteration.When sprint completes in same focus area" executed="True" result="Success" success="True" time="0.0623" asserts="0" description="Same Focus Area - Continuous Iteration.When sprint completes in same focus area">
+                <results>
+                  <test-case description="Should detect sprint is complete" name="Same Focus Area - Continuous Iteration.When sprint completes in same focus area.Should detect sprint is complete" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return ShouldGenerate=true for same focus area when complete" name="Same Focus Area - Continuous Iteration.When sprint completes in same focus area.Should return ShouldGenerate=true for same focus area when complete" time="0.0135" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should archive completed sprint before generating new" name="Same Focus Area - Continuous Iteration.When sprint completes in same focus area.Should archive completed sprint before generating new" time="0.0227" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should increment sprint number" name="Same Focus Area - Continuous Iteration.When sprint completes in same focus area.Should increment sprint number" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Incomplete Sprint - Same Focus Area" executed="True" result="Success" success="True" time="0.0944" asserts="0" description="Incomplete Sprint - Same Focus Area">
+            <results>
+              <test-suite type="TestFixture" name="Incomplete Sprint - Same Focus Area.When sprint is incomplete" executed="True" result="Success" success="True" time="0.0244" asserts="0" description="Incomplete Sprint - Same Focus Area.When sprint is incomplete">
+                <results>
+                  <test-case description="Should return ShouldGenerate=false to continue existing sprint" name="Incomplete Sprint - Same Focus Area.When sprint is incomplete.Should return ShouldGenerate=false to continue existing sprint" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should NOT archive incomplete sprint for same focus area" name="Incomplete Sprint - Same Focus Area.When sprint is incomplete.Should NOT archive incomplete sprint for same focus area" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Different Focus Area - Archive and Switch" executed="True" result="Success" success="True" time="0.1855" asserts="0" description="Different Focus Area - Archive and Switch">
+            <results>
+              <test-suite type="TestFixture" name="Different Focus Area - Archive and Switch.When switching to different focus area" executed="True" result="Success" success="True" time="0.0665" asserts="0" description="Different Focus Area - Archive and Switch.When switching to different focus area">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true for different focus area" name="Different Focus Area - Archive and Switch.When switching to different focus area.Should return ShouldGenerate=true for different focus area" time="0.0146" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should archive with reason 'superseded' when switching" name="Different Focus Area - Archive and Switch.When switching to different focus area.Should archive with reason 'superseded' when switching" time="0.0207" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should preserve story completion stats in archive" name="Different Focus Area - Archive and Switch.When switching to different focus area.Should preserve story completion stats in archive" time="0.027" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Different Focus Area - Archive and Switch.When switching from complete sprint" executed="True" result="Success" success="True" time="0.0874" asserts="0" description="Different Focus Area - Archive and Switch.When switching from complete sprint">
+                <results>
+                  <test-case description="Should generate new PRD for different focus area" name="Different Focus Area - Archive and Switch.When switching from complete sprint.Should generate new PRD for different focus area" time="0.0169" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="TrueAuto Mode - Infinite Iteration" executed="True" result="Success" success="True" time="0.2429" asserts="0" description="TrueAuto Mode - Infinite Iteration">
+            <results>
+              <test-suite type="TestFixture" name="TrueAuto Mode - Infinite Iteration.TrueAuto behavior on sprint complete" executed="True" result="Success" success="True" time="0.0535" asserts="0" description="TrueAuto Mode - Infinite Iteration.TrueAuto behavior on sprint complete">
+                <results>
+                  <test-case description="Should archive on sprint complete" name="TrueAuto Mode - Infinite Iteration.TrueAuto behavior on sprint complete.Should archive on sprint complete" time="0.0234" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should track iteration count in history" name="TrueAuto Mode - Infinite Iteration.TrueAuto behavior on sprint complete.Should track iteration count in history" time="0.0258" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Sprint History Accumulation" executed="True" result="Ignored" success="True" time="0.2591" asserts="0" description="Sprint History Accumulation">
+            <results>
+              <test-suite type="TestFixture" name="Sprint History Accumulation.Cumulative metrics" executed="True" result="Ignored" success="True" time="0.0123" asserts="0" description="Sprint History Accumulation.Cumulative metrics">
+                <results>
+                  <test-case description="Should accumulate across multiple sprints" name="Sprint History Accumulation.Cumulative metrics.Should accumulate across multiple sprints" time="0.0055" asserts="0" success="False" result="Ignored" executed="False" />
+                  <test-case description="Should track per-focus-area breakdown" name="Sprint History Accumulation.Cumulative metrics.Should track per-focus-area breakdown" time="0.0025" asserts="0" success="False" result="Ignored" executed="False" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Sprint Completion Edge Cases" executed="True" result="Success" success="True" time="0.3207" asserts="0" description="Sprint Completion Edge Cases">
+            <results>
+              <test-suite type="TestFixture" name="Sprint Completion Edge Cases.No PRD exists" executed="True" result="Success" success="True" time="0.0177" asserts="0" description="Sprint Completion Edge Cases.No PRD exists">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true" name="Sprint Completion Edge Cases.No PRD exists.Should return ShouldGenerate=true" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sprint Completion Edge Cases.PRD with no stories" executed="True" result="Success" success="True" time="0.0418" asserts="0" description="Sprint Completion Edge Cases.PRD with no stories">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true for empty PRD" name="Sprint Completion Edge Cases.PRD with no stories.Should return ShouldGenerate=true for empty PRD" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should NOT archive empty PRD" name="Sprint Completion Edge Cases.PRD with no stories.Should NOT archive empty PRD" time="0.0089" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sprint Completion Edge Cases.Corrupted PRD" executed="True" result="Success" success="True" time="0.0572" asserts="0" description="Sprint Completion Edge Cases.Corrupted PRD">
+                <results>
+                  <test-case description="Should return ShouldGenerate=true for corrupted PRD" name="Sprint Completion Edge Cases.Corrupted PRD.Should return ShouldGenerate=true for corrupted PRD" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Sync-QueueFromHistory" executed="True" result="Success" success="True" time="0.5278" asserts="0" description="Sync-QueueFromHistory">
+            <results>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When sprint history contains completed queued areas" executed="True" result="Success" success="True" time="0.0501" asserts="0" description="Sync-QueueFromHistory.When sprint history contains completed queued areas">
+                <results>
+                  <test-case description="Should mark queued area as completed if found in sprint history" name="Sync-QueueFromHistory.When sprint history contains completed queued areas.Should mark queued area as completed if found in sprint history" time="0.0321" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should not modify already-completed areas" name="Sync-QueueFromHistory.When sprint history contains completed queued areas.Should not modify already-completed areas" time="0.0136" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When sprint history has no matching areas" executed="True" result="Success" success="True" time="0.0728" asserts="0" description="Sync-QueueFromHistory.When sprint history has no matching areas">
+                <results>
+                  <test-case description="Should leave queue unchanged but add history areas" name="Sync-QueueFromHistory.When sprint history has no matching areas.Should leave queue unchanged but add history areas" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When history has areas not in queue" executed="True" result="Success" success="True" time="0.1037" asserts="0" description="Sync-QueueFromHistory.When history has areas not in queue">
+                <results>
+                  <test-case description="Should add missing areas from sprint history" name="Sync-QueueFromHistory.When history has areas not in queue.Should add missing areas from sprint history" time="0.0269" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When current PRD has untracked focus area" executed="True" result="Success" success="True" time="0.1266" asserts="0" description="Sync-QueueFromHistory.When current PRD has untracked focus area">
+                <results>
+                  <test-case description="Should add current PRD focus area as in-progress" name="Sync-QueueFromHistory.When current PRD has untracked focus area.Should add current PRD focus area as in-progress" time="0.0188" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When current PRD re-opens a completed area" executed="True" result="Success" success="True" time="0.17" asserts="0" description="Sync-QueueFromHistory.When current PRD re-opens a completed area">
+                <results>
+                  <test-case description="Should re-open completed area if PRD has incomplete stories" name="Sync-QueueFromHistory.When current PRD re-opens a completed area.Should re-open completed area if PRD has incomplete stories" time="0.0225" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should NOT re-open if all PRD stories are complete" name="Sync-QueueFromHistory.When current PRD re-opens a completed area.Should NOT re-open if all PRD stories are complete" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When no sprint history exists" executed="True" result="Success" success="True" time="0.1895" asserts="0" description="Sync-QueueFromHistory.When no sprint history exists">
+                <results>
+                  <test-case description="Should not crash and leave queue unchanged" name="Sync-QueueFromHistory.When no sprint history exists.Should not crash and leave queue unchanged" time="0.0135" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Sync-QueueFromHistory.When no queue exists" executed="True" result="Success" success="True" time="0.2031" asserts="0" description="Sync-QueueFromHistory.When no queue exists">
+                <results>
+                  <test-case description="Should not crash" name="Sync-QueueFromHistory.When no queue exists.Should not crash" time="0.0097" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Update-QueueProgress Auto-Add" executed="True" result="Success" success="True" time="0.5832" asserts="0" description="Update-QueueProgress Auto-Add">
+            <results>
+              <test-suite type="TestFixture" name="Update-QueueProgress Auto-Add.When completing an area not in queue" executed="True" result="Success" success="True" time="0.0249" asserts="0" description="Update-QueueProgress Auto-Add.When completing an area not in queue">
+                <results>
+                  <test-case description="Should add and mark new area as completed" name="Update-QueueProgress Auto-Add.When completing an area not in queue.Should add and mark new area as completed" time="0.0208" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Update-QueueProgress Auto-Add.When completing an area already in queue" executed="True" result="Success" success="True" time="0.0488" asserts="0" description="Update-QueueProgress Auto-Add.When completing an area already in queue">
+                <results>
+                  <test-case description="Should mark existing area as completed" name="Update-QueueProgress Auto-Add.When completing an area already in queue.Should mark existing area as completed" time="0.0195" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Watch.Tests.ps1" executed="True" result="Success" success="True" time="0.3561" asserts="0" description="D:\_Projects\voiceover-matcher-subtitle\scripts\ralph\tests\Watch.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Metrics CSV Parsing" executed="True" result="Success" success="True" time="0.0764" asserts="0" description="Metrics CSV Parsing">
+            <results>
+              <test-case description="parses valid CSV file" name="Metrics CSV Parsing.parses valid CSV file" time="0.0405" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates success rate correctly" name="Metrics CSV Parsing.calculates success rate correctly" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates total tokens correctly" name="Metrics CSV Parsing.calculates total tokens correctly" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="groups by focus area correctly" name="Metrics CSV Parsing.groups by focus area correctly" time="0.0135" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Anomaly Detection Logic" executed="True" result="Success" success="True" time="0.1209" asserts="0" description="Anomaly Detection Logic">
+            <results>
+              <test-case description="detects duration spike (3x+ average)" name="Anomaly Detection Logic.detects duration spike (3x+ average)" time="0.0074" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not flag normal duration variance" name="Anomaly Detection Logic.does not flag normal duration variance" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects high failure rate (4/5 recent)" name="Anomaly Detection Logic.detects high failure rate (4/5 recent)" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not flag normal failure rate" name="Anomaly Detection Logic.does not flag normal failure rate" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects cost spike (2x+ recent average)" name="Anomaly Detection Logic.detects cost spike (2x+ recent average)" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects timeout trend (3+ in last 10)" name="Anomaly Detection Logic.detects timeout trend (3+ in last 10)" time="0.0136" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="PRD Parsing" executed="True" result="Success" success="True" time="0.1529" asserts="0" description="PRD Parsing">
+            <results>
+              <test-case description="parses valid PRD file" name="PRD Parsing.parses valid PRD file" time="0.0123" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="counts passed stories correctly" name="PRD Parsing.counts passed stories correctly" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="identifies next incomplete story" name="PRD Parsing.identifies next incomplete story" time="0.0072" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Queue Parsing" executed="True" result="Success" success="True" time="0.1874" asserts="0" description="Queue Parsing">
+            <results>
+              <test-case description="parses interview format queue" name="Queue Parsing.parses interview format queue" time="0.0126" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates queue progress correctly" name="Queue Parsing.calculates queue progress correctly" time="0.007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="finds current focus area" name="Queue Parsing.finds current focus area" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Cost Calculations" executed="True" result="Success" success="True" time="0.207" asserts="0" description="Cost Calculations">
+            <results>
+              <test-case description="calculates estimated cost from tokens" name="Cost Calculations.calculates estimated cost from tokens" time="0.0064" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="calculates cost breakdown by focus area" name="Cost Calculations.calculates cost breakdown by focus area" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Phase Timing Display" executed="True" result="Success" success="True" time="0.2259" asserts="0" description="Phase Timing Display">
+            <results>
+              <test-case description="calculates phase percentages" name="Phase Timing Display.calculates phase percentages" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="converts milliseconds to seconds" name="Phase Timing Display.converts milliseconds to seconds" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Error Evolution Display" executed="True" result="Success" success="True" time="0.242" asserts="0" description="Error Evolution Display">
+            <results>
+              <test-case description="groups errors by category" name="Error Evolution Display.groups errors by category" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Timeline Display" executed="True" result="Success" success="True" time="0.2682" asserts="0" description="Timeline Display">
+            <results>
+              <test-case description="parses timeline events" name="Timeline Display.parses timeline events" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="gets last N events" name="Timeline Display.gets last N events" time="0.011" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Color Selection Logic" executed="True" result="Success" success="True" time="0.3079" asserts="0" description="Color Selection Logic">
+            <results>
+              <test-case description="selects green for high success rate" name="Color Selection Logic.selects green for high success rate" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="selects yellow for medium success rate" name="Color Selection Logic.selects yellow for medium success rate" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="selects red for low success rate" name="Color Selection Logic.selects red for low success rate" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="selects correct color for cost thresholds" name="Color Selection Logic.selects correct color for cost thresholds" time="0.0086" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

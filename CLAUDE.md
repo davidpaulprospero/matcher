@@ -747,7 +747,7 @@ Documented shortcomings encountered and how they were resolved:
 | Vague prompt in queue mode | "Focus on quality" gave Claude no direction | Added optional work description prompt after area selection |
 | Interview context not actionable | `details = "Direct queue: quality, agents..."` | Changed to user-provided description or sensible default |
 | Queue didn't advance to next area | `Get-NextQueuedFocusArea` returned empty despite valid queue.json | Replaced function calls with inline queue file reading in `Start-StandardLoop` |
-| Ralph's Choice didn't update queue | Queue stayed stale after Choice/ChoiceAuto sprints | Added `Update-QueueProgress` to both Choice loops after sprint completion |
+| Ralph's Choice didn't update queue | Queue stale: scored areas (e.g., "testing") not in queue, so `Update-QueueProgress` found no match | `Sync-QueueFromHistory` on loop start reconciles queue with sprint history + PRD; `Update-QueueProgress` auto-adds untracked areas |
 | Metrics CSV "Stream was not readable" | `Add-Content` fails after timeout on Windows | Added `-Encoding UTF8` + try/catch retry in `Record-Metric` |
 
 ### Pipeline
@@ -791,11 +791,11 @@ Documented shortcomings encountered and how they were resolved:
 
 | Date | Changes |
 |------|---------|
+| 2026-01-28 | Fix: Ralph's Choice queue auto-sync — `Sync-QueueFromHistory` reconciles queue with sprint history + current PRD on loop start; `Update-QueueProgress` auto-adds scored areas not in queue |
 | 2026-01-28 | Feat: Ralph Loop self-healing — tiered health checks (T1/T2/T3), healing.ps1 module, sprint freeze/resume, JSONL audit log, sprint report integration |
 | 2026-01-28 | Fix: Ralph's Choice loops now update queue.json on sprint completion; metrics.csv encoding fix |
 | 2026-01-28 | CLAUDE.md: Added Ralph's Choice modes, lib/ module structure to Ralph Loop section |
 | 2026-01-27 | Fix: SABR anti-stall strategy — resume-on-retry, stall detector, socket-timeout 10, max_retries 6, removed --no-continue/--quiet/--no-warnings/--concurrent-fragments |
 | 2026-01-27 | Fix: charmap encoding crash — added `encoding='utf-8', errors='replace'` to 15 subprocess call sites + info.json reading |
-| 2026-01-27 | Fix: Added `--ignore-config` to all 13 yt-dlp call sites to prevent user config conflicts |
 
 *Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
