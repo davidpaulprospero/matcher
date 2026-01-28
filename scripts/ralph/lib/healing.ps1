@@ -695,3 +695,49 @@ function Invoke-PostIterationHealing {
 
     return $result
 }
+
+function Get-HealingSummary {
+    <#
+    .SYNOPSIS
+        Summarize healing activity for sprint reports.
+    #>
+    $logPath = if ($script:HealingLogFile) { $script:HealingLogFile }
+               else { Join-Path $script:RalphDir "healing_log.jsonl" }
+
+    $summary = @{
+        TotalHealingSessions = 0
+        TotalResolved        = 0
+        TotalFailed          = 0
+        TotalAttempts        = 0
+        TierBreakdown        = @{ 1 = 0; 2 = 0; 3 = 0 }
+        Events               = @()
+    }
+
+    if (-not (Test-Path $logPath)) { return $summary }
+
+    $lines = Get-Content $logPath
+    foreach ($line in $lines) {
+        try {
+            $entry = $line | ConvertFrom-Json
+            $summary.Events += $entry
+
+            switch ($entry.event) {
+                "healing_started" {
+                    $summary.TotalHealingSessions++
+                    $tier = if ($entry.data.failedTier) { [int]$entry.data.failedTier } else { 0 }
+                    if ($tier -ge 1 -and $tier -le 3) { $summary.TierBreakdown[$tier]++ }
+                }
+                "healing_resolved" {
+                    $summary.TotalResolved++
+                    if ($entry.data.attempts) { $summary.TotalAttempts += $entry.data.attempts }
+                }
+                "healing_failed" {
+                    $summary.TotalFailed++
+                    if ($entry.data.attempts) { $summary.TotalAttempts += $entry.data.attempts }
+                }
+            }
+        } catch {}
+    }
+
+    return $summary
+}
