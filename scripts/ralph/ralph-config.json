@@ -180,6 +180,16 @@
         "blockOnRegression": true,
         "autoRollback": false
     },
+    "selfHealing": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "runAfterSuccess": true,
+        "runAfterFailure": true,
+        "healingTimeout": 300,
+        "fullRunCadence": 3,
+        "pytestArgs": "tests/ --tb=short -q --no-header",
+        "criticalFiles": ["main.py", "src/__init__.py", "config.yaml", "src/config.py", "src/pipeline.py"]
+    },
     "budget": {
         "enabled": false,
         "maxTokensPerSprint": 500000,
