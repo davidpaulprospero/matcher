@@ -37,6 +37,8 @@ $script:LogDir = Join-Path $script:RalphDir "logs"
 $script:ArchiveDir = Join-Path $script:RalphDir "archive"
 $script:SprintHistoryFile = Join-Path $script:RalphDir "sprint_history.json"
 $script:ExplorationContextFile = Join-Path $script:RalphDir "exploration_context.md"
+$script:HealingLogFile = Join-Path $script:RalphDir "healing_log.jsonl"
+$script:HealingStateFile = Join-Path $script:RalphDir "healing_state.json"
 
 # Mutable session state (consolidated hashtable)
 $script:State = @{
@@ -76,6 +78,7 @@ $script:LibPath = Join-Path $PSScriptRoot 'lib'
 . "$script:LibPath\queue.ps1"
 . "$script:LibPath\metrics.ps1"
 . "$script:LibPath\quality.ps1"
+. "$script:LibPath\healing.ps1"
 . "$script:LibPath\prompts.ps1"
 . "$script:LibPath\claude.ps1"
 . "$script:LibPath\display.ps1"

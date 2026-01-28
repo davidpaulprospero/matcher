@@ -445,6 +445,29 @@ function Resolve-ClaudeResult {
         $script:State.ConsecutiveFailures++
     }
 
+    # === POST-ITERATION HEALING ===
+    # After any story iteration, run tiered health check and heal if needed
+    if ($Ctx.IsStoryWork) {
+        $changedFiles = @()
+        if ($Ctx.FileOps) {
+            $changedFiles += @($Ctx.FileOps.filesCreated | ForEach-Object { $_.path })
+            $changedFiles += @($Ctx.FileOps.filesModified | ForEach-Object { $_.path })
+            $changedFiles = @($changedFiles | Where-Object { $_ })
+        }
+
+        $healResult = Invoke-PostIterationHealing `
+            -StoryId $Ctx.StoryId `
+            -FocusArea $Ctx.FocusAreaId `
+            -ChangedFiles $changedFiles `
+            -IterationSuccess $success
+
+        if ($healResult.HealingNeeded -and -not $healResult.HealingSuccess) {
+            $success = $false
+            $iterationStatus = "healing_failed"
+            Write-Host "  Sprint aborted: Tier $($healResult.FailedTier) errors could not be healed" -ForegroundColor Red
+        }
+    }
+
     return @{
         Success         = $success
         IterationStatus = $iterationStatus
