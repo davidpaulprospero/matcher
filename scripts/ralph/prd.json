@@ -1,157 +1,157 @@
 {
-    "branchName": "ralph/sprint-24",
-    "sprintNumber": 24,
+    "branchName": "ralph/sprint-25",
+    "sprintNumber": 25,
     "focusArea": "testing",
-    "projectContext": "Sprint 24 continues test infrastructure improvements after Sprint 23 completed research client tests, compilation builder tests, marker audits, and subdirectory fixtures. This sprint focuses on documentation gaps (4 test subdirectories lack README files), parameterized test expansion (only 26 files use @parametrize), flaky test infrastructure, benchmark CI integration, test helper utilities, and coverage reporting improvements. Target: complete test infrastructure maturity before transitioning to other focus areas.",
+    "projectContext": "Sprint 25 continues test infrastructure maturity after Sprint 24 completed subdirectory READMEs, flaky test infrastructure, benchmark CI config, test helpers module, and coverage scripts. This sprint focuses on: (1) helpers/fixtures README documentation, (2) expanding parametrize usage to 50+ new cases, (3) marking 200+ network-dependent tests as flaky, (4) adding agent healer assertion helpers, (5) enabling benchmark CI regression detection, (6) consolidating duplicate test patterns, and (7) improving marker coverage from 25% to 50%.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add README.md documentation for test_agents subdirectory",
+            "title": "Add README.md documentation for tests/helpers module",
             "priority": 1,
             "passes": true,
-            "notes": "Created comprehensive README.md with: healer-specific testing patterns, MockHealingContext fixture usage examples, agent_factory fixture documentation, all 16 test files listed with descriptions, healing strategy comparison table (aggressive/conservative/interactive/minimal), and mocking pipeline stages guidance.",
+            "notes": "Created comprehensive README.md with overview table, quick import section, detailed documentation for all 4 main helpers (assert_valid_otio_timeline, assert_valid_match_result, assert_checkpoint_consistent, assert_config_valid), utility assertions (assert_file_exists, assert_dir_exists, assert_json_structure), Rule 25 compliance notes, and best practices section.",
             "acceptanceCriteria": [
-                "Create tests/test_agents/README.md with healer-specific testing patterns",
-                "Document MockHealingContext fixture usage with examples",
-                "Document agent_factory fixture with create_healer/create_orchestrator methods",
-                "List all 16 test files with brief descriptions of what each tests",
-                "Include guidance on testing different healing strategies (aggressive, conservative, minimal)",
-                "Add section on mocking pipeline stages for isolated healer tests"
+                "Create tests/helpers/README.md with overview of assertion helpers",
+                "Document assert_valid_otio_timeline() with parameters and usage examples",
+                "Document assert_valid_match_result() with min_confidence and field validation details",
+                "Document assert_checkpoint_consistent() with Rule 25 compliance notes",
+                "Document assert_config_valid() with constraint validation examples",
+                "Add import statement examples and best practices for using helpers across test files"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add README.md documentation for test_chapter_detection subdirectory",
+            "title": "Add README.md documentation for tests/fixtures module",
             "priority": 2,
-            "passes": true,
-            "notes": "Created comprehensive README.md with: chapter detection testing patterns, all 5 conftest.py fixtures documented (mock_config, sample_segments, single_topic_segments, mock_llm_client, mock_llm_response_two_chapters), all 7 test files listed with descriptions, pipeline passes table, testing chapter boundary detection examples, chunking strategies documentation (6 test classes covered), and transcript-to-chapter validation section with boundary/title/merge/missed chapter testing patterns.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create tests/test_chapter_detection/README.md with chapter detection testing patterns",
-                "Document conftest.py fixtures and their purpose",
-                "List all test files (chunking, coverage, detector, initial, models, refinement, validation)",
-                "Include examples of testing chapter boundary detection",
-                "Document how to test chunking strategies",
-                "Add section on testing transcript-to-chapter validation"
+                "Create tests/fixtures/README.md documenting factory fixtures",
+                "Document srt_segment_factory() with parameter options and examples",
+                "Document config_factory() with section override patterns",
+                "Document pipeline_state_factory() with pre-populated data examples",
+                "Document match_result_factory() with alternatives generation",
+                "Document create_checkpoint_with_populated_stages() for --output-only mode testing"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add README.md documentation for test_keyword_extractor subdirectory",
+            "title": "Expand parametrized tests for matching strategy validation",
             "priority": 3,
-            "passes": true,
-            "notes": "Created comprehensive README.md with: keyword extraction testing patterns, all 9 test files documented with purposes, LLM mocking examples at three levels (client creation, _call_llm method, generate response), priority scoring factors table, validator rules documentation with ABSTRACT_PATTERNS/VISUAL_INDICATORS constants, segment processor batch testing patterns, SRT file testing with temporary files, mock_config fixture documentation. Also fixed test_core.py mock_config to include max_keyword_words for visual keyword validation.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create tests/test_keyword_extractor/README.md with keyword extraction testing patterns",
-                "Document test_core.py, test_entity_extractor.py, test_models.py test purposes",
-                "Include examples of testing LLM keyword extraction mocking",
-                "Document test_prioritizer.py and scoring algorithm testing",
-                "Add guidance on testing validator rules",
-                "Include section on testing segment_processor edge cases"
+                "Add @pytest.mark.parametrize to test_match_stage.py for provider combinations (embedding, llm, hybrid)",
+                "Add parametrized tests for confidence threshold boundary values (0.0, 0.5, 0.75, 1.0)",
+                "Add parametrized tests for match_count variations (1, 3, 5, 10 alternatives)",
+                "Add parametrized tests for strategy fallback scenarios",
+                "Ensure at least 15 new parametrized test cases added to matching tests",
+                "Verify all parametrized tests pass with pytest -v tests/test_match*.py"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add README.md documentation for test_llm_client subdirectory",
+            "title": "Expand parametrized tests for healer scenarios",
             "priority": 4,
-            "passes": true,
-            "notes": "Created comprehensive README.md with: 6 test files documented, conftest.py fixtures (temp_dir, mock_api_key, sample_json_response, cleanup_env_vars), LLM mocking at 3 levels (client creation, _call_api, patch), API rate limiting and retry testing patterns with exponential backoff, JSON validation/parsing from test_parsers.py (no test_validator.py exists in this subdir), provider selection testing (Gemini/Anthropic/Ollama with aliases), streaming vs non-streaming section explaining design choice, cache testing patterns.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create tests/test_llm_client/README.md with LLM client testing patterns",
-                "Document conftest.py fixtures for mocking LLM responses",
-                "Include examples of testing API rate limiting and retry logic",
-                "Document validator testing patterns from test_validator.py",
-                "Add guidance on testing provider selection (Gemini, Anthropic, Ollama)",
-                "Include section on testing streaming vs non-streaming responses"
+                "Add @pytest.mark.parametrize to test_agents/ for error type variations",
+                "Add parametrized tests for healing strategy matrix (aggressive, conservative, interactive, minimal)",
+                "Add parametrized tests for retry count boundaries (1, 2, 3, max_attempts)",
+                "Add parametrized tests for healer selection based on error patterns",
+                "Ensure at least 20 new parametrized test cases added to agent tests",
+                "Verify all parametrized tests pass with pytest -v tests/test_agents/"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add flaky test detection and retry infrastructure",
+            "title": "Mark network-dependent tests with flaky decorator",
             "priority": 5,
-            "passes": true,
-            "notes": "Added pytest-rerunfailures>=15.0 to requirements-dev.txt. Configured pytest.ini with @pytest.mark.flaky marker. Created tests/test_flaky_detection.py with 8 pattern demonstrations: basic, platform-conditional, network-dependent, timing-sensitive, resource contention, CI-aware, infrastructure validation, and documentation pattern. Updated tests/README.md with comprehensive flaky test guidelines covering when to use, how to identify, document, and debug flaky tests.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Add pytest-rerunfailures to requirements-dev.txt",
-                "Configure pytest.ini with default reruns=2 for tests marked flaky",
-                "Add @pytest.mark.flaky marker definition to pytest.ini",
-                "Create tests/test_flaky_detection.py demonstrating retry pattern",
-                "Update tests/README.md with flaky test handling guidelines",
-                "Document how to identify and mark flaky tests appropriately"
+                "Add @pytest.mark.flaky(reruns=2) to tests in test_caption_fetcher.py",
+                "Add @pytest.mark.flaky to tests in test_media_sources_*.py files",
+                "Add @pytest.mark.flaky to tests in test_downloader/ that make network calls",
+                "Add @pytest.mark.flaky to benchmark tests that require network",
+                "Document flaky test patterns in tests/README.md network section",
+                "Verify marked tests can be filtered with pytest -m 'not flaky' for fast CI"
             ]
         },
         {
             "id": "US-006",
-            "title": "Expand parameterized tests for config validation edge cases",
+            "title": "Add agent healer assertion helpers to tests/helpers",
             "priority": 6,
-            "passes": true,
-            "notes": "Added 76 parametrized test cases (19 @pytest.mark.parametrize decorators) across 10 new test classes: TestMatchingConfigProviderParametrized (primary/secondary providers, invalid detection), TestLLMConfigProviderParametrized (env key loading, valid providers, default models), TestEmbeddingProviderParametrized (valid/invalid providers), TestHealingStrategyParametrized (4 strategies), TestBoundaryValuesParametrized (confidence thresholds, embedding_candidates, scene threshold, temperature, min_scene_len), TestLocationMatchingLevelParametrized (4 levels, invalid detection), TestChapterDetectionStrategyParametrized (2 strategies), TestSceneDetectionPresetParametrized (3 presets), TestVisionProviderParametrized (2 providers). All 132 tests pass in 0.73s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Add @pytest.mark.parametrize to test_config_section_validation.py for enum values",
-                "Add parametrized tests for all MatchingConfig.provider valid values",
-                "Add parametrized tests for LLMConfig.provider valid values",
-                "Add parametrized tests for boundary values (min/max thresholds)",
-                "Ensure at least 10 new parametrized test cases added",
-                "Verify all parametrized tests pass with pytest -v"
+                "Add assert_healer_attempt_logged(context, healer_name, attempt_num) helper",
+                "Add assert_healing_strategy_applied(context, strategy_name) helper",
+                "Add assert_recovery_metrics_valid(metrics, expected_attempts, expected_success) helper",
+                "Add assert_healer_chain_executed(context, expected_healers) helper for multi-healer scenarios",
+                "Add usage examples to tests/helpers/README.md",
+                "Add tests for the new helpers in tests/test_helpers.py"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add test helper module for common assertion patterns",
+            "title": "Enable benchmark regression detection in CI workflow",
             "priority": 7,
-            "passes": true,
-            "notes": "Created tests/helpers/__init__.py with 4 main assertion helpers: assert_valid_otio_timeline() validates timeline structure/tracks/clips/limits, assert_valid_match_result() validates match dicts with confidence/timing/strategy checks, assert_checkpoint_consistent() validates checkpoint structure for Rule 25 --output-only mode, assert_config_valid() validates Config object with constraints. Added utility assertions: assert_file_exists, assert_dir_exists, assert_json_structure. All 36 tests pass. Updated tests/README.md with comprehensive documentation including usage examples and best practices.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create tests/helpers/__init__.py with reusable assertion helpers",
-                "Add assert_valid_otio_timeline(timeline) helper validating OTIO structure",
-                "Add assert_valid_match_result(result, min_confidence) helper",
-                "Add assert_checkpoint_consistent(checkpoint) helper for checkpoint validation",
-                "Add assert_config_valid(config) helper for full config validation",
-                "Update tests/README.md documenting the helpers module usage"
+                "Create .github/workflows/benchmarks.yml for scheduled benchmark runs",
+                "Configure benchmark job to run on schedule (weekly) and on benchmark file changes",
+                "Add baseline comparison using scripts/benchmark_runner.py --compare-baseline",
+                "Configure 20% threshold for regression warnings in workflow",
+                "Add benchmark result artifact upload for historical tracking",
+                "Document benchmark CI workflow in tests/benchmarks/README.md"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add benchmark CI workflow configuration",
+            "title": "Add bulk marker assignment for unmarked unit tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Updated tests/benchmarks/README.md with comprehensive CI benchmark guidelines including: DO/DON'T guidance, GitHub Actions workflow example, benchmark runner usage, baseline JSON structure, comparison/alerting with threshold table, baseline update workflow. Created scripts/benchmark_runner.py with: suite selection, JSON output, baseline comparison with configurable threshold, save-baseline flag, min-rounds config, warmup toggle. Fixed Windows encoding issue (using ASCII symbols instead of Unicode). All benchmarks execute and compare correctly.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Update tests/benchmarks/README.md with CI benchmark guidelines",
-                "Add performance baseline tracking approach documentation",
-                "Create scripts/benchmark_runner.py for CI benchmark execution",
-                "Add benchmark result comparison to baseline with 20% threshold warning",
-                "Document how to update baselines when intentional changes occur",
-                "Add --benchmark flag documentation to pytest configuration"
+                "Create scripts/assign_test_markers.py to add markers based on categorize_tests.py output",
+                "Implement --dry-run mode showing proposed marker additions",
+                "Implement --apply mode that modifies test files with markers",
+                "Target: mark 200+ pure unit tests with @pytest.mark.fast",
+                "Target: mark 50+ tests with I/O patterns with @pytest.mark.integration",
+                "Add safeguard to skip files already having explicit markers"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add test categorization script for unmarked tests",
+            "title": "Consolidate duplicate test patterns in download tests",
             "priority": 9,
-            "passes": true,
-            "notes": "Created scripts/categorize_tests.py with: AST-based test analysis (11,544 tests found), I/O pattern detection (requests, subprocess, tempfile, API keys, time.sleep), marker distribution report showing 216 fast/25 integration/8 flaky/11,143 unmarked, CSV output with test_file/test_name/line_number/suggested_marker/reason columns, --auto-suggest mode grouping recommendations by marker type, --json output for CI integration, --path flag for subdirectory analysis. Updated tests/README.md with comprehensive CI Optimization section including quick usage, understanding output, CSV format, CI workflow example, and best practices.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create scripts/categorize_tests.py to analyze test marker distribution",
-                "Generate report of tests by marker (fast, integration, unmarked)",
-                "Identify tests that should have markers based on I/O patterns (open, requests, subprocess)",
-                "Output CSV with test_file, test_name, suggested_marker, reason",
-                "Add --auto-suggest mode that outputs recommended marker additions",
-                "Document usage in tests/README.md CI optimization section"
+                "Identify duplicate mock patterns in test_downloader/ files",
+                "Create tests/fixtures/downloader_fixtures.py with shared mock factories",
+                "Extract common assertion patterns to tests/helpers/__init__.py",
+                "Refactor at least 5 test files to use shared fixtures",
+                "Reduce total line count in test_downloader/ by at least 15%",
+                "Verify all refactored tests pass with pytest -v tests/test_downloader/"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add coverage report per-module breakdown script",
+            "title": "Add integration test runner with isolated environment",
             "priority": 10,
-            "passes": true,
-            "notes": "Created scripts/coverage_by_module.py (380+ lines) with: per-module coverage parsing from coverage.xml, critical module highlighting (matching, agents, compilation, stages), 85% target + 80% minimum thresholds, text and JSON output modes, --verbose flag for all modules, --compare-baseline for regression detection with configurable threshold, --save-baseline for creating baselines, --fail-on-regression and --fail-under for CI exit codes. Updated tests/README.md with comprehensive Per-Module Coverage Breakdown section including quick usage, report output example, critical modules table, JSON format docs, CI integration workflow, and baseline update instructions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create scripts/coverage_by_module.py to generate per-module coverage breakdown",
-                "Report coverage for critical modules: matching, agents, compilation, stages",
-                "Highlight modules below 85% target with warning",
-                "Generate JSON output for CI integration",
-                "Add --compare-baseline mode to detect coverage regressions",
-                "Document usage in tests/README.md coverage section"
+                "Create scripts/run_integration_tests.py for isolated test execution",
+                "Configure temporary directory setup for integration tests",
+                "Add cleanup of test artifacts after completion",
+                "Support --parallel flag for concurrent integration test runs",
+                "Add timeout protection (5 minutes per test by default)",
+                "Document integration test workflow in tests/README.md"
             ]
         }
     ]
