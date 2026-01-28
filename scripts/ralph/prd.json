@@ -38,8 +38,8 @@
             "id": "US-003",
             "title": "Expand parametrized tests for matching strategy validation",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 138 new parametrized test cases (far exceeding the 15 minimum) across test_stage_match.py and test_matching_strategies.py. Coverage includes: (1) Provider combinations - gemini, anthropic, ollama, embedding_only, hybrid, invalid_provider; (2) Confidence thresholds - 0.0, 0.25, 0.5, 0.75, 1.0 boundaries; (3) Match count variations - num_alternatives 0-10, candidate pools 10-100, max_clip_reuse 1-10; (4) Strategy fallbacks - visual_first, broll_only, embedding_diversity with data availability matrices; (5) Additional test classes: TestParametrizedVisualFirst, TestParametrizedDifferentSource, TestParametrizedKeywordOnly, TestParametrizedEmbeddingDiversity, TestParametrizedBrollOnly, TestParametrizedSourceRotation, TestParametrizedVarietyEnforcement, TestParametrizedStrategyFallbacks.",
             "acceptanceCriteria": [
                 "Add @pytest.mark.parametrize to test_match_stage.py for provider combinations (embedding, llm, hybrid)",
                 "Add parametrized tests for confidence threshold boundary values (0.0, 0.5, 0.75, 1.0)",

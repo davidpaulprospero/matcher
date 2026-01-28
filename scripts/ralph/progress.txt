@@ -7626,3 +7626,36 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/fixtures/README.md (538 lines)
 - Commit: 43b94e1
 
+
+## Iteration - [US-003] Expand parametrized tests for matching strategy validation
+- Added 138 new parametrized test cases to matching tests (requirement: 15 minimum)
+- Modified files: tests/test_stage_match.py (+~350 lines), tests/test_matching_strategies.py (+~360 lines)
+
+**New Test Classes in test_stage_match.py:**
+- TestProviderCombinations: Provider initialization, fallback scenarios, strategy types
+- TestConfidenceThresholdBoundaries: min_confidence values, skip_llm thresholds, value validation
+- TestMatchCountVariations: num_alternatives, candidate pool sizes, clip reuse settings
+- TestStrategyFallbackScenarios: Fallback conditions, chains, source availability, exhaustion
+- TestParametrizedEdgeCases: Varying segment counts, video distributions, reuse penalties
+
+**New Test Classes in test_matching_strategies.py:**
+- TestParametrizedStrategyMatching: Strategy name validation, confidence filtering, alternatives limits
+- TestParametrizedVisualFirst: Data combination matrices (scene/keywords availability)
+- TestParametrizedDifferentSource: Used/candidate source selection logic
+- TestParametrizedKeywordOnly: Keyword overlap calculation
+- TestParametrizedEmbeddingDiversity: Cosine distance diversity calculation
+- TestParametrizedBrollOnly: B-roll filtering by is_broll flag
+- TestParametrizedSourceRotation: Source index rotation with modulo
+- TestParametrizedVarietyEnforcement: Time distance, embedding distance exclusion
+- TestParametrizedStrategyFallbacks: Fallback conditions, chain results
+
+**Acceptance Criteria Verification:**
+- AC1: @pytest.mark.parametrize added for provider combinations (gemini, anthropic, ollama, embedding_only, hybrid)
+- AC2: Confidence threshold tests for 0.0, 0.25, 0.5, 0.75, 1.0 boundaries
+- AC3: Match count variations 0, 1, 2, 3, 5, 10 alternatives tested
+- AC4: Strategy fallback scenarios fully covered (visual_first, broll_only, embedding_diversity)
+- AC5: 138 new parametrized test cases added (9x the 15 minimum requirement)
+- AC6: All 233 tests pass with pytest -v tests/test_match*.py tests/test_matching_strategies.py
+
+- Tests passed: 233/233
+- Commit: 74b25ab
