@@ -156,9 +156,50 @@ class CookieRotator:
         """Get count of cookies not in cooldown."""
         return sum(1 for cf in self._cookie_files if self.is_available(cf))
 
+    def _is_cookie_file_valid(self, cookie_path: str) -> bool:
+        """
+        Check if a cookie file still exists and is non-empty.
+
+        Used for mid-session validation to detect files deleted or
+        truncated after initial startup validation.
+
+        Args:
+            cookie_path: Path to cookie file
+
+        Returns:
+            True if file exists and has content, False otherwise
+        """
+        path = Path(cookie_path)
+        if not path.exists():
+            return False
+        if not path.is_file():
+            return False
+        try:
+            return path.stat().st_size > 0
+        except OSError:
+            return False
+
+    def _remove_invalid_cookie(self, cookie_path: str, reason: str) -> None:
+        """
+        Remove a cookie file from the active list after mid-session invalidation.
+
+        Args:
+            cookie_path: Path to the invalid cookie file
+            reason: Reason for removal (for logging)
+        """
+        if cookie_path in self._cookie_files:
+            self._cookie_files.remove(cookie_path)
+            self._invalid_cookies[cookie_path] = reason
+            logger.warning(f"Cookie file invalidated mid-session: {cookie_path} ({reason})")
+            # Adjust current index if needed
+            if self._current_index >= len(self._cookie_files):
+                self._current_index = 0
+
     def get_current_cookie(self) -> Optional[str]:
         """
         Get the current active cookie file path.
+
+        Performs mid-session validation to detect deleted or empty cookie files.
 
         Returns:
             Path to current cookie file, or None if no valid cookies
@@ -172,6 +213,13 @@ class CookieRotator:
 
         current = self._cookie_files[self._current_index]
 
+        # Mid-session validation: check if file still exists and is non-empty
+        if not self._is_cookie_file_valid(current):
+            reason = "deleted" if not Path(current).exists() else "empty file"
+            self._remove_invalid_cookie(current, reason)
+            # Try to find another valid cookie
+            return self._find_valid_cookie()
+
         # If current cookie is in cooldown, try to find an available one
         if not self.is_available(current):
             available = self._find_available_cookie()
@@ -182,6 +230,32 @@ class CookieRotator:
             logger.warning("All cookies in cooldown, using current cookie anyway")
 
         return current
+
+    def _find_valid_cookie(self) -> Optional[str]:
+        """Find the first cookie that still exists, is non-empty, and not in cooldown."""
+        # Remove any invalidated cookies first
+        to_remove = []
+        for cookie_path in self._cookie_files:
+            if not self._is_cookie_file_valid(cookie_path):
+                reason = "deleted" if not Path(cookie_path).exists() else "empty file"
+                to_remove.append((cookie_path, reason))
+
+        for cookie_path, reason in to_remove:
+            self._remove_invalid_cookie(cookie_path, reason)
+
+        if not self._cookie_files:
+            logger.warning("All cookie files deleted or empty — no cookies available")
+            return None
+
+        # Find available (not in cooldown)
+        available = self._find_available_cookie()
+        if available:
+            self._current_index = self._cookie_files.index(available)
+            return available
+
+        # All valid cookies in cooldown — return first valid anyway
+        self._current_index = 0
+        return self._cookie_files[0]
 
     def _find_available_cookie(self) -> Optional[str]:
         """Find the first cookie not in cooldown."""
@@ -295,12 +369,24 @@ class CookieRotator:
 
     def _select_round_robin(self) -> Optional[str]:
         """Select next available cookie in sequence."""
+        if not self._cookie_files:
+            return None
+
         start_index = self._current_index
         tried = 0
 
         while tried < len(self._cookie_files):
             self._current_index = (self._current_index + 1) % len(self._cookie_files)
             candidate = self._cookie_files[self._current_index]
+
+            # Mid-session validation: skip deleted/empty files
+            if not self._is_cookie_file_valid(candidate):
+                reason = "deleted" if not Path(candidate).exists() else "empty file"
+                self._remove_invalid_cookie(candidate, reason)
+                if not self._cookie_files:
+                    return None
+                # Adjust tried count since list shrank
+                continue
 
             if self.is_available(candidate):
                 return candidate
@@ -313,6 +399,15 @@ class CookieRotator:
 
     def _select_random(self) -> Optional[str]:
         """Select a random available cookie."""
+        # Mid-session validation: filter out deleted/empty files
+        to_remove = []
+        for cf in self._cookie_files:
+            if not self._is_cookie_file_valid(cf):
+                reason = "deleted" if not Path(cf).exists() else "empty file"
+                to_remove.append((cf, reason))
+        for cf, reason in to_remove:
+            self._remove_invalid_cookie(cf, reason)
+
         available = [cf for cf in self._cookie_files if self.is_available(cf)]
 
         if not available:

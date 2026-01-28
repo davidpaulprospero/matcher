@@ -1,4 +1,20 @@
 
+## Iteration US-007 (Sprint 14) - Add cookie rotator mid-session file validation tests
+- Added mid-session file validation to CookieRotator in src/downloader/cookie_rotator.py
+  - _is_cookie_file_valid(): checks existence + non-empty size
+  - _remove_invalid_cookie(): removes from active list, tracks in _invalid_cookies
+  - _find_valid_cookie(): validates all cookies, finds first available
+  - Integrated into get_current_cookie(), _select_round_robin(), _select_random()
+- Added TestMidSessionFileValidation class with 10 tests in tests/test_cookie_rotation.py:
+  - AC1: rotate() with deleted cookie falls back to next available (no FileNotFoundError)
+  - AC2: rotate() with empty cookie skips to next, tracks as invalid
+  - AC3: rotate() with all cookies deleted returns None + logs warning
+  - AC4: Single cookie round-robin returns same file, no infinite loop
+  - AC5: get_current_cookie() returns fallback (not deleted path) after deletion
+  - Plus: all-deleted returns None, invalid tracking, chain skip, unit test, status reflection
+- Files modified: src/downloader/cookie_rotator.py, tests/test_cookie_rotation.py, scripts/ralph/prd.json
+- Test results: 38 passed (1 skipped on Windows), 93 related cookie tests pass, 0 regressions
+
 ## Iteration US-006 (Sprint 14) - Add parallel download escalation coordination tests
 - Created tests/test_parallel_download_escalation.py with 17 tests across 5 classes
 - AC1: TestConcurrentKeywordIndependentTiers — 3 tests verifying keyword A escalates to Tier 2 while B stays Tier 1, 10 keywords concurrent independence, full escalation no leak

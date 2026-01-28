@@ -92,7 +92,8 @@
             "id": "US-007",
             "title": "Add cookie rotator mid-session file validation tests",
             "priority": 7,
-            "passes": false,
+            "passes": true,
+            "notes": "Added mid-session file validation to CookieRotator (_is_cookie_file_valid, _remove_invalid_cookie, _find_valid_cookie methods) and integrated into get_current_cookie(), _select_round_robin(), _select_random(). Added TestMidSessionFileValidation class with 10 tests in tests/test_cookie_rotation.py: AC1 - rotate() with deleted cookie falls back gracefully; AC2 - rotate() with empty cookie skips to next; AC3 - rotate() with all deleted returns None + logs warning; AC4 - single cookie round-robin no infinite loop; AC5 - get_current_cookie() returns None/fallback after deletion; plus 5 additional coverage tests (all-deleted returns None, invalid tracking, chain skip, _is_cookie_file_valid unit test, status reflection). All 38 cookie_rotation tests pass (1 skipped on Windows), all 93 related cookie tests pass.",
             "acceptanceCriteria": [
                 "Test rotate() when current cookie file is deleted mid-session — verify graceful fallback to next available cookie (no FileNotFoundError crash)",
                 "Test rotate() when cookie file becomes empty (0 bytes) mid-session — verify it skips to next cookie instead of using empty file",
