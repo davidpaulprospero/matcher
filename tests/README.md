@@ -34,6 +34,7 @@ The following pytest markers are defined in `pytest.ini`:
 | `simulation` | Healing simulation tests | PR merge |
 | `requires_api` | Tests requiring API keys (Gemini, etc.) | When keys available |
 | `requires_network` | Tests making HTTP requests | When online |
+| `flaky` | Intermittent failures (timing, network, race conditions) | Auto-retried 2x |
 
 ### Marker Statistics (Sprint 23)
 
@@ -84,6 +85,9 @@ pytest -m "not requires_network"
 
 # Combine markers
 pytest -m "fast and not requires_api"
+
+# Disable flaky test retries for debugging
+pytest tests/test_flaky_detection.py --reruns 0 -v
 ```
 
 ## Test Organization
@@ -270,6 +274,129 @@ from tests.fixtures import (
     broll_chain_state,
 )
 ```
+
+## Flaky Test Handling
+
+The project uses `pytest-rerunfailures` to handle intermittently failing tests.
+
+### What Makes a Test Flaky?
+
+A test is flaky if it fails intermittently without code changes. Common causes:
+
+| Cause | Example | Solution |
+|-------|---------|----------|
+| **Timing/Race Conditions** | Thread scheduling, async operations | Add `@pytest.mark.flaky(reruns=2)` |
+| **Network Dependencies** | External API timeouts, rate limiting | Add retry with delay: `reruns_delay=0.5` |
+| **Resource Contention** | Port conflicts, file locks | Use unique resources per test |
+| **CI Environment** | Slower runners, resource limits | Increase retries in CI only |
+
+### Marking a Flaky Test
+
+```python
+import pytest
+
+# Basic pattern - retry up to 2 times
+@pytest.mark.flaky(reruns=2)
+def test_sometimes_fails():
+    ...
+
+# With delay between retries (for rate-limited APIs)
+@pytest.mark.flaky(reruns=2, reruns_delay=0.5)
+def test_api_call():
+    ...
+
+# Platform-specific flakiness
+@pytest.mark.flaky(reruns=2, condition="sys.platform == 'win32'")
+def test_windows_timing():
+    ...
+
+# CI-aware retry count
+import os
+IS_CI = os.environ.get("CI", "false").lower() == "true"
+
+@pytest.mark.flaky(reruns=3 if IS_CI else 1)
+def test_ci_sensitive():
+    ...
+```
+
+### When to Use @pytest.mark.flaky
+
+**DO use flaky marker for:**
+- Tests with known intermittent failures that are not worth fixing
+- External service dependencies with occasional timeouts
+- Race conditions that are inherent to the design
+- Tests that fail only in CI due to resource constraints
+
+**DON'T use flaky marker for:**
+- Tests that fail consistently (fix the bug instead)
+- Tests with easy-to-fix timing issues (use proper synchronization)
+- Tests that mask real bugs (investigate root cause)
+- Tests that fail >50% of the time (too unreliable)
+
+### Documenting Flaky Tests
+
+When marking a test as flaky, document the reason:
+
+```python
+@pytest.mark.flaky(reruns=2)
+def test_webhook_delivery():
+    """
+    Test webhook delivery to external service.
+
+    Flakiness Reason:
+        External webhook endpoint occasionally returns 503 under load.
+
+    Mitigation:
+        - Increased timeout from 5s to 15s (reduced failures by 60%)
+        - Added retry logic in source code (further reduced by 30%)
+        - Remaining ~5% failures handled by pytest-rerunfailures
+
+    Related: GitHub Issue #456
+    """
+    ...
+```
+
+### Identifying Flaky Tests
+
+Signs a test may be flaky:
+1. **CI failures without code changes** - Test passes locally but fails in CI
+2. **Inconsistent failures** - Same test fails on different runs
+3. **Timing-related errors** - Timeouts, "operation not completed" errors
+4. **Order-dependent failures** - Fails only when run with certain other tests
+
+Tools to help identify:
+```bash
+# Run tests multiple times to find flaky ones
+pytest tests/test_matching.py --count=5 -x
+
+# Check for tests with I/O that should be marked
+grep -r "requests\|subprocess\|open\|time.sleep" tests/*.py
+```
+
+### Debugging Flaky Tests
+
+```bash
+# Disable retries to see failures immediately
+pytest tests/test_flaky.py --reruns 0 -v
+
+# Run repeatedly to reproduce
+pytest tests/test_flaky.py --count=10 -v
+
+# Show extra output on failure
+pytest tests/test_flaky.py -v --showlocals --tb=long
+```
+
+### Flaky Test Patterns
+
+See `tests/test_flaky_detection.py` for documented patterns:
+1. **Basic flaky marker** - Simple retry configuration
+2. **Flaky with condition** - Platform-specific retries
+3. **Network-dependent** - API calls with retry delay
+4. **Timing-sensitive** - Race conditions and async operations
+5. **Resource contention** - Shared resource access
+6. **CI-aware** - Different retry counts for CI vs local
+7. **Infrastructure validation** - Verifying retry setup works
+8. **Documentation pattern** - How to document flaky tests
 
 ## Coverage Requirements
 
