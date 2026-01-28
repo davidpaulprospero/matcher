@@ -1,4 +1,19 @@
 
+## Iteration US-010 (Sprint 14) - Add budget exhaustion cascade behavior tests
+- Added `get_budget_advice()` method to `src/downloader/rate_limit_budget.py`
+  - Returns 'continue' when rotations available
+  - Returns 'skip_to_vpn' when rotations exhausted but VPN available
+  - Returns 'abort_keyword' when both rotations and VPN exhausted
+- Created `tests/test_budget_exhaustion_cascade.py` with 20 tests across 5 classes:
+  - AC1: TestRotationExhaustionTriggersVpnAdvice — 3 tests: skip_to_vpn on exhausted rotations, continue when available, state verification
+  - AC2: TestFullExhaustionTriggersAbort — 3 tests: abort_keyword when all exhausted, cascade progression (continue->skip_to_vpn->abort_keyword), abort even with backoff available
+  - AC3: TestRotationBudgetExactBoundary — 5 tests: small/single/large budget exact boundaries, over-budget behavior, mid-download advice shift at boundary
+  - AC4: TestBackoffBudgetExhaustion — 4 tests: threshold exhaustion, incremental exhaustion, over-threshold, backoff independence from rotation advice
+  - AC5: TestCheckpointRestoresBudgetState — 5 tests: 5-rotation round-trip, exhausted rotation round-trip, skip_to_vpn advice preserved, abort_keyword advice preserved, keywords+level preserved
+- Files modified: `src/downloader/rate_limit_budget.py` (added get_budget_advice method)
+- Files created: `tests/test_budget_exhaustion_cascade.py`
+- Test results: 20 new tests pass, 198 existing budget-related tests pass, 0 regressions
+
 ## Iteration US-007 (Sprint 14) - Add cookie rotator mid-session file validation tests
 - Added mid-session file validation to CookieRotator in src/downloader/cookie_rotator.py
   - _is_cookie_file_valid(): checks existence + non-empty size
