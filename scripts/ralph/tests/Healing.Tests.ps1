@@ -695,3 +695,120 @@ Describe 'Invoke-HealingSession' {
         $result.AttemptsUsed | Should -Be 1
     }
 }
+
+Describe 'Invoke-PostIterationHealing' {
+    BeforeEach {
+        $script:RalphDir = $TestDrive
+        $script:ProjectRoot = $TestDrive
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state_orch.json"
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_orch.jsonl"
+        if (Test-Path $script:HealingStateFile) { Remove-Item $script:HealingStateFile -Force }
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+        $script:State = @{
+            SessionId = "orch-test"; IterationCount = 12;
+            ConsecutiveFailures = 0; CurrentMode = "Standard"
+        }
+    }
+
+    It 'does nothing when all tiers pass' {
+        Mock Get-RalphConfig { return @{ selfHealing = @{ enabled = $true; runAfterSuccess = $true; runAfterFailure = $true; maxAttempts = 3; fullRunCadence = 3 } } }
+        Mock Invoke-TieredHealthCheck {
+            return @{ HasErrors = $false; FailedTier = 0; TierResults = @(); RawDiagnostics = "" }
+        }
+
+        $result = Invoke-PostIterationHealing -StoryId "US-003" -FocusArea "testing" -ChangedFiles @()
+        $result.HealingNeeded | Should -BeFalse
+        $script:HealingStateFile | Should -Not -Exist
+    }
+
+    It 'skips healing when disabled in config' {
+        Mock Get-RalphConfig {
+            return @{ selfHealing = @{ enabled = $false } }
+        }
+
+        $result = Invoke-PostIterationHealing -StoryId "US-003" -FocusArea "testing"
+        $result.HealingNeeded | Should -BeFalse
+    }
+
+    It 'runs full healing flow when tier 1 errors detected' {
+        Mock Get-RalphConfig { return @{ selfHealing = @{ enabled = $true; runAfterSuccess = $true; runAfterFailure = $true; maxAttempts = 3; fullRunCadence = 3 } } }
+        Mock Invoke-TieredHealthCheck {
+            return @{
+                HasErrors = $true; FailedTier = 1
+                RawDiagnostics = "SYNTAX: config.py -> SyntaxError"
+                TierResults = @(@{ Tier = 1; HasErrors = $true })
+            }
+        }
+        Mock Suspend-SprintForHealing {}
+        Mock Invoke-HealingSession {
+            return @{ Success = $true; AttemptsUsed = 1; FixSummary = "Fixed syntax" }
+        }
+        Mock Resume-SprintFromHealing {}
+
+        $result = Invoke-PostIterationHealing -StoryId "US-003" -FocusArea "pipeline" -ChangedFiles @("src/config.py")
+        $result.HealingNeeded | Should -BeTrue
+        $result.HealingSuccess | Should -BeTrue
+        $result.FailedTier | Should -Be 1
+    }
+
+    It 'returns failure when healing cannot fix errors' {
+        Mock Get-RalphConfig { return @{ selfHealing = @{ enabled = $true; runAfterSuccess = $true; runAfterFailure = $true; maxAttempts = 3; fullRunCadence = 3 } } }
+        Mock Invoke-TieredHealthCheck {
+            return @{
+                HasErrors = $true; FailedTier = 3
+                RawDiagnostics = "FAIL: test.py -> AssertionError"
+                TierResults = @()
+            }
+        }
+        Mock Suspend-SprintForHealing {}
+        Mock Invoke-HealingSession {
+            return @{ Success = $false; AttemptsUsed = 3; FixSummary = "Could not fix" }
+        }
+        Mock Resume-SprintFromHealing {}
+
+        $result = Invoke-PostIterationHealing -StoryId "US-003" -FocusArea "testing"
+        $result.HealingNeeded | Should -BeTrue
+        $result.HealingSuccess | Should -BeFalse
+    }
+
+    It 'skips after failure when runAfterFailure is false' {
+        Mock Get-RalphConfig {
+            return @{ selfHealing = @{
+                enabled = $true; runAfterFailure = $false; runAfterSuccess = $true; maxAttempts = 3
+            }}
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $false; FailedTier = 0 } }
+
+        $result = Invoke-PostIterationHealing -StoryId "US-001" -FocusArea "test" -IterationSuccess $false
+        $result.HealingNeeded | Should -BeFalse
+        Should -Not -Invoke Invoke-TieredHealthCheck
+    }
+
+    It 'skips after success when runAfterSuccess is false' {
+        Mock Get-RalphConfig {
+            return @{ selfHealing = @{
+                enabled = $true; runAfterFailure = $true; runAfterSuccess = $false; maxAttempts = 3
+            }}
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $false; FailedTier = 0 } }
+
+        $result = Invoke-PostIterationHealing -StoryId "US-001" -FocusArea "test" -IterationSuccess $true
+        $result.HealingNeeded | Should -BeFalse
+        Should -Not -Invoke Invoke-TieredHealthCheck
+    }
+
+    It 'passes changed files to tiered health check' {
+        Mock Get-RalphConfig { return @{ selfHealing = @{ enabled = $true; runAfterSuccess = $true; runAfterFailure = $true; maxAttempts = 3; fullRunCadence = 3 } } }
+        Mock Invoke-TieredHealthCheck {
+            param($ChangedFiles, $FullRunCadence)
+            $script:passedChangedFiles = $ChangedFiles
+            return @{ HasErrors = $false; FailedTier = 0 }
+        }
+
+        $script:passedChangedFiles = $null
+        Invoke-PostIterationHealing -StoryId "US-001" -FocusArea "test" -ChangedFiles @("src/foo.py", "src/bar.py")
+
+        $script:passedChangedFiles | Should -Not -BeNullOrEmpty
+        $script:passedChangedFiles.Count | Should -Be 2
+    }
+}
