@@ -1208,3 +1208,518 @@ class TestLogSelfHeal:
             assert len(logger.entries) == 3
             for i, healer in enumerate(healers):
                 assert logger.entries[i].component == healer
+
+
+# =============================================================================
+# US-004: Report Generation and Finalize Tests
+# =============================================================================
+
+
+class TestGenerateReportCounts:
+    """Tests for HealingLogger.generate_report() result counts - US-004."""
+
+    def test_generate_report_returns_correct_success_failed_counts(self):
+        """Test generate_report() returns correct success/failed counts from entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add entries with different results
+            success_entries = 5
+            failed_entries = 3
+
+            for i in range(success_entries):
+                entry = HealingLogEntry(
+                    timestamp=datetime.now(timezone.utc),
+                    stage="TEST",
+                    component="healer",
+                    action="attempt",
+                    error_type="TestError",
+                    error_message=f"Success entry {i}",
+                    result="success",
+                    duration_ms=10.0
+                )
+                healing_logger._write(entry)
+
+            for i in range(failed_entries):
+                entry = HealingLogEntry(
+                    timestamp=datetime.now(timezone.utc),
+                    stage="TEST",
+                    component="healer",
+                    action="attempt",
+                    error_type="TestError",
+                    error_message=f"Failed entry {i}",
+                    result="failed",
+                    duration_ms=10.0
+                )
+                healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+
+            # Verify counts appear in report
+            assert f"Successful heals: {success_entries}" in report
+            assert f"Failed heals: {failed_entries}" in report
+            assert f"Total entries: {success_entries + failed_entries}" in report
+
+    def test_generate_report_counts_watcher_classifications(self):
+        """Test generate_report() counts watcher classifications correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add watcher classification entries
+            for i in range(4):
+                entry = HealingLogEntry(
+                    timestamp=datetime.now(timezone.utc),
+                    stage="DOWNLOAD",
+                    component="watcher",
+                    action="classify",
+                    error_type="NetworkError",
+                    error_message=f"Classification {i}",
+                    result="success",
+                    duration_ms=5.0
+                )
+                healing_logger._write(entry)
+
+            # Add non-watcher entry
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="DOWNLOAD",
+                component="healer",
+                action="attempt",
+                error_type="NetworkError",
+                error_message="Healer attempt",
+                result="success",
+                duration_ms=50.0
+            )
+            healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+            assert "Watcher classifications: 4" in report
+
+    def test_generate_report_counts_llm_healer_invocations(self):
+        """Test generate_report() counts LLM healer invocations correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add llm-healer attempt entries
+            for i in range(3):
+                entry = HealingLogEntry(
+                    timestamp=datetime.now(timezone.utc),
+                    stage="ANALYZE",
+                    component="llm-healer",
+                    action="attempt",
+                    error_type="ParseError",
+                    error_message=f"LLM attempt {i}",
+                    result="success",
+                    duration_ms=100.0
+                )
+                healing_logger._write(entry)
+
+            # Add llm-healer non-attempt entry (shouldn't be counted)
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="SELF_HEAL",
+                component="llm-healer",
+                action="provider_switch",
+                error_type="ProviderSwitch",
+                error_message="Switch provider",
+                result="retrying",
+                duration_ms=0
+            )
+            healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+            assert "LLM healer invocations: 3" in report
+
+
+class TestGenerateReportGrouping:
+    """Tests for HealingLogger.generate_report() grouping by stage - US-004."""
+
+    def test_generate_report_groups_entries_by_stage(self):
+        """Test generate_report() groups entries by stage and counts healer activity."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add healer entries to different stages
+            stages_data = [
+                ("DOWNLOAD", 3, 1),     # 3 success, 1 failed
+                ("TRANSCRIBE", 2, 2),   # 2 success, 2 failed
+                ("MATCH", 4, 0),        # 4 success, 0 failed
+            ]
+
+            for stage, success_count, failed_count in stages_data:
+                for _ in range(success_count):
+                    entry = HealingLogEntry(
+                        timestamp=datetime.now(timezone.utc),
+                        stage=stage,
+                        component="healer",
+                        action="attempt",
+                        error_type="TestError",
+                        error_message="test",
+                        result="success",
+                        duration_ms=10.0
+                    )
+                    healing_logger._write(entry)
+
+                for _ in range(failed_count):
+                    entry = HealingLogEntry(
+                        timestamp=datetime.now(timezone.utc),
+                        stage=stage,
+                        component="healer",
+                        action="attempt",
+                        error_type="TestError",
+                        error_message="test",
+                        result="failed",
+                        duration_ms=10.0
+                    )
+                    healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+
+            # Verify stage groupings appear
+            assert "By stage:" in report
+            assert "DOWNLOAD: 3/4 healed" in report
+            assert "TRANSCRIBE: 2/4 healed" in report
+            assert "MATCH: 4/4 healed" in report
+
+    def test_generate_report_excludes_self_heal_and_preflight_from_stages(self):
+        """Test generate_report() excludes SELF_HEAL and PREFLIGHT from stage listing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add healer entries to regular stage
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="DOWNLOAD",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            # Add SELF_HEAL entries (should be excluded from stage grouping)
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="SELF_HEAL",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            # Add PREFLIGHT entries (should be excluded)
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="PREFLIGHT",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+
+            # DOWNLOAD should appear
+            assert "DOWNLOAD:" in report
+            # SELF_HEAL and PREFLIGHT should NOT appear in stage listing
+            assert "SELF_HEAL:" not in report
+            assert "PREFLIGHT:" not in report
+
+    def test_generate_report_only_shows_stages_with_healer_activity(self):
+        """Test generate_report() only lists stages that have healer activity."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add watcher-only entry (no healer)
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="ANALYZE",
+                component="watcher",
+                action="classify",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=5.0
+            )
+            healing_logger._write(entry)
+
+            # Add healer entry to different stage
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="DOWNLOAD",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+
+            # DOWNLOAD should appear (has healer)
+            assert "DOWNLOAD:" in report
+            # ANALYZE should NOT appear (no healer, only watcher)
+            assert "ANALYZE:" not in report
+
+
+class TestGenerateReportEmptyEntries:
+    """Tests for HealingLogger.generate_report() empty entries case - US-004."""
+
+    def test_generate_report_returns_no_activity_when_entries_empty(self):
+        """Test generate_report() returns 'No healing activity recorded' when entries empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # No entries added
+            report = healing_logger.generate_report()
+            assert report == "No healing activity recorded."
+
+    def test_generate_report_includes_session_id(self):
+        """Test generate_report() includes session ID in report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False)
+
+            # Add one entry
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="TEST",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            report = healing_logger.generate_report()
+            assert f"Session ID: {healing_logger.session_id}" in report
+
+
+class TestFinalize:
+    """Tests for HealingLogger.finalize() - US-004."""
+
+    def test_finalize_writes_final_json_with_session_summary(self):
+        """Test finalize() writes final JSON with session summary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=True)
+
+            # Add some entries
+            for i in range(3):
+                entry = HealingLogEntry(
+                    timestamp=datetime.now(timezone.utc),
+                    stage=f"STAGE_{i}",
+                    component="healer",
+                    action="attempt",
+                    error_type="TestError",
+                    error_message=f"Entry {i}",
+                    result="success" if i % 2 == 0 else "failed",
+                    duration_ms=10.0
+                )
+                healing_logger._write(entry)
+
+            # Finalize
+            healing_logger.finalize()
+
+            # Read and verify JSON structure
+            content = json.loads(healing_logger.json_file.read_text())
+
+            assert "session_id" in content
+            assert content["session_id"] == healing_logger.session_id
+            assert "total_entries" in content
+            assert content["total_entries"] == 3
+            assert "entries" in content
+            assert len(content["entries"]) == 3
+
+    def test_finalize_json_contains_all_entry_data(self):
+        """Test finalize() JSON contains complete entry data."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=True)
+
+            # Add entry with all fields
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="TEST_STAGE",
+                component="test_component",
+                action="test_action",
+                error_type="TestError",
+                error_message="Test message",
+                result="success",
+                duration_ms=123.45,
+                stack_trace="Test stack trace",
+                details={"key": "value"}
+            )
+            healing_logger._write(entry)
+
+            healing_logger.finalize()
+
+            content = json.loads(healing_logger.json_file.read_text())
+            entry_data = content["entries"][0]
+
+            assert entry_data["stage"] == "TEST_STAGE"
+            assert entry_data["component"] == "test_component"
+            assert entry_data["action"] == "test_action"
+            assert entry_data["error_type"] == "TestError"
+            assert entry_data["error_message"] == "Test message"
+            assert entry_data["result"] == "success"
+            assert entry_data["duration_ms"] == 123.45
+            assert entry_data["stack_trace"] == "Test stack trace"
+            assert entry_data["details"] == {"key": "value"}
+
+    def test_finalize_with_empty_entries_writes_empty_entries_array(self):
+        """Test finalize() writes empty entries array when no entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=True)
+
+            # No entries added
+            healing_logger.finalize()
+
+            content = json.loads(healing_logger.json_file.read_text())
+
+            assert "session_id" in content
+            assert content["total_entries"] == 0
+            assert content["entries"] == []
+
+    def test_finalize_calls_generate_report(self):
+        """Test finalize() calls generate_report() for logging."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=True)
+
+            # Add an entry
+            entry = HealingLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                stage="TEST",
+                component="healer",
+                action="attempt",
+                error_type="TestError",
+                error_message="Test",
+                result="success",
+                duration_ms=10.0
+            )
+            healing_logger._write(entry)
+
+            # Mock generate_report to verify it's called
+            with patch.object(healing_logger, 'generate_report', wraps=healing_logger.generate_report) as mock_report:
+                healing_logger.finalize()
+                mock_report.assert_called_once()
+
+
+class TestPrintBox:
+    """Tests for HealingLogger.print_box() - US-004."""
+
+    def test_print_box_handles_minimal_format(self, capsys):
+        """Test print_box() handles minimal console_format option."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False, console_format="minimal")
+
+            lines = ["Line 1", "Line 2", "Line 3"]
+            healing_logger.print_box("Test Title", lines)
+
+            captured = capsys.readouterr()
+
+            # Minimal format: just indented lines, no box or title
+            assert "  Line 1" in captured.out
+            assert "  Line 2" in captured.out
+            assert "  Line 3" in captured.out
+            # Should NOT have box characters
+            assert "┌" not in captured.out
+            assert "└" not in captured.out
+            assert "===" not in captured.out
+
+    def test_print_box_handles_simple_format(self, capsys):
+        """Test print_box() handles simple console_format option."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False, console_format="simple")
+
+            lines = ["Line 1", "Line 2"]
+            healing_logger.print_box("Test Title", lines)
+
+            captured = capsys.readouterr()
+
+            # Simple format: === Title === header
+            assert "=== Test Title ===" in captured.out
+            assert "  Line 1" in captured.out
+            assert "  Line 2" in captured.out
+            # Should NOT have Unicode box characters
+            assert "┌" not in captured.out
+            assert "└" not in captured.out
+
+    def test_print_box_handles_box_format(self, capsys):
+        """Test print_box() handles box console_format option (default)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False, console_format="box")
+
+            lines = ["Line 1", "Line 2"]
+            healing_logger.print_box("Test Title", lines)
+
+            captured = capsys.readouterr()
+
+            # Box format: Unicode box characters
+            assert "┌" in captured.out
+            assert "└" in captured.out
+            assert "│" in captured.out
+            assert "├" in captured.out
+            assert "Test Title" in captured.out
+            assert "Line 1" in captured.out
+            assert "Line 2" in captured.out
+
+    def test_print_box_truncates_long_lines(self, capsys):
+        """Test print_box() truncates lines longer than width."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False, console_format="box")
+
+            # Create a line longer than default width (65)
+            long_line = "A" * 100
+            healing_logger.print_box("Title", [long_line], width=65)
+
+            captured = capsys.readouterr()
+
+            # Line should be truncated with "..."
+            assert "..." in captured.out
+            # Original long line should not appear in full
+            assert "A" * 100 not in captured.out
+
+    def test_print_box_custom_width(self, capsys):
+        """Test print_box() respects custom width parameter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            healing_logger = HealingLogger(log_dir, json_log=False, console_format="box")
+
+            healing_logger.print_box("Title", ["Short line"], width=80)
+
+            captured = capsys.readouterr()
+
+            # Box should be 80 chars wide (excluding │ characters)
+            lines = captured.out.split('\n')
+            # Find a line with box border
+            for line in lines:
+                if line.startswith('┌'):
+                    # Total width includes ┌ + 80 dashes + ┐ = 82 chars
+                    assert len(line) == 82
+                    break
