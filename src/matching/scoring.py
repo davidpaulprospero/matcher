@@ -984,15 +984,34 @@ def compute_multimodal_score(
 
     # Ensure weights sum to 1.0 (normalize if needed)
     weight_sum = sum(w.values())
-    if abs(weight_sum - 1.0) > 0.01:
+    if weight_sum == 0.0:
+        # All zero weights - return zero score to avoid division by zero
+        logger.warning("All multimodal weights are zero, returning score=0.0")
+        return 0.0, "all_weights_zero", {
+            'embedding_similarity': embedding_similarity,
+            'keyword_overlap': keyword_overlap_score,
+            'entity_match': entity_match_score,
+            'visual_description': visual_description_score,
+            'weights_used': w
+        }
+    elif abs(weight_sum - 1.0) > 0.01:
         logger.warning(f"Multimodal weights sum to {weight_sum:.3f}, normalizing to 1.0")
         w = {k: v / weight_sum for k, v in w.items()}
 
-    # Clamp input scores to [0, 1] range
-    emb_clamped = max(0.0, min(1.0, embedding_similarity))
-    kw_clamped = max(0.0, min(1.0, keyword_overlap_score))
-    ent_clamped = max(0.0, min(1.0, entity_match_score))
-    vis_clamped = max(0.0, min(1.0, visual_description_score))
+    # Clamp input scores to [0, 1] range, handling NaN and Inf
+    def safe_clamp(value: float) -> float:
+        """Clamp value to [0, 1], converting NaN/Inf to valid values."""
+        import math
+        if math.isnan(value):
+            return 0.0
+        if math.isinf(value):
+            return 1.0 if value > 0 else 0.0
+        return max(0.0, min(1.0, value))
+
+    emb_clamped = safe_clamp(embedding_similarity)
+    kw_clamped = safe_clamp(keyword_overlap_score)
+    ent_clamped = safe_clamp(entity_match_score)
+    vis_clamped = safe_clamp(visual_description_score)
 
     # Compute weighted contributions
     emb_contrib = emb_clamped * w.get('text_embedding', 0.4)
@@ -1395,6 +1414,13 @@ def normalize_confidence_by_pool(
 
     if pool_size <= 0:
         return confidence, "empty_pool"
+
+    # Handle NaN/Inf confidence input
+    import math
+    if math.isnan(confidence):
+        return 0.0, "nan_confidence_input"
+    if math.isinf(confidence):
+        return 1.0 if confidence > 0 else 0.0, "inf_confidence_input"
 
     reasons = []
     adjustment = 0.0
