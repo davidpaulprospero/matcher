@@ -1,4 +1,16 @@
 
+## Iteration US-010 (Sprint 17) - Add CLI interactive, logging_setup, and config merge helper tests
+- Added 31 new tests across 4 dedicated US-010 test classes in 2 files
+- tests/test_cli_interactive_us010.py:
+  - TestFindVoiceoverSearchOrderUS010 (7 tests): AC1 — searches voiceover/ subdir first, falls back to root, ignores non-voiceover extensions, handles empty dir, finds SRT/MP3/WAV
+  - TestFindVoiceoverAutoSelectUS010 (5 tests): AC2 — auto-selects single SRT/MP4/M4A without prompt, verifies input() NOT called for single file, prompts for multiple files
+- tests/test_config_merge_us010.py:
+  - TestMergeSingleTierAliasesUS010 (10 tests): AC5 — count->videos_per_keyword, per_keyword->videos_per_keyword, min->min_seconds, max->max_seconds, canonical names, max_total passthrough, unknown keys ignored, return value
+  - TestMergeDurationTiersPerTierUS010 (9 tests): AC6 — each tier (short/medium/long/longer) overridden independently without affecting siblings, all four tiers with specific values, partial override preserves existing, invalid tier names ignored
+- AC3 + AC4 already covered by 29 tests in test_logging_setup.py (StreamHandler creation, log level matching, logs/ subdir + two log files at INFO/DEBUG levels)
+- Files created: tests/test_cli_interactive_us010.py, tests/test_config_merge_us010.py
+- Test results: 149 related tests passed in 3.23s (97 existing + 31 new + 21 logger advanced), 0 regressions
+
 ## Iteration US-007 (Sprint 17) - Add TranscodingManager FFmpeg command building tests
 - Added 32 new tests across 5 dedicated US-007 test classes in tests/test_transcoding_us007.py
 - TestFFmpegNvidiaGpuUS007 (6 tests): AC1 — h264_nvenc encoder, -hwaccel cuda, -hwaccel_output_format cuda, preset p4 + cq + vbr, hevc_nvenc for h265, ProRes no cuda output format
