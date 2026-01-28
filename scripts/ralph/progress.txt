@@ -7075,3 +7075,28 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 105 tests pass in tiered matcher suite (2.35s)
 - Files modified: tests/test_tiered_matcher_us007.py (+463 lines)
 - Commit: 10bf94d
+
+## Iteration US-009 (Sprint 22) - Add post-edit analysis feedback learning tests
+- Created new src/feedback_learning.py module (384 lines):
+  - FeedbackEntry: dataclass for single feedback entry (segment_id, confidence, was_kept, keywords, source)
+  - FeedbackBatch: collection of entries with project metadata
+  - FeedbackAnalysis: results from analyzing feedback (confidence adjustment, keyword boosts/penalties, source preferences)
+  - analyze_feedback(): extracts learning signals from editor decisions
+  - validate_feedback_entry(): validates entries (confidence range, segment_id presence)
+  - FeedbackLearner: persistent learning class with save/load/apply_adjustment methods
+- Added tests/test_feedback_learning.py with 30 tests in 7 classes:
+  - TestAnalyzeFeedbackConfidenceAdjustment (5 tests): AC1 - confidence adjustment from corrections
+  - TestAnalyzeFeedbackBatchAggregation (5 tests): AC2 - batch correction aggregation
+  - TestAnalyzeFeedbackInconsistentEdits (6 tests): AC3 - inconsistent edit handling
+  - TestFeedbackValidation (6 tests): AC4 - validation rejects invalid range
+  - TestFeedbackPersistence (6 tests): AC5 - persistence across restarts
+  - TestFeedbackLearningIntegration (2 tests): full workflow testing
+- All 5 acceptance criteria verified:
+  - AC1: test_kept_clip_increases_weight_factor, test_dropped_clip_decreases_weight_factor, etc.
+  - AC2: test_batch_with_multiple_entries, test_batch_aggregates_keyword_statistics, etc.
+  - AC3: test_same_segment_kept_and_dropped_different_sessions, test_handles_none_keywords_gracefully, etc.
+  - AC4: test_confidence_below_zero_rejected, test_confidence_above_one_rejected, test_empty_segment_id_rejected, etc.
+  - AC5: test_feedback_learner_saves_to_file, test_feedback_learner_loads_from_file, test_learner_accumulates_across_sessions
+- Files created: src/feedback_learning.py, tests/test_feedback_learning.py
+- Test results: 30 tests passed in 0.45s
+- Commit: 19a8a34
