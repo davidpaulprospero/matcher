@@ -30,6 +30,7 @@ def mock_config():
     # Keyword config
     config.keyword = Mock()
     config.keyword.max_keywords = 30
+    config.keyword.max_keyword_words = 8  # Default value for visual keyword validation
 
     # Keyword weights config (for TF-IDF fallback)
     config.keyword_weights = Mock()
