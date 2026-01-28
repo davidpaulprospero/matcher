@@ -6275,3 +6275,18 @@ def test_eta_accuracy_batch_50_videos(self):
 ## Focus Area: testing - 2026-01-28 14:59:39
 - Status: In Progress...
 
+
+## Focus Area: testing - 2026-01-28 15:39:34
+- Status: In Progress...
+
+
+## Iteration US-001 (Sprint 17) - Add BrollDownloadStage pipeline stage tests
+- Pre-implemented: 134 tests across 3 files already cover all 6 acceptance criteria
+- Files: tests/test_broll_stages.py, tests/test_broll_stages_extended.py, tests/test_broll_stages_full_coverage.py
+- AC1 (can_skip): test_can_skip, test_run_broll_disabled, test_run_download_disabled, test_run_skip_download_enabled, test_run_no_keywords
+- AC2 (search terms): test_generate_search_terms_keywords, test_generate_search_terms_entities, extended tests for limits/suffixes
+- AC3 (download limits): test_run_respects_max_total, test_run_success_youtube_only
+- AC4 (stock fallback): test_run_success_mixed_sources
+- AC5 (DownloadedVideo entries): test_run_success_youtube_only, test_download_checkpoint_data_structure
+- AC6 (restore): test_restore_from_checkpoint, test_restore_no_checkpoint_data, test_restore_missing_files, test_restore_partial_files
+- Test results: 134 passed in 15.50s, 0 regressions
