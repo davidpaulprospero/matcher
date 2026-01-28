@@ -3041,3 +3041,1045 @@ class TestCaptionStageLanguageValidation:
 
         with pytest.raises(ConfigValidationError):
             CaptionStage(config=config)
+
+
+# ============================================================================
+# US-002 Sprint 17: CaptionStage Core Execution and Skip Logic Tests
+# ============================================================================
+
+class TestCaptionStageCanSkipUS002:
+    """US-002 AC1: Test CaptionStage.can_skip() behavior.
+
+    can_skip() delegates to checkpoint.should_skip_stage(). The config-driven
+    skip (caption_first.enabled=False) is handled in run() which returns
+    StageResult.ok({skipped: True, reason: 'disabled'}).
+
+    This test class verifies both pathways:
+    - can_skip() returns True when checkpoint says skip
+    - can_skip() returns False when checkpoint says not to skip
+    - run() returns skipped result when caption_first.enabled is False
+    - run() proceeds when caption_first.enabled is True and video IDs exist
+    """
+
+    def test_can_skip_true_from_checkpoint(self):
+        """can_skip() returns True when checkpoint indicates stage completed."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+        checkpoint.should_skip_stage.return_value = True
+
+        assert stage.can_skip(state, checkpoint) is True
+        checkpoint.should_skip_stage.assert_called_with("CAPTION")
+
+    def test_can_skip_false_from_checkpoint(self):
+        """can_skip() returns False when checkpoint says stage not done."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+        checkpoint.should_skip_stage.return_value = False
+
+        assert stage.can_skip(state, checkpoint) is False
+
+    def test_run_skips_when_caption_first_disabled(self):
+        """run() returns skipped=True when caption_first.enabled is False."""
+        stage = CaptionStage()
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file="/path/audio.mp3", video_id="abc123XYZ_0",
+                url="https://youtube.com/watch?v=abc123XYZ_0",
+                title="Test", duration=120.0, keyword="test"
+            ),
+        ]
+        config = MagicMock()
+        config.download.caption_first.enabled = False
+        checkpoint = MagicMock()
+        checkpoint.should_skip_stage.return_value = False
+        checkpoint.get_stage_data.return_value = None
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'disabled'
+
+    @patch('src.caption_fetcher.CaptionFetcher')
+    def test_run_proceeds_when_caption_first_enabled_with_videos(
+        self, mock_fetcher_class, mock_config, mock_checkpoint, mock_state_with_audio
+    ):
+        """run() proceeds when caption_first.enabled is True and videos exist."""
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        mock_fetcher = MagicMock()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                vid: CaptionResult(
+                    video_id=vid,
+                    segments=[CaptionSegment(0, 0.0, 5.0, "Test", vid)],
+                    language='en', is_auto_generated=False,
+                )
+                for vid in video_ids
+            }
+
+        mock_fetcher.fetch_captions_batch.side_effect = mock_batch_fetch
+        mock_fetcher_class.return_value = mock_fetcher
+
+        stage = CaptionStage()
+        result = stage.run(mock_state_with_audio, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is not True
+
+
+class TestGetVideoIdsUS002:
+    """US-002 AC2: Test _get_video_ids() extracts from both sources with deduplication.
+
+    Verifies:
+    - Extracts video IDs from downloaded_audio list
+    - Extracts video IDs from downloaded_videos list
+    - Deduplicates when same video appears in both lists
+    """
+
+    def test_extracts_from_audio_downloads(self, mock_config):
+        """Extracts video IDs from downloaded_audio."""
+        stage = CaptionStage()
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file="/path/audio1.mp3", video_id="abc123XYZ_0",
+                url="", title="Test 1", duration=120.0, keyword="test"
+            ),
+            AudioDownload(
+                file="/path/audio2.mp3", video_id="def456ABC_1",
+                url="", title="Test 2", duration=180.0, keyword="test"
+            ),
+        ]
+
+        ids = stage._get_video_ids(state, mock_config)
+
+        assert len(ids) == 2
+        assert "abc123XYZ_0" in ids
+        assert "def456ABC_1" in ids
+
+    def test_extracts_from_downloaded_videos(self, mock_config):
+        """Extracts video IDs from downloaded_videos via URL."""
+        stage = CaptionStage()
+        state = PipelineState()
+        state.downloaded_videos = [
+            DownloadedVideo(
+                file="/path/ghi789JKL_2.mp4",
+                url="https://youtube.com/watch?v=ghi789JKL_2",
+                title="Test 3",
+            ),
+        ]
+
+        ids = stage._get_video_ids(state, mock_config)
+
+        assert len(ids) == 1
+        assert "ghi789JKL_2" in ids
+
+    def test_extracts_from_both_audio_and_video_lists(self, mock_config):
+        """Extracts video IDs from both downloaded_audio and downloaded_videos."""
+        stage = CaptionStage()
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file="/path/audio1.mp3", video_id="abc123XYZ_0",
+                url="", title="Test 1", duration=120.0, keyword="test"
+            ),
+        ]
+        state.downloaded_videos = [
+            DownloadedVideo(
+                file="/path/ghi789JKL_2.mp4",
+                url="https://youtube.com/watch?v=ghi789JKL_2",
+                title="Test 3",
+            ),
+        ]
+
+        ids = stage._get_video_ids(state, mock_config)
+
+        assert len(ids) == 2
+        assert "abc123XYZ_0" in ids
+        assert "ghi789JKL_2" in ids
+
+    def test_deduplicates_same_video_in_both_lists(self, mock_config):
+        """Deduplicates when same video ID appears in both sources."""
+        stage = CaptionStage()
+        state = PipelineState()
+        # Same video ID in both audio and video lists
+        state.downloaded_audio = [
+            AudioDownload(
+                file="/path/abc123XYZ_0.mp3", video_id="abc123XYZ_0",
+                url="https://youtube.com/watch?v=abc123XYZ_0",
+                title="Test", duration=120.0, keyword="test"
+            ),
+        ]
+        state.downloaded_videos = [
+            DownloadedVideo(
+                file="/path/abc123XYZ_0.mp4",
+                url="https://youtube.com/watch?v=abc123XYZ_0",
+                title="Test",
+            ),
+        ]
+
+        ids = stage._get_video_ids(state, mock_config)
+
+        # Should be deduplicated — only 1 unique ID
+        assert len(ids) == 1
+        assert "abc123XYZ_0" in ids
+
+
+class TestExtractVideoIdUS002:
+    """US-002 AC3: Test _extract_video_id() handles various input formats.
+
+    Verifies extraction from:
+    - DownloadedVideo with URL path (extracts 11-char ID)
+    - File path (extracts from filename)
+    - Already-extracted ID string (direct attribute)
+    """
+
+    def test_extract_from_url_path(self):
+        """Extracts 11-char video ID from YouTube URL."""
+        stage = CaptionStage()
+        video = Mock(spec=[])
+        video.video_id = None
+        video.url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        video.file = ""
+
+        result = stage._extract_video_id(video)
+        assert result == "dQw4w9WgXcQ"
+
+    def test_extract_from_youtu_be_url(self):
+        """Extracts video ID from short youtu.be URL."""
+        stage = CaptionStage()
+        video = Mock(spec=[])
+        video.video_id = None
+        video.url = "https://youtu.be/dQw4w9WgXcQ"
+        video.file = ""
+
+        result = stage._extract_video_id(video)
+        assert result == "dQw4w9WgXcQ"
+
+    def test_extract_from_file_path(self):
+        """Extracts video ID from filename containing 11-char ID."""
+        stage = CaptionStage()
+        video = Mock(spec=[])
+        video.video_id = None
+        video.url = ""
+        video.file = "/path/to/videos/dQw4w9WgXcQ.mp4"
+
+        result = stage._extract_video_id(video)
+        assert result == "dQw4w9WgXcQ"
+
+    def test_extract_from_direct_id_attribute(self):
+        """Returns direct video_id attribute when present."""
+        stage = CaptionStage()
+        video = Mock(spec=[])
+        video.video_id = "test_VIDEO_id"
+        video.url = ""
+        video.file = ""
+
+        result = stage._extract_video_id(video)
+        assert result == "test_VIDEO_id"
+
+    def test_returns_none_when_no_id_found(self):
+        """Returns None when no video ID can be extracted."""
+        stage = CaptionStage()
+        video = Mock(spec=[])
+        video.video_id = None
+        video.url = ""
+        video.file = ""
+
+        result = stage._extract_video_id(video)
+        assert result is None
+
+
+class TestLoadExistingCaptionsUS002:
+    """US-002 AC4: Test _load_existing_captions() loads from checkpoint.
+
+    Verifies:
+    - Returns dict mapping video_id to caption data from checkpoint
+    - Handles missing checkpoint data gracefully (returns empty dict)
+    - Handles checkpoint exception gracefully
+    """
+
+    def test_loads_cached_captions_from_checkpoint(self):
+        """Loads caption_results dict from checkpoint stages data."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.return_value = {
+            'caption_results': {
+                'abc123XYZ_0': {
+                    'video_id': 'abc123XYZ_0',
+                    'segments': [{'text': 'Hello', 'start': 0.0, 'end': 2.0}],
+                    'language': 'en',
+                    'is_auto_generated': False,
+                    'segment_count': 1,
+                    'caption_quality': 'high',
+                },
+                'def456ABC_1': {
+                    'video_id': 'def456ABC_1',
+                    'segments': [{'text': 'World', 'start': 0.0, 'end': 3.0}],
+                    'language': 'es',
+                    'is_auto_generated': True,
+                    'segment_count': 1,
+                    'caption_quality': 'medium',
+                },
+            }
+        }
+
+        result = stage._load_existing_captions(checkpoint)
+
+        assert isinstance(result, dict)
+        assert len(result) == 2
+        assert 'abc123XYZ_0' in result
+        assert 'def456ABC_1' in result
+        assert result['abc123XYZ_0']['language'] == 'en'
+        assert result['def456ABC_1']['language'] == 'es'
+
+    def test_returns_empty_dict_when_no_checkpoint(self):
+        """Returns empty dict when checkpoint has no stage data."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.return_value = None
+
+        result = stage._load_existing_captions(checkpoint)
+
+        assert result == {}
+
+    def test_returns_empty_dict_when_no_caption_results_key(self):
+        """Returns empty dict when stage data lacks caption_results."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.return_value = {'success_count': 5}
+
+        result = stage._load_existing_captions(checkpoint)
+
+        assert result == {}
+
+    def test_handles_checkpoint_exception_gracefully(self):
+        """Returns empty dict when checkpoint.get_stage_data raises."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.side_effect = RuntimeError("corrupted checkpoint")
+
+        result = stage._load_existing_captions(checkpoint)
+
+        assert result == {}
+
+
+class TestValidateLanguageConfigUS002:
+    """US-002 AC5: Test _validate_language_config() validates ISO 639-1 codes.
+
+    Verifies:
+    - Passes for valid ISO 639-1 codes ('en', 'es', 'fr')
+    - Fails with clear error for invalid codes ('xyz', '', numbers)
+    - Tests are in the existing TestCaptionStageLanguageValidation class,
+      but this class adds focused unit tests for the specific AC criteria.
+    """
+
+    def test_valid_codes_pass(self):
+        """Valid ISO 639-1 codes pass validation without error."""
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.fallback_languages = ["es", "fr"]
+
+        stage = CaptionStage(config=config)
+        assert stage._config_validated is True
+
+    def test_invalid_xyz_code_fails(self):
+        """Invalid code 'xyz' raises ConfigValidationError."""
+        from src.caption_fetcher import ConfigValidationError
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "xyz"
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert exc_info.value.field == 'preferred_language'
+        assert 'ISO 639-1' in exc_info.value.reason
+
+    def test_empty_string_code_fails(self):
+        """Empty string '' raises ConfigValidationError."""
+        from src.caption_fetcher import ConfigValidationError
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = ""
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError):
+            CaptionStage(config=config)
+
+    def test_numeric_string_code_fails(self):
+        """Numeric string '12' raises ConfigValidationError."""
+        from src.caption_fetcher import ConfigValidationError
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "12"
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError):
+            CaptionStage(config=config)
+
+    def test_three_letter_code_fails(self):
+        """ISO 639-2 three-letter code 'eng' rejected as non-ISO-639-1."""
+        from src.caption_fetcher import ConfigValidationError
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "eng"
+        config.download.caption_first.fallback_languages = []
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            CaptionStage(config=config)
+
+        assert 'ISO 639-1' in exc_info.value.reason
+
+
+class TestPopulateTextMetadataUS002:
+    """US-002 AC6: Test _populate_text_metadata() converts caption results.
+
+    Verifies each entry in state.text_metadata has:
+    - video_id (via video_path and source_file)
+    - segments list data (text, start_time, end_time)
+    - caption_quality field
+    - caption metadata (source, language, auto_generated)
+    """
+
+    def test_populates_entries_with_required_fields(self):
+        """Each text_metadata entry has video_id, segments, quality fields."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [
+                    {"text": "Hello world", "start": 0.0, "end": 2.5},
+                    {"text": "Second segment", "start": 2.5, "end": 5.0},
+                ],
+                "language": "en",
+                "is_auto_generated": False,
+                "caption_quality": "high",
+            }
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        assert len(state.text_metadata) == 2
+
+        entry = state.text_metadata[0]
+        # video_id present via video_path and source_file
+        assert entry['video_path'] == "abc123XYZ_0"
+        assert entry['source_file'] == "abc123XYZ_0"
+        # Segment text
+        assert entry['text'] == "Hello world"
+        # Start/end times
+        assert entry['start_time'] == 0.0
+        assert entry['end_time'] == 2.5
+        # Caption quality
+        assert entry['caption_quality'] == "high"
+        # Caption metadata
+        assert entry['caption_source'] == "youtube"
+        assert entry['caption_language'] == "en"
+        assert entry['caption_auto_generated'] is False
+
+    def test_populates_multiple_videos(self):
+        """Handles multiple videos, each with multiple segments."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [
+                    {"text": "Video 1 seg 1", "start": 0.0, "end": 2.0},
+                ],
+                "language": "en",
+                "is_auto_generated": False,
+                "caption_quality": "high",
+            },
+            "def456ABC_1": {
+                "video_id": "def456ABC_1",
+                "segments": [
+                    {"text": "Video 2 seg 1", "start": 0.0, "end": 3.0},
+                    {"text": "Video 2 seg 2", "start": 3.0, "end": 6.0},
+                ],
+                "language": "es",
+                "is_auto_generated": True,
+                "caption_quality": "medium",
+            },
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        assert len(state.text_metadata) == 3
+        # Check second video's entries have correct language
+        es_entries = [e for e in state.text_metadata if e['caption_language'] == 'es']
+        assert len(es_entries) == 2
+        assert all(e['caption_auto_generated'] is True for e in es_entries)
+
+    def test_skips_unavailable_and_error_results(self):
+        """Skips entries with unavailable=True or error=True."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [{"text": "Good", "start": 0.0, "end": 2.0}],
+                "language": "en",
+                "is_auto_generated": False,
+                "caption_quality": "high",
+            },
+            "err_VIDEO_id": {
+                "video_id": "err_VIDEO_id",
+                "unavailable": True,
+                "reason": "No captions",
+            },
+            "fail_VID_012": {
+                "video_id": "fail_VID_012",
+                "error": True,
+                "reason": "Network error",
+            },
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        # Only the successful video should have entries
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_path'] == "abc123XYZ_0"
+
+    def test_extends_existing_text_metadata(self):
+        """Extends existing text_metadata rather than replacing it."""
+        stage = CaptionStage()
+        state = PipelineState()
+        # Pre-populate with existing transcription data
+        state.text_metadata = [
+            {'text': 'Pre-existing', 'video_path': 'old_video_001', 'start_time': 0.0, 'end_time': 1.0}
+        ]
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [{"text": "New caption", "start": 0.0, "end": 2.0}],
+                "language": "en",
+                "is_auto_generated": False,
+                "caption_quality": "medium",
+            }
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        # Should have old + new
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['text'] == 'Pre-existing'
+        assert state.text_metadata[1]['text'] == 'New caption'
+
+    def test_includes_timing_penalty_field(self):
+        """Includes timing_penalty field when present in caption result."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [{"text": "Test", "start": 0.0, "end": 2.0}],
+                "language": "en",
+                "is_auto_generated": False,
+                "caption_quality": "medium",
+                "timing_penalty": 0.85,
+            }
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        assert state.text_metadata[0]['timing_penalty'] == 0.85
+
+
+# ============================================================================
+# US-003 Sprint 17: CaptionStage batch processing and metrics tests
+# ============================================================================
+
+class TestCaptionStageRunSkipsCachedUS003:
+    """US-003 Sprint 17 AC1: run() skips videos that already have cached captions."""
+
+    @patch('src.caption_fetcher.CaptionBatchCheckpoint')
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('src.caption_fetcher.CaptionCache')
+    @patch('src.caption_fetcher.CaptionMetrics')
+    def test_skips_cached_fetches_only_new(
+        self, mock_metrics_cls, mock_cache_cls, mock_fetcher_cls,
+        mock_batch_cp_cls, mock_config, mock_checkpoint
+    ):
+        """5 video IDs with 2 cached → only 3 new fetches attempted."""
+        # Setup 5 videos in state
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file=f"/path/{vid}.mp3", video_id=vid,
+                url=f"https://youtube.com/watch?v={vid}",
+                title=f"Video {i}", duration=120.0, keyword="test"
+            )
+            for i, vid in enumerate([
+                "aaaAAAAA_01", "bbbBBBBB_02", "cccCCCCC_03",
+                "dddDDDDD_04", "eeeEEEEE_05"
+            ])
+        ]
+
+        # 2 videos already cached in checkpoint
+        cached_captions = {
+            "aaaAAAAA_01": {
+                "video_id": "aaaAAAAA_01",
+                "segments": [{"text": "cached1", "start": 0.0, "end": 1.0}],
+                "language": "en", "is_auto_generated": False,
+                "segment_count": 1, "caption_quality": "high",
+            },
+            "bbbBBBBB_02": {
+                "video_id": "bbbBBBBB_02",
+                "segments": [{"text": "cached2", "start": 0.0, "end": 2.0}],
+                "language": "en", "is_auto_generated": False,
+                "segment_count": 1, "caption_quality": "medium",
+            },
+        }
+        mock_checkpoint.get_stage_data.return_value = {
+            "caption_results": cached_captions
+        }
+
+        # Mock batch checkpoint - not found
+        mock_batch_cp_cls.get_checkpoint_path.return_value = "/tmp/batch_cp.json"
+        mock_batch_cp_cls.load.return_value = None
+
+        # Track fetcher calls
+        mock_fetcher = MagicMock()
+        new_result = MagicMock()
+        new_result.video_id = "cccCCCCC_03"
+        new_result.segments = [MagicMock(index=0, start=0.0, end=1.0, text="new", video_id="cccCCCCC_03")]
+        new_result.language = "en"
+        new_result.is_auto_generated = False
+        new_result.format_source = "vtt"
+        new_result.to_dict.return_value = {
+            "video_id": "cccCCCCC_03", "language": "en",
+            "segments": [{"text": "new", "start": 0.0, "end": 1.0}],
+            "is_auto_generated": False, "caption_quality": "high",
+        }
+        mock_fetcher.fetch_captions_auto_language.return_value = new_result
+        mock_fetcher._using_adaptive_order = False
+        mock_fetcher_cls.return_value = mock_fetcher
+
+        # Mock metrics
+        mock_metrics = MagicMock()
+        mock_metrics.to_dict.return_value = {"successes": 3, "failures": 0, "cache_hits": 2}
+        mock_metrics_cls.return_value = mock_metrics
+
+        # Mock cache
+        mock_cache = MagicMock()
+        mock_cache.enabled = False
+        mock_cache_cls.return_value = mock_cache
+
+        # Disable impersonation/live-stream to simplify
+        mock_config.download.impersonation.enabled = False
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.adaptive_format_order = False
+
+        stage = CaptionStage()
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        # Verify 2 cached were skipped
+        assert result.data.get('skip_count') == 2
+        # Verify fetch_captions_batch was called with only the 3 uncached IDs
+        batch_call = mock_fetcher.fetch_captions_batch
+        batch_call.assert_called_once()
+        fetched_ids = batch_call.call_args[1].get('video_ids') or batch_call.call_args[0][0]
+        assert len(fetched_ids) == 3
+        assert "aaaAAAAA_01" not in fetched_ids
+        assert "bbbBBBBB_02" not in fetched_ids
+
+    @patch('src.caption_fetcher.CaptionBatchCheckpoint')
+    @patch('src.caption_fetcher.CaptionFetcher')
+    @patch('src.caption_fetcher.CaptionCache')
+    @patch('src.caption_fetcher.CaptionMetrics')
+    def test_all_cached_no_fetches(
+        self, mock_metrics_cls, mock_cache_cls, mock_fetcher_cls,
+        mock_batch_cp_cls, mock_config, mock_checkpoint
+    ):
+        """When all video IDs are cached, no new fetches happen."""
+        state = PipelineState()
+        state.downloaded_audio = [
+            AudioDownload(
+                file="/path/vid1.mp3", video_id="aaaAAAAA_01",
+                url="https://youtube.com/watch?v=aaaAAAAA_01",
+                title="Video 1", duration=120.0, keyword="test"
+            ),
+        ]
+
+        mock_checkpoint.get_stage_data.return_value = {
+            "caption_results": {
+                "aaaAAAAA_01": {
+                    "video_id": "aaaAAAAA_01",
+                    "segments": [{"text": "cached", "start": 0.0, "end": 1.0}],
+                    "language": "en", "is_auto_generated": False,
+                    "segment_count": 1, "caption_quality": "high",
+                },
+            }
+        }
+
+        mock_batch_cp_cls.get_checkpoint_path.return_value = "/tmp/batch_cp.json"
+        mock_batch_cp_cls.load.return_value = None
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._using_adaptive_order = False
+        mock_fetcher_cls.return_value = mock_fetcher
+
+        mock_metrics = MagicMock()
+        mock_metrics.to_dict.return_value = {"successes": 0, "cache_hits": 1}
+        mock_metrics_cls.return_value = mock_metrics
+
+        mock_cache = MagicMock()
+        mock_cache.enabled = False
+        mock_cache_cls.return_value = mock_cache
+
+        mock_config.download.impersonation.enabled = False
+        mock_config.download.caption_first.skip_live_streams = False
+        mock_config.download.caption_first.adaptive_format_order = False
+
+        stage = CaptionStage()
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skip_count') == 1
+        # success_count = 0 because no new fetches were made
+        assert result.data.get('success_count') == 0
+
+
+class TestSaveIntermediateCheckpointUS003:
+    """US-003 Sprint 17 AC2: _save_intermediate_checkpoint() writes data without overwriting."""
+
+    def test_saves_caption_data_with_metrics(self):
+        """Checkpoint updated with caption_metrics key when metrics provided."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [{"text": "hello", "start": 0.0, "end": 1.0}],
+                "language": "en",
+            },
+            "def456ABC_1": {
+                "video_id": "def456ABC_1",
+                "segments": [{"text": "world", "start": 0.0, "end": 2.0}],
+                "language": "en",
+                "unavailable": True,
+            },
+        }
+
+        mock_metrics = MagicMock()
+        mock_metrics.to_dict.return_value = {
+            "successes": 1, "failures": 1, "cache_hits": 0
+        }
+
+        stage._save_intermediate_checkpoint(checkpoint, caption_results, mock_metrics)
+
+        checkpoint.save_intermediate.assert_called_once()
+        call_args = checkpoint.save_intermediate.call_args
+        assert call_args[0][0] == "CAPTION"
+        saved_data = call_args[0][1]
+        assert 'caption_results' in saved_data
+        assert 'caption_metrics' in saved_data
+        assert saved_data['caption_metrics']['successes'] == 1
+        # success_count should be 1 (only non-unavailable, non-error)
+        assert saved_data['success_count'] == 1
+        assert saved_data['partial'] is True
+
+    def test_saves_without_metrics(self):
+        """Checkpoint saved without caption_metrics when metrics=None."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+
+        caption_results = {
+            "abc123XYZ_0": {
+                "video_id": "abc123XYZ_0",
+                "segments": [{"text": "hello", "start": 0.0, "end": 1.0}],
+                "language": "en",
+            },
+        }
+
+        stage._save_intermediate_checkpoint(checkpoint, caption_results, metrics=None)
+
+        call_args = checkpoint.save_intermediate.call_args
+        saved_data = call_args[0][1]
+        assert 'caption_results' in saved_data
+        assert 'caption_metrics' not in saved_data
+        assert saved_data['success_count'] == 1
+
+    def test_does_not_overwrite_other_stage_data(self):
+        """save_intermediate only touches CAPTION stage key, not other stages."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+
+        caption_results = {"vid1": {"video_id": "vid1", "language": "en"}}
+
+        stage._save_intermediate_checkpoint(checkpoint, caption_results)
+
+        # Verify the stage name passed is CAPTION
+        call_args = checkpoint.save_intermediate.call_args
+        assert call_args[0][0] == "CAPTION"
+        # save_intermediate on checkpoint is responsible for not clobbering;
+        # the stage just passes its own data under its own key
+
+    def test_handles_exception_gracefully(self):
+        """Exception in save doesn't crash the stage."""
+        stage = CaptionStage()
+        checkpoint = MagicMock()
+        checkpoint.save_intermediate.side_effect = IOError("Disk full")
+
+        # Should not raise
+        stage._save_intermediate_checkpoint(checkpoint, {"vid1": {}})
+
+
+class TestCalculateQualityDistributionUS003:
+    """US-003 Sprint 17 AC3: _calculate_quality_distribution() bins into quality tiers."""
+
+    def test_correct_distribution_counts(self):
+        """Bins high/medium/low correctly for mixed results."""
+        stage = CaptionStage()
+
+        caption_results = {
+            "vid1": {"caption_quality": "high"},
+            "vid2": {"caption_quality": "high"},
+            "vid3": {"caption_quality": "medium"},
+            "vid4": {"caption_quality": "low"},
+            "vid5": {"caption_quality": "low"},
+            "vid6": {"caption_quality": "low"},
+        }
+
+        dist = stage._calculate_quality_distribution(caption_results)
+
+        assert dist == {"high": 2, "medium": 1, "low": 3}
+
+    def test_all_high_quality(self):
+        """All results high quality."""
+        stage = CaptionStage()
+
+        caption_results = {
+            f"vid{i}": {"caption_quality": "high"} for i in range(4)
+        }
+
+        dist = stage._calculate_quality_distribution(caption_results)
+
+        assert dist == {"high": 4, "medium": 0, "low": 0}
+
+    def test_unknown_quality_counted_as_low(self):
+        """Unknown quality strings default to low tier."""
+        stage = CaptionStage()
+
+        caption_results = {
+            "vid1": {"caption_quality": "unknown"},
+            "vid2": {"caption_quality": "excellent"},
+            "vid3": {},  # missing key defaults to 'low'
+        }
+
+        dist = stage._calculate_quality_distribution(caption_results)
+
+        assert dist["low"] == 3  # all unknown/missing → low
+
+    def test_empty_results(self):
+        """Empty caption_results returns all zeros."""
+        stage = CaptionStage()
+
+        dist = stage._calculate_quality_distribution({})
+
+        assert dist == {"high": 0, "medium": 0, "low": 0}
+
+    def test_missing_quality_key_defaults_to_low(self):
+        """Results without caption_quality key are binned as low."""
+        stage = CaptionStage()
+
+        caption_results = {
+            "vid1": {"language": "en"},  # no caption_quality
+            "vid2": {"caption_quality": "medium"},
+        }
+
+        dist = stage._calculate_quality_distribution(caption_results)
+
+        assert dist == {"high": 0, "medium": 1, "low": 1}
+
+
+class TestCaptionStageRunEmptyVideoIdsUS003:
+    """US-003 Sprint 17 AC4: run() handles empty video ID list gracefully."""
+
+    def test_empty_state_returns_ok_skipped(self, mock_config, mock_checkpoint):
+        """Stage completes without error with no videos."""
+        stage = CaptionStage()
+        state = PipelineState()  # No videos or audio
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'no_videos'
+
+    def test_empty_state_has_warning(self, mock_config, mock_checkpoint):
+        """Appropriate warning logged for empty video list."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert any("No video IDs" in w for w in result.warnings)
+
+    def test_disabled_caption_returns_ok_skipped(self, mock_checkpoint):
+        """Disabled caption-first mode returns ok with skipped reason."""
+        config = MagicMock()
+        config.download.caption_first.enabled = False
+
+        stage = CaptionStage()
+        state = PipelineState()
+
+        result = stage.run(state, config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'disabled'
+
+
+class TestCaptionStageRestoreFullUS003:
+    """US-003 Sprint 17 AC5: restore() rebuilds state including metrics and quality."""
+
+    def test_restore_with_caption_metrics(self, mock_config):
+        """Restore populates text_metadata and logs metrics info."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+
+        checkpoint_data = {
+            'caption_results': {
+                "abc123XYZ_0": {
+                    "video_id": "abc123XYZ_0",
+                    "segments": [
+                        {"text": "Hello world", "start": 0.0, "end": 2.5},
+                        {"text": "Test segment", "start": 2.5, "end": 5.0},
+                    ],
+                    "language": "en",
+                    "is_auto_generated": False,
+                    "caption_quality": "high",
+                },
+                "def456ABC_1": {
+                    "video_id": "def456ABC_1",
+                    "segments": [
+                        {"text": "Another video", "start": 0.0, "end": 3.0},
+                    ],
+                    "language": "es",
+                    "is_auto_generated": True,
+                    "caption_quality": "medium",
+                },
+            },
+            'total_segments': 3,
+            'caption_metrics': {
+                'successes': 2,
+                'failures': 0,
+                'cache_hits': 1,
+                'fetch_attempts': 3,
+            },
+        }
+        checkpoint.get_stage_data.return_value = checkpoint_data
+
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is True
+        # 3 total segments across 2 videos
+        assert len(state.text_metadata) == 3
+        # Verify text_metadata fields
+        first = state.text_metadata[0]
+        assert first['video_path'] == "abc123XYZ_0"
+        assert first['caption_quality'] == "high"
+        assert 'caption_language' in first
+
+    def test_restore_without_metrics(self, mock_config):
+        """Restore works when checkpoint has no caption_metrics."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+
+        checkpoint_data = {
+            'caption_results': {
+                "abc123XYZ_0": {
+                    "video_id": "abc123XYZ_0",
+                    "segments": [{"text": "Hello", "start": 0.0, "end": 1.0}],
+                    "language": "en",
+                    "is_auto_generated": False,
+                },
+            },
+            'total_segments': 1,
+        }
+        checkpoint.get_stage_data.return_value = checkpoint_data
+
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is True
+        assert len(state.text_metadata) == 1
+
+    def test_restore_skips_unavailable_captions(self, mock_config):
+        """Unavailable/error captions excluded from text_metadata."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+
+        checkpoint_data = {
+            'caption_results': {
+                "abc123XYZ_0": {
+                    "video_id": "abc123XYZ_0",
+                    "segments": [{"text": "Good", "start": 0.0, "end": 1.0}],
+                    "language": "en", "is_auto_generated": False,
+                },
+                "badVid00001": {
+                    "video_id": "badVid00001",
+                    "unavailable": True,
+                },
+                "errVid00002": {
+                    "video_id": "errVid00002",
+                    "error": "Fetch failed",
+                },
+            },
+            'total_segments': 1,
+        }
+        checkpoint.get_stage_data.return_value = checkpoint_data
+
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is True
+        # Only the good video's segment should be in text_metadata
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_path'] == "abc123XYZ_0"
+
+    def test_restore_empty_results_returns_false(self, mock_config):
+        """Empty caption_results returns False."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+
+        checkpoint.get_stage_data.return_value = {'caption_results': {}}
+
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is False
+
+    def test_restore_handles_exception(self, mock_config):
+        """Exception during restore returns False."""
+        stage = CaptionStage()
+        state = PipelineState()
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.side_effect = RuntimeError("Corrupt checkpoint")
+
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is False
