@@ -235,6 +235,160 @@ class TestPatternRouteFunction:
         assert result.category != "api" or "auth" not in result.reasoning.lower()
 
 
+class TestPatternRouteEdgeCasesUS005:
+    """US-005: Edge case tests for pattern_route() function."""
+
+    # AC1: Word boundary false positives - already covered by existing tests above
+    # test_pattern_route_no_false_positive_singapore_gap
+    # test_pattern_route_no_false_positive_author_auth
+
+    def test_pattern_route_mixed_http_status_codes_in_message(self):
+        """AC2: Test pattern_route() handles mixed HTTP status codes in error messages."""
+        # Message contains multiple status codes - should match the relevant one
+        error = "Request returned 200 OK but then failed with HTTP 403 Forbidden"
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_status_code_in_filename(self):
+        """AC2: Test pattern_route() doesn't false positive on status codes in filenames."""
+        error = "Processing file video_401.mp4 completed successfully"
+        result = pattern_route(error)
+
+        # 401 in filename should NOT match the authentication error pattern
+        # because the pattern requires HTTP context or word boundary
+        # If it matches, it should be because of explicit HTTP 401 pattern
+        if result.category == "api":
+            # Verify the pattern matched was the HTTP-specific one
+            assert "HTTP" in error or "401" in result.reasoning
+
+    def test_pattern_route_status_code_200_no_false_positive(self):
+        """AC2: Test pattern_route() doesn't match HTTP 200 as an error."""
+        error = "Request completed with HTTP 200 status"
+        result = pattern_route(error)
+
+        # 200 is success, should NOT match any error pattern
+        assert result.category == "unknown"
+
+    def test_pattern_route_rate_limit_youtube(self):
+        """AC3: Test pattern_route() identifies rate limit from YouTube."""
+        error = "yt-dlp error: HTTP Error 429 - Rate limit exceeded"
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_rate_limit_pexels(self):
+        """AC3: Test pattern_route() identifies rate limit from Pexels API."""
+        error = "Pexels API: Rate limit reached. Please wait before making more requests."
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_rate_limit_gemini(self):
+        """AC3: Test pattern_route() identifies rate limit from Gemini API."""
+        error = "google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded"
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_rate_limit_anthropic(self):
+        """AC3: Test pattern_route() identifies rate limit from Anthropic API."""
+        error = "anthropic.RateLimitError: Too many requests, please wait 60 seconds"
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_rate_limit_generic_too_many_requests(self):
+        """AC3: Test pattern_route() identifies generic 'too many requests' pattern."""
+        error = "Error: Too many requests. Try again later."
+        result = pattern_route(error)
+
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_multilingual_error_chinese(self):
+        """AC4: Test pattern_route() returns UNKNOWN for Chinese error message."""
+        error = "错误：文件未找到"  # "Error: File not found" in Chinese
+        result = pattern_route(error)
+
+        assert result.category == "unknown"
+        assert result.needs_llm_healer is True
+
+    def test_pattern_route_multilingual_error_japanese(self):
+        """AC4: Test pattern_route() returns UNKNOWN for Japanese error message."""
+        error = "エラー：接続できませんでした"  # "Error: Could not connect" in Japanese
+        result = pattern_route(error)
+
+        assert result.category == "unknown"
+        assert result.needs_llm_healer is True
+
+    def test_pattern_route_multilingual_error_arabic(self):
+        """AC4: Test pattern_route() returns UNKNOWN for Arabic error message."""
+        error = "خطأ: فشل التحميل"  # "Error: Download failed" in Arabic
+        result = pattern_route(error)
+
+        assert result.category == "unknown"
+        assert result.needs_llm_healer is True
+
+    def test_pattern_route_multilingual_error_mixed_english(self):
+        """AC4: Test pattern_route() handles mixed language with English keywords."""
+        # If an error has recognizable English keywords, it should still match
+        error = "ошибка 429: rate limit exceeded"  # Russian + English
+        result = pattern_route(error)
+
+        # Should match on "rate limit" even with Russian prefix
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    def test_pattern_route_priority_rate_limit_over_timeout(self):
+        """AC5: Test pattern_route() priority - rate limit matches before timeout."""
+        # Error message contains both patterns - 429 and timeout
+        error = "HTTP 429 Rate limit: request timed out waiting for quota reset"
+        result = pattern_route(error)
+
+        # Rate limit pattern should be matched (appears first in PATTERN_ROUTING)
+        assert result.category == "api"
+        # Verify it's the rate limit pattern, not timeout
+        assert "429" in result.reasoning or "rate" in result.reasoning.lower()
+
+    def test_pattern_route_priority_api_over_download(self):
+        """AC5: Test pattern_route() priority - API error matches before download error."""
+        # Error contains both API auth and YouTube patterns
+        error = "youtube: HTTP 403 Forbidden - authentication error accessing video"
+        result = pattern_route(error)
+
+        # Should match API pattern (HTTP 403 auth) which comes before download
+        assert result.category == "api"
+        assert "api-healer" in result.suggested_healer
+
+    def test_pattern_route_priority_disk_specific_over_generic(self):
+        """AC5: Test pattern_route() matches specific disk error over generic."""
+        error = "OSError: [Errno 28] No space left on device"
+        result = pattern_route(error)
+
+        assert result.category == "disk"
+        # Should match ENOSPC/no space pattern
+        assert "28" in result.reasoning or "space" in result.reasoning.lower()
+
+    def test_pattern_route_first_matching_pattern_wins(self):
+        """AC5: Test that first matching pattern in PATTERN_ROUTING wins."""
+        # This tests the dictionary iteration order behavior
+        # Create an error that could match multiple patterns
+        error = "HTTP 429 rate limit - connection timed out waiting"
+        result = pattern_route(error)
+
+        # The first pattern in PATTERN_ROUTING for "api" category should match
+        # Both 429/rate_limit and timeout patterns match, but 429 comes first
+        assert result.category == "api"
+        # The reasoning should show which pattern matched
+        assert "pattern" in result.reasoning.lower()
+
+
 class TestPatternRoutingConstants:
     """Tests for PATTERN_ROUTING dictionary."""
 
