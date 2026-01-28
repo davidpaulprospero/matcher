@@ -36,8 +36,8 @@
                             "id":  "US-003",
                             "title":  "Add caption-first video ID resolution tests for Rule 26",
                             "priority":  3,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Created tests/test_caption_first_video_id_resolution.py with 29 tests covering all 5 ACs: video ID to segment path resolution, global cache segment gaps, OTIO path validation, extract_video_id handling, and segment coverage analysis. Tests verify Rule 26 behavior for caption-first mode.",
                             "acceptanceCriteria":  [
                                                        "Test matches with video ID source_file resolve to segment paths after DOWNLOAD_SEGMENTS",
                                                        "Test global caption cache entries don\u0027t have segments downloaded (expected gap)",
