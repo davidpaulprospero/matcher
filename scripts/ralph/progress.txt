@@ -7167,3 +7167,23 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 33 tests passed in 0.52s
 - Files created: tests/test_research_grok_client.py (873 lines)
 - Commit: c116066
+
+## Iteration US-004 (Sprint 23) - Add compilation mode timeline builder tests
+- Added TestCompilationTimelineBuilderGapCheckIntegration class (5 tests):
+  - test_builder_handles_tracks_after_gap_fill: AC2 - tracks supplemented after gap_check
+  - test_builder_handles_mixed_keyword_tracks_from_gap_fill: clips from multiple iterations
+  - test_builder_calculates_total_duration_after_gap_fill: sum includes all gap_fill content
+  - test_builder_handles_empty_track_from_failed_gap_fill: graceful empty track handling
+  - test_builder_preserves_keyword_order_from_gap_check_iterations: iteration order preserved
+- Added TestCompilationTimelineBuilderDurationLimits class (7 tests):
+  - test_builder_calculates_correct_total_duration: AC3 - accurate duration totals
+  - test_builder_handles_clips_near_duration_boundary: exact boundary handling
+  - test_builder_handles_very_short_clips: sub-second clip creation
+  - test_builder_handles_very_long_clips: 10+ minute clips
+  - test_builder_duration_frame_count_accuracy: frame counts at 30/24 fps
+  - test_builder_per_track_duration_stats: per-track statistics
+  - test_builder_handles_fractional_durations_at_frame_boundary: int() truncation behavior
+- Note: AC1/AC4/AC5 already covered by existing 19 tests in TestCompilationTimelineBuilder
+- Test results: 64 tests pass in 0.44s
+- Files modified: tests/test_compilation.py (+258 lines)
+- Commit: 0af4e5c
