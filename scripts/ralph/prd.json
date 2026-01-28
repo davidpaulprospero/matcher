@@ -36,8 +36,8 @@
             "id": "US-003",
             "title": "Add chapter detection ChunkingStrategy tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 13 new tests in 5 test classes: TestChunkingSentenceBoundaries (2), TestChunkingMaxSizeLimit (2), TestChunkingShortTranscripts (3), TestChunkingTimestampPreservation (3), TestChunkingUnicode (3). Note: Implementation uses create_chunks() function not ChunkingStrategy class - tests adapted accordingly. All 5 AC verified. 24 total tests pass in test_chunking.py.",
             "acceptanceCriteria": [
                 "Test ChunkingStrategy.chunk_transcript() splits on sentence boundaries",
                 "Test ChunkingStrategy.chunk_transcript() respects max_chunk_size limit",
