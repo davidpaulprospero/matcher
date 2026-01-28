@@ -19,6 +19,7 @@ class TestEmbeddingPerformance:
 
     @pytest.mark.slow
     @pytest.mark.requires_api
+    @pytest.mark.flaky(reruns=2, reruns_delay=1.0)
     def test_voyage_embedding_speed(self, sample_segments):
         """Benchmark Voyage AI embedding generation speed."""
         pytest.skip("Requires VOYAGE_API_KEY - run manually")
