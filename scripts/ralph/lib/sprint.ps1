@@ -608,6 +608,33 @@ function New-SprintReport {
         $report += ""
     }
 
+    # Healing summary
+    $healingSummary = Get-HealingSummary
+    if ($healingSummary -and $healingSummary.TotalHealingSessions -gt 0) {
+        $healResolveRate = if ($healingSummary.TotalHealingSessions -gt 0) {
+            [math]::Round($healingSummary.TotalResolved / $healingSummary.TotalHealingSessions * 100)
+        } else { 0 }
+        $report += "## Self-Healing"
+        $report += ""
+        $report += "| Metric | Value |"
+        $report += "|--------|-------|"
+        $report += "| Healing sessions | $($healingSummary.TotalHealingSessions) |"
+        $report += "| Resolved | $($healingSummary.TotalResolved) |"
+        $report += "| Failed | $($healingSummary.TotalFailed) |"
+        $report += "| Resolution rate | $healResolveRate% |"
+        $report += "| Total fix attempts | $($healingSummary.TotalAttempts) |"
+        $report += ""
+        # Tier breakdown
+        $report += "**Tier breakdown:**"
+        $report += ""
+        $report += "| Tier | Triggers | Description |"
+        $report += "|------|----------|-------------|"
+        $report += "| T1 | $($healingSummary.TierBreakdown[1]) | Syntax & imports |"
+        $report += "| T2 | $($healingSummary.TierBreakdown[2]) | Collection errors |"
+        $report += "| T3 | $($healingSummary.TierBreakdown[3]) | Full test failures |"
+        $report += ""
+    }
+
     # Token budget
     $budgetStatus = Get-SprintTokenBudget
     if ($budgetStatus) {
