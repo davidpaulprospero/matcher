@@ -1,147 +1,147 @@
 {
-    "branchName": "ralph/sprint-14",
-    "sprintNumber": 14,
+    "branchName": "ralph/sprint-15",
+    "sprintNumber": 15,
     "focusArea": "testing",
-    "projectContext": "Sprint 13 (testing) completed all 10 stories covering rate-limiting intelligence tests: retry queue deadlock prevention, rate limit window estimation, escalation timeline export, tier effectiveness correlation, auto-scaling budget, stale checkpoint restoration, recommendation engine, health status aggregation, circuit breaker pause scaling, and speed tracker signal detection. Sprint 14 targets deeper integration-level testing gaps identified during sprint 13: AudioFirstPipeline has zero escalation/cookie integration tests, RateLimitBudget lacks thread safety, CookieMethodFallback has untested cross-keyword exhaustion paths, parallel downloads have only 10 config-level tests with no concurrency coverage, and checkpoint save/restore cycles for escalation timeline and tier outcomes are untested end-to-end.",
+    "projectContext": "Sprints 13-14 (testing) completed 20 stories covering rate-limiting intelligence tests and integration-level download/escalation/cookie/budget tests. Sprint 15 pivots to under-tested non-download modules: post-edit analysis (1666 lines, 1 indirect test), CLI config_utils (368 lines, no direct tests), newproject.py (331 lines, zero tests), checkpoint corruption recovery (784 lines, basic tests only), pipeline orchestrator resume logic (521 lines, basic tests), vision module cost tracking (544 lines, basic tests), and state dataclass serialization edge cases. These modules handle critical user-facing and pipeline-integrity functionality with minimal test coverage.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add AudioFirstPipeline escalation integration tests",
+            "title": "Add post-edit analysis filename-based matching tests",
             "priority": 1,
             "passes": true,
-            "notes": "Created tests/test_audio_first_escalation.py with 12 tests across 5 classes: TestAudioDownloadEscalationArgs (Tier 1 --impersonate verification), TestAudioDownloadCookieRotation (Tier 3 cookie rotation), TestSegmentDownloadEscalationArgs (Tier 2 --extractor-args in segments), TestFallbackEscalationIndependence (tier preservation across fallback), TestRetryLoopEscalation (403 -> Tier 2 progression via retry loop). All 12 tests pass.",
+            "notes": "Created tests/test_post_edit_analysis.py with 55 tests: 12 for _is_matcher_track (V1-V10, V11/V100 false, keywords), 17 for _get_track_category (all categories + keywords + None), 7 for _render_coverage_bar (0/50/100%, custom width), 9 for _format_timecode (MM:SS, HH:MM:SS, negative, zero), 10 for filename-based analysis (_normalize, FilenameAnalysisResult counts/coverage/to_dict).",
             "acceptanceCriteria": [
-                "Test download_audio_for_keyword() passes escalation_manager.get_escalation_args(keyword) to yt-dlp command — verify args include --impersonate when Tier 1",
-                "Test download_audio_for_keyword() handles EscalationResult.rotate_cookies=True by calling cookie_rotator.rotate() before retry",
-                "Test download_video_segments() applies escalation args to segment download commands — verify --extractor-args added when Tier 2+",
-                "Test _download_full_video_fallback() escalates independently from segment download — verify tier state preserved across fallback transition",
-                "Test retry loop with 2 consecutive 403 errors triggers escalation from Tier 1 to Tier 2 within download_audio_for_keyword()"
+                "Test _is_matcher_track() correctly identifies V1-V10 track names — verify True for 'V1', 'V10', 'V1 Primary', and False for 'V11', 'V100', 'Audio 1'",
+                "Test _get_track_category() returns correct categories — verify 'v1' for V1, 'v2_v3' for V2/V3, 'v4_v6' for V4-V6, 'v7_plus' for V7+, None for non-matcher tracks",
+                "Test _render_coverage_bar() renders ASCII bars — verify 100% yields '[##########]', 0% yields '[..........]', 50% yields '[#####.....]'",
+                "Test _format_timecode() formats seconds — verify 90s='1:30', 3661s='1:01:01', negative seconds prepends '-', 0s='0:00'",
+                "Test filename-based analysis matches clips by normalized filename across original and edited OTIO — verify clips found, clips missing, and coverage percentage calculation"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add AudioFirstPipeline speed escalation wiring tests",
+            "title": "Add post-edit analysis track category statistics tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Created tests/test_speed_escalation_wiring.py with 17 tests across 5 classes: TestCheckSpeedEscalationCallsRecordSlowSpeed (4 tests: signal detection triggers record_slow_speed, no call when not detected, correct keyword/speed forwarding, detect invoked once), TestSpeedEscalationCalledAfterAudioDownload (3 tests: called once per download_audio_for_keyword, called on failures, correct keyword), TestSpeedEscalationCalledAfterSegmentDownload (3 tests: called per video_id, correct keyword per video, called on failure), TestSpeedEscalationWithNullSpeedTracker (3 tests: None tracker, None tracker no record, disabled tracker), TestSpeedEscalationWithNullEscalationManager (4 tests: None manager, detect skipped, both None, integration with None managers). All 17 tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _check_speed_escalation() calls escalation_manager.record_slow_speed(keyword, speed_mbps) when speed_tracker detects rate limit signal",
-                "Test _check_speed_escalation() is called after each audio download attempt in download_audio_for_keyword() — verify invocation count matches retry count",
-                "Test _check_speed_escalation() is called after segment download in download_video_segments() — verify invocation with correct keyword",
-                "Test _check_speed_escalation() handles speed_tracker=None gracefully (no AttributeError when tracking disabled)",
-                "Test _check_speed_escalation() handles escalation_manager=None gracefully (no crash when escalation disabled)"
+                "Test track category aggregation groups clips into v1, v2_v3, v4_v6, v7_plus buckets — verify counts per category with a mock timeline containing 10 clips across 5 tracks",
+                "Test coverage calculation per track category — verify coverage_pct is (matched_duration / total_duration) * 100 for each category",
+                "Test empty edited OTIO returns 0% coverage for all categories — verify no division by zero errors",
+                "Test position-based mode matches clips by frame position — verify clips matched when original and edited positions align within tolerance",
+                "Test report generation produces valid markdown with track breakdown, coverage bars, and summary statistics"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add CookieMethodFallback cross-keyword exhaustion tests",
+            "title": "Add CLI config_utils root directory validation tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Added TestCrossKeywordExhaustion class with 8 tests in tests/test_cookie_method_fallback.py: AC1 - full 5-method chain advance with type verification at each step; AC2 - mark_success rotation from method 0 to method 1 plus wrap-around test; AC3 - reset after exhaustion uses last_success_index (not 0) plus no-success fallback; AC4 - get_status remaining_methods accuracy at each step through full traversal; AC5 - duplicate path deduplication within cookie_files and across slash styles. All 52 tests pass (44 existing + 8 new).",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test advance() through full chain (browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies) — verify each transition returns correct CookieMethod type",
-                "Test mark_success() proactive rotation: after success on method 0, verify current advances to method 1 for load balancing",
-                "Test reset_for_next_download() after exhaustion: verify resets to last_success_index (not always 0) for new keyword downloads",
-                "Test get_status() after partial chain traversal: verify remaining_methods count and current_method are accurate",
-                "Test duplicate cookie file paths in chain construction: verify resolved paths are deduplicated (no duplicate entries in self._chain)"
+                "Test validate_root_directories() creates missing directories — verify mkdir called for download.root_dir and image_search.root_dir when paths are absolute but don't exist",
+                "Test validate_root_directories() rejects relative paths — verify SystemExit when download.root_dir is './videos' (not absolute)",
+                "Test validate_root_directories() handles None root_dir gracefully — verify no error when root_dir is not configured (None or empty string)",
+                "Test validate_root_directories() reports creation failure — verify error message includes path when mkdir raises PermissionError",
+                "Test make_paths_project_relative() converts absolute paths to project-relative — verify voiceover path is resolved relative to project_dir"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add RateLimitBudget thread safety tests",
+            "title": "Add CLI newproject Google Doc parsing tests",
             "priority": 4,
-            "passes": true,
-            "notes": "Created tests/test_budget_thread_safety.py with 14 tests across 5 classes: TestConcurrentRecordRotation (3 tests: 10 threads x1, 10 threads x100, keyword tracking), TestConcurrentCanRotateAndRecord (2 tests: budget limit enforcement under contention, tight single-rotation boundary), TestConcurrentRecordBackoff (3 tests: 5 threads different durations, 5 threads x100 small backoffs, keyword tracking), TestConcurrentSuccessFailure (3 tests: mixed success/failure from 10 threads, interleaved same-thread, failure keyword tracking), TestAtomicLastRotation (3 tests: 20-trial last-rotation atomicity, gated rotation count consistency, 50-thread stress test). All 14 tests pass. All 153 budget-related tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test concurrent record_rotation() from 10 threads — verify rotations_used equals exactly 10 (no race condition overwrites)",
-                "Test concurrent can_rotate() + record_rotation() — verify budget never exceeds max_rotations even under contention",
-                "Test concurrent record_backoff_time() from 5 threads with different durations — verify backoff_time_spent is sum of all durations",
-                "Test concurrent record_success() + record_failure() — verify successes + failures equals total call count",
-                "Test can_rotate() returns False atomically when last rotation consumed — verify no two threads both get True when only 1 rotation remains"
+                "Test extract_doc_id() parses Google Doc URLs — verify extraction from 'https://docs.google.com/document/d/ABC123/edit', '/edit?usp=sharing' variant, and returns None for invalid URLs",
+                "Test extract_drive_links() finds Google Drive file IDs in text — verify finds multiple IDs in multiline text, returns empty list for text with no Drive links",
+                "Test get_date_suffix() returns YYYY-MM-DD format — verify format matches regex pattern r'\\d{4}-\\d{2}-\\d{2}'",
+                "Test concatenate_audio_files() builds correct FFmpeg command for multiple audio files — verify command includes all input files and output path",
+                "Test download_drive_files() handles missing gdown gracefully — verify ImportError is caught and meaningful error message is printed"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add escalation timeline checkpoint persistence tests",
+            "title": "Add checkpoint corruption recovery tests",
             "priority": 5,
-            "passes": true,
-            "notes": "Added timeline and tier_outcomes serialization to EscalationManager.to_dict() (under 'timeline' and 'tier_outcomes' keys) and restoration in from_dict() with backward compatibility and JSON string-key handling. Created tests/test_escalation_checkpoint_persistence.py with 22 tests across 5 classes: TestToDictIncludesTimeline (5 tests), TestFromDictRestoresTimeline (4 tests), TestToDictIncludesTierOutcomes (4 tests), TestFromDictRestoresTierOutcomes (5 tests), TestRoundtripHotKeywords (4 tests). All 22 new tests pass, all 164 existing escalation tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test to_dict() includes _escalation_timeline under 'timeline' key with all recorded events per keyword",
-                "Test from_dict() restores _escalation_timeline correctly — record 5 events, serialize, deserialize, verify get_keyword_escalation_timeline() returns same data",
-                "Test to_dict() includes _tier_outcomes under 'tier_outcomes' key — record mixed outcomes, verify serialized structure matches get_tier_effectiveness() output",
-                "Test from_dict() restores _tier_outcomes correctly — record outcomes, serialize, deserialize, verify get_tier_effectiveness() returns same rates",
-                "Test checkpoint round-trip with hot_keywords: record escalations within 30 min window, save, restore, verify get_hot_keywords() still returns them"
+                "Test load() falls back to backup when primary checkpoint.json is corrupted JSON — verify data loaded from checkpoint.backup.json matches saved state",
+                "Test load() returns None when both checkpoint.json and backup are corrupted — verify no exception raised, returns None gracefully",
+                "Test save() creates backup of previous checkpoint before overwriting — verify checkpoint.backup.json contains the pre-save state after save() call",
+                "Test is_stale() correctly identifies checkpoints older than max_age_hours — verify True for 25-hour-old checkpoint with default 24h threshold, False for 23-hour-old",
+                "Test save() with stage data containing non-serializable objects — verify graceful handling (skip or convert) rather than json.dumps crash"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add parallel download escalation coordination tests",
+            "title": "Add checkpoint stage data round-trip tests",
             "priority": 6,
-            "passes": true,
-            "notes": "Created tests/test_parallel_download_escalation.py with 17 tests across 5 classes: TestConcurrentKeywordIndependentTiers (3 tests: keyword A Tier 2 vs B Tier 1, 10 keywords concurrent independence, full escalation no leak), TestConcurrentRecordFailure (3 tests: 10 threads same keyword exact count, 100 iterations accurate, total_403s across keywords), TestPerKeywordLockIsolation (4 tests: concurrent different-keyword escalation, interleaved failure/success isolation, 20 keywords no deadlock, lock creation thread safety), TestSharedBudgetDepletion (3 tests: keyword A exhausts budget blocks B, concurrent exact limit, budget exhaustion forces FULL_BYPASS skip), TestConcurrentGetEscalationArgs (4 tests: concurrent reads valid tier, read during escalation consistent, different keywords consistent tiers, 50-thread stress no partial state). All 17 tests pass, all 176 related escalation tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test two concurrent keywords sharing EscalationManager — keyword A escalates to Tier 2 while B stays at Tier 1, verify independent tier states",
-                "Test concurrent record_failure() calls for same keyword — verify consecutive_failures count is accurate (thread-safe increment)",
-                "Test concurrent escalation triggers for different keywords — verify per-keyword locks prevent cross-keyword interference",
-                "Test shared budget depletion during parallel downloads — when keyword A exhausts rotations, keyword B's can_rotate() returns False",
-                "Test concurrent get_escalation_args() returns consistent tier-appropriate args (no partial reads of tier state during escalation)"
+                "Test save/load round-trip preserves stage data for all 14 stage types — save with data for ANALYZE through OUTPUT, load, verify each stage dict matches original",
+                "Test get_stage_data() returns empty dict for stages not yet completed — verify no KeyError when accessing stage data before that stage runs",
+                "Test should_run_stage() correctly skips completed stages during resume — verify returns False for stages before last_completed_stage, True for stages after",
+                "Test config_hash mismatch detection — verify load() warns when checkpoint config_hash differs from current config hash (config changed between runs)",
+                "Test voiceover_hash comparison — verify checkpoint detects when voiceover file changed between runs via hash mismatch"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add cookie rotator mid-session file validation tests",
+            "title": "Add pipeline orchestrator resume logic tests",
             "priority": 7,
-            "passes": true,
-            "notes": "Added mid-session file validation to CookieRotator (_is_cookie_file_valid, _remove_invalid_cookie, _find_valid_cookie methods) and integrated into get_current_cookie(), _select_round_robin(), _select_random(). Added TestMidSessionFileValidation class with 10 tests in tests/test_cookie_rotation.py: AC1 - rotate() with deleted cookie falls back gracefully; AC2 - rotate() with empty cookie skips to next; AC3 - rotate() with all deleted returns None + logs warning; AC4 - single cookie round-robin no infinite loop; AC5 - get_current_cookie() returns None/fallback after deletion; plus 5 additional coverage tests (all-deleted returns None, invalid tracking, chain skip, _is_cookie_file_valid unit test, status reflection). All 38 cookie_rotation tests pass (1 skipped on Windows), all 93 related cookie tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test rotate() when current cookie file is deleted mid-session — verify graceful fallback to next available cookie (no FileNotFoundError crash)",
-                "Test rotate() when cookie file becomes empty (0 bytes) mid-session — verify it skips to next cookie instead of using empty file",
-                "Test rotate() with all cookie files deleted — verify returns None and logs warning (not exception)",
-                "Test round-robin rotation with single cookie file — verify it returns that file on every call (no infinite loop in _select_round_robin)",
-                "Test get_current_cookie_path() after cookie deletion — verify returns None rather than path to deleted file"
+                "Test run_pipeline() skips stages before checkpoint's last_completed_stage during resume — mock 3 stages, set checkpoint to stage 1, verify only stages 2 and 3 execute",
+                "Test run_pipeline() executes all stages when no checkpoint exists (fresh run) — verify all stage execute() methods called in order",
+                "Test run_pipeline() halts on stage failure — verify subsequent stages are NOT called when a stage returns StageResult with success=False",
+                "Test stage timing is recorded in metrics — verify elapsed_seconds is populated for each completed stage after run_pipeline() completes",
+                "Test stage callbacks fire correctly — register on_stage_start and on_stage_complete callbacks, verify both called with correct stage name for each stage"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add speech screening escalation integration tests",
+            "title": "Add vision module transcript analysis tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Created tests/test_speech_screening_escalation.py with 15 tests across 5 classes: TestDownloadAudioClipEscalationArgs (3 tests: Tier 1 --impersonate, Tier 2 --extractor-args, arg ordering before cookies), TestDownloadAudioClipNoEscalation (3 tests: no args when both managers None, impersonation fallback when escalation None, no AttributeError on 403), TestScreenVideoRecordsFailure (3 tests: record_failure on 403 stderr, no failure on timeout, no failure on success), TestScreenVideoHandlesCookieRotation (3 tests: cookie_rotator.rotate() on rotate_cookies=True, no rotation when False, no crash without cookie_rotator), TestScreenApprovedVideosSharedState (3 tests: tier progression across videos, shared state persistence across calls, independent tiers per video ID). Also added record_failure and cookie rotation support to speech_screening.py download_audio_clip(). All 15 new tests pass, all 134 related tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _download_audio_clip() applies escalation_manager.get_escalation_args() to yt-dlp command when escalation_manager is provided",
-                "Test _download_audio_clip() omits escalation args gracefully when escalation_manager is None",
-                "Test screen_video() records escalation failure via escalation_manager.record_failure() when download returns 403 error",
-                "Test screen_video() handles EscalationResult.rotate_cookies=True by advancing cookie method before retry",
-                "Test screen_approved_videos() processes multiple videos with shared escalation state — verify tier progression carries across video screening calls"
+                "Test TranscriptAnalyzer.analyze_video_transcript() with empty scenes list — verify returns VideoVisionDecision with needs_vision=True and reason mentioning 'no scenes'",
+                "Test TranscriptAnalyzer identifies sparse scenes — verify scenes with word_count < min_words_per_scene are flagged in sparse_scenes list",
+                "Test TranscriptAnalyzer returns needs_vision=False when all scenes have sufficient transcript — verify coverage_threshold check passes, sparse_scenes is empty",
+                "Test SceneAnalysis dataclass stores correct fields — verify scene_index, transcript_word_count, needs_vision, and optional vision_description all serialize correctly",
+                "Test VideoVisionDecision.transcript_coverage calculation — verify coverage is 0.0 for no-transcript video, 1.0 for fully transcribed video, and proportional for partial"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add title filter escalation args integration tests",
+            "title": "Add state dataclass serialization edge case tests",
             "priority": 9,
-            "passes": true,
-            "notes": "Created tests/test_title_filter_escalation.py with 18 tests across 5 classes: TestSearchIncludesEscalationArgs (3 tests: Tier 1 --impersonate, Tier 2 --extractor-args, arg ordering before cookies), TestSearchHandles403WithEscalation (3 tests: 403 detection via is_escalation_trigger, caller records failure for escalation, 403 returns valid SearchResult), TestTimeoutDoesNotTriggerEscalation (3 tests: timeout doesn't escalate, returns timed_out SearchResult, preserves tier for next search), TestJsonParseErrorPreservesEscalation (4 tests: malformed JSON, mixed valid/invalid, empty output, generic exception all preserve escalation state), TestEscalationManagerNone (5 tests: works without manager, no args when both None, impersonation fallback, no error on 403, no error on timeout). All 18 tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test filter_by_title() includes escalation args from get_escalation_args(keyword) in yt-dlp --dump-json search command",
-                "Test filter_by_title() handles 403 during search by calling escalation_manager.record_failure() and retrying with escalated args",
-                "Test filter_by_title() timeout does NOT trigger escalation (timeout is search-specific, not rate-limit related)",
-                "Test filter_by_title() JSON parse error in yt-dlp output does not crash escalation tracking — verify escalation state unchanged",
-                "Test filter_by_title() with escalation_manager=None skips all escalation logic without AttributeError"
+                "Test VoiceoverSegment.__post_init__() auto-calculates duration — verify duration=15.0 when start=10.0, end=25.0 and duration not explicitly set; verify explicit duration=5.0 is NOT overwritten",
+                "Test TranscriptSegment.to_dict() includes all fields including optional broll fields — verify is_broll and description_source appear in dict output",
+                "Test DownloadedVideo with empty string fields — verify no errors when url='', title='', channel='' (all optional fields empty)",
+                "Test PipelineState initialization with defaults — verify all list fields default to empty lists, all dict fields to empty dicts, no shared mutable defaults across instances",
+                "Test Match dataclass with confidence=0.0 and confidence=1.0 boundary values — verify no float comparison issues, to_dict() preserves exact values"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add budget exhaustion cascade behavior tests",
+            "title": "Add SavedKeywords preset management tests",
             "priority": 10,
-            "passes": true,
-            "notes": "Added get_budget_advice() method to RateLimitBudget returning 'continue', 'skip_to_vpn', or 'abort_keyword'. Created tests/test_budget_exhaustion_cascade.py with 20 tests across 5 classes: TestRotationExhaustionTriggersVpnAdvice (3 tests: skip_to_vpn when exhausted, continue when available, state verification), TestFullExhaustionTriggersAbort (3 tests: abort_keyword when all exhausted, cascade progression continue->skip_to_vpn->abort_keyword, abort even with backoff available), TestRotationBudgetExactBoundary (5 tests: small/single/large budget boundaries, over-budget, mid-download advice shift), TestBackoffBudgetExhaustion (4 tests: threshold, incremental, over-threshold, backoff-rotation independence), TestCheckpointRestoresBudgetState (5 tests: 5-rotation restore, exhausted restore, advice preservation, abort preservation, keyword+level preservation). All 20 new tests pass, all 198 existing budget tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test can_rotate()=False triggers direct VPN escalation advice in get_budget_advice() — verify advice includes 'skip_to_vpn'",
-                "Test can_switch_vpn()=False after can_rotate()=False — verify get_budget_advice() recommends 'abort_keyword' (all resources exhausted)",
-                "Test budget exhaustion mid-download: record_rotation() succeeds N times then can_rotate() returns False — verify exact boundary (max_rotations consumed)",
-                "Test backoff budget exhaustion: record_backoff_time() with cumulative > max_backoff_time — verify can_backoff() returns False at threshold",
-                "Test from_checkpoint() restores budget state correctly — serialize with 5 rotations used, deserialize, verify rotations_used=5 and can_rotate() reflects remaining budget"
+                "Test SavedKeywords.from_dict() ignores unknown keys — verify extra keys in dict don't cause TypeError, only known dataclass fields are set",
+                "Test SavedKeywords.to_dict() round-trip preserves all fields — save with name, keywords list, topic_context, entities, verify from_dict(to_dict()) equals original",
+                "Test KeywordManager.save_preset() writes to saved_keywords.json — verify file created with correct preset name and keyword data",
+                "Test KeywordManager.load_preset() returns None for non-existent preset — verify no FileNotFoundError, returns None gracefully",
+                "Test KeywordManager.list_presets() returns sorted preset names — verify alphabetical order, empty list when no presets saved"
             ]
         }
     ]
