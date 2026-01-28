@@ -650,13 +650,30 @@ function Measure-CodebaseHealth {
         techDebt = @{ todoCount = 0; fixmeCount = 0; hackCount = 0; complexFunctions = 0 }
     }
 
-    # Test metrics
+    # Test metrics (with timeout to prevent hanging the loop)
     try {
         $testsDir = Join-Path $script:ProjectRoot 'tests'
-        $testOutput = & python -m pytest $testsDir --tb=no -q 2>&1
-        $testText = $testOutput -join "`n"
-        if ($testText -match '(\d+)\s+passed') { $health.tests.passed = [int]$Matches[1] }
-        if ($testText -match '(\d+)\s+failed') { $health.tests.failed = [int]$Matches[1] }
+        $healthTimeoutSec = 120  # Max 2 minutes for health check pytest run
+        $outTmp = [System.IO.Path]::GetTempFileName()
+        $errTmp = [System.IO.Path]::GetTempFileName()
+        try {
+            $proc = Start-Process -FilePath "python" -ArgumentList "-m pytest `"$testsDir`" --tb=no -q -x --timeout=30" `
+                -NoNewWindow -RedirectStandardOutput $outTmp -RedirectStandardError $errTmp -PassThru -WorkingDirectory $script:ProjectRoot
+            $completed = $proc.WaitForExit($healthTimeoutSec * 1000)
+            if (-not $completed) {
+                try { $proc.Kill() } catch {}
+                Write-Host "  Health: pytest timed out after ${healthTimeoutSec}s (killed)" -ForegroundColor Yellow
+            }
+            $testText = Get-Content $outTmp -Raw -ErrorAction SilentlyContinue
+            if ($testText) {
+                if ($testText -match '(\d+)\s+passed') { $health.tests.passed = [int]$Matches[1] }
+                if ($testText -match '(\d+)\s+failed') { $health.tests.failed = [int]$Matches[1] }
+            }
+        }
+        finally {
+            Remove-Item $outTmp -Force -ErrorAction SilentlyContinue
+            Remove-Item $errTmp -Force -ErrorAction SilentlyContinue
+        }
         $health.tests.total = $health.tests.passed + $health.tests.failed
         $health.tests.passRate = if ($health.tests.total -gt 0) {
             [math]::Round($health.tests.passed / $health.tests.total, 2)
