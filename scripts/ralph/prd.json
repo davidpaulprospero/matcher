@@ -134,7 +134,8 @@
             "id": "US-010",
             "title": "Add budget exhaustion cascade behavior tests",
             "priority": 10,
-            "passes": false,
+            "passes": true,
+            "notes": "Added get_budget_advice() method to RateLimitBudget returning 'continue', 'skip_to_vpn', or 'abort_keyword'. Created tests/test_budget_exhaustion_cascade.py with 20 tests across 5 classes: TestRotationExhaustionTriggersVpnAdvice (3 tests: skip_to_vpn when exhausted, continue when available, state verification), TestFullExhaustionTriggersAbort (3 tests: abort_keyword when all exhausted, cascade progression continue->skip_to_vpn->abort_keyword, abort even with backoff available), TestRotationBudgetExactBoundary (5 tests: small/single/large budget boundaries, over-budget, mid-download advice shift), TestBackoffBudgetExhaustion (4 tests: threshold, incremental, over-threshold, backoff-rotation independence), TestCheckpointRestoresBudgetState (5 tests: 5-rotation restore, exhausted restore, advice preservation, abort preservation, keyword+level preservation). All 20 new tests pass, all 198 existing budget tests pass.",
             "acceptanceCriteria": [
                 "Test can_rotate()=False triggers direct VPN escalation advice in get_budget_advice() — verify advice includes 'skip_to_vpn'",
                 "Test can_switch_vpn()=False after can_rotate()=False — verify get_budget_advice() recommends 'abort_keyword' (all resources exhausted)",

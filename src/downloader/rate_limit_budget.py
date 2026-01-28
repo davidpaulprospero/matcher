@@ -266,6 +266,23 @@ class RateLimitBudget:
         # All options exhausted
         return "exhausted"
 
+    def get_budget_advice(self) -> str:
+        """Get actionable advice based on current budget exhaustion state.
+
+        Returns advice strings for callers to decide next action:
+        - 'continue': Budget resources still available, proceed normally
+        - 'skip_to_vpn': Cookie rotations exhausted, skip directly to VPN
+        - 'abort_keyword': All recovery resources exhausted, abandon keyword
+
+        Returns:
+            Advice string: 'continue', 'skip_to_vpn', or 'abort_keyword'
+        """
+        if not self.can_rotate():
+            if not self.can_switch_vpn():
+                return "abort_keyword"
+            return "skip_to_vpn"
+        return "continue"
+
     def is_nearly_exhausted(self) -> bool:
         """Check if any single resource exceeds 80% usage.
 
