@@ -509,3 +509,267 @@ class TestFactoryFunction:
             )
 
             assert orchestrator.strategy.mode == HealingMode.AGGRESSIVE
+
+
+class TestClassifyError:
+    """Tests for HealingOrchestrator._classify_error() method.
+
+    US-005: Add FallbackChain.classify_error method tests
+
+    Tests fallback logic:
+    - Uses watcher when available
+    - Falls back to pattern_route when watcher unavailable
+    - Falls back to pattern_route when watcher times out
+    - Logs fallback activation
+    - Returns PatternClassification with needs_llm_healer=True for unknown patterns
+    """
+
+    def test_classify_error_uses_watcher_when_available(self, mock_config, project_dir):
+        """Test classify_error() uses watcher when available and returns WatcherClassification."""
+        # Create orchestrator
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set up mock watcher
+        mock_watcher = Mock()
+        from src.agents.watcher import ErrorClassification
+        mock_classification = ErrorClassification(
+            category="api",
+            severity="recoverable",
+            suggested_healer="api-healer",
+            confidence=0.9,
+            needs_llm_healer=False,
+            reasoning="Watcher classified as API error"
+        )
+        mock_watcher.classify_error.return_value = mock_classification
+
+        # Set up mock fallback_chain that says watcher is available
+        mock_fallback = Mock()
+        mock_fallback.check_watcher_available.return_value = True
+
+        orchestrator.watcher = mock_watcher
+        orchestrator.fallback_chain = mock_fallback
+
+        # Classify an error
+        error = Exception("API rate limit exceeded")
+        result = orchestrator._classify_error(error, "MATCH")
+
+        # Should use watcher classification
+        assert result == mock_classification
+        assert result.category == "api"
+        assert result.confidence == 0.9
+        mock_watcher.classify_error.assert_called_once()
+        mock_fallback.check_watcher_available.assert_called_once()
+
+    def test_classify_error_falls_back_to_pattern_route_when_watcher_unavailable(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() falls back to pattern_route when watcher unavailable."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set up mock fallback_chain that says watcher is unavailable
+        mock_fallback = Mock()
+        mock_fallback.check_watcher_available.return_value = False
+
+        orchestrator.watcher = Mock()
+        orchestrator.fallback_chain = mock_fallback
+
+        # Classify an API error (will be pattern matched)
+        error = Exception("HTTP Error 429: Too Many Requests")
+        result = orchestrator._classify_error(error, "DOWNLOAD")
+
+        # Should use pattern routing
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+        # Watcher's classify_error should not be called
+        orchestrator.watcher.classify_error.assert_not_called()
+
+    def test_classify_error_falls_back_when_watcher_returns_none(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() falls back to pattern_route when watcher returns None."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set up mock watcher that returns None (failed classification)
+        mock_watcher = Mock()
+        mock_watcher.classify_error.return_value = None
+
+        # Fallback chain says watcher is available
+        mock_fallback = Mock()
+        mock_fallback.check_watcher_available.return_value = True
+
+        orchestrator.watcher = mock_watcher
+        orchestrator.fallback_chain = mock_fallback
+
+        # Classify an error - watcher will fail, should fall back
+        error = Exception("Disk full - no space left on device")
+        result = orchestrator._classify_error(error, "OUTPUT")
+
+        # Should fall back to pattern routing
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+        assert result.category == "disk"
+        assert result.suggested_healer == "disk-healer"
+
+    def test_classify_error_falls_back_when_no_watcher_configured(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() uses pattern_route when no watcher configured."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Remove watcher
+        orchestrator.watcher = None
+        orchestrator.fallback_chain = None
+
+        # Classify a checkpoint error
+        error = Exception("JSONDecodeError: Expecting value at line 1")
+        result = orchestrator._classify_error(error, "TRANSCRIBE")
+
+        # Should use pattern routing
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+        assert result.category == "checkpoint"
+        assert result.suggested_healer == "checkpoint-healer"
+
+    def test_classify_error_falls_back_when_no_fallback_chain(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() uses pattern_route when fallback_chain is None."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Have watcher but no fallback chain
+        orchestrator.watcher = Mock()
+        orchestrator.fallback_chain = None
+
+        # Classify an OTIO error
+        error = Exception("opentimelineio.exception: Invalid time range")
+        result = orchestrator._classify_error(error, "OUTPUT")
+
+        # Should use pattern routing (can't check watcher availability)
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+        assert result.category == "otio"
+        assert result.suggested_healer == "otio-healer"
+
+    def test_classify_error_returns_pattern_classification_with_needs_llm_healer_for_unknown(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() returns PatternClassification with needs_llm_healer=True for unknown patterns."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # No watcher available
+        orchestrator.watcher = None
+        orchestrator.fallback_chain = None
+
+        # Classify an unknown error that won't match any pattern
+        error = Exception("Completely random error xyz123 with no patterns")
+        result = orchestrator._classify_error(error, "MATCH")
+
+        # Should return unknown classification with needs_llm_healer=True
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+        assert result.category == "unknown"
+        assert result.suggested_healer == ""
+        assert result.confidence == 0.3
+        assert result.needs_llm_healer is True
+
+    def test_classify_error_context_passed_to_watcher(self, mock_config, project_dir):
+        """Test classify_error() passes correct context to watcher."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        mock_watcher = Mock()
+        from src.agents.watcher import ErrorClassification
+        mock_watcher.classify_error.return_value = ErrorClassification(
+            category="api",
+            severity="recoverable",
+            suggested_healer="api-healer",
+            confidence=0.85,
+            needs_llm_healer=False,
+            reasoning="Test"
+        )
+
+        mock_fallback = Mock()
+        mock_fallback.check_watcher_available.return_value = True
+
+        orchestrator.watcher = mock_watcher
+        orchestrator.fallback_chain = mock_fallback
+
+        error = Exception("rate limit")
+        orchestrator._classify_error(error, "DOWNLOAD")
+
+        # Verify context passed to watcher
+        call_args = mock_watcher.classify_error.call_args
+        context = call_args[0][1]
+        assert context['stage'] == "DOWNLOAD"
+        assert context['stage_name'] == "DOWNLOAD"
+
+    def test_classify_error_pattern_routes_various_error_types(
+        self, mock_config, project_dir
+    ):
+        """Test classify_error() pattern routes various error types correctly."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+        orchestrator.watcher = None
+        orchestrator.fallback_chain = None
+
+        from src.agents.fallback import PatternClassification
+
+        test_cases = [
+            ("Rate limit exceeded", "api", "api-healer"),
+            ("Connection timed out", "api", "api-healer"),
+            ("Permission denied: /var/log", "disk", "disk-healer"),
+            ("No space left on device", "disk", "disk-healer"),
+            ("Path too long exceeds 260 char", "path", "path-healer"),
+            ("UnicodeDecodeError: utf-8 codec", "path", "path-healer"),
+            ("checkpoint corrupt cannot read", "checkpoint", "checkpoint-healer"),
+            ("Video unavailable: private", "download", "download-healer"),
+            ("opentimelineio exception: invalid", "otio", "otio-healer"),
+        ]
+
+        for error_msg, expected_category, expected_healer in test_cases:
+            error = Exception(error_msg)
+            result = orchestrator._classify_error(error, "TEST")
+
+            assert isinstance(result, PatternClassification), f"Failed for: {error_msg}"
+            assert result.category == expected_category, f"Failed category for: {error_msg}"
+            assert result.suggested_healer == expected_healer, f"Failed healer for: {error_msg}"
+
+    def test_classify_error_watcher_logs_fallback_on_failure(self, mock_config, project_dir):
+        """Test classify_error() logs fallback activation via healing_logger.log_fallback().
+
+        When watcher classification fails (returns None), the watcher logs the fallback
+        via healing_logger.log_fallback() before the orchestrator falls back to pattern_route.
+        """
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set up mock watcher that raises exception (simulating timeout/failure)
+        mock_watcher = Mock()
+        mock_watcher.classify_error.return_value = None  # Watcher failed
+
+        # Set up mock healing_logger to verify logging
+        mock_healing_logger = Mock()
+        mock_watcher.healing_logger = mock_healing_logger
+
+        # Fallback chain says watcher is available
+        mock_fallback = Mock()
+        mock_fallback.check_watcher_available.return_value = True
+
+        orchestrator.watcher = mock_watcher
+        orchestrator.fallback_chain = mock_fallback
+
+        # Classify an error
+        error = Exception("rate limit exceeded")
+        result = orchestrator._classify_error(error, "DOWNLOAD")
+
+        # Should fall back to pattern routing
+        from src.agents.fallback import PatternClassification
+        assert isinstance(result, PatternClassification)
+
+        # Watcher was called but returned None (failed)
+        mock_watcher.classify_error.assert_called_once()
+
+        # Note: The healing_logger.log_fallback() is called by WatcherAgent
+        # internally when it catches exceptions (see watcher.py:243-246).
+        # This test verifies the orchestrator correctly handles the None return
+        # and falls back to pattern_route. The watcher's internal logging is
+        # tested in test_watcher.py::TestWatcherClassification::test_classify_error_records_fallback_on_failure
