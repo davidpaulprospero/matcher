@@ -1,147 +1,147 @@
 {
-    "branchName": "ralph/sprint-22",
-    "sprintNumber": 22,
+    "branchName": "ralph/sprint-23",
+    "sprintNumber": 23,
     "focusArea": "testing",
-    "projectContext": "Sprint 22 addresses critical coverage gaps in untested/undertested modules. Key targets: Pexels API client (0 tests, 356 LOC), chapter detection multi-pass system (0 tests, 1,811 LOC), fallback pattern routing edge cases, LLM provider validation/hallucination detection, tiered matcher strategy selection, multi-factor scoring edge cases, post-edit analysis feedback loop, and audio/face detection threshold boundaries. Sprint 13-21 established ~190 stories of test coverage. This sprint focuses on module-level coverage rather than cross-module coordination (Sprint 21 focus).",
+    "projectContext": "Sprint 23 addresses remaining test infrastructure gaps after Sprints 13-22 established ~197 stories of coverage. Key targets: Research clients (1,222 LOC, 0 tests), compilation mode edge cases (667 LOC), test marker distribution (only 4.3% have explicit markers), subdirectory conftest.py files for test_agents/ and others, SABR stall detection edge cases, XML/EDL export special characters, config section validation tests. This sprint focuses on test infrastructure quality and CI/CD optimization rather than module coverage.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add Pexels API client unit tests",
+            "title": "Add Gemini research client unit tests",
             "priority": 1,
             "passes": true,
-            "notes": "Added 18 new tests in tests/test_media_sources_video_clients.py: TestPexelsAPIRateLimitingUS001 (3), TestPexelsNetworkTimeoutUS001 (4), TestPexelsMalformedJSONUS001 (6), TestPexelsPaginationUS001 (5). All 5 AC verified. 63 total tests pass.",
+            "notes": "27 tests added in tests/test_research_gemini_client.py. Note: AC criteria mention search() but actual method is research(). Tests cover: ResearchResult parsing (5), 429/quota handling (4), timeout/retry (4), malformed response (6), API key validation (5), other methods (3). All 27 tests pass in 0.49s.",
             "acceptanceCriteria": [
-                "Test PexelsClient.search_videos() returns correctly parsed VideoResult objects",
-                "Test PexelsClient.search_videos() handles API rate limiting with retry backoff",
-                "Test PexelsClient.search_videos() handles network timeout gracefully",
-                "Test PexelsClient.search_videos() handles malformed JSON response without crash",
-                "Test PexelsClient pagination iterates correctly through multiple result pages"
+                "Test GeminiClient.search() returns correctly parsed SearchResult objects",
+                "Test GeminiClient.search() handles API quota exceeded (429) with exponential backoff",
+                "Test GeminiClient.search() handles network timeout with configurable retry",
+                "Test GeminiClient.search() handles malformed JSON response without crash",
+                "Test GeminiClient validates API key format before making requests"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add Pexels download and error handling tests",
+            "title": "Add Perplexity research client unit tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Added 22 new tests in 5 test classes: TestPexelsDownloadURLValidationUS002 (4), TestPexelsPartialDownloadUS002 (4), TestPexelsQualityOptionsParsingUS002 (4), TestPexelsQualityPreferenceUS002 (4), TestPexelsAPIKeyValidationUS002 (6). All 5 AC verified. 85 total tests pass in test_media_sources_video_clients.py.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test PexelsClient.download_video() validates URL before downloading",
-                "Test PexelsClient.download_video() handles partial download with resume",
-                "Test PexelsClient correctly parses video quality options from API response",
-                "Test PexelsClient respects configured quality preference (HD, SD, original)",
-                "Test PexelsClient API key validation fails fast with clear error message"
+                "Test PerplexityClient.query() returns correctly parsed QueryResult objects",
+                "Test PerplexityClient.query() handles rate limiting with retry-after header",
+                "Test PerplexityClient.query() handles streaming responses correctly",
+                "Test PerplexityClient.query() handles invalid API key with clear error message",
+                "Test PerplexityClient validates query length before API call"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add chapter detection ChunkingStrategy tests",
+            "title": "Add Grok research client unit tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Added 13 new tests in 5 test classes: TestChunkingSentenceBoundaries (2), TestChunkingMaxSizeLimit (2), TestChunkingShortTranscripts (3), TestChunkingTimestampPreservation (3), TestChunkingUnicode (3). Note: Implementation uses create_chunks() function not ChunkingStrategy class - tests adapted accordingly. All 5 AC verified. 24 total tests pass in test_chunking.py.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test ChunkingStrategy.chunk_transcript() splits on sentence boundaries",
-                "Test ChunkingStrategy.chunk_transcript() respects max_chunk_size limit",
-                "Test ChunkingStrategy handles transcripts shorter than min_chunk_size",
-                "Test ChunkingStrategy preserves timestamp alignment after chunking",
-                "Test ChunkingStrategy handles Unicode characters in transcript text"
+                "Test GrokClient.analyze() returns correctly parsed AnalysisResult objects",
+                "Test GrokClient.analyze() handles connection errors with retry logic",
+                "Test GrokClient.analyze() handles empty response gracefully",
+                "Test GrokClient.analyze() respects configured timeout settings",
+                "Test GrokClient validates input parameters before making requests"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add chapter detection ChapterDetector integration tests",
+            "title": "Add compilation mode timeline builder tests",
             "priority": 4,
-            "passes": true,
-            "notes": "Added 13 new tests in 5 test classes: TestDetectorReturnsValidBoundariesUS004 (2), TestDetectorHandlesOverlappingChaptersUS004 (2), TestDetectorMergesShortChaptersUS004 (2), TestDetectorRejectsNegativeDurationsUS004 (3), TestDetectorHandlesEmptyTranscriptUS004 (4). All 5 AC verified. 124 total tests pass in chapter detection suite.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test ChapterDetector.detect() returns ChapterResult with valid boundaries",
-                "Test ChapterDetector.detect() handles LLM response with overlapping chapters",
-                "Test ChapterDetector.detect() merges short chapters below min_duration threshold",
-                "Test ChapterDetector validation rejects chapters with negative durations",
-                "Test ChapterDetector handles empty transcript gracefully"
+                "Test CompilationTimelineBuilder creates valid OTIO structure from keyword matches",
+                "Test CompilationTimelineBuilder handles gap_check stage results correctly",
+                "Test CompilationTimelineBuilder respects duration limits from config",
+                "Test CompilationTimelineBuilder handles empty keyword matches gracefully",
+                "Test CompilationTimelineBuilder preserves segment metadata in output"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add fallback pattern_route edge case tests",
+            "title": "Add test marker audit for CI optimization",
             "priority": 5,
-            "passes": true,
-            "notes": "Added 16 new tests in TestPatternRouteEdgeCasesUS005 class: 3 for mixed HTTP status codes (AC2), 5 for rate limit patterns across services (AC3), 4 for multilingual errors (AC4), 4 for priority ordering (AC5). AC1 covered by existing tests. 67 total tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test pattern_route() avoids word boundary false positives ('Singapore' not matching 'gap')",
-                "Test pattern_route() handles mixed HTTP status codes in error messages",
-                "Test pattern_route() identifies rate limit patterns across different services",
-                "Test pattern_route() returns UNKNOWN for multilingual error messages",
-                "Test pattern_route() priority ordering when multiple patterns match"
+                "Add @pytest.mark.fast to all pure unit tests (no I/O, no network)",
+                "Add @pytest.mark.integration to tests requiring external resources",
+                "Create pytest.ini section for marker-based test selection (--fast flag)",
+                "Verify 'pytest -m fast' runs in under 30 seconds",
+                "Document marker guidelines in tests/README.md"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add LLM provider validation and hallucination detection tests",
+            "title": "Add subdirectory conftest.py for test_agents",
             "priority": 6,
-            "passes": true,
-            "notes": "Verified 145 tests across 4 files. All 5 AC covered: AC1-2 in test_llm_reasoning_validation.py, AC3 in test_explanation_validation.py, AC4 added 3 new tests in test_cot_reasoning.py for nested quotes/special chars, AC5 in test_negative_sampling.py and test_cot_reasoning.py. All tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test validate_llm_reasoning() rejects generic phrases like 'good match' alone",
-                "Test validate_llm_reasoning() accepts responses with specific content references",
-                "Test ExplanationValidation detects hallucinated segment numbers",
-                "Test parse_cot_reasoning() handles nested quotes and special characters",
-                "Test build_cot_prompt() includes correct negative sampling from candidate pool"
+                "Create tests/test_agents/conftest.py with healer-specific fixtures",
+                "Add mock_healing_context fixture for isolated healer tests",
+                "Add mock_orchestrator fixture for runner integration tests",
+                "Add agent_factory fixture following US-006 pattern from tests/conftest.py",
+                "Verify all test_agents/*.py tests pass with new fixtures"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add tiered matcher strategy fallback tests",
+            "title": "Add SABR stall detection edge case tests",
             "priority": 7,
-            "passes": true,
-            "notes": "Added 16 new tests in tests/test_tiered_matcher_us007.py: TestBrollConflictingSignalsUS007 (5), TestBrollExact03ThresholdUS007 (3), TestMemoryExhaustionHandlingUS007 (5), TestStrategySelectionUS007 (3). AC1-2 verified against existing test_tiered_matcher_*.py and test_fallback_matching.py. AC3-5 new tests added. 105 total tests pass in tiered matcher suite.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test TieredMatcher selects correct strategy based on available resources",
-                "Test TieredMatcher falls back from embedding to keyword when index unavailable",
-                "Test TieredMatcher handles face preference scoring at exact 0.3 threshold",
-                "Test TieredMatcher B-roll detection with conflicting signals (silent + faces)",
-                "Test TieredMatcher memory exhaustion handling with >1000 candidates"
+                "Test stall detector triggers after exact timeout threshold (60s default)",
+                "Test stall detector resets timer on any subprocess output",
+                "Test stall detector handles concurrent downloads without false positives",
+                "Test resume-on-retry correctly continues from last completed fragment",
+                "Test stall detector distinguishes metadata output from download progress"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add multi-factor scoring edge case tests",
+            "title": "Add XML export special character handling tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Added 42 new tests in tests/test_multi_factor_scoring_us008.py: TestWeightsSumToZeroUS008 (4), TestNaNPropagationPreventionUS008 (8), TestExtremeConfidenceClampingUS008 (13), TestDiversityIdenticalKeywordsUS008 (6), TestSingleElementPoolUS008 (5), TestAdditionalEdgeCasesUS008 (6). Fixed 2 bugs in scoring.py: ZeroDivisionError on zero weights, NaN/Inf handling. All 5 AC verified. 189 total tests pass across scoring modules.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test scoring handles all weights summing to zero gracefully",
-                "Test scoring prevents NaN propagation through multi-strategy computation",
-                "Test scoring clamps extreme confidence values (0.0 and 1.0) correctly",
-                "Test diversity enforcement with identical keyword matches",
-                "Test pool normalization with single-element candidate pools"
+                "Test XML export escapes ampersands in file paths correctly",
+                "Test XML export escapes quotes in metadata fields correctly",
+                "Test XML export escapes angle brackets in clip names correctly",
+                "Test XML export handles Windows paths exceeding 200 characters",
+                "Test XML export handles Unicode filenames (CJK, emoji, RTL) correctly"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add post-edit analysis feedback learning tests",
+            "title": "Add config section validation tests",
             "priority": 9,
-            "passes": true,
-            "notes": "Created src/feedback_learning.py module with FeedbackEntry, FeedbackBatch, FeedbackAnalysis dataclasses, analyze_feedback() function, FeedbackLearner class with persistence. Added 30 tests in tests/test_feedback_learning.py covering all 5 AC: TestAnalyzeFeedbackConfidenceAdjustment (5), TestAnalyzeFeedbackBatchAggregation (5), TestAnalyzeFeedbackInconsistentEdits (6), TestFeedbackValidation (6), TestFeedbackPersistence (6), TestFeedbackLearningIntegration (2). All tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test analyze_feedback() adjusts confidence weights from editor corrections",
-                "Test analyze_feedback() aggregates batch corrections correctly",
-                "Test analyze_feedback() handles inconsistent user edits without crash",
-                "Test feedback validation rejects corrections outside valid range",
-                "Test confidence adjustment persists across pipeline restarts"
+                "Test InfrastructureConfig __post_init__ converts nested dicts to dataclasses",
+                "Test MatchingConfig validates strategy enum values",
+                "Test MediaConfig validates search provider list",
+                "Test LLMConfig validates provider selection with available keys",
+                "Test all config sections handle missing optional fields with defaults"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add audio analysis and face detection threshold tests",
+            "title": "Add benchmark revival and fixture adoption tests",
             "priority": 10,
-            "passes": true,
-            "notes": "Added 30 new tests in tests/test_audio_face_threshold_us010.py: TestSilenceThresholdBoundariesUS010 (5), TestVADShortAudioUS010 (5), TestFaceScore03ThresholdUS010 (7), TestMultipleFacesConfidenceUS010 (4), TestSpeechVsMusicDetectionUS010 (6), TestAdditionalThresholdEdgeCasesUS010 (3). All 5 AC verified. 30 tests pass in 1.01s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test silence detection at exact volume threshold boundaries",
-                "Test VAD handles very short audio clips (<1 second) gracefully",
-                "Test face_score exactly at 0.3 threshold correctly classifies as B-roll",
-                "Test face detection with multiple faces returns highest confidence",
-                "Test audio analysis distinguishes speech from music-only content"
+                "Fix or archive tests/benchmarks_broken/test_keyword_extraction_performance.py",
+                "Fix or archive tests/benchmarks_broken/test_matching_performance.py",
+                "Fix or archive tests/benchmarks_broken/test_otio_performance.py",
+                "Verify factory fixtures from US-006 are used in at least 10 test files",
+                "Add fixture adoption verification script to CI workflow"
             ]
         }
     ]
