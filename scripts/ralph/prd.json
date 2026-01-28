@@ -38,8 +38,8 @@
             "id": "US-003",
             "title": "Add README.md documentation for test_keyword_extractor subdirectory",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created comprehensive README.md with: keyword extraction testing patterns, all 9 test files documented with purposes, LLM mocking examples at three levels (client creation, _call_llm method, generate response), priority scoring factors table, validator rules documentation with ABSTRACT_PATTERNS/VISUAL_INDICATORS constants, segment processor batch testing patterns, SRT file testing with temporary files, mock_config fixture documentation. Also fixed test_core.py mock_config to include max_keyword_words for visual keyword validation.",
             "acceptanceCriteria": [
                 "Create tests/test_keyword_extractor/README.md with keyword extraction testing patterns",
                 "Document test_core.py, test_entity_extractor.py, test_models.py test purposes",
