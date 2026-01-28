@@ -7685,3 +7685,38 @@ def test_eta_accuracy_batch_50_videos(self):
 
 - Tests passed: 233/233
 - Commit: 74b25ab
+
+
+## Iteration - [US-005] Mark network-dependent tests with flaky decorator
+- Added @pytest.mark.flaky(reruns=2, reruns_delay=1.0) to all network-dependent test classes
+- Modified files: test_caption_fetcher.py, test_caption_integration.py, benchmarks/test_embedding_performance.py
+
+**Marked Test Classes:**
+1. TestCaptionFetcherRealVideos (test_caption_fetcher.py) - 1 test
+2. TestCaptionIntegrationFetch (test_caption_integration.py) - 3 tests
+3. TestCaptionIntegrationAuto - 3 tests
+4. TestCaptionIntegrationNoCaption - 3 tests
+5. TestCaptionIntegrationLanguage - 2 tests
+6. TestCaptionIntegrationQuality - 2 tests
+7. TestCaptionIntegrationRetry - 2 tests
+8. TestCaptionIntegrationCache - 2 tests
+9. TestVideoFixtureValidation - 3 tests
+10. test_voyage_embedding_speed (benchmarks) - 1 test
+
+**N/A Categories (all mocked, no real network calls):**
+- test_media_sources_*.py - Uses unittest.mock for all API calls
+- test_downloader_*.py - Uses mocks for yt-dlp and subprocess calls
+
+**Bug Fix:** Fixed duplicate @pytest.mark.integration decorator in TestCaptionIntegrationFetch
+
+**Acceptance Criteria Verification:**
+- AC1: test_caption_fetcher.py - TestCaptionFetcherRealVideos marked with flaky
+- AC2: test_media_sources_*.py - N/A (all use mocks, no network calls)
+- AC3: test_downloader/* - N/A (all use mocks, no network calls)
+- AC4: benchmark tests - test_voyage_embedding_speed marked with flaky
+- AC5: tests/README.md - Flaky test patterns documented (from previous sprint)
+- AC6: Filter verified: pytest -m "not flaky" correctly excludes 30 flaky tests
+
+- Total flaky tests marked: 22 tests in 9 classes + 1 standalone test
+- Tests passed: All compile checks pass
+- Commit: c74f01d
