@@ -1,4 +1,16 @@
 
+## Iteration US-002 (Sprint 15) - Add post-edit analysis track category statistics tests
+- Added 31 tests to tests/test_post_edit_analysis.py (total now 86)
+- 5 new test classes covering all 5 acceptance criteria:
+  - TestTrackCategoryAggregation: V1-V10 bucket mapping, 10-clip aggregation, user-added track separation
+  - TestCoverageCalculation: coverage_pct, v1_kept_pct, _pct helper, duration ratio, segments sum invariant
+  - TestEmptyEditedOtio: 0% coverage defaults, no division-by-zero, summary()/to_dict() don't crash
+  - TestPositionBasedMatching: position exact matches, gaps, alt/secondary, mismatches, PositionAnalysisResult
+  - TestReportGeneration: header, track breakdown, coverage bars, segment counts, duration/position sections, JSON serializable
+- No source code changes needed (pure test-only story)
+- Files modified: tests/test_post_edit_analysis.py
+- Test results: 86 passed in 0.56s, 0 regressions
+
 ## Iteration US-010 (Sprint 14) - Add budget exhaustion cascade behavior tests
 - Added `get_budget_advice()` method to `src/downloader/rate_limit_budget.py`
   - Returns 'continue' when rotations available

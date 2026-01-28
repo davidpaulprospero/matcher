@@ -22,8 +22,8 @@
             "id": "US-002",
             "title": "Add post-edit analysis track category statistics tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 31 tests across 5 classes: TestTrackCategoryAggregation (5 tests: 10-clip aggregation, V1-V10 bucket mapping, track_breakdown dict, user-added separation, single-category), TestCoverageCalculation (5 tests: coverage_pct, v1_kept_pct, _pct helper, duration ratio, segments sum), TestEmptyEditedOtio (6 tests: zero div, all-zero categories, 0% pct, summary no crash, to_dict no crash, zero ratio), TestPositionBasedMatching (7 tests: exact match, gaps, alt/secondary, mismatches, to_dict, PositionAnalysisResult, position to_dict), TestReportGeneration (8 tests: header, track breakdown, coverage bars, segment counts, duration section, position section, JSON serializable, position summary). All 86 tests pass.",
             "acceptanceCriteria": [
                 "Test track category aggregation groups clips into v1, v2_v3, v4_v6, v7_plus buckets — verify counts per category with a mock timeline containing 10 clips across 5 tracks",
                 "Test coverage calculation per track category — verify coverage_pct is (matched_duration / total_duration) * 100 for each category",
