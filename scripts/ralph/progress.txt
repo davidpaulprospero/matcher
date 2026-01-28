@@ -7720,3 +7720,47 @@ def test_eta_accuracy_batch_50_videos(self):
 - Total flaky tests marked: 22 tests in 9 classes + 1 standalone test
 - Tests passed: All compile checks pass
 - Commit: c74f01d
+
+## Focus Area: testing - 2026-01-29 04:48:17
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-008] Create mock patterns documentation guide
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-009] Add assertion helper adoption measurement
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+
+## Iteration - [US-001] Apply bulk marker assignment to classify unmarked tests
+- Applied 10,957 markers to test files using scripts/assign_test_markers.py --apply
+- Marker distribution:
+  - @pytest.mark.fast: 10,408 tests (pure unit tests, no I/O)
+  - @pytest.mark.integration: 337 tests (file/network I/O, tempfile usage)
+  - @pytest.mark.requires_network: 126 tests
+  - @pytest.mark.requires_api: 82 tests
+  - @pytest.mark.slow: 4 tests
+- 400 "errors" were tests that already had markers (correct - no duplicates added)
+- Verified fast markers applied to pure unit tests (benchmarks, embeddings, config)
+- Verified integration markers applied to I/O tests (test_healing_logger uses tempfile)
+- Updated tests/README.md with Sprint 26 marker statistics section
+- Total tests collected: 12,114 | Marked: ~11,800 | Unmarked: ~300
+
+**Files Modified:**
+- 341 test files with marker additions
+- tests/README.md (updated statistics)
+
+**Acceptance Criteria Verification:**
+- AC1: ✅ Ran --dry-run and reviewed proposed markers (11,357 proposed)
+- AC2: ✅ Applied markers with --apply flag to 10,957 tests (>5,000 requirement)
+- AC3: ✅ Verified @pytest.mark.fast applied to pure unit tests
+- AC4: ✅ Verified @pytest.mark.integration applied to I/O tests
+- AC5: ✅ Updated tests/README.md marker statistics section
+- AC6: ✅ Committed with distribution summary (commit 701cace)
+
+- Tests passed: Sanity check passed (22/22 tests)
+- Commit: 701cace
