@@ -6500,3 +6500,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: TestHistogramEdgeCases::test_empty_confidences — verifies empty list returns valid histogram with 'Total segments: 0'
 - Files already exist: tests/test_confidence_histogram.py (31 tests across 11 test classes)
 - Test results: 31 passed in 0.44s
+
+
+## Iteration US-010 (Sprint 18) - Add calculate_match_quality_metrics edge case and gap detection tests
+- Pre-implemented: tests/test_match_quality_metrics.py contains 30 comprehensive tests
+- AC1: test_counts_gaps — verifies has_gap=True on matches increments gap_count correctly
+- AC2: TestCalculateMatchQualityMetrics tests — verifies MatchResult with primary_match.confidence extraction
+- AC3: TestCalculateMatchQualityMetricsDirectMatch::test_handles_direct_match_objects — verifies direct Match structure with .confidence
+- AC4: test_match_rate_calculation — verifies match_rate = matched_segments / total_segments (3/5 = 0.6)
+- AC5: test_calculates_std_deviation uses statistics.stdev for 5 values, test_single_match_no_std verifies 0.0 for single value
+- AC6: test_empty_matches_returns_metrics — verifies zero metrics when matches=[] but total_segments=10
+- Files already exist: tests/test_match_quality_metrics.py (30 tests across 9 test classes)
+- Test results: 30 passed in 0.47s
