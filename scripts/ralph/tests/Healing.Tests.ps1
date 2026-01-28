@@ -390,3 +390,61 @@ Describe 'Build-TierDiagnostics' -Tag 'Unit', 'Healing' {
         $diag | Should -BeLike "*Raw output:*some raw output here*"
     }
 }
+
+Describe 'Log-HealingEvent' {
+    BeforeEach {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+    }
+
+    It 'creates healing log file on first write' {
+        Log-HealingEvent -Event "healing_started" -Data @{
+            trigger = "test_failure"
+            failedTier = 2
+            failureCount = 2
+            errors = @("test_cache.py::test_hit_rate", "test_config.py::test_load")
+        }
+
+        $script:HealingLogFile | Should -Exist
+        $lines = @(Get-Content $script:HealingLogFile)
+        $lines.Count | Should -Be 1
+        $entry = $lines[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_started"
+        $entry.data.failedTier | Should -Be 2
+        $entry.timestamp | Should -Not -BeNullOrEmpty
+    }
+
+    It 'appends multiple events to log' {
+        Log-HealingEvent -Event "healing_started" -Data @{ trigger = "test_failure" }
+        Log-HealingEvent -Event "healing_attempt" -Data @{ attempt = 1; prompt = "Fix import error" }
+        Log-HealingEvent -Event "healing_resolved" -Data @{ attempt = 1; fix = "Added missing import" }
+
+        $lines = Get-Content $script:HealingLogFile
+        $lines.Count | Should -Be 3
+    }
+
+    It 'includes thought process in healing_resolved events' {
+        Log-HealingEvent -Event "healing_resolved" -Data @{
+            attempt = 1
+            errorsFixed = @("ImportError in test_cache.py")
+            fix = "Added 'from src.cache import BaseCache' to test file"
+            thoughtProcess = "The test file was importing BaseCache but the module was refactored. Updated import path."
+            filesChanged = @("tests/test_cache.py")
+            failedTier = 2
+        }
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.data.thoughtProcess | Should -Not -BeNullOrEmpty
+        $entry.data.filesChanged.Count | Should -Be 1
+        $entry.data.failedTier | Should -Be 2
+    }
+
+    It 'records session context in every event' {
+        $script:State = @{ SessionId = "test-session-123"; IterationCount = 5 }
+        Log-HealingEvent -Event "healing_started" -Data @{ trigger = "test" }
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.sessionId | Should -Be "test-session-123"
+        $entry.iteration | Should -Be 5
+    }
+}
