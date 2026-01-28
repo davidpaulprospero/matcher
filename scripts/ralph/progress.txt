@@ -1,4 +1,20 @@
 
+## Iteration US-006 (Sprint 17) - Add TranscodingManager codec detection and format string tests
+- Fixed 2 broken error-handling tests in test_transcoding.py and test_transcoding_coverage.py
+  - Both tests used generic `Exception` but `_detect_hw_accel()` only catches `(FileNotFoundError, subprocess.SubprocessError, OSError)`
+  - Changed to `FileNotFoundError` to match actual code behavior
+- Added ffprobe argument verification test (AC1): verifies get_video_codec() calls ffprobe with correct -v error, -select_streams v:0, -show_entries stream=codec_name flags
+- Added vp8 incompatible codec test (AC2): explicitly tests vp8 returns True from needs_transcoding()
+- All 6 acceptance criteria verified covered by existing + new tests:
+  - AC1: TestCodecDetection.test_get_video_codec_calls_ffprobe_with_correct_args (new) + existing h264/vp9/hevc tests
+  - AC2: TestTranscodeNecessity tests for h264+mp4, hevc+mov, prores+mov, vp9, av1, vp8 (new), dnxhd
+  - AC3: TestEdgeCases.test_needs_transcoding_all_audio_formats (mp3, m4a, opus, ogg, wav, flac, aac)
+  - AC4: TestFormatStringBuilding tests for best+davinci, best+normal, audio, 1080p+davinci, 720p
+  - AC5: TestFilterStringBuilding tests for basic, min_views, title_blacklist, all_tiers, escapes, dataclass
+  - AC6: TestHardwareAcceleration tests for nvidia, amd, intel, mac, none, manual, error_handling (fixed)
+- Files modified: tests/test_transcoding.py, tests/test_transcoding_coverage.py
+- Test results: 87 transcoding tests passed in 0.99s, 0 regressions
+
 ## Iteration US-005 (Sprint 17) - Add BrollMatchStage enrichment and matching pipeline tests
 - Added 38 new tests across 6 dedicated US-005 test classes in tests/test_broll_match_us005.py
 - TestShouldUseVisionUS005 (6 tests): AC1 — audio-first=False, standard=True, broll vision disabled, global vision disabled, no vision config, audio_first.enabled=False

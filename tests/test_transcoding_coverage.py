@@ -397,7 +397,7 @@ class TestHardwareAccelDetection:
         config = MockConfig()
         config.download.hw_accel = "auto"
 
-        with patch('subprocess.run', side_effect=Exception("ffmpeg not found")):
+        with patch('subprocess.run', side_effect=FileNotFoundError("ffmpeg not found")):
             manager = TranscodingManager(config)
             assert manager.hw_accel == "none"
 
