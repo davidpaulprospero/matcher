@@ -24,6 +24,7 @@ from src.caption_fetcher import (
 )
 
 
+@pytest.mark.fast
 class TestCaptionSegment:
     """Test CaptionSegment dataclass"""
 
@@ -73,6 +74,7 @@ class TestCaptionSegment:
         assert segment.source_file == ""
 
 
+@pytest.mark.fast
 class TestCaptionResult:
     """Test CaptionResult dataclass"""
 
@@ -540,6 +542,7 @@ class TestCaptionResult:
         assert data2['timing_validated']['video_duration'] == 100.0
 
 
+@pytest.mark.fast
 class TestTimingValidationResult:
     """Test TimingValidationResult dataclass (US-007)"""
 
@@ -600,6 +603,7 @@ class TestTimingValidationResult:
         assert result.message == ""
 
 
+@pytest.mark.fast
 class TestTimingEpsilonTolerance:
     """Test timing_epsilon_ms parameter in validate_timing (US-007 Sprint 6)"""
 
@@ -728,6 +732,7 @@ class TestTimingEpsilonTolerance:
         assert validation.is_valid is True  # 50ms within 100ms epsilon
 
 
+@pytest.mark.fast
 class TestTimingPenaltyFactor:
     """Test timing_penalty_factor property on CaptionResult (US-008 Sprint 7)"""
 
@@ -871,6 +876,7 @@ class TestTimingPenaltyFactor:
         assert penalty >= 0.0
 
 
+@pytest.mark.fast
 class TestDetermineCaptionQuality:
     """Test determine_caption_quality function (US-007)"""
 
@@ -942,6 +948,7 @@ class TestDetermineCaptionQuality:
         assert quality == "high"
 
 
+@pytest.mark.fast
 class TestCaptionExceptions:
     """Test caption exception classes"""
 
@@ -977,6 +984,7 @@ class TestCaptionExceptions:
         assert issubclass(CaptionError, Exception)
 
 
+@pytest.mark.fast
 class TestCaptionFetcherVideoIdValidation:
     """Test video ID validation"""
 
@@ -1017,6 +1025,7 @@ class TestCaptionFetcherVideoIdValidation:
         assert fetcher._is_valid_video_id(None) is False
 
 
+@pytest.mark.fast
 class TestCaptionFetcherTimestampParsing:
     """Test timestamp parsing"""
 
@@ -1066,6 +1075,7 @@ class TestCaptionFetcherTimestampParsing:
         assert fetcher._parse_timestamp("abc:def:ghi") is None  # Non-numeric
 
 
+@pytest.mark.fast
 class TestCaptionFetcherVttParsing:
     """Test VTT format parsing"""
 
@@ -1171,6 +1181,7 @@ Test
         assert segments[0].source_file == "my_video_id"
 
 
+@pytest.mark.fast
 class TestCaptionFetcherSrtParsing:
     """Test SRT format parsing"""
 
@@ -1248,6 +1259,7 @@ Also valid
         assert len(segments) == 2
 
 
+@pytest.mark.fast
 class TestCaptionFetcherJson3Parsing:
     """Test JSON3/SRV3 format parsing"""
 
@@ -1354,6 +1366,7 @@ class TestCaptionFetcherJson3Parsing:
         assert "JSON decode error" in result.skipped_segments[0][1]
 
 
+@pytest.mark.fast
 class TestCaptionFetcherFetchCaptions:
     """Test fetch_captions method"""
 
@@ -1463,6 +1476,7 @@ Never gonna let you down
             assert result.format_source == "vtt"
 
 
+@pytest.mark.fast
 class TestCaptionFetcherCookies:
     """Test cookie handling"""
 
@@ -1512,6 +1526,7 @@ class TestCaptionFetcherCookies:
         assert args == ['--cookies-from-browser', 'firefox']
 
 
+@pytest.mark.fast
 class TestCaptionFetcherIntegration:
     """Integration tests for caption fetcher"""
 
@@ -1590,6 +1605,7 @@ Hello 世界! Привет мир! 🎉
 
 
 # Mark integration tests that require network
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionFetcherRealVideos:
     """Integration tests with real YouTube videos.
@@ -1624,6 +1640,7 @@ class TestCaptionFetcherRealVideos:
             raise
 
 
+@pytest.mark.fast
 class TestAvailableLanguage:
     """Test AvailableLanguage dataclass"""
 
@@ -1651,6 +1668,7 @@ class TestAvailableLanguage:
         assert lang.is_auto_generated is True
 
 
+@pytest.mark.fast
 class TestListAvailableLanguages:
     """Test list_available_languages method"""
 
@@ -1796,6 +1814,7 @@ zh-Hans   Chinese (Simplified) vtt, ttml, srv3, srv2, srv1, json3
         assert languages[2].code == "zh-hans"
 
 
+@pytest.mark.fast
 class TestHasCaptions:
     """Test has_captions method (US-008)"""
 
@@ -1900,6 +1919,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert result is True
 
 
+@pytest.mark.fast
 class TestSelectBestLanguage:
     """Test select_best_language method"""
 
@@ -2058,6 +2078,7 @@ class TestSelectBestLanguage:
         assert result.code == "en"
 
 
+@pytest.mark.fast
 class TestFallbackLanguageChain:
     """Test configurable fallback language chain (US-003)"""
 
@@ -2269,6 +2290,7 @@ class TestFallbackLanguageChain:
         assert result.is_auto_generated is False
 
 
+@pytest.mark.fast
 class TestGetFallbackLanguagesFromConfig:
     """Test _get_fallback_languages_from_config method (US-003)"""
 
@@ -2326,6 +2348,7 @@ class TestGetFallbackLanguagesFromConfig:
         assert result == []
 
 
+@pytest.mark.fast
 class TestGetPreferredLanguageFromConfig:
     """Test _get_preferred_language_from_config method"""
 
@@ -2373,6 +2396,7 @@ class TestGetPreferredLanguageFromConfig:
         assert result == "de"
 
 
+@pytest.mark.fast
 class TestParseListSubsOutput:
     """Test _parse_list_subs_output method"""
 
@@ -2473,6 +2497,7 @@ pt-BR     Portuguese (Brazil)       vtt, ttml
         assert "pt-br" in codes
 
 
+@pytest.mark.fast
 class TestFetchCaptionsAutoLanguage:
     """Test fetch_captions_auto_language method"""
 
@@ -2564,6 +2589,7 @@ class TestFetchCaptionsAutoLanguage:
         )
 
 
+@pytest.mark.fast
 class TestCaptionFetcherRetry:
     """Test caption fetch retry behavior (US-008)"""
 
@@ -2819,6 +2845,7 @@ class TestCaptionFetcherRetry:
             assert mock_fetch.call_count == 1
 
 
+@pytest.mark.fast
 class TestCaptionCacheRetry:
     """Test CaptionCache retry integration (US-008)"""
 
@@ -2940,6 +2967,7 @@ class TestCaptionCacheRetry:
 # US-011: CaptionMetrics Tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestCaptionMetrics:
     """Test CaptionMetrics dataclass for fetch statistics tracking (US-011)"""
 
@@ -3248,6 +3276,7 @@ class TestCaptionMetrics:
 # US-008: Pre-Check Metrics Tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestCaptionMetricsPreCheck:
     """Test CaptionMetrics pre-check tracking (US-008)"""
 
@@ -3383,6 +3412,7 @@ class TestCaptionMetricsPreCheck:
 # US-004: Coverage Distribution Tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestCaptionMetricsCoverage:
     """Test CaptionMetrics coverage distribution tracking (US-004)"""
 
@@ -3606,6 +3636,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.low_coverage_videos == []
 
 
+@pytest.mark.fast
 class TestCaptionMetricsThreadSafety:
     """Tests for thread-safe CaptionMetrics (US-001)."""
 
@@ -3681,6 +3712,7 @@ class TestCaptionMetricsThreadSafety:
         assert metrics.failures == expected_failures
 
 
+@pytest.mark.fast
 class TestBatchCaptionFetch:
     """Tests for batch caption fetching (US-001)."""
 
@@ -3932,6 +3964,7 @@ class TestBatchCaptionFetch:
         )
 
 
+@pytest.mark.fast
 class TestLiveStreamDetection:
     """Tests for US-002: Live stream detection to skip caption fetch."""
 
@@ -4059,6 +4092,7 @@ class TestLiveStreamDetection:
         assert result is False
 
 
+@pytest.mark.fast
 class TestCaptionMetricsSkippedLiveStreams:
     """Tests for US-002: CaptionMetrics skipped live streams tracking."""
 
@@ -4144,6 +4178,7 @@ class TestCaptionMetricsSkippedLiveStreams:
         assert metrics.skipped_live_streams == 0
 
 
+@pytest.mark.fast
 class TestCaptionFormatPreference:
     """Tests for US-006: Caption format preference configuration."""
 
@@ -4459,6 +4494,7 @@ class TestCaptionFormatPreference:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestLanguageConfigValidation:
     """Tests for language config validation (US-005 Sprint 6).
 
@@ -4660,6 +4696,7 @@ class TestLanguageConfigValidation:
             f"Expected ~180 ISO 639-1 codes, got {len(ISO_639_1_CODES)}"
 
 
+@pytest.mark.fast
 class TestSegmentLevelErrorRecovery:
     """Tests for US-001 Sprint 7: Segment-level error recovery in parsers."""
 
@@ -4873,6 +4910,7 @@ Also valid
 # US-003 Sprint 7: Error Category Tests
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionErrorCategory:
     """Tests for CaptionErrorCategory enum and categorize_caption_error function (US-003 Sprint 7)."""
 
@@ -4950,6 +4988,7 @@ class TestCaptionErrorCategory:
         assert category == CaptionErrorCategory.NETWORK
 
 
+@pytest.mark.fast
 class TestCaptionErrorCategoryRetryBudgets:
     """Tests for per-category retry budgets (US-003 Sprint 7)."""
 
@@ -5073,6 +5112,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         assert len(attempts) == 1
 
 
+@pytest.mark.fast
 class TestCaptionMetricsErrorCategory:
     """Tests for CaptionMetrics error category tracking (US-003 Sprint 7)."""
 
@@ -5153,6 +5193,7 @@ class TestCaptionMetricsErrorCategory:
 # US-004 Sprint 7: CaptionMetrics Export JSON Tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestCaptionMetricsExportJson:
     """Test CaptionMetrics.export_json() method (US-004 Sprint 7)"""
 
@@ -5476,6 +5517,7 @@ class TestCaptionMetricsExportJson:
             assert field in result, f"Missing expected field: {field}"
 
 
+@pytest.mark.fast
 class TestCaptionMetricsErrorCategorySerialization:
     """Test that error_category_counts is properly serialized (US-003 Sprint 7 fix)"""
 
@@ -5527,6 +5569,7 @@ class TestCaptionMetricsErrorCategorySerialization:
 # =============================================================================
 
 
+@pytest.mark.fast
 class TestCaptionConfigValidationResult:
     """Tests for CaptionConfigValidationResult dataclass (US-005 Sprint 7)."""
 
@@ -5608,6 +5651,7 @@ class TestCaptionConfigValidationResult:
         assert "Test warning" in output
 
 
+@pytest.mark.fast
 class TestValidateCaptionConfig:
     """Tests for validate_caption_config() function (US-005 Sprint 7)."""
 
@@ -5881,6 +5925,7 @@ class TestValidateCaptionConfig:
         assert result.is_valid is True
 
 
+@pytest.mark.fast
 class TestTestFetchResult:
     """Tests for TestFetchResult dataclass (US-005 Sprint 7)."""
 
@@ -5920,6 +5965,7 @@ class TestTestFetchResult:
         assert result.format_used == ""
 
 
+@pytest.mark.fast
 class TestTestFetchSummary:
     """Tests for TestFetchSummary dataclass (US-005 Sprint 7)."""
 
@@ -5975,6 +6021,7 @@ class TestTestFetchSummary:
         assert "No videos tested" in output
 
 
+@pytest.mark.fast
 class TestRunCaptionTestFetch:
     """Tests for run_caption_test_fetch() function (US-005 Sprint 7)."""
 
@@ -6140,6 +6187,7 @@ class TestRunCaptionTestFetch:
         assert summary.avg_time < 1.0  # Sanity check
 
 
+@pytest.mark.fast
 class TestErrorPatternDetector:
     """Tests for ErrorPatternDetector class (US-007 Sprint 7)."""
 
@@ -6409,6 +6457,7 @@ class TestErrorPatternDetector:
         assert stats['error_counts'].get('403 Forbidden', 0) == 50
 
 
+@pytest.mark.fast
 class TestErrorPatternAbortError:
     """Tests for ErrorPatternAbortError exception (US-007 Sprint 7)."""
 
@@ -6444,6 +6493,7 @@ class TestErrorPatternAbortError:
         assert error.partial_results == {}
 
 
+@pytest.mark.fast
 class TestFetchCaptionsBatchWithErrorPattern:
     """Tests for fetch_captions_batch with error pattern detection (US-007 Sprint 7)."""
 
@@ -6637,6 +6687,7 @@ class TestFetchCaptionsBatchWithErrorPattern:
             assert details['affected_count'] >= 3
 
 
+@pytest.mark.fast
 class TestErrorPatternConfigOptions:
     """Tests for error pattern config options (US-007 Sprint 7)."""
 
@@ -6684,6 +6735,7 @@ class TestErrorPatternConfigOptions:
 # ==============================================================================
 
 
+@pytest.mark.fast
 class TestChannelPatternTracking:
     """Tests for channel-level caption availability pattern tracking (US-009 Sprint 7)."""
 
@@ -6751,6 +6803,7 @@ class TestChannelPatternTracking:
         assert restored.success_rate == original.success_rate
 
 
+@pytest.mark.fast
 class TestCaptionMetricsChannelStatistics:
     """Tests for CaptionMetrics.get_channel_statistics() method (US-009 Sprint 7)."""
 
@@ -6925,6 +6978,7 @@ class TestCaptionMetricsChannelStatistics:
         assert stats['bottom_channels'][0][1] == 0.4
 
 
+@pytest.mark.fast
 class TestChannelPrioritizedFetchOrder:
     """Tests for channel-based fetch order prioritization (US-009 Sprint 7)."""
 
@@ -7017,6 +7071,7 @@ class TestChannelPrioritizedFetchOrder:
         assert config.prioritize_by_channel is False
 
 
+@pytest.mark.fast
 class TestChannelSummaryInMetricsSummary:
     """Tests for channel summary in CaptionMetrics.summary() (US-009 Sprint 7)."""
 

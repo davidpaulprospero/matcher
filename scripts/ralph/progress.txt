@@ -7187,3 +7187,43 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 64 tests pass in 0.44s
 - Files modified: tests/test_compilation.py (+258 lines)
 - Commit: 0af4e5c
+
+## Iteration US-005 (Sprint 23) - Add test marker audit for CI optimization
+- Added @pytest.mark.fast to 2,156 additional pure unit tests across 15 test files:
+  - tests/test_utils_simple.py (17 classes, ~80 tests)
+  - tests/test_state_dataclasses.py (20 classes, ~73 tests)
+  - tests/test_config_base_coverage.py (24 classes, ~71 tests)
+  - tests/test_caption_normalizer.py (18 classes, ~88 tests)
+  - tests/test_llm_parsers_coverage.py (21 classes, ~82 tests)
+  - tests/test_post_edit_analysis.py (10 classes, ~86 tests)
+  - tests/test_speed_tracker.py (23 classes, ~80 tests)
+  - tests/test_escalation_manager.py (12 classes, ~72 tests)
+  - tests/test_location_service.py (18 classes, ~70 tests)
+  - tests/test_pipeline_orchestrator.py (10 classes, ~69 tests)
+  - tests/test_rate_limit_metrics.py (23 classes, ~109 tests)
+  - tests/test_global_cache_coverage.py (23 classes, ~98 tests)
+  - tests/test_multi_style.py (11 classes, ~73 tests)
+  - tests/test_checkpoint_coverage.py (16 classes, ~81 tests)
+  - tests/test_recent_additions.py (27 classes, ~110 tests)
+  - tests/test_caption_cache.py (18 classes, ~81 tests)
+  - tests/test_stage_download.py (21 classes, ~75 tests)
+  - tests/test_stage_caption.py (28 classes, ~142 tests)
+  - tests/test_caption_fetcher.py (55 classes, ~400+ tests)
+  - tests/test_media_sources_video_clients.py (14 classes, ~85 tests)
+  - tests/test_research_gemini_client.py (6 classes, ~27 tests)
+  - tests/test_research_perplexity_client.py (7 classes, ~30 tests)
+  - tests/test_research_grok_client.py (7 classes, ~33 tests)
+- Added @pytest.mark.integration to 21 tests requiring external resources:
+  - tests/test_caption_integration.py (8 classes, all with @pytest.mark.requires_network)
+  - tests/test_caption_fetcher.py (1 class - TestCaptionFetcherRealVideos)
+- Updated tests/README.md with marker statistics and CI optimization guidance
+- Acceptance criteria verification:
+  - AC1: Added @pytest.mark.fast to 2,680 pure unit tests (increased from 524)
+  - AC2: Added @pytest.mark.integration to 72 tests (increased from 51)
+  - AC3: pytest.ini already had marker definitions (verified complete)
+  - AC4: pytest -m fast runs in 45s for 2,680 tests (~17ms/test average - pure unit tests)
+  - AC5: tests/README.md already documented markers, updated with statistics
+- Test results: 2,674 passed, 6 failed (pre-existing failures), 8,837 deselected
+- Files modified: 23 test files, tests/README.md
+- Commit: pending
+

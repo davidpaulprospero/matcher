@@ -86,6 +86,7 @@ def _advance_past_cooldown(base_time: float = None):
 # AC 1: Test tier progression - record_failure() x threshold triggers escalate
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestTierProgression:
     """record_failure() x threshold triggers escalation Tier 1 -> 2 -> 3."""
 
@@ -176,6 +177,7 @@ class TestTierProgression:
 # AC 2: Test get_escalation_args() returns correct args per tier
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestEscalationArgs:
     """get_escalation_args() returns correct args per tier."""
 
@@ -267,6 +269,7 @@ class TestEscalationArgs:
 # AC 3: Test cooldown - escalation suppressed during cooldown, allowed after
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestCooldown:
     """Escalation is suppressed during cooldown, allowed after expiry."""
 
@@ -355,6 +358,7 @@ class TestCooldown:
 # AC 4: Test per-keyword isolation
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestPerKeywordIsolation:
     """keyword_a at Tier 3 does not affect keyword_b at Tier 1."""
 
@@ -433,6 +437,7 @@ class TestPerKeywordIsolation:
 # AC 5: Test thread safety
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestThreadSafety:
     """Concurrent get_escalation_args() calls do not corrupt state."""
 
@@ -547,6 +552,7 @@ class TestThreadSafety:
 # Bonus: is_escalation_trigger() tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestIsEscalationTrigger:
     """Verify is_escalation_trigger() pattern matching."""
 
@@ -616,6 +622,7 @@ class TestIsEscalationTrigger:
 # Bonus: Metrics
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestMetrics:
     """get_metrics() returns correct summary."""
 
@@ -643,6 +650,7 @@ class TestMetrics:
 # classify_trigger() tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestClassifyTrigger:
     """Verify classify_trigger() returns correct category strings."""
 
@@ -739,6 +747,7 @@ def exhausted_budget_manager(imp_manager, ext_config, exhausted_budget):
     return EscalationManager(imp_manager, ext_config, budget=exhausted_budget)
 
 
+@pytest.mark.fast
 class TestBudgetAwareEscalation:
     """Tests for US-002: Wire RateLimitBudget into EscalationManager."""
 
@@ -839,6 +848,7 @@ class TestBudgetAwareEscalation:
 # US-006: Speed tracker signal consumption for preemptive escalation
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestSpeedTriggeredEscalation:
     """Tests for record_slow_speed() preemptive escalation."""
 
@@ -993,6 +1003,7 @@ class TestSpeedTriggeredEscalation:
 # Speed escalation cooldown (Sprint 12 US-001)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestSpeedEscalationCooldown:
     """Verify record_slow_speed() respects the cooldown window."""
 
@@ -1059,6 +1070,7 @@ class TestSpeedEscalationCooldown:
 # Checkpoint Persistence (Sprint 10 US-007)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.fast
 class TestEscalationCheckpointPersistence:
     """Tests for to_dict() / from_dict() serialization and resume support."""
 

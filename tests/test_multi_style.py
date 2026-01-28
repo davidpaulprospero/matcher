@@ -38,6 +38,7 @@ from src.multi_style import (
 # Test OTIOStyle Dataclass
 # ============================================================================
 
+@pytest.mark.fast
 class TestOTIOStyle:
     """Test OTIOStyle dataclass"""
 
@@ -87,6 +88,7 @@ class TestOTIOStyle:
 # Test Preset Styles
 # ============================================================================
 
+@pytest.mark.fast
 class TestPresetStyles:
     """Test preset style configurations"""
 
@@ -138,6 +140,7 @@ class TestPresetStyles:
 # Test MultiStyleOTIOGenerator Initialization
 # ============================================================================
 
+@pytest.mark.fast
 class TestMultiStyleOTIOGeneratorInit:
     """Test MultiStyleOTIOGenerator initialization"""
 
@@ -164,6 +167,7 @@ class TestMultiStyleOTIOGeneratorInit:
 # Test Style Management
 # ============================================================================
 
+@pytest.mark.fast
 class TestStyleManagement:
     """Test style management functionality"""
 
@@ -246,6 +250,7 @@ class TestStyleManagement:
 # Test Config Conversion
 # ============================================================================
 
+@pytest.mark.fast
 class TestConfigConversion:
     """Test style to config conversion"""
 
@@ -309,6 +314,7 @@ class TestConfigConversion:
 # Test Track Definitions
 # ============================================================================
 
+@pytest.mark.fast
 class TestTrackDefinitions:
     """Test track definitions for different source types"""
 
@@ -347,6 +353,7 @@ class TestTrackDefinitions:
 # Test Source Type Detection
 # ============================================================================
 
+@pytest.mark.fast
 class TestSourceTypeDetection:
     """Test stock footage detection"""
 
@@ -405,6 +412,7 @@ class TestSourceTypeDetection:
 # Test Edge Cases
 # ============================================================================
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases"""
 
@@ -467,6 +475,7 @@ class TestEdgeCases:
 # Test Interactive Prompts
 # ============================================================================
 
+@pytest.mark.fast
 class TestPromptForSecondStyle:
     """Test prompt_for_second_style function"""
 
@@ -603,6 +612,7 @@ class TestPromptForSecondStyle:
         assert style.name == "custom"
 
 
+@pytest.mark.fast
 class TestPromptCustomStyle:
     """Test _prompt_custom_style function"""
 
@@ -756,6 +766,7 @@ class TestPromptCustomStyle:
         assert style.name == "custom"
 
 
+@pytest.mark.fast
 class TestPromptMultiStyleEnabled:
     """Test prompt_multi_style_enabled function"""
 

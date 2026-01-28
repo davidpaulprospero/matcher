@@ -32,6 +32,7 @@ from src.global_cache import (
 )
 
 
+@pytest.mark.fast
 class TestVideoSource:
     """Test VideoSource enum."""
 
@@ -49,6 +50,7 @@ class TestVideoSource:
         assert VideoSource.GLOBAL_MEDIUM_RELEVANCE.value < VideoSource.GLOBAL_LOW_RELEVANCE.value
 
 
+@pytest.mark.fast
 class TestDownloadInfo:
     """Test DownloadInfo dataclass."""
 
@@ -115,6 +117,7 @@ class TestDownloadInfo:
         assert not hasattr(info, "unknown_field")
 
 
+@pytest.mark.fast
 class TestVideoRegistryEntry:
     """Test VideoRegistryEntry dataclass."""
 
@@ -240,6 +243,7 @@ class TestVideoRegistryEntry:
         assert entry.download_info is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheQueryResult:
     """Test GlobalCacheQueryResult dataclass."""
 
@@ -273,6 +277,7 @@ class TestGlobalCacheQueryResult:
         assert result.redownload_keywords == ["keyword1"]
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerInit:
     """Test GlobalCacheManager initialization."""
 
@@ -319,6 +324,7 @@ class TestGlobalCacheManagerInit:
         assert manager._keyword_index == {}
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerLoadIndices:
     """Test index loading functionality."""
 
@@ -411,6 +417,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._keyword_index == {}
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerSaveIndices:
     """Test index saving functionality."""
 
@@ -441,6 +448,7 @@ class TestGlobalCacheManagerSaveIndices:
             manager._save_indices()
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerComputeHash:
     """Test content hash computation."""
 
@@ -521,6 +529,7 @@ class TestGlobalCacheManagerComputeHash:
         assert len(hash_result) == 32
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerRegisterVideo:
     """Test video registration."""
 
@@ -616,6 +625,7 @@ class TestGlobalCacheManagerRegisterVideo:
         assert entry2.current_path == str(video_file)
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerGetEntry:
     """Test getting video entries."""
 
@@ -660,6 +670,7 @@ class TestGlobalCacheManagerGetEntry:
         assert entry is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerFindVideos:
     """Test finding videos for keywords."""
 
@@ -800,6 +811,7 @@ class TestGlobalCacheManagerFindVideos:
         assert len(result.reuse_videos) <= 3
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerFileChecks:
     """Test file existence checking."""
 
@@ -855,6 +867,7 @@ class TestGlobalCacheManagerFileChecks:
         assert manager._check_file_exists(entry) is False
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerRelevance:
     """Test relevance computation."""
 
@@ -950,6 +963,7 @@ class TestGlobalCacheManagerRelevance:
         assert relevance > 0.5  # Should match download keyword
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerUpdateMethods:
     """Test update methods."""
 
@@ -1038,6 +1052,7 @@ class TestGlobalCacheManagerUpdateMethods:
         assert updated.has_scenes is False
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerTranscripts:
     """Test transcript caching."""
 
@@ -1097,6 +1112,7 @@ class TestGlobalCacheManagerTranscripts:
         assert result is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerScenes:
     """Test scene caching."""
 
@@ -1151,6 +1167,7 @@ class TestGlobalCacheManagerScenes:
         assert result is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerStats:
     """Test statistics methods."""
 
@@ -1200,6 +1217,7 @@ class TestGlobalCacheManagerStats:
         assert size > 0
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerUpdateIndices:
     """Test index update functionality."""
 
@@ -1275,6 +1293,7 @@ class TestGlobalCacheManagerUpdateIndices:
         assert manager._topic_index["travel"].count("hash1") == 1
 
 
+@pytest.mark.fast
 class TestPromptGlobalCacheReuse:
     """Test interactive prompt function."""
 
@@ -1456,6 +1475,7 @@ class TestPromptGlobalCacheReuse:
         assert use_cache is True
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerSaveEntry:
     """Test _save_video_entry method."""
 
@@ -1496,6 +1516,7 @@ class TestGlobalCacheManagerSaveEntry:
             manager._save_video_entry(entry)
 
 
+@pytest.mark.fast
 class TestMissedLines:
     """Tests specifically targeting missed coverage lines."""
 
@@ -1589,6 +1610,7 @@ class TestMissedLines:
         assert len(result.reuse_videos) == 0  # Filtered out by min_relevance
 
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 

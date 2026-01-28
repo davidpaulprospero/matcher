@@ -1,9 +1,9 @@
 {
     "US-006":  {
                    "data":  {
-                                "iteration":  7,
+                                "iteration":  35,
                                 "retryCount":  1,
-                                "tokensUsed":  213
+                                "tokensUsed":  429
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -15,9 +15,9 @@
                },
     "US-003":  {
                    "data":  {
-                                "iteration":  4,
+                                "iteration":  43,
                                 "retryCount":  1,
-                                "tokensUsed":  274
+                                "tokensUsed":  317
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -29,9 +29,9 @@
                },
     "US-004":  {
                    "data":  {
-                                "iteration":  5,
+                                "iteration":  44,
                                 "retryCount":  1,
-                                "tokensUsed":  214
+                                "tokensUsed":  478
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -43,9 +43,9 @@
                },
     "US-007":  {
                    "data":  {
-                                "iteration":  8,
+                                "iteration":  36,
                                 "retryCount":  1,
-                                "tokensUsed":  194
+                                "tokensUsed":  443
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -57,9 +57,9 @@
                },
     "US-001":  {
                    "data":  {
-                                "iteration":  2,
+                                "iteration":  41,
                                 "retryCount":  1,
-                                "tokensUsed":  188
+                                "tokensUsed":  314
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -71,9 +71,9 @@
                },
     "US-010":  {
                    "data":  {
-                                "iteration":  12,
+                                "iteration":  39,
                                 "retryCount":  1,
-                                "tokensUsed":  205
+                                "tokensUsed":  380
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -85,9 +85,9 @@
                },
     "US-002":  {
                    "data":  {
-                                "iteration":  3,
+                                "iteration":  42,
                                 "retryCount":  1,
-                                "tokensUsed":  257
+                                "tokensUsed":  302
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -99,9 +99,9 @@
                },
     "US-009":  {
                    "data":  {
-                                "iteration":  10,
+                                "iteration":  38,
                                 "retryCount":  1,
-                                "tokensUsed":  288
+                                "tokensUsed":  357
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -113,9 +113,9 @@
                },
     "US-005":  {
                    "data":  {
-                                "iteration":  6,
+                                "iteration":  34,
                                 "retryCount":  1,
-                                "tokensUsed":  226
+                                "tokensUsed":  284
                             },
                    "milestones":  {
                                       "committed":  true,
@@ -127,9 +127,9 @@
                },
     "US-008":  {
                    "data":  {
-                                "iteration":  9,
+                                "iteration":  37,
                                 "retryCount":  1,
-                                "tokensUsed":  213
+                                "tokensUsed":  385
                             },
                    "milestones":  {
                                       "committed":  true,

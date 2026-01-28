@@ -13,6 +13,7 @@ from src.downloader.speed_tracker import (
 )
 
 
+@pytest.mark.fast
 class TestDownloadSpeedConfig:
     """Tests for DownloadSpeedConfig defaults and values."""
 
@@ -41,6 +42,7 @@ class TestDownloadSpeedConfig:
         assert config.enable_adaptive_timeout is False
 
 
+@pytest.mark.fast
 class TestDownloadRecord:
     """Tests for DownloadRecord dataclass."""
 
@@ -68,6 +70,7 @@ class TestDownloadRecord:
         assert record.speed_mbps == 0.0
 
 
+@pytest.mark.fast
 class TestTrackerInitialization:
     """Tests for DownloadSpeedTracker initialization."""
 
@@ -89,6 +92,7 @@ class TestTrackerInitialization:
         assert len(tracker._records) == 0
 
 
+@pytest.mark.fast
 class TestRecordDownload:
     """Tests for record_download method."""
 
@@ -148,6 +152,7 @@ class TestRecordDownload:
         assert video_ids == ["video2", "video3", "video4"]
 
 
+@pytest.mark.fast
 class TestAverageSpeed:
     """Tests for get_average_speed_mbps method."""
 
@@ -181,6 +186,7 @@ class TestAverageSpeed:
         assert tracker.get_average_speed_mbps() == pytest.approx(3.0, rel=0.01)
 
 
+@pytest.mark.fast
 class TestAdaptiveTimeout:
     """Tests for get_adjusted_timeout method."""
 
@@ -253,6 +259,7 @@ class TestAdaptiveTimeout:
         assert tracker.get_adjusted_timeout(120) == 120
 
 
+@pytest.mark.fast
 class TestSpeedStats:
     """Tests for get_speed_stats method."""
 
@@ -287,6 +294,7 @@ class TestSpeedStats:
         assert len(stats['records']) == 2
 
 
+@pytest.mark.fast
 class TestCheckpointPersistence:
     """Tests for checkpoint save/restore functionality."""
 
@@ -399,6 +407,7 @@ class TestCheckpointPersistence:
         assert tracker.get_speed_stats()['samples'] == 0
 
 
+@pytest.mark.fast
 class TestIntegration:
     """Integration tests simulating real-world usage."""
 
@@ -462,6 +471,7 @@ class TestIntegration:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestRateLimitSignalDataclass:
     """Tests for RateLimitSignal dataclass."""
 
@@ -493,6 +503,7 @@ class TestRateLimitSignalDataclass:
         assert signal.consecutive_slow_count == 1
 
 
+@pytest.mark.fast
 class TestRateLimitSignalConfigDefaults:
     """Tests for rate limit signal config defaults."""
 
@@ -517,6 +528,7 @@ class TestRateLimitSignalConfigDefaults:
         assert config.consecutive_slow_samples == 5
 
 
+@pytest.mark.fast
 class TestDetectRateLimitSignals:
     """Tests for detect_rate_limit_signals method."""
 
@@ -624,6 +636,7 @@ class TestDetectRateLimitSignals:
         assert signal.threshold == 0.1
 
 
+@pytest.mark.fast
 class TestSignalLogging:
     """Tests for rate limit signal logging."""
 
@@ -665,6 +678,7 @@ class TestSignalLogging:
             mock_logger.warning.assert_not_called()
 
 
+@pytest.mark.fast
 class TestSignalWithCircuitBreaker:
     """Integration tests for signal with circuit breaker."""
 
@@ -730,6 +744,7 @@ class TestSignalWithCircuitBreaker:
             assert breaker.is_open is True
 
 
+@pytest.mark.fast
 class TestSignalEdgeCases:
     """Edge case tests for rate limit signal detection."""
 
@@ -797,6 +812,7 @@ class TestSignalEdgeCases:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestRollingWindowAverage:
     """AC3: Test speed sample averaging with 5 samples and rolling window."""
 
@@ -847,6 +863,7 @@ class TestRollingWindowAverage:
         assert "v2" not in video_ids
 
 
+@pytest.mark.fast
 class TestFastSampleResetsCounter:
     """AC4: Test that a single fast sample resets consecutive_slow_samples counter."""
 
@@ -898,6 +915,7 @@ class TestFastSampleResetsCounter:
         assert signal.consecutive_slow_count == 0
 
 
+@pytest.mark.fast
 class TestPerKeywordIsolation:
     """AC5: Test speed tracking per-keyword isolation."""
 
@@ -999,6 +1017,7 @@ class TestPerKeywordIsolation:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestFewerThan2SamplesAverage:
     """AC1: Test SpeedTracker with fewer than 2 samples behavior."""
 
@@ -1032,6 +1051,7 @@ class TestFewerThan2SamplesAverage:
         assert tracker.get_adjusted_timeout(120) == 240
 
 
+@pytest.mark.fast
 class TestZeroDurationSamplesUS008:
     """AC2: Test SpeedTracker handles zero duration samples gracefully."""
 
@@ -1070,6 +1090,7 @@ class TestZeroDurationSamplesUS008:
         assert len(tracker._records) == 0
 
 
+@pytest.mark.fast
 class TestSlidingWindowDropsOldUS008:
     """AC3: Test sliding window correctly drops old samples beyond window size."""
 
@@ -1116,6 +1137,7 @@ class TestSlidingWindowDropsOldUS008:
         assert tracker.get_average_speed_mbps() == pytest.approx(4.0, rel=0.01)
 
 
+@pytest.mark.fast
 class TestNegativeSpeedValuesUS008:
     """AC4: Test speed calculation with invalid (negative) speed values."""
 
@@ -1163,6 +1185,7 @@ class TestNegativeSpeedValuesUS008:
         assert len(tracker._records) == 2
 
 
+@pytest.mark.fast
 class TestConcurrentSpeedRecordingUS008:
     """AC5: Test concurrent speed recording is thread-safe."""
 

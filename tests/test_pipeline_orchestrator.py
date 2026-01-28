@@ -104,6 +104,7 @@ def mock_config():
     return config
 
 
+@pytest.mark.fast
 class TestAddStageFluent:
     """Test add_stage() fluent interface returns self."""
 
@@ -146,6 +147,7 @@ class TestAddStageFluent:
         assert pipeline.stages[1] is stage2
 
 
+@pytest.mark.fast
 class TestLoadCheckpoint:
     """Test load_checkpoint() with valid and invalid checkpoints."""
 
@@ -229,6 +231,7 @@ class TestLoadCheckpoint:
         assert mock_logger.warning.call_count == 2
 
 
+@pytest.mark.fast
 class TestRunStageFiltering:
     """Test run() stage filtering with skip_stages and only_stages."""
 
@@ -322,6 +325,7 @@ class TestRunStageFiltering:
         assert "C" in pipeline.stage_timings
 
 
+@pytest.mark.fast
 class TestRunResumeWithCheckpoint:
     """Test run() resume behavior with checkpoint."""
 
@@ -390,6 +394,7 @@ class TestRunResumeWithCheckpoint:
         assert stage._run_called is True
 
 
+@pytest.mark.fast
 class TestStageTimingRecording:
     """Test stage timing is recorded in stage_timings dict."""
 
@@ -459,6 +464,7 @@ class TestStageTimingRecording:
         assert "invalid_stage" not in pipeline.stage_timings
 
 
+@pytest.mark.fast
 class TestCheckpointSaving:
     """Test checkpoint is saved after successful stage execution."""
 
@@ -487,6 +493,7 @@ class TestCheckpointSaving:
         pipeline.checkpoint.save.assert_not_called()
 
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
@@ -563,6 +570,7 @@ class TestEdgeCases:
         assert len(summary['stage_timings']) == 2
 
 
+@pytest.mark.fast
 class TestStageProgressCallbacks:
     """Test on_stage_start and on_stage_complete callbacks."""
 
@@ -810,6 +818,7 @@ class TestStageProgressCallbacks:
         assert "B" in pipeline.stage_timings
 
 
+@pytest.mark.fast
 class TestStageMetricsCollection:
     """Test stage metrics collection and aggregation."""
 
@@ -980,6 +989,7 @@ class TestStageMetricsCollection:
         assert result.metrics.items_failed == 2
 
 
+@pytest.mark.fast
 class TestResumeLogic:
     """
     US-007 (Sprint 15): Pipeline orchestrator resume logic tests.

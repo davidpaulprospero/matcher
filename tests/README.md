@@ -27,13 +27,26 @@ The following pytest markers are defined in `pytest.ini`:
 
 | Marker | Description | When to Run |
 |--------|-------------|-------------|
-| `fast` | Fast unit tests (<100ms) | Every commit |
+| `fast` | Pure unit tests (no I/O, no network, mocks only) | Every commit |
 | `slow` | Slow tests (>5 seconds) | On-demand |
 | `integration` | Integration tests requiring external resources | PR merge |
 | `stress` | Stress/chaos tests | Nightly |
 | `simulation` | Healing simulation tests | PR merge |
 | `requires_api` | Tests requiring API keys (Gemini, etc.) | When keys available |
 | `requires_network` | Tests making HTTP requests | When online |
+
+### Marker Statistics (Sprint 23)
+
+| Marker | Test Count | Approx. Runtime |
+|--------|------------|-----------------|
+| `fast` | ~2,680 | ~45 seconds |
+| `integration` | ~72 | Varies (network-dependent) |
+| Unmarked | ~8,800 | - |
+
+**CI Optimization:**
+- Use `pytest -m fast` for quick feedback loop during development
+- Use `pytest -m "not requires_network"` for offline testing
+- Full suite runs on PR merge
 
 ### Using Markers
 

@@ -69,6 +69,7 @@ def temp_project_dir(tmp_path):
 # Test DownloadStage Initialization
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadStageInit:
     """Test DownloadStage initialization"""
 
@@ -99,6 +100,7 @@ class TestDownloadStageInit:
 # Test Input Validation
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadInputValidation:
     """Test validate_inputs method"""
 
@@ -128,6 +130,7 @@ class TestDownloadInputValidation:
 # Test Full Download Mode
 # ============================================================================
 
+@pytest.mark.fast
 class TestFullDownloadMode:
     """Test _run_full_download method"""
 
@@ -225,6 +228,7 @@ class TestFullDownloadMode:
 # Test Audio-First Mode
 # ============================================================================
 
+@pytest.mark.fast
 class TestAudioFirstMode:
     """Test audio-first download mode"""
 
@@ -322,6 +326,7 @@ class TestAudioFirstMode:
 # Test Skip Download Behavior
 # ============================================================================
 
+@pytest.mark.fast
 class TestSkipDownload:
     """Test skip_download behavior"""
 
@@ -385,6 +390,7 @@ class TestSkipDownload:
 # Test Stage Execution
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadStageExecution:
     """Test full stage execution flow"""
 
@@ -450,6 +456,7 @@ class TestDownloadStageExecution:
 # Test Checkpoint Operations
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadCheckpoint:
     """Test checkpoint save/restore"""
 
@@ -571,6 +578,7 @@ class TestDownloadCheckpoint:
 # Test Helper Methods
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadHelpers:
     """Test helper methods"""
 
@@ -655,6 +663,7 @@ class TestDownloadHelpers:
 # Test DownloadVideoSegmentsStage
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadVideoSegmentsStageInit:
     """Test DownloadVideoSegmentsStage initialization"""
 
@@ -674,6 +683,7 @@ class TestDownloadVideoSegmentsStageInit:
         assert stage.downloader is None
 
 
+@pytest.mark.fast
 class TestDownloadVideoSegmentsValidation:
     """Test segment download validation"""
 
@@ -722,6 +732,7 @@ class TestDownloadVideoSegmentsValidation:
         assert error is None
 
 
+@pytest.mark.fast
 class TestDownloadVideoSegmentsExecution:
     """Test segment download execution"""
 
@@ -803,6 +814,7 @@ class TestDownloadVideoSegmentsExecution:
         assert result.data['segment_count'] == 1
 
 
+@pytest.mark.fast
 class TestDownloadVideoSegmentsCheckpoint:
     """Test segment download checkpoint operations"""
 
@@ -824,6 +836,7 @@ class TestDownloadVideoSegmentsCheckpoint:
         assert result is True
 
 
+@pytest.mark.fast
 class TestMatchRemapping:
     """Test match object remapping from audio to video segments"""
 
@@ -1328,6 +1341,7 @@ class TestMatchRemapping:
 # Test Edge Cases
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadEdgeCases:
     """Test edge cases and error conditions"""
 
@@ -1388,6 +1402,7 @@ class TestDownloadEdgeCases:
 # Test Global Cache Coverage
 # ============================================================================
 
+@pytest.mark.fast
 class TestGlobalCacheBranch:
     """Test global cache coverage branch"""
 
@@ -1423,6 +1438,7 @@ class TestGlobalCacheBranch:
 # Test Download Segments Exception
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadSegmentsException:
     """Test exception handling in download segments stage"""
 
@@ -1455,6 +1471,7 @@ class TestDownloadSegmentsException:
 # Test Actual Remap Method Call
 # ============================================================================
 
+@pytest.mark.fast
 class TestRemapMethodIntegration:
     """Test _remap_matches_to_video_segments is actually called"""
 
@@ -1503,6 +1520,7 @@ class TestRemapMethodIntegration:
 # Test Audio Dict Handling
 # ============================================================================
 
+@pytest.mark.fast
 class TestAudioDictHandling:
     """Test _audio_to_dict with dict input"""
 
@@ -1541,6 +1559,7 @@ class TestAudioDictHandling:
 # Test Store Download Results Additional Coverage
 # ============================================================================
 
+@pytest.mark.fast
 class TestStoreDownloadResultsExtended:
     """Extended tests for _store_download_results"""
 
@@ -1604,6 +1623,7 @@ class TestStoreDownloadResultsExtended:
 # Test Retry Logic
 # ============================================================================
 
+@pytest.mark.fast
 class TestDownloadRetryLogic:
     """Test retry with exponential backoff behavior"""
 
@@ -1749,6 +1769,7 @@ class TestDownloadRetryLogic:
         assert "All 2 retries failed" in str(mock_logger.error.call_args)
 
 
+@pytest.mark.fast
 class TestAudioFirstRetryIntegration:
     """Test retry integration in audio-first mode"""
 
@@ -1847,6 +1868,7 @@ class TestAudioFirstRetryIntegration:
         assert len(state.failed_keywords) == 0  # Keyword succeeded because medium tier worked
 
 
+@pytest.mark.fast
 class TestRestoreObsoleteFields:
     """Test restore handles obsolete fields from old checkpoints"""
 

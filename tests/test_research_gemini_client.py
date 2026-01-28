@@ -18,6 +18,7 @@ import time
 # ---------------------------------------------------------------------------
 # AC1: Test research() returns correctly parsed ResearchResult objects
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
@@ -165,6 +166,7 @@ class TestGeminiResearchResultParsing:
 # ---------------------------------------------------------------------------
 # AC2: Test research() handles API quota exceeded (429) with exponential backoff
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiQuotaHandling:
     """AC2: Test research() handles API quota exceeded (429) with exponential backoff."""
 
@@ -306,6 +308,7 @@ class TestGeminiQuotaHandling:
 # ---------------------------------------------------------------------------
 # AC3: Test research() handles network timeout with configurable retry
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiNetworkTimeoutHandling:
     """AC3: Test research() handles network timeout with configurable retry."""
 
@@ -437,6 +440,7 @@ class TestGeminiNetworkTimeoutHandling:
 # ---------------------------------------------------------------------------
 # AC4: Test research() handles malformed JSON response without crash
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiMalformedResponseHandling:
     """AC4: Test research() handles malformed/empty response without crash."""
 
@@ -590,6 +594,7 @@ class TestGeminiMalformedResponseHandling:
 # ---------------------------------------------------------------------------
 # AC5: Test GeminiClient validates API key format before making requests
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiAPIKeyValidation:
     """AC5: Test GeminiClient validates API key format before making requests."""
 
@@ -671,6 +676,7 @@ class TestGeminiAPIKeyValidation:
 # ---------------------------------------------------------------------------
 # Additional tests for other GeminiClient methods
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGeminiOtherMethods:
     """Additional tests for fact_check, compare, and api_docs methods."""
 

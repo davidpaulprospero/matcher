@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # =============================================================================
 # TEST 1: VAD Filter Separation (Rule 11)
 # =============================================================================
+@pytest.mark.fast
 class TestVADFilterSeparation:
     """
     Test VAD filter separation between voiceover and videos.
@@ -119,6 +120,7 @@ class TestVADFilterSeparation:
 # =============================================================================
 # TEST 2: Config Loading - project_config.yaml Overlay
 # =============================================================================
+@pytest.mark.fast
 class TestConfigLoading:
     """
     Test that project_config.yaml properly overlays default config values.
@@ -250,6 +252,7 @@ class TestConfigLoading:
 # =============================================================================
 # TEST 3: video_source_dir Fix in _resolve_paths()
 # =============================================================================
+@pytest.mark.fast
 class TestVideoSourceDir:
     """
     Test that pipeline.video_source_dir correctly overrides downloading.output_dir.
@@ -334,6 +337,7 @@ class TestVideoSourceDir:
 # =============================================================================
 # TEST 4: gap_mode (scale/proportional/none)
 # =============================================================================
+@pytest.mark.fast
 class TestGapMode:
     """
     Test gap_mode configuration for timeline gap distribution.
@@ -393,6 +397,7 @@ class TestGapMode:
 # =============================================================================
 # TEST 5: voiceover_offset (Manual Alignment Adjustment)
 # =============================================================================
+@pytest.mark.fast
 class TestVoiceoverOffset:
     """
     Test voiceover_offset configuration for manual timeline alignment.
@@ -454,6 +459,7 @@ class TestVoiceoverOffset:
 # =============================================================================
 # TEST 6: AudioDownload Checkpoint Backward Compatibility
 # =============================================================================
+@pytest.mark.fast
 class TestAudioDownloadCheckpoint:
     """
     Test AudioDownload dataclass restoration from checkpoint dicts.
@@ -598,6 +604,7 @@ class TestAudioDownloadCheckpoint:
 # =============================================================================
 # Integration Tests
 # =============================================================================
+@pytest.mark.fast
 class TestRecentAdditionsIntegration:
     """Integration tests combining multiple recent additions."""
 
@@ -656,6 +663,7 @@ class TestRecentAdditionsIntegration:
 # =============================================================================
 # TEST 7: Additional VAD Filter Tests (Mocking)
 # =============================================================================
+@pytest.mark.fast
 class TestVADFilterMocking:
     """
     Additional VAD tests using mocking to verify actual behavior.
@@ -713,6 +721,7 @@ class TestVADFilterMocking:
 # =============================================================================
 # TEST 8: Config Loading Error Handling
 # =============================================================================
+@pytest.mark.fast
 class TestConfigLoadingErrorHandling:
     """
     Test error handling in config loading.
@@ -807,6 +816,7 @@ class TestConfigLoadingErrorHandling:
 # =============================================================================
 # TEST 9: Gap Mode Runtime Validation
 # =============================================================================
+@pytest.mark.fast
 class TestGapModeValidation:
     """
     Test gap_mode validation that happens at runtime in timeline.py.
@@ -869,6 +879,7 @@ class TestGapModeValidation:
 # =============================================================================
 # TEST 10: Voiceover Offset Behavior
 # =============================================================================
+@pytest.mark.fast
 class TestVoiceoverOffsetBehavior:
     """
     Test voiceover_offset behavior in timeline calculations.
@@ -925,6 +936,7 @@ class TestVoiceoverOffsetBehavior:
 # =============================================================================
 # TEST 11: AudioDownload Field Mapping (Backward Compat)
 # =============================================================================
+@pytest.mark.fast
 class TestAudioDownloadFieldMapping:
     """
     Test backward compatibility field mapping in checkpoint restoration.
@@ -1007,6 +1019,7 @@ class TestAudioDownloadFieldMapping:
 # =============================================================================
 # TEST 12: Retry Logic Tests
 # =============================================================================
+@pytest.mark.fast
 class TestRetryLogic:
     """
     Test retry logic with exponential backoff.
@@ -1120,6 +1133,7 @@ class TestRetryLogic:
 # =============================================================================
 # TEST 13: Location Matching Tests
 # =============================================================================
+@pytest.mark.fast
 class TestLocationMatching:
     """
     Test location matching configuration and behavior.
@@ -1168,6 +1182,7 @@ class TestLocationMatching:
 # =============================================================================
 # TEST 14: OTIO Utilities Tests
 # =============================================================================
+@pytest.mark.fast
 class TestOTIOUtils:
     """
     Test OTIO utility functions.
@@ -1193,6 +1208,7 @@ class TestOTIOUtils:
 # =============================================================================
 # TEST 15: Additional Integration Tests
 # =============================================================================
+@pytest.mark.fast
 class TestAdditionalIntegration:
     """
     Additional integration tests for recent additions.
@@ -1290,6 +1306,7 @@ class TestAdditionalIntegration:
 # =============================================================================
 # TEST 16: LocationMatcher Tests
 # =============================================================================
+@pytest.mark.fast
 class TestLocationMatcher:
     """
     Test LocationMatcher class for geographic filtering.
@@ -1364,6 +1381,7 @@ class TestLocationMatcher:
 # =============================================================================
 # TEST 17: OTIO Entities Module Tests
 # =============================================================================
+@pytest.mark.fast
 class TestOTIOEntities:
     """
     Test OTIO entities module functions.
@@ -1450,6 +1468,7 @@ class TestOTIOEntities:
 # =============================================================================
 # TEST 18: OTIO Tracks Module Tests
 # =============================================================================
+@pytest.mark.fast
 class TestOTIOTracks:
     """
     Test OTIO tracks module classes.
@@ -1487,6 +1506,7 @@ class TestOTIOTracks:
 # =============================================================================
 # TEST 19: OTIO Utils Tests
 # =============================================================================
+@pytest.mark.fast
 class TestOTIOUtils:
     """
     Test OTIO utility functions.
@@ -1559,6 +1579,7 @@ class TestOTIOUtils:
 # =============================================================================
 # TEST 20: TranscriptSegment Tests
 # =============================================================================
+@pytest.mark.fast
 class TestTranscriptSegment:
     """
     Test TranscriptSegment dataclass.
@@ -1622,6 +1643,7 @@ class TestTranscriptSegment:
 # =============================================================================
 # TEST 21: VoiceoverSegment Tests
 # =============================================================================
+@pytest.mark.fast
 class TestVoiceoverSegment:
     """
     Test VoiceoverSegment dataclass.
@@ -1664,6 +1686,7 @@ class TestVoiceoverSegment:
 # =============================================================================
 # TEST 22: PipelineState Tests
 # =============================================================================
+@pytest.mark.fast
 class TestPipelineState:
     """
     Test PipelineState dataclass.
@@ -1717,6 +1740,7 @@ class TestPipelineState:
 # =============================================================================
 # TEST 23: Config Edge Cases
 # =============================================================================
+@pytest.mark.fast
 class TestConfigEdgeCases:
     """
     Test configuration edge cases.
@@ -1773,6 +1797,7 @@ class TestConfigEdgeCases:
 # =============================================================================
 # TEST 24: Match Dataclass Tests
 # =============================================================================
+@pytest.mark.fast
 class TestMatchDataclass:
     """
     Test Match dataclass.
@@ -1834,6 +1859,7 @@ class TestMatchDataclass:
 # =============================================================================
 # TEST 25: EntityImage and EntityVideo Tests
 # =============================================================================
+@pytest.mark.fast
 class TestEntityDataclasses:
     """
     Test EntityImage and EntityVideo dataclasses.
@@ -1902,6 +1928,7 @@ class TestEntityDataclasses:
 # =============================================================================
 # TEST 26: More Retry Logic Edge Cases
 # =============================================================================
+@pytest.mark.fast
 class TestRetryLogicEdgeCases:
     """
     Additional edge case tests for retry logic.

@@ -10,6 +10,7 @@ from datetime import datetime
 from src.downloader.rate_limit_metrics import RateLimitMetrics
 
 
+@pytest.mark.fast
 class TestRateLimitMetricsInit:
     """Test RateLimitMetrics initialization."""
 
@@ -40,6 +41,7 @@ class TestRateLimitMetricsInit:
         assert metrics.rate_limit_events == 5
 
 
+@pytest.mark.fast
 class TestDownloadRecording:
     """Test download metrics recording."""
 
@@ -82,6 +84,7 @@ class TestDownloadRecording:
         assert metrics.failed_downloads == 1
 
 
+@pytest.mark.fast
 class TestRetryRecording:
     """Test retry metrics recording."""
 
@@ -123,6 +126,7 @@ class TestRetryRecording:
         assert metrics.max_retry_count_reached == 1
 
 
+@pytest.mark.fast
 class TestRateLimitRecording:
     """Test rate limit metrics recording."""
 
@@ -161,6 +165,7 @@ class TestRateLimitRecording:
         assert metrics.vpn_switches == 1
 
 
+@pytest.mark.fast
 class TestCircuitBreakerRecording:
     """Test circuit breaker metrics recording."""
 
@@ -180,6 +185,7 @@ class TestCircuitBreakerRecording:
         assert metrics.circuit_breaker_pause_seconds == 120.0
 
 
+@pytest.mark.fast
 class TestBatchRetryRecording:
     """Test batch retry metrics recording."""
 
@@ -201,6 +207,7 @@ class TestBatchRetryRecording:
         assert metrics.batch_retry_failures == 4
 
 
+@pytest.mark.fast
 class TestSpeedRecording:
     """Test speed metrics recording."""
 
@@ -227,6 +234,7 @@ class TestSpeedRecording:
         assert metrics.timeout_extensions == 1
 
 
+@pytest.mark.fast
 class TestCalculatedProperties:
     """Test calculated metric properties."""
 
@@ -261,6 +269,7 @@ class TestCalculatedProperties:
         assert metrics.success_rate == 85.0
 
 
+@pytest.mark.fast
 class TestSubsystemIntegration:
     """Test integration with subsystem stats."""
 
@@ -316,6 +325,7 @@ class TestSubsystemIntegration:
         assert metrics.avg_speed_mbps == 3.5
 
 
+@pytest.mark.fast
 class TestConfigRecommendations:
     """Test config recommendation generation."""
 
@@ -458,6 +468,7 @@ class TestConfigRecommendations:
         assert any('rotation' in r.lower() or 'enable' in r.lower() for r in cookie_rec)
 
 
+@pytest.mark.fast
 class TestSummary:
     """Test summary generation."""
 
@@ -550,6 +561,7 @@ class TestSummary:
         assert '3 timeout extensions' in summary
 
 
+@pytest.mark.fast
 class TestPersistence:
     """Test checkpoint persistence."""
 
@@ -633,6 +645,7 @@ class TestPersistence:
         assert restored.cookie_rotations == original.cookie_rotations
 
 
+@pytest.mark.fast
 class TestClear:
     """Test metrics clearing."""
 
@@ -651,6 +664,7 @@ class TestClear:
         assert metrics.retries_by_error_type == {}
 
 
+@pytest.mark.fast
 class TestVideoDownloaderIntegration:
     """Test integration with VideoDownloader."""
 
@@ -666,6 +680,7 @@ class TestVideoDownloaderIntegration:
         assert 'RateLimitMetrics' in __all__
 
 
+@pytest.mark.fast
 class TestHealingOrchestratorIntegration:
     """Test integration with HealingOrchestrator."""
 
@@ -764,6 +779,7 @@ class TestHealingOrchestratorIntegration:
         assert orchestrator._rate_limit_metrics is None
 
 
+@pytest.mark.fast
 class TestKeywordRateLimitTracking:
     """Test per-keyword rate limit event tracking (US-009)."""
 
@@ -857,6 +873,7 @@ class TestKeywordRateLimitTracking:
         assert restored.keyword_rate_limit_events == {"keyword1": 2, "keyword2": 1}
 
 
+@pytest.mark.fast
 class TestKeywordSummaryDisplay:
     """Test keyword display in summary when > 10 total events (US-009)."""
 
@@ -924,6 +941,7 @@ class TestKeywordSummaryDisplay:
         assert high_pos < medium_pos < low_pos
 
 
+@pytest.mark.fast
 class TestKeywordConfigRecommendations:
     """Test config recommendations for high-rate-limit keywords (US-009)."""
 
@@ -998,6 +1016,7 @@ class TestKeywordConfigRecommendations:
         assert "skip_keywords" in keyword_recs[0]
 
 
+@pytest.mark.fast
 class TestKeywordCrossSessionPersistence:
     """Test keyword events are preserved across sessions (US-009)."""
 
@@ -1039,6 +1058,7 @@ class TestKeywordCrossSessionPersistence:
         assert session2.session_count == 2
 
 
+@pytest.mark.fast
 class TestExportToJson:
     """Test JSON export functionality (US-012)."""
 
@@ -1292,6 +1312,7 @@ class TestExportToJson:
         assert parsed["downloads"]["total"] == 100
 
 
+@pytest.mark.fast
 class TestExportToJsonFile:
     """Test JSON file export functionality (US-012)."""
 
@@ -1384,6 +1405,7 @@ class TestExportToJsonFile:
         assert "  " in content  # Indentation
 
 
+@pytest.mark.fast
 class TestExportCompleteSchema:
     """Test complete export schema matches documentation (US-012)."""
 

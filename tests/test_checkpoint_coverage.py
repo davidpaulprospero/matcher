@@ -29,6 +29,7 @@ from src.checkpoint import (
 )
 
 
+@pytest.mark.fast
 class TestCheckpointDataClass:
     """Test CheckpointData dataclass methods."""
 
@@ -56,6 +57,7 @@ class TestCheckpointDataClass:
         assert not hasattr(result, 'unknown_field')
 
 
+@pytest.mark.fast
 class TestSavedKeywordsDataClass:
     """Test SavedKeywords dataclass methods."""
 
@@ -81,6 +83,7 @@ class TestSavedKeywordsDataClass:
         assert result.keywords == ['kw1']
 
 
+@pytest.mark.fast
 class TestCheckpointManagerBasics:
     """Test basic CheckpointManager functionality."""
 
@@ -104,6 +107,7 @@ class TestCheckpointManagerBasics:
         assert manager.exists() == True
 
 
+@pytest.mark.fast
 class TestCheckpointCorruption:
     """Test corruption detection and backup restoration."""
 
@@ -215,6 +219,7 @@ class TestCheckpointCorruption:
             assert result is None
 
 
+@pytest.mark.fast
 class TestCheckpointMigration:
     """Test checkpoint migration from v0.9 to v1.0."""
 
@@ -296,6 +301,7 @@ class TestCheckpointMigration:
         assert result.version == '1.0'  # Migrated to 1.0
 
 
+@pytest.mark.fast
 class TestCheckpointIsStale:
     """Test is_stale() method."""
 
@@ -345,6 +351,7 @@ class TestCheckpointIsStale:
         assert manager.is_stale(max_age_hours=1.0) == False
 
 
+@pytest.mark.fast
 class TestCheckpointGetAgeHours:
     """Test get_age_hours() method."""
 
@@ -378,6 +385,7 @@ class TestCheckpointGetAgeHours:
         assert manager.get_age_hours() == 0.0
 
 
+@pytest.mark.fast
 class TestCheckpointValidation:
     """Test checkpoint validation."""
 
@@ -432,6 +440,7 @@ class TestCheckpointValidation:
         assert manager._validate_checkpoint_data(data) == False
 
 
+@pytest.mark.fast
 class TestCheckpointValidateMethod:
     """Test the validate() method."""
 
@@ -513,6 +522,7 @@ class TestCheckpointValidateMethod:
         assert result['completed_stages'] == ["ANALYZE"]
 
 
+@pytest.mark.fast
 class TestCheckpointSaveAndRestore:
     """Test save and restore operations."""
 
@@ -565,6 +575,7 @@ class TestCheckpointSaveAndRestore:
         assert result == ""
 
 
+@pytest.mark.fast
 class TestCheckpointStageOperations:
     """Test stage-related operations."""
 
@@ -605,6 +616,7 @@ class TestCheckpointStageOperations:
         assert manager.should_skip_stage("UNKNOWN_STAGE") == False
 
 
+@pytest.mark.fast
 class TestCheckpointClear:
     """Test clear functionality."""
 
@@ -621,6 +633,7 @@ class TestCheckpointClear:
         assert manager.data is None
 
 
+@pytest.mark.fast
 class TestCheckpointSummary:
     """Test summary generation."""
 
@@ -649,6 +662,7 @@ class TestCheckpointSummary:
         assert "2 keywords" in summary
 
 
+@pytest.mark.fast
 class TestKeywordManager:
     """Test KeywordManager functionality."""
 
@@ -856,6 +870,7 @@ class TestKeywordManager:
         assert '+1 more' in summary  # 4 keywords, showing 3
 
 
+@pytest.mark.fast
 class TestRemainingCoverage:
     """Tests for remaining uncovered lines."""
 
@@ -941,6 +956,7 @@ class TestRemainingCoverage:
         assert "... and 2 more" in summary
 
 
+@pytest.mark.fast
 class TestFormatFunctions:
     """Test format_* functions."""
 

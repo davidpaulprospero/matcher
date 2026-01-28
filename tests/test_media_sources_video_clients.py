@@ -29,6 +29,7 @@ class ConcreteMediaClient(BaseMediaClient):
         return []
 
 
+@pytest.mark.fast
 class TestBaseMediaClient:
     """Test BaseMediaClient abstract base class."""
 
@@ -220,6 +221,7 @@ class TestBaseMediaClient:
         client.cleanup()
 
 
+@pytest.mark.fast
 class TestPexelsVideoClient:
     """Test PexelsVideoClient."""
 
@@ -588,6 +590,7 @@ class TestPexelsVideoClient:
                 assert results[0] == "/path/to/v1.mp4"
 
 
+@pytest.mark.fast
 class TestPixabayVideoClient:
     """Test PixabayVideoClient."""
 
@@ -938,6 +941,7 @@ class TestPixabayVideoClient:
                 assert len(results) == 3
 
 
+@pytest.mark.fast
 class TestVideoClientLongIds:
     """Test handling of long video IDs."""
 
@@ -1006,6 +1010,7 @@ class TestVideoClientLongIds:
             assert filename == "p12345.mp4"
 
 
+@pytest.mark.fast
 class TestVideoClientPreferHD:
     """Test HD preference behavior."""
 
@@ -1072,6 +1077,7 @@ class TestVideoClientPreferHD:
             assert results[0].download_url == "sd_url"
 
 
+@pytest.mark.fast
 class TestPexelsAPIRateLimitingUS001:
     """US-001: Test PexelsClient.search_videos() handles API rate limiting with retry backoff."""
 
@@ -1139,6 +1145,7 @@ class TestPexelsAPIRateLimitingUS001:
                 assert results == []
 
 
+@pytest.mark.fast
 class TestPexelsNetworkTimeoutUS001:
     """US-001: Test PexelsClient.search_videos() handles network timeout gracefully."""
 
@@ -1207,6 +1214,7 @@ class TestPexelsNetworkTimeoutUS001:
             assert result is None
 
 
+@pytest.mark.fast
 class TestPexelsMalformedJSONUS001:
     """US-001: Test PexelsClient.search_videos() handles malformed JSON response without crash."""
 
@@ -1324,6 +1332,7 @@ class TestPexelsMalformedJSONUS001:
             assert results == []
 
 
+@pytest.mark.fast
 class TestPexelsPaginationUS001:
     """US-001: Test PexelsClient pagination iterates correctly through multiple result pages."""
 
@@ -1446,6 +1455,7 @@ class TestPexelsPaginationUS001:
                 assert downloaded_count == 3
 
 
+@pytest.mark.fast
 class TestPexelsDownloadURLValidationUS002:
     """US-002: Test PexelsClient.download_video() validates URL before downloading."""
 
@@ -1550,6 +1560,7 @@ class TestPexelsDownloadURLValidationUS002:
             mock_get.assert_not_called()
 
 
+@pytest.mark.fast
 class TestPexelsPartialDownloadUS002:
     """US-002: Test PexelsClient.download_video() handles partial download scenarios."""
 
@@ -1690,6 +1701,7 @@ class TestPexelsPartialDownloadUS002:
             mock_get.assert_not_called()
 
 
+@pytest.mark.fast
 class TestPexelsQualityOptionsParsingUS002:
     """US-002: Test PexelsClient correctly parses video quality options from API response."""
 
@@ -1822,6 +1834,7 @@ class TestPexelsQualityOptionsParsingUS002:
             assert results[0].height == 0
 
 
+@pytest.mark.fast
 class TestPexelsQualityPreferenceUS002:
     """US-002: Test PexelsClient respects configured quality preference (HD, SD, original)."""
 
@@ -1949,6 +1962,7 @@ class TestPexelsQualityPreferenceUS002:
             assert results[0].height == 1080
 
 
+@pytest.mark.fast
 class TestPexelsAPIKeyValidationUS002:
     """US-002: Test PexelsClient API key validation fails fast with clear error message."""
 
