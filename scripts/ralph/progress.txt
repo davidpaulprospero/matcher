@@ -5997,3 +5997,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 17 passed, 0 failures
 - All 5 acceptance criteria met
 
+
+## Iteration US-003 (Sprint 14) - Add CookieMethodFallback cross-keyword exhaustion tests
+- Added TestCrossKeywordExhaustion class with 8 tests to tests/test_cookie_method_fallback.py
+- AC1: Full 5-method chain advance (browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies) with kind/label verification at each step
+- AC2: mark_success() rotation from method 0 to method 1 for load balancing + wrap-around test (last authenticated wraps to first)
+- AC3: reset_for_next_download() after exhaustion uses last_success_index (not always 0) + no-success fallback to 0
+- AC4: get_status() remaining_methods accuracy at each position through full traversal (4 -> 3 -> 2 -> 1 -> 0)
+- AC5: Duplicate deduplication within cookie_files list + cross-slash-style path normalization dedup
+- Files modified: tests/test_cookie_method_fallback.py
+- Test results: 52 passed (44 existing + 8 new) in 0.65s, 0 failures

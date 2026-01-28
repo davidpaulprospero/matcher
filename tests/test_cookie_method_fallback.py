@@ -576,3 +576,230 @@ class TestChainValidation:
         info_calls = [str(call) for call in mock_logger.info.call_args_list]
         health_log = [c for c in info_calls if "methods available" in c]
         assert len(health_log) >= 1, f"Expected health summary log, got: {info_calls}"
+
+
+# ===========================================================================
+# Test: Cross-keyword exhaustion (US-003)
+# ===========================================================================
+
+
+@pytest.mark.fast
+class TestCrossKeywordExhaustion:
+    """
+    US-003: Test CookieMethodFallback cross-keyword exhaustion paths.
+
+    Covers full-chain advance, mark_success rotation, reset after exhaustion,
+    get_status during partial traversal, and duplicate path deduplication.
+    """
+
+    # ---- AC1: Full chain advance with type verification ----
+
+    def test_advance_full_chain_returns_correct_types(self):
+        """Advance through browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies.
+
+        Each transition must return True and produce the correct CookieMethod kind.
+        """
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt", "cookies/backup1.txt", "cookies/backup2.txt"],
+            files_exist={
+                "cookies\\main.txt", "cookies/main.txt",
+                "cookies\\backup1.txt", "cookies/backup1.txt",
+                "cookies\\backup2.txt", "cookies/backup2.txt",
+            },
+        )
+        # Chain: browser:firefox, file:main.txt, file:backup1.txt, file:backup2.txt, no-cookies
+        assert len(fb._chain) == 5
+
+        # Start: browser
+        assert fb.current_method.kind == "browser"
+        assert fb.current_method.label == "browser:firefox"
+
+        # Advance 1: -> file:main.txt
+        assert fb.advance() is True
+        assert fb.current_method.kind == "file"
+        assert fb.current_method.label == "file:main.txt"
+
+        # Advance 2: -> file:backup1.txt
+        assert fb.advance() is True
+        assert fb.current_method.kind == "file"
+        assert fb.current_method.label == "file:backup1.txt"
+
+        # Advance 3: -> file:backup2.txt
+        assert fb.advance() is True
+        assert fb.current_method.kind == "file"
+        assert fb.current_method.label == "file:backup2.txt"
+
+        # Advance 4: -> no-cookies
+        assert fb.advance() is True
+        assert fb.current_method.kind == "none"
+        assert fb.current_method.label == "no-cookies"
+
+        # Advance 5: exhausted
+        assert fb.advance() is False
+        assert fb.is_exhausted is True
+
+    # ---- AC2: mark_success() proactive rotation ----
+
+    def test_mark_success_on_method_0_advances_to_method_1(self):
+        """After success on method 0 (browser), last_success_index points to method 1 (file).
+
+        This ensures load balancing: the next download starts at the next
+        authenticated method, not the same one.
+        """
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt", "cookies/backup1.txt"],
+            files_exist={
+                "cookies\\main.txt", "cookies/main.txt",
+                "cookies\\backup1.txt", "cookies/backup1.txt",
+            },
+        )
+        # Chain: browser:firefox (0), file:main.txt (1), file:backup1.txt (2), no-cookies (3)
+        assert fb._current_index == 0
+        assert fb.current_method.label == "browser:firefox"
+
+        fb.mark_success()
+
+        # _last_success_index should point to next authenticated method (index 1)
+        assert fb._last_success_index == 1
+        assert fb._chain[fb._last_success_index].label == "file:main.txt"
+
+    def test_mark_success_rotation_wraps_around(self):
+        """Success on last authenticated method wraps to first authenticated method."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        # Chain: browser:firefox (0), file:main.txt (1), no-cookies (2)
+        fb.advance()  # -> file:main.txt (index 1)
+        fb.mark_success()
+
+        # Next authenticated after file:main.txt: skip no-cookies (index 2), wrap to browser (index 0)
+        assert fb._last_success_index == 0
+        assert fb._chain[fb._last_success_index].label == "browser:firefox"
+
+    # ---- AC3: reset_for_next_download() after exhaustion ----
+
+    def test_reset_after_exhaustion_uses_last_success_index(self):
+        """After exhaustion, reset goes to last_success_index, not always 0."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt", "cookies/backup1.txt"],
+            files_exist={
+                "cookies\\main.txt", "cookies/main.txt",
+                "cookies\\backup1.txt", "cookies/backup1.txt",
+            },
+        )
+        # Chain: browser:firefox (0), file:main.txt (1), file:backup1.txt (2), no-cookies (3)
+
+        # Advance to file:main.txt and succeed there
+        fb.advance()
+        fb.mark_success()
+        # _last_success_index should be file:backup1.txt (next authenticated after file:main.txt)
+        success_idx = fb._last_success_index
+        expected_label = fb._chain[success_idx].label
+
+        # Exhaust remaining
+        fb.advance()
+        fb.advance()
+        fb.advance()
+        assert fb.is_exhausted
+
+        # Reset should go to last_success_index, not 0
+        fb.reset_for_next_download()
+        assert fb.is_exhausted is False
+        assert fb.current_method.label == expected_label
+        assert fb._current_index == success_idx
+
+    def test_reset_without_success_goes_to_zero_after_exhaustion(self):
+        """After exhaustion with no prior success, reset goes to index 0."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        # Exhaust without ever calling mark_success
+        fb.advance()
+        fb.advance()
+        fb.advance()
+        assert fb.is_exhausted
+
+        fb.reset_for_next_download()
+        assert fb._current_index == 0
+        assert fb.current_method.label == "browser:firefox"
+
+    # ---- AC4: get_status() after partial traversal ----
+
+    def test_get_status_remaining_methods_after_partial_traversal(self):
+        """get_status() reports accurate remaining_methods and current_method mid-chain."""
+        fb = _build_fallback(
+            browser="firefox",
+            cookie_files=["cookies/main.txt", "cookies/backup1.txt"],
+            files_exist={
+                "cookies\\main.txt", "cookies/main.txt",
+                "cookies\\backup1.txt", "cookies/backup1.txt",
+            },
+        )
+        # Chain has 4 methods: browser, main, backup1, no-cookies
+
+        # Before any advance
+        assert fb.methods_remaining == 4
+        status = fb.get_status()
+        assert status["current_method"] == "browser:firefox"
+        assert status["current_index"] == 0
+
+        # After 1 advance
+        fb.advance()
+        assert fb.methods_remaining == 3
+        status = fb.get_status()
+        assert status["current_method"] == "file:main.txt"
+        assert status["current_index"] == 1
+
+        # After 2 advances
+        fb.advance()
+        assert fb.methods_remaining == 2
+        status = fb.get_status()
+        assert status["current_method"] == "file:backup1.txt"
+        assert status["current_index"] == 2
+
+        # After 3 advances (at no-cookies)
+        fb.advance()
+        assert fb.methods_remaining == 1
+        status = fb.get_status()
+        assert status["current_method"] == "no-cookies"
+        assert status["current_index"] == 3
+
+        # Exhausted
+        fb.advance()
+        assert fb.methods_remaining == 0
+        status = fb.get_status()
+        assert status["current_method"] == "exhausted"
+        assert status["is_exhausted"] is True
+
+    # ---- AC5: Duplicate cookie file deduplication ----
+
+    def test_duplicate_paths_in_cookie_files_deduplicated(self):
+        """Duplicate entries within cookie_rotation.cookie_files are deduplicated."""
+        fb = _build_fallback(
+            cookie_files=["cookies/main.txt", "cookies/main.txt", "cookies/main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        file_methods = [m for m in fb._chain if m.kind == "file"]
+        assert len(file_methods) == 1, (
+            f"Expected 1 file method after dedup, got {len(file_methods)}: "
+            f"{[m.label for m in file_methods]}"
+        )
+
+    def test_duplicate_resolved_paths_deduplicated(self):
+        """Paths that resolve to the same file are deduplicated (forward vs back slash)."""
+        fb = _build_fallback(
+            cookie_files=["cookies/main.txt", "cookies\\main.txt"],
+            files_exist={"cookies\\main.txt", "cookies/main.txt"},
+        )
+        file_methods = [m for m in fb._chain if m.kind == "file"]
+        assert len(file_methods) == 1, (
+            f"Expected 1 file method after path normalization dedup, got {len(file_methods)}: "
+            f"{[m.label for m in file_methods]}"
+        )

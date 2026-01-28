@@ -36,7 +36,8 @@
             "id": "US-003",
             "title": "Add CookieMethodFallback cross-keyword exhaustion tests",
             "priority": 3,
-            "passes": false,
+            "passes": true,
+            "notes": "Added TestCrossKeywordExhaustion class with 8 tests in tests/test_cookie_method_fallback.py: AC1 - full 5-method chain advance with type verification at each step; AC2 - mark_success rotation from method 0 to method 1 plus wrap-around test; AC3 - reset after exhaustion uses last_success_index (not 0) plus no-success fallback; AC4 - get_status remaining_methods accuracy at each step through full traversal; AC5 - duplicate path deduplication within cookie_files and across slash styles. All 52 tests pass (44 existing + 8 new).",
             "acceptanceCriteria": [
                 "Test advance() through full chain (browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies) — verify each transition returns correct CookieMethod type",
                 "Test mark_success() proactive rotation: after success on method 0, verify current advances to method 1 for load balancing",
