@@ -1,4 +1,16 @@
 
+## Iteration US-003 (Sprint 18) - Add calculate_transcript_quality word count and tier scoring tests
+- Story was pre-implemented in tests/test_transcript_quality.py (32 tests)
+- All 6 acceptance criteria verified by existing tests:
+  - AC1: test_empty_transcript_returns_low_quality + test_none_transcript_returns_low_quality (returns 0.0, 'low', 'empty_transcript')
+  - AC2: test_long_transcript_high_word_score + test_well_structured_transcript_high_quality (tier='high' when score >= 0.8)
+  - AC3: test_medium_length_transcript (tier='medium' when 0.5 <= score < 0.8)
+  - AC4: test_gibberish_transcript_low_quality (tier='low' when score < 0.5)
+  - AC5: test_short_transcript_low_word_count + test_medium_length_transcript + test_long_transcript_high_word_score (word scoring: 50+ = 0.4, 20-50 linear, <20 linear)
+  - AC6: test_short_transcript_low_word_count explicitly checks "words:6" in reason string
+- Files: tests/test_transcript_quality.py (existing)
+- Test results: 32 tests passed in 0.44s, 0 regressions
+
 ## Iteration US-002 (Sprint 18) - Add _is_jarring_context_switch topic overlap detection tests
 - Story was mostly pre-implemented in test_temporal_coherence.py (38 tests for US-001)
 - AC1-3, AC5-6 already covered by existing TestIsJarringContextSwitch tests
