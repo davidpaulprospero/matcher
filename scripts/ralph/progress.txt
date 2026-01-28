@@ -1,4 +1,15 @@
 
+## Iteration US-006 (Sprint 15) - Add checkpoint stage data round-trip tests
+- Created tests/test_checkpoint_stage_data_roundtrip.py with 29 tests across 5 classes
+- TestSaveLoadRoundTrip (6 tests): all 14 stages save/load round-trip, metadata preservation (config_hash, voiceover_path, timestamps), single stage, nested data structures, empty/None stage data, overwrite same stage
+- TestGetStageData (6 tests): empty dict before any stage runs, empty for uncompleted stage, correct data for completed stage, empty for unknown stage name, empty for all future stages, all 14 stages empty on fresh manager
+- TestShouldSkipStage (6 tests): skips stages before last_completed (True), runs stages after (False), no checkpoint skips nothing, first stage only completed, all stages completed (OUTPUT), mid-pipeline split counts, unknown stage returns False
+- TestConfigHashMismatch (5 tests): validate() warns on hash mismatch, no warning when hashes match, no warning when no original or current hash, resume_from correct despite mismatch
+- TestVoiceoverHashComparison (6 tests): validate() warns when voiceover file changed, no warning when unchanged, no warning without voiceover_path, no warning when checkpoint has no hash, hash stored correctly via read_bytes, missing file returns empty hash
+- No source code changes needed (pure test-only story)
+- Files created: tests/test_checkpoint_stage_data_roundtrip.py
+- Test results: 29 new tests pass in 0.55s, 191 total checkpoint tests pass, 0 regressions
+
 ## Iteration US-005 (Sprint 15) - Add checkpoint corruption recovery tests
 - Created tests/test_checkpoint_corruption_recovery.py with 27 tests across 5 classes
 - TestBackupFallbackOnCorruption (4 tests): corrupted/empty/truncated primary falls back to backup, verifies loaded data matches backup state, primary file restored after fallback
