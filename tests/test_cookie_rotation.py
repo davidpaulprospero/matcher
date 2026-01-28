@@ -556,3 +556,231 @@ class TestCookieRotatorIntegration:
 
         assert '--cookies' in cmd
         assert cmd[1].endswith('cookie_0.txt')
+
+
+class TestMidSessionFileValidation:
+    """Tests for cookie file validation during active session (US-007).
+
+    Verifies that CookieRotator gracefully handles cookie files that
+    are deleted, emptied, or otherwise invalidated after initialization.
+    """
+
+    @pytest.fixture
+    def three_cookies(self, tmp_path):
+        """Create 3 valid cookie files."""
+        cookies = []
+        for i in range(3):
+            f = tmp_path / f"cookie_{i}.txt"
+            f.write_text(f"# Netscape HTTP Cookie File\ncookie_data_{i}\n")
+            cookies.append(str(f))
+        return cookies
+
+    @pytest.fixture
+    def rotator_with_cookies(self, three_cookies):
+        """Create a CookieRotator with 3 valid cookies."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=three_cookies
+        )
+        return CookieRotator(config)
+
+    def test_rotate_when_current_cookie_deleted_mid_session(self, rotator_with_cookies, three_cookies):
+        """AC1: rotate() when current cookie file is deleted mid-session
+        — verify graceful fallback to next available cookie (no FileNotFoundError crash)."""
+        rotator = rotator_with_cookies
+
+        # Verify initial state
+        assert rotator.get_current_cookie() == three_cookies[0]
+
+        # Delete the current cookie file mid-session
+        os.remove(three_cookies[0])
+
+        # rotate() should NOT raise FileNotFoundError
+        new_cookie = rotator.rotate()
+
+        # Should have fallen back to one of the remaining cookies
+        assert new_cookie is not None
+        assert new_cookie in [three_cookies[1], three_cookies[2]]
+
+        # Deleted file should be removed from active list
+        assert three_cookies[0] not in rotator._cookie_files
+
+    def test_rotate_when_cookie_becomes_empty_mid_session(self, rotator_with_cookies, three_cookies):
+        """AC2: rotate() when cookie file becomes empty (0 bytes) mid-session
+        — verify it skips to next cookie instead of using empty file."""
+        rotator = rotator_with_cookies
+
+        assert rotator.get_current_cookie() == three_cookies[0]
+
+        # Truncate the current cookie to 0 bytes
+        with open(three_cookies[0], 'w') as f:
+            f.truncate(0)
+
+        # rotate() should skip the empty file
+        new_cookie = rotator.rotate()
+
+        # Should get a non-empty cookie
+        assert new_cookie is not None
+        assert new_cookie in [three_cookies[1], three_cookies[2]]
+
+        # Empty file should be tracked as invalid
+        assert three_cookies[0] in rotator._invalid_cookies
+        assert "empty" in rotator._invalid_cookies[three_cookies[0]]
+
+    def test_rotate_with_all_cookies_deleted(self, rotator_with_cookies, three_cookies, caplog):
+        """AC3: rotate() with all cookie files deleted — verify returns None
+        and logs warning (not exception)."""
+        import logging
+
+        rotator = rotator_with_cookies
+
+        # Delete ALL cookie files
+        for cookie_path in three_cookies:
+            os.remove(cookie_path)
+
+        with caplog.at_level(logging.WARNING):
+            # Should NOT raise any exception
+            result = rotator.rotate()
+
+        # Should return None (no cookies available)
+        assert result is None
+
+        # Should have logged a warning
+        assert any("deleted" in record.message.lower() or "no cookies" in record.message.lower()
+                    or "empty" in record.message.lower() or "invalidated" in record.message.lower()
+                    for record in caplog.records)
+
+        # All cookies should be marked invalid
+        assert len(rotator._cookie_files) == 0
+
+    def test_round_robin_single_cookie_no_infinite_loop(self, tmp_path):
+        """AC4: round-robin rotation with single cookie file — verify it returns
+        that file on every call (no infinite loop in _select_round_robin)."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        single = tmp_path / "only_cookie.txt"
+        single.write_text("# Cookie data\n")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(single)],
+            max_rotations_per_session=0  # Unlimited
+        )
+        rotator = CookieRotator(config)
+
+        # get_current_cookie should always return this file
+        for _ in range(5):
+            assert rotator.get_current_cookie() == str(single)
+
+        # rotate() marks current as failed and tries to find next
+        # With only one cookie, round-robin has no other to go to
+        result = rotator.rotate()
+        # Result is None because the only cookie is now in cooldown
+        assert result is None
+
+        # But get_current_cookie still returns it (it's the only one,
+        # even in cooldown the code returns it with a warning)
+        current = rotator.get_current_cookie()
+        assert current == str(single)
+
+    def test_get_current_cookie_after_deletion_returns_none_or_fallback(
+        self, rotator_with_cookies, three_cookies
+    ):
+        """AC5: get_current_cookie() after cookie deletion — verify returns None
+        rather than path to deleted file."""
+        rotator = rotator_with_cookies
+
+        # Initial state: current is cookie_0
+        assert rotator.get_current_cookie() == three_cookies[0]
+
+        # Delete the current cookie
+        os.remove(three_cookies[0])
+
+        # get_current_cookie() should NOT return the deleted file's path
+        result = rotator.get_current_cookie()
+        assert result != three_cookies[0]
+
+        # It should return a valid fallback (cookie_1 or cookie_2)
+        assert result in [three_cookies[1], three_cookies[2]]
+
+    def test_get_current_cookie_all_deleted_returns_none(self, rotator_with_cookies, three_cookies):
+        """get_current_cookie() with all files deleted returns None."""
+        rotator = rotator_with_cookies
+
+        # Delete all cookie files
+        for cookie_path in three_cookies:
+            os.remove(cookie_path)
+
+        result = rotator.get_current_cookie()
+        assert result is None
+
+    def test_deleted_cookie_tracked_in_invalid_cookies(self, rotator_with_cookies, three_cookies):
+        """Deleted cookie is moved to _invalid_cookies with 'deleted' reason."""
+        rotator = rotator_with_cookies
+
+        os.remove(three_cookies[0])
+
+        # Trigger mid-session validation
+        rotator.get_current_cookie()
+
+        assert three_cookies[0] in rotator._invalid_cookies
+        assert rotator._invalid_cookies[three_cookies[0]] == "deleted"
+
+    def test_is_cookie_file_valid_checks_existence_and_size(self, tmp_path):
+        """_is_cookie_file_valid returns False for missing and empty files."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        valid = tmp_path / "valid.txt"
+        valid.write_text("# Cookie\n")
+
+        empty = tmp_path / "empty.txt"
+        empty.write_text("")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid)]
+        )
+        rotator = CookieRotator(config)
+
+        # Valid file
+        assert rotator._is_cookie_file_valid(str(valid)) is True
+
+        # Empty file
+        assert rotator._is_cookie_file_valid(str(empty)) is False
+
+        # Missing file
+        assert rotator._is_cookie_file_valid(str(tmp_path / "missing.txt")) is False
+
+    def test_rotate_skips_deleted_in_middle_of_chain(self, rotator_with_cookies, three_cookies):
+        """rotate() skips a deleted cookie in the middle and goes to the next valid one."""
+        rotator = rotator_with_cookies
+
+        # Delete cookie_1 (the next one in round-robin after cookie_0)
+        os.remove(three_cookies[1])
+
+        # Rotate from cookie_0 — should skip deleted cookie_1 and go to cookie_2
+        new_cookie = rotator.rotate()
+        assert new_cookie == three_cookies[2]
+
+        # cookie_1 should be removed from active list
+        assert three_cookies[1] not in rotator._cookie_files
+
+    def test_status_reflects_mid_session_invalidation(self, rotator_with_cookies, three_cookies):
+        """get_status() reflects mid-session invalidation correctly."""
+        rotator = rotator_with_cookies
+
+        # Initial: 3 valid, 0 invalid
+        status_before = rotator.get_status()
+        assert status_before["valid_cookies"] == 3
+        assert status_before["total_cookies"] == 3
+
+        # Delete one cookie and trigger validation
+        os.remove(three_cookies[0])
+        rotator.get_current_cookie()
+
+        status_after = rotator.get_status()
+        assert status_after["valid_cookies"] == 2
+        assert status_after["total_cookies"] == 3  # total includes invalid
+        assert three_cookies[0] in status_after["invalid_cookies"]
