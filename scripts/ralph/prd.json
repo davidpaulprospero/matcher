@@ -22,8 +22,8 @@
             "id": "US-002",
             "title": "Add _is_jarring_context_switch topic overlap detection tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented in test_temporal_coherence.py. Added test_empty_adjacent_topics_not_jarring for AC4. All 6 AC verified: AC1-test_no_overlap_is_jarring, AC2-test_overlap_is_not_jarring, AC3-test_empty_topics_not_jarring, AC4-test_empty_adjacent_topics_not_jarring, AC5-test_keywords_and_topics_combined, AC6-test_case_insensitive_comparison.",
             "acceptanceCriteria": [
                 "Test _is_jarring_context_switch() returns True when both segments have topics/keywords but zero overlap — verify segments with disjoint sets trigger jarring detection",
                 "Test _is_jarring_context_switch() returns False when segments share at least one common topic or keyword (case-insensitive)",
