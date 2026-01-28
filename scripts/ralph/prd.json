@@ -106,8 +106,8 @@
             "id": "US-008",
             "title": "Add multi-factor scoring edge case tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 42 new tests in tests/test_multi_factor_scoring_us008.py: TestWeightsSumToZeroUS008 (4), TestNaNPropagationPreventionUS008 (8), TestExtremeConfidenceClampingUS008 (13), TestDiversityIdenticalKeywordsUS008 (6), TestSingleElementPoolUS008 (5), TestAdditionalEdgeCasesUS008 (6). Fixed 2 bugs in scoring.py: ZeroDivisionError on zero weights, NaN/Inf handling. All 5 AC verified. 189 total tests pass across scoring modules.",
             "acceptanceCriteria": [
                 "Test scoring handles all weights summing to zero gracefully",
                 "Test scoring prevents NaN propagation through multi-strategy computation",
