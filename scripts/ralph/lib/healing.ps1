@@ -624,3 +624,66 @@ function Invoke-HealingSession {
         FixSummary   = "Failed to fix after $MaxAttempts attempts"
     }
 }
+
+function Invoke-PostIterationHealing {
+    <#
+    .SYNOPSIS
+        Post-iteration orchestrator. Runs tiered health check, triggers healing if needed.
+        Called from Resolve-ClaudeResult after every story iteration.
+    .PARAMETER StoryId
+        Current story being worked on
+    .PARAMETER FocusArea
+        Current focus area
+    .PARAMETER ChangedFiles
+        Files changed in this iteration (from git diff)
+    .PARAMETER IterationSuccess
+        Whether the iteration itself succeeded (controls runAfterSuccess/runAfterFailure)
+    .RETURNS
+        Hashtable: HealingNeeded, HealingSuccess, AttemptsUsed, FailedTier
+    #>
+    param(
+        [string]$StoryId = "",
+        [string]$FocusArea = "",
+        [string[]]$ChangedFiles = @(),
+        [bool]$IterationSuccess = $true
+    )
+
+    $result = @{
+        HealingNeeded  = $false
+        HealingSuccess = $false
+        AttemptsUsed   = 0
+        FailedTier     = 0
+    }
+
+    # Check config
+    $config = Get-RalphConfig
+    $shConfig = $config.selfHealing
+
+    if ($shConfig -and $shConfig.enabled -eq $false) { return $result }
+    if ($IterationSuccess -and $shConfig -and $shConfig.runAfterSuccess -eq $false) { return $result }
+    if (-not $IterationSuccess -and $shConfig -and $shConfig.runAfterFailure -eq $false) { return $result }
+
+    $maxAttempts = if ($shConfig -and $shConfig.maxAttempts) { $shConfig.maxAttempts } else { 3 }
+    $fullRunCadence = if ($shConfig -and $shConfig.fullRunCadence) { $shConfig.fullRunCadence } else { 3 }
+
+    # Run tiered health check
+    $health = Invoke-TieredHealthCheck -ChangedFiles $ChangedFiles -FullRunCadence $fullRunCadence
+
+    if (-not $health.HasErrors) {
+        return $result
+    }
+
+    # Errors detected -- begin healing
+    $result.HealingNeeded = $true
+    $result.FailedTier = $health.FailedTier
+
+    Suspend-SprintForHealing -HealthResult $health -StoryId $StoryId -FocusArea $FocusArea
+
+    $healResult = Invoke-HealingSession -MaxAttempts $maxAttempts
+    $result.AttemptsUsed = $healResult.AttemptsUsed
+    $result.HealingSuccess = $healResult.Success
+
+    Resume-SprintFromHealing -Success $healResult.Success -AttemptCount $healResult.AttemptsUsed -FixSummary $healResult.FixSummary
+
+    return $result
+}
