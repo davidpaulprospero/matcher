@@ -7377,3 +7377,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_keyword_extractor/README.md
 - Files modified: tests/test_keyword_extractor/test_core.py (mock_config fixture)
 - Test results: 180 tests passed in 1.05s
+
+
+## Iteration US-004 (Sprint 24) - Add README.md documentation for test_llm_client subdirectory
+- Created tests/test_llm_client/README.md (comprehensive documentation for LLM client tests)
+- AC1: Created README.md with LLM client testing patterns, 6 test files documented
+- AC2: Documented conftest.py fixtures: temp_dir, mock_api_key, sample_json_response, sample_json_array_response, cleanup_env_vars (autouse)
+- AC3: Added API rate limiting and retry logic section with exponential backoff examples, timeout detection, max retries exhaustion
+- AC4: Documented validator/parsing patterns from test_parsers.py (JSON extraction, repair, array parsing, key extraction) - note: no test_validator.py exists in this subdir
+- AC5: Added provider selection section covering Gemini/Anthropic/Ollama, aliases (google/claude), case insensitivity, API key requirements, env var loading
+- AC6: Added streaming vs non-streaming section explaining non-streaming design choice (caching, JSON parsing, retry logic compatibility)
+- Additional: LLM mocking at 3 levels, cache testing patterns (TTL, corruption, key generation), test markers documentation
+- Files created: tests/test_llm_client/README.md (571 lines)
+- Test results: 101 tests in test_llm_client/ pass
+- Commit: 12d053b
