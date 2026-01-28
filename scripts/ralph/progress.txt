@@ -7362,3 +7362,18 @@ def test_eta_accuracy_batch_50_videos(self):
 - Additional: Testing Boundary Refinement section (embeddings, transition phrases, cosine similarity), Testing Coverage Resolution section (overlaps, gaps, tiny chapter merging)
 - Files created: tests/test_chapter_detection/README.md
 - All acceptance criteria met
+
+
+## Iteration US-003 (Sprint 24) - Add README.md documentation for test_keyword_extractor subdirectory
+- Created tests/test_keyword_extractor/README.md (comprehensive documentation for keyword extraction tests)
+- AC1: Documented keyword extraction testing patterns with directory overview table
+- AC2: Documented all 9 test files: test_core.py, test_entity_extractor.py, test_models.py, test_prioritizer.py, test_prompts.py, test_segment_processor.py, test_topic_detector.py, test_utils.py, test_validator.py
+- AC3: Added 3-level LLM mocking examples: client creation (patch create_client), _call_llm method (Mock side_effect), generate response (mock_response.text)
+- AC4: Documented test_prioritizer.py with priority scoring factors table (entity 0.9, topic 0.8, general 0.5, boosts +0.1/+0.05)
+- AC5: Added validator rules section with ABSTRACT_PATTERNS and VISUAL_INDICATORS constants, parametrized test examples
+- AC6: Added segment_processor section covering batch processing, fallback behavior, edge cases (short text, stopwords, special characters)
+- Additional: mock_config fixture documentation, SRT file testing with tempfile, prompt template testing, common edge cases section
+- Bug fix: Fixed test_core.py mock_config fixture to include max_keyword_words = 8 for visual validation tests
+- Files created: tests/test_keyword_extractor/README.md
+- Files modified: tests/test_keyword_extractor/test_core.py (mock_config fixture)
+- Test results: 180 tests passed in 1.05s
