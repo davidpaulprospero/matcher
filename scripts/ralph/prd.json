@@ -8,7 +8,8 @@
             "id": "US-001",
             "title": "Add AudioFirstPipeline escalation integration tests",
             "priority": 1,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_audio_first_escalation.py with 12 tests across 5 classes: TestAudioDownloadEscalationArgs (Tier 1 --impersonate verification), TestAudioDownloadCookieRotation (Tier 3 cookie rotation), TestSegmentDownloadEscalationArgs (Tier 2 --extractor-args in segments), TestFallbackEscalationIndependence (tier preservation across fallback), TestRetryLoopEscalation (403 -> Tier 2 progression via retry loop). All 12 tests pass.",
             "acceptanceCriteria": [
                 "Test download_audio_for_keyword() passes escalation_manager.get_escalation_args(keyword) to yt-dlp command — verify args include --impersonate when Tier 1",
                 "Test download_audio_for_keyword() handles EscalationResult.rotate_cookies=True by calling cookie_rotator.rotate() before retry",

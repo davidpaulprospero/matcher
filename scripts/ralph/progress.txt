@@ -5973,3 +5973,15 @@ def test_eta_accuracy_batch_50_videos(self):
 ## Focus Area: testing - 2026-01-28 10:42:36
 - Status: In Progress...
 
+## Iteration 1 - [US-001] Add AudioFirstPipeline escalation integration tests
+- Created tests/test_audio_first_escalation.py with 12 tests across 5 test classes
+- AC1 (Tier 1 impersonate args): TestAudioDownloadEscalationArgs — verifies --impersonate in yt-dlp command, no --extractor-args
+- AC2 (cookie rotation on Tier 3): TestAudioDownloadCookieRotation — verifies cookie_rotator.rotate() called at Tier 3, not at Tier 1
+- AC3 (segment download escalation): TestSegmentDownloadEscalationArgs — verifies --extractor-args at Tier 2, record_success on completion
+- AC4 (fallback independence): TestFallbackEscalationIndependence — verifies tier state preserved across fallback, 403 failure recorded, keyword isolation
+- AC5 (retry loop escalation): TestRetryLoopEscalation — verifies 2 consecutive 403s escalate Tier 1->2, per-keyword independence, sticky tier after success
+- Key design: cookie rotation enables retry loop for same video_id, accumulating 403 failures for escalation threshold
+- Files created: tests/test_audio_first_escalation.py
+- Test results: 12 passed, 0 failures
+- All 5 acceptance criteria met
+
