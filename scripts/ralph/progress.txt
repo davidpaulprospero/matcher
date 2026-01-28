@@ -6734,3 +6734,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - Additional tests: context passing, various error type routing, no watcher/fallback_chain scenarios
 - Test results: 46 tests in test_orchestrator.py passed in 5.69s (9 new + 37 existing)
 - Commit: b8fef3b
+
+## Iteration US-006 (Sprint 20) - Add API Healer private method edge case tests
+- Story was pre-implemented in tests/test_api_healer.py and tests/test_api_healer_us008.py (58 tests total)
+- All 5 acceptance criteria verified by existing tests:
+  - AC1: test_rate_limit_respects_max_backoff + test_backoff_capped_at_max (_handle_rate_limit caps at MAX_BACKOFF)
+  - AC2: test_auth_error_detects_gemini_and_tries_switch + test_auth_error_detects_anthropic_and_tries_switch + TestHandleAuthErrorProviderSwitchUS008 (4 tests) (_handle_auth_error identifies Gemini, Anthropic, Ollama)
+  - AC3: test_quota_exceeded_fails_when_no_alternatives (_handle_quota_exceeded returns ABORT with no alternatives)
+  - AC4: test_timeout_respects_max_timeout + test_timeout_capped_at_300 + test_repeated_timeout_caps_at_300 (_handle_timeout doubles up to 300s)
+  - AC5: test_provider_switch_exclude_specific_provider (_try_provider_switch respects exclude parameter)
+- Files: tests/test_api_healer.py (30 tests), tests/test_api_healer_us008.py (28 tests)
+- Test results: 58 tests passed in 205.81s, 0 regressions
