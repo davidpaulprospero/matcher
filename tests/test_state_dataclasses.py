@@ -5,6 +5,7 @@ Tests all pipeline state dataclasses with correct field names.
 """
 
 import pytest
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import Mock
 import sys
@@ -894,6 +895,309 @@ class TestNumpyImportFallback:
             text="No numpy needed"
         )
         assert segment.text == "No numpy needed"
+
+
+# ============================================================================
+# US-009: Serialization Edge Case Tests
+# ============================================================================
+
+
+class TestVoiceoverSegmentPostInit:
+    """Test VoiceoverSegment.__post_init__() auto-duration edge cases."""
+
+    def test_auto_calculates_duration_from_start_end(self):
+        """Verify duration=15.0 when start=10.0, end=25.0 and duration not explicitly set."""
+        segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test")
+        assert segment.duration == 15.0
+
+    def test_explicit_duration_not_overwritten(self):
+        """Verify explicit duration=5.0 is NOT overwritten by auto-calculation."""
+        segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test", duration=5.0)
+        # __post_init__ only sets duration when it's 0.0, so 5.0 is preserved
+        assert segment.duration == 5.0
+
+    def test_zero_duration_triggers_auto_calc(self):
+        """Verify duration=0.0 (default) triggers auto-calculation."""
+        segment = VoiceoverSegment(index=0, start=0.0, end=10.0, text="Test", duration=0.0)
+        assert segment.duration == 10.0
+
+    def test_negative_range_produces_negative_duration(self):
+        """Verify start > end produces negative duration (no clamping)."""
+        segment = VoiceoverSegment(index=0, start=25.0, end=10.0, text="Reversed")
+        assert segment.duration == -15.0
+
+    def test_same_start_end_zero_duration_auto_calc(self):
+        """Verify start==end produces 0.0 duration (edge case: 0.0 - 0.0 = 0.0)."""
+        # This is a quirk: end-start = 0.0, but __post_init__ checks if duration == 0.0
+        # So it recalculates to 0.0 anyway
+        segment = VoiceoverSegment(index=0, start=5.0, end=5.0, text="Zero length")
+        assert segment.duration == 0.0
+
+
+class TestTranscriptSegmentToDictBroll:
+    """Test TranscriptSegment.to_dict() includes all fields including optional broll fields."""
+
+    def test_to_dict_includes_is_broll_true(self):
+        """Verify is_broll=True appears in dict output."""
+        segment = TranscriptSegment(
+            index=0, start_time=0.0, end_time=5.0, text="B-roll scene",
+            is_broll=True, description_source="vision"
+        )
+        result = segment.to_dict()
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+    def test_to_dict_includes_is_broll_false_default(self):
+        """Verify is_broll=False (default) appears in dict output."""
+        segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
+        result = segment.to_dict()
+        assert 'is_broll' in result
+        assert result['is_broll'] is False
+
+    def test_to_dict_includes_description_source_empty_default(self):
+        """Verify description_source='' (default) appears in dict output."""
+        segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
+        result = segment.to_dict()
+        assert 'description_source' in result
+        assert result['description_source'] == ""
+
+    def test_to_dict_all_description_sources(self):
+        """Verify description_source works for all known values."""
+        for source in ["vision", "llm", "keyword", ""]:
+            segment = TranscriptSegment(
+                index=0, start_time=0.0, end_time=5.0, text="Test",
+                description_source=source
+            )
+            result = segment.to_dict()
+            assert result['description_source'] == source
+
+    def test_to_dict_round_trip_all_fields(self):
+        """Verify to_dict() output can recreate the segment."""
+        original = TranscriptSegment(
+            index=3, start_time=10.5, end_time=25.3, text="Round trip test",
+            source_file="video.mp4", is_broll=True, description_source="vision"
+        )
+        d = original.to_dict()
+        recreated = TranscriptSegment(**d)
+        assert recreated.index == original.index
+        assert recreated.start_time == original.start_time
+        assert recreated.end_time == original.end_time
+        assert recreated.text == original.text
+        assert recreated.source_file == original.source_file
+        assert recreated.is_broll == original.is_broll
+        assert recreated.description_source == original.description_source
+
+
+class TestDownloadedVideoEmptyStrings:
+    """Test DownloadedVideo with empty string fields."""
+
+    def test_all_optional_fields_empty(self):
+        """Verify no errors when url='', title='', channel='' (all optional fields empty)."""
+        video = DownloadedVideo(
+            file="",
+            url="",
+            title="",
+            channel="",
+            upload_date="",
+            duration_tier="",
+            keyword="",
+            source="",
+            video_hash=""
+        )
+        assert video.file == ""
+        assert video.url == ""
+        assert video.title == ""
+        assert video.channel == ""
+        assert video.upload_date == ""
+        assert video.duration_tier == ""
+        assert video.keyword == ""
+        assert video.source == ""
+        assert video.video_hash == ""
+
+    def test_only_file_provided(self):
+        """Verify DownloadedVideo works with only file field."""
+        video = DownloadedVideo(file="video.mp4")
+        assert video.file == "video.mp4"
+        assert video.url == ""
+        assert video.title == ""
+        assert video.channel == ""
+
+    def test_asdict_with_empty_strings(self):
+        """Verify asdict serialization with empty strings doesn't drop fields."""
+        video = DownloadedVideo(file="", url="", title="", channel="")
+        d = asdict(video)
+        assert 'file' in d
+        assert 'url' in d
+        assert 'title' in d
+        assert 'channel' in d
+        assert d['file'] == ""
+        assert d['url'] == ""
+
+    def test_numeric_defaults_with_empty_strings(self):
+        """Verify numeric defaults are correct when string fields are empty."""
+        video = DownloadedVideo(file="")
+        assert video.duration == 0.0
+        assert video.face_score == 0.5
+        assert video.license == "Unknown"
+
+
+class TestPipelineStateDefaults:
+    """Test PipelineState initialization with defaults — no shared mutable defaults."""
+
+    def test_list_fields_default_to_empty(self):
+        """Verify all list fields default to empty lists."""
+        state = PipelineState()
+        assert state.voiceover_segments == []
+        assert state.keywords == []
+        assert state.downloaded_videos == []
+        assert state.downloaded_audio == []
+        assert state.failed_keywords == []
+        assert state.global_cache_videos == []
+        assert state.remix_files == []
+        assert state.embeddings == []
+        assert state.text_metadata == []
+        assert state.matches == []
+        assert state.output_files == []
+        assert state.otio_files == []
+        assert state.broll_downloads == []
+        assert state.broll_matches == []
+        assert state.location_chapters == []
+        assert state.pending_streams == []
+
+    def test_dict_fields_default_to_empty(self):
+        """Verify all dict fields default to empty dicts."""
+        state = PipelineState()
+        assert state.entity_images == {}
+        assert state.entity_videos == {}
+        assert state.caption_results == {}
+        assert state.transcripts == {}
+        assert state.scene_data == {}
+        assert state.alternatives == {}
+        assert state.stage_timings == {}
+
+    def test_no_shared_mutable_defaults_lists(self):
+        """Verify no shared mutable defaults across instances for lists."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        # Mutate state1's lists
+        state1.keywords.append("keyword1")
+        state1.downloaded_videos.append(DownloadedVideo(file="video.mp4"))
+        state1.matches.append(
+            Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.9)
+        )
+
+        # state2 should be unaffected
+        assert state2.keywords == []
+        assert state2.downloaded_videos == []
+        assert state2.matches == []
+
+    def test_no_shared_mutable_defaults_dicts(self):
+        """Verify no shared mutable defaults across instances for dicts."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        # Mutate state1's dicts
+        state1.entity_images["test"] = EntityImage(entity="test", file="test.jpg")
+        state1.stage_timings["DOWNLOAD"] = 42.0
+        state1.alternatives[0] = [
+            Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.8)
+        ]
+
+        # state2 should be unaffected
+        assert state2.entity_images == {}
+        assert state2.stage_timings == {}
+        assert state2.alternatives == {}
+
+    def test_string_defaults(self):
+        """Verify string fields have correct defaults."""
+        state = PipelineState()
+        assert state.voiceover_path == ""
+        assert state.topic_context == ""
+        assert state.face_preference == "neutral"
+
+    def test_none_defaults(self):
+        """Verify embedding_index defaults to None."""
+        state = PipelineState()
+        assert state.embedding_index is None
+
+
+class TestMatchBoundaryConfidence:
+    """Test Match dataclass with confidence=0.0 and confidence=1.0 boundary values."""
+
+    def test_confidence_zero(self):
+        """Verify confidence=0.0 is stored correctly."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        assert match.confidence == 0.0
+        assert match.confidence is not None
+
+    def test_confidence_one(self):
+        """Verify confidence=1.0 is stored correctly."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=1.0
+        )
+        assert match.confidence == 1.0
+
+    def test_confidence_zero_not_falsy_issue(self):
+        """Verify confidence=0.0 is not treated as falsy in boolean context."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        # Ensure 0.0 is distinguished from None/missing
+        assert match.confidence == 0.0
+        assert isinstance(match.confidence, float)
+        assert match.confidence >= 0.0  # Valid range check
+
+    def test_confidence_one_not_rounded(self):
+        """Verify confidence=1.0 exact value preserved."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=1.0
+        )
+        assert match.confidence == 1.0
+        assert not (match.confidence > 1.0)
+
+    def test_asdict_preserves_boundary_confidence(self):
+        """Verify to_dict() preserves exact float values for 0.0 and 1.0."""
+        match_zero = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        match_one = Match(
+            segment_index=1, video_file="v.mp4",
+            video_start=5.0, video_end=10.0, confidence=1.0
+        )
+
+        d_zero = asdict(match_zero)
+        d_one = asdict(match_one)
+
+        assert d_zero['confidence'] == 0.0
+        assert d_one['confidence'] == 1.0
+        assert isinstance(d_zero['confidence'], float)
+        assert isinstance(d_one['confidence'], float)
+
+    def test_near_boundary_float_precision(self):
+        """Verify near-boundary floats are preserved without comparison issues."""
+        match = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.9999999999
+        )
+        assert match.confidence == 0.9999999999
+        assert match.confidence < 1.0
+
+    def test_confidence_small_epsilon(self):
+        """Verify very small confidence near 0 is preserved."""
+        match = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=1e-10
+        )
+        assert match.confidence == 1e-10
+        assert match.confidence > 0.0
 
 
 if __name__ == "__main__":
