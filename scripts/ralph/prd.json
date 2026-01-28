@@ -92,8 +92,8 @@
             "id": "US-007",
             "title": "Add test markers and collection optimization",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented markers in pytest.ini, added tests/README.md documentation",
             "acceptanceCriteria": [
                 "Add pytest marker 'fast' to all tests that complete in <100ms",
                 "Add pytest marker 'requires_api' to tests that need external API keys",
