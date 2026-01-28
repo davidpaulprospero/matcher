@@ -183,3 +183,293 @@ def temp_dir(tmp_path):
     """Fixture for temporary directory."""
     # Simple temp directory that doesn't require external resources
     return tmp_path
+
+
+# =============================================================================
+# FIXTURE FACTORIES (US-006, Sprint 19)
+# =============================================================================
+#
+# Factory fixtures create customizable test objects. Use them like:
+#
+#     def test_something(srt_segment_factory):
+#         segment = srt_segment_factory(text="Custom text", confidence=0.9)
+#
+# Factories accept keyword arguments to override defaults, making it easy
+# to create objects with specific properties for focused test cases.
+# =============================================================================
+
+
+@pytest.fixture
+def srt_segment_factory():
+    """
+    Factory fixture for creating SRTSegment instances.
+
+    Usage:
+        segment = srt_segment_factory()  # Defaults
+        segment = srt_segment_factory(text="Custom", is_broll=True)
+        segment = srt_segment_factory(index=5, start_time=10.0, end_time=15.0)
+
+    Default values:
+        - index: 0
+        - start_time: 0.0
+        - end_time: 5.0
+        - text: "Sample voiceover text"
+        - source_file: ""
+        - keywords: []
+        - entities: []
+        - topic_id: None
+        - topics: []
+        - is_broll: False
+
+    Returns:
+        Callable that creates SRTSegment instances
+    """
+    from src.utils import SRTSegment
+
+    def _make(
+        index: int = 0,
+        start_time: float = 0.0,
+        end_time: float = 5.0,
+        text: str = "Sample voiceover text",
+        source_file: str = "",
+        keywords: list = None,
+        entities: list = None,
+        topic_id: int = None,
+        topics: list = None,
+        is_broll: bool = False,
+    ):
+        return SRTSegment(
+            index=index,
+            start_time=start_time,
+            end_time=end_time,
+            text=text,
+            source_file=source_file,
+            keywords=keywords or [],
+            entities=entities or [],
+            topic_id=topic_id,
+            topics=topics or [],
+            is_broll=is_broll,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def config_factory(tmp_path):
+    """
+    Factory fixture for creating mock Config objects with nested section overrides.
+
+    Usage:
+        config = config_factory()  # Defaults
+        config = config_factory(
+            matching={'min_confidence': 0.8},
+            download={'root_dir': '/custom/path'}
+        )
+
+    Sections:
+        - cache: cache_dir path
+        - output: output_dir path
+        - transcription: model, language
+        - matching: min_confidence, location_matching.enabled
+        - keyword: max_keywords, min_keyword_length
+        - download: root_dir
+
+    Returns:
+        Callable that creates mock Config objects
+    """
+    from unittest.mock import Mock
+
+    def _make(
+        cache: dict = None,
+        output: dict = None,
+        transcription: dict = None,
+        matching: dict = None,
+        keyword: dict = None,
+        download: dict = None,
+    ):
+        # Default values
+        cache_defaults = {'cache_dir': str(tmp_path / "cache")}
+        output_defaults = {'output_dir': str(tmp_path / "output")}
+        trans_defaults = {'model': 'base', 'language': 'en'}
+        match_defaults = {
+            'min_confidence': 0.5,
+            'location_matching': Mock(enabled=False, geonames_username="")
+        }
+        kw_defaults = {'max_keywords': 10, 'min_keyword_length': 3}
+        dl_defaults = {'root_dir': str(tmp_path / "downloads")}
+
+        # Merge with user overrides
+        cache_cfg = {**cache_defaults, **(cache or {})}
+        output_cfg = {**output_defaults, **(output or {})}
+        trans_cfg = {**trans_defaults, **(transcription or {})}
+        match_cfg = {**match_defaults, **(matching or {})}
+        kw_cfg = {**kw_defaults, **(keyword or {})}
+        dl_cfg = {**dl_defaults, **(download or {})}
+
+        mock_config = Mock()
+        mock_config.cache = Mock(**cache_cfg)
+        mock_config.output = Mock(**output_cfg)
+        mock_config.transcription = Mock(**trans_cfg)
+        mock_config.matching = Mock(**match_cfg)
+        mock_config.keyword = Mock(**kw_cfg)
+        mock_config.download = Mock(**dl_cfg)
+
+        # Create directories
+        Path(cache_cfg['cache_dir']).mkdir(exist_ok=True)
+        Path(output_cfg['output_dir']).mkdir(exist_ok=True)
+        Path(dl_cfg['root_dir']).mkdir(exist_ok=True)
+
+        return mock_config
+
+    return _make
+
+
+@pytest.fixture
+def pipeline_state_factory():
+    """
+    Factory fixture for creating PipelineState with pre-populated stage data.
+
+    Usage:
+        state = pipeline_state_factory()  # Empty state
+        state = pipeline_state_factory(
+            voiceover_segments=[seg1, seg2],
+            keywords=['travel', 'nature'],
+            matches=[match1, match2]
+        )
+
+    Commonly used fields:
+        - voiceover_path: str
+        - voiceover_segments: List[VoiceoverSegment]
+        - keywords: List[str]
+        - downloaded_videos: List[DownloadedVideo]
+        - matches: List[Match]
+        - text_metadata: List[Dict]
+
+    Returns:
+        Callable that creates PipelineState instances
+    """
+    from src.state import PipelineState
+
+    def _make(**kwargs):
+        return PipelineState(**kwargs)
+
+    return _make
+
+
+@pytest.fixture
+def match_result_factory(srt_segment_factory):
+    """
+    Factory fixture for creating MatchResult with configurable confidence and alternatives.
+
+    Usage:
+        result = match_result_factory()  # Simple result with 0.85 confidence
+        result = match_result_factory(confidence=0.92, video_source_file="custom.mp4")
+        result = match_result_factory(has_gap=True, gap_reason="No suitable match")
+        result = match_result_factory(num_alternatives=3)  # Add 3 alternatives
+
+    Parameters:
+        - confidence: float (default 0.85) - primary match confidence
+        - video_source_file: str (default "video.mp4") - source file for video segment
+        - vo_text: str (default "Voiceover text") - voiceover text
+        - video_text: str (default "Video transcript") - video transcript
+        - has_gap: bool (default False) - whether this is a gap
+        - gap_reason: str (default "") - reason for gap
+        - num_alternatives: int (default 0) - number of alternatives to generate
+
+    Returns:
+        Callable that creates MatchResult instances
+    """
+    from src.utils import MatchResult, Match, AlternativeMatch
+
+    def _make(
+        confidence: float = 0.85,
+        video_source_file: str = "video.mp4",
+        vo_text: str = "Voiceover text",
+        video_text: str = "Video transcript",
+        has_gap: bool = False,
+        gap_reason: str = "",
+        num_alternatives: int = 0,
+        matched_keywords: list = None,
+    ):
+        vo_segment = srt_segment_factory(text=vo_text)
+        video_segment = srt_segment_factory(
+            text=video_text,
+            source_file=video_source_file
+        )
+
+        primary = Match(
+            voiceover_segment=vo_segment,
+            video_segment=video_segment,
+            video_scene=None,
+            confidence=confidence,
+            reasoning="Test match"
+        )
+
+        alternatives = []
+        for i in range(num_alternatives):
+            alt_video_segment = srt_segment_factory(
+                text=f"Alternative {i+1}",
+                source_file=f"alt_video_{i+1}.mp4"
+            )
+            alt = AlternativeMatch(
+                video_segment=alt_video_segment,
+                video_scene=None,
+                confidence=confidence - 0.05 * (i + 1),
+                reasoning=f"Alternative match {i+1}"
+            )
+            alternatives.append(alt)
+
+        return MatchResult(
+            primary_match=primary,
+            alternatives=alternatives,
+            has_gap=has_gap,
+            gap_reason=gap_reason,
+            matched_keywords=matched_keywords or [],
+        )
+
+    return _make
+
+
+@pytest.fixture
+def match_factory(srt_segment_factory):
+    """
+    Factory fixture for creating individual Match objects.
+
+    Usage:
+        match = match_factory()  # Defaults
+        match = match_factory(confidence=0.95, video_source_file="best.mp4")
+
+    Parameters:
+        - vo_text: str (default "Voiceover text")
+        - video_text: str (default "Video transcript")
+        - video_source_file: str (default "video.mp4")
+        - confidence: float (default 0.85)
+        - reasoning: str (default "Test match")
+
+    Returns:
+        Callable that creates Match instances
+    """
+    from src.utils import Match
+
+    def _make(
+        vo_text: str = "Voiceover text",
+        video_text: str = "Video transcript",
+        video_source_file: str = "video.mp4",
+        confidence: float = 0.85,
+        reasoning: str = "Test match",
+    ):
+        vo_segment = srt_segment_factory(text=vo_text)
+        video_segment = srt_segment_factory(
+            text=video_text,
+            source_file=video_source_file
+        )
+
+        return Match(
+            voiceover_segment=vo_segment,
+            video_segment=video_segment,
+            video_scene=None,
+            confidence=confidence,
+            reasoning=reasoning,
+        )
+
+    return _make

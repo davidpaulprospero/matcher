@@ -78,8 +78,8 @@
             "id": "US-006",
             "title": "Add test fixture factory patterns for common mock objects",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "5 factories in conftest.py + 14 tests verifying them",
             "acceptanceCriteria": [
                 "Create conftest fixture factory for SRTSegment with customizable attributes",
                 "Create conftest fixture factory for mock Config with nested section overrides",
