@@ -6589,3 +6589,12 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC4: test_select_healers_returns_empty_for_unknown_error — verifies empty list return
 - AC5: test_select_healers_logs_decision — verifies logging runs
 - Test results: 9 tests in TestHealerCoordination passed in 5.52s
+
+## Iteration US-009 (Sprint 19) - Add ResilientRunner concurrent stage healing tests
+- Pre-implemented: 25+ tests in test_runner.py covering run_stage, _try_heal, max attempts
+- AC1: test_run_stage_max_attempts + test_heal_called_at_most_n_times — verifies MAX_HEAL_ATTEMPTS
+- AC2: test_try_heal_action_skip + test_try_heal_action_abort — verifies action handling
+- AC3: Added test_healing_time_accumulated + test_heal_history_records_timing
+- AC4: test_try_heal_action_abort verifies False return propagates to failure
+- AC5: test_reset_healers + test_reset_healers_missing_method — verifies healer reset
+- Test results: 2 new tests + 25 pre-existing tests passed

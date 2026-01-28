@@ -120,8 +120,8 @@
             "id": "US-009",
             "title": "Add ResilientRunner concurrent stage healing tests",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented + 2 new time accumulation tests",
             "acceptanceCriteria": [
                 "Test ResilientRunner.run_stage() retries up to MAX_HEAL_ATTEMPTS on recoverable errors",
                 "Test ResilientRunner.run_stage() respects HealerResult.action to determine next step",
