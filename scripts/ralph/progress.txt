@@ -6468,3 +6468,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files already exist: tests/test_transcript_quality.py (TestAdjustEmbeddingWeight class lines 366-430)
 - Test results: 6 passed in 0.44s, 43 total in test_transcript_quality.py
 
+## Iteration US-007 (Sprint 18) - Add compute_semantic_coherence embedding similarity adjustment tests
+- Pre-implemented: tests/test_semantic_coherence.py contains 34 comprehensive tests
+- AC1: TestSmoothTopicFlow tests (test_identical_embeddings_get_boost, test_high_similarity_embeddings_get_boost) — verifies +0.03 adjustment when sim > 0.6
+- AC2: TestAbruptTopicFlow tests (test_orthogonal_embeddings_get_penalty, test_low_similarity_embeddings_get_penalty) — verifies -0.05 adjustment when sim < 0.3
+- AC3: TestNeutralTopicFlow tests (test_medium_similarity_no_adjustment, test_similarity_at_lower/upper_boundary) — verifies 0.0 for 0.3 <= sim <= 0.6
+- AC4: TestDisabledMode::test_disabled_returns_zero_adjustment — verifies (0.0, 'semantic_coherence_disabled')
+- AC5: TestMissingEmbeddings tests (test_none_current_embedding, test_none_previous_embedding, test_both_embeddings_none) — verifies (0.0, 'missing_embedding')
+- AC6: TestReasonStrings tests (test_smooth/abrupt/neutral_reason_includes_similarity) — verifies 'sim=X.XXX' format in reason
+- Test results: 34 passed in 0.45s
+

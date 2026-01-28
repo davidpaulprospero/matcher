@@ -95,8 +95,8 @@
             "id": "US-007",
             "title": "Add compute_semantic_coherence embedding similarity adjustment tests",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: tests/test_semantic_coherence.py has 34 tests covering all 6 AC. AC1: TestSmoothTopicFlow tests +0.03 for sim>0.6. AC2: TestAbruptTopicFlow tests -0.05 for sim<0.3. AC3: TestNeutralTopicFlow tests 0.0 for 0.3<=sim<=0.6. AC4: TestDisabledMode::test_disabled_returns_zero_adjustment verifies (0.0, 'semantic_coherence_disabled'). AC5: TestMissingEmbeddings covers None current/previous/both. AC6: TestReasonStrings verifies 'sim=X.XXX' format. All 34 tests pass in 0.45s.",
             "acceptanceCriteria": [
                 "Test compute_semantic_coherence() returns +0.03 adjustment when cosine similarity > 0.6 (smooth topic flow)",
                 "Test compute_semantic_coherence() returns -0.05 adjustment when cosine similarity < 0.3 (abrupt topic flow)",
