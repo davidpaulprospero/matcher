@@ -615,6 +615,8 @@ pytest tests/test_llm_client/ tests/test_keyword_extractor/ -v
 
 **Test markers:** `fast` (unit), `integration`, `stress`, `simulation`, `requires_api`, `requires_network`
 
+**Mutation testing:** [docs/mutation-testing-healing.md](docs/mutation-testing-healing.md) — 10 mutations, 100% kill rate across `healing.ps1` edge-case tests.
+
 ### Pre-commit Checklist
 
 - [ ] `python -m py_compile main.py`
