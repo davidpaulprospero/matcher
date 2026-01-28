@@ -6881,3 +6881,44 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 80 speed tracker tests passed in 0.55s
 - Files modified: tests/test_speed_tracker.py (+318 lines)
 - Commit: 96ff4e6
+
+## Iteration US-009 (Sprint 21) - Add rate limit window estimation edge case tests
+- Added 24 new tests in 4 test classes to tests/test_rate_limit_window_estimation.py
+- Test classes:
+  1. TestSparseTimingDataUS009 (AC2): 5 tests for sparse timing data handling
+     - test_single_large_gap_in_sequence: outlier gap doesn't affect median
+     - test_very_small_gaps_near_zero: gaps close to 0s handled correctly
+     - test_large_time_gaps_between_pairs: inter-pair gaps don't affect result
+     - test_alternating_small_and_large_gaps: median robust to alternation
+     - test_identical_timestamps_failure_recovery: 0s gap handled
+  2. TestSessionCountPersistenceUS009 (AC3): 5 tests for session tracking
+     - test_events_log_survives_to_dict_from_dict_roundtrip: events log NOT persisted (expected)
+     - test_session_count_increments_on_checkpoint_restore: count increments
+     - test_session_count_tracks_multiple_resumptions: accumulates across restores
+     - test_window_estimation_requires_fresh_data_each_session: per-session data
+     - test_keyword_rate_limit_events_persist_across_sessions: counts DO persist
+  3. TestPerKeywordBreakdownAggregationUS009 (AC4): 6 tests for export JSON
+     - test_export_by_keyword_matches_recorded_events: exact match
+     - test_export_by_keyword_empty_when_no_keywords: empty dict when none
+     - test_export_by_keyword_accumulates_across_multiple_records: accumulation
+     - test_export_by_keyword_with_special_characters: unicode/spaces/dashes
+     - test_export_estimated_window_matches_keyword_data: alignment
+     - test_export_by_keyword_total_matches_rate_limit_events: sum check
+  4. TestOverlappingFailureWindowsUS009 (AC5): 8 tests for overlapping windows
+     - test_multiple_failures_before_recovery: F,F,F,R pattern
+     - test_interleaved_failures_and_recoveries: F,R,F,F,R,F,R pattern
+     - test_recovery_without_prior_failure: orphan R ignored
+     - test_consecutive_recoveries: F,R,R,R,F,R pattern
+     - test_all_failures_no_recoveries: returns None
+     - test_all_recoveries_no_failures: returns None
+     - test_overlapping_windows_different_keywords: keyword isolation
+     - test_trailing_failure_without_recovery: trailing F ignored
+- Acceptance criteria mapping:
+  - AC1 (<3 pairs returns None): Pre-existing TestEstimatedRateLimitWindowNone (5 tests)
+  - AC2 (sparse timing): TestSparseTimingDataUS009 (5 tests)
+  - AC3 (session persistence): TestSessionCountPersistenceUS009 (5 tests)
+  - AC4 (per-keyword export): TestPerKeywordBreakdownAggregationUS009 (6 tests)
+  - AC5 (overlapping windows): TestOverlappingFailureWindowsUS009 (8 tests)
+- Test results: 45 window estimation tests pass in 0.47s, 276 total rate limit tests pass in 2.21s
+- Files modified: tests/test_rate_limit_window_estimation.py (+429 lines)
+- Commit: 363bf00
