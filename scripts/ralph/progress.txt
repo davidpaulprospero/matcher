@@ -1,4 +1,15 @@
 
+## Iteration US-002 (Sprint 17) - Add CaptionStage core execution and skip logic tests
+- Pre-implemented: 27 tests across 6 dedicated US-002 test classes already exist in tests/test_stage_caption.py
+- TestCaptionStageCanSkipUS002 (4 tests): AC1 — can_skip True/False from checkpoint, run() skip when disabled, run() proceeds when enabled
+- TestGetVideoIdsUS002 (4 tests): AC2 — extracts from audio, videos, both sources, deduplicates same video
+- TestExtractVideoIdUS002 (5 tests): AC3 — URL path, youtu.be, file path, direct attribute, None when not found
+- TestLoadExistingCaptionsUS002 (4 tests): AC4 — loads cached, empty on no checkpoint, empty on no key, handles exception
+- TestValidateLanguageConfigUS002 (5 tests): AC5 — valid codes pass, 'xyz' fails, '' fails, numeric fails, three-letter fails
+- TestPopulateTextMetadataUS002 (5 tests): AC6 — required fields, multiple videos, skips unavailable/error, extends existing, timing_penalty
+- All 6 acceptance criteria verified met
+- Test results: 27 passed in 0.67s, 0 regressions
+
 ## Iteration US-003 (Sprint 16) - Add DownloadHealer and ResilientRunner error path tests
 - Added 13 new tests across 3 files covering all 6 acceptance criteria
 - DownloadHealer can_handle tests added to test_healers.py (4 new):
