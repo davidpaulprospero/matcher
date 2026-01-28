@@ -1,154 +1,154 @@
 {
-    "branchName": "ralph/sprint-16",
-    "sprintNumber": 16,
+    "branchName": "ralph/sprint-17",
+    "sprintNumber": 17,
     "focusArea": "testing",
-    "projectContext": "Sprint 16 continues the testing focus by targeting the deepest coverage gaps: self-healing agent healers (5 of 7 healer classes have zero tests), compilation module (695 lines at ~10% coverage), matching scoring private helpers (7 functions with 0 tests), LLM client error/retry paths (exceptions.py, retry.py, parsers.py untested), CLI utility modules (environment.py, logging_setup.py, cache_commands.py with 0 tests), and media_sources Unsplash image client (0% coverage). These modules handle error recovery, pipeline resilience, and user-facing CLI functionality with critical untested code paths.",
+    "projectContext": "Sprint 17 targets the deepest remaining coverage gaps discovered during sprint 16 analysis: 3 pipeline stages with ZERO dedicated tests (BrollDownloadStage 454 LOC, CaptionStage 1008 LOC, BrollMatchStage 793 LOC), downloader transcoding module (331 LOC, 0 tests), CLI interactive/logging modules (256 LOC combined, 0 tests), APIHealer private error handlers (5 methods tested only indirectly), LLM client private helpers (_normalize_confidence, _is_permanent_error with no unit tests), and config merge duration tier helpers (2 functions with no direct tests). These gaps represent ~2,800 LOC of untested pipeline-critical code handling B-roll workflows, video transcoding, caption fetching, error recovery, and user-facing CLI functionality.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add CheckpointHealer and DiskHealer agent tests",
+            "title": "Add BrollDownloadStage pipeline stage tests",
             "priority": 1,
             "passes": true,
-            "notes": "Pre-implemented: 64 tests passing (31 CheckpointHealer + 33 DiskHealer) across test_checkpoint_healer.py and test_disk_healer.py. All 6 acceptance criteria met.",
+            "notes": "Pre-implemented: 134 tests across 3 files (test_broll_stages.py, test_broll_stages_extended.py, test_broll_stages_full_coverage.py) cover all 6 acceptance criteria. All pass in 15.5s.",
             "acceptanceCriteria": [
-                "Test CheckpointHealer.can_heal() returns True for checkpoint-related errors (JSONDecodeError, missing checkpoint, corrupted stages dict) and False for unrelated errors (network, API)",
-                "Test CheckpointHealer.heal() restores from backup when primary checkpoint is corrupted — verify .fixed() returned and backup data loaded correctly",
-                "Test CheckpointHealer.heal() returns .failed() when both primary and backup are corrupted — verify no exception raised, failure reason logged",
-                "Test DiskHealer.can_heal() returns True for disk space errors (OSError errno 28, 'No space left') and permission errors (errno 13) — False for network errors",
-                "Test DiskHealer.heal() attempts cleanup of temp files and stale cache when disk full — verify cleanup actions logged via self.log_attempt()",
-                "Test both healers use self.log_attempt() and self.log_success() per Rule 20 — verify log methods called with descriptive messages during heal attempts"
+                "Test BrollDownloadStage.can_skip() returns True when broll disabled in config, when skip_download is set, or when no keywords extracted — returns False when broll enabled with keywords present",
+                "Test BrollDownloadStage._generate_search_terms() combines keywords and entities into valid search term pairs — verify produces expected combinations from mock keyword list and entity list",
+                "Test BrollDownloadStage._download_youtube_broll() respects per-term and max-total video limits — mock downloader, verify download count does not exceed configured broll.max_videos_per_term and broll.max_total_videos",
+                "Test BrollDownloadStage._download_stock_broll() activates as fallback when YouTube downloads are under target count — mock stock API client, verify called only when youtube_count < max_total",
+                "Test BrollDownloadStage.run() creates DownloadedVideo entries with source='broll' and correct metadata — verify video objects in state.broll_downloads have expected fields after mock run",
+                "Test BrollDownloadStage.restore() correctly rebuilds broll_downloads list from checkpoint data — mock checkpoint with broll_paths and broll_count, verify state restored accurately"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add PathHealer and OTIOHealer agent tests",
+            "title": "Add CaptionStage core execution and skip logic tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Added 19 new tests: PathHealer (9 tests — can_handle API/network false, FileNotFoundError, Windows path shortening, missing drive .failed()), OTIOHealer (6 tests — can_handle import/serialization/track corruption true, download errors false, logging verification, reconstruction result), ResilientRunner integration (4 tests — healer selection, healer iteration, max attempts). Total 101 tests passing across both files.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test PathHealer.can_heal() returns True for path-related errors (FileNotFoundError, path too long, invalid characters) — False for API or network errors",
-                "Test PathHealer.heal() fixes Windows path length issues by shortening paths — verify .fixed() returned with corrected path in result",
-                "Test PathHealer.heal() returns .failed() for paths on missing drives (e.g., Z:\\nonexistent) — verify descriptive failure reason",
-                "Test OTIOHealer.can_heal() returns True for OTIO-related errors (import errors, serialization failures, track corruption) — False for download errors",
-                "Test OTIOHealer.heal() attempts OTIO timeline reconstruction when export fails — verify reconstruction steps logged and .fixed() or .failed() returned appropriately",
-                "Test both healers integrate with ResilientRunner — mock runner with healer list, trigger matching error, verify correct healer selected and heal() called"
+                "Test CaptionStage.can_skip() returns True when caption_first.enabled is False — returns False when caption_first is enabled and video IDs exist in state",
+                "Test CaptionStage._get_video_ids() extracts video IDs from both downloaded_videos and downloaded_audio lists — verify deduplication when same video appears in both",
+                "Test CaptionStage._extract_video_id() handles DownloadedVideo with URL path (extracts 11-char ID), file path (extracts from filename), and already-extracted ID string",
+                "Test CaptionStage._load_existing_captions() loads cached captions from checkpoint stages dict — verify returns dict mapping video_id to caption data, handles missing checkpoint gracefully",
+                "Test CaptionStage._validate_language_config() passes for valid ISO 639-1 codes ('en', 'es', 'fr') and fails with clear error for invalid codes ('xyz', '', numbers)",
+                "Test CaptionStage._populate_text_metadata() converts caption results into state.text_metadata entries — verify each entry has video_id, segments list, quality_score, and word_count fields"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add DownloadHealer and ResilientRunner error path tests",
+            "title": "Add CaptionStage batch processing and metrics tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Added 13 new tests across 3 files: test_healers.py (4 new — can_handle 403/extraction True, config/OTIO errors False), test_download_healer_retry.py (3 new — max tier failure, failure logging, escalation manager max tier), test_runner.py (6 new — RuntimeError crash safety, KeyboardInterrupt propagation, 3-healer iteration, no-match returns False, max attempts limit, orchestrator max_attempts). Total 470 agent tests passing, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test DownloadHealer.can_heal() returns True for download errors (403 Forbidden, rate limited, yt-dlp extraction failed) — False for config or OTIO errors",
-                "Test DownloadHealer.heal() escalates bypass tier on repeated 403 errors — verify escalation_manager.escalate() called and .fixed() returned for retry",
-                "Test DownloadHealer.heal() returns .failed() when max escalation tier reached and all retries exhausted — verify failure logged with tier info",
-                "Test ResilientRunner catches exceptions from stage.execute() — mock stage that raises RuntimeError, verify runner does not crash and returns failure result",
-                "Test ResilientRunner iterates through healer list to find matching healer — mock 3 healers where only the 2nd can_heal() returns True, verify only 2nd healer's heal() called",
-                "Test ResilientRunner respects max_attempts_per_stage from healing config — verify heal() called at most N times before stage marked as permanently failed"
+                "Test CaptionStage.run() skips videos that already have cached captions — mock 5 video IDs with 2 cached, verify only 3 new fetches attempted",
+                "Test CaptionStage._save_intermediate_checkpoint() writes caption data to checkpoint without overwriting other stage data — verify checkpoint file updated with caption_metrics key",
+                "Test CaptionStage._calculate_quality_distribution() correctly bins caption results into quality tiers (high/medium/low/failed) — verify counts match expected distribution for mock results",
+                "Test CaptionStage.run() handles empty video ID list gracefully — verify stage completes without error, returns empty metrics, logs appropriate message",
+                "Test CaptionStage.restore() rebuilds state from checkpoint including text_metadata, caption_metrics, and quality distribution — verify all fields populated correctly from mock checkpoint"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add compilation GapAnalyzer and TopicBroadener tests",
+            "title": "Add BrollMatchStage silent scene detection and scoring tests",
             "priority": 4,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test GapAnalyzer.analyze() identifies gaps in timeline — mock timeline with 3 clips and 2 gaps, verify gap positions and durations returned correctly",
-                "Test GapAnalyzer.analyze() returns empty list for gapless timeline — verify no false positives when clips are contiguous",
-                "Test GapAnalyzer.analyze() handles clips with zero or negative duration — verify no crash, invalid clips skipped or flagged",
-                "Test TopicBroadener.broaden() generates expanded keywords from LLM response — mock LLM client returning JSON, verify parsed keywords list matches expected expansion",
-                "Test TopicBroadener.broaden() handles LLM failure gracefully — mock LLM raising exception, verify fallback keywords generated from original topic without crash",
-                "Test TopicBroadener.broaden() handles malformed JSON from LLM — mock LLM returning invalid JSON string, verify fallback parsing extracts usable keywords"
+                "Test BrollMatchStage._detect_silent_scenes() identifies scenes with word_count below broll.min_words_threshold (default 10) — mock text_metadata with 5 entries (3 silent, 2 speech), verify 3 BrollScene objects returned",
+                "Test BrollMatchStage._detect_silent_scenes() also detects face-detection B-roll scenes (is_broll=True from SceneDetection) — verify both detection methods contribute to result list",
+                "Test BrollMatchStage._validate_and_normalize_weights() normalizes embedding(0.4)+keyword(0.35)+entity(0.25) weights to sum=1.0 — verify logs warning when original weights differ by >0.01 from sum=1.0",
+                "Test BrollMatchStage._calculate_embedding_score() returns cosine similarity between scene and voiceover embeddings — verify returns float in [0.0, 1.0] range, handles zero-vector input without crash",
+                "Test BrollMatchStage._calculate_keyword_score() returns overlap ratio between scene keywords and voiceover keywords — verify 1.0 for identical sets, 0.0 for disjoint sets, handles empty keyword lists",
+                "Test BrollMatchStage._calculate_entity_score() scores entity overlap between scene and voiceover — verify partial entity matches (substring) contribute to score, empty entities return 0.0"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add compilation TimelineBuilder and DownloadStage tests",
+            "title": "Add BrollMatchStage enrichment and matching pipeline tests",
             "priority": 5,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test CompilationTimelineBuilder.create_timeline() builds OTIO timeline from clip list — verify timeline has correct number of tracks and clips with proper durations",
-                "Test CompilationTimelineBuilder.create_timeline() handles empty clip list — verify returns valid but empty timeline without crash",
-                "Test CompilationTimelineBuilder._create_clip() formats file paths correctly — verify file:/// URL prefix and forward slashes on Windows paths",
-                "Test CompilationTimelineBuilder._create_clip() handles Unicode filenames — verify no encoding errors for non-ASCII characters in clip paths",
-                "Test compilation DownloadStage.run() calls ffprobe for duration detection — mock subprocess, verify ffprobe command constructed correctly with input file path",
-                "Test compilation DownloadStage.run() handles subprocess timeout — mock subprocess.TimeoutExpired, verify stage returns graceful failure instead of crash"
+                "Test BrollMatchStage._should_use_vision() returns False in audio-first mode and True in standard mode when Vision API key is configured — verify config checks are correct",
+                "Test BrollMatchStage._enrich_with_keywords() extracts keywords from filename, removing prefixes (pexels_, pixabay_) and video IDs — verify 'pexels_sunset_ocean_4k.mp4' yields ['sunset', 'ocean', '4k']",
+                "Test BrollMatchStage._extract_keywords_from_filename() handles various filename patterns including underscores, hyphens, video IDs, and resolution suffixes — verify correct keyword extraction for 5+ patterns",
+                "Test BrollMatchStage._match_scenes_to_voiceover() selects top match per voiceover segment using multi-strategy scoring — mock 3 scenes and 2 voiceover segments, verify each segment gets best-scoring scene",
+                "Test BrollMatchStage.can_skip() returns True when broll disabled or no voiceover segments exist — returns False when broll enabled and voiceover segments present",
+                "Test BrollMatchStage.restore() rebuilds broll_matches from checkpoint including silent_count, match_count, and match data — verify state correctly populated from mock checkpoint"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add matching scoring private helper function tests",
+            "title": "Add TranscodingManager codec detection and format string tests",
             "priority": 6,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test _is_jarring_context_switch() returns True for unrelated segment pairs — verify segments with completely different topics/keywords flagged as jarring context switch",
-                "Test _is_jarring_context_switch() returns False for related segments and handles None/empty topics — verify no crash on None values, empty strings treated as non-jarring",
-                "Test _extract_entity_texts() extracts text from entity dicts — verify handles mixed entity formats (dict with 'text' key, plain strings), returns empty list for None input",
-                "Test _looks_like_entity() identifies capitalized multi-word phrases — verify True for 'New York', 'Barack Obama', False for 'the quick', 'is a', handles empty/whitespace strings",
-                "Test _calculate_language_consistency() scores transcript coherence — verify high score for well-formed English text, low score for gibberish/repetitive text, handles empty string",
-                "Test _calculate_sentence_coherence() scores punctuation patterns — verify high score for properly punctuated text, low for text without punctuation, handles non-ASCII punctuation"
+                "Test TranscodingManager.get_video_codec() calls ffprobe with correct arguments and parses JSON output — mock subprocess returning codec_name='h264' and container='mp4', verify returned tuple",
+                "Test TranscodingManager.needs_transcoding() returns False for compatible codec+container pairs (h264+mp4, hevc+mov, prores+mov) — returns True for incompatible codecs (vp9, av1, vp8)",
+                "Test TranscodingManager.needs_transcoding() skips audio-only files (mp3, m4a, wav, ogg extensions) — verify returns False without calling ffprobe",
+                "Test TranscodingManager.build_format_string() includes h264 codec preference when davinci_mode enabled — verify format selector prioritizes h264 over vp9/av1",
+                "Test TranscodingManager.build_filter_string() combines duration, views, and title blacklist filters into valid yt-dlp filter expression — verify correct filter syntax for sample config values",
+                "Test TranscodingManager._detect_hw_accel() detects GPU type from subprocess output — mock nvidia-smi success for NVIDIA, verify returns 'nvidia'; mock failure, verify returns None or fallback"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add LLM client exception hierarchy and retry logic tests",
+            "title": "Add TranscodingManager FFmpeg command building tests",
             "priority": 7,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test LLM exception classes inherit correctly — verify LLMRateLimitError, LLMAuthError, LLMTimeoutError all subclass base LLMError, each carries provider name and original error",
-                "Test retry logic applies exponential backoff — mock time.sleep, trigger retryable error 3 times, verify sleep durations follow backoff formula (delay * backoff^attempt)",
-                "Test retry logic distinguishes retryable vs non-retryable errors — verify LLMRateLimitError triggers retry, LLMAuthError does NOT trigger retry (fails immediately)",
-                "Test retry logic respects max_retries config — set max_retries=2, trigger 3 retryable errors, verify only 2 retries attempted then exception raised",
-                "Test LLM response parser handles malformed JSON — feed parser truncated JSON, JSON with trailing commas, empty string — verify graceful fallback or clear error message for each"
+                "Test TranscodingManager.get_ffmpeg_transcode_cmd() builds command with hardware-accelerated encoder for NVIDIA GPU — verify h264_nvenc encoder, -hwaccel cuda flags in command list",
+                "Test get_ffmpeg_transcode_cmd() builds command with h264_amf encoder for AMD GPU — verify correct encoder and decode flags",
+                "Test get_ffmpeg_transcode_cmd() falls back to libx264 software encoder when no GPU detected — verify no -hwaccel flags, uses libx264 with crf quality setting",
+                "Test get_ffmpeg_transcode_cmd() outputs to .mov container for ProRes codec and .mxf for DNxHD codec — verify output extension matches codec requirement",
+                "Test get_ffmpeg_transcode_cmd() includes -y overwrite flag and correct input/output paths — verify command structure is valid for subprocess execution"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add CLI environment and logging setup tests",
+            "title": "Add APIHealer private error handler isolated tests",
             "priority": 8,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test strip_extended_path_prefix() removes Windows \\\\?\\ prefix — verify '\\\\?\\C:\\path' becomes 'C:\\path', plain paths unchanged, empty string returns empty",
-                "Test load_environment() loads .env file variables — mock dotenv.load_dotenv, verify called with correct path, handles missing .env file gracefully (no crash)",
-                "Test setup_logging() configures console handler with correct format — verify logger has StreamHandler after setup, log level matches config setting",
-                "Test setup_logging() handles file logging permission errors — mock open() raising PermissionError for log file, verify falls back to console-only without crash",
-                "Test CLI cache_commands display_cache_stats() formats output for empty cache — verify no division by zero when hit_count=0 and miss_count=0, displays '0 items' gracefully"
+                "Test APIHealer._handle_rate_limit() sleeps for backoff_time and returns RETRY action — mock time.sleep, verify called with initial backoff (2s), then doubled on second call (4s), capped at MAX_BACKOFF",
+                "Test APIHealer._handle_auth_error() identifies provider from error message and attempts _try_provider_switch() — mock error with 'gemini' provider, verify switch attempted to anthropic/ollama",
+                "Test APIHealer._handle_quota_exceeded() attempts provider switch and returns failed() when no alternatives available — verify failed result includes descriptive quota message",
+                "Test APIHealer._handle_timeout() increases config timeout value up to 300s maximum — mock config with timeout=60, verify updated to 120 after first call, capped at 300 after repeated calls",
+                "Test APIHealer._handle_connection_error() sleeps INITIAL_BACKOFF and returns RETRY — verify sleep called, retry action returned with connection retry message",
+                "Test APIHealer._is_provider_available() returns True when provider API key env var is set, False when missing — verify Ollama provider skips API key check and always returns True"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add media sources Unsplash image client tests",
+            "title": "Add LLM client _normalize_confidence and _is_permanent_error unit tests",
             "priority": 9,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test UnsplashImageClient.search() constructs correct API request — verify URL includes query parameters (query, per_page, orientation), Authorization header contains API key",
-                "Test UnsplashImageClient.search() parses API response into ImageResult objects — mock HTTP response with 3 results, verify each has url, width, height, source='unsplash'",
-                "Test UnsplashImageClient.search() handles rate limit response (HTTP 429) — verify returns empty list without crash, logs rate limit warning",
-                "Test UnsplashImageClient.search() handles invalid API key (HTTP 401) — verify returns empty list, logs authentication error message",
-                "Test UnsplashImageClient.search() handles network timeout — mock requests.get raising Timeout, verify returns empty list without crash"
+                "Test _normalize_confidence() converts string labels: 'high'->0.9, 'medium'->0.7, 'low'->0.5, 'very_high'->0.95, 'very_low'->0.3 — verify exact float values for each label",
+                "Test _normalize_confidence() parses numeric strings ('0.85' -> 0.85), passes through float/int values, returns None for invalid input (None, empty string, 'invalid', non-numeric string)",
+                "Test _is_permanent_error() returns True for permanent error patterns: 'model not found', 'invalid api key', 'unauthorized', 'permission denied', 'authentication failed' — case-insensitive matching",
+                "Test _is_permanent_error() returns False for transient errors: 'timeout', 'connection refused', 'rate limit exceeded', 'service unavailable', 'internal server error'",
+                "Test _normalize_confidence() handles edge cases: float values already in 0-1 range returned as-is, values >1.0 or <0.0 handled gracefully (clamped or returned as-is per implementation)"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add matching scoring error paths and visual description tests",
+            "title": "Add CLI interactive, logging_setup, and config merge helper tests",
             "priority": 10,
             "passes": false,
             "notes": "",
             "acceptanceCriteria": [
-                "Test calculate_visual_description_score() with None description — verify returns 0.0 without crash, not NaN or exception",
-                "Test calculate_visual_description_score() with None visual_keywords — verify handles None vs empty list differently, no TypeError",
-                "Test adjust_embedding_weight_for_transcript_quality() with unknown quality_tier — verify returns base_weight unchanged, no KeyError or crash",
-                "Test adjust_embedding_weight_for_transcript_quality() with boundary values — verify base_weight=0.0 returns 0.0, base_weight=1.0 applies reduction correctly",
-                "Test statistics.StatisticsError path in adaptive threshold — mock statistics.median raising StatisticsError on empty data, verify fallback value returned instead of crash",
-                "Test compute_multimodal_score() with all-None inputs — verify returns valid float (0.0 or default), no NoneType arithmetic errors"
+                "Test find_voiceover_interactive() searches voiceover/ subdirectory first, then project root — mock directory with SRT file in voiceover/, verify found without searching root",
+                "Test find_voiceover_interactive() auto-selects when only one candidate found — mock single .srt file, verify returned without user prompt",
+                "Test setup_logging() creates logger with StreamHandler at configured level — verify logger has handler after setup, log level matches input parameter",
+                "Test setup_logging() creates logs/ subdirectory and two log files (normal + verbose) — mock output directory, verify both file handlers created with correct levels (INFO, DEBUG)",
+                "Test _merge_single_tier() maps config aliases correctly: 'count'->'videos_per_keyword', 'min'->'min_seconds', 'max'->'max_seconds' — verify setattr called with canonical field names",
+                "Test _merge_duration_tiers() detects tier names (short/medium/long/longer) and applies per-tier overrides — verify each tier receives its specific override values without affecting sibling tiers"
             ]
         }
     ]
