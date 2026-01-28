@@ -1,147 +1,157 @@
 {
-    "branchName": "ralph/sprint-23",
-    "sprintNumber": 23,
+    "branchName": "ralph/sprint-24",
+    "sprintNumber": 24,
     "focusArea": "testing",
-    "projectContext": "Sprint 23 addresses remaining test infrastructure gaps after Sprints 13-22 established ~197 stories of coverage. Key targets: Research clients (1,222 LOC, 0 tests), compilation mode edge cases (667 LOC), test marker distribution (only 4.3% have explicit markers), subdirectory conftest.py files for test_agents/ and others, SABR stall detection edge cases, XML/EDL export special characters, config section validation tests. This sprint focuses on test infrastructure quality and CI/CD optimization rather than module coverage.",
+    "projectContext": "Sprint 24 continues test infrastructure improvements after Sprint 23 completed research client tests, compilation builder tests, marker audits, and subdirectory fixtures. This sprint focuses on documentation gaps (4 test subdirectories lack README files), parameterized test expansion (only 26 files use @parametrize), flaky test infrastructure, benchmark CI integration, test helper utilities, and coverage reporting improvements. Target: complete test infrastructure maturity before transitioning to other focus areas.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add Gemini research client unit tests",
+            "title": "Add README.md documentation for test_agents subdirectory",
             "priority": 1,
             "passes": true,
-            "notes": "27 tests added in tests/test_research_gemini_client.py. Note: AC criteria mention search() but actual method is research(). Tests cover: ResearchResult parsing (5), 429/quota handling (4), timeout/retry (4), malformed response (6), API key validation (5), other methods (3). All 27 tests pass in 0.49s.",
+            "notes": "Created comprehensive README.md with: healer-specific testing patterns, MockHealingContext fixture usage examples, agent_factory fixture documentation, all 16 test files listed with descriptions, healing strategy comparison table (aggressive/conservative/interactive/minimal), and mocking pipeline stages guidance.",
             "acceptanceCriteria": [
-                "Test GeminiClient.search() returns correctly parsed SearchResult objects",
-                "Test GeminiClient.search() handles API quota exceeded (429) with exponential backoff",
-                "Test GeminiClient.search() handles network timeout with configurable retry",
-                "Test GeminiClient.search() handles malformed JSON response without crash",
-                "Test GeminiClient validates API key format before making requests"
+                "Create tests/test_agents/README.md with healer-specific testing patterns",
+                "Document MockHealingContext fixture usage with examples",
+                "Document agent_factory fixture with create_healer/create_orchestrator methods",
+                "List all 16 test files with brief descriptions of what each tests",
+                "Include guidance on testing different healing strategies (aggressive, conservative, minimal)",
+                "Add section on mocking pipeline stages for isolated healer tests"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add Perplexity research client unit tests",
+            "title": "Add README.md documentation for test_chapter_detection subdirectory",
             "priority": 2,
-            "passes": true,
-            "notes": "30 tests added in tests/test_research_perplexity_client.py. Note: AC criteria mention query() but actual method is research(). Tests cover: ResearchResult parsing (5), rate limiting/429 handling (4), connection/timeout errors (5), invalid API key handling (3), API key validation (5), other methods (3), edge cases (5). All 30 tests pass in 0.49s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test PerplexityClient.query() returns correctly parsed QueryResult objects",
-                "Test PerplexityClient.query() handles rate limiting with retry-after header",
-                "Test PerplexityClient.query() handles streaming responses correctly",
-                "Test PerplexityClient.query() handles invalid API key with clear error message",
-                "Test PerplexityClient validates query length before API call"
+                "Create tests/test_chapter_detection/README.md with chapter detection testing patterns",
+                "Document conftest.py fixtures and their purpose",
+                "List all test files (chunking, coverage, detector, initial, models, refinement, validation)",
+                "Include examples of testing chapter boundary detection",
+                "Document how to test chunking strategies",
+                "Add section on testing transcript-to-chapter validation"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add Grok research client unit tests",
+            "title": "Add README.md documentation for test_keyword_extractor subdirectory",
             "priority": 3,
-            "passes": true,
-            "notes": "33 tests added in tests/test_research_grok_client.py. Note: AC criteria mention analyze() but actual method is research(). Tests cover: ResearchResult parsing (5), connection error retry (5), empty response handling (5), timeout settings (3), input validation (5), other methods (5), edge cases (5). All 33 tests pass in 0.52s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test GrokClient.analyze() returns correctly parsed AnalysisResult objects",
-                "Test GrokClient.analyze() handles connection errors with retry logic",
-                "Test GrokClient.analyze() handles empty response gracefully",
-                "Test GrokClient.analyze() respects configured timeout settings",
-                "Test GrokClient validates input parameters before making requests"
+                "Create tests/test_keyword_extractor/README.md with keyword extraction testing patterns",
+                "Document test_core.py, test_entity_extractor.py, test_models.py test purposes",
+                "Include examples of testing LLM keyword extraction mocking",
+                "Document test_prioritizer.py and scoring algorithm testing",
+                "Add guidance on testing validator rules",
+                "Include section on testing segment_processor edge cases"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add compilation mode timeline builder tests",
+            "title": "Add README.md documentation for test_llm_client subdirectory",
             "priority": 4,
-            "passes": true,
-            "notes": "12 new tests added in tests/test_compilation.py (now 64 total). TestCompilationTimelineBuilderGapCheckIntegration (5 tests): AC2 - handles tracks after gap_fill, mixed keyword tracks, total duration after gap_fill, empty tracks from failed gap_fill, keyword order preservation. TestCompilationTimelineBuilderDurationLimits (7 tests): AC3 - correct duration calculation, boundary handling, very short/long clips, frame count accuracy, per-track stats, fractional truncation. AC1/AC4/AC5 already covered by 19 existing tests in TestCompilationTimelineBuilder. All 64 tests pass in 0.44s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test CompilationTimelineBuilder creates valid OTIO structure from keyword matches",
-                "Test CompilationTimelineBuilder handles gap_check stage results correctly",
-                "Test CompilationTimelineBuilder respects duration limits from config",
-                "Test CompilationTimelineBuilder handles empty keyword matches gracefully",
-                "Test CompilationTimelineBuilder preserves segment metadata in output"
+                "Create tests/test_llm_client/README.md with LLM client testing patterns",
+                "Document conftest.py fixtures for mocking LLM responses",
+                "Include examples of testing API rate limiting and retry logic",
+                "Document validator testing patterns from test_validator.py",
+                "Add guidance on testing provider selection (Gemini, Anthropic, Ollama)",
+                "Include section on testing streaming vs non-streaming responses"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add test marker audit for CI optimization",
+            "title": "Add flaky test detection and retry infrastructure",
             "priority": 5,
-            "passes": true,
-            "notes": "Added @pytest.mark.fast to 2,156 additional unit tests across 23 files (now 2,680 total, up from 524). Added @pytest.mark.integration to 21 tests requiring external resources (now 72 total). pytest.ini already had marker definitions. Fast tests run in ~45s for 2,680 tests (~17ms/test). Updated tests/README.md with statistics. AC4 note: 45s exceeds 30s target but this is pytest collection overhead; individual tests run at 17ms each.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Add @pytest.mark.fast to all pure unit tests (no I/O, no network)",
-                "Add @pytest.mark.integration to tests requiring external resources",
-                "Create pytest.ini section for marker-based test selection (--fast flag)",
-                "Verify 'pytest -m fast' runs in under 30 seconds",
-                "Document marker guidelines in tests/README.md"
+                "Add pytest-rerunfailures to requirements-dev.txt",
+                "Configure pytest.ini with default reruns=2 for tests marked flaky",
+                "Add @pytest.mark.flaky marker definition to pytest.ini",
+                "Create tests/test_flaky_detection.py demonstrating retry pattern",
+                "Update tests/README.md with flaky test handling guidelines",
+                "Document how to identify and mark flaky tests appropriately"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add subdirectory conftest.py for test_agents",
+            "title": "Expand parameterized tests for config validation edge cases",
             "priority": 6,
-            "passes": true,
-            "notes": "Added 3 new fixtures to tests/test_agents/conftest.py: mock_healing_context (MockHealingContext dataclass with .with_error()/.with_stage() helpers), mock_orchestrator (creates real HealingOrchestrator with conservative strategy), agent_factory (AgentFactory class with create_healer/create_orchestrator/create_runner methods). Also added mock_orchestrator_factory for strategy variations. All 558 test_agents tests pass in 7.83s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Create tests/test_agents/conftest.py with healer-specific fixtures",
-                "Add mock_healing_context fixture for isolated healer tests",
-                "Add mock_orchestrator fixture for runner integration tests",
-                "Add agent_factory fixture following US-006 pattern from tests/conftest.py",
-                "Verify all test_agents/*.py tests pass with new fixtures"
+                "Add @pytest.mark.parametrize to test_config_section_validation.py for enum values",
+                "Add parametrized tests for all MatchingConfig.provider valid values",
+                "Add parametrized tests for LLMConfig.provider valid values",
+                "Add parametrized tests for boundary values (min/max thresholds)",
+                "Ensure at least 10 new parametrized test cases added",
+                "Verify all parametrized tests pass with pytest -v"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add SABR stall detection edge case tests",
+            "title": "Add test helper module for common assertion patterns",
             "priority": 7,
-            "passes": true,
-            "notes": "22 tests added in tests/test_downloader_stall_detection.py. AC1: 3 tests for timeout threshold (triggers after threshold, uses 60s default, no stall when output continues). AC2: 3 tests for timer reset (stderr resets, stdout resets via source inspection, no reset without output). AC3: 2 tests for concurrency (independent timers per process, thread safety via source inspection). AC4: 4 tests for resume-on-retry (partial files cleaned, --no-continue not in source, config supports resume, all partial patterns recognized). AC5: 4 tests for metadata vs progress (metadata/warning/progress/mixed all reset timer). Plus 6 edge case tests. All 22 tests pass in 39s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test stall detector triggers after exact timeout threshold (60s default)",
-                "Test stall detector resets timer on any subprocess output",
-                "Test stall detector handles concurrent downloads without false positives",
-                "Test resume-on-retry correctly continues from last completed fragment",
-                "Test stall detector distinguishes metadata output from download progress"
+                "Create tests/helpers/__init__.py with reusable assertion helpers",
+                "Add assert_valid_otio_timeline(timeline) helper validating OTIO structure",
+                "Add assert_valid_match_result(result, min_confidence) helper",
+                "Add assert_checkpoint_consistent(checkpoint) helper for checkpoint validation",
+                "Add assert_config_valid(config) helper for full config validation",
+                "Update tests/README.md documenting the helpers module usage"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add XML export special character handling tests",
+            "title": "Add benchmark CI workflow configuration",
             "priority": 8,
-            "passes": true,
-            "notes": "32 tests added in tests/test_otio_xml_export.py::TestXMLSpecialCharacterHandling. AC1: 3 tests for ampersand escaping in clip names. AC2: 4 tests for quote escaping (double, single, mixed). AC3: 5 tests for angle bracket escaping (<, >, pairs, HTML-like tags). AC4: 5 tests for long paths (200+, 250, nested, long filename, boundary). AC5: 11 tests for Unicode (CJK, Japanese, Korean, emoji, Arabic RTL, Hebrew RTL, Cyrillic, European accents, mixed). Edge cases: 4 tests (encoding declaration, pathurl format, unicode passthrough, combined). Note: escape_xml() is used for clip <name> elements; pathurl uses format_path_url() which preserves raw paths per DaVinci Resolve requirements. All 32 tests pass in 0.57s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test XML export escapes ampersands in file paths correctly",
-                "Test XML export escapes quotes in metadata fields correctly",
-                "Test XML export escapes angle brackets in clip names correctly",
-                "Test XML export handles Windows paths exceeding 200 characters",
-                "Test XML export handles Unicode filenames (CJK, emoji, RTL) correctly"
+                "Update tests/benchmarks/README.md with CI benchmark guidelines",
+                "Add performance baseline tracking approach documentation",
+                "Create scripts/benchmark_runner.py for CI benchmark execution",
+                "Add benchmark result comparison to baseline with 20% threshold warning",
+                "Document how to update baselines when intentional changes occur",
+                "Add --benchmark flag documentation to pytest configuration"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add config section validation tests",
+            "title": "Add test categorization script for unmarked tests",
             "priority": 9,
-            "passes": true,
-            "notes": "56 tests added in tests/test_config_section_validation.py. AC1: 6 tests for HealingConfig __post_init__ dict conversion (logging, watcher, llm_healer dicts). AC2: 7 tests for MatchingConfig strategy/enum validation (provider values, hard_filter_level, chapter detection strategy). AC3: 4 tests for MediaConfig provider validation (VisionConfig, SceneDetectionConfig, EmbeddingConfig providers). AC4: 7 tests for LLMConfig provider/API key validation (loads from env, validates required keys). AC5: 32 tests for default values across 16 config classes (LoggingConfig, CacheConfig, GlobalCacheConfig, PipelineConfig, APIKeysConfig, HealingConfig, WatcherConfig, LLMHealerConfig, MatchingConfig, VisionConfig, SceneDetectionConfig, AudioAnalysisConfig, LLMConfig, NegativeMatchingConfig, ChapterDetectionConfig, LocationMatchingConfig). All 56 tests pass in 0.54s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test InfrastructureConfig __post_init__ converts nested dicts to dataclasses",
-                "Test MatchingConfig validates strategy enum values",
-                "Test MediaConfig validates search provider list",
-                "Test LLMConfig validates provider selection with available keys",
-                "Test all config sections handle missing optional fields with defaults"
+                "Create scripts/categorize_tests.py to analyze test marker distribution",
+                "Generate report of tests by marker (fast, integration, unmarked)",
+                "Identify tests that should have markers based on I/O patterns (open, requests, subprocess)",
+                "Output CSV with test_file, test_name, suggested_marker, reason",
+                "Add --auto-suggest mode that outputs recommended marker additions",
+                "Document usage in tests/README.md CI optimization section"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add benchmark revival and fixture adoption tests",
+            "title": "Add coverage report per-module breakdown script",
             "priority": 10,
-            "passes": true,
-            "notes": "AC1-3: Archived 3 broken benchmark files to tests/benchmarks_archived/ with updated README (reference non-existent APIs like TFIDFKeywordExtractor, EmbeddingMatcher). AC4: Verified 15 test files use factory fixtures (exceeds min of 10). AC5: Added scripts/verify_fixture_adoption.py - tracks 12 fixtures, reports per-fixture/per-file usage, exits 0/1 based on minimum adoption. Commit: 540d519.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Fix or archive tests/benchmarks_broken/test_keyword_extraction_performance.py",
-                "Fix or archive tests/benchmarks_broken/test_matching_performance.py",
-                "Fix or archive tests/benchmarks_broken/test_otio_performance.py",
-                "Verify factory fixtures from US-006 are used in at least 10 test files",
-                "Add fixture adoption verification script to CI workflow"
+                "Create scripts/coverage_by_module.py to generate per-module coverage breakdown",
+                "Report coverage for critical modules: matching, agents, compilation, stages",
+                "Highlight modules below 85% target with warning",
+                "Generate JSON output for CI integration",
+                "Add --compare-baseline mode to detect coverage regressions",
+                "Document usage in tests/README.md coverage section"
             ]
         }
     ]
