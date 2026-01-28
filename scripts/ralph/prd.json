@@ -106,8 +106,8 @@
             "id": "US-008",
             "title": "Add HealingOrchestrator strategy selection tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented + 3 new tests for empty/can_handle/logging",
             "acceptanceCriteria": [
                 "Test HealingOrchestrator.select_healer() returns highest-priority matching healer",
                 "Test HealingOrchestrator.select_healer() skips healers with exhausted retry budgets",
