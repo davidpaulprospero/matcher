@@ -97,8 +97,8 @@
             "id": "US-007",
             "title": "Add TranscodingManager FFmpeg command building tests",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "32 tests across 5 dedicated US-007 test classes in test_transcoding_us007.py: TestFFmpegNvidiaGpuUS007 (6 tests, AC1), TestFFmpegAmdGpuUS007 (5 tests, AC2), TestFFmpegCpuFallbackUS007 (6 tests, AC3), TestFFmpegOutputContainerUS007 (7 tests, AC4), TestFFmpegCommandStructureUS007 (8 tests, AC5). All 119 transcoding tests pass in 1.23s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test TranscodingManager.get_ffmpeg_transcode_cmd() builds command with hardware-accelerated encoder for NVIDIA GPU — verify h264_nvenc encoder, -hwaccel cuda flags in command list",
                 "Test get_ffmpeg_transcode_cmd() builds command with h264_amf encoder for AMD GPU — verify correct encoder and decode flags",

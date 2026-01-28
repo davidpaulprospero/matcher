@@ -1,4 +1,15 @@
 
+## Iteration US-007 (Sprint 17) - Add TranscodingManager FFmpeg command building tests
+- Added 32 new tests across 5 dedicated US-007 test classes in tests/test_transcoding_us007.py
+- TestFFmpegNvidiaGpuUS007 (6 tests): AC1 — h264_nvenc encoder, -hwaccel cuda, -hwaccel_output_format cuda, preset p4 + cq + vbr, hevc_nvenc for h265, ProRes no cuda output format
+- TestFFmpegAmdGpuUS007 (5 tests): AC2 — h264_amf encoder, -quality quality flag, no -hwaccel decode flags, -c:v h264_amf, AAC audio codec
+- TestFFmpegCpuFallbackUS007 (6 tests): AC3 — libx264 encoder, -crf 18 for high quality, -preset medium, no -hwaccel flags, libx265 for h265, quality presets map (low=28, medium=23, high=18)
+- TestFFmpegOutputContainerUS007 (7 tests): AC4 — ProRes outputs .mov, DNxHD outputs .mxf, h264 preserves .mp4, prores_ks encoder with profile, PCM audio, dnxhr_sq profile, all 4 ProRes profiles map correctly
+- TestFFmpegCommandStructureUS007 (8 tests): AC5 — starts with ffmpeg, includes -y overwrite flag, -i followed by input path, output path is last element, returned output_path matches cmd, valid list of strings, -nostdin flag, -y appears before -i
+- All 5 acceptance criteria verified met
+- Files created: tests/test_transcoding_us007.py
+- Test results: 119 transcoding tests passed in 1.23s (87 existing + 32 new), 0 regressions
+
 ## Iteration US-006 (Sprint 17) - Add TranscodingManager codec detection and format string tests
 - Fixed 2 broken error-handling tests in test_transcoding.py and test_transcoding_coverage.py
   - Both tests used generic `Exception` but `_detect_hw_accel()` only catches `(FileNotFoundError, subprocess.SubprocessError, OSError)`
