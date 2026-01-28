@@ -140,8 +140,8 @@
             "id": "US-010",
             "title": "Add CLI interactive, logging_setup, and config merge helper tests",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "31 new tests across 4 dedicated US-010 test classes in 2 files: test_cli_interactive_us010.py (TestFindVoiceoverSearchOrderUS010: 7 tests AC1, TestFindVoiceoverAutoSelectUS010: 5 tests AC2) and test_config_merge_us010.py (TestMergeSingleTierAliasesUS010: 10 tests AC5, TestMergeDurationTiersPerTierUS010: 9 tests AC6). AC3+AC4 already covered by 29 tests in test_logging_setup.py (TestSetupLoggingBasic, TestSetupLoggingHandlers, TestSetupLoggingLevels). All 149 related tests pass in 3.23s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test find_voiceover_interactive() searches voiceover/ subdirectory first, then project root — mock directory with SRT file in voiceover/, verify found without searching root",
                 "Test find_voiceover_interactive() auto-selects when only one candidate found — mock single .srt file, verify returned without user prompt",
