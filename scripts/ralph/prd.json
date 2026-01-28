@@ -106,7 +106,8 @@
             "id": "US-008",
             "title": "Add speech screening escalation integration tests",
             "priority": 8,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_speech_screening_escalation.py with 15 tests across 5 classes: TestDownloadAudioClipEscalationArgs (3 tests: Tier 1 --impersonate, Tier 2 --extractor-args, arg ordering before cookies), TestDownloadAudioClipNoEscalation (3 tests: no args when both managers None, impersonation fallback when escalation None, no AttributeError on 403), TestScreenVideoRecordsFailure (3 tests: record_failure on 403 stderr, no failure on timeout, no failure on success), TestScreenVideoHandlesCookieRotation (3 tests: cookie_rotator.rotate() on rotate_cookies=True, no rotation when False, no crash without cookie_rotator), TestScreenApprovedVideosSharedState (3 tests: tier progression across videos, shared state persistence across calls, independent tiers per video ID). Also added record_failure and cookie rotation support to speech_screening.py download_audio_clip(). All 15 new tests pass, all 134 related tests pass.",
             "acceptanceCriteria": [
                 "Test _download_audio_clip() applies escalation_manager.get_escalation_args() to yt-dlp command when escalation_manager is provided",
                 "Test _download_audio_clip() omits escalation args gracefully when escalation_manager is None",

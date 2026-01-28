@@ -13,6 +13,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from .escalation_manager import is_escalation_trigger
+
 if TYPE_CHECKING:
     from ..config import Config
     from .impersonation import ImpersonationManager
@@ -99,6 +101,11 @@ class SpeechScreener:
             esc_result = self.escalation_manager.get_escalation_args(video_id)
             if esc_result.args:
                 cmd.extend(esc_result.args)
+            # Tier 3: trigger cookie rotation proactively
+            if esc_result.rotate_cookies:
+                cookie_rotator = getattr(self, 'cookie_rotator', None)
+                if cookie_rotator:
+                    cookie_rotator.rotate()
         elif self.impersonation_manager:
             imp_args = self.impersonation_manager.get_impersonate_args()
             if imp_args:
@@ -115,6 +122,11 @@ class SpeechScreener:
             if result.returncode == 0:
                 matches = list(temp_dir.glob(f"{video_id}.*"))
                 return matches[0] if matches else None
+            else:
+                # Record 403/bot errors with escalation manager
+                stderr = result.stderr or ''
+                if self.escalation_manager and is_escalation_trigger(stderr):
+                    self.escalation_manager.record_failure(video_id, stderr)
         except subprocess.TimeoutExpired:
             logger.debug(f"[SPEECH SCREEN] {video_id}: download timeout")
         except Exception as e:
