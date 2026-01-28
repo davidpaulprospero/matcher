@@ -6077,3 +6077,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_speech_screening_escalation.py
 - Files modified: src/downloader/speech_screening.py, scripts/ralph/prd.json
 - Test results: 15 new tests pass, 134 total related tests pass (25 speech screening + 109 escalation manager)
+
+
+## Iteration US-009 (Sprint 14) - Add title filter escalation args integration tests
+- Created tests/test_title_filter_escalation.py with 18 tests across 5 classes
+- AC1: TestSearchIncludesEscalationArgs — Tier 1 --impersonate in command, Tier 2 --extractor-args in command after 2 failures, escalation args ordered before cookies
+- AC2: TestSearchHandles403WithEscalation — is_escalation_trigger detects 403 in stderr, caller can record_failure to escalate for next search, 403 returns valid empty SearchResult
+- AC3: TestTimeoutDoesNotTriggerEscalation — timeout doesn't change tier, returns timed_out SearchResult, tier preserved for next search
+- AC4: TestJsonParseErrorPreservesEscalation — malformed JSON, mixed valid/invalid lines, empty output, generic OSError all preserve Tier 1 state
+- AC5: TestEscalationManagerNone — search works with None manager, no --impersonate/--extractor-args when both None, impersonation fallback when only escalation None, no AttributeError on 403 or timeout without manager
+- Note: search_video_metadata() includes escalation args in command but does NOT call record_failure() itself — the caller (core.py) handles failure recording via circuit_breaker. Tests verify this by checking escalation state is unchanged after search errors.
+- Note: Existing test_title_filter.py and test_title_filter_coverage.py have 21 pre-existing failures (tests written before SearchResult return type change) — not caused by this work.
+- Files created: tests/test_title_filter_escalation.py
+- Files modified: scripts/ralph/prd.json
+- Test results: 18 new tests pass in 0.57s, 0 failures
