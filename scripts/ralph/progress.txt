@@ -1,4 +1,17 @@
 
+## Iteration US-004 (Sprint 14) - Add RateLimitBudget thread safety tests
+- Created `tests/test_budget_thread_safety.py` with 14 tests across 5 classes
+- AC1: TestConcurrentRecordRotation — 10 threads each call record_rotation(), verify exact count (10 and 1000), plus keyword tracking
+- AC2: TestConcurrentCanRotateAndRecord — budget limit enforcement under contention, tight single-rotation boundary test
+- AC3: TestConcurrentRecordBackoff — 5 threads with different durations verify exact sum (150.0), plus 500 small backoffs from 5 threads
+- AC4: TestConcurrentSuccessFailure — mixed success/failure from 10 threads (500+500=1000), interleaved per-thread, keyword tracking
+- AC5: TestAtomicLastRotation — 20-trial repeated last-rotation atomicity, gated rotation count consistency, 50-thread stress test for 10 rotations
+- All tests use threading.Barrier for synchronized thread start to maximize contention
+- RateLimitBudget has no explicit locks but CPython GIL provides atomicity for simple integer increments (+=1)
+- Float accumulation (backoff_time_spent) and list append (keywords_rate_limited) also safe under GIL for single operations
+- Files created: `tests/test_budget_thread_safety.py`
+- Test results: 14 passed (new), 153 passed (all budget tests), 0 failures
+
 ## Iteration US-008 (Sprint 13) - Add RateLimitMetricsAggregator health status tests
 - Pre-existing implementation in `rate_limit_metrics.py` (RateLimitMetricsAggregator class, lines 948-1116)
 - Pre-existing test file had 27 tests covering most acceptance criteria

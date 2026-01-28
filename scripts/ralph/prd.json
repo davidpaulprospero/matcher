@@ -50,7 +50,8 @@
             "id": "US-004",
             "title": "Add RateLimitBudget thread safety tests",
             "priority": 4,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_budget_thread_safety.py with 14 tests across 5 classes: TestConcurrentRecordRotation (3 tests: 10 threads x1, 10 threads x100, keyword tracking), TestConcurrentCanRotateAndRecord (2 tests: budget limit enforcement under contention, tight single-rotation boundary), TestConcurrentRecordBackoff (3 tests: 5 threads different durations, 5 threads x100 small backoffs, keyword tracking), TestConcurrentSuccessFailure (3 tests: mixed success/failure from 10 threads, interleaved same-thread, failure keyword tracking), TestAtomicLastRotation (3 tests: 20-trial last-rotation atomicity, gated rotation count consistency, 50-thread stress test). All 14 tests pass. All 153 budget-related tests pass.",
             "acceptanceCriteria": [
                 "Test concurrent record_rotation() from 10 threads — verify rotations_used equals exactly 10 (no race condition overwrites)",
                 "Test concurrent can_rotate() + record_rotation() — verify budget never exceeds max_rotations even under contention",
