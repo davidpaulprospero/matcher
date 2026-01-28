@@ -83,8 +83,8 @@
             "id": "US-006",
             "title": "Expand parameterized tests for config validation edge cases",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 76 parametrized test cases (19 @pytest.mark.parametrize decorators) across 10 new test classes: TestMatchingConfigProviderParametrized (primary/secondary providers, invalid detection), TestLLMConfigProviderParametrized (env key loading, valid providers, default models), TestEmbeddingProviderParametrized (valid/invalid providers), TestHealingStrategyParametrized (4 strategies), TestBoundaryValuesParametrized (confidence thresholds, embedding_candidates, scene threshold, temperature, min_scene_len), TestLocationMatchingLevelParametrized (4 levels, invalid detection), TestChapterDetectionStrategyParametrized (2 strategies), TestSceneDetectionPresetParametrized (3 presets), TestVisionProviderParametrized (2 providers). All 132 tests pass in 0.73s.",
             "acceptanceCriteria": [
                 "Add @pytest.mark.parametrize to test_config_section_validation.py for enum values",
                 "Add parametrized tests for all MatchingConfig.provider valid values",
