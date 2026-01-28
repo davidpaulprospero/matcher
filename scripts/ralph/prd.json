@@ -52,8 +52,8 @@
             "id": "US-004",
             "title": "Add _calculate_sentence_coherence punctuation and structure tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 4 new tests to TestSentenceCoherence: test_long_words_boost_coherence (AC3), test_medium_word_length_partial_boost (AC3), test_score_capped_at_maximum (AC5), test_score_cap_with_excessive_input (AC5). Existing tests cover AC1 (punctuation), AC2 (capitalization), AC4 (short text). All 5 AC verified: 36 tests pass in 0.48s.",
             "acceptanceCriteria": [
                 "Test _calculate_sentence_coherence() returns score > 0 when text has sentence-ending punctuation (. ! ?) — verify punctuation_ratio contributes",
                 "Test _calculate_sentence_coherence() returns score > 0 for capitalized words indicating sentence structure — verify capitalization contributes",

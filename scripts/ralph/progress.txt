@@ -6447,3 +6447,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: test_disabled_config_returns_original_confidence — verifies (confidence, '') when disabled
 - Test results: 38 passed in 0.48s
 
+
+## Iteration US-004 (Sprint 18) - Add _calculate_sentence_coherence punctuation and structure tests
+- Added 4 new tests to TestSentenceCoherence class in tests/test_transcript_quality.py
+- AC1: test_proper_sentences_good_coherence — verifies score > 0 for sentence-ending punctuation (. ! ?)
+- AC2: test_capitalized_words_boost_coherence — verifies score > 0 for capitalized words
+- AC3: test_long_words_boost_coherence, test_medium_word_length_partial_boost — verifies avg_word_len >= 4.0 boosts score, 3.0-4.0 gives partial boost
+- AC4: test_very_short_text_low_coherence, test_empty_text_returns_zero — verifies 0.0 for < 3 words
+- AC5: test_score_capped_at_maximum, test_score_cap_with_excessive_input — verifies score capped at 0.35 maximum
+- Files modified: tests/test_transcript_quality.py
+- Test results: 36 passed in 0.48s, 0 regressions
