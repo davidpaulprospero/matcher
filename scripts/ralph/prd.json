@@ -50,8 +50,8 @@
             "id": "US-004",
             "title": "Add GapCheckStage orchestration and retry tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "6 tests - added shortfall trigger, report details, and state separation tests",
             "acceptanceCriteria": [
                 "Test GapCheckStage.execute() returns success when GapReport.complete is True",
                 "Test GapCheckStage.execute() triggers TopicBroadener when shortfall exceeds threshold",

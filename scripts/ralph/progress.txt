@@ -6543,3 +6543,12 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC4: test_custom_frame_rate — verifies framerate from constructor
 - AC5: test_clip_names_use_video_id_fallback — documents current behavior (no collision avoidance, video_id unique in metadata)
 - Test results: 18 passed in 0.35s
+
+## Iteration US-004 (Sprint 19) - Add GapCheckStage orchestration and retry tests
+- Added 3 new tests: shortfall_triggers, report_details, keywords_in_report
+- AC1: test_complete_state_returns_complete_report — verifies complete=True returns success
+- AC2: test_shortfall_triggers_broadener — verifies broadener called with topic, used_keywords, shortfall_seconds
+- AC3/AC5: Note - GapCheckStage doesn't modify state (retry_count, all_used_keywords) - that's the orchestrator's job
+- AC3/AC5: test_returns_keywords_in_report_not_state documents this separation of concerns
+- AC4: test_max_retries_prevents_broadening — verifies broadener not called when retry_count >= max_retries
+- Test results: 6 passed in 0.34s
