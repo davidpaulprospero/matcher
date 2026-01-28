@@ -54,10 +54,56 @@ The following pytest markers are defined in `pytest.ini`:
 
 *Statistics updated in Sprint 26 after bulk marker assignment (10,957 markers applied).*
 
-**CI Optimization:**
-- Use `pytest -m fast` for quick feedback loop during development
-- Use `pytest -m "not requires_network"` for offline testing
-- Full suite runs on PR merge
+## CI Workflow (Sprint 26)
+
+The CI pipeline is configured for **marker-based test selection** to provide fast feedback on PRs while ensuring full test coverage on merge to main.
+
+### Workflow Jobs
+
+| Job | Trigger | Tests Run | Purpose |
+|-----|---------|-----------|---------|
+| `fast-tests` | Every PR update | `pytest -m fast` | Quick feedback (~45s target) |
+| `full-tests` | Merge to main only | Full test suite | Complete coverage verification |
+| `offline-tests` | Every PR update | `pytest -m "not requires_network"` | Fallback for network-restricted runners |
+| `lint` | Every PR update | black, isort, ruff | Code formatting and style |
+| `quality` | PRs only | mypy, extended ruff | Informational quality checks |
+
+### Performance Targets
+
+| Metric | Target | Limit |
+|--------|--------|-------|
+| Fast tests duration | 45 seconds | 60 seconds |
+| Full suite | N/A | Depends on coverage |
+
+### Job Summary
+
+Each test job generates a GitHub Actions job summary with:
+- Total test count
+- Passed/Failed/Skipped breakdown
+- Duration with performance status indicator
+
+### Local Development
+
+```bash
+# Simulate CI fast tests
+pytest tests/ -m fast --tb=short -v
+
+# Simulate CI offline tests
+pytest tests/ -m "not requires_network" --tb=short -v
+
+# Simulate CI full suite
+pytest tests/ --cov=src --cov-report=html --tb=short -v
+```
+
+### Workflow File
+
+See `.github/workflows/tests.yml` for the complete workflow configuration.
+
+**Key features:**
+- Parallel test execution with `pytest-xdist` (`-n auto`)
+- JSON report generation for metrics extraction
+- Coverage uploaded to Codecov (on merge to main)
+- Cached pip packages for faster installs
 
 ### Using Markers
 
