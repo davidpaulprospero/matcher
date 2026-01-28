@@ -6922,3 +6922,37 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 45 window estimation tests pass in 0.47s, 276 total rate limit tests pass in 2.21s
 - Files modified: tests/test_rate_limit_window_estimation.py (+429 lines)
 - Commit: 363bf00
+
+## Iteration US-010 (Sprint 21) - Add test fixture utilities for complex coordination scenarios
+- Added 4 new fixture factories to tests/fixtures/__init__.py:
+  1. create_checkpoint_with_populated_stages (AC1)
+     - For Rule 25 --output-only testing
+     - Generates checkpoint with fully populated stages dict
+     - Customizable match_count, avg_confidence, video_count
+     - Supports stage-specific overrides
+  2. create_concurrent_escalation_fixture (AC2)
+     - For EscalationManager thread contention tests
+     - Generates keywords, ext_config, initial states
+     - Includes expected tier args for verification
+  3. create_otio_timeline_fixture (AC3)
+     - For Rule 17 auto-split threshold testing
+     - Parameterized for any segment count
+     - Calculates expected_parts, at_threshold, above_threshold
+     - Provides threshold constants (3000 max, 2500 warning)
+  4. create_broll_propagation_chain_state (AC4)
+     - For Rule 8 is_broll propagation testing
+     - Generates scenes with face and silent detection
+     - Creates matching text_metadata entries
+     - Tracks V8 track expectations
+- Updated tests/README.md with comprehensive fixture documentation (AC5)
+  - Usage examples for all 4 new fixtures
+  - Import patterns including aliases
+  - Integration with existing fixture factories
+- Added 23 new tests in test_fixture_factories.py
+  - TestCheckpointWithPopulatedStagesFixture (6 tests)
+  - TestConcurrentEscalationFixture (5 tests)
+  - TestOtioTimelineFixture (6 tests)
+  - TestBrollPropagationChainStateFixture (6 tests)
+- Test results: 37 fixture tests pass in 0.47s
+- Files modified: tests/fixtures/__init__.py (+426 lines), tests/test_fixture_factories.py (+284 lines), tests/README.md (+153 lines)
+- Commit: 18f7481
