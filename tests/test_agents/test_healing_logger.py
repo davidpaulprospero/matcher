@@ -842,3 +842,369 @@ class TestEntriesTruncation:
 
             finally:
                 HealingLogger.MAX_ENTRIES = original_max
+
+
+# =============================================================================
+# US-003: Log Method Tests for All Entry Types
+# =============================================================================
+
+
+class TestLogClassification:
+    """Tests for HealingLogger.log_classification() - US-003."""
+
+    def test_log_classification_creates_entry_with_correct_component_and_action(self):
+        """Test log_classification() creates entry with correct component='watcher' and action='classify'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            # Create mock classification
+            mock_classification = MagicMock()
+            mock_classification.category = "network"
+            mock_classification.severity = "medium"
+            mock_classification.suggested_healer = "NetworkHealer"
+            mock_classification.confidence = 0.85
+            mock_classification.needs_llm_healer = False
+            mock_classification.reasoning = "Connection timeout detected"
+
+            # Log classification
+            error = ConnectionError("Connection refused")
+            logger.log_classification("DOWNLOAD", error, mock_classification, 15.5)
+
+            # Verify entry created with correct values
+            assert len(logger.entries) == 1
+            entry = logger.entries[0]
+            assert entry.component == "watcher"
+            assert entry.action == "classify"
+            assert entry.stage == "DOWNLOAD"
+            assert entry.error_type == "ConnectionError"
+            assert "Connection refused" in entry.error_message
+            assert entry.result == "success"
+            assert entry.duration_ms == 15.5
+
+    def test_log_classification_captures_classification_details(self):
+        """Test log_classification() stores classification details correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            mock_classification = MagicMock()
+            mock_classification.category = "rate_limit"
+            mock_classification.severity = "high"
+            mock_classification.suggested_healer = "RateLimitHealer"
+            mock_classification.confidence = 0.95
+            mock_classification.needs_llm_healer = True
+            mock_classification.reasoning = "HTTP 429 response detected with Retry-After header"
+
+            error = Exception("Rate limited")
+            logger.log_classification("API_CALL", error, mock_classification, 5.0)
+
+            entry = logger.entries[0]
+            details = entry.details
+
+            assert details["category"] == "rate_limit"
+            assert details["severity"] == "high"
+            assert details["suggested_healer"] == "RateLimitHealer"
+            assert details["confidence"] == 0.95
+            assert details["needs_llm_healer"] == True
+            assert "HTTP 429" in details["reasoning"]
+
+    def test_log_classification_truncates_long_reasoning(self):
+        """Test log_classification() truncates reasoning to 100 characters."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            mock_classification = MagicMock()
+            mock_classification.category = "unknown"
+            mock_classification.severity = "low"
+            mock_classification.suggested_healer = None
+            mock_classification.confidence = 0.3
+            mock_classification.needs_llm_healer = True
+            mock_classification.reasoning = "A" * 200  # Long reasoning
+
+            error = Exception("Unknown error")
+            logger.log_classification("TEST", error, mock_classification, 1.0)
+
+            entry = logger.entries[0]
+            assert len(entry.details["reasoning"]) == 100
+
+
+class TestLogHealerAttempt:
+    """Tests for HealingLogger.log_healer_attempt() - US-003."""
+
+    def test_log_healer_attempt_captures_healer_name_and_result(self):
+        """Test log_healer_attempt() captures healer_name, result, and stack_trace in details."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            # Create mock healer result
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.action = MagicMock()
+            mock_result.action.value = "RETRY"
+            mock_result.message = "Backoff applied, retrying"
+            mock_result.modified_config = True
+            mock_result.details = {"backoff_seconds": 30}
+
+            error = TimeoutError("Request timed out")
+            stack_trace = "Traceback (most recent call last):\n  File ..."
+
+            logger.log_healer_attempt(
+                "TRANSCRIBE", "TimeoutHealer", error, mock_result, 250.0, stack_trace
+            )
+
+            assert len(logger.entries) == 1
+            entry = logger.entries[0]
+
+            # Verify basic fields
+            assert entry.component == "healer"
+            assert entry.action == "attempt"
+            assert entry.stage == "TRANSCRIBE"
+            assert entry.error_type == "TimeoutError"
+            assert entry.result == "success"
+            assert entry.duration_ms == 250.0
+            assert entry.stack_trace == stack_trace
+
+            # Verify details contain healer info
+            assert entry.details["healer"] == "TimeoutHealer"
+            assert entry.details["action"] == "RETRY"
+            assert entry.details["message"] == "Backoff applied, retrying"
+            assert entry.details["modified_config"] == True
+            assert entry.details["healer_details"]["backoff_seconds"] == 30
+
+    def test_log_healer_attempt_records_failed_result(self):
+        """Test log_healer_attempt() correctly records failed result."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            mock_result = MagicMock()
+            mock_result.success = False
+            mock_result.action = MagicMock()
+            mock_result.action.value = "ABORT"
+            mock_result.message = "Cannot fix this error"
+            mock_result.modified_config = False
+            mock_result.details = {}
+
+            error = ValueError("Invalid data")
+            logger.log_healer_attempt("MATCH", "DataHealer", error, mock_result, 100.0)
+
+            entry = logger.entries[0]
+            assert entry.result == "failed"
+            assert entry.details["action"] == "ABORT"
+
+    def test_log_healer_attempt_handles_action_without_value_attr(self):
+        """Test log_healer_attempt() handles action that's a string not enum."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            mock_result = MagicMock()
+            mock_result.success = True
+            mock_result.action = "SKIP"  # String, not enum
+            mock_result.message = "Skipping"
+            mock_result.modified_config = False
+            mock_result.details = {}
+
+            error = Exception("Test")
+            logger.log_healer_attempt("TEST", "TestHealer", error, mock_result, 10.0)
+
+            entry = logger.entries[0]
+            assert entry.details["action"] == "SKIP"
+
+
+class TestLogFallback:
+    """Tests for HealingLogger.log_fallback() - US-003."""
+
+    def test_log_fallback_records_component_transition(self):
+        """Test log_fallback() records from_component and to_component transition correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            logger.log_fallback(
+                "DOWNLOAD",
+                from_component="WatcherWithLLM",
+                to_component="PatternMatcher",
+                reason="LLM API unavailable"
+            )
+
+            assert len(logger.entries) == 1
+            entry = logger.entries[0]
+
+            # Verify basic fields
+            assert entry.component == "fallback"
+            assert entry.action == "fallback"
+            assert entry.stage == "DOWNLOAD"
+            assert entry.error_type == "FallbackTriggered"
+            assert entry.error_message == "LLM API unavailable"
+            assert entry.result == "degraded"
+            assert entry.duration_ms == 0
+
+            # Verify transition details
+            assert entry.details["from"] == "WatcherWithLLM"
+            assert entry.details["to"] == "PatternMatcher"
+            assert entry.details["reason"] == "LLM API unavailable"
+
+    def test_log_fallback_multiple_transitions(self):
+        """Test log_fallback() can record multiple fallback transitions."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            # First fallback
+            logger.log_fallback("STAGE1", "ComponentA", "ComponentB", "Reason 1")
+            # Second fallback
+            logger.log_fallback("STAGE2", "ComponentB", "ComponentC", "Reason 2")
+
+            assert len(logger.entries) == 2
+
+            # First transition
+            assert logger.entries[0].details["from"] == "ComponentA"
+            assert logger.entries[0].details["to"] == "ComponentB"
+
+            # Second transition
+            assert logger.entries[1].details["from"] == "ComponentB"
+            assert logger.entries[1].details["to"] == "ComponentC"
+
+
+class TestLogEscalation:
+    """Tests for HealingLogger.log_escalation() - US-003."""
+
+    def test_log_escalation_distinguishes_to_user(self):
+        """Test log_escalation() correctly handles to_user=True escalation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            error = RuntimeError("Critical system failure")
+            logger.log_escalation(
+                "OUTPUT",
+                error,
+                "All automated fixes exhausted",
+                to_user=True
+            )
+
+            assert len(logger.entries) == 1
+            entry = logger.entries[0]
+
+            # Verify basic fields
+            assert entry.component == "orchestrator"
+            assert entry.action == "escalate"
+            assert entry.stage == "OUTPUT"
+            assert entry.error_type == "RuntimeError"
+            assert entry.result == "escalated"
+
+            # Verify escalation type
+            assert entry.details["to_user"] == True
+            assert entry.details["to_llm_healer"] == False
+            assert entry.details["reason"] == "All automated fixes exhausted"
+
+    def test_log_escalation_distinguishes_to_llm_healer(self):
+        """Test log_escalation() correctly handles to_user=False (to LLM healer) escalation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            error = ValueError("Complex parsing error")
+            logger.log_escalation(
+                "ANALYZE",
+                error,
+                "Pattern matchers insufficient",
+                to_user=False
+            )
+
+            entry = logger.entries[0]
+
+            # Verify escalation type
+            assert entry.details["to_user"] == False
+            assert entry.details["to_llm_healer"] == True
+            assert entry.details["reason"] == "Pattern matchers insufficient"
+
+    def test_log_escalation_default_is_to_llm_healer(self):
+        """Test log_escalation() defaults to LLM healer (to_user=False)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            error = Exception("Test error")
+            # Don't specify to_user, should default to False
+            logger.log_escalation("TEST", error, "Testing default")
+
+            entry = logger.entries[0]
+            assert entry.details["to_user"] == False
+            assert entry.details["to_llm_healer"] == True
+
+
+class TestLogSelfHeal:
+    """Tests for HealingLogger.log_self_heal() - US-003."""
+
+    def test_log_self_heal_captures_attempt_progression(self):
+        """Test log_self_heal() captures attempt count and max_attempts progression."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            # Simulate 3 self-heal attempts
+            for attempt in range(1, 4):
+                logger.log_self_heal(
+                    healer="GeminiHealer",
+                    attempt=attempt,
+                    max_attempts=3,
+                    error_type="APIError",
+                    action=f"Retry with modified prompt (attempt {attempt})"
+                )
+
+            assert len(logger.entries) == 3
+
+            # Verify first attempt
+            entry1 = logger.entries[0]
+            assert entry1.stage == "SELF_HEAL"
+            assert entry1.component == "GeminiHealer"
+            assert entry1.action == "self_heal"
+            assert entry1.error_type == "APIError"
+            assert entry1.result == "retrying"
+            assert entry1.details["attempt"] == 1
+            assert entry1.details["max_attempts"] == 3
+
+            # Verify progression
+            assert logger.entries[1].details["attempt"] == 2
+            assert logger.entries[2].details["attempt"] == 3
+
+            # All should have same max_attempts
+            for entry in logger.entries:
+                assert entry.details["max_attempts"] == 3
+
+    def test_log_self_heal_records_action_as_error_message(self):
+        """Test log_self_heal() stores action description in error_message field."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            logger.log_self_heal(
+                healer="AnthropicHealer",
+                attempt=1,
+                max_attempts=5,
+                error_type="RateLimitError",
+                action="Applying exponential backoff"
+            )
+
+            entry = logger.entries[0]
+            assert entry.error_message == "Applying exponential backoff"
+            assert entry.component == "AnthropicHealer"
+
+    def test_log_self_heal_different_healers(self):
+        """Test log_self_heal() correctly identifies different healer types."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            logger = HealingLogger(log_dir, json_log=False)
+
+            healers = ["GeminiHealer", "AnthropicHealer", "OllamaHealer"]
+            for healer in healers:
+                logger.log_self_heal(healer, 1, 3, "TestError", "Testing")
+
+            assert len(logger.entries) == 3
+            for i, healer in enumerate(healers):
+                assert logger.entries[i].component == healer
