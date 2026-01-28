@@ -185,7 +185,40 @@ TF-IDF memory usage: 12.34 MB for 100 segments
 
 ## Continuous Integration
 
-Benchmarks are **not** run in CI by default (they're slow and variable). This section covers how to integrate benchmarks into your CI pipeline.
+Benchmarks are run in CI on a schedule and on benchmark file changes. The `.github/workflows/benchmarks.yml` workflow handles this automatically.
+
+### GitHub Actions Workflow
+
+**Location:** `.github/workflows/benchmarks.yml`
+
+**Triggers:**
+- Weekly schedule (Sundays at midnight UTC)
+- Push to `main` affecting benchmark files
+- Manual workflow dispatch
+
+**Features:**
+- Runs all benchmark suites
+- Compares against baseline with 20% regression threshold
+- Uploads results as artifacts (90-day retention)
+- Stores baseline as artifact (365-day retention)
+- Posts summary to GitHub Actions job log
+- Creates warnings on regression detection
+
+**Manual Workflow Options:**
+- `update_baseline`: Set to `true` to update the baseline with new results
+- `threshold`: Override the default 20% regression threshold
+
+**Usage:**
+```bash
+# Trigger manually via GitHub CLI
+gh workflow run benchmarks.yml
+
+# Update baseline
+gh workflow run benchmarks.yml -f update_baseline=true
+
+# Custom threshold
+gh workflow run benchmarks.yml -f threshold=30
+```
 
 ### CI Benchmark Guidelines
 
