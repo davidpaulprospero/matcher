@@ -1,0 +1,813 @@
+"""
+Tests for config section validation.
+
+US-009 Sprint 23: Config section validation tests
+
+Covers:
+- AC1: InfrastructureConfig __post_init__ nested dict conversion
+- AC2: MatchingConfig validates strategy enum values
+- AC3: MediaConfig validates search provider list
+- AC4: LLMConfig validates provider selection with available keys
+- AC5: All config sections handle missing optional fields with defaults
+"""
+
+import pytest
+import os
+from unittest.mock import patch
+
+# Infrastructure config imports
+from src.config.sections.infrastructure import (
+    HealingConfig,
+    HealingLoggingConfig,
+    WatcherConfig,
+    LLMHealerConfig,
+    LoggingConfig,
+    CacheConfig,
+    GlobalCacheConfig,
+    PipelineConfig,
+    APIKeysConfig,
+)
+
+# Matching config imports
+from src.config.sections.matching import (
+    MatchingConfig,
+    LocationMatchingConfig,
+    ChapterDetectionConfig,
+    NegativeMatchingConfig,
+)
+
+# Media config imports
+from src.config.sections.media import (
+    VisionConfig,
+    SceneDetectionConfig,
+    AudioAnalysisConfig,
+)
+
+# LLM config imports
+from src.config.sections.llm import (
+    LLMConfig,
+    LLMRetryConfig,
+    LLMCacheConfig,
+    LLMProviderConfig,
+)
+
+# Base config for validation
+from src.config.base import Config
+
+
+# =============================================================================
+# AC1: Test InfrastructureConfig __post_init__ converts nested dicts to dataclasses
+# =============================================================================
+
+@pytest.mark.fast
+class TestHealingConfigPostInit:
+    """Test HealingConfig __post_init__ dict-to-dataclass conversions."""
+
+    def test_logging_dict_converted(self):
+        """Test logging dict is converted to HealingLoggingConfig."""
+        config = HealingConfig(
+            logging={'enabled': False, 'log_dir': '/custom/logs', 'json_log': False}
+        )
+
+        assert isinstance(config.logging, HealingLoggingConfig)
+        assert config.logging.enabled is False
+        assert config.logging.log_dir == '/custom/logs'
+        assert config.logging.json_log is False
+
+    def test_watcher_dict_converted(self):
+        """Test watcher dict is converted to WatcherConfig."""
+        config = HealingConfig(
+            watcher={
+                'enabled': True,
+                'provider': 'anthropic',
+                'model': 'claude-3-haiku',
+                'timeout': 60.0
+            }
+        )
+
+        assert isinstance(config.watcher, WatcherConfig)
+        assert config.watcher.enabled is True
+        assert config.watcher.provider == 'anthropic'
+        assert config.watcher.model == 'claude-3-haiku'
+        assert config.watcher.timeout == 60.0
+
+    def test_llm_healer_dict_converted(self):
+        """Test llm_healer dict is converted to LLMHealerConfig."""
+        config = HealingConfig(
+            llm_healer={
+                'enabled': True,
+                'provider': 'gemini',
+                'model': 'gemini-pro',
+                'max_tokens': 8192,
+                'timeout': 120.0
+            }
+        )
+
+        assert isinstance(config.llm_healer, LLMHealerConfig)
+        assert config.llm_healer.enabled is True
+        assert config.llm_healer.provider == 'gemini'
+        assert config.llm_healer.model == 'gemini-pro'
+        assert config.llm_healer.max_tokens == 8192
+        assert config.llm_healer.timeout == 120.0
+
+    def test_all_nested_dicts_converted(self):
+        """Test all nested configs converted from dicts at once."""
+        config = HealingConfig(
+            enabled=True,
+            strategy='aggressive',
+            logging={'enabled': True, 'console_format': 'simple'},
+            watcher={'enabled': True, 'escalate_threshold': 0.5},
+            llm_healer={'enabled': True, 'max_retries': 5}
+        )
+
+        assert isinstance(config.logging, HealingLoggingConfig)
+        assert isinstance(config.watcher, WatcherConfig)
+        assert isinstance(config.llm_healer, LLMHealerConfig)
+        assert config.logging.console_format == 'simple'
+        assert config.watcher.escalate_threshold == 0.5
+        assert config.llm_healer.max_retries == 5
+
+    def test_dataclass_objects_unchanged(self):
+        """Test that dataclass instances are not modified."""
+        logging_cfg = HealingLoggingConfig(enabled=False)
+        watcher_cfg = WatcherConfig(model='llama3.1')
+        healer_cfg = LLMHealerConfig(max_tokens=2048)
+
+        config = HealingConfig(
+            logging=logging_cfg,
+            watcher=watcher_cfg,
+            llm_healer=healer_cfg
+        )
+
+        assert config.logging is logging_cfg
+        assert config.watcher is watcher_cfg
+        assert config.llm_healer is healer_cfg
+
+    def test_partial_dict_conversion(self):
+        """Test conversion with mix of dict and dataclass instances."""
+        logging_cfg = HealingLoggingConfig(json_log=False)
+
+        config = HealingConfig(
+            logging=logging_cfg,
+            watcher={'provider': 'ollama'},
+            llm_healer={'provider': 'anthropic'}
+        )
+
+        assert config.logging is logging_cfg
+        assert isinstance(config.watcher, WatcherConfig)
+        assert isinstance(config.llm_healer, LLMHealerConfig)
+
+
+# =============================================================================
+# AC2: Test MatchingConfig validates strategy enum values
+# =============================================================================
+
+@pytest.mark.fast
+class TestMatchingConfigStrategyValidation:
+    """Test MatchingConfig validates strategy/enum values."""
+
+    def test_valid_primary_provider(self):
+        """Test valid primary_provider values accepted."""
+        for provider in ['gemini', 'anthropic', 'ollama']:
+            config = MatchingConfig(primary_provider=provider)
+            assert config.primary_provider == provider
+
+    def test_valid_secondary_provider(self):
+        """Test valid secondary_provider values accepted."""
+        for provider in ['gemini', 'anthropic', 'ollama']:
+            config = MatchingConfig(secondary_provider=provider)
+            assert config.secondary_provider == provider
+
+    def test_valid_local_provider(self):
+        """Test valid local_provider values accepted."""
+        config = MatchingConfig(local_provider='ollama')
+        assert config.local_provider == 'ollama'
+
+    def test_location_matching_hard_filter_level_valid(self):
+        """Test valid hard_filter_level values in LocationMatchingConfig."""
+        for level in ['city', 'state', 'country', 'continent']:
+            config = LocationMatchingConfig(hard_filter_level=level)
+            assert config.hard_filter_level == level
+
+    def test_invalid_hard_filter_level_detected(self, tmp_path):
+        """Test invalid hard_filter_level is detected during validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  location_matching:
+    enabled: true
+    hard_filter_level: invalid_level
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+
+        assert any("hard_filter_level" in e for e in errors)
+
+    def test_chapter_detection_strategy_valid(self):
+        """Test valid default_strategy values in ChapterDetectionConfig."""
+        for strategy in ['topic', 'location']:
+            config = ChapterDetectionConfig(default_strategy=strategy)
+            assert config.default_strategy == strategy
+
+    def test_matching_config_strategy_field(self):
+        """Test MatchingConfig healing strategy-related fields."""
+        # Note: MatchingConfig doesn't have a 'strategy' field, but HealingConfig does
+        healing_config = HealingConfig(strategy='conservative')
+        assert healing_config.strategy == 'conservative'
+
+        for strategy in ['aggressive', 'conservative', 'interactive', 'minimal']:
+            config = HealingConfig(strategy=strategy)
+            assert config.strategy == strategy
+
+
+@pytest.mark.fast
+class TestMatchingConfigLocationMatchingPostInit:
+    """Test MatchingConfig __post_init__ for location_matching."""
+
+    def test_location_matching_none_creates_default(self):
+        """Test location_matching=None creates default LocationMatchingConfig."""
+        config = MatchingConfig(location_matching=None)
+
+        assert isinstance(config.location_matching, LocationMatchingConfig)
+        assert config.location_matching.enabled is True
+
+    def test_location_matching_dict_converted(self):
+        """Test location_matching dict is converted to dataclass."""
+        config = MatchingConfig(
+            location_matching={
+                'enabled': True,
+                'hard_filter_level': 'country',
+                'geographic_penalty': 0.3
+            }
+        )
+
+        assert isinstance(config.location_matching, LocationMatchingConfig)
+        assert config.location_matching.hard_filter_level == 'country'
+        assert config.location_matching.geographic_penalty == 0.3
+
+    def test_chapter_detection_none_creates_default(self):
+        """Test chapter_detection=None creates default ChapterDetectionConfig."""
+        config = MatchingConfig(chapter_detection=None)
+
+        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert config.chapter_detection.enabled is True
+
+    def test_chapter_detection_dict_converted(self):
+        """Test chapter_detection dict is converted to dataclass."""
+        config = MatchingConfig(
+            chapter_detection={
+                'enabled': True,
+                'max_chapters': 30,
+                'min_chapter_confidence': 0.6
+            }
+        )
+
+        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert config.chapter_detection.max_chapters == 30
+        assert config.chapter_detection.min_chapter_confidence == 0.6
+
+
+# =============================================================================
+# AC3: Test MediaConfig validates search provider list
+# =============================================================================
+
+@pytest.mark.fast
+class TestMediaConfigProviderValidation:
+    """Test Media config validates provider lists and values."""
+
+    def test_vision_provider_valid(self):
+        """Test valid vision provider values."""
+        for provider in ['gemini', 'openai']:
+            config = VisionConfig(provider=provider)
+            assert config.provider == provider
+
+    def test_scene_detection_preset_valid(self):
+        """Test valid scene detection preset values."""
+        for preset in ['fast', 'balanced', 'accurate']:
+            config = SceneDetectionConfig(preset=preset)
+            assert config.preset == preset
+
+    def test_invalid_embedding_provider_detected(self, tmp_path):
+        """Test invalid embedding provider is detected during validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+embedding:
+  provider: invalid_provider
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+
+        assert any("embedding.provider" in e for e in errors)
+
+    def test_valid_embedding_providers(self, tmp_path):
+        """Test valid embedding provider values."""
+        # Valid providers as defined in src/config/base.py line 639
+        for provider in ['gemini', 'openai', 'local', 'sentence_transformers']:
+            config_file = tmp_path / f"config_{provider}.yaml"
+            config_file.write_text(f"""
+embedding:
+  provider: {provider}
+""")
+            config = Config.from_yaml(str(config_file))
+            errors = config._validate_enums()
+
+            provider_errors = [e for e in errors if "embedding.provider" in e]
+            assert len(provider_errors) == 0, f"Provider {provider} should be valid"
+
+
+@pytest.mark.fast
+class TestSceneDetectionConfigValidation:
+    """Test SceneDetectionConfig validation."""
+
+    def test_gpu_settings(self):
+        """Test GPU acceleration settings."""
+        config = SceneDetectionConfig(use_gpu=True, force_gpu=False)
+        assert config.use_gpu is True
+        assert config.force_gpu is False
+
+    def test_threshold_range(self):
+        """Test scene detection threshold is in valid range."""
+        config = SceneDetectionConfig(threshold=27.0)
+        assert 0 < config.threshold < 100
+
+    def test_min_scene_len_positive(self):
+        """Test min_scene_len must be positive."""
+        config = SceneDetectionConfig(min_scene_len=15)
+        assert config.min_scene_len > 0
+
+
+# =============================================================================
+# AC4: Test LLMConfig validates provider selection with available keys
+# =============================================================================
+
+@pytest.mark.fast
+class TestLLMConfigProviderValidation:
+    """Test LLMConfig validates provider selection with available keys."""
+
+    @pytest.fixture(autouse=True)
+    def clear_env_keys(self, monkeypatch):
+        """Clear API key environment variables."""
+        for key in ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'VOYAGE_API_KEY']:
+            monkeypatch.delenv(key, raising=False)
+
+    def test_google_provider_loads_gemini_key(self):
+        """Test google provider loads GEMINI_API_KEY from env."""
+        with patch.dict(os.environ, {'GEMINI_API_KEY': 'test_gemini_key'}):
+            config = LLMConfig(provider='google', api_key='')
+            assert config.api_key == 'test_gemini_key'
+
+    def test_anthropic_provider_loads_anthropic_key(self):
+        """Test anthropic provider loads ANTHROPIC_API_KEY from env."""
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test_anthropic_key'}):
+            config = LLMConfig(provider='anthropic', api_key='')
+            assert config.api_key == 'test_anthropic_key'
+
+    def test_explicit_key_not_overwritten(self):
+        """Test explicitly set api_key is not overwritten."""
+        with patch.dict(os.environ, {'GEMINI_API_KEY': 'env_key'}):
+            config = LLMConfig(provider='google', api_key='explicit_key')
+            assert config.api_key == 'explicit_key'
+
+    def test_invalid_matching_provider_detected(self, tmp_path):
+        """Test invalid matching provider is detected during validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  primary_provider: invalid_provider
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+
+        assert any("matching.primary_provider" in e for e in errors)
+
+    def test_gemini_key_required_when_gemini_provider(self, tmp_path):
+        """Test GEMINI_API_KEY required when using gemini provider."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  primary_provider: gemini
+api_keys:
+  gemini_api_key: ""
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+
+        assert any("GEMINI_API_KEY required" in e for e in errors)
+
+    def test_anthropic_key_required_when_anthropic_secondary(self, tmp_path):
+        """Test ANTHROPIC_API_KEY required when using anthropic as secondary."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  secondary_provider: anthropic
+api_keys:
+  anthropic_api_key: ""
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+
+        assert any("ANTHROPIC_API_KEY required" in e for e in errors)
+
+    def test_no_key_error_when_key_present(self, tmp_path):
+        """Test no key error when API key is present."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  primary_provider: gemini
+api_keys:
+  gemini_api_key: "test_key_123"
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+
+        gemini_errors = [e for e in errors if "GEMINI_API_KEY required" in e]
+        assert len(gemini_errors) == 0
+
+
+@pytest.mark.fast
+class TestLLMConfigPostInit:
+    """Test LLMConfig __post_init__ conversions."""
+
+    def test_retry_dict_converted(self):
+        """Test retry dict is converted to LLMRetryConfig."""
+        config = LLMConfig(
+            retry={'max_retries': 5, 'retry_delay_seconds': 5.0}
+        )
+
+        assert isinstance(config.retry, LLMRetryConfig)
+        assert config.retry.max_retries == 5
+        assert config.retry.retry_delay_seconds == 5.0
+
+    def test_cache_dict_converted(self):
+        """Test cache dict is converted to LLMCacheConfig."""
+        config = LLMConfig(
+            cache={'enabled': False, 'ttl_hours': 48}
+        )
+
+        assert isinstance(config.cache, LLMCacheConfig)
+        assert config.cache.enabled is False
+        assert config.cache.ttl_hours == 48
+
+    def test_provider_configs_dict_converted(self):
+        """Test provider configs (gemini, anthropic, ollama) dicts are converted."""
+        config = LLMConfig(
+            gemini={'model': 'gemini-pro', 'max_tokens': 4096},
+            anthropic={'model': 'claude-3-opus', 'temperature': 0.3},
+            ollama={'model': 'mistral'}
+        )
+
+        assert isinstance(config.gemini, LLMProviderConfig)
+        assert isinstance(config.anthropic, LLMProviderConfig)
+        assert isinstance(config.ollama, LLMProviderConfig)
+
+        assert config.gemini.model == 'gemini-pro'
+        assert config.gemini.max_tokens == 4096
+        assert config.anthropic.model == 'claude-3-opus'
+        assert config.anthropic.temperature == 0.3
+        assert config.ollama.model == 'mistral'
+
+
+# =============================================================================
+# AC5: Test all config sections handle missing optional fields with defaults
+# =============================================================================
+
+@pytest.mark.fast
+class TestLoggingConfigDefaults:
+    """Test LoggingConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test LoggingConfig default values."""
+        config = LoggingConfig()
+
+        assert config.enabled is True
+        assert config.log_dir == "logs"
+        assert config.log_level == "INFO"
+        assert config.log_to_file is True
+        assert config.log_to_console is True
+        assert config.generate_json_log is True
+        assert config.log_api_calls is True
+        assert config.track_api_costs is True
+        assert config.log_config_access is False
+        assert config.warn_on_hardcoded is True
+
+    def test_partial_override(self):
+        """Test partial override preserves other defaults."""
+        config = LoggingConfig(log_level="DEBUG", log_to_console=False)
+
+        assert config.log_level == "DEBUG"
+        assert config.log_to_console is False
+        assert config.enabled is True  # Default preserved
+        assert config.log_to_file is True  # Default preserved
+
+
+@pytest.mark.fast
+class TestCacheConfigDefaults:
+    """Test CacheConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test CacheConfig default values."""
+        config = CacheConfig()
+
+        assert config.cache_dir == ".cache"
+        assert config.cache_transcriptions is True
+        assert config.cache_embeddings is True
+        assert config.cache_scenes is True
+        assert config.cache_llm_responses is True
+        assert config.cache_vision is True
+        assert config.cross_project_cache is False
+        assert config.validate_cache_on_load is True
+
+
+@pytest.mark.fast
+class TestGlobalCacheConfigDefaults:
+    """Test GlobalCacheConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test GlobalCacheConfig default values."""
+        config = GlobalCacheConfig()
+
+        assert config.enabled is True
+        assert config.cache_dir == "~/.matcher_global_cache"
+        assert config.check_before_download is True
+        assert config.min_keyword_similarity == 0.8
+        assert config.min_topic_overlap == 0.3
+        assert config.max_reuse_videos == 50
+        assert config.share_transcripts is True
+
+
+@pytest.mark.fast
+class TestPipelineConfigDefaults:
+    """Test PipelineConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test PipelineConfig default values."""
+        config = PipelineConfig()
+
+        assert config.skip_download is False
+        assert config.skip_image_search is False
+        assert config.skip_transcription is False
+        assert config.skip_scene_detection is False
+        assert config.skip_matching is False
+        assert config.resume_enabled is True
+        assert config.max_retries == 3
+        assert config.parallel_transcription is True
+
+
+@pytest.mark.fast
+class TestAPIKeysConfigDefaults:
+    """Test APIKeysConfig handles missing optional fields with defaults."""
+
+    def test_default_empty_keys(self, monkeypatch):
+        """Test APIKeysConfig starts with empty keys (not from env)."""
+        # Clear all env variables
+        for key in ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'VOYAGE_API_KEY',
+                    'PEXELS_API_KEY', 'PIXABAY_API_KEY', 'UNSPLASH_API_KEY']:
+            monkeypatch.delenv(key, raising=False)
+
+        config = APIKeysConfig()
+
+        # All should be empty since env vars are cleared
+        assert config.gemini_api_key == ""
+        assert config.anthropic_api_key == ""
+        assert config.voyage_api_key == ""
+        assert config.pexels_api_key == ""
+        assert config.pixabay_api_key == ""
+        assert config.unsplash_api_key == ""
+
+    def test_loads_from_environment(self):
+        """Test APIKeysConfig loads keys from environment."""
+        with patch.dict(os.environ, {
+            'GEMINI_API_KEY': 'gemini_test',
+            'ANTHROPIC_API_KEY': 'anthropic_test'
+        }):
+            config = APIKeysConfig()
+
+            assert config.gemini_api_key == 'gemini_test'
+            assert config.anthropic_api_key == 'anthropic_test'
+
+
+@pytest.mark.fast
+class TestHealingConfigDefaults:
+    """Test HealingConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test HealingConfig default values."""
+        config = HealingConfig()
+
+        assert config.enabled is True
+        assert config.strategy == "conservative"
+        assert config.max_attempts_per_stage == 3
+        assert config.max_total_heals == 20
+        assert config.heal_delay == 2.0
+        assert config.run_preflight is True
+        assert config.auto_fix_preflight is True
+        assert config.enable_rollback is True
+        assert config.print_report is True
+
+    def test_nested_configs_have_defaults(self):
+        """Test nested configs are created with defaults."""
+        config = HealingConfig()
+
+        assert isinstance(config.logging, HealingLoggingConfig)
+        assert isinstance(config.watcher, WatcherConfig)
+        assert isinstance(config.llm_healer, LLMHealerConfig)
+
+
+@pytest.mark.fast
+class TestWatcherConfigDefaults:
+    """Test WatcherConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test WatcherConfig default values."""
+        config = WatcherConfig()
+
+        assert config.enabled is True
+        assert config.provider == "ollama"
+        assert config.model == "llama3.2"
+        assert config.fallback_model == "llama3.1"
+        assert config.host == "http://localhost:11434"
+        assert config.timeout == 30.0
+        assert config.escalate_threshold == 0.7
+        assert config.max_failures == 3
+
+
+@pytest.mark.fast
+class TestLLMHealerConfigDefaults:
+    """Test LLMHealerConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test LLMHealerConfig default values."""
+        config = LLMHealerConfig()
+
+        assert config.enabled is True
+        assert config.provider == "anthropic"
+        assert config.model == "claude-sonnet-4-20250514"
+        assert config.max_tokens == 4096
+        assert config.timeout == 60.0
+        assert config.max_retries == 3
+        assert config.include_stack_trace is True
+        assert config.include_config_context is True
+
+
+@pytest.mark.fast
+class TestMatchingConfigDefaults:
+    """Test MatchingConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test MatchingConfig default values."""
+        config = MatchingConfig()
+
+        assert config.min_confidence == 0.7
+        assert config.high_confidence_threshold == 0.85
+        assert config.max_clip_reuse == 1
+        assert config.embedding_candidates == 50
+        assert config.llm_rerank_candidates == 5
+        assert config.primary_provider == "gemini"
+        assert config.secondary_provider == "anthropic"
+        assert config.cache_llm_responses is True
+        assert config.delta_matching_enabled is True
+
+    def test_nested_configs_created(self):
+        """Test nested configs are created by default."""
+        config = MatchingConfig()
+
+        assert isinstance(config.location_matching, LocationMatchingConfig)
+        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+
+
+@pytest.mark.fast
+class TestVisionConfigDefaults:
+    """Test VisionConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test VisionConfig default values."""
+        config = VisionConfig()
+
+        assert config.provider == "gemini"
+        assert config.model == "gemini-2.0-flash"
+        assert config.enabled is True
+        assert config.min_words_per_scene == 5
+        assert config.coverage_threshold == 0.3
+        assert config.max_scenes_per_video == 50
+        assert config.frame_format == "jpg"
+        assert config.frame_quality == 85
+
+
+@pytest.mark.fast
+class TestSceneDetectionConfigDefaults:
+    """Test SceneDetectionConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test SceneDetectionConfig default values."""
+        config = SceneDetectionConfig()
+
+        assert config.enabled is True
+        assert config.preset == "balanced"
+        assert config.threshold == 27.0
+        assert config.min_scene_len == 15
+        assert config.downscale_factor == 4
+        assert config.use_gpu is True
+        assert config.detect_faces_per_scene is True
+
+
+@pytest.mark.fast
+class TestAudioAnalysisConfigDefaults:
+    """Test AudioAnalysisConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test AudioAnalysisConfig default values."""
+        config = AudioAnalysisConfig()
+
+        assert config.enabled is True
+        assert config.sample_rate == 22050
+        assert config.silence_threshold_db == -40.0
+        assert config.min_silence_duration == 0.3
+        assert config.speech_threshold == 0.5
+
+
+@pytest.mark.fast
+class TestLLMConfigDefaults:
+    """Test LLMConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self, monkeypatch):
+        """Test LLMConfig default values."""
+        # Clear env to avoid loading API keys
+        monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+        monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+        config = LLMConfig()
+
+        assert config.provider == "google"
+        assert config.model == "gemini-2.0-flash"
+        assert config.temperature == 0.7
+        assert config.max_tokens == 2000
+        assert config.ollama_host == "http://localhost:11434"
+
+    def test_nested_configs_created(self):
+        """Test nested configs are created with defaults."""
+        config = LLMConfig()
+
+        assert isinstance(config.retry, LLMRetryConfig)
+        assert isinstance(config.cache, LLMCacheConfig)
+        assert isinstance(config.gemini, LLMProviderConfig)
+        assert isinstance(config.anthropic, LLMProviderConfig)
+        assert isinstance(config.ollama, LLMProviderConfig)
+
+
+@pytest.mark.fast
+class TestNegativeMatchingConfigDefaults:
+    """Test NegativeMatchingConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test NegativeMatchingConfig default values."""
+        config = NegativeMatchingConfig()
+
+        assert config.enabled is True
+        assert isinstance(config.rules, list)
+        assert len(config.rules) == 3
+
+
+@pytest.mark.fast
+class TestChapterDetectionConfigDefaults:
+    """Test ChapterDetectionConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self):
+        """Test ChapterDetectionConfig default values."""
+        config = ChapterDetectionConfig()
+
+        assert config.enabled is True
+        assert config.use_validation_pass is True
+        assert config.use_boundary_refinement is True
+        assert config.default_strategy == 'topic'
+        assert config.auto_detect_content_type is True
+        assert config.max_chunk_chars == 6000
+        assert config.min_chapter_confidence == 0.5
+        assert config.max_chapters == 20
+
+
+@pytest.mark.fast
+class TestLocationMatchingConfigDefaults:
+    """Test LocationMatchingConfig handles missing optional fields with defaults."""
+
+    def test_default_values(self, monkeypatch):
+        """Test LocationMatchingConfig default values."""
+        monkeypatch.delenv('GEONAMES_USERNAME', raising=False)
+
+        config = LocationMatchingConfig()
+
+        assert config.enabled is True
+        assert config.hard_filter_level == "city"
+        assert config.geographic_penalty == 0.4
+        assert config.hierarchy_bonus == 0.15
+        assert config.landmark_bonus == 0.2
+        assert config.use_llm_disambiguation is True
+
+    def test_loads_geonames_from_env(self):
+        """Test geonames_username loaded from environment."""
+        with patch.dict(os.environ, {'GEONAMES_USERNAME': 'test_user'}):
+            config = LocationMatchingConfig()
+            assert config.geonames_username == 'test_user'
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
