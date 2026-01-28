@@ -83,8 +83,8 @@
             "id": "US-006",
             "title": "Add agent healer assertion helpers to tests/helpers",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Implemented 4 healer assertion helpers with full test coverage (32 new tests). assert_healer_attempt_logged() validates healer logging with attempt_num and expected_message options. assert_healing_strategy_applied() validates strategy mode with optional check_max_attempts and check_heal_delay params. assert_recovery_metrics_valid() validates HealingMetrics with expected_attempts, expected_success, min_successful_heals, max_failed_heals, expected_healers_used, expected_stages_healed options. assert_healer_chain_executed() validates healer chain with in_order and all_required options. Added VALID_HEALERS and VALID_STRATEGIES constants. Updated README.md with comprehensive documentation and usage examples.",
             "acceptanceCriteria": [
                 "Add assert_healer_attempt_logged(context, healer_name, attempt_num) helper",
                 "Add assert_healing_strategy_applied(context, strategy_name) helper",

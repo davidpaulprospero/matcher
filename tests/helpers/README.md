@@ -18,18 +18,37 @@ This module provides standardized assertion helpers that encapsulate complex val
 | `assert_dir_exists()` | Verify directory existence with descriptive errors |
 | `assert_json_structure()` | Validate JSON data structure and types |
 
+**Agent healer helpers:**
+
+| Helper | Purpose |
+|--------|---------|
+| `assert_healer_attempt_logged()` | Verify healer logged an attempt during healing |
+| `assert_healing_strategy_applied()` | Verify correct healing strategy was used |
+| `assert_recovery_metrics_valid()` | Validate healing metrics match expectations |
+| `assert_healer_chain_executed()` | Verify multiple healers ran in expected order |
+
 ## Quick Import
 
 ```python
 from tests.helpers import (
+    # Core assertion helpers
     assert_valid_otio_timeline,
     assert_valid_match_result,
     assert_checkpoint_consistent,
     assert_config_valid,
+    # Utility assertions
     assert_file_exists,
     assert_dir_exists,
     assert_json_structure,
+    # Agent healer assertions
+    assert_healer_attempt_logged,
+    assert_healing_strategy_applied,
+    assert_recovery_metrics_valid,
+    assert_healer_chain_executed,
+    # Constants
     VALID_STAGES,
+    VALID_HEALERS,
+    VALID_STRATEGIES,
 )
 ```
 
@@ -394,6 +413,275 @@ from tests.helpers import VALID_STAGES
 def test_custom_stage_logic():
     stage = get_current_stage()
     assert stage in VALID_STAGES
+```
+
+---
+
+## Agent Healer Assertions
+
+These helpers validate the self-healing pipeline system in `src/agents/`.
+
+### assert_healer_attempt_logged()
+
+Verifies that a specific healer logged an attempt during the healing process.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `context` | `Any` | required | HealingOrchestrator, mock logger, or dict with logged attempts |
+| `healer_name` | `str` | required | Name of the healer (e.g., "checkpoint-healer", "api-healer") |
+| `attempt_num` | `int` | `None` | Specific attempt number to check (1-indexed) |
+| `expected_message` | `str` | `None` | Substring expected in the attempt message |
+
+#### Valid Healer Names
+
+```python
+VALID_HEALERS = [
+    "checkpoint-healer",
+    "api-healer",
+    "download-healer",
+    "disk-healer",
+    "path-healer",
+    "otio-healer",
+    "llm-healer",
+]
+```
+
+#### Usage Examples
+
+```python
+from tests.helpers import assert_healer_attempt_logged
+
+def test_checkpoint_healer_triggered():
+    """Test that checkpoint healer is triggered on JSON error."""
+    orchestrator = HealingOrchestrator(config, strategy)
+    error = json.JSONDecodeError("Expecting value", "", 0)
+
+    orchestrator.coordinate_heal(error, state, "MATCH", [])
+
+    # Verify healer was triggered
+    assert_healer_attempt_logged(orchestrator, "checkpoint-healer")
+
+    # Verify specific attempt number
+    assert_healer_attempt_logged(orchestrator, "checkpoint-healer", 1)
+
+    # Verify attempt message
+    assert_healer_attempt_logged(
+        orchestrator,
+        "checkpoint-healer",
+        expected_message="Attempting to restore",
+    )
+
+def test_healer_with_mock_context():
+    """Test using mock context dict."""
+    context = {
+        "attempts": [
+            {"healer": "api-healer", "message": "Rate limit detected"},
+            {"healer": "api-healer", "message": "Increasing delay to 30s"},
+        ]
+    }
+    assert_healer_attempt_logged(context, "api-healer", attempt_num=2)
+```
+
+---
+
+### assert_healing_strategy_applied()
+
+Verifies that the correct healing strategy was applied.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `context` | `Any` | required | HealingOrchestrator, HealingStrategy, or context dict |
+| `strategy_name` | `str` | required | Expected strategy ("aggressive", "conservative", "interactive", "minimal") |
+| `check_max_attempts` | `int` | `None` | Verify max_attempts_per_stage value |
+| `check_heal_delay` | `float` | `None` | Verify heal_delay value |
+
+#### Valid Strategy Names
+
+```python
+VALID_STRATEGIES = ["aggressive", "conservative", "interactive", "minimal"]
+```
+
+#### Strategy Defaults
+
+| Strategy | max_attempts_per_stage | heal_delay |
+|----------|------------------------|------------|
+| aggressive | 5 | 1.0 |
+| conservative | 3 | 2.0 |
+| interactive | 3 | 2.0 |
+| minimal | 1 | 0.5 |
+
+#### Usage Examples
+
+```python
+from tests.helpers import assert_healing_strategy_applied
+
+def test_conservative_strategy():
+    """Test that conservative strategy is applied by default."""
+    orchestrator = HealingOrchestrator(config)
+    assert_healing_strategy_applied(orchestrator, "conservative")
+
+def test_aggressive_strategy_params():
+    """Test aggressive strategy has expected parameters."""
+    strategy = HealingStrategy.aggressive()
+    orchestrator = HealingOrchestrator(config, strategy)
+
+    assert_healing_strategy_applied(
+        orchestrator,
+        "aggressive",
+        check_max_attempts=5,
+        check_heal_delay=1.0,
+    )
+
+def test_minimal_strategy():
+    """Test minimal strategy for fast-fail testing."""
+    strategy = HealingStrategy.minimal()
+    assert_healing_strategy_applied(strategy, "minimal", check_max_attempts=1)
+```
+
+---
+
+### assert_recovery_metrics_valid()
+
+Validates that healing metrics match expectations.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `metrics` | `Any` | required | HealingMetrics object or dict |
+| `expected_attempts` | `int` | `None` | Total expected heal attempts |
+| `expected_success` | `bool` | `None` | Expected overall success |
+| `min_successful_heals` | `int` | `None` | Minimum successful heals required |
+| `max_failed_heals` | `int` | `None` | Maximum failed heals allowed |
+| `expected_healers_used` | `List[str]` | `None` | List of healer names that should have been used |
+| `expected_stages_healed` | `List[str]` | `None` | List of stage names that should have been healed |
+
+#### Metric Fields
+
+```python
+@dataclass
+class HealingMetrics:
+    total_heals: int = 0
+    successful_heals: int = 0
+    failed_heals: int = 0
+    heals_by_stage: Dict[str, int] = ...
+    heals_by_healer: Dict[str, int] = ...
+    time_spent_healing: float = 0.0
+    preflight_issues_found: int = 0
+    preflight_issues_fixed: int = 0
+    rollbacks_performed: int = 0
+    user_escalations: int = 0
+```
+
+#### Usage Examples
+
+```python
+from tests.helpers import assert_recovery_metrics_valid
+
+def test_healing_metrics_after_recovery():
+    """Test metrics after successful recovery."""
+    runner = ResilientRunner(config, orchestrator)
+    runner.run_pipeline(pipeline)
+
+    metrics = orchestrator.get_metrics()
+    assert_recovery_metrics_valid(
+        metrics,
+        expected_success=True,
+        min_successful_heals=1,
+    )
+
+def test_healing_attempts_counted():
+    """Test that all heal attempts are recorded."""
+    # Simulate 3 heal attempts with 2 successes
+    metrics = {
+        "total_heals": 3,
+        "successful_heals": 2,
+        "failed_heals": 1,
+        "heals_by_healer": {"api-healer": 2, "download-healer": 1},
+    }
+
+    assert_recovery_metrics_valid(
+        metrics,
+        expected_attempts=3,
+        max_failed_heals=1,
+        expected_healers_used=["api-healer", "download-healer"],
+    )
+
+def test_stage_specific_healing():
+    """Test that correct stages were healed."""
+    metrics = orchestrator.get_metrics()
+    assert_recovery_metrics_valid(
+        metrics,
+        expected_stages_healed=["DOWNLOAD", "MATCH"],
+    )
+```
+
+---
+
+### assert_healer_chain_executed()
+
+Verifies that a chain of healers was executed during healing.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `context` | `Any` | required | HealingOrchestrator, mock logger, or context dict |
+| `expected_healers` | `List[str]` | required | List of healer names expected to be invoked |
+| `in_order` | `bool` | `False` | Whether healers must have been invoked in specified order |
+| `all_required` | `bool` | `True` | Whether all specified healers must have been invoked |
+
+#### Usage Examples
+
+```python
+from tests.helpers import assert_healer_chain_executed
+
+def test_fallback_chain_triggered():
+    """Test that fallback chain runs when first healer fails."""
+    orchestrator = HealingOrchestrator(config, strategy)
+    error = Exception("Complex error")
+
+    orchestrator.coordinate_heal(error, state, "DOWNLOAD", [])
+
+    # Verify multiple healers were tried
+    assert_healer_chain_executed(
+        orchestrator,
+        ["checkpoint-healer", "api-healer", "download-healer"],
+    )
+
+def test_healer_order_respected():
+    """Test that healers run in priority order."""
+    orchestrator = HealingOrchestrator(config, strategy)
+
+    # Run healing
+    orchestrator.coordinate_heal(error, state, "MATCH", [])
+
+    # Verify order: checkpoint first, then others
+    assert_healer_chain_executed(
+        orchestrator,
+        ["checkpoint-healer", "api-healer"],
+        in_order=True,
+    )
+
+def test_partial_chain_execution():
+    """Test that at least some healers from chain run."""
+    context = {
+        "healers": {
+            "checkpoint-healer": [{"message": "Restoring"}],
+            "api-healer": [{"message": "Rate limit"}],
+        }
+    }
+
+    # Only require api-healer, don't require all
+    assert_healer_chain_executed(
+        context,
+        ["api-healer", "download-healer"],
+        all_required=False,  # Only api-healer needs to run
+    )
 ```
 
 ---

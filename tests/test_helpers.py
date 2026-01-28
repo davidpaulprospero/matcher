@@ -452,3 +452,500 @@ class TestUtilityAssertions:
             required_keys=["name", "count"],
             type_checks={"name": str, "count": int, "items": list},
         )
+
+
+# =============================================================================
+# Agent Healer Assertion Tests
+# =============================================================================
+
+class TestAssertHealerAttemptLogged:
+    """Tests for assert_healer_attempt_logged helper."""
+
+    def test_healer_with_dict_context(self):
+        """Healer attempt in dict context passes."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "attempts": [
+                {"healer": "api-healer", "message": "Rate limit detected"},
+                {"healer": "checkpoint-healer", "message": "Restoring from backup"},
+            ]
+        }
+
+        # Should not raise
+        assert_healer_attempt_logged(context, "api-healer")
+        assert_healer_attempt_logged(context, "checkpoint-healer")
+
+    def test_healer_with_healers_dict(self):
+        """Healer in healers dict context passes."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "healers": {
+                "download-healer": [
+                    {"message": "Retrying download"},
+                    {"message": "Increasing timeout"},
+                ],
+            }
+        }
+
+        assert_healer_attempt_logged(context, "download-healer")
+
+    def test_healer_not_found_raises(self):
+        """Missing healer raises assertion."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "attempts": [
+                {"healer": "api-healer", "message": "Rate limit"},
+            ]
+        }
+
+        with pytest.raises(AssertionError, match="did not log any attempts"):
+            assert_healer_attempt_logged(context, "checkpoint-healer")
+
+    def test_specific_attempt_number(self):
+        """Specific attempt number validation."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "healers": {
+                "api-healer": [
+                    {"message": "First attempt"},
+                    {"message": "Second attempt"},
+                ],
+            }
+        }
+
+        # Should pass for attempt 1 and 2
+        assert_healer_attempt_logged(context, "api-healer", 1)
+        assert_healer_attempt_logged(context, "api-healer", 2)
+
+        # Should fail for attempt 3
+        with pytest.raises(AssertionError, match="only logged 2 attempts"):
+            assert_healer_attempt_logged(context, "api-healer", 3)
+
+    def test_expected_message_found(self):
+        """Message substring matching passes."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "attempts": [
+                {"healer": "disk-healer", "message": "Cleaning up temp files"},
+            ]
+        }
+
+        assert_healer_attempt_logged(
+            context, "disk-healer", expected_message="Cleaning up"
+        )
+
+    def test_expected_message_not_found(self):
+        """Missing message raises assertion."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "attempts": [
+                {"healer": "disk-healer", "message": "Checking disk space"},
+            ]
+        }
+
+        with pytest.raises(AssertionError, match="No attempts.*contain message"):
+            assert_healer_attempt_logged(
+                context, "disk-healer", expected_message="Cleaning up"
+            )
+
+    def test_healer_name_normalization(self):
+        """Healer names are normalized (underscores to dashes)."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        context = {
+            "attempts": [
+                {"healer": "api-healer", "message": "Test"},
+            ]
+        }
+
+        # Both formats should work
+        assert_healer_attempt_logged(context, "api-healer")
+        assert_healer_attempt_logged(context, "api_healer")
+
+    def test_mock_with_healer_attempts_attr(self):
+        """Context with _healer_attempts attribute works."""
+        from tests.helpers import assert_healer_attempt_logged
+
+        class MockOrchestrator:
+            _healer_attempts = {
+                "path-healer": [{"message": "Path too long"}],
+            }
+
+        context = MockOrchestrator()
+        assert_healer_attempt_logged(context, "path-healer")
+
+
+class TestAssertHealingStrategyApplied:
+    """Tests for assert_healing_strategy_applied helper."""
+
+    def test_direct_strategy_object(self):
+        """Direct strategy object validation passes."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockStrategy:
+            mode = Mock(value="conservative")
+            max_attempts_per_stage = 3
+            heal_delay = 2.0
+
+        strategy = MockStrategy()
+        assert_healing_strategy_applied(strategy, "conservative")
+
+    def test_strategy_from_orchestrator(self):
+        """Strategy extracted from orchestrator passes."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockOrchestrator:
+            class MockStrategy:
+                mode = Mock(value="aggressive")
+                max_attempts_per_stage = 5
+                heal_delay = 1.0
+            strategy = MockStrategy()
+
+        orchestrator = MockOrchestrator()
+        assert_healing_strategy_applied(orchestrator, "aggressive")
+
+    def test_strategy_from_dict(self):
+        """Strategy extracted from dict passes."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        context = {
+            "strategy": {
+                "mode": "minimal",
+                "max_attempts_per_stage": 1,
+                "heal_delay": 0.5,
+            }
+        }
+
+        assert_healing_strategy_applied(context, "minimal")
+
+    def test_invalid_strategy_name(self):
+        """Invalid strategy name raises assertion."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockStrategy:
+            mode = Mock(value="conservative")
+
+        with pytest.raises(AssertionError, match="Invalid strategy"):
+            assert_healing_strategy_applied(MockStrategy(), "invalid_strategy")
+
+    def test_strategy_mismatch(self):
+        """Wrong strategy raises assertion."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockStrategy:
+            mode = Mock(value="conservative")
+            max_attempts_per_stage = 3  # Required for _extract_strategy
+
+        with pytest.raises(AssertionError, match="Expected strategy 'aggressive'"):
+            assert_healing_strategy_applied(MockStrategy(), "aggressive")
+
+    def test_check_max_attempts(self):
+        """Max attempts parameter check."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockStrategy:
+            mode = Mock(value="aggressive")
+            max_attempts_per_stage = 5
+            heal_delay = 1.0
+
+        # Should pass
+        assert_healing_strategy_applied(
+            MockStrategy(), "aggressive", check_max_attempts=5
+        )
+
+        # Should fail
+        with pytest.raises(AssertionError, match="max_attempts_per_stage is 5"):
+            assert_healing_strategy_applied(
+                MockStrategy(), "aggressive", check_max_attempts=3
+            )
+
+    def test_check_heal_delay(self):
+        """Heal delay parameter check."""
+        from tests.helpers import assert_healing_strategy_applied
+
+        class MockStrategy:
+            mode = Mock(value="conservative")
+            max_attempts_per_stage = 3
+            heal_delay = 2.0
+
+        # Should pass
+        assert_healing_strategy_applied(
+            MockStrategy(), "conservative", check_heal_delay=2.0
+        )
+
+        # Should fail
+        with pytest.raises(AssertionError, match="heal_delay is 2.0"):
+            assert_healing_strategy_applied(
+                MockStrategy(), "conservative", check_heal_delay=1.0
+            )
+
+
+class TestAssertRecoveryMetricsValid:
+    """Tests for assert_recovery_metrics_valid helper."""
+
+    def test_valid_metrics_dict(self):
+        """Valid metrics dict passes."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {
+            "total_heals": 3,
+            "successful_heals": 2,
+            "failed_heals": 1,
+            "heals_by_healer": {"api-healer": 2, "download-healer": 1},
+            "heals_by_stage": {"DOWNLOAD": 2, "MATCH": 1},
+        }
+
+        # Should not raise
+        assert_recovery_metrics_valid(metrics)
+
+    def test_expected_attempts(self):
+        """Expected attempts check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {"total_heals": 5, "successful_heals": 3, "failed_heals": 2}
+
+        assert_recovery_metrics_valid(metrics, expected_attempts=5)
+
+        with pytest.raises(AssertionError, match="Expected 10 heal attempts"):
+            assert_recovery_metrics_valid(metrics, expected_attempts=10)
+
+    def test_expected_success_true(self):
+        """Expected success=True check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {"total_heals": 2, "successful_heals": 1, "failed_heals": 1}
+        assert_recovery_metrics_valid(metrics, expected_success=True)
+
+        metrics_no_success = {"total_heals": 2, "successful_heals": 0, "failed_heals": 2}
+        with pytest.raises(AssertionError, match="no successful heals"):
+            assert_recovery_metrics_valid(metrics_no_success, expected_success=True)
+
+    def test_expected_success_false(self):
+        """Expected success=False check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {"total_heals": 2, "successful_heals": 0, "failed_heals": 2}
+        assert_recovery_metrics_valid(metrics, expected_success=False)
+
+        metrics_all_success = {"total_heals": 2, "successful_heals": 2, "failed_heals": 0}
+        with pytest.raises(AssertionError, match="no failed heals"):
+            assert_recovery_metrics_valid(metrics_all_success, expected_success=False)
+
+    def test_min_successful_heals(self):
+        """Minimum successful heals check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {"total_heals": 5, "successful_heals": 3, "failed_heals": 2}
+
+        assert_recovery_metrics_valid(metrics, min_successful_heals=3)
+
+        with pytest.raises(AssertionError, match="Expected at least 5 successful"):
+            assert_recovery_metrics_valid(metrics, min_successful_heals=5)
+
+    def test_max_failed_heals(self):
+        """Maximum failed heals check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {"total_heals": 5, "successful_heals": 3, "failed_heals": 2}
+
+        assert_recovery_metrics_valid(metrics, max_failed_heals=2)
+
+        with pytest.raises(AssertionError, match="Expected at most 1 failed"):
+            assert_recovery_metrics_valid(metrics, max_failed_heals=1)
+
+    def test_expected_healers_used(self):
+        """Expected healers used check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {
+            "total_heals": 3,
+            "successful_heals": 2,
+            "failed_heals": 1,
+            "heals_by_healer": {"api-healer": 2, "download-healer": 1},
+        }
+
+        assert_recovery_metrics_valid(
+            metrics, expected_healers_used=["api-healer", "download-healer"]
+        )
+
+        with pytest.raises(AssertionError, match="Expected healers not used"):
+            assert_recovery_metrics_valid(
+                metrics, expected_healers_used=["checkpoint-healer"]
+            )
+
+    def test_expected_stages_healed(self):
+        """Expected stages healed check."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        metrics = {
+            "total_heals": 3,
+            "successful_heals": 2,
+            "failed_heals": 1,
+            "heals_by_stage": {"DOWNLOAD": 2, "MATCH": 1},
+        }
+
+        assert_recovery_metrics_valid(
+            metrics, expected_stages_healed=["DOWNLOAD", "MATCH"]
+        )
+
+        with pytest.raises(AssertionError, match="Expected stages not healed"):
+            assert_recovery_metrics_valid(
+                metrics, expected_stages_healed=["OUTPUT"]
+            )
+
+    def test_consistency_check(self):
+        """Metrics consistency validation."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        # successful + failed exceeds total - should fail
+        metrics = {"total_heals": 2, "successful_heals": 2, "failed_heals": 2}
+        with pytest.raises(AssertionError, match="exceeds total_heals"):
+            assert_recovery_metrics_valid(metrics)
+
+    def test_negative_values_rejected(self):
+        """Negative metric values are rejected."""
+        from tests.helpers import assert_recovery_metrics_valid
+
+        with pytest.raises(AssertionError, match="cannot be negative"):
+            assert_recovery_metrics_valid({"total_heals": -1, "successful_heals": 0, "failed_heals": 0})
+
+
+class TestAssertHealerChainExecuted:
+    """Tests for assert_healer_chain_executed helper."""
+
+    def test_chain_with_all_healers(self):
+        """All expected healers executed passes."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {
+            "healers": {
+                "checkpoint-healer": [{"message": "Restoring"}],
+                "api-healer": [{"message": "Rate limit"}],
+                "download-healer": [{"message": "Retrying"}],
+            }
+        }
+
+        assert_healer_chain_executed(
+            context,
+            ["checkpoint-healer", "api-healer", "download-healer"],
+        )
+
+    def test_chain_missing_healer(self):
+        """Missing required healer raises assertion."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {
+            "healers": {
+                "api-healer": [{"message": "Rate limit"}],
+            }
+        }
+
+        with pytest.raises(AssertionError, match="Required healers not executed"):
+            assert_healer_chain_executed(
+                context,
+                ["checkpoint-healer", "api-healer"],
+            )
+
+    def test_chain_partial_match(self):
+        """Partial chain match with all_required=False."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {
+            "healers": {
+                "api-healer": [{"message": "Rate limit"}],
+            }
+        }
+
+        # Should pass - only api-healer needed
+        assert_healer_chain_executed(
+            context,
+            ["checkpoint-healer", "api-healer"],
+            all_required=False,
+        )
+
+    def test_chain_in_order(self):
+        """Chain order validation."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {
+            "attempts": [
+                {"healer": "checkpoint-healer", "message": "First"},
+                {"healer": "api-healer", "message": "Second"},
+                {"healer": "download-healer", "message": "Third"},
+            ]
+        }
+
+        # Correct order - should pass
+        assert_healer_chain_executed(
+            context,
+            ["checkpoint-healer", "api-healer"],
+            in_order=True,
+        )
+
+    def test_chain_wrong_order(self):
+        """Wrong chain order raises assertion."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {
+            "attempts": [
+                {"healer": "download-healer", "message": "First"},
+                {"healer": "api-healer", "message": "Second"},
+                {"healer": "checkpoint-healer", "message": "Third"},
+            ]
+        }
+
+        with pytest.raises(AssertionError, match="not executed in expected order"):
+            assert_healer_chain_executed(
+                context,
+                ["checkpoint-healer", "api-healer"],
+                in_order=True,
+            )
+
+    def test_empty_healers_list_rejected(self):
+        """Empty expected_healers raises assertion."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {"healers": {"api-healer": [{"message": "Test"}]}}
+
+        with pytest.raises(AssertionError, match="cannot be empty"):
+            assert_healer_chain_executed(context, [])
+
+    def test_no_healers_logged(self):
+        """No healers logged raises assertion."""
+        from tests.helpers import assert_healer_chain_executed
+
+        context = {"healers": {}, "attempts": []}
+
+        with pytest.raises(AssertionError, match="No healers logged"):
+            assert_healer_chain_executed(context, ["api-healer"])
+
+
+class TestHealerHelperConstants:
+    """Tests for healer helper constants."""
+
+    def test_valid_healers_constant(self):
+        """VALID_HEALERS constant has expected values."""
+        from tests.helpers import VALID_HEALERS
+
+        assert "checkpoint-healer" in VALID_HEALERS
+        assert "api-healer" in VALID_HEALERS
+        assert "download-healer" in VALID_HEALERS
+        assert "disk-healer" in VALID_HEALERS
+        assert "path-healer" in VALID_HEALERS
+        assert "otio-healer" in VALID_HEALERS
+        assert "llm-healer" in VALID_HEALERS
+
+    def test_valid_strategies_constant(self):
+        """VALID_STRATEGIES constant has expected values."""
+        from tests.helpers import VALID_STRATEGIES
+
+        assert "aggressive" in VALID_STRATEGIES
+        assert "conservative" in VALID_STRATEGIES
+        assert "interactive" in VALID_STRATEGIES
+        assert "minimal" in VALID_STRATEGIES

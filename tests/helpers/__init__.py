@@ -646,6 +646,483 @@ def assert_json_structure(
 
 
 # =============================================================================
+# Agent Healer Assertions
+# =============================================================================
+
+# Valid healer names
+VALID_HEALERS = [
+    "checkpoint-healer",
+    "api-healer",
+    "download-healer",
+    "disk-healer",
+    "path-healer",
+    "otio-healer",
+    "llm-healer",
+]
+
+# Valid healing strategies
+VALID_STRATEGIES = [
+    "aggressive",
+    "conservative",
+    "interactive",
+    "minimal",
+]
+
+
+def assert_healer_attempt_logged(
+    context: Any,
+    healer_name: str,
+    attempt_num: Optional[int] = None,
+    *,
+    expected_message: Optional[str] = None,
+) -> None:
+    """
+    Assert that a healer attempt was logged in the healing context.
+
+    Validates that a specific healer logged an attempt during the healing
+    process. Works with HealingOrchestrator contexts, mock loggers, or
+    log file data.
+
+    Args:
+        context: HealingOrchestrator, mock logger, or dict with logged attempts
+        healer_name: Name of the healer (e.g., "checkpoint-healer", "api-healer")
+        attempt_num: Specific attempt number to check (1-indexed, optional)
+        expected_message: Substring expected in the attempt message (optional)
+
+    Raises:
+        AssertionError: If healer attempt was not logged
+
+    Example:
+        >>> orchestrator.coordinate_heal(error, state, "MATCH", [])
+        >>> assert_healer_attempt_logged(orchestrator, "api-healer", 1)
+        >>> assert_healer_attempt_logged(orchestrator, "checkpoint-healer",
+        ...     expected_message="Attempting to restore")
+    """
+    # Normalize healer name
+    healer_name_normalized = healer_name.lower().replace("_", "-")
+
+    # Extract attempts from different context types
+    attempts = _extract_healer_attempts(context, healer_name_normalized)
+
+    # Check that healer has logged attempts
+    assert len(attempts) > 0, (
+        f"Healer '{healer_name}' did not log any attempts. "
+        f"Available healers: {_get_logged_healers(context)}"
+    )
+
+    # Check specific attempt number if provided
+    if attempt_num is not None:
+        assert attempt_num > 0, "attempt_num must be 1-indexed (>= 1)"
+        assert len(attempts) >= attempt_num, (
+            f"Healer '{healer_name}' only logged {len(attempts)} attempts, "
+            f"expected at least {attempt_num}"
+        )
+
+    # Check message content if provided
+    if expected_message is not None:
+        matching_attempts = [
+            a for a in attempts
+            if expected_message in str(_get_attempt_message(a))
+        ]
+        assert len(matching_attempts) > 0, (
+            f"No attempts from '{healer_name}' contain message: '{expected_message}'. "
+            f"Found messages: {[_get_attempt_message(a) for a in attempts[:3]]}"
+        )
+
+
+def assert_healing_strategy_applied(
+    context: Any,
+    strategy_name: str,
+    *,
+    check_max_attempts: Optional[int] = None,
+    check_heal_delay: Optional[float] = None,
+) -> None:
+    """
+    Assert that a specific healing strategy was applied.
+
+    Validates that the healing context used a specific strategy mode
+    (aggressive, conservative, interactive, or minimal) and optionally
+    checks strategy parameters.
+
+    Args:
+        context: HealingOrchestrator, HealingStrategy, or context dict
+        strategy_name: Expected strategy name ("aggressive", "conservative", etc.)
+        check_max_attempts: Verify max_attempts_per_stage value (optional)
+        check_heal_delay: Verify heal_delay value (optional)
+
+    Raises:
+        AssertionError: If strategy was not applied or parameters don't match
+
+    Example:
+        >>> runner = ResilientRunner(config, orchestrator)
+        >>> assert_healing_strategy_applied(orchestrator, "conservative")
+        >>> assert_healing_strategy_applied(orchestrator, "aggressive",
+        ...     check_max_attempts=5, check_heal_delay=1.0)
+    """
+    # Validate strategy name
+    strategy_name_lower = strategy_name.lower()
+    assert strategy_name_lower in VALID_STRATEGIES, (
+        f"Invalid strategy '{strategy_name}', must be one of: {VALID_STRATEGIES}"
+    )
+
+    # Extract strategy from context
+    strategy = _extract_strategy(context)
+    assert strategy is not None, (
+        "Could not extract healing strategy from context. "
+        "Expected HealingOrchestrator, HealingStrategy, or dict with 'strategy' key."
+    )
+
+    # Check strategy mode
+    actual_mode = _get_strategy_mode(strategy)
+    assert actual_mode.lower() == strategy_name_lower, (
+        f"Expected strategy '{strategy_name}', but '{actual_mode}' was applied"
+    )
+
+    # Check max_attempts_per_stage if provided
+    if check_max_attempts is not None:
+        actual_max = _get_strategy_attr(strategy, 'max_attempts_per_stage')
+        assert actual_max == check_max_attempts, (
+            f"Strategy max_attempts_per_stage is {actual_max}, expected {check_max_attempts}"
+        )
+
+    # Check heal_delay if provided
+    if check_heal_delay is not None:
+        actual_delay = _get_strategy_attr(strategy, 'heal_delay')
+        assert abs(actual_delay - check_heal_delay) < 0.01, (
+            f"Strategy heal_delay is {actual_delay}, expected {check_heal_delay}"
+        )
+
+
+def assert_recovery_metrics_valid(
+    metrics: Any,
+    *,
+    expected_attempts: Optional[int] = None,
+    expected_success: Optional[bool] = None,
+    min_successful_heals: Optional[int] = None,
+    max_failed_heals: Optional[int] = None,
+    expected_healers_used: Optional[List[str]] = None,
+    expected_stages_healed: Optional[List[str]] = None,
+) -> None:
+    """
+    Assert that recovery metrics are valid and match expectations.
+
+    Validates HealingMetrics from an orchestrator or runner, checking
+    heal counts, success rates, and optional specific expectations.
+
+    Args:
+        metrics: HealingMetrics object or dict with metric fields
+        expected_attempts: Total expected heal attempts (optional)
+        expected_success: Expected overall success (True/False, optional)
+        min_successful_heals: Minimum successful heals required (optional)
+        max_failed_heals: Maximum failed heals allowed (optional)
+        expected_healers_used: List of healer names that should have been used (optional)
+        expected_stages_healed: List of stage names that should have been healed (optional)
+
+    Raises:
+        AssertionError: If metrics are invalid or don't match expectations
+
+    Example:
+        >>> metrics = orchestrator.get_metrics()
+        >>> assert_recovery_metrics_valid(metrics, expected_attempts=3, expected_success=True)
+        >>> assert_recovery_metrics_valid(metrics, min_successful_heals=2, max_failed_heals=1)
+    """
+    # Extract metrics values
+    total_heals = _get_metric(metrics, 'total_heals', 0)
+    successful_heals = _get_metric(metrics, 'successful_heals', 0)
+    failed_heals = _get_metric(metrics, 'failed_heals', 0)
+    heals_by_healer = _get_metric(metrics, 'heals_by_healer', {})
+    heals_by_stage = _get_metric(metrics, 'heals_by_stage', {})
+
+    # Basic consistency check
+    assert total_heals >= 0, f"total_heals cannot be negative: {total_heals}"
+    assert successful_heals >= 0, f"successful_heals cannot be negative: {successful_heals}"
+    assert failed_heals >= 0, f"failed_heals cannot be negative: {failed_heals}"
+    assert successful_heals + failed_heals <= total_heals, (
+        f"successful_heals ({successful_heals}) + failed_heals ({failed_heals}) "
+        f"exceeds total_heals ({total_heals})"
+    )
+
+    # Check expected_attempts
+    if expected_attempts is not None:
+        assert total_heals == expected_attempts, (
+            f"Expected {expected_attempts} heal attempts, got {total_heals}"
+        )
+
+    # Check expected_success
+    if expected_success is not None:
+        if expected_success:
+            assert successful_heals > 0 or total_heals == 0, (
+                "Expected successful recovery but no successful heals recorded"
+            )
+        else:
+            assert failed_heals > 0, (
+                "Expected failed recovery but no failed heals recorded"
+            )
+
+    # Check min_successful_heals
+    if min_successful_heals is not None:
+        assert successful_heals >= min_successful_heals, (
+            f"Expected at least {min_successful_heals} successful heals, "
+            f"got {successful_heals}"
+        )
+
+    # Check max_failed_heals
+    if max_failed_heals is not None:
+        assert failed_heals <= max_failed_heals, (
+            f"Expected at most {max_failed_heals} failed heals, "
+            f"got {failed_heals}"
+        )
+
+    # Check expected_healers_used
+    if expected_healers_used is not None:
+        healers_used = set(heals_by_healer.keys())
+        expected_set = set(h.lower().replace("_", "-") for h in expected_healers_used)
+        normalized_used = set(h.lower().replace("_", "-") for h in healers_used)
+        missing = expected_set - normalized_used
+        assert not missing, (
+            f"Expected healers not used: {missing}. "
+            f"Healers that were used: {healers_used}"
+        )
+
+    # Check expected_stages_healed
+    if expected_stages_healed is not None:
+        stages_healed = set(heals_by_stage.keys())
+        expected_stages = set(s.upper() for s in expected_stages_healed)
+        normalized_healed = set(s.upper() for s in stages_healed)
+        missing = expected_stages - normalized_healed
+        assert not missing, (
+            f"Expected stages not healed: {missing}. "
+            f"Stages that were healed: {stages_healed}"
+        )
+
+
+def assert_healer_chain_executed(
+    context: Any,
+    expected_healers: List[str],
+    *,
+    in_order: bool = False,
+    all_required: bool = True,
+) -> None:
+    """
+    Assert that a chain of healers was executed during healing.
+
+    Validates that multiple healers were invoked during a healing attempt,
+    optionally checking execution order and completeness.
+
+    Args:
+        context: HealingOrchestrator, mock logger, or context dict
+        expected_healers: List of healer names expected to be invoked
+        in_order: Whether healers must have been invoked in specified order (default: False)
+        all_required: Whether all specified healers must have been invoked (default: True)
+
+    Raises:
+        AssertionError: If healer chain was not executed as expected
+
+    Example:
+        >>> # Test that fallback chain was triggered
+        >>> assert_healer_chain_executed(orchestrator,
+        ...     ["checkpoint-healer", "api-healer", "download-healer"])
+        >>> # Test strict execution order
+        >>> assert_healer_chain_executed(orchestrator,
+        ...     ["checkpoint-healer", "api-healer"], in_order=True)
+    """
+    assert len(expected_healers) > 0, "expected_healers list cannot be empty"
+
+    # Get logged healers from context
+    logged_healers = _get_logged_healers(context)
+
+    if not logged_healers:
+        raise AssertionError(
+            f"No healers logged any attempts. Expected: {expected_healers}"
+        )
+
+    # Normalize names
+    expected_normalized = [h.lower().replace("_", "-") for h in expected_healers]
+    logged_normalized = [h.lower().replace("_", "-") for h in logged_healers]
+
+    if all_required:
+        missing = [h for h in expected_normalized if h not in logged_normalized]
+        if missing:
+            raise AssertionError(
+                f"Required healers not executed: {missing}. "
+                f"Executed healers: {logged_healers}"
+            )
+
+    if in_order:
+        # Find positions of expected healers in logged order
+        positions = []
+        for healer in expected_normalized:
+            try:
+                pos = logged_normalized.index(healer)
+                positions.append(pos)
+            except ValueError:
+                if all_required:
+                    raise AssertionError(
+                        f"Healer '{healer}' not found in execution log"
+                    )
+
+        # Check positions are monotonically increasing
+        for i in range(1, len(positions)):
+            if positions[i] <= positions[i - 1]:
+                raise AssertionError(
+                    f"Healers not executed in expected order. "
+                    f"Expected: {expected_healers}. "
+                    f"Actual order: {logged_healers}"
+                )
+
+
+# =============================================================================
+# Internal Helper Functions for Healer Assertions
+# =============================================================================
+
+def _extract_healer_attempts(context: Any, healer_name: str) -> List[Any]:
+    """Extract attempt records for a specific healer from various context types."""
+    attempts = []
+
+    # HealingOrchestrator or similar with get_metrics()
+    if hasattr(context, 'get_metrics'):
+        metrics = context.get_metrics()
+        if hasattr(metrics, 'heals_by_healer') or isinstance(getattr(metrics, 'heals_by_healer', None), dict):
+            heals = getattr(metrics, 'heals_by_healer', {})
+            for name, count in heals.items():
+                if name.lower().replace("_", "-") == healer_name:
+                    attempts.extend([{"healer": name}] * count)
+
+    # Object with healing_log attribute (list of entries)
+    if hasattr(context, 'healing_log'):
+        log = context.healing_log
+        if isinstance(log, list):
+            for entry in log:
+                entry_healer = _get_entry_healer(entry)
+                if entry_healer and entry_healer.lower().replace("_", "-") == healer_name:
+                    attempts.append(entry)
+
+    # Object with _healer_attempts attribute (test mocks)
+    if hasattr(context, '_healer_attempts'):
+        healer_attempts = context._healer_attempts
+        if isinstance(healer_attempts, dict):
+            if healer_name in healer_attempts:
+                attempts.extend(healer_attempts[healer_name])
+
+    # Dict context with 'attempts' or 'healers' keys
+    if isinstance(context, dict):
+        if 'attempts' in context:
+            for attempt in context['attempts']:
+                entry_healer = _get_entry_healer(attempt)
+                if entry_healer and entry_healer.lower().replace("_", "-") == healer_name:
+                    attempts.append(attempt)
+        if 'healers' in context and healer_name in context['healers']:
+            attempts.extend(context['healers'][healer_name])
+
+    return attempts
+
+
+def _get_entry_healer(entry: Any) -> Optional[str]:
+    """Extract healer name from a log entry."""
+    if isinstance(entry, dict):
+        return entry.get('healer') or entry.get('healer_name') or entry.get('component')
+    if hasattr(entry, 'component'):
+        return entry.component
+    if hasattr(entry, 'healer'):
+        return entry.healer
+    return None
+
+
+def _get_attempt_message(attempt: Any) -> str:
+    """Extract message from an attempt record."""
+    if isinstance(attempt, dict):
+        return attempt.get('message', '') or attempt.get('error_message', '')
+    if hasattr(attempt, 'message'):
+        return attempt.message
+    if hasattr(attempt, 'error_message'):
+        return attempt.error_message
+    return str(attempt)
+
+
+def _get_logged_healers(context: Any) -> List[str]:
+    """Get list of all healers that logged attempts."""
+    healers = []
+
+    # HealingOrchestrator or similar with get_metrics()
+    if hasattr(context, 'get_metrics'):
+        metrics = context.get_metrics()
+        if hasattr(metrics, 'heals_by_healer'):
+            healers.extend(metrics.heals_by_healer.keys())
+
+    # Object with healing_log attribute
+    if hasattr(context, 'healing_log'):
+        log = context.healing_log
+        if isinstance(log, list):
+            for entry in log:
+                healer = _get_entry_healer(entry)
+                if healer and healer not in healers:
+                    healers.append(healer)
+
+    # Object with _healer_attempts attribute
+    if hasattr(context, '_healer_attempts'):
+        if isinstance(context._healer_attempts, dict):
+            for name, attempts in context._healer_attempts.items():
+                if attempts and name not in healers:
+                    healers.append(name)
+
+    # Dict context
+    if isinstance(context, dict):
+        if 'attempts' in context:
+            for attempt in context['attempts']:
+                healer = _get_entry_healer(attempt)
+                if healer and healer not in healers:
+                    healers.append(healer)
+        if 'healers' in context:
+            healers.extend(context['healers'].keys())
+
+    return healers
+
+
+def _extract_strategy(context: Any) -> Any:
+    """Extract HealingStrategy from various context types."""
+    # Direct HealingStrategy
+    if hasattr(context, 'mode') and hasattr(context, 'max_attempts_per_stage'):
+        return context
+
+    # HealingOrchestrator with strategy attribute
+    if hasattr(context, 'strategy'):
+        return context.strategy
+
+    # Dict with 'strategy' key
+    if isinstance(context, dict) and 'strategy' in context:
+        return context['strategy']
+
+    return None
+
+
+def _get_strategy_mode(strategy: Any) -> str:
+    """Get the mode name from a strategy object."""
+    if isinstance(strategy, dict):
+        mode = strategy.get('mode', '')
+        return mode.value if hasattr(mode, 'value') else str(mode)
+
+    if hasattr(strategy, 'mode'):
+        mode = strategy.mode
+        return mode.value if hasattr(mode, 'value') else str(mode)
+
+    return str(strategy)
+
+
+def _get_strategy_attr(strategy: Any, attr: str) -> Any:
+    """Get an attribute from a strategy object."""
+    if isinstance(strategy, dict):
+        return strategy.get(attr)
+    return getattr(strategy, attr, None)
+
+
+def _get_metric(metrics: Any, name: str, default: Any) -> Any:
+    """Get a metric value from metrics object or dict."""
+    if isinstance(metrics, dict):
+        return metrics.get(name, default)
+    return getattr(metrics, name, default)
+
+
+# =============================================================================
 # Public API
 # =============================================================================
 
@@ -655,10 +1132,17 @@ __all__ = [
     'assert_valid_match_result',
     'assert_checkpoint_consistent',
     'assert_config_valid',
+    # Agent healer assertion helpers
+    'assert_healer_attempt_logged',
+    'assert_healing_strategy_applied',
+    'assert_recovery_metrics_valid',
+    'assert_healer_chain_executed',
     # Utility assertions
     'assert_file_exists',
     'assert_dir_exists',
     'assert_json_structure',
     # Constants
     'VALID_STAGES',
+    'VALID_HEALERS',
+    'VALID_STRATEGIES',
 ]
