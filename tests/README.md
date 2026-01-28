@@ -853,3 +853,117 @@ integration: 400 tests
 2. **Mark fast tests gradually** - Don't add `@pytest.mark.fast` to everything at once
 3. **Verify with selective runs** - After marking, test with `pytest -m fast` to confirm
 4. **Update CI to use markers** - Once marked, update CI to run `-m fast` on PR updates
+
+## Integration Test Runner
+
+The `scripts/run_integration_tests.py` script provides isolated execution for integration tests with automatic cleanup and timeout protection.
+
+### Quick Usage
+
+```bash
+# Run all integration tests (default: 5 min timeout per test)
+python scripts/run_integration_tests.py
+
+# Verbose output with test progress
+python scripts/run_integration_tests.py -v
+
+# Parallel execution (requires pytest-xdist)
+python scripts/run_integration_tests.py --parallel 4
+
+# Custom timeout (10 minutes per test)
+python scripts/run_integration_tests.py --timeout 600
+
+# Keep test artifacts for debugging
+python scripts/run_integration_tests.py --keep-artifacts
+
+# Filter by pattern
+python scripts/run_integration_tests.py -k "test_caption"
+
+# Export JSON report
+python scripts/run_integration_tests.py --json-report results.json
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Isolated environment** | Each run creates a fresh temp directory with cache, output, downloads subdirs |
+| **Automatic cleanup** | Temp directories are removed after tests complete (unless `--keep-artifacts`) |
+| **Timeout protection** | Default 5 minutes per test, prevents hanging tests from blocking CI |
+| **Parallel execution** | Use `--parallel N` to run tests concurrently (requires pytest-xdist) |
+| **JSON reports** | Export results with `--json-report` for CI integration |
+| **Pattern matching** | Filter tests with `-k` pattern (same as pytest) |
+| **Marker selection** | Default: `integration`, `requires_network`, `requires_api` |
+
+### Environment Variables
+
+The runner sets these environment variables for test isolation:
+
+| Variable | Description |
+|----------|-------------|
+| `INTEGRATION_TEST_TEMP_DIR` | Root temp directory for the test run |
+| `INTEGRATION_TEST_CACHE_DIR` | Isolated cache directory |
+| `INTEGRATION_TEST_OUTPUT_DIR` | Isolated output directory |
+| `INTEGRATION_TEST_DOWNLOADS_DIR` | Isolated downloads directory |
+| `INTEGRATION_TEST_NO_CACHE` | Set to "1" to disable caching |
+
+### Using in Tests
+
+Access the isolated directories in your integration tests:
+
+```python
+import os
+import pytest
+
+@pytest.mark.integration
+def test_with_isolation():
+    temp_dir = os.environ.get("INTEGRATION_TEST_TEMP_DIR")
+    if temp_dir:
+        # Use isolated directories
+        cache_dir = os.environ.get("INTEGRATION_TEST_CACHE_DIR")
+        output_dir = os.environ.get("INTEGRATION_TEST_OUTPUT_DIR")
+    else:
+        # Fallback for direct pytest runs
+        pass
+```
+
+### CI Integration
+
+Add to GitHub Actions workflow:
+
+```yaml
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run integration tests
+        run: |
+          python scripts/run_integration_tests.py \
+            --parallel 2 \
+            --timeout 300 \
+            --json-report integration-results.json
+        continue-on-error: true
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results
+          path: integration-results.json
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Tests timeout | Increase `--timeout` or check for hanging network calls |
+| Parallel fails | Install pytest-xdist: `pip install pytest-xdist` |
+| Artifacts not found | Use `--keep-artifacts` and check temp directory |
+| Permission errors | Ensure temp directory is writable |
