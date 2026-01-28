@@ -6692,3 +6692,33 @@ def test_eta_accuracy_batch_50_videos(self):
   - test_log_self_heal_records_action_as_error_message (additional)
   - test_log_self_heal_different_healers (additional)
 - Test results: 41 passed in 1.33s
+
+## Iteration US-004 (Sprint 20) - Add HealingLogger report generation and finalize tests
+- Added 17 new tests covering generate_report(), finalize(), and print_box() methods
+- TestGenerateReportCounts (3 tests):
+  - AC1: test_generate_report_returns_correct_success_failed_counts (success/failed/total counts)
+  - test_generate_report_counts_watcher_classifications (watcher entry counting)
+  - test_generate_report_counts_llm_healer_invocations (llm-healer attempt counting)
+- TestGenerateReportGrouping (3 tests):
+  - AC2: test_generate_report_groups_entries_by_stage (stage grouping with healer activity)
+  - test_generate_report_excludes_self_heal_and_preflight_from_stages (SELF_HEAL/PREFLIGHT exclusion)
+  - test_generate_report_only_shows_stages_with_healer_activity (no listing for watcher-only stages)
+- TestGenerateReportEmptyEntries (2 tests):
+  - AC3: test_generate_report_returns_no_activity_when_entries_empty (empty entries case)
+  - test_generate_report_includes_session_id (session ID in report)
+- TestFinalize (4 tests):
+  - AC4: test_finalize_writes_final_json_with_session_summary (session_id, total_entries, entries)
+  - test_finalize_json_contains_all_entry_data (complete entry serialization)
+  - test_finalize_with_empty_entries_writes_empty_entries_array
+  - test_finalize_calls_generate_report (verify report generation called)
+- TestPrintBox (5 tests):
+  - AC5: test_print_box_handles_minimal_format (indented lines only)
+  - AC5: test_print_box_handles_simple_format (=== Title === header)
+  - AC5: test_print_box_handles_box_format (Unicode box characters)
+  - test_print_box_truncates_long_lines (line truncation with ...)
+  - test_print_box_custom_width (respects width parameter)
+- All 5 acceptance criteria verified
+- Files modified: tests/test_agents/test_healing_logger.py (+515 lines)
+- Test results: 58 HealingLogger tests passed in 1.38s
+- Commit: 0a9dea8
+
