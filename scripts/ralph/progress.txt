@@ -6572,3 +6572,11 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: All factories have usage examples and parameter docs in docstrings
 - Bonus: Added match_factory for individual Match objects
 - Test results: 14 tests in test_fixture_factories.py passed in 0.43s
+
+## Iteration US-007 (Sprint 19) - Add test markers and collection optimization
+- Pre-implemented: pytest.ini already has marker definitions
+- AC1: 177 tests already marked with @pytest.mark.fast
+- AC2: 1 test marked with @pytest.mark.requires_api
+- AC3: 12 tests marked with @pytest.mark.requires_network
+- AC4: pytest.ini has all markers defined (fast, slow, integration, stress, simulation, requires_api, requires_network)
+- AC5: Added tests/README.md with comprehensive marker documentation and usage examples
