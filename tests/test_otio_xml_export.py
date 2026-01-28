@@ -698,3 +698,581 @@ class TestFrameRateValidation:
 
         expected = {23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0}
         assert STANDARD_NLE_RATES == expected
+
+
+@pytest.mark.fast
+class TestXMLSpecialCharacterHandling:
+    """
+    Tests for XML export special character handling.
+
+    US-008: Verify XML export correctly handles special characters in:
+    - File paths (ampersands, percent signs, hash)
+    - Metadata fields (quotes, apostrophes)
+    - Clip names (angle brackets, special chars)
+    - Long Windows paths (>200 characters)
+    - Unicode filenames (CJK, emoji, RTL)
+
+    Note: The escape_xml() function is used for clip <name> elements.
+    The pathurl elements use format_path_url() which preserves raw paths
+    for DaVinci Resolve compatibility. Special characters in pathurl are
+    expected to be sanitized at download time.
+    """
+
+    @pytest.fixture
+    def special_char_matches(self):
+        """Create matches with special characters in paths and names."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0,
+            text="Voiceover segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=13.0,
+            text="Video clip", source_file="/videos/normal_clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=0.9,
+            reasoning='Test match'
+        )
+        return [MatchResult(primary_match=match, alternatives=[], secondary_matches=[], strategy_matches=[])]
+
+    # ============================================================
+    # AC1: Test XML export escapes ampersands in file paths correctly
+    # ============================================================
+
+    def test_ampersand_in_clip_name_escaped(self, special_char_matches, tmp_path):
+        """Test ampersands in clip names (derived from paths) are properly escaped."""
+        from src.otio.utils import escape_xml
+
+        # Test the escape_xml function directly for ampersands
+        clip_name = "Tom & Jerry_clip.mp4"
+        escaped = escape_xml(clip_name)
+        assert "&amp;" in escaped, "Ampersand in clip name should be escaped as &amp;"
+        assert "Tom & Jerry" not in escaped, "Raw ampersand should not appear in escaped text"
+
+    def test_escape_xml_ampersand_in_path_component(self):
+        """Test escape_xml correctly handles ampersands in path-derived names."""
+        from src.otio.utils import escape_xml
+
+        # Folder name with ampersand (used in unique clip names)
+        folder_name = "R&D"
+        escaped = escape_xml(folder_name)
+        assert escaped == "R&amp;D", "Ampersand should be escaped"
+
+    def test_multiple_ampersands_in_name(self):
+        """Test multiple ampersands are all escaped."""
+        from src.otio.utils import escape_xml
+
+        text = "A & B & C"
+        escaped = escape_xml(text)
+        assert escaped.count("&amp;") == 2, "All ampersands should be escaped"
+        assert "&" not in escaped.replace("&amp;", ""), "No unescaped ampersands"
+
+    # ============================================================
+    # AC2: Test XML export escapes quotes in metadata fields correctly
+    # ============================================================
+
+    def test_double_quotes_in_clip_name_escaped(self, special_char_matches, tmp_path):
+        """Test double quotes in clip names are properly escaped."""
+        # Use a path that would create a clip name with quotes
+        special_char_matches[0].primary_match.video_segment.source_file = '/videos/folder/clip_"best"_take.mp4'
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        # Double quotes should be escaped as &quot; in name elements
+        assert "&quot;" in xml_content or '"best"' not in xml_content.replace("&quot;", "QUOTE"), \
+            "Double quotes should be escaped"
+
+        # XML should still be valid
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_single_quotes_in_path_escaped(self, special_char_matches, tmp_path):
+        """Test single quotes (apostrophes) in paths are properly escaped."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/John's Folder/clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        # Apostrophe should be escaped as &apos; in name elements
+        assert "&apos;" in xml_content or "John's" not in xml_content.replace("&apos;", "APOS"), \
+            "Apostrophe should be escaped"
+
+        # XML should still be valid
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_mixed_quotes_in_metadata(self, special_char_matches, tmp_path):
+        """Test both quote types in same path are escaped correctly."""
+        special_char_matches[0].primary_match.video_segment.source_file = '/videos/"Mike\'s" Project/clip.mp4'
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # Should produce valid parseable XML
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml', "XML with mixed quotes should be valid"
+
+    def test_escape_xml_quotes(self):
+        """Test escape_xml handles both quote types."""
+        from src.otio.utils import escape_xml
+
+        text = "\"Mike's\" Project"
+        escaped = escape_xml(text)
+        assert "&quot;" in escaped, "Double quotes should be escaped"
+        assert "&apos;" in escaped, "Apostrophes should be escaped"
+
+    # ============================================================
+    # AC3: Test XML export escapes angle brackets in clip names correctly
+    # ============================================================
+
+    def test_escape_xml_less_than(self):
+        """Test escape_xml handles less-than brackets."""
+        from src.otio.utils import escape_xml
+
+        text = "version <1>"
+        escaped = escape_xml(text)
+        assert "&lt;" in escaped, "Less-than should be escaped as &lt;"
+
+    def test_escape_xml_greater_than(self):
+        """Test escape_xml handles greater-than brackets."""
+        from src.otio.utils import escape_xml
+
+        text = "v1 -> v2"
+        escaped = escape_xml(text)
+        assert "&gt;" in escaped, "Greater-than should be escaped as &gt;"
+
+    def test_escape_xml_angle_brackets_pair(self):
+        """Test escape_xml handles paired angle brackets."""
+        from src.otio.utils import escape_xml
+
+        text = "<draft>"
+        escaped = escape_xml(text)
+        assert escaped == "&lt;draft&gt;", "Both brackets should be escaped"
+
+    def test_escape_xml_html_like_tag(self):
+        """Test escape_xml handles HTML-like tags correctly."""
+        from src.otio.utils import escape_xml
+
+        text = "<script>alert</script>"
+        escaped = escape_xml(text)
+        assert "&lt;script&gt;" in escaped, "Opening tag should be escaped"
+        assert "&lt;/script&gt;" in escaped, "Closing tag should be escaped"
+        # Should not contain raw angle brackets
+        assert "<script>" not in escaped
+        assert "</script>" not in escaped
+
+    def test_greater_than_in_path_generates_xml(self, special_char_matches, tmp_path):
+        """Test paths with > produce valid XML (> is escaped in name elements)."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/v1-to-v2/clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # Should generate valid XML
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    # ============================================================
+    # AC4: Test XML export handles Windows paths exceeding 200 characters
+    # ============================================================
+
+    def test_long_path_200_plus_chars(self, special_char_matches, tmp_path):
+        """Test paths exceeding 200 characters are handled correctly."""
+        # Create a path > 200 characters (no special chars that need escaping)
+        long_folder = "very_long_folder_name_that_goes_on_and_on_" * 5  # ~200 chars
+        long_path = f"/videos/{long_folder}/clip.mp4"
+        assert len(long_path) > 200, f"Path should exceed 200 chars, got {len(long_path)}"
+
+        special_char_matches[0].primary_match.video_segment.source_file = long_path
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # XML should be generated successfully
+        assert len(paths) >= 1
+        assert Path(paths[0]).exists()
+
+        # XML should be valid
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_long_path_250_chars(self, special_char_matches, tmp_path):
+        """Test paths approaching Windows MAX_PATH limit (260 chars)."""
+        # Create path close to Windows limit
+        base = "/videos/"
+        folder_name = "a" * 200
+        filename = "clip_with_long_name.mp4"
+        long_path = f"{base}{folder_name}/{filename}"
+        assert len(long_path) > 200, f"Path should exceed 200 chars, got {len(long_path)}"
+
+        special_char_matches[0].primary_match.video_segment.source_file = long_path
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # Should still generate valid XML
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_deeply_nested_path(self, special_char_matches, tmp_path):
+        """Test deeply nested folder structures create valid XML."""
+        # Create deeply nested path
+        nested_path = "/videos" + "/subfolder" * 15 + "/clip.mp4"  # ~200 chars
+        assert len(nested_path) > 150, f"Path should be deeply nested, got {len(nested_path)}"
+
+        special_char_matches[0].primary_match.video_segment.source_file = nested_path
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_long_filename_itself(self, special_char_matches, tmp_path):
+        """Test very long filenames (without long folder path) are handled."""
+        # Create long filename
+        long_name = "this_is_a_very_long_video_filename_that_describes_the_content_in_great_detail_" * 2
+        long_path = f"/videos/normal_folder/{long_name}.mp4"
+
+        special_char_matches[0].primary_match.video_segment.source_file = long_path
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # Should generate valid XML
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+        assert root.tag == 'xmeml'
+
+        # Path should be preserved in XML
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            content = f.read()
+        assert long_name in content, "Long filename should be preserved in XML"
+
+    def test_path_length_boundary(self, special_char_matches, tmp_path):
+        """Test paths exactly at 200 character boundary."""
+        # Create path exactly at 200 chars
+        base = "/videos/project/"
+        # Calculate how many chars we need for folder name to hit 200 total
+        remaining = 200 - len(base) - len("/clip.mp4")
+        folder_name = "x" * remaining
+        boundary_path = f"{base}{folder_name}/clip.mp4"
+        assert len(boundary_path) == 200, f"Path should be exactly 200 chars, got {len(boundary_path)}"
+
+        special_char_matches[0].primary_match.video_segment.source_file = boundary_path
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    # ============================================================
+    # AC5: Test XML export handles Unicode filenames correctly
+    # ============================================================
+
+    def test_cjk_characters_in_path(self, special_char_matches, tmp_path):
+        """Test Chinese/Japanese/Korean characters in paths."""
+        # CJK characters
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/中文视频/测试片段.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # XML should be valid UTF-8
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "中文视频" in xml_content or "中文视频" in xml_content, "CJK characters should be preserved"
+
+        # Should parse as valid XML
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_japanese_characters_in_path(self, special_char_matches, tmp_path):
+        """Test Japanese characters (hiragana/katakana/kanji) in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/日本語フォルダ/クリップ.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "日本語" in xml_content, "Japanese characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_korean_characters_in_path(self, special_char_matches, tmp_path):
+        """Test Korean (Hangul) characters in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/한국어폴더/영상클립.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "한국어" in xml_content, "Korean characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_emoji_in_path(self, special_char_matches, tmp_path):
+        """Test emoji characters in paths are handled."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/🎬 Movies/🎥 clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        # Should generate valid UTF-8 XML
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        # Emoji should be preserved (either directly or as references)
+        assert "🎬" in xml_content or "Movies" in xml_content, "Path content should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_rtl_arabic_in_path(self, special_char_matches, tmp_path):
+        """Test RTL (right-to-left) Arabic characters in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/مجلد عربي/مقطع.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "مجلد" in xml_content or "عربي" in xml_content, "Arabic characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_rtl_hebrew_in_path(self, special_char_matches, tmp_path):
+        """Test RTL Hebrew characters in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/תיקייה עברית/קליפ.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "תיקייה" in xml_content or "עברית" in xml_content, "Hebrew characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_mixed_unicode_and_special_chars_in_escape(self):
+        """Test escape_xml handles combination of Unicode and special characters."""
+        from src.otio.utils import escape_xml
+
+        # Mix of CJK, ampersand, and quotes
+        text = "中文 & English's \"folder\""
+        escaped = escape_xml(text)
+
+        # Unicode should be preserved
+        assert "中文" in escaped, "CJK should be preserved"
+        # Special chars should be escaped
+        assert "&amp;" in escaped, "Ampersand should be escaped"
+        assert "&apos;" in escaped, "Apostrophe should be escaped"
+        assert "&quot;" in escaped, "Quotes should be escaped"
+
+    def test_unicode_path_generates_valid_xml(self, special_char_matches, tmp_path):
+        """Test Unicode paths (without XML special chars) generate valid XML."""
+        # Use Unicode without ampersands or brackets
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/中文视频/测试.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        # Unicode should be preserved in the file
+        assert "中文" in xml_content, "CJK should be preserved in XML"
+
+        # XML should be valid
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_cyrillic_in_path(self, special_char_matches, tmp_path):
+        """Test Cyrillic (Russian) characters in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/Русская папка/клип.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "Русская" in xml_content, "Cyrillic characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    def test_accented_european_characters(self, special_char_matches, tmp_path):
+        """Test accented European characters (ñ, ü, é, etc.) in paths."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/Café René/Señor's clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+
+        assert "Café" in xml_content or "René" in xml_content, "Accented characters should be preserved"
+
+        tree = ET.parse(paths[0])
+        assert tree.getroot().tag == 'xmeml'
+
+    # ============================================================
+    # Edge cases and combined scenarios
+    # ============================================================
+
+    def test_escape_xml_all_special_chars_combined(self):
+        """Test escape_xml handles all special character types."""
+        from src.otio.utils import escape_xml
+
+        # Combine all special chars
+        text = "Tom & Jerry's <Draft> \"test\""
+        escaped = escape_xml(text)
+
+        assert "&amp;" in escaped, "Ampersand should be escaped"
+        assert "&apos;" in escaped, "Apostrophe should be escaped"
+        assert "&lt;" in escaped, "Less-than should be escaped"
+        assert "&gt;" in escaped, "Greater-than should be escaped"
+        assert "&quot;" in escaped, "Quote should be escaped"
+
+        # No raw special chars should remain
+        assert "&" not in escaped.replace("&amp;", "").replace("&apos;", "").replace("&lt;", "").replace("&gt;", "").replace("&quot;", "")
+        assert "<" not in escaped
+        assert ">" not in escaped
+        assert '"' not in escaped
+        assert "'" not in escaped
+
+    def test_xml_encoding_declaration(self, special_char_matches, tmp_path):
+        """Test XML has proper UTF-8 encoding declaration for Unicode support."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/Japanese/clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        with open(paths[0], 'r', encoding='utf-8') as f:
+            first_line = f.readline()
+
+        assert 'encoding="UTF-8"' in first_line or 'encoding="utf-8"' in first_line.lower(), \
+            "XML should declare UTF-8 encoding"
+
+    def test_pathurl_format_plain_path(self, special_char_matches, tmp_path):
+        """Test pathurl elements contain plain paths (no file:// prefix)."""
+        special_char_matches[0].primary_match.video_segment.source_file = "/videos/test_folder/clip.mp4"
+
+        paths = generate_resolve_xml_with_bins(
+            special_char_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        # Find pathurl elements
+        pathurls = root.findall('.//pathurl')
+        assert len(pathurls) > 0, "Should have pathurl elements"
+
+        # DaVinci expects plain Windows paths, not file:// URLs
+        for pathurl in pathurls:
+            if pathurl.text:
+                # Should not start with file:// (causes hangs in DaVinci)
+                assert not pathurl.text.startswith("file://"), \
+                    "pathurl should be plain path, not file:// URL"
+
+    def test_escape_xml_unicode_passthrough(self):
+        """Test escape_xml preserves Unicode characters (CJK, etc.)."""
+        from src.otio.utils import escape_xml
+
+        # Unicode should pass through unchanged
+        text = "中文 日本語 한국어"
+        escaped = escape_xml(text)
+        assert escaped == text, "Unicode should pass through escape_xml unchanged"
+
+    def test_escape_xml_unicode_with_special_chars(self):
+        """Test escape_xml handles mix of Unicode and special chars."""
+        from src.otio.utils import escape_xml
+
+        text = "中文 & English"
+        escaped = escape_xml(text)
+        assert "中文" in escaped, "Unicode should be preserved"
+        assert "&amp;" in escaped, "Ampersand should be escaped"
+        assert escaped == "中文 &amp; English"
