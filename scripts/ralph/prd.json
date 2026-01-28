@@ -64,8 +64,8 @@
             "id": "US-005",
             "title": "Add fallback pattern_route edge case tests",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 16 new tests in TestPatternRouteEdgeCasesUS005 class: 3 for mixed HTTP status codes (AC2), 5 for rate limit patterns across services (AC3), 4 for multilingual errors (AC4), 4 for priority ordering (AC5). AC1 covered by existing tests. 67 total tests pass.",
             "acceptanceCriteria": [
                 "Test pattern_route() avoids word boundary false positives ('Singapore' not matching 'gap')",
                 "Test pattern_route() handles mixed HTTP status codes in error messages",

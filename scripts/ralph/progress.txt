@@ -1,4 +1,17 @@
 
+## Iteration US-005 (Sprint 22) - Add fallback pattern_route edge case tests
+- Added 16 new tests in tests/test_agents/test_fallback.py
+- New test class created: TestPatternRouteEdgeCasesUS005
+- All 5 acceptance criteria verified:
+  - AC1: Word boundary false positives (already covered by existing tests: test_pattern_route_no_false_positive_singapore_gap, test_pattern_route_no_false_positive_author_auth)
+  - AC2: Mixed HTTP status codes (3 tests): test_pattern_route_mixed_http_status_codes_in_message, test_pattern_route_status_code_in_filename, test_pattern_route_status_code_200_no_false_positive
+  - AC3: Rate limit patterns across services (5 tests): YouTube, Pexels, Gemini, Anthropic, generic "too many requests"
+  - AC4: Multilingual error messages (4 tests): Chinese, Japanese, Arabic return UNKNOWN; mixed English with recognizable keywords still matches
+  - AC5: Priority ordering (4 tests): rate limit over timeout, API over download, disk specific, first matching pattern wins
+- Files modified: tests/test_agents/test_fallback.py (+154 lines)
+- Test results: 67 tests passed in 0.55s (51 pre-existing + 16 new)
+- Commit: 729c6ba
+
 ## Iteration US-003 (Sprint 22) - Add chapter detection ChunkingStrategy tests
 - Added 13 new tests in tests/test_chapter_detection/test_chunking.py
 - New test classes created:
