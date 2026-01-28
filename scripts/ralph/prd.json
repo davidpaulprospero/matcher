@@ -68,8 +68,8 @@
             "id": "US-005",
             "title": "Mark network-dependent tests with flaky decorator",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added @pytest.mark.flaky(reruns=2, reruns_delay=1.0) to 9 test classes (22 tests total): TestCaptionFetcherRealVideos in test_caption_fetcher.py, 8 classes in test_caption_integration.py, and test_voyage_embedding_speed in benchmarks. test_media_sources_*.py and test_downloader/* use mocks (no real network calls). Fixed duplicate @pytest.mark.integration in TestCaptionIntegrationFetch. README already documented. Filter verified: pytest -m 'not flaky' excludes all marked tests.",
             "acceptanceCriteria": [
                 "Add @pytest.mark.flaky(reruns=2) to tests in test_caption_fetcher.py",
                 "Add @pytest.mark.flaky to tests in test_media_sources_*.py files",
