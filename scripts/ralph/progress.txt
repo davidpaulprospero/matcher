@@ -1,4 +1,19 @@
 
+## Iteration US-005 (Sprint 14) - Add escalation timeline checkpoint persistence tests
+- Added `_escalation_timeline` serialization to `to_dict()` under 'timeline' key (deep-copied list of event dicts per keyword)
+- Added `_tier_outcomes` serialization to `to_dict()` under 'tier_outcomes' key (deep-copied nested success/attempt counts)
+- Added restoration of both fields in `from_dict()` with backward compatibility (missing keys default to empty)
+- Handles JSON round-trip where int dict keys become strings (tier_val converted via `int()`)
+- Created `tests/test_escalation_checkpoint_persistence.py` with 22 tests across 5 classes:
+  - AC1: TestToDictIncludesTimeline — 5 tests: key presence, empty, after escalation, multi-event, multi-keyword
+  - AC2: TestFromDictRestoresTimeline — 4 tests: 5-event round-trip, multi-keyword, empty, missing key backward compat
+  - AC3: TestToDictIncludesTierOutcomes — 4 tests: key presence, empty, after recording, matches get_tier_effectiveness()
+  - AC4: TestFromDictRestoresTierOutcomes — 5 tests: round-trip, precise rates, empty, missing key, JSON string key conversion
+  - AC5: TestRoundtripHotKeywords — 4 tests: hot survives round-trip, stale not hot, mixed hot/cold, combined timeline+outcomes+hot
+- Files modified: `src/downloader/escalation_manager.py`
+- Files created: `tests/test_escalation_checkpoint_persistence.py`
+- Test results: 22 passed (new), 164 passed (existing escalation tests), 0 failures
+
 ## Iteration US-004 (Sprint 14) - Add RateLimitBudget thread safety tests
 - Created `tests/test_budget_thread_safety.py` with 14 tests across 5 classes
 - AC1: TestConcurrentRecordRotation — 10 threads each call record_rotation(), verify exact count (10 and 1000), plus keyword tracking
