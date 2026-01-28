@@ -676,6 +676,7 @@ Location: `scripts/ralph/` - Autonomous development assistant.
 |--------|---------|
 | `claude.ps1` | Claude subprocess execution, result resolution |
 | `display.ps1` | Banners, iteration display |
+| `healing.ps1` | Tiered health checks, sprint freeze/resume, Claude healing sessions |
 | `loops.ps1` | Standard, TrueAuto, RalphsChoice, RalphsChoiceAuto loops |
 | `metrics.ps1` | CSV recording, health comparison, fast-fail detection |
 | `prompts.ps1` | Prompt building for PRD generation and story work |
@@ -699,6 +700,35 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Tag 'Unit' -Output Detailed
 ```
 
 See `scripts/ralph/README.md` for full documentation.
+
+### Ralph Loop Self-Healing
+
+After every iteration, Ralph runs tiered health checks on the codebase. If errors are found, the sprint is frozen and a Claude healing session attempts automatic fixes.
+
+**Health check tiers:**
+
+| Tier | Checks | Cost |
+|------|--------|------|
+| T1 (every iteration) | `py_compile` critical files, git merge conflicts, config validation | <2s |
+| T2 (every iteration) | `pytest --collect-only` (import/syntax errors) | 5-15s |
+| T3 (cadence-based) | Full `pytest` run (every Nth iteration, configurable) | 30-120s |
+
+**Config** (`ralph-config.json` `selfHealing` section):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Master switch |
+| `maxAttempts` | `3` | Claude fix attempts per healing session |
+| `runAfterSuccess` | `true` | Check after successful iterations |
+| `runAfterFailure` | `true` | Check after failed iterations |
+| `healingTimeout` | `300` | Seconds per healing Claude session |
+| `fullRunCadence` | `3` | Run T3 every Nth iteration |
+| `pytestArgs` | `tests/ --tb=short -q --no-header` | Args for T3 pytest |
+| `criticalFiles` | `[main.py, src/__init__.py, ...]` | Files checked by T1 py_compile |
+
+**Files:** `healing_log.jsonl` (permanent audit trail), `healing_state.json` (sprint freeze state)
+
+**Hook location:** `Resolve-ClaudeResult` in `claude.ps1` calls `Invoke-PostIterationHealing` before returning.
 
 ## Known Issues & Solutions
 
@@ -759,11 +789,11 @@ Documented shortcomings encountered and how they were resolved:
 
 | Date | Changes |
 |------|---------|
+| 2026-01-28 | Feat: Ralph Loop self-healing — tiered health checks (T1/T2/T3), healing.ps1 module, sprint freeze/resume, JSONL audit log, sprint report integration |
 | 2026-01-28 | Fix: Ralph's Choice loops now update queue.json on sprint completion; metrics.csv encoding fix |
 | 2026-01-28 | CLAUDE.md: Added Ralph's Choice modes, lib/ module structure to Ralph Loop section |
 | 2026-01-27 | Fix: SABR anti-stall strategy — resume-on-retry, stall detector, socket-timeout 10, max_retries 6, removed --no-continue/--quiet/--no-warnings/--concurrent-fragments |
 | 2026-01-27 | Fix: charmap encoding crash — added `encoding='utf-8', errors='replace'` to 15 subprocess call sites + info.json reading |
 | 2026-01-27 | Fix: Added `--ignore-config` to all 13 yt-dlp call sites to prevent user config conflicts |
-| 2026-01-27 | CLAUDE.md: Removed 10 phantom CLI flags, added 8 real undocumented ones |
 
 *Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
