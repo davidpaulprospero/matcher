@@ -120,8 +120,8 @@
             "id": "US-009",
             "title": "Add config section validation tests",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "56 tests added in tests/test_config_section_validation.py. AC1: 6 tests for HealingConfig __post_init__ dict conversion (logging, watcher, llm_healer dicts). AC2: 7 tests for MatchingConfig strategy/enum validation (provider values, hard_filter_level, chapter detection strategy). AC3: 4 tests for MediaConfig provider validation (VisionConfig, SceneDetectionConfig, EmbeddingConfig providers). AC4: 7 tests for LLMConfig provider/API key validation (loads from env, validates required keys). AC5: 32 tests for default values across 16 config classes (LoggingConfig, CacheConfig, GlobalCacheConfig, PipelineConfig, APIKeysConfig, HealingConfig, WatcherConfig, LLMHealerConfig, MatchingConfig, VisionConfig, SceneDetectionConfig, AudioAnalysisConfig, LLMConfig, NegativeMatchingConfig, ChapterDetectionConfig, LocationMatchingConfig). All 56 tests pass in 0.54s.",
             "acceptanceCriteria": [
                 "Test InfrastructureConfig __post_init__ converts nested dicts to dataclasses",
                 "Test MatchingConfig validates strategy enum values",
