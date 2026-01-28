@@ -78,8 +78,13 @@ function Start-InterviewQueueLoop {
             if ($status.complete) {
                 Write-Host "  Sprint complete for $areaId!" -ForegroundColor Green
                 $sprintComplete = $true
-                Save-SprintArchive -Reason "complete"
-                Update-QueueProgress -AreaId $areaId
+                try {
+                    Save-SprintArchive -Reason "complete"
+                    Update-QueueProgress -AreaId $areaId
+                }
+                catch {
+                    Write-Host "  Warning: Error during sprint archive: $_" -ForegroundColor Yellow
+                }
                 $completedAreas += $area
 
                 # Check for graceful stop before moving to next focus area
@@ -200,21 +205,19 @@ function Start-TrueAutoLoop {
             Write-Host ""
             Write-Host "  Sprint complete!" -ForegroundColor Green
 
-            # Archive the completed sprint
-            Save-SprintArchive -Reason "complete"
-
-            # Check for graceful stop BEFORE generating new sprint
-            if (Test-GracefulStopRequested) {
-                Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
-                Clear-GracefulStopSignal
-                break
-            }
-
-            Write-Host "  TrueAuto will generate new stories..." -ForegroundColor Magenta
-
-            # Score, select focus area, and generate new sprint PRD
-            # Wrapped in try-catch to prevent silent crash (see session 2026-01-27_231506)
+            # Entire sprint transition wrapped in try-catch to prevent silent exits
             try {
+                # Archive the completed sprint
+                Save-SprintArchive -Reason "complete"
+
+                # Check for graceful stop BEFORE generating new sprint
+                if (Test-GracefulStopRequested) {
+                    Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                    Clear-GracefulStopSignal
+                    break
+                }
+
+                Write-Host "  TrueAuto will generate new stories..." -ForegroundColor Magenta
                 # Use -FocusArea parameter if provided, otherwise use Ralph's Choice scoring
                 if ($FocusArea) {
                     $focusTarget = $FocusArea
@@ -465,30 +468,31 @@ function Start-RalphsChoiceLoop {
 
         if ($status.complete -or $sprintCount -eq 0) {
             if ($sprintCount -gt 0) {
-                Write-Host ""
-                Write-Host "=====================================================" -ForegroundColor Green
-                Write-Host "   SPRINT $sprintCount COMPLETE!" -ForegroundColor Green
-                Write-Host "=====================================================" -ForegroundColor Green
-                Write-Host ""
-
-                # Archive the completed sprint
-                Save-SprintArchive -Reason "complete"
-
-                # Update queue if completed area is tracked
-                if ($status.focusArea) {
-                    Update-QueueProgress -AreaId $status.focusArea -Silent
-                }
-
-                # Check for graceful stop
-                if (Test-GracefulStopRequested) {
-                    Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
-                    Clear-GracefulStopSignal
-                    break
-                }
-
-                # Score, select next area, and generate new sprint PRD
-                # Wrapped in try-catch to prevent silent crash (see session 2026-01-27_231506)
+                # Entire sprint transition wrapped in try-catch to prevent silent exits
                 try {
+                    Write-Host ""
+                    Write-Host "=====================================================" -ForegroundColor Green
+                    Write-Host "   SPRINT $sprintCount COMPLETE!" -ForegroundColor Green
+                    Write-Host "=====================================================" -ForegroundColor Green
+                    Write-Host ""
+
+                    # Archive the completed sprint
+                    Save-SprintArchive -Reason "complete"
+
+                    # Update queue if completed area is tracked
+                    if ($status.focusArea) {
+                        Update-QueueProgress -AreaId $status.focusArea -Silent
+                    }
+
+                    # Check for graceful stop
+                    if (Test-GracefulStopRequested) {
+                        Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                        Clear-GracefulStopSignal
+                        break
+                    }
+
+                    Write-Host "  Scoring focus areas for next sprint..." -ForegroundColor DarkGray
+
                     # Get stay/switch decision
                     $decision = Get-StayOrSwitchDecision -CurrentArea $status.focusArea
                     $scores = $decision.scores
@@ -626,33 +630,35 @@ function Start-RalphsChoiceAutoLoop {
         $status = Get-SprintStatus
 
         if ($status.complete -or $sprintCount -eq 0) {
-            if ($sprintCount -gt 0) {
-                Write-Host ""
-                Write-Host "=====================================================" -ForegroundColor Green
-                Write-Host "   SPRINT $sprintCount COMPLETE!" -ForegroundColor Green
-                Write-Host "=====================================================" -ForegroundColor Green
-                Write-Host ""
-
-                # Archive the completed sprint
-                Save-SprintArchive -Reason "complete"
-
-                # Update queue if completed area is tracked
-                if ($status.focusArea) {
-                    Update-QueueProgress -AreaId $status.focusArea -Silent
-                }
-
-                # Check for graceful stop
-                if (Test-GracefulStopRequested) {
-                    Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
-                    Clear-GracefulStopSignal
-                    break
-                }
-            }
-
-            # Score, select next area, and generate new sprint PRD
-            # Wrapped in try-catch: session 2026-01-27_231506 crashed silently here
-            # after Save-SprintArchive (no session_end event, no error output)
+            # Entire sprint transition wrapped in try-catch to prevent silent exits
+            # (session 2026-01-27_231506 crashed silently after Save-SprintArchive)
             try {
+                if ($sprintCount -gt 0) {
+                    Write-Host ""
+                    Write-Host "=====================================================" -ForegroundColor Green
+                    Write-Host "   SPRINT $sprintCount COMPLETE!" -ForegroundColor Green
+                    Write-Host "=====================================================" -ForegroundColor Green
+                    Write-Host ""
+
+                    # Archive the completed sprint
+                    Save-SprintArchive -Reason "complete"
+
+                    # Update queue if completed area is tracked
+                    if ($status.focusArea) {
+                        Update-QueueProgress -AreaId $status.focusArea -Silent
+                    }
+
+                    # Check for graceful stop
+                    if (Test-GracefulStopRequested) {
+                        Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                        Clear-GracefulStopSignal
+                        break
+                    }
+
+                    Write-Host "  Scoring focus areas for next sprint..." -ForegroundColor DarkGray
+                }
+
+                # Score, select next area, and generate new sprint PRD
                 $scores = Get-AllFocusAreaScores
                 if (-not $scores -or $scores.Count -eq 0) {
                     Write-Host "  Error: No focus area scores returned - cannot select next area" -ForegroundColor Red
