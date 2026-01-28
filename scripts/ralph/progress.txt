@@ -6374,3 +6374,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: TestIsProviderAvailableUS008 (6 tests) - gemini/anthropic with/without keys, ollama always True, unknown provider behavior
 - Files created: tests/test_api_healer_us008.py
 - Test results: 28 passed (new), 92 passed (all healer tests), 0 failures, 0 regressions
+
+## Iteration - [US-009] Add LLM client _normalize_confidence and _is_permanent_error unit tests
+- Created test_llm_client_us009.py with 52 tests across 5 test classes
+- AC1: TestNormalizeConfidenceStringLabelsUS009 (9 tests) - string label mapping including case-insensitive and whitespace handling
+- AC2: TestNormalizeConfidenceNumericUS009 (13 tests) - numeric string parsing, float/int passthrough, None/invalid/non-string types
+- AC3: TestIsPermanentErrorTrueUS009 (11 tests) - permanent error patterns with case-insensitive matching
+- AC4: TestIsPermanentErrorFalseUS009 (9 tests) - transient errors correctly return False
+- AC5: TestNormalizeConfidenceEdgeCasesUS009 (10 tests) - edge cases for float range, bool handling, large ints
+- All 52 tests pass in 0.46s, 0 regressions on existing LLM tests
+- Files created: tests/test_llm_client_us009.py
