@@ -64,8 +64,8 @@
             "id": "US-005",
             "title": "Add checkpoint corruption recovery tests",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_checkpoint_corruption_recovery.py with 27 tests across 5 classes: TestBackupFallbackOnCorruption (4 tests: corrupted/empty/truncated primary restored from backup, primary file restored after fallback), TestBothCorrupted (5 tests: both corrupted/empty/too-small/arrays returns None, no backup returns None), TestSaveCreatesBackup (4 tests: backup contains pre-save state, backup updates on each save, no backup on first save, save_intermediate creates backup), TestIsStaleThresholds (8 tests: 25h stale, 23h fresh, 24h+1m boundary, 23h59m boundary, custom 1h threshold, created_at fallback, no timestamp), TestNonSerializableStageData (6 tests: datetime/Path/set/bytes/mixed types all handled via default=str, serializable data preserved alongside).",
             "acceptanceCriteria": [
                 "Test load() falls back to backup when primary checkpoint.json is corrupted JSON — verify data loaded from checkpoint.backup.json matches saved state",
                 "Test load() returns None when both checkpoint.json and backup are corrupted — verify no exception raised, returns None gracefully",

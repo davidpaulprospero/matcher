@@ -1,4 +1,15 @@
 
+## Iteration US-005 (Sprint 15) - Add checkpoint corruption recovery tests
+- Created tests/test_checkpoint_corruption_recovery.py with 27 tests across 5 classes
+- TestBackupFallbackOnCorruption (4 tests): corrupted/empty/truncated primary falls back to backup, verifies loaded data matches backup state, primary file restored after fallback
+- TestBothCorrupted (5 tests): both files corrupted/empty/too-small/arrays returns None gracefully, no backup returns None
+- TestSaveCreatesBackup (4 tests): backup contains pre-save state (ANALYZE before DOWNLOAD), backup updates on each successive save, no backup on first save, save_intermediate also creates backup
+- TestIsStaleThresholds (8 tests): 25-hour-old stale with 24h threshold, 23-hour-old not stale, 24h+1m boundary stale, 23h59m boundary not stale, custom 1-hour threshold both ways, created_at fallback, no timestamp stale
+- TestNonSerializableStageData (6 tests): datetime/Path/set/bytes/mixed types handled via default=str without crash, serializable data preserved alongside non-serializable
+- No source code changes needed (pure test-only story)
+- Files created: tests/test_checkpoint_corruption_recovery.py
+- Test results: 27 new tests pass in 0.53s, 162 total checkpoint tests pass, 0 regressions
+
 ## Iteration US-004 (Sprint 15) - Add CLI newproject Google Doc parsing tests
 - Created tests/test_cli_newproject.py with 25 tests across 5 classes
 - TestExtractDocId (7 tests): standard /edit URL, ?usp=sharing variant, invalid/empty/Drive URLs, long doc ID, URL with fragment
