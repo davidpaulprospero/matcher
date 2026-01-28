@@ -6214,3 +6214,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - TestMatchBoundaryConfidence (7 tests): confidence=0.0 stored, confidence=1.0 stored, 0.0 not falsy, 1.0 not rounded, asdict preserves exact values, near-boundary float precision, small epsilon
 - Files modified: tests/test_state_dataclasses.py
 - Test results: 71 passed in 0.61s, 0 regressions
+
+## Iteration 11 - [US-010] Add SavedKeywords preset management tests
+- Pre-implemented: All 5 acceptance criteria already covered by existing tests
+- test_checkpoint_unit.py::TestSavedKeywordsDataclass (5 tests): minimal fields, all fields, to_dict, from_dict, round-trip
+- test_checkpoint_coverage.py::TestSavedKeywordsDataClass (2 tests): to_dict, from_dict filters unknown fields
+- test_checkpoint_coverage.py::TestKeywordManager (19 tests): init, load new/old format, error handling, save_keywords (manual/auto-name/voiceover/error), get_preset (by name/not found/latest), get_latest, list_presets (sorted newest first), delete (exists/not found), has_presets, get_summary (empty/with presets)
+- Criteria mapping:
+  1. from_dict ignores unknown keys → test_from_dict_filters_unknown_fields
+  2. to_dict round-trip → test_round_trip_serialization
+  3. save_keywords writes file → test_save_keywords (checks keywords_path.exists())
+  4. get_preset returns None → test_get_preset_not_found
+  5. list_presets sorted → test_list_presets (newest first verified)
+- Files: No changes needed (pre-existing coverage)
+- Test results: 26 passed (5 + 21), 0 failures
