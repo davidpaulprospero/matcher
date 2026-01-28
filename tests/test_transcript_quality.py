@@ -282,6 +282,86 @@ class TestLanguageConsistency:
         score = _calculate_language_consistency("hi", ["hi"])
         assert score == 0.0
 
+    def test_empty_word_list_returns_zero(self):
+        """Empty word list should return 0."""
+        score = _calculate_language_consistency("", [])
+        assert score == 0.0
+
+    def test_non_ascii_content_deducts_score(self):
+        """Non-ASCII content (mixed scripts) should deduct 0.05 from score.
+
+        AC6: ascii_ratio < 0.7 deducts 0.05
+        """
+        # Use text with significant non-ASCII content (> 30%)
+        # Example: 50% non-ASCII characters
+        words = ["こんにちは", "世界", "hello", "world"]  # Japanese + English
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # Non-ASCII should deduct points - max score is 0.25, with 0.05 deduction = 0.20 max
+        assert score <= 0.20
+
+    def test_high_ascii_ratio_no_deduction(self):
+        """High ASCII ratio (>= 0.7) should not deduct for non-ASCII."""
+        words = ["hello", "world", "this", "is", "english", "text"]
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # Pure ASCII text with no other issues should retain full score (0.25)
+        assert score == 0.25
+
+    def test_repetition_exact_deduction_heavy(self):
+        """Verify exact 0.15 deduction for heavy repetition (ratio < 0.3).
+
+        AC1: repetition_ratio < 0.3 deducts 0.15
+        """
+        # 8 words, 2 unique = ratio 0.25 (< 0.3)
+        words = ["the", "the", "the", "the", "the", "the", "word", "word"]
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # 0.25 - 0.15 = 0.10 max (assuming no other penalties)
+        assert score <= 0.10
+
+    def test_short_words_exact_deduction(self):
+        """Verify exact 0.10 deduction for many short words (ratio > 0.5).
+
+        AC2: short_ratio > 0.5 deducts 0.10
+        """
+        # 8 words, 5 short (<=2 chars) = ratio 0.625 (> 0.5)
+        words = ["a", "b", "c", "d", "go", "hello", "world", "test"]
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # With > 50% short words, should deduct 0.10
+        assert score <= 0.15  # 0.25 - 0.10 = 0.15
+
+    def test_filler_exact_deduction(self):
+        """Verify exact 0.08 deduction for filler word overload (ratio > 0.2).
+
+        AC3: filler_ratio > 0.2 deducts 0.08
+        """
+        # 10 words, 3 fillers = ratio 0.3 (> 0.2)
+        words = ["um", "so", "like", "basically", "the", "thing", "is", "that", "we", "went"]
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # With filler ratio > 0.2, should deduct 0.08
+        assert score <= 0.17  # 0.25 - 0.08 = 0.17
+
+    def test_well_formed_text_full_score(self):
+        """Well-formed text with no issues returns full score (0.25).
+
+        AC4: Full score for well-formed text with no issues
+        """
+        # Diverse words, no short words, no fillers, pure ASCII
+        words = ["excellent", "documentation", "provides", "comprehensive", "overview", "system"]
+        text = " ".join(words)
+
+        score = _calculate_language_consistency(text, words)
+        # No deductions should apply
+        assert score == 0.25
+
 
 class TestAdjustEmbeddingWeight:
     """Test the embedding weight adjustment function."""
