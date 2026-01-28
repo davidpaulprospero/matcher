@@ -110,8 +110,8 @@
             "id": "US-008",
             "title": "Add normalize_confidence_by_pool size-based normalization tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: tests/test_pool_normalization.py has 34 tests covering all 6 AC. AC1: test_small_pool_with_clear_winner_extra_boost verifies +0.05 for small pool (<10) with clear winner (margin >= 0.1). AC2: test_large_pool_with_tight_margin_extra_penalty verifies -0.05 for large pool (>100) with tight margin (<0.05). AC3: TestMediumPoolNormalization + TestNormalizationFormula verify inverse sqrt(pool_size/50) formula. AC4: test_disabled_returns_original_confidence verifies 'pool_normalization_disabled'. AC5: test_empty_pool_returns_original_confidence + test_negative_pool_returns_original_confidence verify 'empty_pool'. AC6: test_confidence_capped_at_one + test_confidence_capped_at_zero verify [0.0, 1.0] clamping. All 34 tests pass in 0.44s.",
             "acceptanceCriteria": [
                 "Test normalize_confidence_by_pool() boosts confidence for small pools (<10) with clear winner (margin >= 0.1) — verify +0.05 adjustment",
                 "Test normalize_confidence_by_pool() reduces confidence for large pools (>100) with tight margins (<0.05) — verify -0.05 adjustment",

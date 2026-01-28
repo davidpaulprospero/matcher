@@ -6478,3 +6478,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: TestReasonStrings tests (test_smooth/abrupt/neutral_reason_includes_similarity) — verifies 'sim=X.XXX' format in reason
 - Test results: 34 passed in 0.45s
 
+
+## Iteration US-008 (Sprint 18) - Add normalize_confidence_by_pool size-based normalization tests
+- Pre-implemented: tests/test_pool_normalization.py contains 34 comprehensive tests
+- AC1: test_small_pool_with_clear_winner_extra_boost — verifies +0.05 adjustment for small pool (<10) with clear winner (margin >= 0.1), reason contains 'clear_winner' and '+0.05'
+- AC2: test_large_pool_with_tight_margin_extra_penalty — verifies -0.05 adjustment for large pool (>100) with tight margin (<0.05), reason contains 'tight_margin' and '-0.05'
+- AC3: TestMediumPoolNormalization + TestNormalizationFormula — verifies inverse sqrt(pool_size/50) formula for medium pools (10-100)
+- AC4: test_disabled_returns_original_confidence — verifies (confidence, 'pool_normalization_disabled') when feature disabled
+- AC5: test_empty_pool_returns_original_confidence + test_negative_pool_returns_original_confidence — verifies (confidence, 'empty_pool') when pool_size <= 0
+- AC6: test_confidence_capped_at_one + test_confidence_capped_at_zero — verifies result clamped to [0.0, 1.0] range
+- Files already exist: tests/test_pool_normalization.py (34 tests across 8 test classes)
+- Test results: 34 passed in 0.44s
