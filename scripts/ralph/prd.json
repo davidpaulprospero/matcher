@@ -78,7 +78,8 @@
             "id": "US-006",
             "title": "Add parallel download escalation coordination tests",
             "priority": 6,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_parallel_download_escalation.py with 17 tests across 5 classes: TestConcurrentKeywordIndependentTiers (3 tests: keyword A Tier 2 vs B Tier 1, 10 keywords concurrent independence, full escalation no leak), TestConcurrentRecordFailure (3 tests: 10 threads same keyword exact count, 100 iterations accurate, total_403s across keywords), TestPerKeywordLockIsolation (4 tests: concurrent different-keyword escalation, interleaved failure/success isolation, 20 keywords no deadlock, lock creation thread safety), TestSharedBudgetDepletion (3 tests: keyword A exhausts budget blocks B, concurrent exact limit, budget exhaustion forces FULL_BYPASS skip), TestConcurrentGetEscalationArgs (4 tests: concurrent reads valid tier, read during escalation consistent, different keywords consistent tiers, 50-thread stress no partial state). All 17 tests pass, all 176 related escalation tests pass.",
             "acceptanceCriteria": [
                 "Test two concurrent keywords sharing EscalationManager — keyword A escalates to Tier 2 while B stays at Tier 1, verify independent tier states",
                 "Test concurrent record_failure() calls for same keyword — verify consecutive_failures count is accurate (thread-safe increment)",

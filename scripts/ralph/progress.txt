@@ -1,4 +1,14 @@
 
+## Iteration US-006 (Sprint 14) - Add parallel download escalation coordination tests
+- Created tests/test_parallel_download_escalation.py with 17 tests across 5 classes
+- AC1: TestConcurrentKeywordIndependentTiers — 3 tests verifying keyword A escalates to Tier 2 while B stays Tier 1, 10 keywords concurrent independence, full escalation no leak
+- AC2: TestConcurrentRecordFailure — 3 tests verifying thread-safe consecutive_failures counting (10 threads x1, 10 threads x10, total_403s across keywords)
+- AC3: TestPerKeywordLockIsolation — 4 tests verifying per-keyword lock creation, concurrent escalation, interleaved failure/success isolation, 20 keywords no deadlock
+- AC4: TestSharedBudgetDepletion — 3 tests verifying shared budget consumption (keyword A exhausts budget blocking B, exact limit enforcement, budget exhaustion forces FULL_BYPASS skip)
+- AC5: TestConcurrentGetEscalationArgs — 4 tests verifying consistent tier-appropriate args under concurrent read (valid tier args, read during escalation, different keywords consistent, 50-thread stress test)
+- All 17 new tests pass, all 176 related escalation tests pass with zero regressions
+- Files modified: tests/test_parallel_download_escalation.py (new), scripts/ralph/prd.json
+
 ## Iteration US-005 (Sprint 14) - Add escalation timeline checkpoint persistence tests
 - Added `_escalation_timeline` serialization to `to_dict()` under 'timeline' key (deep-copied list of event dicts per keyword)
 - Added `_tier_outcomes` serialization to `to_dict()` under 'tier_outcomes' key (deep-copied nested success/attempt counts)
