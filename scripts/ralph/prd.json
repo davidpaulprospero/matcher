@@ -120,8 +120,8 @@
                             "id":  "US-009",
                             "title":  "Add rate limit window estimation edge case tests",
                             "priority":  9,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Added 24 tests in 4 test classes to tests/test_rate_limit_window_estimation.py: TestSparseTimingDataUS009 (5 tests, AC2), TestSessionCountPersistenceUS009 (5 tests, AC3), TestPerKeywordBreakdownAggregationUS009 (6 tests, AC4), TestOverlappingFailureWindowsUS009 (8 tests, AC5). AC1 was already covered by existing TestEstimatedRateLimitWindowNone. Total 45 window estimation tests pass in 0.47s, 276 rate limit tests pass overall.",
                             "acceptanceCriteria":  [
                                                        "Test window estimation with fewer than 3 failure/recovery pairs returns None",
                                                        "Test median gap calculation handles sparse timing data correctly",
