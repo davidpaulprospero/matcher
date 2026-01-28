@@ -7540,3 +7540,40 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: scripts/categorize_tests.py (428 lines)
 - Files modified: tests/README.md (+100 lines)
 - Commit: dec2556
+
+## Iteration - [US-010] Add coverage report per-module breakdown script
+- Created scripts/coverage_by_module.py (380+ lines) for per-module coverage analysis
+- Parses coverage.xml to extract per-package coverage statistics
+- Aggregates coverage by top-level module (e.g., matching, agents, stages)
+
+**Script Features:**
+- Critical module detection: matching, agents, compilation, stages
+- 85% target threshold with warning for modules below target
+- 80% critical threshold for critical modules
+- Text output with module table and warnings section
+- JSON output (--json) for CI integration with summary statistics
+- Verbose mode (--verbose) shows all modules, not just critical ones
+- Baseline comparison (--compare-baseline) detects regressions/improvements
+- Save baseline (--save-baseline) creates baseline JSON for future comparison
+- CI exit codes: --fail-on-regression, --fail-under for automation
+
+**tests/README.md Updates (~100 lines):**
+- Added "Per-Module Coverage Breakdown" section
+- Quick usage examples for all modes
+- Sample report output with module table
+- Critical modules table with targets
+- JSON output format documentation
+- GitHub Actions workflow example
+- Baseline update workflow documentation
+
+**Acceptance Criteria Verification:**
+- AC1: scripts/coverage_by_module.py created with XML parsing
+- AC2: Reports matching, agents, compilation, stages as critical modules
+- AC3: Highlights modules below 85% with [WARN] status and CRITICAL/WARNING messages
+- AC4: --json output includes modules, critical_modules, warnings, summary
+- AC5: --compare-baseline mode with configurable --regression-threshold
+- AC6: tests/README.md updated with comprehensive coverage section
+
+- Files created: scripts/coverage_by_module.py (380 lines)
+- Files modified: tests/README.md (+100 lines)
+- Script verified: syntax check, --help, basic report, JSON output, baseline save/compare

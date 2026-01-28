@@ -143,8 +143,8 @@
             "id": "US-010",
             "title": "Add coverage report per-module breakdown script",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created scripts/coverage_by_module.py (380+ lines) with: per-module coverage parsing from coverage.xml, critical module highlighting (matching, agents, compilation, stages), 85% target + 80% minimum thresholds, text and JSON output modes, --verbose flag for all modules, --compare-baseline for regression detection with configurable threshold, --save-baseline for creating baselines, --fail-on-regression and --fail-under for CI exit codes. Updated tests/README.md with comprehensive Per-Module Coverage Breakdown section including quick usage, report output example, critical modules table, JSON format docs, CI integration workflow, and baseline update instructions.",
             "acceptanceCriteria": [
                 "Create scripts/coverage_by_module.py to generate per-module coverage breakdown",
                 "Report coverage for critical modules: matching, agents, compilation, stages",
