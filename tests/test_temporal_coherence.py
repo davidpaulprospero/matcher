@@ -318,6 +318,15 @@ class TestIsJarringContextSwitch:
 
         assert result is False
 
+    def test_empty_adjacent_topics_not_jarring(self, mock_segment_factory):
+        """Empty adjacent topics should not be considered jarring (AC4)."""
+        current = mock_segment_factory(topics=["cooking", "food"])
+        adjacent = mock_segment_factory(topics=[])
+
+        result = _is_jarring_context_switch(current, adjacent)
+
+        assert result is False
+
     def test_case_insensitive_comparison(self, mock_segment_factory):
         """Topic comparison should be case-insensitive."""
         current = mock_segment_factory(topics=["Cooking", "FOOD"])
