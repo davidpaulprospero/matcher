@@ -53,8 +53,8 @@
             "id": "US-004",
             "title": "Expand parametrized tests for healer scenarios",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created test_parametrized_healers.py with 159 new parametrized test cases (far exceeding the 20 minimum). Coverage includes: (1) AC1: Error type variations across all 5 healer classes - APIHealer (18 cases), CheckpointHealer (12 cases), DownloadHealer (17 cases), DiskHealer (14 cases), PathHealer (12 cases); (2) AC2: Healing strategy matrix - factory values, rollback settings, auto_fix_preflight, heal_delay for aggressive/conservative/interactive/minimal; (3) AC3: Retry count boundaries with max_attempts 1,2,3,5,10 and total heal limits; (4) AC4: Healer selection based on error patterns including orchestrator integration. Additional test classes for HealerResultVariations, MetricsRecording, BackoffBehavior, ConfigModifications. All 717 tests in test_agents/ pass.",
             "acceptanceCriteria": [
                 "Add @pytest.mark.parametrize to test_agents/ for error type variations",
                 "Add parametrized tests for healing strategy matrix (aggressive, conservative, interactive, minimal)",

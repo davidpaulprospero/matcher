@@ -1,4 +1,30 @@
 
+## Iteration US-004 (Sprint 25) - Expand parametrized tests for healer scenarios
+- Created tests/test_agents/test_parametrized_healers.py with 159 new parametrized test cases
+- Coverage far exceeds the 20 minimum requirement (7.95x the target)
+- All 6 acceptance criteria verified and passing
+- Test classes created:
+  - TestParametrizedAPIHealerErrors (18 cases): rate limit, timeout, auth errors
+  - TestParametrizedCheckpointHealerErrors (12 cases): JSON decode, corrupt, hash mismatch
+  - TestParametrizedDownloadHealerErrors (17 cases): yt-dlp, YouTube, format, network errors
+  - TestParametrizedDiskHealerErrors (14 cases): disk full, permission, storage errors
+  - TestParametrizedPathHealerErrors (12 cases): path length, unicode, invalid chars
+  - TestParametrizedHealingStrategies (16 cases): factory values, rollback, preflight, delays
+  - TestParametrizedOrchestratorWithStrategies (8 cases): strategy initialization and healer selection
+  - TestParametrizedRetryBoundaries (8 cases): max_attempts 1,2,3,5,10 with runner
+  - TestParametrizedTotalHealLimits (8 cases): max_total_heals and metrics recording
+  - TestParametrizedHealerSelection (12 cases): orchestrator selects correct healer per error
+  - TestParametrizedHealerPriority (3 cases): priority order respected
+  - TestParametrizedMultiHealerScenarios (5 cases): skip_healers exclusion
+  - TestParametrizedExceptionTypes (5 cases): exception class matching
+  - TestParametrizedHealerResultVariations (5 cases): action implies retry logic
+  - TestParametrizedMetricsRecording (6 cases): healer/stage metrics
+  - TestParametrizedBackoffBehavior (6 cases): initial/max backoff, retry scaling
+  - TestParametrizedConfigModifications (6 cases): timeout/socket_timeout increases
+- Files modified: tests/test_agents/test_parametrized_healers.py (+614 lines)
+- Test results: 717 tests passed in test_agents/ (159 new)
+- Commit: 50295cb
+
 ## Iteration US-006 (Sprint 22) - Add LLM provider validation and hallucination detection tests
 - Verified 145 tests across 4 test files covering all 5 acceptance criteria
 - All tests passing (114 in reasoning/sampling/explanation + 31 in CoT)
