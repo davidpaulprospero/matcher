@@ -23,8 +23,8 @@
             "id": "US-002",
             "title": "Add CaptionStage core execution and skip logic tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: 27 tests across 6 US-002 test classes (TestCaptionStageCanSkipUS002, TestGetVideoIdsUS002, TestExtractVideoIdUS002, TestLoadExistingCaptionsUS002, TestValidateLanguageConfigUS002, TestPopulateTextMetadataUS002) cover all 6 acceptance criteria. All pass in 0.67s.",
             "acceptanceCriteria": [
                 "Test CaptionStage.can_skip() returns True when caption_first.enabled is False — returns False when caption_first is enabled and video IDs exist in state",
                 "Test CaptionStage._get_video_ids() extracts video IDs from both downloaded_videos and downloaded_audio lists — verify deduplication when same video appears in both",
