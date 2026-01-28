@@ -7313,3 +7313,23 @@ def test_eta_accuracy_batch_50_videos(self):
   - LLM: LLMConfig (2)
 - Files created: tests/test_config_section_validation.py (628 lines)
 - Test results: 56 tests passed in 0.54s
+
+
+## Iteration US-010 (Sprint 23) - Add benchmark revival and fixture adoption tests
+- AC1-3: Archived 3 broken benchmark files from benchmarks_broken/ to benchmarks_archived/
+  - test_keyword_extraction_performance.py: Uses non-existent TFIDFKeywordExtractor, EntityExtractor, KeywordRemixer
+  - test_matching_performance.py: Uses non-existent EmbeddingMatcher, old TieredMatcher.match_all() API
+  - test_otio_performance.py: Uses old create_timeline() signature, non-existent PrimaryTrackBuilder._create_clip()
+  - Updated README.md with archival explanation and future reference for proper API usage
+- AC4: Verified 15 test files use factory fixtures (exceeds minimum of 10)
+  - Fixtures from conftest.py: srt_segment_factory, config_factory, pipeline_state_factory, match_result_factory, match_factory
+  - Fixtures from fixtures/__init__.py: create_mock_config (14 files), create_mock_state, create_test_checkpoint, etc.
+- AC5: Added scripts/verify_fixture_adoption.py
+  - Tracks 12 factory fixtures from conftest.py and fixtures/__init__.py
+  - Reports per-fixture usage count and per-file usage details
+  - Exit code 0 if minimum adoption met (10 files), 1 otherwise
+  - Can be integrated into CI workflow
+- Files created: scripts/verify_fixture_adoption.py
+- Files renamed: tests/benchmarks_broken/ -> tests/benchmarks_archived/
+- All 37 fixture factory tests pass in 0.44s
+- Commit: 540d519
