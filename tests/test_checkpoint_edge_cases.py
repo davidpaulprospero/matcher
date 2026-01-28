@@ -17,9 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.checkpoint import CheckpointManager, CheckpointData
 
 # Only import numpy if available for optional tests
