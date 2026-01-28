@@ -6457,3 +6457,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: test_score_capped_at_maximum, test_score_cap_with_excessive_input — verifies score capped at 0.35 maximum
 - Files modified: tests/test_transcript_quality.py
 - Test results: 36 passed in 0.48s, 0 regressions
+
+## Iteration US-006 (Sprint 18) - Add adjust_embedding_weight_for_transcript_quality tier-based adjustment tests
+- Pre-implemented: TestAdjustEmbeddingWeight class in tests/test_transcript_quality.py
+- AC1: test_high_quality_no_reduction — verifies (base_weight, 'high_quality_transcript') when quality_tier='high'
+- AC2: test_medium_quality_reduces_weight_by_10_percent — verifies 0.4 becomes 0.36 for medium tier
+- AC3: test_low_quality_reduces_weight_by_20_percent — verifies 0.4 becomes 0.32 for low tier
+- AC4: test_disabled_returns_unchanged — verifies (base_weight, 'quality_adjustment_disabled') when disabled
+- AC5: test_custom_reduction_factor — verifies non-default low_quality_reduction parameter respected
+- Files already exist: tests/test_transcript_quality.py (TestAdjustEmbeddingWeight class lines 366-430)
+- Test results: 6 passed in 0.44s, 43 total in test_transcript_quality.py
+
