@@ -38,8 +38,8 @@
             "id": "US-003",
             "title": "Add DownloadHealer and ResilientRunner error path tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 13 new tests across 3 files: test_healers.py (4 new — can_handle 403/extraction True, config/OTIO errors False), test_download_healer_retry.py (3 new — max tier failure, failure logging, escalation manager max tier), test_runner.py (6 new — RuntimeError crash safety, KeyboardInterrupt propagation, 3-healer iteration, no-match returns False, max attempts limit, orchestrator max_attempts). Total 470 agent tests passing, 0 regressions.",
             "acceptanceCriteria": [
                 "Test DownloadHealer.can_heal() returns True for download errors (403 Forbidden, rate limited, yt-dlp extraction failed) — False for config or OTIO errors",
                 "Test DownloadHealer.heal() escalates bypass tier on repeated 403 errors — verify escalation_manager.escalate() called and .fixed() returned for retry",

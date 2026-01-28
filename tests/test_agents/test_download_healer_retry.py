@@ -662,6 +662,93 @@ class TestSharedEscalationManager:
         assert download_healer.escalation_manager is mock_esc_mgr
 
 
+class TestMaxEscalationTierFailure:
+    """Test DownloadHealer fails properly when max escalation tier + retries exhausted."""
+
+    @patch('time.sleep')
+    def test_failed_when_max_tier_and_retries_exhausted_no_escalation_mgr(self, mock_sleep, project_dir):
+        """Test .failed() returned when all escalation exhausted (no escalation manager)."""
+        from src.agents.healers.download import DownloadHealer
+        from src.downloader.types import DownloadError
+
+        # No cookie rotation, no VPN, no escalation manager
+        healer = DownloadHealer(MockConfig(), project_dir)
+        state = Mock()
+
+        error = DownloadError(
+            "HTTP Error 403: Forbidden",
+            retry_count=3,
+            max_retries=3,
+            error_type='transient'
+        )
+
+        result = healer.fix(error, state, "DOWNLOAD")
+
+        # Should fail — all options exhausted
+        assert not result.success
+        assert result.details.get('core_retries_exhausted') is True
+
+    @patch('time.sleep')
+    def test_failure_logged_with_tier_info(self, mock_sleep, project_dir, caplog):
+        """Test failure is logged with escalation tier information."""
+        from src.agents.healers.download import DownloadHealer
+        from src.downloader.types import DownloadError
+        import logging
+
+        healer = DownloadHealer(MockConfig(), project_dir)
+        state = Mock()
+
+        error = DownloadError(
+            "HTTP Error 403: Forbidden",
+            retry_count=3,
+            max_retries=3,
+            error_type='transient'
+        )
+
+        with caplog.at_level(logging.INFO):
+            result = healer.fix(error, state, "DOWNLOAD")
+
+        assert not result.success
+        # Should log exhaustion message
+        assert any("core retry exhausted" in record.message.lower() for record in caplog.records)
+
+    @patch('time.sleep')
+    def test_escalation_manager_max_tier_still_returns_fixed_for_retry(self, mock_sleep, project_dir):
+        """Test escalation manager at max tier still returns .fixed() with tier info for retry."""
+        from src.agents.healers.download import DownloadHealer
+        from src.downloader.types import DownloadError
+
+        mock_esc_mgr = Mock()
+        mock_result = Mock()
+        mock_result.tier = Mock()
+        mock_result.tier.name = "FULL_BYPASS"  # Max tier
+        mock_result.args = ["--impersonate", "Chrome-136:Macos-15", "--extractor-args", "youtube:player_client=web_safari"]
+        mock_result.rotate_cookies = True
+        mock_esc_mgr.get_escalation_args.return_value = mock_result
+
+        healer = DownloadHealer(
+            MockConfig(), project_dir, escalation_manager=mock_esc_mgr
+        )
+        state = Mock()
+
+        error = DownloadError(
+            "HTTP Error 403: Forbidden",
+            retry_count=3,
+            max_retries=3,
+            error_type='transient'
+        )
+
+        result = healer.fix(error, state, "DOWNLOAD")
+
+        # Escalation manager path always returns fixed (to let runner decide)
+        assert result.success
+        assert result.details.get('escalation_tier') == "FULL_BYPASS"
+        assert result.details.get('rotate_cookies') is True
+        assert result.details.get('core_retries_exhausted') is True
+        # Verify failure was recorded
+        mock_esc_mgr.record_failure.assert_called_once()
+
+
 class TestExportFromDownloader:
     """Test DownloadError is properly exported from downloader package."""
 

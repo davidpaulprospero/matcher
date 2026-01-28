@@ -314,6 +314,162 @@ class TestTryHeal:
         assert runner.heal_history[0]["healer"] == "test-healer"
 
 
+class TestRunnerCatchesStageExceptions:
+    """Tests for ResilientRunner catching stage.run() exceptions (AC4)."""
+
+    def test_runtime_error_does_not_crash_runner(self, mock_config, project_dir, mock_stage, mock_state):
+        """Test runner catches RuntimeError from stage.execute() and returns failure."""
+        runner = ResilientRunner(mock_config, project_dir)
+
+        # Stage raises RuntimeError, no healer can fix
+        mock_stage.run.side_effect = RuntimeError("Unexpected internal error")
+
+        with patch.object(runner, '_try_heal', return_value=False):
+            result = runner.run_stage(
+                mock_stage,
+                mock_state,
+                mock_config,
+                Mock()
+            )
+
+        # Runner did not crash, returned a failure result
+        assert not result.success
+        assert "Unexpected internal error" in result.error
+
+    def test_keyboard_interrupt_not_caught(self, mock_config, project_dir, mock_stage, mock_state):
+        """Test KeyboardInterrupt propagates (not swallowed by runner)."""
+        runner = ResilientRunner(mock_config, project_dir)
+
+        mock_stage.run.side_effect = KeyboardInterrupt()
+
+        # KeyboardInterrupt is not an Exception subclass, should propagate
+        with pytest.raises(KeyboardInterrupt):
+            runner.run_stage(mock_stage, mock_state, mock_config, Mock())
+
+
+class TestHealerIterationOrder:
+    """Tests for ResilientRunner iterating healer list correctly (AC5)."""
+
+    def test_only_matching_healer_called(self, mock_config, project_dir, mock_state):
+        """Test only the healer whose can_handle returns True gets heal() called."""
+        runner = ResilientRunner(mock_config, project_dir)
+
+        # Create 3 mock healers — only the 2nd can handle the error
+        healer1 = Mock()
+        healer1.can_handle.return_value = False
+        healer1.name = "healer-1"
+
+        healer2 = Mock()
+        healer2.can_handle.return_value = True
+        healer2.fix.return_value = HealerResult.fixed("Fixed by healer 2", action=HealerAction.RETRY)
+        healer2.name = "healer-2"
+
+        healer3 = Mock()
+        healer3.can_handle.return_value = False
+        healer3.name = "healer-3"
+
+        runner.healers = [healer1, healer2, healer3]
+
+        result = runner._try_heal(Exception("download error"), mock_state, "DOWNLOAD")
+
+        # healer1: can_handle called, fix NOT called
+        healer1.can_handle.assert_called_once()
+        healer1.fix.assert_not_called()
+
+        # healer2: can_handle called, fix called
+        healer2.can_handle.assert_called_once()
+        healer2.fix.assert_called_once()
+
+        # healer3: can_handle NOT called (iteration stops at first match)
+        healer3.can_handle.assert_not_called()
+
+        assert result is True
+
+    def test_no_healer_matches_returns_false(self, mock_config, project_dir, mock_state):
+        """Test returns False when all 3 healers' can_handle return False."""
+        runner = ResilientRunner(mock_config, project_dir)
+
+        healers = []
+        for i in range(3):
+            h = Mock()
+            h.can_handle.return_value = False
+            h.name = f"healer-{i}"
+            healers.append(h)
+
+        runner.healers = healers
+
+        result = runner._try_heal(Exception("unknown error"), mock_state, "TEST")
+
+        # All checked, none fixed
+        for h in healers:
+            h.can_handle.assert_called_once()
+            h.fix.assert_not_called()
+
+        assert result is False
+
+
+class TestMaxAttemptsPerStage:
+    """Tests for max_attempts_per_stage from healing config (AC6)."""
+
+    def test_heal_called_at_most_n_times(self, mock_config, project_dir, mock_stage, mock_state):
+        """Test heal() called at most MAX_HEAL_ATTEMPTS times before permanent failure."""
+        runner = ResilientRunner(mock_config, project_dir)
+        runner.MAX_HEAL_ATTEMPTS = 3
+
+        from src.stages import StageResult
+        # Stage always fails
+        mock_stage.run.return_value = StageResult.fail("persistent error")
+
+        heal_call_count = 0
+
+        def count_heal(*args, **kwargs):
+            nonlocal heal_call_count
+            heal_call_count += 1
+            return True  # Healed (allows retry)
+
+        with patch.object(runner, '_try_heal', side_effect=count_heal):
+            with patch('time.sleep'):
+                result = runner.run_stage(
+                    mock_stage,
+                    mock_state,
+                    mock_config,
+                    Mock()
+                )
+
+        assert not result.success
+        assert "failed after" in result.error.lower()
+        # Stage runs MAX_HEAL_ATTEMPTS times. After first attempt fails, heal is called.
+        # Then retry, fail, heal, retry, fail → exhausted after 3 attempts.
+        # Heal called once per failure, but last attempt doesn't heal (returns exhausted).
+        # Actually: attempts 1,2,3 all fail. Heals after 1 and 2. Attempt 3 exhausts.
+        assert heal_call_count <= 3
+
+    def test_orchestrator_max_attempts_respected(self, mock_config, project_dir, mock_stage, mock_state):
+        """Test MAX_HEAL_ATTEMPTS set from orchestrator strategy.max_attempts_per_stage."""
+        strategy = HealingStrategy(max_attempts_per_stage=2)
+        orchestrator = HealingOrchestrator(mock_config, project_dir, strategy=strategy)
+        runner = ResilientRunner(mock_config, project_dir, orchestrator=orchestrator)
+
+        assert runner.MAX_HEAL_ATTEMPTS == 2
+
+        from src.stages import StageResult
+        mock_stage.run.return_value = StageResult.fail("keeps failing")
+
+        with patch.object(orchestrator, 'coordinate_heal',
+                         return_value=HealerResult.fixed("Fixed", action=HealerAction.RETRY)):
+            with patch('time.sleep'):
+                result = runner.run_stage(
+                    mock_stage,
+                    mock_state,
+                    mock_config,
+                    Mock()
+                )
+
+        assert not result.success
+        # Stage ran exactly 2 times (max_attempts_per_stage=2)
+        assert mock_stage.run.call_count == 2
+
+
 class TestSummary:
     """Tests for summary methods."""
 
