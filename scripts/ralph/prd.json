@@ -125,8 +125,8 @@
             "id": "US-009",
             "title": "Add log_confidence_histogram bucket counting and ASCII rendering tests",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: tests/test_confidence_histogram.py has 31 tests covering all 6 AC. AC1: TestHistogramBuckets::test_bucket_ranges_correct verifies 6 buckets. AC2: TestBucketCounting::test_boundary_value_one verifies 1.0 in 0.9-1.0 bucket. AC3: TestHistogramFormatting::test_includes_header_and_footer verifies 'Confidence Distribution' header. AC4: TestHistogramBarScaling::test_custom_bar_width verifies bar_width parameter respected. AC5: TestHistogramFormatting::test_includes_percentages verifies 'N (X.X%)' format. AC6: TestHistogramEdgeCases::test_empty_confidences verifies empty list returns valid histogram with zero counts. All 31 tests pass in 0.44s.",
             "acceptanceCriteria": [
                 "Test log_confidence_histogram() correctly buckets confidences: 0.0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0",
                 "Test log_confidence_histogram() includes 1.0 in the 0.9-1.0 bucket (inclusive upper bound)",
