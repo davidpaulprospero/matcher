@@ -6722,3 +6722,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 58 HealingLogger tests passed in 1.38s
 - Commit: 0a9dea8
 
+
+## Iteration US-005 (Sprint 20) - Add FallbackChain.classify_error method tests
+- Added 9 new tests to TestClassifyError class in tests/test_agents/test_orchestrator.py
+- Note: Story title mentions FallbackChain.classify_error but actual implementation is HealingOrchestrator._classify_error()
+- AC1: test_classify_error_uses_watcher_when_available — verifies watcher classification used when available
+- AC2: test_classify_error_falls_back_to_pattern_route_when_watcher_unavailable — verifies pattern_route fallback
+- AC3: test_classify_error_falls_back_when_watcher_returns_none — verifies fallback on watcher timeout (returns None)
+- AC4: test_classify_error_watcher_logs_fallback_on_failure — documents logging in WatcherAgent (tested in test_watcher.py)
+- AC5: test_classify_error_returns_pattern_classification_with_needs_llm_healer_for_unknown — verifies unknown patterns
+- Additional tests: context passing, various error type routing, no watcher/fallback_chain scenarios
+- Test results: 46 tests in test_orchestrator.py passed in 5.69s (9 new + 37 existing)
+- Commit: b8fef3b
