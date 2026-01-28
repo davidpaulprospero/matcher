@@ -78,8 +78,8 @@
                             "id":  "US-006",
                             "title":  "Add API Healer private method edge case tests",
                             "priority":  6,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Pre-implemented in tests/test_api_healer.py and tests/test_api_healer_us008.py. All 5 ACs verified: backoff cap (AC1), auth error provider ID (AC2), quota ABORT (AC3), timeout 300s cap (AC4), exclude param (AC5). 58 tests pass.",
                             "acceptanceCriteria":  [
                                                        "Test _handle_rate_limit() caps backoff_time at MAX_BACKOFF constant",
                                                        "Test _handle_auth_error() identifies provider from error message (Gemini, Anthropic, Ollama)",
