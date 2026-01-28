@@ -92,8 +92,8 @@
             "id": "US-007",
             "title": "Add SABR stall detection edge case tests",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "22 tests added in tests/test_downloader_stall_detection.py. AC1: 3 tests for timeout threshold (triggers after threshold, uses 60s default, no stall when output continues). AC2: 3 tests for timer reset (stderr resets, stdout resets via source inspection, no reset without output). AC3: 2 tests for concurrency (independent timers per process, thread safety via source inspection). AC4: 4 tests for resume-on-retry (partial files cleaned, --no-continue not in source, config supports resume, all partial patterns recognized). AC5: 4 tests for metadata vs progress (metadata/warning/progress/mixed all reset timer). Plus 6 edge case tests. All 22 tests pass in 39s.",
             "acceptanceCriteria": [
                 "Test stall detector triggers after exact timeout threshold (60s default)",
                 "Test stall detector resets timer on any subprocess output",
