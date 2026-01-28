@@ -40,6 +40,7 @@ def create_mock_config(tmp_path, **overrides):
     mock_config.download.cookies_from_browser = None
     mock_config.download.download_timeout = 120
     mock_config.download.download_timeouts = {}
+    mock_config.download.stall_timeout = 0
     mock_config.download.delete_original = False
     mock_config.download.per_keyword = {'short': 2, 'medium': 2, 'long': 2}
     mock_config.download.use_llm_filter = False
@@ -48,6 +49,9 @@ def create_mock_config(tmp_path, **overrides):
     mock_config.download.max_retries = 3
     mock_config.download.retry_delay = 2.0
     mock_config.download.retry_backoff = 2.0
+    mock_config.download.rate_limit_budget = None
+    mock_config.download.cookie_rotation = None
+    mock_config.download.vpn = None
     mock_config.llm = MagicMock()
     mock_config.llm.provider = 'gemini'
     mock_config.llm.model = 'gemini-pro'
@@ -364,24 +368,28 @@ class TestTimeoutOverride:
 
                                     with patch('subprocess.Popen') as mock_popen:
                                         mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
                                         mock_process.returncode = 0
                                         mock_process.poll.return_value = 0
                                         mock_popen.return_value = mock_process
 
-                                        # Use timeout_override=30
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set(),
-                                            timeout_override=30
-                                        )
+                                        # Mock progress-aware timeout to capture args
+                                        with patch.object(downloader, '_wait_for_process_with_progress',
+                                                          return_value=("", "", None)) as mock_wait:
+                                            # Use timeout_override=30
+                                            result = downloader._run_download_cmd(
+                                                cmd=['yt-dlp', 'test'],
+                                                keyword_dir=keyword_dir,
+                                                output_dir=tmp_path / "videos",
+                                                keyword="test",
+                                                tier="short",
+                                                existing_before=set(),
+                                                timeout_override=30
+                                            )
 
-                                        # Should have used 30s, not 50 or 100
-                                        mock_process.communicate.assert_called_with(timeout=30)
+                                            # Should have used 30s as stall timeout
+                                            call_args = mock_wait.call_args
+                                            stall_timeout = call_args[0][1]  # second positional arg
+                                            assert stall_timeout == 30
 
     def test_timeout_fallback_when_no_tier(self, tmp_path):
         """Test timeout falls back to config default when tier not in timeouts."""
@@ -405,22 +413,26 @@ class TestTimeoutOverride:
 
                                     with patch('subprocess.Popen') as mock_popen:
                                         mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
                                         mock_process.returncode = 0
                                         mock_process.poll.return_value = 0
                                         mock_popen.return_value = mock_process
 
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
+                                        # Mock progress-aware timeout to capture args
+                                        with patch.object(downloader, '_wait_for_process_with_progress',
+                                                          return_value=("", "", None)) as mock_wait:
+                                            result = downloader._run_download_cmd(
+                                                cmd=['yt-dlp', 'test'],
+                                                keyword_dir=keyword_dir,
+                                                output_dir=tmp_path / "videos",
+                                                keyword="test",
+                                                tier="short",
+                                                existing_before=set()
+                                            )
 
-                                        # Should have used fallback 120s
-                                        mock_process.communicate.assert_called_with(timeout=120)
+                                            # Should have used fallback 120s as stall timeout
+                                            call_args = mock_wait.call_args
+                                            stall_timeout = call_args[0][1]  # second positional arg
+                                            assert stall_timeout == 120
 
 
 class TestDownloadTimeout:
@@ -447,38 +459,36 @@ class TestDownloadTimeout:
 
                                     with patch('subprocess.Popen') as mock_popen:
                                         mock_process = MagicMock()
-                                        # First call raises timeout, second call (after kill) returns normally
-                                        mock_process.communicate.side_effect = [
-                                            subprocess.TimeoutExpired('yt-dlp', 120),
-                                            ("", "")  # Return value for second call after kill
-                                        ]
                                         mock_process.kill = MagicMock()
-                                        mock_process.poll.return_value = 0  # Process is done
+                                        mock_process.poll.return_value = 0
                                         mock_popen.return_value = mock_process
 
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test_keyword",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
+                                        # Simulate timeout via progress-aware monitor
+                                        with patch.object(downloader, '_wait_for_process_with_progress',
+                                                          return_value=("", "", 'stall')):
+                                            result = downloader._run_download_cmd(
+                                                cmd=['yt-dlp', 'test'],
+                                                keyword_dir=keyword_dir,
+                                                output_dir=tmp_path / "videos",
+                                                keyword="test_keyword",
+                                                tier="short",
+                                                existing_before=set()
+                                            )
 
-                                        # Should return empty list on timeout
-                                        assert result == []
-                                        # Should have set timeout flag
-                                        assert downloader._last_download_timed_out
+                                            # Should return empty list on timeout
+                                            assert result == []
+                                            # Should have set timeout flag
+                                            assert downloader._last_download_timed_out
 
 
 class TestProcessCleanup:
-    """Test process cleanup in finally block (lines 848-852)."""
+    """Test process cleanup on unexpected exceptions."""
 
-    def test_process_cleanup_when_still_running(self, tmp_path):
-        """Test that process is killed if still running after communicate."""
+    def test_process_cleanup_on_exception(self, tmp_path):
+        """Test that process is killed if an unexpected exception occurs."""
         from src.downloader.core import VideoDownloader
 
-        config = create_mock_config(tmp_path)
+        config = create_mock_config(tmp_path, max_retries=0)
 
         with patch('src.downloader.core.CheckpointManager'):
             with patch('src.downloader.core.TranscodingManager'):
@@ -494,23 +504,25 @@ class TestProcessCleanup:
 
                                     with patch('subprocess.Popen') as mock_popen:
                                         mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
                                         mock_process.returncode = 0
                                         # poll() returns None = still running
                                         mock_process.poll.return_value = None
                                         mock_process.wait.side_effect = subprocess.TimeoutExpired('yt-dlp', 5)
                                         mock_popen.return_value = mock_process
 
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
+                                        # Simulate unexpected exception during progress monitoring
+                                        with patch.object(downloader, '_wait_for_process_with_progress',
+                                                          side_effect=RuntimeError("unexpected")):
+                                            result = downloader._run_download_cmd(
+                                                cmd=['yt-dlp', 'test'],
+                                                keyword_dir=keyword_dir,
+                                                output_dir=tmp_path / "videos",
+                                                keyword="test",
+                                                tier="short",
+                                                existing_before=set()
+                                            )
 
-                                        # Process should have been killed
+                                        # Process should have been killed in exception handler
                                         mock_process.kill.assert_called()
 
 

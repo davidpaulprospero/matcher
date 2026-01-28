@@ -199,4 +199,30 @@ Examples:
              'Exit code 2 if any test fetches fail.'
     )
 
+    # Cache cleanup (US-004 Sprint 8)
+    parser.add_argument(
+        '--cleanup-caption-cache',
+        action='store_true',
+        help='Remove stale caption cache entries older than max_cache_age_days '
+             '(default: 30 days, configurable in config.yaml). '
+             'Reports freed space and exits.'
+    )
+
+    parser.add_argument(
+        '--cleanup-caption-cache-days',
+        type=int,
+        metavar='DAYS',
+        default=None,
+        help='Override max_cache_age_days for cleanup. '
+             'Use with --cleanup-caption-cache to remove entries older than DAYS. '
+             'Example: --cleanup-caption-cache --cleanup-caption-cache-days 7'
+    )
+
+    parser.add_argument(
+        '--cleanup-caption-cache-dry-run',
+        action='store_true',
+        help='With --cleanup-caption-cache: show what would be removed without deleting. '
+             'Useful for previewing cleanup impact.'
+    )
+
     return parser.parse_args()

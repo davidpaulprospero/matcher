@@ -15,15 +15,12 @@ $script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
 # Load domain modules for shared state access
 $script:LibPath = Join-Path $script:RalphDir 'lib'
 if (Test-Path $script:LibPath) {
-    . "$script:LibPath\sprint.ps1"   # Save-StateFile
+    . "$script:LibPath\sprint.ps1"   # Read-JsonFile, Save-StateFile
     . "$script:LibPath\queue.ps1"    # Get-Queue, Save-Queue
 }
 
 # Load config if it exists
-$config = $null
-if (Test-Path $script:ConfigFile) {
-    $config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
-}
+$config = Read-JsonFile -Path $script:ConfigFile
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -99,14 +96,12 @@ function Get-ExistingContext {
         - Total: Total number of focus areas
     #>
 
-    # Check if queue.json exists
-    if (-not (Test-Path $script:QueueFile)) {
+    $queue = Get-Queue
+    if (-not $queue) {
         return @{ HasContext = $false }
     }
 
     try {
-        $queue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
-
         # Check for interviewContext
         if (-not $queue.interviewContext) {
             return @{ HasContext = $false }
@@ -325,7 +320,7 @@ function Ask-Client {
     $clientsFile = Join-Path $script:RalphDir "clients.json"
     if (Test-Path $clientsFile) {
         try {
-            $clientsData = Get-Content $clientsFile -Raw | ConvertFrom-Json
+            $clientsData = Read-JsonFile -Path $clientsFile
             if ($clientsData.clients) {
                 $clientNames = @()
                 $clientsData.clients.PSObject.Properties | ForEach-Object {
@@ -447,7 +442,7 @@ function Start-QueueMode {
 
     # Load focus areas from config
     $configPath = Join-Path $PSScriptRoot "ralph-config.json"
-    $focusConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+    $focusConfig = Read-JsonFile -Path $configPath
 
     $selected = [System.Collections.ArrayList]::new()
 
@@ -563,13 +558,9 @@ function Get-InterviewSprintHistory {
         Load sprint history for scoring
     #>
     $historyFile = Join-Path $script:RalphDir "sprint_history.json"
-    if (Test-Path $historyFile) {
-        try {
-            return Get-Content $historyFile -Raw | ConvertFrom-Json
-        } catch {
-            # Return empty structure on parse error
-        }
-    }
+    $history = Read-JsonFile -Path $historyFile
+    if ($history) { return $history }
+
     return @{
         totalSprintsCompleted = 0
         focusAreaBreakdown = @{}
@@ -855,10 +846,10 @@ function Get-ApprovedAreas {
             continue
         }
 
-        # [1-5] Remove specific
-        if ($choice -match "^[1-5]$") {
+        # [number] Remove specific
+        if ($choice -match "^\d+$") {
             $removeIndex = [int]$choice - 1
-            if ($removeIndex -lt $approved.Count) {
+            if ($removeIndex -ge 0 -and $removeIndex -lt $approved.Count) {
                 $removed = $approved[$removeIndex]
                 $approved.RemoveAt($removeIndex)
                 Write-Host "  Removed: $removed" -ForegroundColor Yellow
@@ -1015,7 +1006,7 @@ if (-not $script:ResumeMode) {
             Write-Host ""
             Write-Host "  Restarting interview..." -ForegroundColor Yellow
             Write-Host ""
-            & $PSCommandPath
+            & $PSCommandPath -NoLaunch:$NoLaunch
             return
         }
 
@@ -1093,7 +1084,7 @@ if (-not $script:ResumeMode) {
             Write-Host ""
             Write-Host "  Restarting interview..." -ForegroundColor Yellow
             Write-Host ""
-            & $PSCommandPath
+            & $PSCommandPath -NoLaunch:$NoLaunch
             return
         }
     }

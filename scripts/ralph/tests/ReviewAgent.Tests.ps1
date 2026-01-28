@@ -8,7 +8,7 @@ BeforeAll {
 
     # Source Phase 2 functions + their dependencies
     $neededFunctions = @(
-        'Get-RalphConfig', 'Write-JsonNoBom',
+        'Read-JsonFile', 'Get-RalphConfig', 'Write-JsonNoBom',
         'Format-ReviewPrompt', 'Invoke-CodeReview',
         'Get-OptimalNextStory', 'Get-StoryFileTouches', 'Test-FileConflict',
         'Search-CriterionEvidence', 'Log-StoryVerification',

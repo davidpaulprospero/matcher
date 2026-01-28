@@ -30,10 +30,15 @@ def create_mock_config(tmp_path, **overrides):
     mock_config.download.cookies_from_browser = None
     mock_config.download.download_timeout = 120
     mock_config.download.download_timeouts = {}
+    mock_config.download.stall_timeout = 0
     mock_config.download.delete_original = False
     mock_config.download.max_retries = 3
     mock_config.download.retry_delay = 2.0
     mock_config.download.retry_backoff = 2.0
+    mock_config.download.rate_limit_budget = None
+    mock_config.download.cookie_rotation = None
+    mock_config.download.vpn = None
+    mock_config.download.rate_limit = None
     mock_config.llm = MagicMock()
     mock_config.llm.provider = 'gemini'
     mock_config.llm.model = 'gemini-pro'
@@ -293,39 +298,33 @@ class TestRetryBehavior:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            # All calls timeout
-                                            mock_process.communicate.side_effect = [
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),  # After kill
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),  # After kill
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),  # After kill
-                                            ]
                                             mock_process.kill = MagicMock()
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test_keyword",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
+                                            # All attempts timeout via progress-aware monitor
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              return_value=("", "", 'stall')):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test_keyword",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
 
-                                            # Should return empty list after retries exhausted
-                                            assert result == []
-                                            assert downloader._last_download_timed_out
+                                                # Should return empty list after retries exhausted
+                                                assert result == []
+                                                assert downloader._last_download_timed_out
 
-                                            # Should have slept with exponential backoff
-                                            # First retry: 0.1 * (2.0 ^ 0) = 0.1
-                                            # Second retry: 0.1 * (2.0 ^ 1) = 0.2
-                                            assert mock_sleep.call_count == 2
-                                            calls = mock_sleep.call_args_list
-                                            assert abs(calls[0][0][0] - 0.1) < 0.01
-                                            assert abs(calls[1][0][0] - 0.2) < 0.01
+                                                # Should have slept with exponential backoff
+                                                # First retry: 0.1 * (2.0 ^ 0) = 0.1
+                                                # Second retry: 0.1 * (2.0 ^ 1) = 0.2
+                                                assert mock_sleep.call_count == 2
+                                                calls = mock_sleep.call_args_list
+                                                assert abs(calls[0][0][0] - 0.1) < 0.01
+                                                assert abs(calls[1][0][0] - 0.2) < 0.01
 
     def test_retry_on_transient_error(self, tmp_path):
         """Test that transient errors trigger retry."""
@@ -348,41 +347,32 @@ class TestRetryBehavior:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            # First call: 429 error, second call: success
-                                            mock_process.communicate.side_effect = [
-                                                ("", "ERROR: HTTP Error 429: Too Many Requests"),
-                                                ("", ""),  # Success on retry
-                                            ]
-                                            mock_process.returncode = 1  # First call fails
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            # Make returncode change on second call
+                                            # First call: 429 error, second call: success
                                             call_count = [0]
-                                            original_communicate = mock_process.communicate.side_effect
-
-                                            def update_returncode(*args, **kwargs):
+                                            def wait_side_effect(process, stall, maxt, kw, tier):
                                                 call_count[0] += 1
                                                 if call_count[0] == 1:
                                                     mock_process.returncode = 1
-                                                    return ("", "ERROR: HTTP Error 429: Too Many Requests")
-                                                else:
-                                                    mock_process.returncode = 0
-                                                    return ("", "")
+                                                    return ("", "ERROR: HTTP Error 429: Too Many Requests", None)
+                                                mock_process.returncode = 0
+                                                return ("", "", None)
 
-                                            mock_process.communicate = update_returncode
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              side_effect=wait_side_effect):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test_keyword",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test_keyword",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
-
-                                            # Should have slept once for retry
-                                            assert mock_sleep.call_count >= 1
+                                                # Should have slept once for retry
+                                                assert mock_sleep.call_count >= 1
 
     def test_no_retry_on_permanent_error(self, tmp_path):
         """Test that permanent errors fail immediately without retry."""
@@ -502,33 +492,33 @@ class TestExponentialBackoffCalculation:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            # First call: transient error, second: success
-                                            call_count = [0]
-
-                                            def communicate_side_effect(*args, **kwargs):
-                                                call_count[0] += 1
-                                                if call_count[0] == 1:
-                                                    mock_process.returncode = 1
-                                                    return ("", "ERROR: 429 rate limit")
-                                                mock_process.returncode = 0
-                                                return ("", "")
-
-                                            mock_process.communicate = communicate_side_effect
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
+                                            # First call: transient error, second: success
+                                            call_count = [0]
+                                            def wait_side_effect(process, stall, maxt, kw, tier):
+                                                call_count[0] += 1
+                                                if call_count[0] == 1:
+                                                    mock_process.returncode = 1
+                                                    return ("", "ERROR: 429 rate limit", None)
+                                                mock_process.returncode = 0
+                                                return ("", "", None)
 
-                                            # First retry delay: 2.0 * (2.0 ^ 0) = 2.0
-                                            assert mock_sleep.call_count == 1
-                                            assert abs(mock_sleep.call_args[0][0] - 2.0) < 0.01
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              side_effect=wait_side_effect):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
+
+                                                # First retry delay: 2.0 * (2.0 ^ 0) = 2.0
+                                                assert mock_sleep.call_count == 1
+                                                assert abs(mock_sleep.call_args[0][0] - 2.0) < 0.01
 
     def test_backoff_formula_progressive(self, tmp_path):
         """Test that delays increase with each retry."""
@@ -551,36 +541,28 @@ class TestExponentialBackoffCalculation:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            # All calls timeout
-                                            mock_process.communicate.side_effect = [
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                            ]
                                             mock_process.kill = MagicMock()
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
+                                            # All calls timeout via progress-aware monitor
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              return_value=("", "", 'stall')):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
 
-                                            # Delays: 1.0*2^0=1, 1.0*2^1=2, 1.0*2^2=4
-                                            assert mock_sleep.call_count == 3
-                                            calls = mock_sleep.call_args_list
-                                            assert abs(calls[0][0][0] - 1.0) < 0.01
-                                            assert abs(calls[1][0][0] - 2.0) < 0.01
-                                            assert abs(calls[2][0][0] - 4.0) < 0.01
+                                                # Delays: 1.0*2^0=1, 1.0*2^1=2, 1.0*2^2=4
+                                                assert mock_sleep.call_count == 3
+                                                calls = mock_sleep.call_args_list
+                                                assert abs(calls[0][0][0] - 1.0) < 0.01
+                                                assert abs(calls[1][0][0] - 2.0) < 0.01
+                                                assert abs(calls[2][0][0] - 4.0) < 0.01
 
 
 class TestRetryLogging:
@@ -608,32 +590,26 @@ class TestRetryLogging:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            # All calls timeout
-                                            mock_process.communicate.side_effect = [
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                            ]
                                             mock_process.kill = MagicMock()
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test_keyword",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
+                                            # All calls timeout via progress-aware monitor
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              return_value=("", "", 'stall')):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test_keyword",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
 
-                                            # Check that retry attempts were logged
-                                            log_text = caplog.text
-                                            assert "retry 1/2" in log_text
-                                            assert "retry 2/2" in log_text
+                                                # Check that retry attempts were logged
+                                                log_text = caplog.text
+                                                assert "retry 1/2" in log_text
+                                                assert "retry 2/2" in log_text
 
     def test_exhausted_retries_logged(self, tmp_path, caplog):
         """Test that exhausted retries are logged as warning."""
@@ -657,24 +633,21 @@ class TestRetryLogging:
 
                                         with patch('subprocess.Popen') as mock_popen:
                                             mock_process = MagicMock()
-                                            mock_process.communicate.side_effect = [
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                                subprocess.TimeoutExpired('yt-dlp', 120),
-                                                ("", ""),
-                                            ]
                                             mock_process.kill = MagicMock()
                                             mock_process.poll.return_value = 0
                                             mock_popen.return_value = mock_process
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test_keyword",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
+                                            # All calls timeout via progress-aware monitor
+                                            with patch.object(downloader, '_wait_for_process_with_progress',
+                                                              return_value=("", "", 'stall')):
+                                                result = downloader._run_download_cmd(
+                                                    cmd=['yt-dlp', 'test'],
+                                                    keyword_dir=keyword_dir,
+                                                    output_dir=tmp_path / "videos",
+                                                    keyword="test_keyword",
+                                                    tier="short",
+                                                    existing_before=set()
+                                                )
 
-                                            # Check that exhausted retries were logged
-                                            assert "retries exhausted" in caplog.text.lower()
+                                                # Check that exhausted retries were logged
+                                                assert "retries exhausted" in caplog.text.lower()

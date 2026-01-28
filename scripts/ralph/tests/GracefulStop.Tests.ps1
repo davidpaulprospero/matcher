@@ -30,6 +30,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'test-helper.ps1')
 
     $gracefulStopFunctions = @(
+        'Read-JsonFile',
         'Test-GracefulStopRequested',
         'Clear-GracefulStopSignal',
         'Request-GracefulStop'

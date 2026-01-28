@@ -221,7 +221,8 @@ class LLMKeywordExtractor:
 
         # Validate keywords - filter out abstract/narrative phrases
         pre_validation_count = len(keywords)
-        keywords = validate_visual_keywords(keywords)
+        max_keyword_words = getattr(self.config.keyword, 'max_keyword_words', 8)
+        keywords = validate_visual_keywords(keywords, max_words=max_keyword_words)
 
         logger.info(f"Final keywords: {len(keywords)} (validated from {pre_validation_count}, {len(entity_keywords)} entity-based)")
 

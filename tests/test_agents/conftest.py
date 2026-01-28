@@ -45,6 +45,19 @@ def mock_config():
     config.download.continue_dl = False
     config.download.root_dir = None
 
+    # Cookie rotation config - disabled by default to prevent CookieRotator initialization
+    config.download.cookie_rotation = Mock()
+    config.download.cookie_rotation.enabled = False
+    config.download.cookie_rotation.cookie_files = []
+    config.download.cookie_rotation.rotate_on_errors = ["429", "rate limit"]
+    config.download.cookie_rotation.rotation_strategy = "on_error"
+    config.download.cookie_rotation.cooldown_seconds = 300
+    config.download.cookie_rotation.max_rotations_per_session = 0
+
+    # VPN config - disabled by default
+    config.download.vpn = Mock()
+    config.download.vpn.enabled = False
+
     # LLM config
     config.llm = Mock()
     config.llm.provider = "gemini"

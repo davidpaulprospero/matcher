@@ -48,8 +48,9 @@ function Get-GitActivityByArea {
 
         foreach ($file in $changedFiles) {
             foreach ($pattern in $patterns) {
-                # Convert glob pattern to regex
-                $regexPattern = $pattern -replace '\*\*/', '.*' -replace '\*', '[^/]*' -replace '\.', '\.'
+                # Convert glob pattern to regex (placeholder avoids cascading replacements)
+                # Handle **/ first, then standalone ** (e.g. src/**)
+                $regexPattern = $pattern -replace '\.', '\.' -replace '\*\*/', '<<GLOBSTAR>>' -replace '\*\*', '<<GLOBSTAR>>' -replace '\*', '[^/]*' -replace '<<GLOBSTAR>>', '.*'
                 if ($file -match $regexPattern) {
                     $commitCount++
                     break  # Don't double-count same file
@@ -109,8 +110,8 @@ function Get-FocusAreaScore {
         $neglectedScore = 1.0
     } else {
         # Find most recent sprint for this area
-        $areasSprints = $SprintHistory.sprints | Where-Object { $_.focusArea -eq $AreaId } | Sort-Object completedAt -Descending
-        if ($areasSprints -and $areasSprints.Count -gt 0) {
+        $areasSprints = @($SprintHistory.sprints | Where-Object { $_.focusArea -eq $AreaId } | Sort-Object completedAt -Descending)
+        if ($areasSprints.Count -gt 0) {
             $lastSprint = $areasSprints | Select-Object -First 1
             if ($lastSprint.completedAt) {
                 $daysSince = ((Get-Date) - [datetime]$lastSprint.completedAt).Days
@@ -185,7 +186,8 @@ function Get-AllFocusAreaScores {
     }
 
     # Sort by total score descending
-    $sorted = $scores | Sort-Object -Property total -Descending
+    # Wrap in @() to ensure array (single-element Sort-Object returns scalar)
+    $sorted = @($scores | Sort-Object -Property total -Descending)
 
     return $sorted
 }
@@ -234,16 +236,12 @@ function Get-StayOrSwitchDecision {
 
     # Check if PRD has unfinished stories
     $unfinishedStories = $false
-    if (Test-Path $script:PrdFile) {
-        try {
-            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-            if ($prd.userStories) {
-                $incomplete = $prd.userStories | Where-Object { $_.passes -ne $true }
-                if ($incomplete -and $incomplete.Count -gt 0) {
-                    $unfinishedStories = $true
-                }
-            }
-        } catch {}
+    $prd = Get-Sprint
+    if ($prd -and $prd.userStories) {
+        $incomplete = @($prd.userStories | Where-Object { $_.passes -ne $true })
+        if ($incomplete.Count -gt 0) {
+            $unfinishedStories = $true
+        }
     }
 
     # STAY reasons
@@ -263,7 +261,17 @@ function Get-StayOrSwitchDecision {
     }
 
     # Get all scores to check if another area has significantly higher score
-    $allScores = Get-AllFocusAreaScores
+    $allScores = @(Get-AllFocusAreaScores)
+    if (-not $allScores -or $allScores.Count -eq 0) {
+        return @{
+            decision = "stay"
+            currentArea = $CurrentArea
+            newArea = $CurrentArea
+            stayReasons = @("No focus area scores available")
+            switchReasons = @()
+            scores = @()
+        }
+    }
     $matchedArea = $allScores | Where-Object { $_.areaId -eq $CurrentArea }
     $currentScore = if ($matchedArea -and $matchedArea.total) { $matchedArea.total } else { 0 }
     $topScore = $allScores[0]
@@ -415,7 +423,8 @@ function Get-StoryFileTouches {
     $logFiles = Get-ChildItem -Path $script:SessionLogDir -Filter "iteration_*.json" -ErrorAction SilentlyContinue
     foreach ($logFile in $logFiles) {
         try {
-            $log = Get-Content $logFile.FullName -Raw | ConvertFrom-Json
+            $log = Read-JsonFile -Path $logFile.FullName
+            if (-not $log) { continue }
             $storyId = $log.storyId
             if (-not $storyId) { continue }
 

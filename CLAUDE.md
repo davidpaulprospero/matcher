@@ -21,25 +21,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Flag | Description |
 |------|-------------|
 | `--voiceover`, `-v` | Path to voiceover file (SRT, MP3, WAV, MP4) |
+| `--keywords`, `-k` | Number of keywords to extract (default: from config.yaml) |
 | `--project`, `-p` | Project directory path |
 | `--config`, `-c` | Path to config file |
 | `--match-only` | Skip download/transcribe, use cached data |
 | `--output-only` | Regenerate OTIO/EDL/XML only (fastest, no re-matching) |
 | `--resume` / `--fresh` | Resume from checkpoint / Force fresh start |
-| `--keyword-list "a,b,c"` | Keyword mode: comma-separated keywords (no voiceover) |
-| `--keyword-mode MODE` | montage, script, or collection |
-| `--duration SECS` | Target duration for keyword mode |
+| `--force-rematch` | Force rematch all videos, ignoring cached matches |
 | `--non-interactive` | Skip prompts, use defaults |
-| `--client CLIENT_ID` | Client ID for cross-project learning (e.g., "theresa", "stu") |
-| `--evolve-preset` | Generate evolved preset from project history (requires `--client`) |
-| `--list-clients` | List all client profiles and exit |
-| `--client-stats [ID]` | Show client statistics (specific client or "all") |
-| `--high-matches` | Enable iterative matching until target confidence achieved |
-| `--target-confidence SCORE` | Target confidence for high matches mode (default: 0.90) |
-| `--coverage-target RATIO` | Coverage target for high matches mode (default: 0.85) |
+| `--use-keywords [PRESET]` | Use saved keywords ("latest" or preset name) |
+| `--save-keywords [NAME]` | Save extracted keywords as preset |
+| `--list-keywords` | List saved keyword presets and exit |
+| `--validate-config` | Validate config file and exit |
+| `--refresh-entities` | Force re-download entity images (ignore cache) |
+| `--export-metrics PATH` | Export rate limit metrics to JSON after pipeline |
 | `--caption-first` | Enable caption-first mode (fetch YouTube captions before download) |
 | `--caption-language CODE` | Preferred caption language (ISO 639-1, e.g., "en", "es") |
 | `--no-caption-fallback` | Disable Whisper fallback when captions unavailable |
+| `--validate-captions` | Validate caption config without running pipeline |
+| `--test-fetch N` | Test fetch captions for N sample videos (use with `--validate-captions`) |
+| `--export-caption-metrics PATH` | Export caption metrics to JSON after run |
+| `--cleanup-caption-cache` | Remove stale caption cache entries |
+| `--cleanup-caption-cache-days DAYS` | Override max_cache_age_days for cleanup |
+| `--cleanup-caption-cache-dry-run` | Preview cleanup without deleting |
 
 ### Common Commands
 
@@ -47,11 +51,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python main.py --voiceover script.srt --project "E:\Projects\MyDoc"
 python main.py --match-only                    # Re-run matching only
 python main.py --output-only                   # Regenerate OTIO only (fastest, needs checkpoint)
-python main.py --keyword-list "sunset,ocean" --keyword-mode montage --duration 60
-python main.py --project "E:\Edit Job\theresa\Project" --client theresa  # Cross-project learning
-python main.py --evolve-preset --client theresa  # Generate evolved preset from history
-python main.py --voiceover script.srt --high-matches  # Iterate until 90%+ confidence
 python main.py --voiceover script.srt --caption-first  # Use YouTube captions instead of Whisper
+python main.py --save-keywords mypreset        # Save keywords after extraction
+python main.py --use-keywords mypreset         # Reuse saved keywords
+python main.py --force-rematch                 # Ignore cached matches, re-match all
 
 # Standalone OTIO regeneration (bypasses checkpoint - works even when corrupted)
 python scripts/regenerate_otio.py "E:\Edit Job\client\project"
@@ -102,9 +105,8 @@ Then run with `--resume`. Stage order: ANALYZE → ENTITY_IMAGES → ENTITY_VIDE
 - Follow established patterns from completed refactors (e.g., LLM client abstraction)
 
 Current status:
-- ✅ Pipeline stages architecture (completed)
-- ✅ LLM client abstraction (completed - Jan 6, 2026)
-- 📋 See REFACTORING.md for full roadmap
+- ✅ All 12 major refactorings completed (~17,200+ lines refactored into modular packages)
+- ✅ See REFACTORING.md for details (note: some "Proposed Solution" sections are stale - the work is done)
 
 When writing new code, prefer using modern abstractions:
 - Use `src/llm_client/` for all LLM calls (see Rule 9 below)
@@ -113,28 +115,52 @@ When writing new code, prefer using modern abstractions:
 
 ## Architecture
 
+### Setup
+
+```bash
+# Python 3.9+ required, FFmpeg required (for video/audio processing)
+pip install -r requirements.txt      # Runtime dependencies
+pip install -r requirements-dev.txt  # Test/dev dependencies (pytest, pester, etc.)
+```
+
 ### File Structure
+
+**Entry points:**
 
 | File | Purpose |
 |------|---------|
 | `main.py` | Entry point, pipeline orchestration |
 | `config.yaml` | User-editable settings |
-| `src/config.py` | Config dataclasses with defaults |
-| `src/state.py` | PipelineState + dataclasses (CANONICAL location) |
-| `src/llm_client/` | **Unified LLM abstraction** (Gemini, Anthropic, Ollama) |
-| `src/downloader.py` | Video/audio download logic |
-| `src/matching.py` | Video-to-voiceover matching |
-| `src/transcription.py` | Whisper transcription |
-| `src/checkpoint.py` | Resume/checkpoint management |
-| `src/keyword_extractor.py` | LLM-based keyword extraction |
-| `src/entity_images.py` | Entity image search (Google, Bing) |
-| `src/entity_cache.py` | Cross-project entity cache |
-| `src/location_service.py` | GeoNames geocoding |
-| `src/otio_builder.py` | Timeline generation |
-| `src/pipeline.py` | PipelineOrchestrator |
-| `src/stages/` | Modular stage classes |
-| `src/agents/` | **Self-healing pipeline agents** (ResilientRunner, Healers) |
 | `setup_project.py` | Creates project folders with run scripts |
+
+**Core packages** (all under `src/`):
+
+| Package | Purpose |
+|---------|---------|
+| `stages/` | 14 modular pipeline stage classes |
+| `config/` | Config dataclasses split by section (`sections/download.py`, `sections/keywords.py`, etc.) |
+| `cli/` | CLI arg parsing, config loading, project config merge |
+| `llm_client/` | **Unified LLM abstraction** (Gemini, Anthropic, Ollama) |
+| `downloader/` | YouTube download: `core.py`, `audio_first.py`, `impersonation.py`, `escalation_manager.py`, `cookie_rotator.py`, `cookie_method_fallback.py`, `rate_limit_budget.py` |
+| `matching/` | Tiered video-to-voiceover matching (embedding + LLM strategies) |
+| `keyword_extractor/` | LLM-based keyword extraction with validation |
+| `otio/` | OTIO/EDL/XML timeline generation, track builders |
+| `media_sources/` | Entity image/video search (Google, Bing, Pexels, Pixabay) |
+| `transcription/` | Whisper transcription + embeddings |
+| `agents/` | **Self-healing pipeline agents** (ResilientRunner, Healers) |
+| `cache/` | Unified BaseCache abstraction (6 caches migrated) |
+| `compilation/` | Keyword compilation and montage features |
+
+**Key single-file modules** (under `src/`):
+
+| File | Purpose |
+|------|---------|
+| `state.py` | PipelineState + dataclasses (CANONICAL import location) |
+| `pipeline.py` | PipelineOrchestrator, `create_healing_pipeline()` |
+| `checkpoint.py` | Resume/checkpoint management |
+| `caption_fetcher.py` | YouTube caption fetching |
+| `entity_cache.py` | Cross-project entity cache |
+| `location_service.py` | GeoNames geocoding |
 
 ### Pipeline Stages
 
@@ -143,6 +169,8 @@ When writing new code, prefer using modern abstractions:
 | ANALYZE | AnalyzeStage | Keywords, topics, entities, location chapters |
 | ENTITY_IMAGES | EntityImagesStage | Download entity images (Google, Bing, Pexels) |
 | ENTITY_VIDEOS | EntityVideosStage | Download stock videos for entities |
+| VIDEO_METADATA | VideoMetadataStage | Fetch video metadata for caption-first mode |
+| CAPTION | CaptionStage | Fetch YouTube captions (before TRANSCRIBE) |
 | DOWNLOAD | DownloadStage | YouTube video/audio download |
 | STOCK | StockVideoStage | Download generic stock footage (B-roll) |
 | BROLL_DOWNLOAD | BrollDownloadStage | Download B-roll with keyword suffixes |
@@ -367,6 +395,77 @@ image_search:
 - Must be absolute path (not relative like `./videos`)
 - Run as administrator if permission errors occur
 
+### Bypass & Escalation System
+
+3-tier yt-dlp bypass using curl_cffi TLS fingerprint spoofing. Always-on, per-keyword, thread-safe.
+
+**Tier Progression:**
+
+| Tier | Trigger | yt-dlp Args Added | Cookie Rotation |
+|------|---------|-------------------|-----------------|
+| 1 (always) | Every call | `--impersonate Chrome-136:Macos-15` (rotating) | No |
+| 2 (on 403) | 2 consecutive 403s | Tier 1 + `--extractor-args youtube:player_client=web_safari,tv_downgraded,web` | No |
+| 3 (max) | 2 more 403s at Tier 2 | Tier 2 args + cookie rotation | Yes |
+
+**Key classes:**
+
+| Class | File | Purpose |
+|-------|------|---------|
+| `ImpersonationManager` | `src/downloader/impersonation.py` | Auto-detect targets, round-robin rotation |
+| `EscalationManager` | `src/downloader/escalation_manager.py` | Per-keyword tier progression, metrics |
+| `CookieMethodFallback` | `src/downloader/cookie_method_fallback.py` | browser:firefox -> file:main.txt -> file:backup1.txt -> none |
+| `RateLimitBudget` | `src/downloader/rate_limit_budget.py` | Cross-keyword recovery resource tracking |
+| `is_escalation_trigger()` | `src/downloader/escalation_manager.py` | Detect 403/bot patterns in stderr |
+
+**Escalation behavior:**
+- **Sticky:** Tiers never de-escalate mid-session (success resets 403 counter but keeps tier)
+- **Cooldown:** 300s between escalations per keyword (`ExtractorArgsConfig.cooldown_seconds`)
+- **Thread-safe:** Per-keyword locks for concurrent downloads
+- **All 8 call sites wired:** core.py (x2), audio_first.py (x3), title_filter.py, speech_screening.py, caption_fetcher.py
+
+**Config:**
+```yaml
+download:
+  impersonation:
+    enabled: true              # Master switch for Tier 1
+    preferred_targets: []      # Filter targets (empty = use all detected)
+  extractor_args:
+    enabled: true              # Master switch for Tier 2+
+    player_clients: ["web_safari", "tv_downgraded", "web"]
+    escalation_threshold: 2    # Consecutive 403s before escalating
+    cooldown_seconds: 300      # Cooldown between escalations
+```
+
+**Adding new yt-dlp call sites:** Use `escalation_manager.get_escalation_args(keyword)` instead of direct `impersonation_manager.get_impersonate_args()`. Handle `result.rotate_cookies` flag for Tier 3.
+
+### SABR Anti-Stall Strategy
+
+YouTube's SABR streaming causes fragments to stall indefinitely (TCP connection stays open, zero data). Our subprocess stall detector kills the process and retries with resume.
+
+**Current flags on both download commands (`core.py`):**
+
+| Flag | Purpose |
+|------|---------|
+| `--socket-timeout 10` | Give up dead connections after 10s (forces yt-dlp internal retry) |
+| `--retries 10` | yt-dlp whole-download retries |
+| `--fragment-retries 10` | yt-dlp per-fragment retries |
+| `--throttled-rate 100K` | Re-extract when throttled below 100KB/s |
+| `--force-ipv4` | IPv6 causes silent hangs on Windows |
+| `--http-chunk-size 10M` | YouTube throttles chunks >10MB |
+| `--skip-unavailable-fragments` | Don't hang on broken fragments |
+| `--ignore-config` | Prevent user config conflicts |
+| `--progress --newline` | Output progress lines for stall detection |
+
+**Flags intentionally REMOVED:**
+- `--no-continue`: Removed so retries resume from last fragment instead of restarting
+- `--quiet`: Removed so metadata extraction output resets stall timer
+- `--no-warnings`: Removed so retry warning messages reset stall timer
+- `--concurrent-fragments`: Removed — triggers 403 errors on YouTube
+
+**Config settings:** `stall_timeout: 60`, `max_retries: 6`, `retry_backoff: 2.0`
+
+**Subprocess encoding:** ALL subprocess calls that process yt-dlp output MUST use `encoding='utf-8', errors='replace'` to prevent charmap crash on Windows (see Rule 27).
+
 ## Development Rules
 
 | Rule | Summary | Key Point |
@@ -379,8 +478,8 @@ image_search:
 | 6 | Dict/Object config | Handle both: `vc.get()` if dict, `getattr()` if object |
 | 7 | Embeddings truthiness | Use `is_embeddings_empty()` - numpy fails bool |
 | 8 | B-roll propagation | SceneDetection → text_metadata → Match restores is_broll |
-| 9 | Test non-interactive | Tests MUST use `--non-interactive` |
-| 10 | LLM Client | Use `src/llm_client/` for ALL LLM calls |
+| 9 | LLM Client | Use `src/llm_client/` for ALL LLM calls |
+| 10 | Test non-interactive | Tests MUST use `--non-interactive` |
 | 11 | Dataclass imports | Import from `src/state.py` or `src/config.py` only |
 | 12 | VAD Filter | Videos: OFF (hardcoded). Voiceover: ON (config) |
 | 21 | Project vs Global config | Use `project_config.yaml` for project-specific settings |
@@ -388,6 +487,7 @@ image_search:
 | 23 | Project config merge | Deep merge preserves sibling sections (`_deep_merge_section`) |
 | 24 | Running pipeline = latest code | Python imports dynamically - fixes take effect immediately |
 | 25 | `--output-only` needs stage data | Checkpoint must have populated `stages` dict, not just `last_completed_stage` |
+| 27 | Subprocess encoding (Windows) | ALL `subprocess.Popen`/`run` with `text=True` MUST add `encoding='utf-8', errors='replace'` |
 
 ### DaVinci Rules (13-17)
 
@@ -543,26 +643,52 @@ pytest tests/test_llm_client/ tests/test_keyword_extractor/ -v
 Location: `scripts/ralph/` - Autonomous development assistant.
 
 ```powershell
-# Morning check-in (recommended)
-.\scripts\ralph\1-im-learnding.bat
+# Unified launcher (recommended)
+.\scripts\ralph\launcher.ps1
 
-# Interview mode (give specific direction)
-.\scripts\ralph\7-hi-super-nintendo-chalmers.bat
+# Direct execution
+.\scripts\ralph\ralph.ps1 [-TrueAuto] [-Resume] [-FocusArea <area>]
 
 # Watch dashboard (separate terminal)
 .\scripts\ralph\watch.ps1 [-Interval 5]
-
-# Direct execution
-.\scripts\ralph\ralph.ps1 [-Queue] [-TrueAuto] [-Resume] [-FocusArea <area>]
 ```
 
-**Interview work types:** `[B]` Bug fix, `[F]` Feature, `[I]` Improvement, `[C]` Client feedback, `[Q]` Queue focus areas (direct selection)
+**Launcher modes:**
 
-**Focus areas:** pipeline, testing, speed, quality, rate-limiting, otio, caption, config, client-learning, agents, compilation
+| Mode | Flag | Description |
+|------|------|-------------|
+| Standard | (default) | Work through stories, pause on sprint complete |
+| TrueAuto | `-TrueAuto` | Continuous improvement, auto-generate new sprints |
+| Resume | `-Resume` | Continue where left off |
+| Smart Queue | (interactive) | Describe work in natural language, Ralph picks focus areas |
+| Ralph's Choice | `-RalphsChoice` | Ralph scores all areas, user confirms each decision |
+| Ralph's Choice Auto | `-RalphsChoiceAuto` | Ralph scores and continues autonomously (fully unattended) |
+
+**Ralph's Choice Auto features:**
+- Scores all focus areas, picks highest (or stay/switch decision after sprint 1)
+- 10s countdown between sprints (press any key to pause/override/quit)
+- `maxConsecutiveSprints` cap (default: 20) + `maxIterations` cap (default: 115)
+- Archives completed sprints, updates queue progress, checks graceful stop
+
+**Module structure** (`scripts/ralph/lib/`):
+
+| Module | Purpose |
+|--------|---------|
+| `claude.ps1` | Claude subprocess execution, result resolution |
+| `display.ps1` | Banners, iteration display |
+| `loops.ps1` | Standard, TrueAuto, RalphsChoice, RalphsChoiceAuto loops |
+| `metrics.ps1` | CSV recording, health comparison, fast-fail detection |
+| `prompts.ps1` | Prompt building for PRD generation and story work |
+| `quality.ps1` | Diff scoring, test regression, code review, rollback |
+| `queue.ps1` | Queue management, interview context, progress tracking |
+| `scoring.ps1` | Focus area scoring, stay/switch decisions, story ordering |
+| `sprint.ps1` | PRD read/write, sprint archive, sprint history |
+
+**Focus areas:** pipeline, config, rate-limiting, caption, download, quality, speed, compilation, otio, agents, client-learning, testing, unit-tests, integration-tests, mutation-tests, documentation, ux
 
 **Testing Ralph Loop:**
 ```powershell
-# Run all 138 Pester tests
+# Run all Pester tests (~403 tests)
 Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 # Run specific test file
@@ -588,15 +714,23 @@ Documented shortcomings encountered and how they were resolved:
 | Standard mode ignored queue | PRD focus area matched queue, but old stories used | Check queue/PRD mismatch OR fresh queue at `Start-StandardLoop` entry |
 | Vague prompt in queue mode | "Focus on quality" gave Claude no direction | Added optional work description prompt after area selection |
 | Interview context not actionable | `details = "Direct queue: quality, agents..."` | Changed to user-provided description or sensible default |
+| Queue didn't advance to next area | `Get-NextQueuedFocusArea` returned empty despite valid queue.json | Replaced function calls with inline queue file reading in `Start-StandardLoop` |
+| Ralph's Choice didn't update queue | Queue stayed stale after Choice/ChoiceAuto sprints | Added `Update-QueueProgress` to both Choice loops after sprint completion |
+| Metrics CSV "Stream was not readable" | `Add-Content` fails after timeout on Windows | Added `-Encoding UTF8` + try/catch retry in `Record-Metric` |
 
 ### Pipeline
 
 | Issue | Symptom | Solution |
 |-------|---------|----------|
+| Caption-first used audio-first | `--caption-first` still ran DOWNLOAD AUDIO stage | `_is_caption_first_enabled()` must handle dict configs (Rule 6) |
 | Caption-first segment gaps | OTIO paths like `file:///DDi-Swd7Qcw` (no .mp4) | Rule 26: DOWNLOAD_SEGMENTS only covers `video_candidates`, not global cache |
 | V8 track empty | B-roll matching produced no results | Two detection methods: face_score < 0.3 OR word_count < threshold |
 | `--output-only` re-ran stages | Jumped to CAPTION instead of OUTPUT | Rule 25: Checkpoint needs populated `stages` dict, not just `last_completed_stage` |
 | Project config overwrote siblings | Setting `download.fallback.proxy` cleared `fallback.caption` | Deep merge via `_deep_merge_section()` preserves sibling keys |
+| 403 errors in caption-first | No cookie rotation in `audio_first.py` | CookieRotator now shared from VideoDownloader to AudioFirstPipeline |
+| charmap codec error (Windows) | `UnicodeDecodeError: 'charmap'` crashes reader thread → phantom stall | Rule 27: `encoding='utf-8', errors='replace'` on all subprocess calls |
+| SABR download stalling | Downloads stall 50-90%, no yt-dlp output for 60s+ | Resume-on-retry + stall detector + 6 retries (see SABR Anti-Stall Strategy) |
+| info.json read crash | `open(info_file, 'r')` fails on non-ASCII metadata | `open(info_file, 'r', encoding='utf-8')` + catch `UnicodeDecodeError` |
 
 ### General Patterns
 
@@ -605,6 +739,8 @@ Documented shortcomings encountered and how they were resolved:
 | Config dict vs object | YAML loads as dict, dataclass as object | Always use `getattr(obj, 'field', default)` or check `isinstance` |
 | Numpy bool ambiguity | `if embeddings:` fails on numpy arrays | Use `is_embeddings_empty()` helper |
 | PowerShell falsy arrays | `@()` is falsy but `.Count` works | Check `.Count -gt 0` not just truthiness |
+| MagicMock auto-attributes | `getattr(MagicMock(), 'anything', default)` returns Mock not default | Set `mock.attr = None` explicitly for attributes that should be absent |
+| yt-dlp user config conflict | `~/.config/yt-dlp/config` overrides pipeline's escalation args | Keep user config minimal; avoid `--extractor-args` (pipeline handles this) |
 
 ## Git Conventions
 
@@ -623,9 +759,11 @@ Documented shortcomings encountered and how they were resolved:
 
 | Date | Changes |
 |------|---------|
-| 2026-01-25 | Ralph: Fresh queue auto-generates new sprint PRD; Standard mode checks queue/PRD focus area mismatch |
-| 2026-01-25 | Ralph: `[Q]` Queue mode with interactive area selection (toggle on/off), optional work description prompt |
-| 2026-01-25 | Ralph: auto-launch interview when queue empty, -NoLaunch flag, Pester test suite (138 tests) |
-| 2026-01-24 | Global cache segment download, caption-first segment gap fix (Rule 26), V10 spam fix |
+| 2026-01-28 | Fix: Ralph's Choice loops now update queue.json on sprint completion; metrics.csv encoding fix |
+| 2026-01-28 | CLAUDE.md: Added Ralph's Choice modes, lib/ module structure to Ralph Loop section |
+| 2026-01-27 | Fix: SABR anti-stall strategy — resume-on-retry, stall detector, socket-timeout 10, max_retries 6, removed --no-continue/--quiet/--no-warnings/--concurrent-fragments |
+| 2026-01-27 | Fix: charmap encoding crash — added `encoding='utf-8', errors='replace'` to 15 subprocess call sites + info.json reading |
+| 2026-01-27 | Fix: Added `--ignore-config` to all 13 yt-dlp call sites to prevent user config conflicts |
+| 2026-01-27 | CLAUDE.md: Removed 10 phantom CLI flags, added 8 real undocumented ones |
 
 *Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*

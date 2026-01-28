@@ -127,13 +127,12 @@ function Invoke-ClaudeProcess {
     $storyId = if ($isStoryWork) { $Identifier } else { $null }
     $focusAreaId = if ($isStoryWork) { $FocusArea } else { $Identifier }
 
-    # Track retries
+    # Track retries via State hashtable
     $trackingId = if ($isStoryWork) { $storyId } else { $focusAreaId }
-    $lastTrackingVar = if ($isStoryWork) { 'LastStoryId' } else { 'LastFocusAreaId' }
-    $lastTracking = Get-Variable -Name $lastTrackingVar -Scope Script -ErrorAction SilentlyContinue
-    if (-not $lastTracking -or $lastTracking.Value -ne $trackingId) {
+    $lastTrackingKey = if ($isStoryWork) { 'LastStoryId' } else { 'LastFocusAreaId' }
+    if ($script:State[$lastTrackingKey] -ne $trackingId) {
         $script:State.CurrentRetryCount = 0
-        Set-Variable -Name $lastTrackingVar -Value $trackingId -Scope Script
+        $script:State[$lastTrackingKey] = $trackingId
     }
     $script:State.CurrentRetryCount++
 
@@ -151,7 +150,7 @@ function Invoke-ClaudeProcess {
         $claudeArgs += "--allowedTools=Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
 
-    $displayPrompt = if ($isStoryWork) { "Work on $storyId" } else { "Focus on $focusAreaId" }
+    $displayPrompt = if ($isStoryWork) { "Work on $storyId" } elseif ($PromptType -eq "prd_generation") { "Generate PRD for $focusAreaId" } else { "Focus on $focusAreaId" }
     Write-Host "  Invoking Claude..." -ForegroundColor Cyan
     Write-Host "  Prompt: $displayPrompt" -ForegroundColor DarkGray
 
@@ -344,6 +343,18 @@ function Invoke-ClaudeForFocusArea {
         }
     }
 
+    # Archive existing incomplete sprint before generating new one
+    # (completed sprints are already archived by the calling loop)
+    if ($GeneratePRD -and (Test-Path $script:PrdFile)) {
+        $existingPrd = Get-Sprint
+        if ($existingPrd -and $existingPrd.userStories) {
+            $incompleteStories = @($existingPrd.userStories | Where-Object { $_.passes -ne $true })
+            if ($incompleteStories.Count -gt 0) {
+                Save-SprintArchive -Reason "superseded"
+            }
+        }
+    }
+
     # Build the prompt
     if ($GeneratePRD) {
         # Build exploration context section for PRD prompt
@@ -433,8 +444,8 @@ function Complete-StoryAutomatically {
 
     try {
         # Update prd.json
-        if (Test-Path $script:PrdFile) {
-            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+        $prd = Get-Sprint
+        if ($prd) {
             $storyToUpdate = $prd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
             if ($storyToUpdate) {
                 $storyToUpdate.passes = $true
@@ -449,7 +460,7 @@ function Complete-StoryAutomatically {
                 else {
                     $storyToUpdate | Add-Member -NotePropertyName 'notes' -NotePropertyValue $noteText -Force
                 }
-                $prd | ConvertTo-Json -Depth 10 | Set-Content $script:PrdFile -Encoding UTF8
+                Save-StateFile -Path $script:PrdFile -Data $prd
                 Write-Host "    Updated prd.json: $StoryId -> passes: true" -ForegroundColor Green
             }
         }
@@ -471,14 +482,13 @@ function Complete-StoryAutomatically {
         if (Test-Path $metricsFile) {
             $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
             $sessionId = if ($script:State.SessionId) { $script:State.SessionId } else { "preflight" }
-            $sprintName = "sprint-$($script:SprintNumber)"
             $focusArea = ""
-            if (Test-Path $script:PrdFile) {
-                try {
-                    $prdData = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-                    $focusArea = $prdData.focusArea
-                } catch {}
+            $prdData = Get-Sprint
+            if ($prdData) {
+                $focusArea = $prdData.focusArea
             }
+            $sprintNum = if ($prdData -and $prdData.sprintNumber) { $prdData.sprintNumber } else { "0" }
+            $sprintName = "sprint-$sprintNum"
             $metricsLine = "$timestamp,$sessionId,$sprintName,$StoryId,PreFlight,0,true,false,$focusArea,0,,$(Get-Date -Format 'HH'),,0,0,0,0,0,0,0,0,false,,0"
             $metricsLine | Out-File -FilePath $metricsFile -Append -Encoding UTF8
         }
@@ -505,21 +515,25 @@ function Invoke-ClaudeForStory {
     # Get focus area and story object from PRD
     $focusArea = ""
     $storyObj = $null
-    if (Test-Path $script:PrdFile) {
-        try {
-            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-            $focusArea = $prd.focusArea
-            $storyObj = $prd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
-        }
-        catch {}
+    $prd = Get-Sprint
+    if ($prd) {
+        $focusArea = $prd.focusArea
+        $storyObj = $prd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
     }
 
     # Pre-flight: skip stories already committed in git
+    # Guard: track auto-completed stories to prevent infinite loop if prd.json write fails
+    if (-not $script:AutoCompletedStories) { $script:AutoCompletedStories = @{} }
     if ($storyObj -and -not $storyObj.passes) {
+        if ($script:AutoCompletedStories.ContainsKey($StoryId)) {
+            Write-Host "    Pre-flight: $StoryId already auto-completed this session - skipping" -ForegroundColor Yellow
+            return $true
+        }
         $alreadyDone = Test-StoryAlreadyCommitted -StoryId $StoryId -Story $storyObj
         if ($alreadyDone) {
             Write-Host "    Pre-flight: $StoryId already committed in git - auto-completing" -ForegroundColor Green
             Complete-StoryAutomatically -StoryId $StoryId -Story $storyObj -Reason "git-commit-detected"
+            $script:AutoCompletedStories[$StoryId] = $true
             return $true
         }
     }
@@ -603,23 +617,16 @@ function Test-GracefulStopRequested {
     $signalFile = Join-Path $script:RalphDir "graceful_stop.signal"
     if (Test-Path $signalFile) {
         # Read metadata if present for logging
-        try {
-            $meta = Get-Content $signalFile -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
-            $reason = if ($meta -and $meta.reason) { $meta.reason } else { "User requested" }
-            $requestedAt = if ($meta -and $meta.requestedAt) { $meta.requestedAt } else { "Unknown" }
-            Write-Host ""
-            Write-Host "  =====================================================" -ForegroundColor Cyan
-            Write-Host "     GRACEFUL STOP REQUESTED" -ForegroundColor Cyan
-            Write-Host "  =====================================================" -ForegroundColor Cyan
-            Write-Host "  Reason: $reason" -ForegroundColor DarkGray
-            Write-Host "  Requested at: $requestedAt" -ForegroundColor DarkGray
-            Write-Host ""
-        }
-        catch {
-            Write-Host ""
-            Write-Host "  GRACEFUL STOP REQUESTED" -ForegroundColor Cyan
-            Write-Host ""
-        }
+        $meta = Read-JsonFile -Path $signalFile -Silent
+        $reason = if ($meta -and $meta.reason) { $meta.reason } else { "User requested" }
+        $requestedAt = if ($meta -and $meta.requestedAt) { $meta.requestedAt } else { "Unknown" }
+        Write-Host ""
+        Write-Host "  =====================================================" -ForegroundColor Cyan
+        Write-Host "     GRACEFUL STOP REQUESTED" -ForegroundColor Cyan
+        Write-Host "  =====================================================" -ForegroundColor Cyan
+        Write-Host "  Reason: $reason" -ForegroundColor DarkGray
+        Write-Host "  Requested at: $requestedAt" -ForegroundColor DarkGray
+        Write-Host ""
         return $true
     }
     return $false
@@ -670,47 +677,41 @@ function Get-SprintStatus {
         Hashtable with passed, failed, total, nextStory
     #>
 
-    if (-not (Test-Path $script:PrdFile)) {
+    $prd = Get-Sprint
+    if (-not $prd) {
         return @{ passed = 0; failed = 0; total = 0; nextStory = $null; complete = $true }
     }
 
-    try {
-        $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
+    $passed = 0
+    $failed = 0
 
-        $passed = 0
-        $failed = 0
-
-        foreach ($story in $prd.userStories) {
-            if ($story.passes) {
-                $passed++
-            }
-            else {
-                $failed++
-            }
+    foreach ($story in $prd.userStories) {
+        if ($story.passes) {
+            $passed++
         }
-
-        # Story 2.2: Smart story ordering
-        $nextStory = $null
-        if ($failed -gt 0) {
-            $metricsFile = Join-Path $script:RalphDir "metrics.csv"
-            $metricsData = $null
-            if (Test-Path $metricsFile) {
-                try { $metricsData = Import-Csv $metricsFile } catch {}
-            }
-            $nextStory = Get-OptimalNextStory -Stories $prd.userStories -Metrics $metricsData
-        }
-
-        return @{
-            passed = $passed
-            failed = $failed
-            total = $passed + $failed
-            nextStory = $nextStory
-            complete = ($failed -eq 0)
-            focusArea = $prd.focusArea
+        else {
+            $failed++
         }
     }
-    catch {
-        return @{ passed = 0; failed = 0; total = 0; nextStory = $null; complete = $true }
+
+    # Story 2.2: Smart story ordering
+    $nextStory = $null
+    if ($failed -gt 0) {
+        $metricsFile = Join-Path $script:RalphDir "metrics.csv"
+        $metricsData = $null
+        if (Test-Path $metricsFile) {
+            try { $metricsData = Import-Csv $metricsFile } catch {}
+        }
+        $nextStory = Get-OptimalNextStory -Stories $prd.userStories -Metrics $metricsData
+    }
+
+    return @{
+        passed = $passed
+        failed = $failed
+        total = $passed + $failed
+        nextStory = $nextStory
+        complete = ($failed -eq 0)
+        focusArea = $prd.focusArea
     }
 }
 
@@ -722,7 +723,7 @@ function Get-SprintStatus {
 # ENTRY POINT
 # ============================================================================
 
-Write-RalphBanner
+Write-RalphBanner -Queue:$Queue -TrueAuto:$TrueAuto -RalphsChoice:$RalphsChoice -RalphsChoiceAuto:$RalphsChoiceAuto
 
 # Initialize graceful stop state
 $script:GracefulStopTriggered = $false
@@ -771,37 +772,42 @@ Append-SessionTimeline -Event "session_start" -Data @{
 
 # Route to appropriate loop based on flags
 # Note: each mode function runs its own pre-flight at the right time (after PRD generation)
-if ($Queue) {
-    Start-InterviewQueueLoop
+# Wrapped in try-finally to ensure session_end event is always written
+# (session 2026-01-27_231506 crashed without writing session_end)
+try {
+    if ($Queue) {
+        Start-InterviewQueueLoop
+    }
+    elseif ($TrueAuto) {
+        Start-TrueAutoLoop -FocusArea $FocusArea
+    }
+    elseif ($RalphsChoice) {
+        Start-RalphsChoiceLoop
+    }
+    elseif ($RalphsChoiceAuto) {
+        Start-RalphsChoiceAutoLoop
+    }
+    else {
+        Start-StandardLoop
+    }
 }
-elseif ($TrueAuto) {
-    Start-TrueAutoLoop
-}
-elseif ($RalphsChoice) {
-    Start-RalphsChoiceLoop
-}
-elseif ($RalphsChoiceAuto) {
-    Start-RalphsChoiceAutoLoop
-}
-else {
-    Start-StandardLoop
-}
+finally {
+    # Session summary - always runs even if loop throws unhandled exception
+    $duration = (Get-Date) - $script:State.SessionStartTime
 
-# Session summary
-$duration = (Get-Date) - $script:State.SessionStartTime
-
-# Log session end event
-Append-SessionTimeline -Event "session_end" -Data @{
-    iterations = $script:State.IterationCount
-    durationMin = [math]::Round($duration.TotalMinutes, 1)
-    consecutiveFailures = $script:State.ConsecutiveFailures
+    # Log session end event
+    Append-SessionTimeline -Event "session_end" -Data @{
+        iterations = $script:State.IterationCount
+        durationMin = [math]::Round($duration.TotalMinutes, 1)
+        consecutiveFailures = $script:State.ConsecutiveFailures
+    }
+    Write-Host ""
+    Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
+    Write-Host "  Session Summary" -ForegroundColor Cyan
+    Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
+    Write-Host "  Session ID: $($script:State.SessionId)" -ForegroundColor DarkGray
+    Write-Host "  Iterations: $($script:State.IterationCount)" -ForegroundColor DarkGray
+    Write-Host "  Duration: $([math]::Round($duration.TotalMinutes, 1)) minutes" -ForegroundColor DarkGray
+    Write-Host "  Logs: $script:SessionLogDir" -ForegroundColor DarkGray
+    Write-Host ""
 }
-Write-Host ""
-Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Session Summary" -ForegroundColor Cyan
-Write-Host "-----------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Session ID: $($script:State.SessionId)" -ForegroundColor DarkGray
-Write-Host "  Iterations: $($script:State.IterationCount)" -ForegroundColor DarkGray
-Write-Host "  Duration: $([math]::Round($duration.TotalMinutes, 1)) minutes" -ForegroundColor DarkGray
-Write-Host "  Logs: $script:SessionLogDir" -ForegroundColor DarkGray
-Write-Host ""

@@ -88,26 +88,51 @@ Please output your review as JSON.
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $claudePath
-        $psi.Arguments = "--print --dangerously-skip-permissions --model $model -p `"$reviewRequest`""
-        $psi.RedirectStandardInput = $false
+        $psi.Arguments = "--print --dangerously-skip-permissions --model $model"
+        $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
         $psi.WorkingDirectory = $script:ProjectRoot
 
-        $process = [System.Diagnostics.Process]::Start($psi)
-        $exited = $process.WaitForExit($timeout * 1000)
-        $output = $process.StandardOutput.ReadToEnd()
+        # Async output capture (prevents deadlock when output fills pipe buffer)
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
 
-        if (-not $exited) {
-            $process.Kill()
-            Write-Host "  Review timed out after ${timeout}s" -ForegroundColor Yellow
-            return $null
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+
+            # Pipe prompt via stdin to avoid CLI argument length limits
+            $process.StandardInput.Write($reviewRequest)
+            $process.StandardInput.Close()
+
+            $exited = $process.WaitForExit($timeout * 1000)
+            if ($exited) { $process.WaitForExit() }  # Flush async events
+            Start-Sleep -Milliseconds 200
+            $output = $outBuilder.ToString()
+
+            if (-not $exited) {
+                try { $process.Kill() } catch {}
+                Write-Host "  Review timed out after ${timeout}s" -ForegroundColor Yellow
+                return $null
+            }
+        }
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            if ($process -and -not $process.HasExited) {
+                try { $process.Kill() } catch {}
+            }
+            if ($process) { $process.Dispose() }
         }
 
         # Try to parse JSON from output
-        $jsonMatch = [regex]::Match($output, '\{[\s\S]*?"overallScore"[\s\S]*?\}')
+        $jsonMatch = [regex]::Match($output, '\{[\s\S]*"overallScore"[\s\S]*\}')
         if ($jsonMatch.Success) {
             try {
                 $review = $jsonMatch.Value | ConvertFrom-Json
@@ -205,8 +230,8 @@ function Get-StoryFailureContext {
 
     # Check for last output file
     $prevIteration = $script:State.IterationCount  # Current iteration (we're building prompt for next)
-    $outFile = Join-Path $script:SessionLogDir "claude_stdout_$prevIteration.txt"
-    $errFile = Join-Path $script:SessionLogDir "claude_stderr_$prevIteration.txt"
+    $outFile = Join-Path $script:SessionLogDir "claude_out_$prevIteration.log"
+    $errFile = Join-Path $script:SessionLogDir "claude_err_$prevIteration.log"
 
     $lastOutput = ""
     if (Test-Path $outFile) {
@@ -244,37 +269,27 @@ function Get-StoryFailureContext {
 
     # Check for previous verification logs
     $prevVerificationFile = Join-Path $script:SessionLogDir "story_${StoryId}_verification.json"
-    if (Test-Path $prevVerificationFile) {
-        try {
-            $prevVerification = Get-Content $prevVerificationFile -Raw | ConvertFrom-Json
-            if ($prevVerification.acceptanceCriteria) {
-                $unmet = @($prevVerification.acceptanceCriteria | Where-Object { -not $_.verified })
-                if ($unmet.Count -gt 0) {
-                    $context += ""
-                    $context += "Unmet criteria from previous attempt:"
-                    foreach ($c in $unmet) {
-                        $context += "  - $($c.criterion)"
-                    }
-                }
+    $prevVerification = Read-JsonFile -Path $prevVerificationFile
+    if ($prevVerification -and $prevVerification.acceptanceCriteria) {
+        $unmet = @($prevVerification.acceptanceCriteria | Where-Object { -not $_.verified })
+        if ($unmet.Count -gt 0) {
+            $context += ""
+            $context += "Unmet criteria from previous attempt:"
+            foreach ($c in $unmet) {
+                $context += "  - $($c.criterion)"
             }
         }
-        catch {}
     }
 
     # Check for review feedback
     $reviewFile = Join-Path $script:SessionLogDir "review_${StoryId}.json"
-    if (Test-Path $reviewFile) {
-        try {
-            $review = Get-Content $reviewFile -Raw | ConvertFrom-Json
-            if ($review.issues) {
-                $context += ""
-                $context += "Issues from quality review (score: $($review.overallScore)/10):"
-                foreach ($issue in $review.issues) {
-                    $context += "  [$($issue.severity)] $($issue.description)"
-                }
-            }
+    $review = Read-JsonFile -Path $reviewFile
+    if ($review -and $review.issues) {
+        $context += ""
+        $context += "Issues from quality review (score: $($review.overallScore)/10):"
+        foreach ($issue in $review.issues) {
+            $context += "  [$($issue.severity)] $($issue.description)"
         }
-        catch {}
     }
 
     $context += ""
@@ -461,12 +476,8 @@ function Compare-TestBaseline {
         return $null
     }
 
-    try {
-        $baseline = Get-Content $baselineFile -Raw | ConvertFrom-Json
-    }
-    catch {
-        return $null
-    }
+    $baseline = Read-JsonFile -Path $baselineFile
+    if (-not $baseline) { return $null }
 
     # Parse current results
     $currentPassed = 0
@@ -558,21 +569,11 @@ function Import-HumanFeedback {
 
     $feedbackFile = Join-Path $script:RalphDir "feedback.json"
 
-    if (-not (Test-Path $feedbackFile)) {
-        return @()
+    $data = Read-JsonFile -Path $feedbackFile
+    if ($data -and $data.entries) {
+        return @($data.entries)
     }
-
-    try {
-        $data = Get-Content $feedbackFile -Raw | ConvertFrom-Json
-        if ($data.entries) {
-            return @($data.entries)
-        }
-        return @()
-    }
-    catch {
-        Write-Host "  Warning: Could not parse feedback.json: $_" -ForegroundColor Yellow
-        return @()
-    }
+    return @()
 }
 
 function Get-FeedbackForStory {
@@ -1044,32 +1045,52 @@ function Invoke-CodeReview {
     $reviewFile = Join-Path $script:SessionLogDir "review_${StoryId}.json"
 
     try {
-        # Write prompt to temp file
-        $promptFile = Join-Path $env:TEMP "ralph_review_${StoryId}.md"
-        $reviewPrompt | Set-Content $promptFile -Encoding UTF8
+        $claudeFullPath = Get-ClaudePath
 
-        # Invoke separate Claude session (read-only)
-        $reviewCmd = "claude --model $model --print `"Review the code changes described in $promptFile and output ONLY the JSON review object, no other text.`""
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $claudeFullPath
+        $psi.Arguments = "--print --dangerously-skip-permissions --model $model"
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.WorkingDirectory = $script:ProjectRoot
 
-        $reviewProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c $reviewCmd" `
-            -RedirectStandardOutput (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") `
-            -RedirectStandardError (Join-Path $env:TEMP "ralph_review_err_${StoryId}.txt") `
-            -NoNewWindow -PassThru
+        # Async output capture (prevents deadlock when output fills pipe buffer)
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
 
-        $reviewProcess.WaitForExit($timeout * 1000) | Out-Null
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
 
-        if (-not $reviewProcess.HasExited) {
-            $reviewProcess.Kill()
-            Write-Host "  Code review: Timed out after ${timeout}s" -ForegroundColor Yellow
-            return $null
+            # Pipe prompt via stdin to avoid CLI argument length limits
+            $process.StandardInput.Write($reviewPrompt)
+            $process.StandardInput.Close()
+
+            $exited = $process.WaitForExit($timeout * 1000)
+            if ($exited) { $process.WaitForExit() }  # Flush async events
+            Start-Sleep -Milliseconds 200
+            $reviewOutput = $outBuilder.ToString()
+
+            if (-not $exited) {
+                try { $process.Kill() } catch {}
+                Write-Host "  Code review: Timed out after ${timeout}s" -ForegroundColor Yellow
+                return $null
+            }
         }
-
-        $reviewOutput = Get-Content (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") -Raw -ErrorAction SilentlyContinue
-
-        # Clean up temp files
-        Remove-Item $promptFile -ErrorAction SilentlyContinue
-        Remove-Item (Join-Path $env:TEMP "ralph_review_out_${StoryId}.txt") -ErrorAction SilentlyContinue
-        Remove-Item (Join-Path $env:TEMP "ralph_review_err_${StoryId}.txt") -ErrorAction SilentlyContinue
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            if ($process -and -not $process.HasExited) {
+                try { $process.Kill() } catch {}
+            }
+            if ($process) { $process.Dispose() }
+        }
 
         if (-not $reviewOutput) {
             Write-Host "  Code review: No output from review agent" -ForegroundColor Yellow
@@ -1136,14 +1157,8 @@ function Invoke-BatchPreFlight {
         Number of stories auto-completed
     #>
 
-    if (-not (Test-Path $script:PrdFile)) {
-        return 0
-    }
-
-    try {
-        $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-    }
-    catch {
+    $prd = Get-Sprint
+    if (-not $prd) {
         return 0
     }
 

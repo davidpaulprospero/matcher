@@ -7,7 +7,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'test-helper.ps1')
 
     $neededFunctions = @(
-        'Get-RalphConfig', 'Write-JsonNoBom',
+        'Read-JsonFile', 'Get-RalphConfig', 'Write-JsonNoBom',
         'Build-StoryPrompt', 'Get-RelevantFilesForStory',
         'Measure-CodebaseHealth', 'Compare-HealthMetrics',
         'Test-TokenBudget', 'Get-PromptEffectivenessHistory', 'Get-PromptRecommendation',

@@ -216,17 +216,27 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
 
-    # Apply caption-first mode CLI flags
+    # Apply caption-first mode CLI flags (handle dict or object config - Rule 6)
+    caption_first = config.download.caption_first
     if getattr(args, 'caption_first', False):
-        config.download.caption_first.enabled = True
+        if isinstance(caption_first, dict):
+            caption_first['enabled'] = True
+        else:
+            caption_first.enabled = True
         print("  Caption-first mode enabled via --caption-first")
 
     if getattr(args, 'caption_language', None):
-        config.download.caption_first.preferred_language = args.caption_language
+        if isinstance(caption_first, dict):
+            caption_first['preferred_language'] = args.caption_language
+        else:
+            caption_first.preferred_language = args.caption_language
         print(f"  Caption language set to '{args.caption_language}' via --caption-language")
 
     if getattr(args, 'no_caption_fallback', False):
-        config.download.caption_first.fallback_to_transcription = False
+        if isinstance(caption_first, dict):
+            caption_first['fallback_to_transcription'] = False
+        else:
+            caption_first.fallback_to_transcription = False
         print("  Caption fallback disabled via --no-caption-fallback")
 
     # Setup logging with dual log files (normal + verbose)
@@ -351,6 +361,52 @@ def main():
         else:
             print(f"\n  ✗ Config invalid: {len(validation_result.errors)} error(s)")
             sys.exit(1)
+
+    # Handle --cleanup-caption-cache (US-004 Sprint 8)
+    if getattr(args, 'cleanup_caption_cache', False):
+        from src.caption_fetcher import CaptionCache
+
+        print("\n  Caption Cache Cleanup")
+        print("  " + "=" * 40)
+
+        # Get caption-first config
+        caption_config = getattr(config.download, 'caption_first', None)
+        cache = CaptionCache(caption_config)
+
+        # Get override max_age_days if provided
+        max_age_days = getattr(args, 'cleanup_caption_cache_days', None)
+        if max_age_days is None:
+            max_age_days = cache.max_age_days
+
+        dry_run = getattr(args, 'cleanup_caption_cache_dry_run', False)
+
+        print(f"    Cache directory: {cache.cache_dir}")
+        print(f"    Max age threshold: {max_age_days} days")
+        print(f"    Dry run: {dry_run}")
+        print()
+
+        # Get current stats first
+        stats = cache.get_stats()
+        print(f"    Current entries: {stats['total_entries']:,}")
+        print(f"    Current size: {stats['cache_size_mb']:.2f} MB")
+        print()
+
+        # Run cleanup
+        result = cache.cleanup_stale_entries(
+            max_age_days=max_age_days,
+            dry_run=dry_run
+        )
+
+        action = "Would remove" if dry_run else "Removed"
+        print(f"    {action}: {result['entries_removed']:,} stale entries")
+        print(f"    Bytes freed: {result['bytes_freed'] / (1024 * 1024):.2f} MB")
+        if result['entries_removed'] > 0:
+            print(f"    Oldest entry: {result['oldest_removed_days']:.1f} days old")
+
+        if dry_run:
+            print("\n  Run without --cleanup-caption-cache-dry-run to actually remove entries.")
+
+        sys.exit(0)
 
     # Validate at startup
     if not validate_config_at_startup(config):
