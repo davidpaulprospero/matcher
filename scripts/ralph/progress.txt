@@ -6106,3 +6106,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_title_filter_escalation.py
 - Files modified: scripts/ralph/prd.json
 - Test results: 18 new tests pass in 0.57s, 0 failures
+
+## Focus Area: testing - 2026-01-28 14:06:44
+- Status: In Progress...
+
+## Iteration US-001 (Sprint 15) - Add post-edit analysis filename-based matching tests
+- Created tests/test_post_edit_analysis.py with 55 tests across 5 classes:
+  - AC1: TestIsMatcherTrack — 12 tests: V1/V5/V10 True, V11/V100/Audio 1 False, keyword matching (Primary/Entity/Stock)
+  - AC2: TestGetTrackCategory — 17 tests: v1 for V1, v2_v3 for V2/V3, v4_v6 for V4-V6, v7_plus for V7-V10, None for non-matcher, keyword fallback categories
+  - AC3: TestRenderCoverageBar — 7 tests: 0%/50%/100% exact bars, 25%/75% rounding, custom width, bar length invariant
+  - AC4: TestFormatTimecode — 9 tests: MM:SS (90s=1:30), HH:MM:SS (3661s=1:01:01), negative prepends '-', 0s=0:00, boundary 59s/60s/3600s
+  - AC5: TestFilenameBasedAnalysis — 10 tests: _normalize strips extension/segment suffix/basename, case-insensitive extensions, FilenameAnalysisResult coverage/counts/to_dict, empty result zero coverage
+- Files created: tests/test_post_edit_analysis.py
+- Test results: 55 passed in 0.54s, 0 failures
+
