@@ -7137,3 +7137,17 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 27 tests passed in 0.49s
 - Files created: tests/test_research_gemini_client.py (742 lines)
 - Commit: 7414163
+
+## Iteration US-002 (Sprint 23) - Add Perplexity research client unit tests
+- Created tests/test_research_perplexity_client.py with 30 unit tests in 7 classes:
+  - TestPerplexityResearchResultParsing (5 tests): AC1 - ResearchResult parsing
+  - TestPerplexityRateLimitHandling (4 tests): AC2 - 429/rate limiting with backoff
+  - TestPerplexityConnectionErrorHandling (5 tests): AC3 - timeout/connection retries
+  - TestPerplexityInvalidAPIKeyHandling (3 tests): AC4 - invalid API key errors
+  - TestPerplexityAPIKeyValidation (5 tests): AC5 - API key validation
+  - TestPerplexityOtherMethods (3 tests): fact_check, compare, api_docs methods
+  - TestPerplexityEdgeCases (5 tests): empty citations, missing fields, model selection
+- Note: AC criteria mention query() but actual PerplexityClient has research() method
+- Uses requests library mocking for HTTP call simulation
+- Test results: 30 tests passed in 0.49s
+- Files created: tests/test_research_perplexity_client.py (465 lines)

@@ -22,8 +22,8 @@
             "id": "US-002",
             "title": "Add Perplexity research client unit tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "30 tests added in tests/test_research_perplexity_client.py. Note: AC criteria mention query() but actual method is research(). Tests cover: ResearchResult parsing (5), rate limiting/429 handling (4), connection/timeout errors (5), invalid API key handling (3), API key validation (5), other methods (3), edge cases (5). All 30 tests pass in 0.49s.",
             "acceptanceCriteria": [
                 "Test PerplexityClient.query() returns correctly parsed QueryResult objects",
                 "Test PerplexityClient.query() handles rate limiting with retry-after header",
