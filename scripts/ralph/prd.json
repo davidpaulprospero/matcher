@@ -23,8 +23,8 @@
                             "id":  "US-002",
                             "title":  "Implement marker-based CI workflow for fast feedback",
                             "priority":  2,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Implemented marker-based CI in .github/workflows/tests.yml: fast-tests job runs pytest -m fast on PR updates (45s target), full-tests runs complete suite on merge to main only, offline-tests provides -m 'not requires_network' fallback. Added job summaries with test metrics and duration. Documented in tests/README.md. Commit: 9b3241a",
                             "acceptanceCriteria":  [
                                                        "Update .github/workflows/tests.yml to run pytest -m fast on PR updates",
                                                        "Configure full test suite run only on merge to main branch",
