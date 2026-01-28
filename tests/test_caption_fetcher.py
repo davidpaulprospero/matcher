@@ -1607,6 +1607,7 @@ Hello 世界! Привет мир! 🎉
 # Mark integration tests that require network
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionFetcherRealVideos:
     """Integration tests with real YouTube videos.
 

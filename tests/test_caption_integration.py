@@ -96,8 +96,8 @@ def get_test_video(fixture_key: str) -> str:
 # =============================================================================
 
 @pytest.mark.integration
-@pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationFetch:
     """Integration tests for caption fetching from real YouTube videos.
 
@@ -230,6 +230,7 @@ class TestCaptionIntegrationFetch:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationAuto:
     """Integration tests for videos with auto-generated captions.
 
@@ -334,6 +335,7 @@ class TestCaptionIntegrationAuto:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationNoCaption:
     """Integration tests for videos without captions.
 
@@ -420,6 +422,7 @@ class TestCaptionIntegrationNoCaption:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationLanguage:
     """Integration tests for caption language detection and selection."""
 
@@ -489,6 +492,7 @@ class TestCaptionIntegrationLanguage:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationQuality:
     """Integration tests for caption quality detection and metrics."""
 
@@ -569,6 +573,7 @@ class TestCaptionIntegrationQuality:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationRetry:
     """Integration tests for retry behavior with real network conditions."""
 
@@ -629,6 +634,7 @@ class TestCaptionIntegrationRetry:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestCaptionIntegrationCache:
     """Integration tests for caption caching with real videos."""
 
@@ -695,6 +701,7 @@ class TestCaptionIntegrationCache:
 
 @pytest.mark.integration
 @pytest.mark.requires_network
+@pytest.mark.flaky(reruns=2, reruns_delay=1.0)
 class TestVideoFixtureValidation:
     """Tests to validate that our video fixtures are still valid.
 
