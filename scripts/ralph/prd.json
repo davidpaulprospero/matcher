@@ -1,154 +1,154 @@
 {
-    "branchName": "ralph/sprint-17",
-    "sprintNumber": 17,
-    "focusArea": "testing",
-    "projectContext": "Sprint 17 targets the deepest remaining coverage gaps discovered during sprint 16 analysis: 3 pipeline stages with ZERO dedicated tests (BrollDownloadStage 454 LOC, CaptionStage 1008 LOC, BrollMatchStage 793 LOC), downloader transcoding module (331 LOC, 0 tests), CLI interactive/logging modules (256 LOC combined, 0 tests), APIHealer private error handlers (5 methods tested only indirectly), LLM client private helpers (_normalize_confidence, _is_permanent_error with no unit tests), and config merge duration tier helpers (2 functions with no direct tests). These gaps represent ~2,800 LOC of untested pipeline-critical code handling B-roll workflows, video transcoding, caption fetching, error recovery, and user-facing CLI functionality.",
+    "branchName": "ralph/sprint-18",
+    "sprintNumber": 18,
+    "focusArea": "quality",
+    "projectContext": "Sprint 18 targets untested scoring functions in src/matching/scoring.py and src/matching/metrics.py. Previous sprints established strong coverage for duration, topic, B-roll, caption quality, and entity match scoring. This sprint focuses on the remaining 8 untested functions: temporal coherence (compute_temporal_coherence, _is_jarring_context_switch), transcript quality (calculate_transcript_quality, _calculate_sentence_coherence, _calculate_language_consistency), embedding weight adjustment (adjust_embedding_weight_for_transcript_quality), semantic coherence (compute_semantic_coherence), pool normalization (normalize_confidence_by_pool), and metrics histogram (log_confidence_histogram). These functions represent ~400 LOC of untested confidence calibration logic that directly affects match quality output.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add BrollDownloadStage pipeline stage tests",
+            "title": "Add compute_temporal_coherence same-source boost and context switch penalty tests",
             "priority": 1,
             "passes": true,
-            "notes": "Pre-implemented: 134 tests across 3 files (test_broll_stages.py, test_broll_stages_extended.py, test_broll_stages_full_coverage.py) cover all 6 acceptance criteria. All pass in 15.5s.",
+            "notes": "Pre-implemented: tests/test_temporal_coherence.py has 38 tests covering all 5 AC. AC1: test_same_source_as_previous_applies_boost, AC2: test_same_source_as_next_applies_boost, AC3: test_same_source_both_directions_double_boost, AC4: test_jarring_switch_applies_penalty, AC5: test_disabled_config_returns_original_confidence. All pass.",
             "acceptanceCriteria": [
-                "Test BrollDownloadStage.can_skip() returns True when broll disabled in config, when skip_download is set, or when no keywords extracted — returns False when broll enabled with keywords present",
-                "Test BrollDownloadStage._generate_search_terms() combines keywords and entities into valid search term pairs — verify produces expected combinations from mock keyword list and entity list",
-                "Test BrollDownloadStage._download_youtube_broll() respects per-term and max-total video limits — mock downloader, verify download count does not exceed configured broll.max_videos_per_term and broll.max_total_videos",
-                "Test BrollDownloadStage._download_stock_broll() activates as fallback when YouTube downloads are under target count — mock stock API client, verify called only when youtube_count < max_total",
-                "Test BrollDownloadStage.run() creates DownloadedVideo entries with source='broll' and correct metadata — verify video objects in state.broll_downloads have expected fields after mock run",
-                "Test BrollDownloadStage.restore() correctly rebuilds broll_downloads list from checkpoint data — mock checkpoint with broll_paths and broll_count, verify state restored accurately"
+                "Test compute_temporal_coherence() returns +0.05 boost when current and previous match have same source_file — verify reason contains 'same source as prev'",
+                "Test compute_temporal_coherence() returns +0.05 boost when current and next match have same source_file — verify reason contains 'same source as next'",
+                "Test compute_temporal_coherence() applies double boost (+0.10) when both previous and next matches share same source_file as current",
+                "Test compute_temporal_coherence() returns -0.05 penalty when _is_jarring_context_switch() detects no topic overlap with previous match",
+                "Test compute_temporal_coherence() returns (confidence, '') when temporal_coherence_enabled is False in config — no adjustment applied"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add CaptionStage core execution and skip logic tests",
+            "title": "Add _is_jarring_context_switch topic overlap detection tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Pre-implemented: 27 tests across 6 US-002 test classes (TestCaptionStageCanSkipUS002, TestGetVideoIdsUS002, TestExtractVideoIdUS002, TestLoadExistingCaptionsUS002, TestValidateLanguageConfigUS002, TestPopulateTextMetadataUS002) cover all 6 acceptance criteria. All pass in 0.67s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test CaptionStage.can_skip() returns True when caption_first.enabled is False — returns False when caption_first is enabled and video IDs exist in state",
-                "Test CaptionStage._get_video_ids() extracts video IDs from both downloaded_videos and downloaded_audio lists — verify deduplication when same video appears in both",
-                "Test CaptionStage._extract_video_id() handles DownloadedVideo with URL path (extracts 11-char ID), file path (extracts from filename), and already-extracted ID string",
-                "Test CaptionStage._load_existing_captions() loads cached captions from checkpoint stages dict — verify returns dict mapping video_id to caption data, handles missing checkpoint gracefully",
-                "Test CaptionStage._validate_language_config() passes for valid ISO 639-1 codes ('en', 'es', 'fr') and fails with clear error for invalid codes ('xyz', '', numbers)",
-                "Test CaptionStage._populate_text_metadata() converts caption results into state.text_metadata entries — verify each entry has video_id, segments list, quality_score, and word_count fields"
+                "Test _is_jarring_context_switch() returns True when both segments have topics/keywords but zero overlap — verify segments with disjoint sets trigger jarring detection",
+                "Test _is_jarring_context_switch() returns False when segments share at least one common topic or keyword (case-insensitive)",
+                "Test _is_jarring_context_switch() returns False when current_segment has no topics/keywords (empty set cannot be jarring)",
+                "Test _is_jarring_context_switch() returns False when adjacent_segment has no topics/keywords (empty adjacent cannot trigger jarring)",
+                "Test _is_jarring_context_switch() handles mixed topics + keywords — overlap can come from either field",
+                "Test _is_jarring_context_switch() normalizes to lowercase for comparison — 'Paris' matches 'paris'"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add CaptionStage batch processing and metrics tests",
+            "title": "Add calculate_transcript_quality word count and tier scoring tests",
             "priority": 3,
-            "passes": true,
-            "notes": "19 tests across 5 dedicated US-003 test classes: TestCaptionStageRunSkipsCachedUS003 (2 tests, AC1), TestSaveIntermediateCheckpointUS003 (4 tests, AC2), TestCalculateQualityDistributionUS003 (5 tests, AC3), TestCaptionStageRunEmptyVideoIdsUS003 (3 tests, AC4), TestCaptionStageRestoreFullUS003 (5 tests, AC5). All 142 caption tests pass in 1.70s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test CaptionStage.run() skips videos that already have cached captions — mock 5 video IDs with 2 cached, verify only 3 new fetches attempted",
-                "Test CaptionStage._save_intermediate_checkpoint() writes caption data to checkpoint without overwriting other stage data — verify checkpoint file updated with caption_metrics key",
-                "Test CaptionStage._calculate_quality_distribution() correctly bins caption results into quality tiers (high/medium/low/failed) — verify counts match expected distribution for mock results",
-                "Test CaptionStage.run() handles empty video ID list gracefully — verify stage completes without error, returns empty metrics, logs appropriate message",
-                "Test CaptionStage.restore() rebuilds state from checkpoint including text_metadata, caption_metrics, and quality distribution — verify all fields populated correctly from mock checkpoint"
+                "Test calculate_transcript_quality() returns (0.0, 'low', 'empty_transcript') for empty or whitespace-only input",
+                "Test calculate_transcript_quality() returns quality_tier='high' when score >= 0.8 — verify word_count >= 50 with good coherence",
+                "Test calculate_transcript_quality() returns quality_tier='medium' when 0.5 <= score < 0.8 — verify intermediate word count",
+                "Test calculate_transcript_quality() returns quality_tier='low' when score < 0.5 — verify low word count or poor coherence",
+                "Test calculate_transcript_quality() word scoring: 50+ words = 0.4, 20-50 words = 0.2-0.4 (linear), <20 words = 0.0-0.2 (linear)",
+                "Test calculate_transcript_quality() reason string includes 'words:N' with actual word count"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add BrollMatchStage silent scene detection and scoring tests",
+            "title": "Add _calculate_sentence_coherence punctuation and structure tests",
             "priority": 4,
-            "passes": true,
-            "notes": "35 tests across 6 dedicated US-004 test classes in test_broll_match_us004.py: TestDetectSilentScenesWordCountUS004 (5 tests, AC1), TestDetectSilentScenesFaceDetectionUS004 (4 tests, AC2), TestValidateAndNormalizeWeightsUS004 (5 tests, AC3), TestCalculateEmbeddingScoreUS004 (8 tests, AC4), TestCalculateKeywordScoreUS004 (6 tests, AC5), TestCalculateEntityScoreUS004 (7 tests, AC6). All 169 broll tests pass in 16.37s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test BrollMatchStage._detect_silent_scenes() identifies scenes with word_count below broll.min_words_threshold (default 10) — mock text_metadata with 5 entries (3 silent, 2 speech), verify 3 BrollScene objects returned",
-                "Test BrollMatchStage._detect_silent_scenes() also detects face-detection B-roll scenes (is_broll=True from SceneDetection) — verify both detection methods contribute to result list",
-                "Test BrollMatchStage._validate_and_normalize_weights() normalizes embedding(0.4)+keyword(0.35)+entity(0.25) weights to sum=1.0 — verify logs warning when original weights differ by >0.01 from sum=1.0",
-                "Test BrollMatchStage._calculate_embedding_score() returns cosine similarity between scene and voiceover embeddings — verify returns float in [0.0, 1.0] range, handles zero-vector input without crash",
-                "Test BrollMatchStage._calculate_keyword_score() returns overlap ratio between scene keywords and voiceover keywords — verify 1.0 for identical sets, 0.0 for disjoint sets, handles empty keyword lists",
-                "Test BrollMatchStage._calculate_entity_score() scores entity overlap between scene and voiceover — verify partial entity matches (substring) contribute to score, empty entities return 0.0"
+                "Test _calculate_sentence_coherence() returns score > 0 when text has sentence-ending punctuation (. ! ?) — verify punctuation_ratio contributes",
+                "Test _calculate_sentence_coherence() returns score > 0 for capitalized words indicating sentence structure — verify capitalization contributes",
+                "Test _calculate_sentence_coherence() returns higher score when average word length >= 4.0 (not gibberish)",
+                "Test _calculate_sentence_coherence() returns 0.0 for text with fewer than 3 words (too short to assess)",
+                "Test _calculate_sentence_coherence() returns score capped at 0.35 maximum — verify calculation respects ceiling"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add BrollMatchStage enrichment and matching pipeline tests",
+            "title": "Add _calculate_language_consistency repetition and filler detection tests",
             "priority": 5,
-            "passes": true,
-            "notes": "38 tests across 6 dedicated US-005 test classes in test_broll_match_us005.py: TestShouldUseVisionUS005 (6 tests, AC1), TestEnrichWithKeywordsUS005 (5 tests, AC2), TestExtractKeywordsFromFilenameUS005 (11 tests, AC3), TestMatchScenesToVoiceoverUS005 (5 tests, AC4), TestCanSkipUS005 (5 tests, AC5), TestRestoreUS005 (6 tests, AC6). All 207 broll tests pass in 15.55s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test BrollMatchStage._should_use_vision() returns False in audio-first mode and True in standard mode when Vision API key is configured — verify config checks are correct",
-                "Test BrollMatchStage._enrich_with_keywords() extracts keywords from filename, removing prefixes (pexels_, pixabay_) and video IDs — verify 'pexels_sunset_ocean_4k.mp4' yields ['sunset', 'ocean', '4k']",
-                "Test BrollMatchStage._extract_keywords_from_filename() handles various filename patterns including underscores, hyphens, video IDs, and resolution suffixes — verify correct keyword extraction for 5+ patterns",
-                "Test BrollMatchStage._match_scenes_to_voiceover() selects top match per voiceover segment using multi-strategy scoring — mock 3 scenes and 2 voiceover segments, verify each segment gets best-scoring scene",
-                "Test BrollMatchStage.can_skip() returns True when broll disabled or no voiceover segments exist — returns False when broll enabled and voiceover segments present",
-                "Test BrollMatchStage.restore() rebuilds broll_matches from checkpoint including silent_count, match_count, and match data — verify state correctly populated from mock checkpoint"
+                "Test _calculate_language_consistency() penalizes excessive word repetition — verify repetition_ratio < 0.3 deducts 0.15 from score",
+                "Test _calculate_language_consistency() penalizes many short words — verify short_ratio > 0.5 deducts 0.10 from score",
+                "Test _calculate_language_consistency() penalizes filler word overload (um, uh, like) — verify filler_ratio > 0.2 deducts 0.08",
+                "Test _calculate_language_consistency() returns 0.25 (full score) for well-formed text with no issues",
+                "Test _calculate_language_consistency() returns 0.0 for single-word or empty input — verify edge case handling",
+                "Test _calculate_language_consistency() handles non-ASCII content — verify ascii_ratio < 0.7 deducts 0.05"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add TranscodingManager codec detection and format string tests",
+            "title": "Add adjust_embedding_weight_for_transcript_quality tier-based adjustment tests",
             "priority": 6,
-            "passes": true,
-            "notes": "Fixed 2 broken error-handling tests (Exception -> FileNotFoundError to match actual catch clause), added ffprobe argument verification test (AC1), added vp8 incompatible codec test (AC2). All 87 transcoding tests pass in 0.99s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test TranscodingManager.get_video_codec() calls ffprobe with correct arguments and parses JSON output — mock subprocess returning codec_name='h264' and container='mp4', verify returned tuple",
-                "Test TranscodingManager.needs_transcoding() returns False for compatible codec+container pairs (h264+mp4, hevc+mov, prores+mov) — returns True for incompatible codecs (vp9, av1, vp8)",
-                "Test TranscodingManager.needs_transcoding() skips audio-only files (mp3, m4a, wav, ogg extensions) — verify returns False without calling ffprobe",
-                "Test TranscodingManager.build_format_string() includes h264 codec preference when davinci_mode enabled — verify format selector prioritizes h264 over vp9/av1",
-                "Test TranscodingManager.build_filter_string() combines duration, views, and title blacklist filters into valid yt-dlp filter expression — verify correct filter syntax for sample config values",
-                "Test TranscodingManager._detect_hw_accel() detects GPU type from subprocess output — mock nvidia-smi success for NVIDIA, verify returns 'nvidia'; mock failure, verify returns None or fallback"
+                "Test adjust_embedding_weight_for_transcript_quality() returns (base_weight, 'high_quality_transcript') when quality_tier='high'",
+                "Test adjust_embedding_weight_for_transcript_quality() reduces weight by 10% for quality_tier='medium' — verify 0.4 becomes 0.36",
+                "Test adjust_embedding_weight_for_transcript_quality() reduces weight by 20% for quality_tier='low' — verify 0.4 becomes 0.32",
+                "Test adjust_embedding_weight_for_transcript_quality() returns (base_weight, 'quality_adjustment_disabled') when feature disabled",
+                "Test adjust_embedding_weight_for_transcript_quality() respects custom low_quality_reduction parameter — verify non-default reduction"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add TranscodingManager FFmpeg command building tests",
+            "title": "Add compute_semantic_coherence embedding similarity adjustment tests",
             "priority": 7,
-            "passes": true,
-            "notes": "32 tests across 5 dedicated US-007 test classes in test_transcoding_us007.py: TestFFmpegNvidiaGpuUS007 (6 tests, AC1), TestFFmpegAmdGpuUS007 (5 tests, AC2), TestFFmpegCpuFallbackUS007 (6 tests, AC3), TestFFmpegOutputContainerUS007 (7 tests, AC4), TestFFmpegCommandStructureUS007 (8 tests, AC5). All 119 transcoding tests pass in 1.23s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test TranscodingManager.get_ffmpeg_transcode_cmd() builds command with hardware-accelerated encoder for NVIDIA GPU — verify h264_nvenc encoder, -hwaccel cuda flags in command list",
-                "Test get_ffmpeg_transcode_cmd() builds command with h264_amf encoder for AMD GPU — verify correct encoder and decode flags",
-                "Test get_ffmpeg_transcode_cmd() falls back to libx264 software encoder when no GPU detected — verify no -hwaccel flags, uses libx264 with crf quality setting",
-                "Test get_ffmpeg_transcode_cmd() outputs to .mov container for ProRes codec and .mxf for DNxHD codec — verify output extension matches codec requirement",
-                "Test get_ffmpeg_transcode_cmd() includes -y overwrite flag and correct input/output paths — verify command structure is valid for subprocess execution"
+                "Test compute_semantic_coherence() returns +0.03 adjustment when cosine similarity > 0.6 (smooth topic flow)",
+                "Test compute_semantic_coherence() returns -0.05 adjustment when cosine similarity < 0.3 (abrupt topic flow)",
+                "Test compute_semantic_coherence() returns 0.0 adjustment when 0.3 <= similarity <= 0.6 (neutral flow)",
+                "Test compute_semantic_coherence() returns (0.0, 'semantic_coherence_disabled') when feature disabled",
+                "Test compute_semantic_coherence() returns (0.0, 'missing_embedding') when either embedding is None",
+                "Test compute_semantic_coherence() reason string includes actual similarity value in format 'sim=X.XXX'"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add APIHealer private error handler isolated tests",
+            "title": "Add normalize_confidence_by_pool size-based normalization tests",
             "priority": 8,
-            "passes": true,
-            "notes": "28 tests across 6 dedicated US-008 test classes in test_api_healer_us008.py: TestHandleRateLimitBackoffUS008 (5 tests, AC1), TestHandleAuthErrorProviderSwitchUS008 (4 tests, AC2), TestHandleQuotaExceededUS008 (4 tests, AC3), TestHandleTimeoutUS008 (5 tests, AC4), TestHandleConnectionErrorUS008 (4 tests, AC5), TestIsProviderAvailableUS008 (6 tests, AC6). All 92 healer tests pass in 3.4s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test APIHealer._handle_rate_limit() sleeps for backoff_time and returns RETRY action — mock time.sleep, verify called with initial backoff (2s), then doubled on second call (4s), capped at MAX_BACKOFF",
-                "Test APIHealer._handle_auth_error() identifies provider from error message and attempts _try_provider_switch() — mock error with 'gemini' provider, verify switch attempted to anthropic/ollama",
-                "Test APIHealer._handle_quota_exceeded() attempts provider switch and returns failed() when no alternatives available — verify failed result includes descriptive quota message",
-                "Test APIHealer._handle_timeout() increases config timeout value up to 300s maximum — mock config with timeout=60, verify updated to 120 after first call, capped at 300 after repeated calls",
-                "Test APIHealer._handle_connection_error() sleeps INITIAL_BACKOFF and returns RETRY — verify sleep called, retry action returned with connection retry message",
-                "Test APIHealer._is_provider_available() returns True when provider API key env var is set, False when missing — verify Ollama provider skips API key check and always returns True"
+                "Test normalize_confidence_by_pool() boosts confidence for small pools (<10) with clear winner (margin >= 0.1) — verify +0.05 adjustment",
+                "Test normalize_confidence_by_pool() reduces confidence for large pools (>100) with tight margins (<0.05) — verify -0.05 adjustment",
+                "Test normalize_confidence_by_pool() applies factor-based normalization for medium pools (10-100) — verify inverse sqrt formula",
+                "Test normalize_confidence_by_pool() returns (confidence, 'pool_normalization_disabled') when feature disabled",
+                "Test normalize_confidence_by_pool() returns (confidence, 'empty_pool') when pool_size <= 0",
+                "Test normalize_confidence_by_pool() clamps result to [0.0, 1.0] range — verify extreme adjustments don't exceed bounds"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add LLM client _normalize_confidence and _is_permanent_error unit tests",
+            "title": "Add log_confidence_histogram bucket counting and ASCII rendering tests",
             "priority": 9,
-            "passes": true,
-            "notes": "52 tests across 5 dedicated US-009 test classes in test_llm_client_us009.py: TestNormalizeConfidenceStringLabelsUS009 (9 tests, AC1), TestNormalizeConfidenceNumericUS009 (13 tests, AC2), TestIsPermanentErrorTrueUS009 (11 tests, AC3), TestIsPermanentErrorFalseUS009 (9 tests, AC4), TestNormalizeConfidenceEdgeCasesUS009 (10 tests, AC5). All 52 tests pass in 0.46s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _normalize_confidence() converts string labels: 'high'->0.9, 'medium'->0.7, 'low'->0.5, 'very_high'->0.95, 'very_low'->0.3 — verify exact float values for each label",
-                "Test _normalize_confidence() parses numeric strings ('0.85' -> 0.85), passes through float/int values, returns None for invalid input (None, empty string, 'invalid', non-numeric string)",
-                "Test _is_permanent_error() returns True for permanent error patterns: 'model not found', 'invalid api key', 'unauthorized', 'permission denied', 'authentication failed' — case-insensitive matching",
-                "Test _is_permanent_error() returns False for transient errors: 'timeout', 'connection refused', 'rate limit exceeded', 'service unavailable', 'internal server error'",
-                "Test _normalize_confidence() handles edge cases: float values already in 0-1 range returned as-is, values >1.0 or <0.0 handled gracefully (clamped or returned as-is per implementation)"
+                "Test log_confidence_histogram() correctly buckets confidences: 0.0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0",
+                "Test log_confidence_histogram() includes 1.0 in the 0.9-1.0 bucket (inclusive upper bound)",
+                "Test log_confidence_histogram() returns string containing 'Confidence Distribution' header",
+                "Test log_confidence_histogram() bar lengths scale proportionally to max count — verify bar_width parameter respected",
+                "Test log_confidence_histogram() shows percentage for each bucket — verify format 'N (X.X%)'",
+                "Test log_confidence_histogram() handles empty confidence list gracefully — returns valid histogram with zero counts"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add CLI interactive, logging_setup, and config merge helper tests",
+            "title": "Add calculate_match_quality_metrics edge case and gap detection tests",
             "priority": 10,
-            "passes": true,
-            "notes": "31 new tests across 4 dedicated US-010 test classes in 2 files: test_cli_interactive_us010.py (TestFindVoiceoverSearchOrderUS010: 7 tests AC1, TestFindVoiceoverAutoSelectUS010: 5 tests AC2) and test_config_merge_us010.py (TestMergeSingleTierAliasesUS010: 10 tests AC5, TestMergeDurationTiersPerTierUS010: 9 tests AC6). AC3+AC4 already covered by 29 tests in test_logging_setup.py (TestSetupLoggingBasic, TestSetupLoggingHandlers, TestSetupLoggingLevels). All 149 related tests pass in 3.23s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test find_voiceover_interactive() searches voiceover/ subdirectory first, then project root — mock directory with SRT file in voiceover/, verify found without searching root",
-                "Test find_voiceover_interactive() auto-selects when only one candidate found — mock single .srt file, verify returned without user prompt",
-                "Test setup_logging() creates logger with StreamHandler at configured level — verify logger has handler after setup, log level matches input parameter",
-                "Test setup_logging() creates logs/ subdirectory and two log files (normal + verbose) — mock output directory, verify both file handlers created with correct levels (INFO, DEBUG)",
-                "Test _merge_single_tier() maps config aliases correctly: 'count'->'videos_per_keyword', 'min'->'min_seconds', 'max'->'max_seconds' — verify setattr called with canonical field names",
-                "Test _merge_duration_tiers() detects tier names (short/medium/long/longer) and applies per-tier overrides — verify each tier receives its specific override values without affecting sibling tiers"
+                "Test calculate_match_quality_metrics() counts gaps correctly — verify has_gap=True on matches increments gap_count",
+                "Test calculate_match_quality_metrics() handles MatchResult structure with primary_match attribute — extract confidence correctly",
+                "Test calculate_match_quality_metrics() handles direct Match structure with confidence attribute",
+                "Test calculate_match_quality_metrics() returns MatchQualityMetrics with match_rate = matched_segments / total_segments",
+                "Test calculate_match_quality_metrics() calculates confidence_std using statistics.stdev for 2+ values, 0.0 for single value",
+                "Test calculate_match_quality_metrics() returns zero metrics when matches list is empty but total_segments > 0"
             ]
         }
     ]
