@@ -143,8 +143,8 @@
             "id": "US-010",
             "title": "Add integration test runner with isolated environment",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created scripts/run_integration_tests.py (400+ lines) with: (1) IsolatedTestEnvironment class that creates temp directories (cache, output, downloads, projects) and sets isolation env vars; (2) IntegrationTestRunner with configurable timeout (default 5 min), parallel execution via pytest-xdist, and pattern/marker filtering; (3) Automatic cleanup after completion (or --keep-artifacts to preserve); (4) JSON report export with --json-report; (5) CLI with -v, -k, -m, -n flags matching pytest conventions. Added 22 tests in test_run_integration_tests.py covering environment setup/cleanup, test discovery, result parsing, timeout handling, and parallel fallback. Updated tests/README.md with comprehensive Integration Test Runner section including usage examples, features table, environment variables, and CI integration.",
             "acceptanceCriteria": [
                 "Create scripts/run_integration_tests.py for isolated test execution",
                 "Configure temporary directory setup for integration tests",
