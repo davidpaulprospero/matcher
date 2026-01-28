@@ -7494,3 +7494,49 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: tests/benchmarks/README.md (+200 lines)
 - Benchmark runner tested: 14 pipeline benchmarks run and compared successfully
 - Commit: 928b670
+
+## Iteration - [US-009] Add test categorization script for unmarked tests
+- Created scripts/categorize_tests.py (428 lines) for test marker analysis
+- AST-based parsing extracts all test functions and their existing markers
+- I/O pattern detection for automatic marker suggestions:
+  - requires_network: requests, httpx, aiohttp, urllib, socket patterns
+  - integration: subprocess, tempfile, shutil.rmtree, sqlite3, redis, pymongo
+  - requires_api: *_API_KEY environment variable patterns
+  - slow: time.sleep > 2 seconds
+  - fast: Mock/MagicMock/patch with no I/O patterns
+
+**Script Output Modes:**
+1. Default: Marker distribution report to stdout
+2. --verbose: Shows sample tests needing markers
+3. --output report.csv: Full CSV with all tests
+4. --auto-suggest: Grouped recommendations by marker type
+5. --json --output report.json: CI-friendly JSON format
+6. --path tests/test_agents: Analyze specific directory
+
+**Marker Distribution Found:**
+- Total tests: 11,544
+- fast: 216 (currently marked)
+- integration: 25 (currently marked)
+- flaky: 8 (currently marked)
+- unmarked: 11,143 (97% of tests)
+- Suggested additions: 10,711 fast, 332 integration, 126 requires_network, 82 requires_api
+
+**tests/README.md Updates:**
+- Added "CI Optimization: Test Categorization" section (~100 lines)
+- Quick usage examples for all modes
+- I/O pattern to marker mapping table
+- CSV output format documentation
+- GitHub Actions workflow example
+- Best practices for adding markers
+
+**Acceptance Criteria Verification:**
+- AC1: scripts/categorize_tests.py created with AST-based analysis
+- AC2: Report shows tests by marker (fast, integration, unmarked counts)
+- AC3: Detects I/O patterns (requests, subprocess, tempfile, API keys)
+- AC4: CSV output includes test_file, test_name, suggested_marker, reason
+- AC5: --auto-suggest mode groups recommendations by marker type
+- AC6: tests/README.md CI optimization section added with full documentation
+
+- Files created: scripts/categorize_tests.py (428 lines)
+- Files modified: tests/README.md (+100 lines)
+- Commit: dec2556
