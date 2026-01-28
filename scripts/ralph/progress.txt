@@ -7057,3 +7057,21 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 124 chapter detection tests pass in 0.59s
 - Files modified: tests/test_chapter_detection/test_detector.py (+335 lines)
 - Commit: 03df23f
+
+
+## Iteration - [US-007] Add tiered matcher strategy fallback tests
+- Added 16 new tests in tests/test_tiered_matcher_us007.py
+- Test classes created:
+  - TestBrollConflictingSignalsUS007 (5 tests): AC4 - conflicting B-roll signals (silent + faces)
+  - TestBrollExact03ThresholdUS007 (3 tests): AC3 - exact 0.3 threshold behavior
+  - TestMemoryExhaustionHandlingUS007 (5 tests): AC5 - >1000 candidate handling
+  - TestStrategySelectionUS007 (3 tests): AC1 verification - strategy selection
+- Acceptance criteria verification:
+  - AC1: Covered by existing tests in test_tiered_matcher_advanced.py (TestLLMProviderFallback)
+  - AC2: Covered by existing tests in test_fallback_matching.py (TestKeywordOnlyFallback)
+  - AC3: Added new tests + verified existing in test_face_detection.py (TestBRollClassification)
+  - AC4: Added new tests for is_broll=True with high face_score conflicts
+  - AC5: Added stress tests with 1000-5000 candidates, memory handling verification
+- Test results: 105 tests pass in tiered matcher suite (2.35s)
+- Files modified: tests/test_tiered_matcher_us007.py (+463 lines)
+- Commit: 10bf94d

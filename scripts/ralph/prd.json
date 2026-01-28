@@ -92,8 +92,8 @@
             "id": "US-007",
             "title": "Add tiered matcher strategy fallback tests",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 16 new tests in tests/test_tiered_matcher_us007.py: TestBrollConflictingSignalsUS007 (5), TestBrollExact03ThresholdUS007 (3), TestMemoryExhaustionHandlingUS007 (5), TestStrategySelectionUS007 (3). AC1-2 verified against existing test_tiered_matcher_*.py and test_fallback_matching.py. AC3-5 new tests added. 105 total tests pass in tiered matcher suite.",
             "acceptanceCriteria": [
                 "Test TieredMatcher selects correct strategy based on available resources",
                 "Test TieredMatcher falls back from embedding to keyword when index unavailable",
