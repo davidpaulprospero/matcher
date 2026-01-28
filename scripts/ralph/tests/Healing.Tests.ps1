@@ -827,3 +827,32 @@ Describe 'Self-healing config' {
         $config.selfHealing.criticalFiles | Should -Not -BeNullOrEmpty
     }
 }
+
+Describe 'Healing metrics recording' {
+    It 'records healing iteration as mode=Healing in metrics CSV' {
+        Mock Record-Metric {}
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{ Exited = $true; ExitCode = 0; TimedOut = $false; Output = "Fixed";
+                      ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date) }
+        }
+        Mock Invoke-TieredHealthCheck {
+            return @{ HasErrors = $false; FailedTier = 0 }
+        }
+        Mock Write-Host {}
+
+        $script:RalphDir = $TestDrive
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state_metric.json"
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_metric.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+        $script:State = @{ SessionId = "m-test"; IterationCount = 5; CurrentMode = "Standard"; ConsecutiveFailures = 0 }
+
+        @{ paused = $true; storyId = "US-005"; focusArea = "testing"; failedTier = 2;
+           rawDiagnostics = "IMPORT error" } |
+            ConvertTo-Json -Depth 10 | Set-Content $script:HealingStateFile
+
+        Invoke-HealingSession -MaxAttempts 1
+
+        Should -Invoke Record-Metric -Times 1 -ParameterFilter { $Mode -eq "Healing" -and $StoryId -like "HEALING-*" }
+    }
+}
