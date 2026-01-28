@@ -50,8 +50,8 @@
             "id": "US-004",
             "title": "Add CLI newproject Google Doc parsing tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_cli_newproject.py with 25 tests across 5 classes: TestExtractDocId (7 tests: standard/sharing/invalid/empty/drive/long/fragment URLs), TestExtractDriveLinks (6 tests: multiline, empty, single, non-drive, hyphens/underscores), TestGetDateSuffix (4 tests: regex format, string type, length 10, specific date mock), TestCombineAudioFiles (3 tests: empty list, multi-file combine mock, missing pydub), TestDownloadDriveFiles (5 tests: missing gdown, ordered download, skip existing, failure handling, empty list).",
             "acceptanceCriteria": [
                 "Test extract_doc_id() parses Google Doc URLs — verify extraction from 'https://docs.google.com/document/d/ABC123/edit', '/edit?usp=sharing' variant, and returns None for invalid URLs",
                 "Test extract_drive_links() finds Google Drive file IDs in text — verify finds multiple IDs in multiline text, returns empty list for text with no Drive links",
