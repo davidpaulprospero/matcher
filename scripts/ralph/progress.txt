@@ -6745,3 +6745,36 @@ def test_eta_accuracy_batch_50_videos(self):
   - AC5: test_provider_switch_exclude_specific_provider (_try_provider_switch respects exclude parameter)
 - Files: tests/test_api_healer.py (30 tests), tests/test_api_healer_us008.py (28 tests)
 - Test results: 58 tests passed in 205.81s, 0 regressions
+
+## Focus Area: testing - 2026-01-28 21:51:19
+- Status: In Progress...
+
+
+## Pre-flight Auto-Complete - [US-006] Add config deep merge sibling preservation tests for Rule 23
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Pre-flight Auto-Complete - [US-002] Add subprocess encoding compliance tests for Rule 27
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration US-001 (Sprint 21) - Add retry queue and circuit breaker coordination edge case tests
+- Added 7 new tests in TestConcurrentRetryCoordination class to tests/test_circuit_breaker_retry_coordination.py
+- Tests added:
+  1. test_concurrent_circuit_breaker_wait_serializes_correctly - verifies multiple threads waiting on CB coordinate
+  2. test_concurrent_retry_queues_share_circuit_breaker - multiple queues sharing same CB coordinate
+  3. test_failure_recording_thread_safety - concurrent failure recording doesn't corrupt state
+  4. test_success_recording_thread_safety - concurrent success recording resets properly
+  5. test_circuit_breaker_state_machine_transitions - CB state transitions CLOSED->OPEN->HALF_OPEN->CLOSED
+  6. test_retry_queue_add_blocks_on_open_cb_via_process - blocking happens in start_retry_pass, not add()
+  7. test_half_open_recovery_after_batch_retry_wait - verifies recovery after CB wait
+- Acceptance criteria mapping:
+  - AC1 (RetryQueue blocks when CB OPEN): test_retry_queue_add_blocks_on_open_cb_via_process + existing test_batch_retry_waits_for_tripped_circuit_breaker
+  - AC2 (CB pause scaling): existing TestBudgetAwarePauseScaling (10+ tests)
+  - AC3 (concurrent coordination): NEW test_concurrent_circuit_breaker_wait_serializes_correctly + thread safety tests
+  - AC4 (deadlock prevention): existing test_retry_queue_deadlock.py (40+ tests)
+  - AC5 (half-open recovery): test_half_open_recovery_after_batch_retry_wait + test_transitions_to_half_open
+- Test results: 191 CB+retry coordination tests passed in 2.31s
+- Files modified: tests/test_circuit_breaker_retry_coordination.py (+198 lines)
