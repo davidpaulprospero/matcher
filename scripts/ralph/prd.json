@@ -78,8 +78,8 @@
             "id": "US-006",
             "title": "Add checkpoint stage data round-trip tests",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_checkpoint_stage_data_roundtrip.py with 29 tests across 5 classes: TestSaveLoadRoundTrip (6 tests: all 14 stages round-trip, metadata preservation, single stage, nested data, empty data, overwrite), TestGetStageData (6 tests: before any stage, uncompleted stage, completed stage, unknown stage, future stages, all 14 empty), TestShouldSkipStage (6 tests: skip before last_completed, no checkpoint, first only, last/all, mid-pipeline split, unknown stage), TestConfigHashMismatch (5 tests: warns on mismatch, no warn on match, no warn when no original/current hash, resume_from correct despite mismatch), TestVoiceoverHashComparison (6 tests: warns on file change, no warn unchanged, no warn without path/hash, hash stored correctly, missing file empty hash). All 191 checkpoint tests pass, 0 regressions.",
             "acceptanceCriteria": [
                 "Test save/load round-trip preserves stage data for all 14 stage types — save with data for ANALYZE through OUTPUT, load, verify each stage dict matches original",
                 "Test get_stage_data() returns empty dict for stages not yet completed — verify no KeyError when accessing stage data before that stage runs",
