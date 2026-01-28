@@ -50,8 +50,8 @@
                             "id":  "US-004",
                             "title":  "Add B-roll propagation chain validation tests for Rule 8",
                             "priority":  4,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Auto-completed by pre-flight check (pre-implemented). All 5 ACs covered by existing tests: AC1 in test_scene_detection_stage_coverage.py, AC2 in TestMergeSceneDataCoverage, AC3 in test_stage_match_coverage.py::TestPrepareSegments, AC4 in test_broll_match_us004.py::TestDetectSilentScenesWordCountUS004, AC5 in test_broll_stages.py::test_detect_silent_scenes_includes_is_broll. 170 related tests pass.",
                             "acceptanceCriteria":  [
                                                        "Test SceneDetection sets is_broll=True when face_score \u003c 0.3",
                                                        "Test text_metadata preserves is_broll flag through pipeline stages",
@@ -64,8 +64,8 @@
                             "id":  "US-005",
                             "title":  "Add checkpoint stage data validation tests for Rule 25",
                             "priority":  5,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Created tests/test_checkpoint_stage_data_validation.py with 25 tests covering all 5 ACs: empty stages dict failure, populated stages dict success, backup restoration, manually edited checkpoint warnings, and reusable fixture for valid checkpoint with stage data. Tests verify Rule 25 behavior for --output-only mode.",
                             "acceptanceCriteria":  [
                                                        "Test --output-only fails gracefully when stages dict is empty {}",
                                                        "Test --output-only succeeds when checkpoint has populated stages dict",
@@ -92,8 +92,8 @@
                             "id":  "US-007",
                             "title":  "Add OTIO auto-split validation tests for Rule 17",
                             "priority":  7,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Created tests/test_otio_auto_split_rule17.py with 31 tests covering all 5 ACs: AC1 (4 tests for boundary at 3000 items), AC2 (7 tests for auto-split at 3001+), AC3 (6 tests for MediaPathNormalizer Rule 16), AC4 (5 tests for clip timing preservation), AC5 (6 tests for warning logs). Plus 3 integration tests. All tests pass.",
                             "acceptanceCriteria":  [
                                                        "Test timeline with exactly 3000 items does not split",
                                                        "Test timeline with 3001+ items auto-splits into PART1-4 files",

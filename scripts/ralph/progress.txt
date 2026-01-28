@@ -1,4 +1,31 @@
 
+## Iteration US-005 (Sprint 21) - Add checkpoint stage data validation tests for Rule 25
+- Created tests/test_checkpoint_stage_data_validation.py with 25 comprehensive tests
+- All 5 acceptance criteria verified:
+  - AC1: TestOutputOnlyFailsWithEmptyStages (5 tests) - empty stages dict causes restore failure
+  - AC2: TestOutputOnlySucceedsWithPopulatedStages (5 tests) - populated stages enable successful restore
+  - AC3: TestBackupRestorationWithStageData (2 tests) - backup restores all 14 stage types
+  - AC4: TestManuallyEditedCheckpointWarnings (5 tests) - invalid/missing fields trigger warnings
+  - AC5: valid_checkpoint_with_stage_data fixture - reusable fixture for OUTPUT tests
+- Additional tests:
+  - TestOutputOnlyModeIntegration (4 tests) - pipeline simulation for --output-only mode
+  - TestCheckpointStageDataEdgeCases (4 tests) - partial data, None values, empty vs missing
+- Files created: tests/test_checkpoint_stage_data_validation.py (837 lines)
+- Test results: 25 tests passed in 0.49s, 228 total checkpoint tests pass
+- Commit: 3390683
+
+## Iteration US-004 (Sprint 21) - Add B-roll propagation chain validation tests for Rule 8
+- Story was pre-implemented across multiple existing test files (170 tests)
+- All 5 acceptance criteria verified by existing tests:
+  - AC1: test_scene_detection_stage_coverage.py + test_face_detection_extended.py (face_score < 0.3 sets is_broll=True)
+  - AC2: test_scene_detection_stage_coverage.py::TestMergeSceneDataCoverage (text_metadata preserves is_broll)
+  - AC3: test_stage_match_coverage.py::TestPrepareSegments::test_prepare_video_segments_from_dict_metadata (MatchStage restores is_broll)
+  - AC4: test_broll_match_us004.py::TestDetectSilentScenesWordCountUS004 (word_count < threshold detection)
+  - AC5: test_broll_stages.py::TestBrollMatchStage::test_detect_silent_scenes_includes_is_broll (both detection methods contribute to V8)
+- Files: tests/test_broll_match_us004.py, tests/test_broll_stages.py, tests/test_scene_detection_stage_coverage.py, tests/test_stage_match_coverage.py
+- Test results: 170 tests passed in 17.37s, 0 regressions
+- Note: All Rule 8 B-roll propagation chain behavior is comprehensively tested
+
 ## Iteration US-001 (Sprint 20) - Add HealingLogger initialization and file creation tests
 - Added 15 new tests in tests/test_agents/test_healing_logger.py
 - TestHealingLoggerInit (9 tests):
@@ -6796,3 +6823,22 @@ def test_eta_accuracy_batch_50_videos(self):
   - AC5: test_identify_missing_segments, test_global_cache_videos_in_missing_list, test_coverage_percentage_calculation
 - Test results: 29 tests passed in 0.51s
 - Files created: tests/test_caption_first_video_id_resolution.py (~520 lines)
+
+## Iteration US-007 (Sprint 21) - Add OTIO auto-split validation tests for Rule 17
+- Created tests/test_otio_auto_split_rule17.py with 31 tests
+- Test classes:
+  1. TestTimelineExact3000NoSplit (AC1): 4 tests for boundary at 3000 items
+  2. TestTimelineAutoSplit (AC2): 7 tests for auto-split at 3001+ items
+  3. TestMediaPathNormalizerDeduplication (AC3): 6 tests for Rule 16 deduplication
+  4. TestSplitTimelineClipTiming (AC4): 5 tests for timing preservation across parts
+  5. TestLargeTimelineWarnings (AC5): 6 tests for warning log behavior
+  6. TestAutoSplitIntegration: 3 integration tests
+- Key verifications:
+  - AC1: _split_timeline_by_segments returns single timeline when segments <= max_segments
+  - AC2: Split creates ceil(segments/max_segments) parts, generates PART1-N files
+  - AC3: MediaPathNormalizer maps duplicate files to canonical path (stock/ preferred)
+  - AC4: Clips preserve source_range, parts maintain continuity, audio syncs with video
+  - AC5: Warning at 2500 clips, error at 3000 clips, threshold values match Rule 17
+- Test results: 31 tests passed in 2.38s
+- Files created: tests/test_otio_auto_split_rule17.py (~604 lines)
+- Commit: 6e43826
