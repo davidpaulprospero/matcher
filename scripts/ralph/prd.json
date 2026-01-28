@@ -78,8 +78,8 @@
             "id": "US-006",
             "title": "Add LLM provider validation and hallucination detection tests",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Verified 145 tests across 4 files. All 5 AC covered: AC1-2 in test_llm_reasoning_validation.py, AC3 in test_explanation_validation.py, AC4 added 3 new tests in test_cot_reasoning.py for nested quotes/special chars, AC5 in test_negative_sampling.py and test_cot_reasoning.py. All tests pass.",
             "acceptanceCriteria": [
                 "Test validate_llm_reasoning() rejects generic phrases like 'good match' alone",
                 "Test validate_llm_reasoning() accepts responses with specific content references",

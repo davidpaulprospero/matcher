@@ -374,6 +374,61 @@ class TestParseCotReasoning:
 
         assert len(cot.reasoning_text) <= 100
 
+    def test_parse_handles_nested_quotes_in_themes(self):
+        """Parse should handle nested quotes in theme strings."""
+        response = {
+            "voiceover_themes": ['She said "hello" to him', "It's a 'special' day"],
+            "video_elements": ["element"],
+            "rubric_scores": {"topic_match": 0.9},
+            "confidence": 0.8,
+            "reason": "match"
+        }
+
+        cot = parse_cot_reasoning(response)
+
+        assert len(cot.voiceover_themes) == 2
+        assert '"hello"' in cot.voiceover_themes[0]
+        assert "'special'" in cot.voiceover_themes[1]
+
+    def test_parse_handles_special_characters_in_elements(self):
+        """Parse should handle special characters in video elements."""
+        response = {
+            "voiceover_themes": ["theme"],
+            "video_elements": [
+                "café & résumé",
+                "emoji: 🎬🎥",
+                "newline\\nand\\ttab",
+                "<script>alert('xss')</script>"
+            ],
+            "rubric_scores": {"topic_match": 0.9},
+            "confidence": 0.8,
+            "reason": "match"
+        }
+
+        cot = parse_cot_reasoning(response)
+
+        assert len(cot.video_elements) == 4
+        assert "café" in cot.video_elements[0]
+        assert "🎬" in cot.video_elements[1]
+        assert "\\n" in cot.video_elements[2]
+        assert "<script>" in cot.video_elements[3]
+
+    def test_parse_handles_special_characters_in_reason(self):
+        """Parse should handle special characters in reason text."""
+        response = {
+            "voiceover_themes": ["theme"],
+            "video_elements": ["element"],
+            "rubric_scores": {"topic_match": 0.9},
+            "confidence": 0.8,
+            "reason": 'Text with "nested" quotes and special chars: <>&\'\\'
+        }
+
+        cot = parse_cot_reasoning(response)
+
+        # Should preserve special characters in truncated string
+        assert '"nested"' in cot.reasoning_text
+        assert "<>&" in cot.reasoning_text
+
 
 class TestCotIntegration:
     """Integration tests for CoT with LLM providers."""
