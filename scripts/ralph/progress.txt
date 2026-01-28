@@ -6489,3 +6489,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: test_confidence_capped_at_one + test_confidence_capped_at_zero — verifies result clamped to [0.0, 1.0] range
 - Files already exist: tests/test_pool_normalization.py (34 tests across 8 test classes)
 - Test results: 34 passed in 0.44s
+
+## Iteration US-009 (Sprint 18) - Add log_confidence_histogram bucket counting and ASCII rendering tests
+- Pre-implemented: tests/test_confidence_histogram.py contains 31 comprehensive tests
+- AC1: TestHistogramBuckets::test_bucket_ranges_correct — verifies 6 buckets (0.0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0)
+- AC2: TestBucketCounting::test_boundary_value_one — verifies 1.0 goes in 0.9-1.0 bucket (inclusive upper bound)
+- AC3: TestHistogramFormatting::test_includes_header_and_footer — verifies 'Confidence Distribution' header present
+- AC4: TestHistogramBarScaling::test_custom_bar_width — verifies bar_width parameter scales bar lengths proportionally
+- AC5: TestHistogramFormatting::test_includes_percentages — verifies format 'N (X.X%)' for each bucket
+- AC6: TestHistogramEdgeCases::test_empty_confidences — verifies empty list returns valid histogram with 'Total segments: 0'
+- Files already exist: tests/test_confidence_histogram.py (31 tests across 11 test classes)
+- Test results: 31 passed in 0.44s
