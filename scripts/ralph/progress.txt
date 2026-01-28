@@ -1,4 +1,16 @@
 
+## Iteration US-004 (Sprint 17) - Add BrollMatchStage silent scene detection and scoring tests
+- Added 35 new tests across 6 dedicated US-004 test classes in tests/test_broll_match_us004.py
+- TestDetectSilentScenesWordCountUS004 (5 tests): AC1 — 5 entries (3 silent <10 words, 2 speech >=10), threshold verification, ignore marker stripping, custom threshold
+- TestDetectSilentScenesFaceDetectionUS004 (4 tests): AC2 — is_broll=True included despite word count, both detection methods contribute, is_broll word_count=0, empty transcripts
+- TestValidateAndNormalizeWeightsUS004 (5 tests): AC3 — default weights no warning, exact sum, within-tolerance normalization, outside-tolerance warning, logger.warning verification
+- TestCalculateEmbeddingScoreUS004 (8 tests): AC4 — identical vectors=1.0, orthogonal=0.0, float in [0,1], None inputs, zero-vector no crash, negative cosine clamped
+- TestCalculateKeywordScoreUS004 (6 tests): AC5 — identical=1.0, disjoint=0.0, empty keywords fallback, empty vo/scene text, partial overlap
+- TestCalculateEntityScoreUS004 (7 tests): AC6 — full overlap, partial match, substring match, empty entities=0.0, no entities in vo, empty description, case-insensitive
+- All 6 acceptance criteria verified met
+- Files modified: tests/test_broll_match_us004.py (new)
+- Test results: 169 broll tests passed in 16.37s (134 existing + 35 new), 0 regressions
+
 ## Iteration US-003 (Sprint 17) - Add CaptionStage batch processing and metrics tests
 - Added 19 new tests across 5 dedicated US-003 test classes in tests/test_stage_caption.py
 - TestCaptionStageRunSkipsCachedUS003 (2 tests): AC1 — run() skips cached captions (5 IDs, 2 cached → only 3 fetched), all-cached scenario

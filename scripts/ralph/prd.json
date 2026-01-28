@@ -52,8 +52,8 @@
             "id": "US-004",
             "title": "Add BrollMatchStage silent scene detection and scoring tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "35 tests across 6 dedicated US-004 test classes in test_broll_match_us004.py: TestDetectSilentScenesWordCountUS004 (5 tests, AC1), TestDetectSilentScenesFaceDetectionUS004 (4 tests, AC2), TestValidateAndNormalizeWeightsUS004 (5 tests, AC3), TestCalculateEmbeddingScoreUS004 (8 tests, AC4), TestCalculateKeywordScoreUS004 (6 tests, AC5), TestCalculateEntityScoreUS004 (7 tests, AC6). All 169 broll tests pass in 16.37s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test BrollMatchStage._detect_silent_scenes() identifies scenes with word_count below broll.min_words_threshold (default 10) — mock text_metadata with 5 entries (3 silent, 2 speech), verify 3 BrollScene objects returned",
                 "Test BrollMatchStage._detect_silent_scenes() also detects face-detection B-roll scenes (is_broll=True from SceneDetection) — verify both detection methods contribute to result list",
