@@ -78,8 +78,8 @@
             "id": "US-006",
             "title": "Add subdirectory conftest.py for test_agents",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 3 new fixtures to tests/test_agents/conftest.py: mock_healing_context (MockHealingContext dataclass with .with_error()/.with_stage() helpers), mock_orchestrator (creates real HealingOrchestrator with conservative strategy), agent_factory (AgentFactory class with create_healer/create_orchestrator/create_runner methods). Also added mock_orchestrator_factory for strategy variations. All 558 test_agents tests pass in 7.83s.",
             "acceptanceCriteria": [
                 "Create tests/test_agents/conftest.py with healer-specific fixtures",
                 "Add mock_healing_context fixture for isolated healer tests",
