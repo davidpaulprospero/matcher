@@ -436,3 +436,177 @@ Coverage settings are in `.coveragerc`:
 - HTML reports go to `htmlcov/`
 - XML reports go to `coverage.xml`
 - Excludes: legacy modules, test files, type-checking blocks
+
+## Assertion Helpers
+
+The `tests/helpers/` module provides reusable assertion helpers for common validation patterns.
+
+### Importing Helpers
+
+```python
+from tests.helpers import (
+    assert_valid_otio_timeline,
+    assert_valid_match_result,
+    assert_checkpoint_consistent,
+    assert_config_valid,
+    assert_file_exists,
+    assert_dir_exists,
+    assert_json_structure,
+)
+```
+
+### assert_valid_otio_timeline()
+
+Validates OTIO timeline structure including tracks, clips, and media references.
+
+```python
+import opentimelineio as otio
+
+def test_timeline_generation():
+    timeline = create_timeline(matches, config)
+
+    # Basic validation
+    assert_valid_otio_timeline(timeline)
+
+    # With requirements
+    assert_valid_otio_timeline(
+        timeline,
+        min_tracks=2,
+        require_video=True,
+        require_audio=True,
+        expected_duration=120.0,  # seconds
+        max_clips=3000,  # Rule 17 limit
+    )
+```
+
+**Validates:**
+- Timeline is an opentimelineio.schema.Timeline object
+- Has minimum required tracks (video and/or audio)
+- All clips have valid source_range and media_reference
+- Total clip count is within limits (default: 3000 per Rule 17)
+- Duration matches expected value (if specified)
+
+### assert_valid_match_result()
+
+Validates match result dicts from the matching stage.
+
+```python
+def test_matcher_output():
+    result = matcher.match(segment)
+
+    # Basic validation with minimum confidence
+    assert_valid_match_result(result, min_confidence=0.5)
+
+    # Full validation
+    assert_valid_match_result(
+        result,
+        min_confidence=0.7,
+        require_video_file=True,
+        require_timing=True,
+        require_strategy=True,
+        valid_strategies=["embedding", "llm", "fallback"],
+    )
+```
+
+**Validates:**
+- Required fields present (segment_index, confidence)
+- Confidence in range [0, 1] and meets minimum threshold
+- Video file path is present and non-empty
+- Timing fields (start/end) are valid and ordered correctly
+- Strategy is from allowed list (if specified)
+
+### assert_checkpoint_consistent()
+
+Validates checkpoint structure and data consistency.
+
+```python
+def test_checkpoint_save_restore():
+    checkpoint = load_checkpoint(project_dir)
+
+    # Basic validation
+    assert_checkpoint_consistent(checkpoint)
+
+    # For --output-only mode (Rule 25)
+    assert_checkpoint_consistent(
+        checkpoint,
+        require_stages=True,  # Ensures stages dict is populated
+        expected_stage="MATCH",
+        min_matches=10,
+    )
+```
+
+**Validates:**
+- Required fields (version, last_completed_stage)
+- Stage name is valid (one of VALID_STAGES)
+- Stages dict is populated (required for --output-only mode)
+- Match data consistency (count matches len(matches))
+
+### assert_config_valid()
+
+Validates Config object structure and values.
+
+```python
+def test_config_loading():
+    config = load_config("config.yaml")
+
+    # Get list of validation errors
+    errors = assert_config_valid(config)
+    assert not errors, f"Config errors: {errors}"
+
+    # With requirements
+    errors = assert_config_valid(
+        config,
+        require_api_keys=True,
+        require_matching=True,
+        check_constraints=True,
+        allowed_errors=["GEMINI_API_KEY"],  # Ignore missing key in tests
+    )
+```
+
+**Validates:**
+- Required sections exist (matching, download, etc.)
+- Value ranges (confidence 0-1, workers >= 1)
+- Enum values (valid providers, strategies)
+- Constraint relationships (min <= max)
+- Uses Config.validate() if available
+
+### Utility Assertions
+
+```python
+# File existence
+assert_file_exists(output_path, description="OTIO output")
+assert_dir_exists(project_dir, description="Project directory")
+
+# JSON structure
+assert_json_structure(
+    data,
+    required_keys=["version", "timestamp", "matches"],
+    type_checks={"version": str, "matches": list},
+)
+```
+
+### Best Practices
+
+1. **Use helpers for repeated patterns** - If you're writing the same validation logic in multiple tests, add it to helpers.
+
+2. **Provide clear error messages** - Helpers give actionable errors:
+   ```
+   AssertionError: Timeline has 3500 clips, exceeds limit of 3000.
+   Consider using save_timeline_split() for auto-splitting.
+   ```
+
+3. **Combine with fixtures** - Use helpers with fixture factories:
+   ```python
+   from tests.fixtures import create_mock_state
+   from tests.helpers import assert_valid_match_result
+
+   def test_with_mock_data():
+       state = create_mock_state()
+       result = matcher.match(state.voiceover_segments[0])
+       assert_valid_match_result(result, min_confidence=0.3)
+   ```
+
+4. **Use allowed_errors for test contexts** - Skip known issues in test environments:
+   ```python
+   errors = assert_config_valid(config, allowed_errors=["API_KEY"])
+   ```
