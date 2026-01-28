@@ -1,4 +1,12 @@
 
+## Iteration US-001 (Sprint 16) - Add CheckpointHealer and DiskHealer agent tests
+- Pre-implemented: 64 tests already passing from previous session (31 CheckpointHealer + 33 DiskHealer)
+- Files: tests/test_agents/test_checkpoint_healer.py, tests/test_agents/test_disk_healer.py
+- CheckpointHealer tests: 9 test classes covering init, can_handle, restore_from_backup, rebuild_checkpoint, hash_mismatch, start_fresh, create_backup, fix routing, integration
+- DiskHealer tests: 10 test classes covering init, can_handle, handle_disk_full, handle_permission, get_dir_size, get_free_space, format_size, check_space, find_old_files, fix routing
+- All 6 acceptance criteria verified met
+- Test results: 64 passed in 0.74s, 0 regressions
+
 ## Iteration US-008 (Sprint 15) - Add vision module transcript analysis tests
 - Created tests/test_vision_transcript_analysis.py with 35 tests across 5 classes
 - TestEmptyScenes (7 tests): needs_vision=True, reason mentions 'no scenes', returns VideoVisionDecision, total_scenes=0, sparse_scenes empty, coverage=0.0, empty scenes with transcript segments
@@ -6228,3 +6236,7 @@ def test_eta_accuracy_batch_50_videos(self):
   5. list_presets sorted → test_list_presets (newest first verified)
 - Files: No changes needed (pre-existing coverage)
 - Test results: 26 passed (5 + 21), 0 failures
+
+## Focus Area: testing - 2026-01-28 14:59:39
+- Status: In Progress...
+
