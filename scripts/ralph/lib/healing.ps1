@@ -330,3 +330,49 @@ function Build-TierDiagnostics {
 
     return $lines -join "`n"
 }
+
+function Log-HealingEvent {
+    <#
+    .SYNOPSIS
+        Append a structured event to healing_log.jsonl.
+        Every fix, diagnosis, and thought process is permanently recorded.
+    .PARAMETER Event
+        Event type: healing_started, healing_attempt, healing_resolved, healing_failed, healing_skipped
+    .PARAMETER Data
+        Hashtable of event-specific data (tier, errors, fix description, thought process, etc.)
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("healing_started", "healing_attempt", "healing_resolved", "healing_failed", "healing_skipped")]
+        [string]$Event,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Data
+    )
+
+    $logPath = if ($script:HealingLogFile) {
+        $script:HealingLogFile
+    } else {
+        Join-Path $script:RalphDir "healing_log.jsonl"
+    }
+
+    $entry = @{
+        timestamp  = (Get-Date -Format "o")
+        event      = $Event
+        data       = $Data
+    }
+
+    # Add session context if available
+    if ($script:State) {
+        if ($script:State.SessionId) { $entry.sessionId = $script:State.SessionId }
+        if ($script:State.IterationCount) { $entry.iteration = $script:State.IterationCount }
+    }
+
+    $json = $entry | ConvertTo-Json -Depth 10 -Compress
+    try {
+        Add-Content -Path $logPath -Value $json -Encoding UTF8
+    } catch {
+        Start-Sleep -Milliseconds 200
+        try { Add-Content -Path $logPath -Value $json -Encoding UTF8 } catch {}
+    }
+}
