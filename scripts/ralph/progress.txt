@@ -1,4 +1,15 @@
 
+## Iteration US-004 (Sprint 15) - Add CLI newproject Google Doc parsing tests
+- Created tests/test_cli_newproject.py with 25 tests across 5 classes
+- TestExtractDocId (7 tests): standard /edit URL, ?usp=sharing variant, invalid/empty/Drive URLs, long doc ID, URL with fragment
+- TestExtractDriveLinks (6 tests): multiple IDs in multiline text, empty/no-links text, single link, non-Drive URLs ignored, hyphens/underscores in IDs
+- TestGetDateSuffix (4 tests): YYYY-MM-DD regex match, string type, length 10, mocked specific date
+- TestCombineAudioFiles (3 tests): empty list returns False, multi-file combine with mocked pydub, missing pydub handled gracefully
+- TestDownloadDriveFiles (5 tests): missing gdown returns [] with error message, ordered download with Pt1/Pt2 naming, skip existing non-empty files, individual download failure handled, empty file_ids list
+- No source code changes needed (pure test-only story)
+- Files created: tests/test_cli_newproject.py
+- Test results: 25 passed in 0.83s, 106 related tests pass (config_utils + post_edit_analysis), 0 regressions
+
 ## Iteration US-002 (Sprint 15) - Add post-edit analysis track category statistics tests
 - Added 31 tests to tests/test_post_edit_analysis.py (total now 86)
 - 5 new test classes covering all 5 acceptance criteria:
