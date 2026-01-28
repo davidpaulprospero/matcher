@@ -64,8 +64,8 @@
                             "id":  "US-005",
                             "title":  "Add FallbackChain.classify_error method tests",
                             "priority":  5,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Added 9 tests to TestClassifyError in test_orchestrator.py covering watcher->pattern_route fallback. Tests verify: watcher used when available, fallback when unavailable/returns None/not configured, PatternClassification for unknown errors with needs_llm_healer=True, context passing to watcher, and pattern routing for various error types. Commit: b8fef3b",
                             "acceptanceCriteria":  [
                                                        "Test classify_error() uses watcher when available and returns WatcherClassification",
                                                        "Test classify_error() falls back to pattern_route when watcher unavailable",
