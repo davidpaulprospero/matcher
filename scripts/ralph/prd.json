@@ -106,8 +106,8 @@
             "id": "US-008",
             "title": "Add vision module transcript analysis tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_vision_transcript_analysis.py with 35 tests across 5 classes: TestEmptyScenes (7 tests: needs_vision=True, reason mentions 'no scenes', returns VideoVisionDecision, total_scenes=0, sparse_scenes empty, coverage=0.0, empty scenes with transcript), TestSparseSceneIdentification (7 tests: single sparse flagged, all sparse no transcript, non-sparse excluded, mixed sparse/sufficient, SRTSegment objects, exact threshold not sparse, below threshold sparse), TestSufficientTranscript (5 tests: all sufficient needs_vision=False, sparse_scenes empty, coverage threshold met, single scene sufficient, reason mentions good coverage), TestSceneAnalysisSerialization (7 tests: required fields, optional defaults None, vision_description stored, asdict round-trip, asdict None optionals, JSON serializable), TestTranscriptCoverage (9 tests: 0.0 no transcript, 1.0 all covered, 0.5 half, 2/3 proportional, 1/3 proportional, float type, empty text=0.0, VideoVisionDecision fields, asdict). All 89 vision tests pass, 0 regressions.",
             "acceptanceCriteria": [
                 "Test TranscriptAnalyzer.analyze_video_transcript() with empty scenes list — verify returns VideoVisionDecision with needs_vision=True and reason mentioning 'no scenes'",
                 "Test TranscriptAnalyzer identifies sparse scenes — verify scenes with word_count < min_words_per_scene are flagged in sparse_scenes list",

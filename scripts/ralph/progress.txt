@@ -1,4 +1,15 @@
 
+## Iteration US-008 (Sprint 15) - Add vision module transcript analysis tests
+- Created tests/test_vision_transcript_analysis.py with 35 tests across 5 classes
+- TestEmptyScenes (7 tests): needs_vision=True, reason mentions 'no scenes', returns VideoVisionDecision, total_scenes=0, sparse_scenes empty, coverage=0.0, empty scenes with transcript segments
+- TestSparseSceneIdentification (7 tests): single sparse scene flagged, all sparse when no transcript, non-sparse excluded, mixed sparse/sufficient, SRTSegment objects, exact threshold not sparse, below threshold sparse
+- TestSufficientTranscript (5 tests): all scenes sufficient → needs_vision=False, sparse_scenes empty, coverage threshold met, single scene sufficient, reason mentions good coverage
+- TestSceneAnalysisSerialization (7 tests): required fields stored, optional defaults None (vision_description, combined_description), vision_description stored explicitly, asdict round-trip all fields, asdict None optionals, JSON serializable
+- TestTranscriptCoverage (9 tests): 0.0 no transcript, 1.0 all covered, 0.5 half, 2/3 proportional, 1/3 proportional, float type, empty text segments=0.0, VideoVisionDecision fields, VideoVisionDecision asdict
+- No source code changes needed (pure test-only story)
+- Files created: tests/test_vision_transcript_analysis.py
+- Test results: 35 new tests pass in 0.48s, 89 total vision tests pass, 0 regressions
+
 ## Iteration US-007 (Sprint 15) - Add pipeline orchestrator resume logic tests
 - Added TestResumeLogic class with 11 tests to tests/test_pipeline_orchestrator.py
 - test_resume_skips_stages_before_checkpoint_3_stages: 3 stages, stage1 can_skip=True, only stages 2+3 execute
