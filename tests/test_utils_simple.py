@@ -54,6 +54,7 @@ from src.utils import (
 )
 
 
+@pytest.mark.fast
 class TestSRTSegment:
     """Test SRTSegment dataclass."""
 
@@ -105,6 +106,7 @@ class TestSRTSegment:
         assert seg1 != seg3
 
 
+@pytest.mark.fast
 class TestSRTTimestamps:
     """Test SRT timestamp formatting and parsing."""
 
@@ -144,6 +146,7 @@ class TestSRTTimestamps:
         assert abs(parsed - original) < 0.01  # Within 10ms
 
 
+@pytest.mark.fast
 class TestPathHandling:
     """Test path normalization and handling."""
 
@@ -181,6 +184,7 @@ class TestPathHandling:
         assert sanitized is not None
 
 
+@pytest.mark.fast
 class TestSRTFileParsing:
     """Test parsing SRT files."""
 
@@ -275,6 +279,7 @@ Test subtitle
             assert abs(orig.end_time - loaded.end_time) < 0.01
 
 
+@pytest.mark.fast
 class TestEmbeddingHelpers:
     """Test embedding helper functions."""
 
@@ -301,6 +306,7 @@ class TestEmbeddingHelpers:
         assert not is_embeddings_empty(single_vec)
 
 
+@pytest.mark.fast
 class TestPathUtilitiesAdvanced:
     """Test advanced path handling features."""
 
@@ -377,6 +383,7 @@ class TestPathUtilitiesAdvanced:
             assert isinstance(result, str)
 
 
+@pytest.mark.fast
 class TestFFmpegDebugLogging:
     """Test FFmpeg debug logging functionality."""
 
@@ -452,6 +459,7 @@ class TestFFmpegDebugLogging:
                 raise ValueError("Test exception")
 
 
+@pytest.mark.fast
 class TestChapterDataclass:
     """Test Chapter dataclass."""
 
@@ -496,6 +504,7 @@ class TestChapterDataclass:
         assert len(chapter_dict["topics"]) == 2
 
 
+@pytest.mark.fast
 class TestSRTSegmentAdvanced:
     """Test advanced SRTSegment features."""
 
@@ -565,6 +574,7 @@ class TestSRTSegmentAdvanced:
         assert segment.duration == 15.5
 
 
+@pytest.mark.fast
 class TestSceneInfoDataclass:
     """Test SceneInfo dataclass."""
 
@@ -628,6 +638,7 @@ class TestSceneInfoDataclass:
         assert scene.description == ""  # Default
 
 
+@pytest.mark.fast
 class TestVideoIndexDataclass:
     """Test VideoIndex dataclass."""
 
@@ -681,6 +692,7 @@ class TestVideoIndexDataclass:
         assert len(index.scenes) == 1
 
 
+@pytest.mark.fast
 class TestMatchDataclasses:
     """Test Match-related dataclasses."""
 
@@ -724,6 +736,7 @@ class TestMatchDataclasses:
         assert match_dict["confidence"] == 0.8
 
 
+@pytest.mark.fast
 class TestProgressBar:
     """Test ProgressBar functionality."""
 
@@ -763,6 +776,7 @@ class TestProgressBar:
         assert bar.current == 100
 
 
+@pytest.mark.fast
 class TestCacheManager:
     """Test CacheManager functionality."""
 
@@ -903,6 +917,7 @@ class TestCacheManager:
         assert loaded["/video1.mp4"] == "hash1"
 
 
+@pytest.mark.fast
 class TestReuseTracker:
     """Test ReuseTracker functionality."""
 
@@ -1036,6 +1051,7 @@ class TestReuseTracker:
         assert top_sources[0][1] == 2
 
 
+@pytest.mark.fast
 class TestSRTParsingAdvanced:
     """Test advanced SRT parsing features."""
 

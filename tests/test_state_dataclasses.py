@@ -25,6 +25,7 @@ from src.state import (
 )
 
 
+@pytest.mark.fast
 class TestVoiceoverSegment:
     """Test VoiceoverSegment dataclass."""
 
@@ -66,6 +67,7 @@ class TestVoiceoverSegment:
         assert segment.duration == 5.5
 
 
+@pytest.mark.fast
 class TestTranscriptSegment:
     """Test TranscriptSegment dataclass."""
 
@@ -120,6 +122,7 @@ class TestTranscriptSegment:
         assert segment.description_source == "vision"
 
 
+@pytest.mark.fast
 class TestDownloadedVideo:
     """Test DownloadedVideo dataclass."""
 
@@ -164,6 +167,7 @@ class TestDownloadedVideo:
         assert video.face_score == 0.8
 
 
+@pytest.mark.fast
 class TestAudioDownload:
     """Test AudioDownload dataclass."""
 
@@ -194,6 +198,7 @@ class TestAudioDownload:
         assert audio.keyword == "test keyword"
 
 
+@pytest.mark.fast
 class TestMatch:
     """Test Match dataclass."""
 
@@ -242,6 +247,7 @@ class TestMatch:
         assert match.face_score == 0.7
 
 
+@pytest.mark.fast
 class TestEntityImage:
     """Test EntityImage dataclass."""
 
@@ -270,6 +276,7 @@ class TestEntityImage:
         assert image.height == 1080
 
 
+@pytest.mark.fast
 class TestEntityVideo:
     """Test EntityVideo dataclass."""
 
@@ -299,6 +306,7 @@ class TestEntityVideo:
             assert video.source == source
 
 
+@pytest.mark.fast
 class TestPipelineState:
     """Test PipelineState manager."""
 
@@ -411,6 +419,7 @@ class TestPipelineState:
         assert state.stage_timings["DOWNLOAD"] == 45.2
 
 
+@pytest.mark.fast
 class TestTranscriptSegmentToDict:
     """Test TranscriptSegment to_dict method."""
 
@@ -460,6 +469,7 @@ class TestTranscriptSegmentToDict:
         assert result['description_source'] == "vision"
 
 
+@pytest.mark.fast
 class TestPipelineStateClearMatches:
     """Test clear_matches method."""
 
@@ -515,6 +525,7 @@ class TestPipelineStateClearMatches:
         assert state.alternatives == {}
 
 
+@pytest.mark.fast
 class TestPipelineStateFromLegacy:
     """Test from_legacy_pipeline class method."""
 
@@ -772,6 +783,7 @@ class TestPipelineStateFromLegacy:
         assert isinstance(state.voiceover_segments, list)
 
 
+@pytest.mark.fast
 class TestPipelineStateToCheckpointDict:
     """Test to_checkpoint_dict method."""
 
@@ -823,6 +835,7 @@ class TestPipelineStateToCheckpointDict:
 # Coverage Tests - Lines 18-20, 50
 # ============================================================================
 
+@pytest.mark.fast
 class TestTranscriptSegmentToDict:
     """Test TranscriptSegment.to_dict() method (line 50)."""
 
@@ -866,6 +879,7 @@ class TestTranscriptSegmentToDict:
         assert result['source_file'] == ""
 
 
+@pytest.mark.fast
 class TestNumpyImportFallback:
     """Test numpy import fallback (lines 18-20)."""
 
@@ -902,6 +916,7 @@ class TestNumpyImportFallback:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestVoiceoverSegmentPostInit:
     """Test VoiceoverSegment.__post_init__() auto-duration edge cases."""
 
@@ -934,6 +949,7 @@ class TestVoiceoverSegmentPostInit:
         assert segment.duration == 0.0
 
 
+@pytest.mark.fast
 class TestTranscriptSegmentToDictBroll:
     """Test TranscriptSegment.to_dict() includes all fields including optional broll fields."""
 
@@ -988,6 +1004,7 @@ class TestTranscriptSegmentToDictBroll:
         assert recreated.description_source == original.description_source
 
 
+@pytest.mark.fast
 class TestDownloadedVideoEmptyStrings:
     """Test DownloadedVideo with empty string fields."""
 
@@ -1041,6 +1058,7 @@ class TestDownloadedVideoEmptyStrings:
         assert video.license == "Unknown"
 
 
+@pytest.mark.fast
 class TestPipelineStateDefaults:
     """Test PipelineState initialization with defaults — no shared mutable defaults."""
 
@@ -1122,6 +1140,7 @@ class TestPipelineStateDefaults:
         assert state.embedding_index is None
 
 
+@pytest.mark.fast
 class TestMatchBoundaryConfidence:
     """Test Match dataclass with confidence=0.0 and confidence=1.0 boundary values."""
 

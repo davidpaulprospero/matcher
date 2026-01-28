@@ -18,6 +18,7 @@ import requests
 # ---------------------------------------------------------------------------
 # AC1: Test research() returns correctly parsed ResearchResult objects
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
@@ -145,6 +146,7 @@ class TestPerplexityResearchResultParsing:
 # ---------------------------------------------------------------------------
 # AC2: Test research() handles rate limiting (429) with retry-after header
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityRateLimitHandling:
     """AC2: Test research() handles rate limiting (429) with exponential backoff."""
 
@@ -267,6 +269,7 @@ class TestPerplexityRateLimitHandling:
 # ---------------------------------------------------------------------------
 # AC3: Test research() handles streaming/connection errors correctly
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityConnectionErrorHandling:
     """AC3: Test research() handles connection/timeout errors with retry."""
 
@@ -401,6 +404,7 @@ class TestPerplexityConnectionErrorHandling:
 # ---------------------------------------------------------------------------
 # AC4: Test research() handles invalid API key with clear error message
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityInvalidAPIKeyHandling:
     """AC4: Test research() handles invalid API key with clear error message."""
 
@@ -476,6 +480,7 @@ class TestPerplexityInvalidAPIKeyHandling:
 # ---------------------------------------------------------------------------
 # AC5: Test PerplexityClient validates API key before making requests
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityAPIKeyValidation:
     """AC5: Test PerplexityClient validates API key before making requests."""
 
@@ -546,6 +551,7 @@ class TestPerplexityAPIKeyValidation:
 # ---------------------------------------------------------------------------
 # Additional tests for other PerplexityClient methods
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityOtherMethods:
     """Additional tests for fact_check, compare, and api_docs methods."""
 
@@ -617,6 +623,7 @@ class TestPerplexityOtherMethods:
 # ---------------------------------------------------------------------------
 # Edge case and robustness tests
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestPerplexityEdgeCases:
     """Edge case and robustness tests."""
 

@@ -17,6 +17,7 @@ from src.caption_fetcher import (
 )
 
 
+@pytest.mark.fast
 class TestNormalizationConfig:
     """Test NormalizationConfig dataclass"""
 
@@ -47,6 +48,7 @@ class TestNormalizationConfig:
         assert config.validate_timestamps is False
 
 
+@pytest.mark.fast
 class TestCaptionNormalizerInit:
     """Test CaptionNormalizer initialization"""
 
@@ -65,6 +67,7 @@ class TestCaptionNormalizerInit:
         assert normalizer.config.overlap_strategy == "merge"
 
 
+@pytest.mark.fast
 class TestNormalizeEmptyInput:
     """Test normalize with empty or edge case input"""
 
@@ -89,6 +92,7 @@ class TestNormalizeEmptyInput:
         assert result[0].end_time == 5.0
 
 
+@pytest.mark.fast
 class TestValidateSegment:
     """Test individual segment validation"""
 
@@ -197,6 +201,7 @@ class TestValidateSegment:
         assert result[0].source_file == "test_video"
 
 
+@pytest.mark.fast
 class TestOverlapHandling:
     """Test overlapping segment handling"""
 
@@ -301,6 +306,7 @@ class TestOverlapHandling:
         assert "Inner" in result[0].text
 
 
+@pytest.mark.fast
 class TestGapHandling:
     """Test gap segment handling"""
 
@@ -390,6 +396,7 @@ class TestGapHandling:
         assert result[1].start_time == 5.0
 
 
+@pytest.mark.fast
 class TestReindexing:
     """Test segment reindexing"""
 
@@ -427,6 +434,7 @@ class TestReindexing:
         assert result[2].index == 2
 
 
+@pytest.mark.fast
 class TestValidateContinuity:
     """Test validate_continuity method"""
 
@@ -476,6 +484,7 @@ class TestValidateContinuity:
         assert any("overlap" in w.lower() for w in warnings)
 
 
+@pytest.mark.fast
 class TestTimestampConversion:
     """Test timestamp format conversion"""
 
@@ -528,6 +537,7 @@ class TestTimestampConversion:
         assert result == 5445.123
 
 
+@pytest.mark.fast
 class TestSecondsToTimestamp:
     """Test seconds to timestamp conversion"""
 
@@ -562,6 +572,7 @@ class TestSecondsToTimestamp:
         assert result == "02:02:03.456"
 
 
+@pytest.mark.fast
 class TestCaptionNormalizationError:
     """Test CaptionNormalizationError exception"""
 
@@ -580,6 +591,7 @@ class TestCaptionNormalizationError:
         assert error.reason == ""
 
 
+@pytest.mark.fast
 class TestComplexScenarios:
     """Test complex normalization scenarios"""
 
@@ -703,6 +715,7 @@ class TestComplexScenarios:
         assert result[1].source_file == "original_video"
 
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases and boundary conditions"""
 
@@ -770,6 +783,7 @@ class TestEdgeCases:
         assert result[0].end_time == 5.999
 
 
+@pytest.mark.fast
 class TestPartialRecovery:
     """Test partial recovery from malformed segments (US-005)."""
 
@@ -947,6 +961,7 @@ class TestPartialRecovery:
         assert skipped == 0  # Filtering is not an error
 
 
+@pytest.mark.fast
 class TestCaptionParseWarning:
     """Test CaptionParseWarning exception class (US-005)."""
 
@@ -984,6 +999,7 @@ class TestCaptionParseWarning:
         assert isinstance(warning, Exception)
 
 
+@pytest.mark.fast
 class TestCaptionResultSkippedCount:
     """Test CaptionResult.skipped_segments_count field (US-005)."""
 
@@ -1024,6 +1040,7 @@ class TestCaptionResultSkippedCount:
         assert data["skipped_segments_count"] == 0
 
 
+@pytest.mark.fast
 class TestNormalizerEdgeCasesSprint6:
     """Test normalizer edge cases for corrupted segments (US-009 Sprint 6).
 

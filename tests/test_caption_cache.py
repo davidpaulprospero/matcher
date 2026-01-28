@@ -22,6 +22,7 @@ from src.caption_fetcher import (
 )
 
 
+@pytest.mark.fast
 class TestCachedCaption:
     """Test CachedCaption dataclass"""
 
@@ -124,6 +125,7 @@ class TestCachedCaption:
         assert result.segments[1].text == 'Second'
 
 
+@pytest.mark.fast
 class TestCaptionCacheBasics:
     """Test basic CaptionCache functionality"""
 
@@ -185,6 +187,7 @@ class TestCaptionCacheBasics:
         assert key == "abc123def45_es"
 
 
+@pytest.mark.fast
 class TestCaptionCacheOperations:
     """Test CaptionCache store/get operations"""
 
@@ -341,6 +344,7 @@ class TestCaptionCacheOperations:
         assert cached_es.is_auto_generated is True
 
 
+@pytest.mark.fast
 class TestCaptionCacheInvalidation:
     """Test CaptionCache invalidation functionality"""
 
@@ -435,6 +439,7 @@ class TestCaptionCacheInvalidation:
         assert cache.get_caption("abc123def45", "en") is not None
 
 
+@pytest.mark.fast
 class TestCaptionCacheTTL:
     """Test CaptionCache TTL/expiration functionality"""
 
@@ -502,6 +507,7 @@ class TestCaptionCacheTTL:
         assert cache.get_caption("dQw4w9WgXcQ", "en") is not None
 
 
+@pytest.mark.fast
 class TestCaptionCacheGetOrFetch:
     """Test CaptionCache.get_or_fetch convenience method"""
 
@@ -596,6 +602,7 @@ class TestCaptionCacheGetOrFetch:
             cache.get_or_fetch(mock_fetcher, "dQw4w9WgXcQ", "en")
 
 
+@pytest.mark.fast
 class TestCaptionCacheStats:
     """Test CaptionCache statistics"""
 
@@ -685,6 +692,7 @@ class TestCaptionCacheStats:
         assert stats['hit_rate'] == 0.5
 
 
+@pytest.mark.fast
 class TestCaptionCachePersistence:
     """Test CaptionCache persistence across instances"""
 
@@ -752,6 +760,7 @@ class TestCaptionCachePersistence:
         assert "dQw4w9WgXcQ_en" in index_data
 
 
+@pytest.mark.fast
 class TestCaptionCacheConfigIntegration:
     """Test CaptionCache with real CaptionFirstConfig"""
 
@@ -787,6 +796,7 @@ class TestCaptionCacheConfigIntegration:
         assert cached.segments[0]['text'] == "Test"
 
 
+@pytest.mark.fast
 class TestCacheValidation:
     """Test CaptionCache validation (US-008 Sprint 6)"""
 
@@ -1143,6 +1153,7 @@ class TestCacheValidation:
         assert stats['pass_rate'] == 100.0
 
 
+@pytest.mark.fast
 class TestCacheValidationResult:
     """Test CacheValidationResult dataclass (US-008 Sprint 6)"""
 
@@ -1193,6 +1204,7 @@ class TestCacheValidationResult:
         assert result.actual_segment_count == 48
 
 
+@pytest.mark.fast
 class TestCaptionMetricsCacheValidation:
     """Test CaptionMetrics cache validation tracking (US-008 Sprint 6)"""
 
@@ -1312,6 +1324,7 @@ class TestCaptionMetricsCacheValidation:
         assert metrics.cache_validation_refetched == 0
 
 
+@pytest.mark.fast
 class TestAdaptiveFormatOrdering:
     """Test adaptive format ordering (US-002 Sprint 7)"""
 
@@ -1401,6 +1414,7 @@ class TestAdaptiveFormatOrdering:
             assert r == results[0]
 
 
+@pytest.mark.fast
 class TestCaptionCacheFormatStatistics:
     """Test CaptionCache format statistics persistence (US-002 Sprint 7)"""
 
@@ -1485,6 +1499,7 @@ class TestCaptionCacheFormatStatistics:
         assert loaded == format_counts
 
 
+@pytest.mark.fast
 class TestCaptionFetcherAdaptiveOrder:
     """Test CaptionFetcher adaptive format ordering (US-002 Sprint 7)"""
 
@@ -1599,6 +1614,7 @@ class TestCaptionFetcherAdaptiveOrder:
         assert order[0] == 'vtt'
 
 
+@pytest.mark.fast
 class TestCacheStaleness:
     """Test cache staleness checking (US-004 Sprint 8)"""
 
@@ -1832,6 +1848,7 @@ class TestCacheStaleness:
         assert cached is not None
 
 
+@pytest.mark.fast
 class TestCleanupStaleEntries:
     """Test cleanup_stale_entries method (US-004 Sprint 8)"""
 
@@ -1985,6 +2002,7 @@ class TestCleanupStaleEntries:
         assert '__format_statistics__' in cache_with_entries.index
 
 
+@pytest.mark.fast
 class TestCacheStalenessIntegration:
     """Integration tests for staleness with strict/warn modes (US-004 Sprint 8)"""
 

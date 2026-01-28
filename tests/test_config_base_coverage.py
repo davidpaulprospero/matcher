@@ -33,6 +33,7 @@ from src.config.base import (
 )
 
 
+@pytest.mark.fast
 class TestConfigMetrics:
     """Test configuration metrics tracking."""
 
@@ -44,6 +45,7 @@ class TestConfigMetrics:
         assert 'cache_hits' in metrics
 
 
+@pytest.mark.fast
 class TestConfigFromYaml:
     """Test Config.from_yaml loading."""
 
@@ -85,6 +87,7 @@ matching:
         assert config is not None
 
 
+@pytest.mark.fast
 class TestBuildDataclass:
     """Test _build_dataclass method."""
 
@@ -143,6 +146,7 @@ matching:
             assert result is not None
 
 
+@pytest.mark.fast
 class TestBuildDurationTiers:
     """Test _build_duration_tiers method."""
 
@@ -175,6 +179,7 @@ duration_tiers:
         assert config.duration_tiers.medium.videos_per_keyword == 8
 
 
+@pytest.mark.fast
 class TestConfigToYaml:
     """Test config serialization to YAML."""
 
@@ -198,6 +203,7 @@ class TestConfigToYaml:
         assert 'project' in content
 
 
+@pytest.mark.fast
 class TestConfigReload:
     """Test config reload functionality."""
 
@@ -251,6 +257,7 @@ project:
         assert config.project.name == "modified"
 
 
+@pytest.mark.fast
 class TestConfigValidation:
     """Test config validation."""
 
@@ -303,6 +310,7 @@ matching:
         assert any("max_clip_reuse must be >= 0" in e for e in errors)
 
 
+@pytest.mark.fast
 class TestValidateEnums:
     """Test enum validation."""
 
@@ -371,6 +379,7 @@ matching:
         assert any("matching.primary_provider" in e for e in errors)
 
 
+@pytest.mark.fast
 class TestValidateConstraints:
     """Test constraint validation."""
 
@@ -415,6 +424,7 @@ output:
         assert any("split_otio" in e for e in errors)
 
 
+@pytest.mark.fast
 class TestGetNested:
     """Test get_nested method."""
 
@@ -459,6 +469,7 @@ duration_tiers:
         assert result is None
 
 
+@pytest.mark.fast
 class TestGlobalConfigFunctions:
     """Test global config functions."""
 
@@ -507,6 +518,7 @@ project:
         assert result == False  # No changes
 
 
+@pytest.mark.fast
 class TestHelperFunctions:
     """Test helper functions."""
 
@@ -558,6 +570,7 @@ logging:
         log_hardcoded_warning("test_component", "test_value", 42)
 
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
@@ -624,6 +637,7 @@ output:
         assert any("min_gap_ms" in e for e in errors)
 
 
+@pytest.mark.fast
 class TestTypeHintHandling:
     """Test type hint resolution in _build_dataclass."""
 
@@ -657,6 +671,7 @@ matching:
             assert result is not None
 
 
+@pytest.mark.fast
 class TestYAMLLoaderFallback:
     """Test YAML loader fallback behavior."""
 
@@ -667,6 +682,7 @@ class TestYAMLLoaderFallback:
         assert isinstance(YAML_FAST, bool)
 
 
+@pytest.mark.fast
 class TestConfigToDict:
     """Test _to_dict method."""
 
@@ -681,6 +697,7 @@ class TestConfigToDict:
         assert 'api_keys' not in result  # Should be excluded
 
 
+@pytest.mark.fast
 class TestThreadSafety:
     """Test thread safety of global config."""
 
@@ -703,6 +720,7 @@ class TestThreadSafety:
         assert all(results)
 
 
+@pytest.mark.fast
 class TestRemainingCoverage:
     """Tests for remaining uncovered lines."""
 
@@ -781,6 +799,7 @@ matching:
         assert YAML_FAST in (True, False)
 
 
+@pytest.mark.fast
 class TestCSafeLoaderFallback:
     """Tests for lines 50-53: CSafeLoader import fallback."""
 
@@ -818,6 +837,7 @@ class TestCSafeLoaderFallback:
                 sys.modules['src.config.base'] = original_config_base
 
 
+@pytest.mark.fast
 class TestAPIKeyValidation:
     """Tests for API key validation (lines 521-523)."""
 
@@ -923,6 +943,7 @@ api_keys:
         assert len(gemini_errors) == 0
 
 
+@pytest.mark.fast
 class TestStringTypeAnnotation:
     """Tests for string type annotation resolution (lines 362-366)."""
 
@@ -951,6 +972,7 @@ class TestStringTypeAnnotation:
             assert result is not None
 
 
+@pytest.mark.fast
 class TestAbsolutePathResolution:
     """Tests for absolute path resolution (line 227)."""
 
@@ -985,6 +1007,7 @@ output:
         # Should not crash with empty values
 
 
+@pytest.mark.fast
 class TestTypeErrorHandling:
     """More comprehensive tests for TypeError handling (lines 388-390)."""
 

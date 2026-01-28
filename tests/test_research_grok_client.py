@@ -21,6 +21,7 @@ import requests
 # ---------------------------------------------------------------------------
 # AC1: Test GrokClient.research() returns correctly parsed ResearchResult objects
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
@@ -156,6 +157,7 @@ class TestGrokResearchResultParsing:
 # ---------------------------------------------------------------------------
 # AC2: Test GrokClient.research() handles connection errors with retry logic
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokConnectionErrorHandling:
     """AC2: Test research() handles connection errors with retry logic."""
 
@@ -314,6 +316,7 @@ class TestGrokConnectionErrorHandling:
 # ---------------------------------------------------------------------------
 # AC3: Test GrokClient.research() handles empty response gracefully
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokEmptyResponseHandling:
     """AC3: Test research() handles empty response gracefully."""
 
@@ -438,6 +441,7 @@ class TestGrokEmptyResponseHandling:
 # ---------------------------------------------------------------------------
 # AC4: Test GrokClient.research() respects configured timeout settings
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokTimeoutSettings:
     """AC4: Test research() respects configured timeout settings."""
 
@@ -529,6 +533,7 @@ class TestGrokTimeoutSettings:
 # ---------------------------------------------------------------------------
 # AC5: Test GrokClient validates input parameters before making requests
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokInputValidation:
     """AC5: Test GrokClient validates input parameters before making requests."""
 
@@ -633,6 +638,7 @@ class TestGrokInputValidation:
 # ---------------------------------------------------------------------------
 # Additional tests for other GrokClient methods
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokOtherMethods:
     """Additional tests for compare and test_connection methods."""
 
@@ -745,6 +751,7 @@ class TestGrokOtherMethods:
 # ---------------------------------------------------------------------------
 # Edge case tests
 # ---------------------------------------------------------------------------
+@pytest.mark.fast
 class TestGrokEdgeCases:
     """Edge case tests for GrokClient."""
 

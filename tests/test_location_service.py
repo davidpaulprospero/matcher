@@ -91,6 +91,7 @@ def geonames_response():
 # Test GeoLocation Dataclass
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeoLocation:
     """Test GeoLocation dataclass"""
 
@@ -155,6 +156,7 @@ class TestGeoLocation:
 # Test GeoLocation Serialization
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeoLocationSerialization:
     """Test GeoLocation serialization"""
 
@@ -208,6 +210,7 @@ class TestGeoLocationSerialization:
 # Test LocationService (requires mocked API)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationService:
     """Test LocationService initialization"""
 
@@ -240,6 +243,7 @@ class TestLocationService:
 # Test Distance Calculations (if available)
 # ============================================================================
 
+@pytest.mark.fast
 class TestDistanceCalculations:
     """Test geographic distance calculations"""
 
@@ -257,6 +261,7 @@ class TestDistanceCalculations:
 # Test Continent Mapping
 # ============================================================================
 
+@pytest.mark.fast
 class TestContinentMapping:
     """Test continent mapping"""
 
@@ -294,6 +299,7 @@ class TestContinentMapping:
 # Test Location Types
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationTypes:
     """Test location type classification"""
 
@@ -335,6 +341,7 @@ class TestLocationTypes:
 # Test Cache Key Generation
 # ============================================================================
 
+@pytest.mark.fast
 class TestCacheKeyGeneration:
     """Test cache key generation behavior"""
 
@@ -411,6 +418,7 @@ class TestCacheKeyGeneration:
 # Test Factory Function
 # ============================================================================
 
+@pytest.mark.fast
 class TestCreateLocationService:
     """Test create_location_service factory"""
 
@@ -433,6 +441,7 @@ class TestCreateLocationService:
 # Test Edge Cases
 # ============================================================================
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases"""
 
@@ -487,6 +496,7 @@ class TestEdgeCases:
 # Test LocationService API Integration (with mocking)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationServiceAPIIntegration:
     """Test LocationService API methods with mocked responses"""
 
@@ -635,6 +645,7 @@ class TestLocationServiceAPIIntegration:
 # Test Disambiguation Logic
 # ============================================================================
 
+@pytest.mark.fast
 class TestDisambiguation:
     """Test location disambiguation strategies"""
 
@@ -922,6 +933,7 @@ class TestDisambiguation:
 # Test Distance Calculations (Haversine)
 # ============================================================================
 
+@pytest.mark.fast
 class TestHaversineDistance:
     """Test distance calculations"""
 
@@ -996,6 +1008,7 @@ class TestHaversineDistance:
 # Test Geographic Hierarchy Methods
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeographicHierarchy:
     """Test geographic hierarchy comparison methods"""
 
@@ -1208,6 +1221,7 @@ class TestGeographicHierarchy:
 # Test Parent Region Checking
 # ============================================================================
 
+@pytest.mark.fast
 class TestParentRegion:
     """Test geographic parent-child relationships"""
 
@@ -1284,6 +1298,7 @@ class TestParentRegion:
 # Test Visual Keywords
 # ============================================================================
 
+@pytest.mark.fast
 class TestVisualKeywords:
     """Test visual keyword generation for locations"""
 
@@ -1369,6 +1384,7 @@ class TestVisualKeywords:
 # Test Text Extraction
 # ============================================================================
 
+@pytest.mark.fast
 class TestTextExtraction:
     """Test location extraction from text"""
 
@@ -1425,6 +1441,7 @@ class TestTextExtraction:
 # Test Rate Limiting
 # ============================================================================
 
+@pytest.mark.fast
 class TestRateLimiting:
     """Test API rate limiting"""
 
@@ -1473,6 +1490,7 @@ class TestRateLimiting:
 # Test Error Handling
 # ============================================================================
 
+@pytest.mark.fast
 class TestErrorHandling:
     """Test error handling"""
 

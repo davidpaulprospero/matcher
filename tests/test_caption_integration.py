@@ -95,6 +95,8 @@ def get_test_video(fixture_key: str) -> str:
 # Integration Tests - Caption Fetching
 # =============================================================================
 
+@pytest.mark.integration
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationFetch:
     """Integration tests for caption fetching from real YouTube videos.
@@ -226,6 +228,7 @@ class TestCaptionIntegrationFetch:
 # Integration Tests - Auto-Generated Captions
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationAuto:
     """Integration tests for videos with auto-generated captions.
@@ -329,6 +332,7 @@ class TestCaptionIntegrationAuto:
 # Integration Tests - No Captions
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationNoCaption:
     """Integration tests for videos without captions.
@@ -414,6 +418,7 @@ class TestCaptionIntegrationNoCaption:
 # Integration Tests - Language Selection
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationLanguage:
     """Integration tests for caption language detection and selection."""
@@ -482,6 +487,7 @@ class TestCaptionIntegrationLanguage:
 # Integration Tests - Quality and Metrics
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationQuality:
     """Integration tests for caption quality detection and metrics."""
@@ -561,6 +567,7 @@ class TestCaptionIntegrationQuality:
 # Integration Tests - Retry and Error Handling
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationRetry:
     """Integration tests for retry behavior with real network conditions."""
@@ -620,6 +627,7 @@ class TestCaptionIntegrationRetry:
 # Integration Tests - Cache Integration
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestCaptionIntegrationCache:
     """Integration tests for caption caching with real videos."""
@@ -685,6 +693,7 @@ class TestCaptionIntegrationCache:
 # Fixture Documentation
 # =============================================================================
 
+@pytest.mark.integration
 @pytest.mark.requires_network
 class TestVideoFixtureValidation:
     """Tests to validate that our video fixtures are still valid.

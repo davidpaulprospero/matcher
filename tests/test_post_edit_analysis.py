@@ -19,6 +19,7 @@ from src.post_edit_analysis import (
 # AC1: _is_matcher_track() tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestIsMatcherTrack:
     """Test _is_matcher_track() correctly identifies V1-V10 track names."""
 
@@ -63,6 +64,7 @@ class TestIsMatcherTrack:
 # AC2: _get_track_category() tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestGetTrackCategory:
     """Test _get_track_category() returns correct categories."""
 
@@ -122,6 +124,7 @@ class TestGetTrackCategory:
 # AC3: _render_coverage_bar() tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestRenderCoverageBar:
     """Test _render_coverage_bar() renders ASCII bars correctly."""
 
@@ -161,6 +164,7 @@ class TestRenderCoverageBar:
 # AC4: _format_timecode() tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestFormatTimecode:
     """Test _format_timecode() formats seconds correctly."""
 
@@ -200,6 +204,7 @@ class TestFormatTimecode:
 # AC5: Filename-based analysis matching tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestFilenameBasedAnalysis:
     """
     Test filename-based analysis matches clips by normalized filename
@@ -318,6 +323,7 @@ class TestFilenameBasedAnalysis:
 # AC1: Track category aggregation tests
 # =============================================================================
 
+@pytest.mark.fast
 class TestTrackCategoryAggregation:
     """Test track category aggregation groups clips into v1, v2_v3, v4_v6, v7_plus buckets."""
 
@@ -409,6 +415,7 @@ class TestTrackCategoryAggregation:
 # AC2: Coverage calculation per track category
 # =============================================================================
 
+@pytest.mark.fast
 class TestCoverageCalculation:
     """Test coverage calculation per track category."""
 
@@ -468,6 +475,7 @@ class TestCoverageCalculation:
 # AC3: Empty edited OTIO returns 0% coverage
 # =============================================================================
 
+@pytest.mark.fast
 class TestEmptyEditedOtio:
     """Test empty edited OTIO returns 0% coverage for all categories."""
 
@@ -536,6 +544,7 @@ class TestEmptyEditedOtio:
 # AC4: Position-based mode matches clips by frame position
 # =============================================================================
 
+@pytest.mark.fast
 class TestPositionBasedMatching:
     """Test position-based mode matches clips by frame position."""
 
@@ -650,6 +659,7 @@ class TestPositionBasedMatching:
 # AC5: Report generation produces valid markdown
 # =============================================================================
 
+@pytest.mark.fast
 class TestReportGeneration:
     """Test report generation produces valid markdown with track breakdown, coverage bars, and summary."""
 

@@ -142,6 +142,7 @@ def mock_caption_result():
 # Test CaptionStage Initialization
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionStageInit:
     """Test CaptionStage initialization"""
 
@@ -168,6 +169,7 @@ class TestCaptionStageInit:
 # Test Input Validation
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionStageValidation:
     """Test input validation"""
 
@@ -199,6 +201,7 @@ class TestCaptionStageValidation:
 # Test Disabled Mode
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionStageDisabled:
     """Test behavior when caption-first mode is disabled"""
 
@@ -217,6 +220,7 @@ class TestCaptionStageDisabled:
 # Test Video ID Extraction
 # ============================================================================
 
+@pytest.mark.fast
 class TestVideoIdExtraction:
     """Test video ID extraction from various sources"""
 
@@ -275,6 +279,7 @@ class TestVideoIdExtraction:
 # Test Caption Fetching
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionFetching:
     """Test caption fetching with mocked API"""
 
@@ -355,6 +360,7 @@ class TestCaptionFetching:
 # Test Text Metadata Population
 # ============================================================================
 
+@pytest.mark.fast
 class TestTextMetadataPopulation:
     """Test population of state.text_metadata"""
 
@@ -406,6 +412,7 @@ class TestTextMetadataPopulation:
 # Test Checkpoint Integration
 # ============================================================================
 
+@pytest.mark.fast
 class TestCheckpointIntegration:
     """Test checkpoint save/restore functionality"""
 
@@ -498,6 +505,7 @@ class TestCheckpointIntegration:
 # Test No Videos Scenario
 # ============================================================================
 
+@pytest.mark.fast
 class TestNoVideos:
     """Test behavior with no video candidates"""
 
@@ -517,6 +525,7 @@ class TestNoVideos:
 # Test Configuration
 # ============================================================================
 
+@pytest.mark.fast
 class TestConfiguration:
     """Test configuration handling"""
 
@@ -572,6 +581,7 @@ class TestConfiguration:
 # Test STAGE_ORDER Integration
 # ============================================================================
 
+@pytest.mark.fast
 class TestStageOrder:
     """Test CAPTION is properly positioned in STAGE_ORDER"""
 
@@ -604,6 +614,7 @@ class TestStageOrder:
 # Test Live Stream Detection (US-002, US-007 Sprint 8)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLiveStreamSkipping:
     """Test US-002/US-007: Stream state detection and skipping in CaptionStage.
 
@@ -716,6 +727,7 @@ class TestLiveStreamSkipping:
 # Test Streaming Progress Output (US-009)
 # ============================================================================
 
+@pytest.mark.fast
 class TestStreamingProgressOutput:
     """Test US-009: Streaming progress output for caption fetch.
 
@@ -1073,6 +1085,7 @@ class TestStreamingProgressOutput:
 # Test Thread Safety (US-001 Sprint 6)
 # ============================================================================
 
+@pytest.mark.fast
 class TestProgressCallbackThreadSafety:
     """Test US-001 Sprint 6: Thread-safe locking for streaming progress callback.
 
@@ -1492,6 +1505,7 @@ class TestProgressCallbackThreadSafety:
 # Test Per-Video Timeout Tracking (US-002 Sprint 6)
 # ============================================================================
 
+@pytest.mark.fast
 class TestPerVideoTimeoutTracking:
     """Test US-002 Sprint 6: Per-video timeout tracking in batch fetch.
 
@@ -1947,6 +1961,7 @@ class TestPerVideoTimeoutTracking:
 # Test Language Selection Audit Trail (US-003 Sprint 6)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLanguageSelectionTrace:
     """Test US-003 Sprint 6: Language selection audit trail in CaptionMetrics.
 
@@ -2407,6 +2422,7 @@ class TestLanguageSelectionTrace:
         assert "Language fallback:" not in summary_text
 
 
+@pytest.mark.fast
 class TestFormatPreferenceTracking:
     """Test US-004 Sprint 6: Format preference success rates in CaptionMetrics.
 
@@ -2858,6 +2874,7 @@ class TestFormatPreferenceTracking:
 # ============================================================================
 
 
+@pytest.mark.fast
 class TestCaptionStageLanguageValidation:
     """Tests for CaptionStage language config validation (US-005 Sprint 6).
 
@@ -3047,6 +3064,7 @@ class TestCaptionStageLanguageValidation:
 # US-002 Sprint 17: CaptionStage Core Execution and Skip Logic Tests
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionStageCanSkipUS002:
     """US-002 AC1: Test CaptionStage.can_skip() behavior.
 
@@ -3132,6 +3150,7 @@ class TestCaptionStageCanSkipUS002:
         assert result.data.get('skipped') is not True
 
 
+@pytest.mark.fast
 class TestGetVideoIdsUS002:
     """US-002 AC2: Test _get_video_ids() extracts from both sources with deduplication.
 
@@ -3230,6 +3249,7 @@ class TestGetVideoIdsUS002:
         assert "abc123XYZ_0" in ids
 
 
+@pytest.mark.fast
 class TestExtractVideoIdUS002:
     """US-002 AC3: Test _extract_video_id() handles various input formats.
 
@@ -3295,6 +3315,7 @@ class TestExtractVideoIdUS002:
         assert result is None
 
 
+@pytest.mark.fast
 class TestLoadExistingCaptionsUS002:
     """US-002 AC4: Test _load_existing_captions() loads from checkpoint.
 
@@ -3369,6 +3390,7 @@ class TestLoadExistingCaptionsUS002:
         assert result == {}
 
 
+@pytest.mark.fast
 class TestValidateLanguageConfigUS002:
     """US-002 AC5: Test _validate_language_config() validates ISO 639-1 codes.
 
@@ -3443,6 +3465,7 @@ class TestValidateLanguageConfigUS002:
         assert 'ISO 639-1' in exc_info.value.reason
 
 
+@pytest.mark.fast
 class TestPopulateTextMetadataUS002:
     """US-002 AC6: Test _populate_text_metadata() converts caption results.
 
@@ -3608,6 +3631,7 @@ class TestPopulateTextMetadataUS002:
 # US-003 Sprint 17: CaptionStage batch processing and metrics tests
 # ============================================================================
 
+@pytest.mark.fast
 class TestCaptionStageRunSkipsCachedUS003:
     """US-003 Sprint 17 AC1: run() skips videos that already have cached captions."""
 
@@ -3760,6 +3784,7 @@ class TestCaptionStageRunSkipsCachedUS003:
         assert result.data.get('success_count') == 0
 
 
+@pytest.mark.fast
 class TestSaveIntermediateCheckpointUS003:
     """US-003 Sprint 17 AC2: _save_intermediate_checkpoint() writes data without overwriting."""
 
@@ -3846,6 +3871,7 @@ class TestSaveIntermediateCheckpointUS003:
         stage._save_intermediate_checkpoint(checkpoint, {"vid1": {}})
 
 
+@pytest.mark.fast
 class TestCalculateQualityDistributionUS003:
     """US-003 Sprint 17 AC3: _calculate_quality_distribution() bins into quality tiers."""
 
@@ -3914,6 +3940,7 @@ class TestCalculateQualityDistributionUS003:
         assert dist == {"high": 0, "medium": 1, "low": 1}
 
 
+@pytest.mark.fast
 class TestCaptionStageRunEmptyVideoIdsUS003:
     """US-003 Sprint 17 AC4: run() handles empty video ID list gracefully."""
 
@@ -3952,6 +3979,7 @@ class TestCaptionStageRunEmptyVideoIdsUS003:
         assert result.data.get('reason') == 'disabled'
 
 
+@pytest.mark.fast
 class TestCaptionStageRestoreFullUS003:
     """US-003 Sprint 17 AC5: restore() rebuilds state including metrics and quality."""
 

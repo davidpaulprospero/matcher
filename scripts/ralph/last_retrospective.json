@@ -3,7 +3,7 @@
                           {
                               "lesson":  "Story US-003 required 17 retries - may need story decomposition",
                               "storyId":  "US-003",
-                              "attempts":  42,
+                              "attempts":  45,
                               "failures":  17
                           },
                           {
@@ -15,7 +15,7 @@
                           {
                               "lesson":  "Story US-002 required 5 retries - may need story decomposition",
                               "storyId":  "US-002",
-                              "attempts":  39,
+                              "attempts":  42,
                               "failures":  5
                           }
                       ],
@@ -1171,6 +1171,54 @@
                                  "linesDeleted":  139,
                                  "totalChurn":  1616,
                                  "linesAdded":  1477
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  224,
+                                 "totalChurn":  1869,
+                                 "linesAdded":  1645
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  107,
+                                 "totalChurn":  556,
+                                 "linesAdded":  449
+                             },
+                             {
+                                 "storyId":  "US-003",
+                                 "linesDeleted":  28,
+                                 "totalChurn":  829,
+                                 "linesAdded":  801
+                             },
+                             {
+                                 "storyId":  "US-004",
+                                 "linesDeleted":  30,
+                                 "totalChurn":  858,
+                                 "linesAdded":  828
+                             },
+                             {
+                                 "storyId":  "US-005",
+                                 "linesDeleted":  30,
+                                 "totalChurn":  1074,
+                                 "linesAdded":  1044
+                             },
+                             {
+                                 "storyId":  "testing",
+                                 "linesDeleted":  181,
+                                 "totalChurn":  648,
+                                 "linesAdded":  467
+                             },
+                             {
+                                 "storyId":  "US-001",
+                                 "linesDeleted":  181,
+                                 "totalChurn":  632,
+                                 "linesAdded":  451
+                             },
+                             {
+                                 "storyId":  "US-003",
+                                 "linesDeleted":  40,
+                                 "totalChurn":  591,
+                                 "linesAdded":  551
                              }
                          ],
     "qualityTrends":  [
@@ -1178,9 +1226,9 @@
                       ],
     "failurePatterns":  [
                             {
-                                "lesson":  "Recurring \u0027Timeout\u0027 errors (20x) - consider adding targeted error handling",
+                                "lesson":  "Recurring \u0027Timeout\u0027 errors (21x) - consider adding targeted error handling",
                                 "category":  "Timeout",
-                                "count":  20
+                                "count":  21
                             },
                             {
                                 "lesson":  "Recurring \u00270\u0027 errors (16x) - consider adding targeted error handling",
@@ -1194,10 +1242,10 @@
                             }
                         ],
     "recommendations":  [
-                            "20 timeouts detected - consider increasing timeout or breaking stories into smaller tasks"
+                            "21 timeouts detected - consider increasing timeout or breaking stories into smaller tasks"
                         ],
     "lessons":  [
-                    "Most common failure: Timeout (20x)",
+                    "Most common failure: Timeout (21x)",
                     "Stories requiring excessive retries: US-003, quality, US-002",
                     "Sprint pass rate: 100% (10/10)"
                 ]

@@ -24,6 +24,7 @@ from src.llm_client.parsers import (
 )
 
 
+@pytest.mark.fast
 class TestParseJsonStrategy3RegexMatch:
     """Test parse_json Strategy 3: regex extraction of JSON object."""
 
@@ -55,6 +56,7 @@ End of response.'''
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonStrategy4Repair:
     """Test parse_json Strategy 4: repair and parse."""
 
@@ -79,6 +81,7 @@ class TestParseJsonStrategy4Repair:
         assert result == {"valid": "json"}
 
 
+@pytest.mark.fast
 class TestParseJsonStrategy5ExtractFirst:
     """Test parse_json Strategy 5: Extract first valid JSON object."""
 
@@ -134,6 +137,7 @@ class TestParseJsonStrategy5ExtractFirst:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonWarningLog:
     """Test parse_json warning log when all strategies fail (line 83)."""
 
@@ -159,6 +163,7 @@ class TestParseJsonWarningLog:
         assert "..." in warning_msgs[0]
 
 
+@pytest.mark.fast
 class TestParseJsonArrayStrategy1Direct:
     """Test parse_json_array Strategy 1: Direct array parse."""
 
@@ -197,6 +202,7 @@ class TestParseJsonArrayStrategy1Direct:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonArrayStrategy2Markdown:
     """Test parse_json_array Strategy 2: Remove markdown and parse."""
 
@@ -218,6 +224,7 @@ class TestParseJsonArrayStrategy2Markdown:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonArrayStrategy3Regex:
     """Test parse_json_array Strategy 3: Find array with regex."""
 
@@ -243,6 +250,7 @@ class TestParseJsonArrayStrategy3Regex:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonArrayStrategy5ExtractObjects:
     """Test parse_json_array Strategy 5: Extract individual objects."""
 
@@ -289,6 +297,7 @@ class TestParseJsonArrayStrategy5ExtractObjects:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonArrayStrategy6Regex:
     """Test parse_json_array Strategy 6: Regex pattern extraction."""
 
@@ -316,6 +325,7 @@ class TestParseJsonArrayStrategy6Regex:
         assert result is None
 
 
+@pytest.mark.fast
 class TestParseJsonArrayWarningLog:
     """Test parse_json_array warning log when all strategies fail (line 188)."""
 
@@ -329,6 +339,7 @@ class TestParseJsonArrayWarningLog:
         assert any("Failed to parse JSON array" in record.message for record in caplog.records)
 
 
+@pytest.mark.fast
 class TestRepairJsonBoundaries:
     """Test repair_json JSON boundary detection."""
 
@@ -359,6 +370,7 @@ class TestRepairJsonBoundaries:
         assert result.endswith('}')
 
 
+@pytest.mark.fast
 class TestRepairJsonCommaSplicing:
     """Test repair_json missing comma fixes."""
 
@@ -387,6 +399,7 @@ class TestRepairJsonCommaSplicing:
         assert '],[' in result
 
 
+@pytest.mark.fast
 class TestExtractJsonByKeysValueParsing:
     """Test extract_json_by_keys value parsing edge cases."""
 
@@ -455,6 +468,7 @@ class TestExtractJsonByKeysValueParsing:
         assert result.get("active") is True
 
 
+@pytest.mark.fast
 class TestComplexJsonScenarios:
     """Test complex real-world JSON parsing scenarios."""
 
@@ -536,6 +550,7 @@ I hope this helps! Let me know if you need anything else.'''
         assert result["data"][0][0][0] == "deep"
 
 
+@pytest.mark.fast
 class TestRobustnessAndErrors:
     """Test robustness and error handling."""
 
@@ -580,6 +595,7 @@ class TestRobustnessAndErrors:
         assert len(result) == 100
 
 
+@pytest.mark.fast
 class TestMarkdownVariations:
     """Test various markdown code block formats."""
 
@@ -610,6 +626,7 @@ print("hello")
         assert result == {"key": "value"}
 
 
+@pytest.mark.fast
 class TestBraceBalancing:
     """Test brace balancing edge cases."""
 
@@ -640,6 +657,7 @@ class TestBraceBalancing:
         assert result["array"][2]["nested"] == [3, 4]
 
 
+@pytest.mark.fast
 class TestNumericEdgeCases:
     """Test numeric value edge cases in extract_json_by_keys."""
 
@@ -666,6 +684,7 @@ class TestNumericEdgeCases:
         # May be parsed as string since .5 might not match the digit pattern
 
 
+@pytest.mark.fast
 class TestParseJsonArrayExpectedCount:
     """Test expected_count validation in parse_json_array."""
 
@@ -700,6 +719,7 @@ class TestParseJsonArrayExpectedCount:
 # Test Coverage Gaps - Lines 80-81, 166-167, 180-181, 185-186, 270-271
 # ============================================================================
 
+@pytest.mark.fast
 class TestParserEdgeCaseCoverage:
     """Test edge cases for parser coverage gaps"""
 
