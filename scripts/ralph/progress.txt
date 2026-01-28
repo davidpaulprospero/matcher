@@ -6061,3 +6061,19 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: Duplicate deduplication within cookie_files list + cross-slash-style path normalization dedup
 - Files modified: tests/test_cookie_method_fallback.py
 - Test results: 52 passed (44 existing + 8 new) in 0.65s, 0 failures
+
+
+## Iteration US-008 (Sprint 14) - Add speech screening escalation integration tests
+- Created tests/test_speech_screening_escalation.py with 15 tests across 5 classes
+- AC1: TestDownloadAudioClipEscalationArgs — Tier 1 --impersonate applied, Tier 2 --extractor-args applied, args ordered before cookies
+- AC2: TestDownloadAudioClipNoEscalation — no args when both managers None, impersonation fallback when escalation_manager None, no AttributeError on 403 with None manager
+- AC3: TestScreenVideoRecordsFailure — record_failure() called on 403 stderr, NOT called on timeout, NOT called on success
+- AC4: TestScreenVideoHandlesCookieRotation — cookie_rotator.rotate() called when rotate_cookies=True, not called when False, no crash without cookie_rotator attribute
+- AC5: TestScreenApprovedVideosSharedState — tier progression across video screening, shared state persistence across multiple screen_approved_videos calls, independent tiers per video ID
+- Also added missing escalation integration to src/downloader/speech_screening.py:
+  - Added is_escalation_trigger import
+  - Added cookie rotation handling (rotate_cookies=True triggers cookie_rotator.rotate())
+  - Added record_failure() on 403/bot-detection errors in download_audio_clip()
+- Files created: tests/test_speech_screening_escalation.py
+- Files modified: src/downloader/speech_screening.py, scripts/ralph/prd.json
+- Test results: 15 new tests pass, 134 total related tests pass (25 speech screening + 109 escalation manager)
