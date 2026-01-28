@@ -177,6 +177,66 @@ class TestSentenceCoherence:
         # Should get boost from capitalization matching punctuation
         assert score > 0.1
 
+    def test_long_words_boost_coherence(self):
+        """Words with avg length >= 4.0 should boost score (not gibberish)."""
+        # Words with avg length >= 4.0: programming, development, software, engineering, architecture
+        # Average length = (11+11+8+11+12)/5 = 10.6
+        words = ["programming", "development", "software", "engineering", "architecture"]
+        text = " ".join(words)
+
+        score_long = _calculate_sentence_coherence(text, words)
+
+        # Words with avg length < 3.0: a, be, to, go, at (avg = 1.6)
+        short_words = ["a", "be", "to", "go", "at"]
+        short_text = " ".join(short_words)
+
+        score_short = _calculate_sentence_coherence(short_text, short_words)
+
+        # Long words should get +0.10 boost, short words get +0.00
+        assert score_long > score_short
+        # Long words get the word length boost
+        assert score_long >= 0.10  # At least word length contribution
+
+    def test_medium_word_length_partial_boost(self):
+        """Words with avg length 3.0-4.0 should get partial boost (0.05)."""
+        # Words with avg length ~3.5: this, that, they, them (avg = 4.0)
+        # Let's use words that give us exactly avg 3.5: big, the, cat, dog, hat (3,3,3,3,3 = 3.0)
+        # To get avg >= 3.0 but < 4.0, use: play, this, good (4,4,4 = 4.0)
+        # Use: the, big, cat (3,3,3 = 3.0)
+        words = ["the", "big", "cat"]
+        text = " ".join(words)
+
+        score = _calculate_sentence_coherence(text, words)
+        # Should get partial boost for avg length exactly 3.0
+        assert score >= 0.05  # At least partial word length contribution
+
+    def test_score_capped_at_maximum(self):
+        """Score should be capped at 0.35 maximum regardless of input."""
+        # Create text that would maximize all scoring components:
+        # - Multiple sentence endings (3 periods = punctuation_ratio capped at 1.0)
+        # - Capitalized words matching sentence count
+        # - Average word length >= 4.0
+        # This should exceed 0.35 without cap: 0.15 (punct) + 0.10 (caps) + 0.10 (word_len) = 0.35
+        text = "Programming. Development. Engineering."
+        words = text.replace(".", "").split()  # ["Programming", "Development", "Engineering"]
+
+        score = _calculate_sentence_coherence(text, words)
+
+        # Score must be capped at 0.35
+        assert score <= 0.35
+
+    def test_score_cap_with_excessive_input(self):
+        """Score should remain at 0.35 even with excessive positive signals."""
+        # Create highly structured text that would theoretically score > 0.35
+        text = "Welcome. Hello. Goodbye. Thanks. Cheers. Wonderful. Fantastic. Excellent. Amazing. Outstanding."
+        words = text.replace(".", "").split()
+
+        score = _calculate_sentence_coherence(text, words)
+
+        # Even with many sentences and capitals, score is capped
+        assert score == 0.35 or score < 0.35  # Capped at maximum
+        assert score <= 0.35  # Explicit cap test
+
 
 class TestLanguageConsistency:
     """Test the language consistency scoring helper."""
