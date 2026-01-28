@@ -6363,3 +6363,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5 (DownloadedVideo entries): test_run_success_youtube_only, test_download_checkpoint_data_structure
 - AC6 (restore): test_restore_from_checkpoint, test_restore_no_checkpoint_data, test_restore_missing_files, test_restore_partial_files
 - Test results: 134 passed in 15.50s, 0 regressions
+
+## Iteration US-008 (Sprint 17) - Add APIHealer private error handler isolated tests
+- Created tests/test_api_healer_us008.py with 28 tests across 6 classes
+- AC1: TestHandleRateLimitBackoffUS008 (5 tests) - mock time.sleep verifying 2s initial, doubles to 4s/8s, capped at MAX_BACKOFF, retry_count increments, result includes backoff_seconds
+- AC2: TestHandleAuthErrorProviderSwitchUS008 (4 tests) - gemini->anthropic switch, anthropic->gemini switch, ollama fallback with no keys, unknown provider failure with API_KEY message
+- AC3: TestHandleQuotaExceededUS008 (4 tests) - provider switch on quota, ollama fallback, failure when no LLM config, descriptive failure message
+- AC4: TestHandleTimeoutUS008 (5 tests) - 60->120 increase, 300s cap, repeated calls cap, result details, no-config fallback with sleep
+- AC5: TestHandleConnectionErrorUS008 (4 tests) - sleeps INITIAL_BACKOFF, returns RETRY, connection message, waited_seconds in details
+- AC6: TestIsProviderAvailableUS008 (6 tests) - gemini/anthropic with/without keys, ollama always True, unknown provider behavior
+- Files created: tests/test_api_healer_us008.py
+- Test results: 28 passed (new), 92 passed (all healer tests), 0 failures, 0 regressions

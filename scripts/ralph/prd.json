@@ -111,8 +111,8 @@
             "id": "US-008",
             "title": "Add APIHealer private error handler isolated tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "28 tests across 6 dedicated US-008 test classes in test_api_healer_us008.py: TestHandleRateLimitBackoffUS008 (5 tests, AC1), TestHandleAuthErrorProviderSwitchUS008 (4 tests, AC2), TestHandleQuotaExceededUS008 (4 tests, AC3), TestHandleTimeoutUS008 (5 tests, AC4), TestHandleConnectionErrorUS008 (4 tests, AC5), TestIsProviderAvailableUS008 (6 tests, AC6). All 92 healer tests pass in 3.4s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test APIHealer._handle_rate_limit() sleeps for backoff_time and returns RETRY action — mock time.sleep, verify called with initial backoff (2s), then doubled on second call (4s), capped at MAX_BACKOFF",
                 "Test APIHealer._handle_auth_error() identifies provider from error message and attempts _try_provider_switch() — mock error with 'gemini' provider, verify switch attempted to anthropic/ollama",
