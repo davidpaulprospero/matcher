@@ -1,4 +1,25 @@
 
+## Iteration US-003 (Sprint 16) - Add DownloadHealer and ResilientRunner error path tests
+- Added 13 new tests across 3 files covering all 6 acceptance criteria
+- DownloadHealer can_handle tests added to test_healers.py (4 new):
+  - test_can_handle_403_forbidden: yt-dlp/download context 403 errors return True
+  - test_can_handle_extraction_failed: yt-dlp extraction failures return True
+  - test_can_handle_false_for_config_errors: config errors return False (negative)
+  - test_can_handle_false_for_otio_errors: OTIO errors return False (negative)
+- DownloadHealer escalation failure tests added to test_download_healer_retry.py (3 new):
+  - test_failed_when_max_tier_and_retries_exhausted_no_escalation_mgr: .failed() when all exhausted
+  - test_failure_logged_with_tier_info: caplog verifies "core retry exhausted" logged
+  - test_escalation_manager_max_tier_still_returns_fixed_for_retry: FULL_BYPASS tier info in result
+- ResilientRunner error path tests added to test_runner.py (6 new):
+  - test_runtime_error_does_not_crash_runner: RuntimeError caught, failure result returned
+  - test_keyboard_interrupt_not_caught: KeyboardInterrupt propagates (not swallowed)
+  - test_only_matching_healer_called: 3 healers, only 2nd match — 1st checked/not fixed, 2nd fixed, 3rd not checked
+  - test_no_healer_matches_returns_false: all 3 healers can_handle=False → returns False
+  - test_heal_called_at_most_n_times: MAX_HEAL_ATTEMPTS=3 respected, permanent failure
+  - test_orchestrator_max_attempts_respected: strategy.max_attempts_per_stage=2 → exactly 2 runs
+- Files modified: tests/test_agents/test_healers.py, tests/test_agents/test_download_healer_retry.py, tests/test_agents/test_runner.py
+- Test results: 470 passed in 7.19s (457 existing + 13 new), 0 regressions
+
 ## Iteration US-002 (Sprint 16) - Add PathHealer and OTIOHealer agent tests
 - Extended existing test files with 19 new tests covering all 6 acceptance criteria
 - PathHealer tests added (9 new):

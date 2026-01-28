@@ -261,6 +261,38 @@ class TestDownloadHealer:
         assert healer.can_handle(Exception("YouTube rate limit"), "DOWNLOAD")
         assert healer.can_handle(Exception("Video unavailable"), "DOWNLOAD")
 
+    def test_can_handle_403_forbidden(self, mock_config, project_dir):
+        """Test can_handle returns True for 403 Forbidden download errors."""
+        healer = DownloadHealer(mock_config, project_dir)
+
+        # 403 errors in real yt-dlp output include "download" or "yt-dlp" context
+        assert healer.can_handle(Exception("yt-dlp: HTTP Error 403: Forbidden"), "DOWNLOAD")
+        assert healer.can_handle(Exception("Download failed: 403 Forbidden"), "DOWNLOAD")
+        # Error messages with "429" rate limit
+        assert healer.can_handle(Exception("429 Too Many Requests"), "DOWNLOAD")
+
+    def test_can_handle_extraction_failed(self, mock_config, project_dir):
+        """Test can_handle returns True for yt-dlp extraction failures."""
+        healer = DownloadHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("yt-dlp extraction failed for video"), "DOWNLOAD")
+        assert healer.can_handle(Exception("Unable to extract video data"), "DOWNLOAD")
+
+    def test_can_handle_false_for_config_errors(self, mock_config, project_dir):
+        """Test can_handle returns False for config-related errors."""
+        healer = DownloadHealer(mock_config, project_dir)
+
+        assert not healer.can_handle(Exception("Invalid config key 'output.frame_rate'"), "OUTPUT")
+        assert not healer.can_handle(Exception("Missing required config section 'llm'"), "ANALYZE")
+
+    def test_can_handle_false_for_otio_errors(self, mock_config, project_dir):
+        """Test can_handle returns False for OTIO-related errors."""
+        healer = DownloadHealer(mock_config, project_dir)
+
+        assert not healer.can_handle(Exception("OTIO serialization failed"), "OUTPUT")
+        assert not healer.can_handle(Exception("opentimelineio import error"), "OUTPUT")
+        assert not healer.can_handle(Exception("Track layout corruption detected"), "OUTPUT")
+
     @patch('time.sleep')
     def test_handle_rate_limit(self, mock_sleep, mock_config, project_dir):
         """Test rate limit triggers backoff."""
