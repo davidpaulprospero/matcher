@@ -120,8 +120,8 @@
             "id": "US-009",
             "title": "Add state dataclass serialization edge case tests",
             "priority": 9,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 27 edge case tests across 5 new test classes to test_state_dataclasses.py: TestVoiceoverSegmentPostInit (5 tests: auto-calc, explicit preserved, zero triggers, negative range, same start/end), TestTranscriptSegmentToDictBroll (5 tests: broll true/false, description_source default/all values, round-trip), TestDownloadedVideoEmptyStrings (4 tests: all empty, file only, asdict empty, numeric defaults), TestPipelineStateDefaults (6 tests: lists empty, dicts empty, no shared mutable lists/dicts, string defaults, None defaults), TestMatchBoundaryConfidence (7 tests: 0.0/1.0 stored, not falsy, not rounded, asdict preserves, near-boundary precision, small epsilon). All 71 tests pass in 0.61s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test VoiceoverSegment.__post_init__() auto-calculates duration — verify duration=15.0 when start=10.0, end=25.0 and duration not explicitly set; verify explicit duration=5.0 is NOT overwritten",
                 "Test TranscriptSegment.to_dict() includes all fields including optional broll fields — verify is_broll and description_source appear in dict output",

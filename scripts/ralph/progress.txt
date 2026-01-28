@@ -6204,3 +6204,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - No source code changes needed (pure test-only story)
 - Files created: tests/test_cli_config_utils.py
 - Test results: 20 passed in 0.48s, 0 regressions
+
+## Iteration US-009 (Sprint 15) - Add state dataclass serialization edge case tests
+- Added 27 edge case tests across 5 new test classes in tests/test_state_dataclasses.py
+- TestVoiceoverSegmentPostInit (5 tests): auto-calc duration from start/end, explicit duration NOT overwritten, zero triggers auto-calc, negative range, same start/end
+- TestTranscriptSegmentToDictBroll (5 tests): is_broll=True in dict, is_broll=False default in dict, description_source default, all description sources, round-trip reconstruct
+- TestDownloadedVideoEmptyStrings (4 tests): all optional fields empty, file-only, asdict with empty strings, numeric defaults correct
+- TestPipelineStateDefaults (6 tests): all list fields empty, all dict fields empty, no shared mutable lists across instances, no shared mutable dicts, string defaults, None defaults
+- TestMatchBoundaryConfidence (7 tests): confidence=0.0 stored, confidence=1.0 stored, 0.0 not falsy, 1.0 not rounded, asdict preserves exact values, near-boundary float precision, small epsilon
+- Files modified: tests/test_state_dataclasses.py
+- Test results: 71 passed in 0.61s, 0 regressions
