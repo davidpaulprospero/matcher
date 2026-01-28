@@ -81,8 +81,8 @@
             "id": "US-006",
             "title": "Add adjust_embedding_weight_for_transcript_quality tier-based adjustment tests",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: TestAdjustEmbeddingWeight class in tests/test_transcript_quality.py has 6 tests covering all 5 AC. AC1: test_high_quality_no_reduction verifies (base_weight, reason with 'high_quality'). AC2: test_medium_quality_reduces_weight_by_10_percent verifies 0.4 -> 0.36. AC3: test_low_quality_reduces_weight_by_20_percent verifies 0.4 -> 0.32. AC4: test_disabled_returns_unchanged verifies (base_weight, reason with 'disabled'). AC5: test_custom_reduction_factor verifies custom low_quality_reduction parameter. All 6 tests pass in 0.44s.",
             "acceptanceCriteria": [
                 "Test adjust_embedding_weight_for_transcript_quality() returns (base_weight, 'high_quality_transcript') when quality_tier='high'",
                 "Test adjust_embedding_weight_for_transcript_quality() reduces weight by 10% for quality_tier='medium' — verify 0.4 becomes 0.36",
