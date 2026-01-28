@@ -49,6 +49,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         import numpy as np
         return np.random.rand(100, 384).astype('float32')
 
+    @pytest.mark.fast
     def test_timing_logged_for_flat_index(self, mock_config, mock_embeddings, caplog):
         """Test that timing is logged when building flat index"""
         from src.embeddings import build_embedding_index
@@ -61,6 +62,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         assert len(timing_messages) >= 1, "Timing message not logged"
         assert 'ms' in timing_messages[0].message, "Timing not in milliseconds"
 
+    @pytest.mark.fast
     def test_timing_includes_vector_count(self, mock_config, mock_embeddings, caplog):
         """Test that timing message includes vector count"""
         from src.embeddings import build_embedding_index
@@ -71,6 +73,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         timing_messages = [r for r in caplog.records if 'Built FAISS index' in r.message]
         assert '100 vectors' in timing_messages[0].message, "Vector count not in log message"
 
+    @pytest.mark.fast
     def test_timing_includes_dimension(self, mock_config, mock_embeddings, caplog):
         """Test that timing message includes vector dimension"""
         from src.embeddings import build_embedding_index
@@ -81,6 +84,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         timing_messages = [r for r in caplog.records if 'Built FAISS index' in r.message]
         assert 'dim=384' in timing_messages[0].message, "Dimension not in log message"
 
+    @pytest.mark.fast
     def test_timing_includes_index_type_flat(self, mock_config, mock_embeddings, caplog):
         """Test that timing message includes index type (flat)"""
         from src.embeddings import build_embedding_index
@@ -93,6 +97,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         timing_messages = [r for r in caplog.records if 'Built FAISS index' in r.message]
         assert '(flat)' in timing_messages[0].message, "Index type 'flat' not in log message"
 
+    @pytest.mark.fast
     def test_timing_includes_index_type_ivf(self, mock_config, caplog):
         """Test that timing message includes index type (ivf)"""
         import numpy as np
@@ -109,6 +114,7 @@ class TestBuildEmbeddingIndexTimingLogged:
         assert len(timing_messages) >= 1, "Timing message not logged for IVF"
         assert '(ivf)' in timing_messages[0].message, "Index type 'ivf' not in log message"
 
+    @pytest.mark.fast
     def test_timing_log_level_is_info(self, mock_config, mock_embeddings, caplog):
         """Test that timing is logged at INFO level"""
         from src.embeddings import build_embedding_index
@@ -132,6 +138,7 @@ class TestTimingFormat:
         config.indexing.index_type = 'flat'
         return config
 
+    @pytest.mark.fast
     def test_timing_format_milliseconds(self, mock_config, caplog):
         """Test that timing is in 'X.Xms' format"""
         import numpy as np
@@ -147,6 +154,7 @@ class TestTimingFormat:
         assert re.search(r'in \d+\.?\d*ms', timing_messages[0].message), \
             f"Timing format incorrect: {timing_messages[0].message}"
 
+    @pytest.mark.fast
     def test_timing_is_positive_value(self, mock_config, caplog):
         """Test that logged timing is a positive number"""
         import numpy as np
@@ -177,6 +185,7 @@ class TestTimingWith100PlusVectors:
         config.indexing.index_type = 'flat'
         return config
 
+    @pytest.mark.fast
     def test_timing_logged_for_100_vectors(self, mock_config, caplog):
         """Test that timing is logged for exactly 100 vectors"""
         import numpy as np
@@ -191,6 +200,7 @@ class TestTimingWith100PlusVectors:
         assert len(timing_messages) >= 1, "Timing not logged for 100 vectors"
         assert '100 vectors' in timing_messages[0].message
 
+    @pytest.mark.fast
     def test_timing_logged_for_500_vectors(self, mock_config, caplog):
         """Test that timing is logged for 500 vectors"""
         import numpy as np
@@ -205,6 +215,7 @@ class TestTimingWith100PlusVectors:
         assert len(timing_messages) >= 1, "Timing not logged for 500 vectors"
         assert '500 vectors' in timing_messages[0].message
 
+    @pytest.mark.fast
     def test_timing_logged_for_1000_vectors(self, mock_config, caplog):
         """Test that timing is logged for 1000 vectors"""
         import numpy as np
@@ -232,6 +243,7 @@ class TestDifferentDimensions:
         config.indexing.index_type = 'flat'
         return config
 
+    @pytest.mark.fast
     def test_timing_with_768_dim(self, mock_config, caplog):
         """Test timing with 768-dimensional embeddings (BERT-style)"""
         import numpy as np
@@ -245,6 +257,7 @@ class TestDifferentDimensions:
         timing_messages = [r for r in caplog.records if 'Built FAISS index' in r.message]
         assert 'dim=768' in timing_messages[0].message
 
+    @pytest.mark.fast
     def test_timing_with_1536_dim(self, mock_config, caplog):
         """Test timing with 1536-dimensional embeddings (OpenAI ada-002)"""
         import numpy as np
@@ -258,6 +271,7 @@ class TestDifferentDimensions:
         timing_messages = [r for r in caplog.records if 'Built FAISS index' in r.message]
         assert 'dim=1536' in timing_messages[0].message
 
+    @pytest.mark.fast
     def test_timing_with_384_dim(self, mock_config, caplog):
         """Test timing with 384-dimensional embeddings (MiniLM)"""
         import numpy as np
@@ -275,6 +289,7 @@ class TestDifferentDimensions:
 class TestNoTimingWhenFaissDisabled:
     """Test that no timing is logged when FAISS is disabled"""
 
+    @pytest.mark.fast
     def test_no_timing_when_use_faiss_false(self, caplog):
         """Test that no timing is logged when use_faiss=False"""
         import numpy as np
@@ -306,6 +321,7 @@ class TestTimingWithListInput:
         config.indexing.index_type = 'flat'
         return config
 
+    @pytest.mark.fast
     def test_timing_with_list_embeddings(self, mock_config, caplog):
         """Test timing is logged when embeddings are a list of lists"""
         from src.embeddings import build_embedding_index
@@ -336,6 +352,7 @@ class TestIVFIndexTiming:
         config.indexing.ivf_nprobe = 5
         return config
 
+    @pytest.mark.fast
     def test_ivf_timing_includes_training_time(self, mock_config_ivf, caplog):
         """Test that IVF timing includes training phase"""
         import numpy as np
@@ -365,6 +382,7 @@ class TestLogMessageFormat:
         config.indexing.index_type = 'flat'
         return config
 
+    @pytest.mark.fast
     def test_log_message_contains_all_elements(self, mock_config, caplog):
         """Test that log message contains checkmark, index type, vectors, dim, and timing"""
         import numpy as np
@@ -384,6 +402,7 @@ class TestLogMessageFormat:
         assert 'dim=512' in msg, "Dimension missing from log message"
         assert 'ms' in msg, "Timing missing from log message"
 
+    @pytest.mark.fast
     def test_log_message_format_ivf(self, caplog):
         """Test log message format for IVF index"""
         import numpy as np

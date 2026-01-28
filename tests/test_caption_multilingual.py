@@ -29,6 +29,7 @@ class TestMultilingualCaptions:
     - Empty fallback_languages defaults
     """
 
+    @pytest.mark.fast
     def test_fallback_chain_preferred_unavailable_2nd_fallback_succeeds(self):
         """Test fallback chain: preferred (en) unavailable, skip es, de succeeds.
 
@@ -56,6 +57,7 @@ class TestMultilingualCaptions:
         assert result.code == "de", f"Expected 'de' but got '{result.code}'"
         assert result.is_auto_generated is False, "Should be manual captions"
 
+    @pytest.mark.fast
     def test_unicode_handling_german_umlauts(self):
         """Test Unicode handling: German umlauts (ä, ö, ü, ß) in caption text."""
         # German text with umlauts
@@ -87,6 +89,7 @@ class TestMultilingualCaptions:
         assert "ß" in result.text, "German sharp s (ß) should be preserved"
         assert result.language == "de"
 
+    @pytest.mark.fast
     def test_unicode_handling_chinese_characters(self):
         """Test Unicode handling: Chinese characters (simplified and traditional)."""
         # Mix of simplified and traditional Chinese
@@ -117,6 +120,7 @@ class TestMultilingualCaptions:
         assert result.language == "zh"
         assert len(result.segments) == 1
 
+    @pytest.mark.fast
     def test_unicode_handling_arabic_rtl_text(self):
         """Test Unicode handling: Arabic right-to-left (RTL) text."""
         # Arabic text (reads right-to-left)
@@ -148,6 +152,7 @@ class TestMultilingualCaptions:
         arabic_chars = [c for c in result.text if '\u0600' <= c <= '\u06FF']
         assert len(arabic_chars) > 10, f"Should have Arabic chars, found {len(arabic_chars)}"
 
+    @pytest.mark.fast
     def test_mixed_language_video_preferred_en_returned(self):
         """Test mixed-language video: captions in en + es available, preferred en returned."""
         fetcher = CaptionFetcher()
@@ -171,6 +176,7 @@ class TestMultilingualCaptions:
         assert result.code == "en", f"Preferred 'en' should be selected, got '{result.code}'"
         assert result.is_auto_generated is False, "Should prefer manual over auto"
 
+    @pytest.mark.fast
     def test_language_code_normalization_uppercase_treated_same_as_lowercase(self):
         """Test language code normalization: 'EN' treated same as 'en'."""
         fetcher = CaptionFetcher()
@@ -207,6 +213,7 @@ class TestMultilingualCaptions:
         assert result2 is not None, "Should match 'en' from 'EN'"
         assert result2.code.lower() == "en", "Case-insensitive matching should work"
 
+    @pytest.mark.fast
     def test_empty_fallback_languages_defaults_to_en_gracefully(self):
         """Test empty fallback_languages defaults to 'en' gracefully.
 
@@ -249,6 +256,7 @@ class TestMultilingualCaptions:
 class TestMultilingualCaptionValidation:
     """Additional tests for language validation with multilingual content."""
 
+    @pytest.mark.fast
     def test_is_valid_language_code_for_multilingual_set(self):
         """Test is_valid_language_code for a variety of language codes."""
         # Common languages used in multilingual projects
@@ -258,6 +266,7 @@ class TestMultilingualCaptionValidation:
             assert is_valid_language_code(code), f"'{code}' should be valid"
             assert is_valid_language_code(code.upper()), f"'{code.upper()}' should be valid (case insensitive)"
 
+    @pytest.mark.fast
     def test_validate_language_config_multilingual_fallback_chain(self):
         """Test validate_language_config with a realistic multilingual fallback chain."""
         # Realistic config for Spanish content with Portuguese/English fallbacks
@@ -269,6 +278,7 @@ class TestMultilingualCaptionValidation:
 
         assert len(issues) == 0, f"Valid config should have no issues: {issues}"
 
+    @pytest.mark.fast
     def test_validate_language_config_warns_duplicate_preferred_in_fallback(self):
         """Test that having preferred language in fallback generates warning."""
         issues = validate_language_config(
@@ -284,6 +294,7 @@ class TestMultilingualCaptionValidation:
 class TestMultilingualCaptionSegments:
     """Test caption segment handling with multilingual content."""
 
+    @pytest.mark.fast
     def test_mixed_unicode_segments(self):
         """Test CaptionResult with segments containing different Unicode scripts."""
         segments = [
@@ -311,6 +322,7 @@ class TestMultilingualCaptionSegments:
         # Duration should still be calculated correctly
         assert result.duration == 12.0
 
+    @pytest.mark.fast
     def test_segment_serialization_preserves_unicode(self):
         """Test that to_dict() preserves Unicode characters correctly."""
         segment = CaptionSegment(

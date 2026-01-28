@@ -13,6 +13,7 @@ from src.agents.base import HealerResult, HealerAction
 class TestCheckpointHealerInit:
     """Test CheckpointHealer initialization."""
 
+    @pytest.mark.fast
     def test_init_stores_config_and_project(self):
         """Test that CheckpointHealer stores config and project_dir."""
         config = MagicMock()
@@ -21,6 +22,7 @@ class TestCheckpointHealerInit:
         assert healer.config is config
         assert healer.project_dir == "/path/to/project"
 
+    @pytest.mark.fast
     def test_init_has_correct_name(self):
         """Test that CheckpointHealer has correct name."""
         config = MagicMock()
@@ -28,6 +30,7 @@ class TestCheckpointHealerInit:
 
         assert healer.name == "checkpoint-healer"
 
+    @pytest.mark.fast
     def test_init_has_checkpoint_file_constant(self):
         """Test that CheckpointHealer has CHECKPOINT_FILE constant."""
         config = MagicMock()
@@ -36,6 +39,7 @@ class TestCheckpointHealerInit:
         assert hasattr(healer, 'CHECKPOINT_FILE')
         assert healer.CHECKPOINT_FILE == "checkpoint.json"
 
+    @pytest.mark.fast
     def test_init_has_backup_file_constant(self):
         """Test that CheckpointHealer has BACKUP_FILE constant."""
         config = MagicMock()
@@ -44,6 +48,7 @@ class TestCheckpointHealerInit:
         assert hasattr(healer, 'BACKUP_FILE')
         assert healer.BACKUP_FILE == "checkpoint.backup.json"
 
+    @pytest.mark.fast
     def test_init_has_exception_types(self):
         """Test that CheckpointHealer has exception_types list."""
         config = MagicMock()
@@ -56,6 +61,7 @@ class TestCheckpointHealerInit:
 class TestCheckpointHealerCanHandle:
     """Test CheckpointHealer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_json_decode_error(self):
         """Test that CheckpointHealer can handle JSONDecodeError."""
         config = MagicMock()
@@ -64,6 +70,7 @@ class TestCheckpointHealerCanHandle:
         error = json.JSONDecodeError("Expecting value", "doc", 0)
         assert healer.can_handle(error, "LOAD") is True
 
+    @pytest.mark.fast
     def test_can_handle_json_in_message(self):
         """Test that CheckpointHealer can handle errors with 'json' in message."""
         config = MagicMock()
@@ -72,6 +79,7 @@ class TestCheckpointHealerCanHandle:
         error = Exception("JSON decode failed at line 42")
         assert healer.can_handle(error, "LOAD") is True
 
+    @pytest.mark.fast
     def test_can_handle_checkpoint_in_message(self):
         """Test that CheckpointHealer can handle checkpoint-related errors."""
         config = MagicMock()
@@ -80,6 +88,7 @@ class TestCheckpointHealerCanHandle:
         error = Exception("Checkpoint file is corrupted")
         assert healer.can_handle(error, "LOAD") is True
 
+    @pytest.mark.fast
     def test_can_handle_corrupt_in_message(self):
         """Test that CheckpointHealer can handle corruption errors."""
         config = MagicMock()
@@ -88,6 +97,7 @@ class TestCheckpointHealerCanHandle:
         error = Exception("File is corrupt or incomplete")
         assert healer.can_handle(error, "LOAD") is True
 
+    @pytest.mark.fast
     def test_can_handle_hash_in_message(self):
         """Test that CheckpointHealer can handle hash mismatch errors."""
         config = MagicMock()
@@ -96,6 +106,7 @@ class TestCheckpointHealerCanHandle:
         error = Exception("Hash mismatch: config has changed")
         assert healer.can_handle(error, "LOAD") is True
 
+    @pytest.mark.fast
     def test_cannot_handle_unrelated_error(self):
         """Test that CheckpointHealer doesn't handle unrelated errors."""
         config = MagicMock()
@@ -111,6 +122,7 @@ class TestCheckpointHealerCanHandle:
 class TestCheckpointHealerRestoreFromBackup:
     """Test CheckpointHealer._restore_from_backup() method."""
 
+    @pytest.mark.fast
     def test_restore_from_backup_success(self, tmp_path):
         """Test successful restore from backup."""
         config = MagicMock()
@@ -131,6 +143,7 @@ class TestCheckpointHealerRestoreFromBackup:
         assert result.action == HealerAction.RESTORE
         assert (project_dir / "checkpoint.json").exists()
 
+    @pytest.mark.fast
     def test_restore_from_backup_no_backup_exists(self, tmp_path):
         """Test restore fails gracefully when no backup exists."""
         config = MagicMock()
@@ -145,6 +158,7 @@ class TestCheckpointHealerRestoreFromBackup:
         # Should fall through to start_fresh
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_restore_from_backup_corrupted_backup(self, tmp_path):
         """Test restore handles corrupted backup."""
         config = MagicMock()
@@ -167,6 +181,7 @@ class TestCheckpointHealerRestoreFromBackup:
 class TestCheckpointHealerRebuildCheckpoint:
     """Test CheckpointHealer._rebuild_checkpoint() method."""
 
+    @pytest.mark.fast
     def test_rebuild_checkpoint_finds_transcriptions(self, tmp_path):
         """Test rebuild finds cached transcriptions."""
         config = MagicMock()
@@ -186,6 +201,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         assert result.success is True
         assert "TRANSCRIBE" in result.details.get("cached_stages", [])
 
+    @pytest.mark.fast
     def test_rebuild_checkpoint_finds_embeddings(self, tmp_path):
         """Test rebuild finds cached embeddings."""
         config = MagicMock()
@@ -205,6 +221,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         assert result.success is True
         assert "EMBEDDINGS" in result.details.get("cached_stages", [])
 
+    @pytest.mark.fast
     def test_rebuild_checkpoint_finds_scene_detection(self, tmp_path):
         """Test rebuild finds cached scene detection data."""
         config = MagicMock()
@@ -224,6 +241,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         assert result.success is True
         assert "SCENE_DETECTION" in result.details.get("cached_stages", [])
 
+    @pytest.mark.fast
     def test_rebuild_checkpoint_no_cache(self, tmp_path):
         """Test rebuild with no cache directory."""
         config = MagicMock()
@@ -238,6 +256,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         # Should fall through to start_fresh
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_rebuild_checkpoint_empty_cache(self, tmp_path):
         """Test rebuild with empty cache directories."""
         config = MagicMock()
@@ -260,6 +279,7 @@ class TestCheckpointHealerRebuildCheckpoint:
 class TestCheckpointHealerHandleHashMismatch:
     """Test CheckpointHealer._handle_hash_mismatch() method."""
 
+    @pytest.mark.fast
     def test_handle_hash_mismatch_continues(self, tmp_path):
         """Test that hash mismatch continues with current config."""
         config = MagicMock()
@@ -276,6 +296,7 @@ class TestCheckpointHealerHandleHashMismatch:
 class TestCheckpointHealerStartFresh:
     """Test CheckpointHealer._start_fresh() method."""
 
+    @pytest.mark.fast
     def test_start_fresh_moves_corrupted(self, tmp_path):
         """Test that start_fresh moves corrupted checkpoint."""
         config = MagicMock()
@@ -296,6 +317,7 @@ class TestCheckpointHealerStartFresh:
         assert not checkpoint_path.exists()
         assert (project_dir / "checkpoint.corrupted.json").exists()
 
+    @pytest.mark.fast
     def test_start_fresh_no_checkpoint(self, tmp_path):
         """Test start_fresh when no checkpoint exists."""
         config = MagicMock()
@@ -314,6 +336,7 @@ class TestCheckpointHealerStartFresh:
 class TestCheckpointHealerCreateBackup:
     """Test CheckpointHealer.create_backup() method."""
 
+    @pytest.mark.fast
     def test_create_backup_success(self, tmp_path):
         """Test successful backup creation."""
         config = MagicMock()
@@ -331,6 +354,7 @@ class TestCheckpointHealerCreateBackup:
         assert result is True
         assert (project_dir / "checkpoint.backup.json").exists()
 
+    @pytest.mark.fast
     def test_create_backup_no_checkpoint(self, tmp_path):
         """Test create_backup returns False when no checkpoint exists."""
         config = MagicMock()
@@ -343,6 +367,7 @@ class TestCheckpointHealerCreateBackup:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_create_backup_preserves_content(self, tmp_path):
         """Test that backup preserves checkpoint content."""
         config = MagicMock()
@@ -366,6 +391,7 @@ class TestCheckpointHealerCreateBackup:
 class TestCheckpointHealerFix:
     """Test CheckpointHealer.fix() method routing."""
 
+    @pytest.mark.fast
     def test_fix_routes_json_decode_error(self, tmp_path):
         """Test that fix() routes JSONDecodeError correctly."""
         config = MagicMock()
@@ -380,6 +406,7 @@ class TestCheckpointHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_corrupt_error(self, tmp_path):
         """Test that fix() routes corruption errors correctly."""
         config = MagicMock()
@@ -393,6 +420,7 @@ class TestCheckpointHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_missing_error(self, tmp_path):
         """Test that fix() routes missing field errors correctly."""
         config = MagicMock()
@@ -406,6 +434,7 @@ class TestCheckpointHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_hash_mismatch(self, tmp_path):
         """Test that fix() routes hash mismatch errors correctly."""
         config = MagicMock()
@@ -424,6 +453,7 @@ class TestCheckpointHealerFix:
 class TestCheckpointHealerIntegration:
     """Integration tests for CheckpointHealer."""
 
+    @pytest.mark.fast
     def test_full_recovery_cycle(self, tmp_path):
         """Test full recovery cycle: create, corrupt, restore."""
         config = MagicMock()
@@ -461,6 +491,7 @@ class TestCheckpointHealerIntegration:
         restored_data = json.loads(checkpoint_path.read_text())
         assert restored_data == checkpoint_data
 
+    @pytest.mark.fast
     def test_cascade_to_fresh_start(self, tmp_path):
         """Test cascade from restore to fresh start when backup is also bad."""
         config = MagicMock()

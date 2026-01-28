@@ -11,21 +11,25 @@ import time
 class TestSpeedModuleImports:
     """Verify speed-related modules can be imported."""
 
+    @pytest.mark.fast
     def test_import_transcript_cache(self):
         """TranscriptCache should be importable from transcription.cache."""
         from src.transcription.cache import TranscriptCache
         assert TranscriptCache is not None
 
+    @pytest.mark.fast
     def test_import_base_cache(self):
         """BaseCache should be importable from cache.base."""
         from src.cache.base import BaseCache
         assert BaseCache is not None
 
+    @pytest.mark.fast
     def test_import_cache_entry(self):
         """CacheEntry should be importable from cache.base."""
         from src.cache.base import CacheEntry
         assert CacheEntry is not None
 
+    @pytest.mark.fast
     def test_import_eviction_result(self):
         """EvictionResult should be importable from cache.base."""
         from src.cache.base import EvictionResult
@@ -35,21 +39,25 @@ class TestSpeedModuleImports:
 class TestParallelProcessingImports:
     """Verify parallel processing utilities are available."""
 
+    @pytest.mark.fast
     def test_import_thread_pool_executor(self):
         """ThreadPoolExecutor should be importable from concurrent.futures."""
         from concurrent.futures import ThreadPoolExecutor
         assert ThreadPoolExecutor is not None
 
+    @pytest.mark.fast
     def test_import_as_completed(self):
         """as_completed should be importable from concurrent.futures."""
         from concurrent.futures import as_completed
         assert as_completed is not None
 
+    @pytest.mark.fast
     def test_import_future(self):
         """Future should be importable from concurrent.futures."""
         from concurrent.futures import Future
         assert Future is not None
 
+    @pytest.mark.fast
     def test_thread_pool_executor_works(self):
         """ThreadPoolExecutor should execute tasks in parallel."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -67,21 +75,25 @@ class TestParallelProcessingImports:
 class TestGlobalCacheManagerImports:
     """Verify GlobalCacheManager is importable."""
 
+    @pytest.mark.fast
     def test_import_global_cache_manager(self):
         """GlobalCacheManager should be importable."""
         from src.global_cache import GlobalCacheManager
         assert GlobalCacheManager is not None
 
+    @pytest.mark.fast
     def test_import_video_registry_entry(self):
         """VideoRegistryEntry should be importable."""
         from src.global_cache import VideoRegistryEntry
         assert VideoRegistryEntry is not None
 
+    @pytest.mark.fast
     def test_import_download_info(self):
         """DownloadInfo should be importable."""
         from src.global_cache import DownloadInfo
         assert DownloadInfo is not None
 
+    @pytest.mark.fast
     def test_import_video_source(self):
         """VideoSource enum should be importable."""
         from src.global_cache import VideoSource
@@ -91,6 +103,7 @@ class TestGlobalCacheManagerImports:
 class TestTranscriptCacheStructure:
     """Verify TranscriptCache has required methods."""
 
+    @pytest.mark.integration
     def test_transcript_cache_has_source_map(self):
         """TranscriptCache should have _source_map attribute after init."""
         from src.transcription.cache import TranscriptCache
@@ -102,6 +115,7 @@ class TestTranscriptCacheStructure:
             assert hasattr(cache, '_source_map')
             assert isinstance(cache._source_map, dict)
 
+    @pytest.mark.integration
     def test_transcript_cache_has_video_id_map(self):
         """TranscriptCache should have _video_id_map attribute."""
         from src.transcription.cache import TranscriptCache
@@ -112,6 +126,7 @@ class TestTranscriptCacheStructure:
             assert hasattr(cache, '_video_id_map')
             assert isinstance(cache._video_id_map, dict)
 
+    @pytest.mark.fast
     def test_transcript_cache_has_build_source_map(self):
         """TranscriptCache should have _build_source_map method."""
         from src.transcription.cache import TranscriptCache
@@ -122,17 +137,20 @@ class TestTranscriptCacheStructure:
 class TestBaseCacheStructure:
     """Verify BaseCache has required abstract methods."""
 
+    @pytest.mark.fast
     def test_base_cache_is_abstract(self):
         """BaseCache should be an abstract class."""
         from src.cache.base import BaseCache
         from abc import ABC
         assert issubclass(BaseCache, ABC)
 
+    @pytest.mark.fast
     def test_base_cache_has_serialize_entry(self):
         """BaseCache should have _serialize_entry abstract method."""
         from src.cache.base import BaseCache
         assert hasattr(BaseCache, '_serialize_entry')
 
+    @pytest.mark.fast
     def test_base_cache_has_deserialize_entry(self):
         """BaseCache should have _deserialize_entry abstract method."""
         from src.cache.base import BaseCache
@@ -142,11 +160,13 @@ class TestBaseCacheStructure:
 class TestLRUCachePatternAvailable:
     """Verify functools.lru_cache is available for caching patterns."""
 
+    @pytest.mark.fast
     def test_import_lru_cache(self):
         """lru_cache should be importable from functools."""
         from functools import lru_cache
         assert lru_cache is not None
 
+    @pytest.mark.fast
     def test_lru_cache_works(self):
         """lru_cache should cache function calls."""
         from functools import lru_cache
@@ -174,6 +194,7 @@ class TestLRUCachePatternAvailable:
         assert result3 == 9
         assert call_count == 2
 
+    @pytest.mark.fast
     def test_lru_cache_info_available(self):
         """lru_cache decorated functions should have cache_info()."""
         from functools import lru_cache
@@ -195,12 +216,14 @@ class TestLRUCachePatternAvailable:
 class TestTimingUtilities:
     """Verify timing utilities for performance measurement."""
 
+    @pytest.mark.fast
     def test_time_perf_counter_available(self):
         """time.perf_counter should be available for high-resolution timing."""
         assert hasattr(time, 'perf_counter')
         start = time.perf_counter()
         assert isinstance(start, float)
 
+    @pytest.mark.fast
     def test_time_perf_counter_monotonic(self):
         """perf_counter should be monotonically increasing."""
         t1 = time.perf_counter()
@@ -209,6 +232,7 @@ class TestTimingUtilities:
         assert t2 >= t1
         assert t3 >= t2
 
+    @pytest.mark.fast
     def test_time_process_time_available(self):
         """time.process_time should be available for CPU time measurement."""
         assert hasattr(time, 'process_time')

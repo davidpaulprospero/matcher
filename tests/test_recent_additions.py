@@ -38,6 +38,7 @@ class TestVADFilterSeparation:
     Config setting only applies to voiceover transcription.
     """
 
+    @pytest.mark.fast
     def test_video_transcription_vad_always_false(self):
         """Video transcription should ALWAYS use vad_filter=False regardless of config"""
         from src.transcription.parallel_processor import transcribe_videos_parallel
@@ -70,6 +71,7 @@ class TestVADFilterSeparation:
                "ALWAYS disabled" in source, \
             "Should have comment explaining VAD is always disabled for videos"
 
+    @pytest.mark.fast
     def test_voiceover_transcription_reads_config_vad(self):
         """Voiceover transcription should read VAD setting from config"""
         from src.stages.analyze import AnalyzeStage
@@ -82,6 +84,7 @@ class TestVADFilterSeparation:
         assert "getattr(config.transcription, 'vad_filter'" in source, \
             "Voiceover transcription should read vad_filter from config"
 
+    @pytest.mark.fast
     def test_voiceover_vad_default_true(self):
         """Voiceover VAD should default to True when not in config"""
         from src.transcription.parallel_processor import transcribe_voiceover_audio
@@ -95,6 +98,7 @@ class TestVADFilterSeparation:
         assert vad_param.default is True, \
             f"vad_filter should default to True for voiceover, got {vad_param.default}"
 
+    @pytest.mark.fast
     def test_video_vad_ignores_config_value(self):
         """Verify video transcription ignores config vad_filter value"""
         # This test verifies the code path that ignores config
@@ -133,6 +137,7 @@ class TestConfigLoading:
         project_dir.mkdir()
         return project_dir
 
+    @pytest.mark.fast
     def test_merge_config_simple_values(self):
         """Test merge_config with simple value overrides"""
         from src.cli.config_utils import merge_config
@@ -152,6 +157,7 @@ class TestConfigLoading:
         assert merged.keyword.max_keywords == 25, \
             f"Expected max_keywords=25, got {merged.keyword.max_keywords}"
 
+    @pytest.mark.fast
     def test_merge_config_nested_sections(self):
         """Test merge_config with multiple nested sections"""
         from src.cli.config_utils import merge_config
@@ -171,6 +177,7 @@ class TestConfigLoading:
         assert merged.output.frame_rate == 60.0
         assert merged.pipeline.skip_download is True
 
+    @pytest.mark.fast
     def test_merge_config_preserves_unspecified(self):
         """Test that merge_config preserves values not in overrides"""
         from src.cli.config_utils import merge_config
@@ -190,6 +197,7 @@ class TestConfigLoading:
         assert merged.transcription.model == original_model
         assert merged.output.generate_otio == original_generate_otio
 
+    @pytest.mark.fast
     def test_load_project_config_with_overrides(self, temp_project_dir):
         """Test full load_project_config with project_config.yaml"""
         from src.cli.config_utils import load_project_config
@@ -213,6 +221,7 @@ class TestConfigLoading:
         assert config.output.voiceover_offset == 2.5, \
             f"Expected voiceover_offset=2.5, got {config.output.voiceover_offset}"
 
+    @pytest.mark.fast
     def test_load_project_config_calls_resolve_paths(self, temp_project_dir):
         """Test that load_project_config calls _resolve_paths after merge"""
         from src.cli.config_utils import load_project_config
@@ -230,6 +239,7 @@ class TestConfigLoading:
         assert config.project_dir == str(temp_project_dir), \
             "project_dir should be set to the project directory"
 
+    @pytest.mark.fast
     def test_project_config_detection_warning(self, temp_project_dir, capsys):
         """Test warning when --config points to project_config.yaml"""
         from src.cli.config_utils import load_project_config
@@ -258,6 +268,7 @@ class TestVideoSourceDir:
     Test that pipeline.video_source_dir correctly overrides downloading.output_dir.
     """
 
+    @pytest.mark.fast
     def test_video_source_dir_overrides_output_dir(self):
         """Test that video_source_dir takes precedence over downloading.output_dir"""
         from src.config import Config
@@ -275,6 +286,7 @@ class TestVideoSourceDir:
         assert config.downloaded_videos_dir == "D:/custom/videos", \
             f"Expected D:/custom/videos, got {config.downloaded_videos_dir}"
 
+    @pytest.mark.fast
     def test_empty_video_source_dir_uses_default(self):
         """Test that empty video_source_dir falls back to downloading.output_dir"""
         from src.config import Config
@@ -291,6 +303,7 @@ class TestVideoSourceDir:
         assert config.downloaded_videos_dir == expected, \
             f"Expected {expected}, got {config.downloaded_videos_dir}"
 
+    @pytest.mark.fast
     def test_video_source_dir_none_uses_default(self):
         """Test that None video_source_dir falls back to downloading.output_dir"""
         from src.config import Config
@@ -312,6 +325,7 @@ class TestVideoSourceDir:
         assert config.downloaded_videos_dir == expected, \
             f"Expected {expected}, got {config.downloaded_videos_dir}"
 
+    @pytest.mark.fast
     def test_video_source_dir_absolute_path(self):
         """Test that absolute video_source_dir is used as-is"""
         from src.config import Config
@@ -343,6 +357,7 @@ class TestGapMode:
     Test gap_mode configuration for timeline gap distribution.
     """
 
+    @pytest.mark.fast
     def test_gap_mode_default_is_scale(self):
         """Test that default gap_mode is 'scale'"""
         from src.config.sections.output import OutputConfig
@@ -351,6 +366,7 @@ class TestGapMode:
         assert config.gap_mode == "scale", \
             f"Default gap_mode should be 'scale', got {config.gap_mode}"
 
+    @pytest.mark.fast
     def test_gap_mode_accepts_proportional(self):
         """Test that gap_mode accepts 'proportional'"""
         from src.config.sections.output import OutputConfig
@@ -358,6 +374,7 @@ class TestGapMode:
         config = OutputConfig(gap_mode="proportional")
         assert config.gap_mode == "proportional"
 
+    @pytest.mark.fast
     def test_gap_mode_accepts_none(self):
         """Test that gap_mode accepts 'none'"""
         from src.config.sections.output import OutputConfig
@@ -365,6 +382,7 @@ class TestGapMode:
         config = OutputConfig(gap_mode="none")
         assert config.gap_mode == "none"
 
+    @pytest.mark.fast
     def test_gap_mode_accepts_scale(self):
         """Test that gap_mode accepts 'scale'"""
         from src.config.sections.output import OutputConfig
@@ -372,6 +390,7 @@ class TestGapMode:
         config = OutputConfig(gap_mode="scale")
         assert config.gap_mode == "scale"
 
+    @pytest.mark.fast
     def test_gap_mode_in_full_config(self):
         """Test gap_mode through full Config object"""
         from src.config import Config
@@ -384,6 +403,7 @@ class TestGapMode:
         config.output.gap_mode = "proportional"
         assert config.output.gap_mode == "proportional"
 
+    @pytest.mark.fast
     def test_gap_mode_invalid_value_allowed(self):
         """Test that invalid gap_mode is allowed (handled at runtime)"""
         from src.config.sections.output import OutputConfig
@@ -403,6 +423,7 @@ class TestVoiceoverOffset:
     Test voiceover_offset configuration for manual timeline alignment.
     """
 
+    @pytest.mark.fast
     def test_voiceover_offset_default_zero(self):
         """Test that default voiceover_offset is 0.0"""
         from src.config.sections.output import OutputConfig
@@ -411,6 +432,7 @@ class TestVoiceoverOffset:
         assert config.voiceover_offset == 0.0, \
             f"Default voiceover_offset should be 0.0, got {config.voiceover_offset}"
 
+    @pytest.mark.fast
     def test_voiceover_offset_positive_value(self):
         """Test positive voiceover_offset (shift clips later)"""
         from src.config.sections.output import OutputConfig
@@ -418,6 +440,7 @@ class TestVoiceoverOffset:
         config = OutputConfig(voiceover_offset=2.5)
         assert config.voiceover_offset == 2.5
 
+    @pytest.mark.fast
     def test_voiceover_offset_negative_value(self):
         """Test negative voiceover_offset (shift clips earlier)"""
         from src.config.sections.output import OutputConfig
@@ -425,6 +448,7 @@ class TestVoiceoverOffset:
         config = OutputConfig(voiceover_offset=-1.5)
         assert config.voiceover_offset == -1.5
 
+    @pytest.mark.fast
     def test_voiceover_offset_float_precision(self):
         """Test voiceover_offset maintains float precision"""
         from src.config.sections.output import OutputConfig
@@ -432,6 +456,7 @@ class TestVoiceoverOffset:
         config = OutputConfig(voiceover_offset=0.333)
         assert abs(config.voiceover_offset - 0.333) < 0.001
 
+    @pytest.mark.fast
     def test_voiceover_offset_in_full_config(self):
         """Test voiceover_offset through full Config object"""
         from src.config import Config
@@ -443,6 +468,7 @@ class TestVoiceoverOffset:
         config.output.voiceover_offset = 3.0
         assert config.output.voiceover_offset == 3.0
 
+    @pytest.mark.fast
     def test_voiceover_offset_large_values(self):
         """Test voiceover_offset with large values"""
         from src.config.sections.output import OutputConfig
@@ -466,6 +492,7 @@ class TestAudioDownloadCheckpoint:
     Ensures backward compatibility when obsolete fields are present.
     """
 
+    @pytest.mark.fast
     def test_audio_download_basic_creation(self):
         """Test basic AudioDownload creation"""
         from src.state import AudioDownload
@@ -482,6 +509,7 @@ class TestAudioDownloadCheckpoint:
         assert ad.duration == 0.0
         assert ad.keyword == ""
 
+    @pytest.mark.fast
     def test_audio_download_full_creation(self):
         """Test AudioDownload with all fields"""
         from src.state import AudioDownload
@@ -502,6 +530,7 @@ class TestAudioDownloadCheckpoint:
         assert ad.duration == 120.5
         assert ad.keyword == "test keyword"
 
+    @pytest.mark.fast
     def test_audio_download_from_dict(self):
         """Test AudioDownload creation from checkpoint dict"""
         from src.state import AudioDownload
@@ -521,6 +550,7 @@ class TestAudioDownloadCheckpoint:
         assert ad.video_id == 'xyz789'
         assert ad.title == 'Checkpoint Video'
 
+    @pytest.mark.fast
     def test_audio_download_obsolete_field_handling(self):
         """Test that obsolete fields in checkpoint dict are handled gracefully"""
         from src.state import AudioDownload
@@ -551,6 +581,7 @@ class TestAudioDownloadCheckpoint:
         assert ad.file == '/path/to/audio.mp3'
         assert ad.video_id == 'abc123'
 
+    @pytest.mark.fast
     def test_audio_download_required_fields_only(self):
         """Test AudioDownload with only required fields"""
         from src.state import AudioDownload
@@ -564,6 +595,7 @@ class TestAudioDownloadCheckpoint:
         assert ad.url == ""
         assert ad.duration == 0.0
 
+    @pytest.mark.fast
     def test_audio_download_asdict(self):
         """Test AudioDownload serialization with asdict"""
         from src.state import AudioDownload
@@ -584,6 +616,7 @@ class TestAudioDownloadCheckpoint:
         assert 'duration' in d
         assert 'keyword' in d
 
+    @pytest.mark.fast
     def test_downloaded_video_required_fields(self):
         """Test DownloadedVideo has correct required fields (file=, not path=)"""
         from src.state import DownloadedVideo
@@ -635,6 +668,7 @@ class TestRecentAdditionsIntegration:
         assert config.output.voiceover_offset == 1.5
         assert config.output.frame_rate == 24.0
 
+    @pytest.mark.fast
     def test_project_config_with_video_source_dir(self, tmp_path):
         """Test project config that sets video_source_dir"""
         from src.cli.config_utils import load_project_config
@@ -669,6 +703,7 @@ class TestVADFilterMocking:
     Additional VAD tests using mocking to verify actual behavior.
     """
 
+    @pytest.mark.fast
     def test_video_transcription_ignores_config_vad_true(self):
         """Verify video transcription code sets vad_filter=False regardless of config"""
         from unittest.mock import Mock, patch
@@ -694,6 +729,7 @@ class TestVADFilterMocking:
         assert hardcoded_false_count >= 1, \
             "Should have at least one hardcoded vad_filter = False for video transcription"
 
+    @pytest.mark.fast
     def test_voiceover_function_accepts_vad_parameter(self):
         """Verify voiceover transcription accepts vad_filter parameter"""
         from src.transcription.parallel_processor import transcribe_voiceover_audio
@@ -705,6 +741,7 @@ class TestVADFilterMocking:
         assert 'vad_filter' in params, "transcribe_voiceover_audio should have vad_filter parameter"
         assert params['vad_filter'].default is True, "Default should be True for voiceover"
 
+    @pytest.mark.fast
     def test_analyze_stage_reads_vad_from_config(self):
         """Verify AnalyzeStage reads VAD from config for voiceover"""
         from src.stages.analyze import AnalyzeStage
@@ -727,6 +764,7 @@ class TestConfigLoadingErrorHandling:
     Test error handling in config loading.
     """
 
+    @pytest.mark.fast
     def test_merge_config_unknown_section_ignored(self):
         """Test that unknown sections in overrides are ignored"""
         from src.cli.config_utils import merge_config
@@ -745,6 +783,7 @@ class TestConfigLoadingErrorHandling:
         assert merged.keyword.max_keywords == 5
         assert not hasattr(merged, 'nonexistent_section')
 
+    @pytest.mark.fast
     def test_merge_config_unknown_field_ignored(self):
         """Test that unknown fields in overrides are ignored"""
         from src.cli.config_utils import merge_config
@@ -764,6 +803,7 @@ class TestConfigLoadingErrorHandling:
         assert merged.keyword.max_keywords == 10
         assert not hasattr(merged.keyword, 'nonexistent_field')
 
+    @pytest.mark.fast
     def test_load_project_config_empty_yaml(self, tmp_path):
         """Test loading empty project_config.yaml"""
         from src.cli.config_utils import load_project_config
@@ -781,6 +821,7 @@ class TestConfigLoadingErrorHandling:
         # Should use defaults
         assert config.keyword.max_keywords > 0
 
+    @pytest.mark.fast
     def test_load_project_config_no_project_config_file(self, tmp_path):
         """Test loading when project_config.yaml doesn't exist"""
         from src.cli.config_utils import load_project_config
@@ -795,6 +836,7 @@ class TestConfigLoadingErrorHandling:
         assert config is not None
         assert config.project_dir == str(project_dir)
 
+    @pytest.mark.fast
     def test_merge_config_scalar_override(self):
         """Test overriding a section with a scalar value"""
         from src.cli.config_utils import merge_config
@@ -822,6 +864,7 @@ class TestGapModeValidation:
     Test gap_mode validation that happens at runtime in timeline.py.
     """
 
+    @pytest.mark.fast
     def test_gap_mode_invalid_falls_back_to_scale(self):
         """Test that invalid gap_mode falls back to 'scale' at runtime"""
         # The validation happens in timeline.py lines 358-361:
@@ -838,6 +881,7 @@ class TestGapModeValidation:
         assert "'scale'" in source and "'proportional'" in source and "'none'" in source, \
             "Should check for scale, proportional, and none modes"
 
+    @pytest.mark.fast
     def test_gap_mode_scale_with_time_scale_factor(self):
         """Test that scale mode works with time_scale_factor"""
         from src.config.sections.output import OutputConfig
@@ -850,6 +894,7 @@ class TestGapModeValidation:
         assert config.gap_mode == 'scale'
         assert config.time_scale_factor == 1.5
 
+    @pytest.mark.fast
     def test_gap_mode_proportional_needs_audio_duration(self):
         """Test that proportional mode requires audio duration"""
         # In timeline.py lines 417-419:
@@ -863,6 +908,7 @@ class TestGapModeValidation:
         assert "Cannot use proportional gap mode without audio duration" in source, \
             "Should warn when proportional mode used without audio duration"
 
+    @pytest.mark.fast
     def test_gap_mode_none_with_min_gap_threshold(self):
         """Test gap_mode none with min_gap_threshold"""
         from src.config.sections.output import OutputConfig
@@ -885,6 +931,7 @@ class TestVoiceoverOffsetBehavior:
     Test voiceover_offset behavior in timeline calculations.
     """
 
+    @pytest.mark.fast
     def test_voiceover_offset_in_timeline_code(self):
         """Verify voiceover_offset is used in timeline.py"""
         from src.otio.timeline import create_timeline
@@ -899,6 +946,7 @@ class TestVoiceoverOffsetBehavior:
         assert "Applying voiceover offset" in source, \
             "Should log when applying voiceover offset"
 
+    @pytest.mark.fast
     def test_voiceover_offset_adjusts_first_segment(self):
         """Test that voiceover_offset adjusts the first segment start"""
         from src.otio.timeline import create_timeline
@@ -909,6 +957,7 @@ class TestVoiceoverOffsetBehavior:
         # The offset should be added to first segment calculation
         assert "voiceover_offset" in source, "Should use voiceover_offset in calculations"
 
+    @pytest.mark.fast
     def test_voiceover_offset_with_time_scale_factor(self):
         """Test voiceover_offset works with time_scale_factor"""
         from src.config.sections.output import OutputConfig
@@ -921,6 +970,7 @@ class TestVoiceoverOffsetBehavior:
         assert config.voiceover_offset == 2.0
         assert config.time_scale_factor == 1.1
 
+    @pytest.mark.fast
     def test_voiceover_offset_zero_no_log(self):
         """Test that zero offset doesn't trigger logging"""
         from src.otio.timeline import create_timeline
@@ -942,6 +992,7 @@ class TestAudioDownloadFieldMapping:
     Test backward compatibility field mapping in checkpoint restoration.
     """
 
+    @pytest.mark.fast
     def test_download_stage_restore_audio_file_mapping(self):
         """Test that audio_file is mapped to file in checkpoint restore"""
         from src.stages.download import DownloadStage
@@ -953,6 +1004,7 @@ class TestAudioDownloadFieldMapping:
         assert "'audio_file'" in source and "'file'" in source, \
             "Should map audio_file to file for backward compatibility"
 
+    @pytest.mark.fast
     def test_download_stage_restore_video_url_mapping(self):
         """Test that video_url is mapped to url in checkpoint restore"""
         from src.stages.download import DownloadStage
@@ -964,6 +1016,7 @@ class TestAudioDownloadFieldMapping:
         assert "'video_url'" in source and "'url'" in source, \
             "Should map video_url to url for backward compatibility"
 
+    @pytest.mark.fast
     def test_download_stage_removes_obsolete_fields(self):
         """Test that obsolete fields are removed during restore"""
         from src.stages.download import DownloadStage
@@ -977,6 +1030,7 @@ class TestAudioDownloadFieldMapping:
             assert f"'{field}'" in source, \
                 f"Should handle obsolete field '{field}'"
 
+    @pytest.mark.fast
     def test_audio_download_from_old_checkpoint_format(self):
         """Test AudioDownload creation from old checkpoint format"""
         from src.state import AudioDownload
@@ -1025,6 +1079,7 @@ class TestRetryLogic:
     Test retry logic with exponential backoff.
     """
 
+    @pytest.mark.fast
     def test_permanent_error_patterns(self):
         """Test that permanent errors are identified correctly"""
         from src.llm_client.retry import _is_permanent_error, PERMANENT_ERROR_PATTERNS
@@ -1044,6 +1099,7 @@ class TestRetryLogic:
         for msg in permanent_messages:
             assert _is_permanent_error(msg), f"'{msg}' should be identified as permanent"
 
+    @pytest.mark.fast
     def test_transient_error_not_permanent(self):
         """Test that transient errors are not identified as permanent"""
         from src.llm_client.retry import _is_permanent_error
@@ -1059,6 +1115,7 @@ class TestRetryLogic:
         for msg in transient_messages:
             assert not _is_permanent_error(msg), f"'{msg}' should NOT be permanent"
 
+    @pytest.mark.fast
     def test_with_retry_success_first_try(self):
         """Test with_retry succeeds on first try"""
         from src.llm_client.retry import with_retry
@@ -1075,6 +1132,7 @@ class TestRetryLogic:
         assert result == "success"
         assert call_count == 1, "Should only call once on success"
 
+    @pytest.mark.fast
     def test_with_retry_permanent_error_no_retry(self):
         """Test that permanent errors don't retry"""
         from src.llm_client.retry import with_retry
@@ -1093,6 +1151,7 @@ class TestRetryLogic:
         # Should only be called once due to permanent error detection
         assert call_count == 1, "Should not retry permanent errors"
 
+    @pytest.mark.fast
     def test_with_retry_retries_transient_error(self):
         """Test that transient errors are retried"""
         from src.llm_client.retry import with_retry
@@ -1111,6 +1170,7 @@ class TestRetryLogic:
         # Should be called max_retries times
         assert call_count == 3, "Should retry transient errors"
 
+    @pytest.mark.fast
     def test_with_retry_success_after_retries(self):
         """Test success after failed retries"""
         from src.llm_client.retry import with_retry
@@ -1139,6 +1199,7 @@ class TestLocationMatching:
     Test location matching configuration and behavior.
     """
 
+    @pytest.mark.fast
     def test_location_matching_config_exists(self):
         """Test that location matching config exists"""
         from src.config import Config
@@ -1148,6 +1209,7 @@ class TestLocationMatching:
         assert hasattr(config.matching, 'location_matching'), \
             "Config should have location_matching section"
 
+    @pytest.mark.fast
     def test_location_matching_enabled_field(self):
         """Test location matching enabled field"""
         from src.config import Config
@@ -1158,6 +1220,7 @@ class TestLocationMatching:
         assert hasattr(location_config, 'enabled'), \
             "location_matching should have 'enabled' field"
 
+    @pytest.mark.fast
     def test_location_matching_geonames_field(self):
         """Test location matching geonames_username field"""
         from src.config import Config
@@ -1168,6 +1231,7 @@ class TestLocationMatching:
         assert hasattr(location_config, 'geonames_username'), \
             "location_matching should have 'geonames_username' field"
 
+    @pytest.mark.fast
     def test_location_matching_hard_filter_level(self):
         """Test location matching hard_filter_level field"""
         from src.config import Config
@@ -1188,6 +1252,7 @@ class TestOTIOUtils:
     Test OTIO utility functions.
     """
 
+    @pytest.mark.fast
     def test_otio_utils_exists(self):
         """Test that OTIO utils module exists"""
         try:
@@ -1196,6 +1261,7 @@ class TestOTIOUtils:
         except ImportError:
             pytest.skip("OTIO utils not available")
 
+    @pytest.mark.fast
     def test_otio_entities_module_exists(self):
         """Test that OTIO entities module exists"""
         try:
@@ -1214,6 +1280,7 @@ class TestAdditionalIntegration:
     Additional integration tests for recent additions.
     """
 
+    @pytest.mark.fast
     def test_full_config_with_all_new_options(self, tmp_path):
         """Test config with all new options combined"""
         from src.cli.config_utils import load_project_config
@@ -1256,6 +1323,7 @@ class TestAdditionalIntegration:
         assert config.keyword.max_keywords == 20
         assert config.transcription.vad_filter is False
 
+    @pytest.mark.fast
     def test_config_vad_only_for_voiceover(self, tmp_path):
         """Test that transcription.vad_filter in config only affects voiceover"""
         from src.cli.config_utils import load_project_config
@@ -1281,6 +1349,7 @@ class TestAdditionalIntegration:
 
         # But video transcription will still ignore this (verified in code inspection tests)
 
+    @pytest.mark.fast
     def test_downloaded_video_and_audio_download_coexist(self):
         """Test both DownloadedVideo and AudioDownload can be used together"""
         from src.state import DownloadedVideo, AudioDownload, PipelineState
@@ -1312,6 +1381,7 @@ class TestLocationMatcher:
     Test LocationMatcher class for geographic filtering.
     """
 
+    @pytest.mark.fast
     def test_location_matcher_initialization(self):
         """Test LocationMatcher initialization"""
         from src.matching.location_matching import LocationMatcher
@@ -1322,6 +1392,7 @@ class TestLocationMatcher:
         assert matcher.location_chapters == {}
         assert matcher.video_locations == {}
 
+    @pytest.mark.fast
     def test_location_matcher_set_location_chapters(self):
         """Test setting location chapters"""
         from src.matching.location_matching import LocationMatcher
@@ -1342,6 +1413,7 @@ class TestLocationMatcher:
         assert 6 in matcher.location_chapters
         assert 10 in matcher.location_chapters
 
+    @pytest.mark.fast
     def test_location_matcher_set_video_locations(self):
         """Test setting video locations"""
         from src.matching.location_matching import LocationMatcher
@@ -1358,6 +1430,7 @@ class TestLocationMatcher:
         assert len(matcher.video_locations) == 2
         assert '/path/video1.mp4' in matcher.video_locations
 
+    @pytest.mark.fast
     def test_location_matcher_get_location_chapter(self):
         """Test getting location chapter for segment"""
         from src.matching.location_matching import LocationMatcher
@@ -1387,6 +1460,7 @@ class TestOTIOEntities:
     Test OTIO entities module functions.
     """
 
+    @pytest.mark.fast
     def test_get_attr_with_dict(self):
         """Test _get_attr with dictionary"""
         from src.otio.entities import _get_attr
@@ -1398,6 +1472,7 @@ class TestOTIOEntities:
         assert _get_attr(obj, 'missing') is None
         assert _get_attr(obj, 'missing', 'default') == 'default'
 
+    @pytest.mark.fast
     def test_get_attr_with_object(self):
         """Test _get_attr with object"""
         from src.otio.entities import _get_attr
@@ -1410,6 +1485,7 @@ class TestOTIOEntities:
         assert _get_attr(obj, 'name') == 'test'
         assert _get_attr(obj, 'value') == 123
 
+    @pytest.mark.fast
     def test_find_best_entity_match_exact(self):
         """Test exact entity matching"""
         from src.otio.entities import _find_best_entity_match
@@ -1428,6 +1504,7 @@ class TestOTIOEntities:
         assert entity == 'Austin'
         assert match_type == 'exact'
 
+    @pytest.mark.fast
     def test_find_best_entity_match_no_match(self):
         """Test when no entity matches"""
         from src.otio.entities import _find_best_entity_match
@@ -1445,6 +1522,7 @@ class TestOTIOEntities:
         # No match should return None without sticky
         assert entity is None or match_type == 'semantic'
 
+    @pytest.mark.fast
     def test_find_best_entity_match_sticky(self):
         """Test sticky entity matching"""
         from src.otio.entities import _find_best_entity_match
@@ -1474,6 +1552,7 @@ class TestOTIOTracks:
     Test OTIO tracks module classes.
     """
 
+    @pytest.mark.fast
     def test_track_builder_abstract(self):
         """Test that TrackBuilder is abstract"""
         from src.otio.tracks import TrackBuilder
@@ -1482,6 +1561,7 @@ class TestOTIOTracks:
         with pytest.raises(TypeError):
             TrackBuilder(matches=[], config=None, frame_rate=30.0)
 
+    @pytest.mark.fast
     def test_track_names(self):
         """Test track naming convention"""
         # Verify track names are correct
@@ -1512,6 +1592,7 @@ class TestOTIOUtils:
     Test OTIO utility functions.
     """
 
+    @pytest.mark.fast
     def test_numpy_encoder_int(self):
         """Test NumpyEncoder with numpy integers"""
         import numpy as np
@@ -1523,6 +1604,7 @@ class TestOTIOUtils:
 
         assert '"value": 42' in result
 
+    @pytest.mark.fast
     def test_numpy_encoder_float(self):
         """Test NumpyEncoder with numpy floats"""
         import numpy as np
@@ -1534,6 +1616,7 @@ class TestOTIOUtils:
 
         assert '3.14' in result
 
+    @pytest.mark.fast
     def test_numpy_encoder_array(self):
         """Test NumpyEncoder with numpy arrays"""
         import numpy as np
@@ -1545,6 +1628,7 @@ class TestOTIOUtils:
 
         assert '[1, 2, 3]' in result
 
+    @pytest.mark.fast
     def test_to_windows_path(self):
         """Test Windows path conversion"""
         from src.otio.utils import _to_windows_path
@@ -1556,6 +1640,7 @@ class TestOTIOUtils:
             assert "\\" in path
             assert "/" not in path or path[0:2] == "//"  # UNC paths allowed
 
+    @pytest.mark.fast
     def test_sanitize_path_for_url(self):
         """Test path sanitization for URLs"""
         from src.otio.utils import sanitize_path_for_url
@@ -1565,6 +1650,7 @@ class TestOTIOUtils:
         assert "\\\\?\\" not in path
         assert "?" not in path
 
+    @pytest.mark.fast
     def test_format_path_url(self):
         """Test path URL formatting"""
         from src.otio.utils import format_path_url
@@ -1585,6 +1671,7 @@ class TestTranscriptSegment:
     Test TranscriptSegment dataclass.
     """
 
+    @pytest.mark.fast
     def test_transcript_segment_creation(self):
         """Test TranscriptSegment creation"""
         from src.state import TranscriptSegment
@@ -1604,6 +1691,7 @@ class TestTranscriptSegment:
         assert segment.source_file == "/path/video.mp4"
         assert segment.is_broll is False  # Default
 
+    @pytest.mark.fast
     def test_transcript_segment_broll(self):
         """Test TranscriptSegment with B-roll flag"""
         from src.state import TranscriptSegment
@@ -1621,6 +1709,7 @@ class TestTranscriptSegment:
         assert segment.is_broll is True
         assert segment.description_source == 'vision'
 
+    @pytest.mark.fast
     def test_transcript_segment_to_dict(self):
         """Test TranscriptSegment serialization"""
         from src.state import TranscriptSegment
@@ -1649,6 +1738,7 @@ class TestVoiceoverSegment:
     Test VoiceoverSegment dataclass.
     """
 
+    @pytest.mark.fast
     def test_voiceover_segment_creation(self):
         """Test VoiceoverSegment creation"""
         from src.state import VoiceoverSegment
@@ -1665,6 +1755,7 @@ class TestVoiceoverSegment:
         assert segment.end == 5.0
         assert segment.text == "Welcome to the show"
 
+    @pytest.mark.fast
     def test_voiceover_segment_defaults(self):
         """Test VoiceoverSegment default values"""
         from src.state import VoiceoverSegment
@@ -1692,6 +1783,7 @@ class TestPipelineState:
     Test PipelineState dataclass.
     """
 
+    @pytest.mark.fast
     def test_pipeline_state_initialization(self):
         """Test PipelineState default initialization"""
         from src.state import PipelineState
@@ -1706,6 +1798,7 @@ class TestPipelineState:
         assert state.matches == []
         assert state.transcripts == {}
 
+    @pytest.mark.fast
     def test_pipeline_state_mutable_fields(self):
         """Test that mutable fields are independent"""
         from src.state import PipelineState
@@ -1719,6 +1812,7 @@ class TestPipelineState:
         assert "test" in state1.keywords
         assert "test" not in state2.keywords
 
+    @pytest.mark.fast
     def test_pipeline_state_all_fields(self):
         """Test PipelineState has all expected fields"""
         from src.state import PipelineState
@@ -1746,6 +1840,7 @@ class TestConfigEdgeCases:
     Test configuration edge cases.
     """
 
+    @pytest.mark.fast
     def test_output_config_variety_dict_conversion(self):
         """Test that variety dict is converted to VarietyConfig"""
         from src.config.sections.output import OutputConfig, VarietyConfig
@@ -1761,6 +1856,7 @@ class TestConfigEdgeCases:
         assert config.variety.require_different_source is False
         assert config.variety.min_time_distance == 20.0
 
+    @pytest.mark.fast
     def test_output_config_time_scale_default(self):
         """Test default time_scale_factor"""
         from src.config.sections.output import OutputConfig
@@ -1768,6 +1864,7 @@ class TestConfigEdgeCases:
         config = OutputConfig()
         assert config.time_scale_factor == 1.0
 
+    @pytest.mark.fast
     def test_output_config_min_gap_threshold_default(self):
         """Test default min_gap_threshold"""
         from src.config.sections.output import OutputConfig
@@ -1775,6 +1872,7 @@ class TestConfigEdgeCases:
         config = OutputConfig()
         assert config.min_gap_threshold == 0.0
 
+    @pytest.mark.fast
     def test_config_transcription_defaults(self):
         """Test transcription config defaults"""
         from src.config import Config
@@ -1784,6 +1882,7 @@ class TestConfigEdgeCases:
         assert hasattr(config.transcription, 'model')
         assert hasattr(config.transcription, 'vad_filter')
 
+    @pytest.mark.fast
     def test_config_pipeline_defaults(self):
         """Test pipeline config defaults"""
         from src.config import Config
@@ -1803,6 +1902,7 @@ class TestMatchDataclass:
     Test Match dataclass.
     """
 
+    @pytest.mark.fast
     def test_match_creation(self):
         """Test Match creation"""
         from src.state import Match
@@ -1823,6 +1923,7 @@ class TestMatchDataclass:
         assert match.strategy == ""  # Default
         assert match.face_score == 0.5  # Default
 
+    @pytest.mark.fast
     def test_match_with_strategy(self):
         """Test Match with strategy"""
         from src.state import Match
@@ -1840,6 +1941,7 @@ class TestMatchDataclass:
         assert match.strategy == "embedding_diversity"
         assert match.reason == "Best semantic match"
 
+    @pytest.mark.fast
     def test_match_face_score(self):
         """Test Match with face_score"""
         from src.state import Match
@@ -1865,6 +1967,7 @@ class TestEntityDataclasses:
     Test EntityImage and EntityVideo dataclasses.
     """
 
+    @pytest.mark.fast
     def test_entity_image_creation(self):
         """Test EntityImage creation"""
         from src.state import EntityImage
@@ -1880,6 +1983,7 @@ class TestEntityDataclasses:
         assert image.width == 0  # Default
         assert image.height == 0  # Default
 
+    @pytest.mark.fast
     def test_entity_image_full(self):
         """Test EntityImage with all fields"""
         from src.state import EntityImage
@@ -1896,6 +2000,7 @@ class TestEntityDataclasses:
         assert image.width == 1920
         assert image.height == 1080
 
+    @pytest.mark.fast
     def test_entity_video_creation(self):
         """Test EntityVideo creation"""
         from src.state import EntityVideo
@@ -1910,6 +2015,7 @@ class TestEntityDataclasses:
         assert video.source == ""  # Default
         assert video.duration == 0.0  # Default
 
+    @pytest.mark.fast
     def test_entity_video_full(self):
         """Test EntityVideo with all fields"""
         from src.state import EntityVideo
@@ -1934,6 +2040,7 @@ class TestRetryLogicEdgeCases:
     Additional edge case tests for retry logic.
     """
 
+    @pytest.mark.fast
     def test_timeout_error_classification(self):
         """Test that timeout errors are properly classified"""
         from src.llm_client.retry import with_retry
@@ -1951,6 +2058,7 @@ class TestRetryLogicEdgeCases:
         with pytest.raises((LLMTimeoutError, LLMProviderError)):
             with_retry(timeout_func, max_retries=2, base_delay=0.01)
 
+    @pytest.mark.fast
     def test_deadline_error_classification(self):
         """Test that deadline errors are properly classified"""
         from src.llm_client.retry import with_retry
@@ -1966,6 +2074,7 @@ class TestRetryLogicEdgeCases:
         with pytest.raises(LLMTimeoutError):
             with_retry(deadline_func, max_retries=2, base_delay=0.01)
 
+    @pytest.mark.fast
     def test_exponential_backoff_timing(self):
         """Test exponential backoff calculation - verifies retry with delays"""
         from src.llm_client.retry import with_retry

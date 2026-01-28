@@ -103,6 +103,7 @@ def create_downloader(tmp_path, rate_limit_config=None, **overrides):
 class TestDownloadCheckpointTierBackoffField:
     """Test tier_backoff_state field in DownloadCheckpoint."""
 
+    @pytest.mark.fast
     def test_field_defaults_to_none(self):
         """Test that tier_backoff_state defaults to None."""
         checkpoint = DownloadCheckpoint(
@@ -115,6 +116,7 @@ class TestDownloadCheckpointTierBackoffField:
         )
         assert checkpoint.tier_backoff_state is None
 
+    @pytest.mark.fast
     def test_field_serialized_in_to_dict(self):
         """Test that tier_backoff_state is included in to_dict output."""
         state_data = {
@@ -130,6 +132,7 @@ class TestDownloadCheckpointTierBackoffField:
         assert 'tier_backoff_state' in data
         assert data['tier_backoff_state'] == state_data
 
+    @pytest.mark.fast
     def test_from_dict_with_tier_backoff_state(self):
         """Test from_dict restores tier_backoff_state."""
         data = {
@@ -144,6 +147,7 @@ class TestDownloadCheckpointTierBackoffField:
         assert checkpoint.tier_backoff_state is not None
         assert checkpoint.tier_backoff_state['tiers']['long']['backoff_count'] == 3
 
+    @pytest.mark.fast
     def test_from_dict_missing_tier_backoff_state(self):
         """Test from_dict handles missing tier_backoff_state (backward compat)."""
         data = {
@@ -161,6 +165,7 @@ class TestDownloadCheckpointTierBackoffField:
 class TestSaveCheckpointIncludesTierState:
     """Test that _save_checkpoint() serializes tier backoff state."""
 
+    @pytest.mark.fast
     def test_save_includes_tier_backoff_state(self, tmp_path):
         """Test _save_checkpoint includes tier state when per_tier_isolation is enabled."""
         downloader = create_downloader(tmp_path)
@@ -191,6 +196,7 @@ class TestSaveCheckpointIncludesTierState:
         assert tier_data['tiers']['long']['total_delay'] == 45.0
         assert tier_data['tiers']['short']['backoff_count'] == 1
 
+    @pytest.mark.fast
     def test_save_no_tier_state_when_isolation_disabled(self, tmp_path):
         """Test _save_checkpoint skips tier state when per_tier_isolation is disabled."""
         rate_config = MockRateLimitConfig(per_tier_isolation=False)
@@ -216,6 +222,7 @@ class TestSaveCheckpointIncludesTierState:
 class TestRestoreTierBackoffState:
     """Test _restore_tier_backoff_state method."""
 
+    @pytest.mark.fast
     def test_restore_preserves_backoff_delays(self, tmp_path):
         """Test that restore preserves backoff counts and delays."""
         downloader = create_downloader(tmp_path)
@@ -240,6 +247,7 @@ class TestRestoreTierBackoffState:
         assert downloader._tier_rate_limit_states['medium'].backoff_count == 0
         assert downloader._tier_rate_limit_states['longer'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_restore_stale_checkpoint_halves_delays(self, tmp_path):
         """Test that stale checkpoint (>30min) halves backoff delays."""
         downloader = create_downloader(tmp_path)
@@ -263,6 +271,7 @@ class TestRestoreTierBackoffState:
         assert downloader._tier_rate_limit_states['short'].backoff_count == 2
         assert downloader._tier_rate_limit_states['long'].backoff_count == 4
 
+    @pytest.mark.fast
     def test_restore_exactly_30min_not_stale(self, tmp_path):
         """Test that checkpoint exactly 30min old is not considered stale."""
         downloader = create_downloader(tmp_path)
@@ -280,6 +289,7 @@ class TestRestoreTierBackoffState:
         # 30min exactly should NOT trigger de-escalation (only >30 triggers it)
         assert downloader._tier_rate_limit_states['short'].total_delay == 20.0
 
+    @pytest.mark.fast
     def test_restore_handles_missing_tiers_key(self, tmp_path):
         """Test graceful handling of missing 'tiers' key."""
         downloader = create_downloader(tmp_path)
@@ -295,6 +305,7 @@ class TestRestoreTierBackoffState:
         # State should remain at defaults
         assert downloader._tier_rate_limit_states['short'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_restore_handles_none_data(self, tmp_path):
         """Test graceful handling of None values."""
         downloader = create_downloader(tmp_path)
@@ -305,6 +316,7 @@ class TestRestoreTierBackoffState:
         # State should remain at defaults
         assert downloader._tier_rate_limit_states['short'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_restore_handles_malformed_saved_at(self, tmp_path, caplog):
         """Test graceful handling of invalid saved_at timestamp."""
         downloader = create_downloader(tmp_path)
@@ -324,6 +336,7 @@ class TestRestoreTierBackoffState:
         # State remains at default (fresh)
         assert downloader._tier_rate_limit_states['short'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_restore_handles_unknown_tier_names(self, tmp_path):
         """Test that unknown tier names in checkpoint are ignored."""
         downloader = create_downloader(tmp_path)
@@ -343,6 +356,7 @@ class TestRestoreTierBackoffState:
         # Unknown tier not added
         assert 'unknown_tier' not in downloader._tier_rate_limit_states
 
+    @pytest.mark.fast
     def test_restore_handles_corrupt_tier_data(self, tmp_path, caplog):
         """Test graceful handling of corrupt tier data that causes exceptions."""
         downloader = create_downloader(tmp_path)
@@ -359,6 +373,7 @@ class TestRestoreTierBackoffState:
         # State should remain at defaults
         assert downloader._tier_rate_limit_states['short'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_restore_logs_active_tiers(self, tmp_path, caplog):
         """Test that restore logs the number of active tiers."""
         downloader = create_downloader(tmp_path)
@@ -384,6 +399,7 @@ class TestRestoreTierBackoffState:
 class TestTierBackoffRoundTrip:
     """Test full save → restore round-trip."""
 
+    @pytest.mark.fast
     def test_round_trip_preserves_state(self, tmp_path):
         """Test that save then restore preserves all tier backoff state."""
         downloader = create_downloader(tmp_path)
@@ -422,6 +438,7 @@ class TestTierBackoffRoundTrip:
         assert downloader2._tier_rate_limit_states['medium'].backoff_count == 0
         assert downloader2._tier_rate_limit_states['longer'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_stale_round_trip_halves_delays(self, tmp_path):
         """Test round-trip with stale checkpoint halves total_delay."""
         downloader = create_downloader(tmp_path)
@@ -462,6 +479,7 @@ class TestTierBackoffRoundTrip:
 class TestMissingSavedAt:
     """Test behavior when saved_at is missing or None."""
 
+    @pytest.mark.fast
     def test_missing_saved_at_no_de_escalation(self, tmp_path):
         """Test that missing saved_at means no staleness factor (assume fresh)."""
         downloader = create_downloader(tmp_path)

@@ -26,36 +26,47 @@ class TestIsMatcherTrack:
     def test_v1_returns_true(self):
         assert _is_matcher_track("V1") is True
 
+    @pytest.mark.fast
     def test_v10_returns_true(self):
         assert _is_matcher_track("V10") is True
 
+    @pytest.mark.fast
     def test_v1_primary_returns_true(self):
         assert _is_matcher_track("V1 Primary") is True
 
+    @pytest.mark.fast
     def test_v11_returns_false(self):
         assert _is_matcher_track("V11") is False
 
+    @pytest.mark.fast
     def test_v100_returns_false(self):
         assert _is_matcher_track("V100") is False
 
+    @pytest.mark.fast
     def test_audio_1_returns_false(self):
         assert _is_matcher_track("Audio 1") is False
 
+    @pytest.mark.fast
     def test_v5_returns_true(self):
         assert _is_matcher_track("V5") is True
 
+    @pytest.mark.fast
     def test_keyword_primary_returns_true(self):
         assert _is_matcher_track("Primary") is True
 
+    @pytest.mark.fast
     def test_keyword_entity_returns_true(self):
         assert _is_matcher_track("Entity Images") is True
 
+    @pytest.mark.fast
     def test_keyword_stock_returns_true(self):
         assert _is_matcher_track("Stock") is True
 
+    @pytest.mark.fast
     def test_empty_string_returns_false(self):
         assert _is_matcher_track("") is False
 
+    @pytest.mark.fast
     def test_random_name_returns_false(self):
         assert _is_matcher_track("My Custom Track") is False
 
@@ -71,51 +82,67 @@ class TestGetTrackCategory:
     def test_v1_returns_v1(self):
         assert _get_track_category("V1") == "v1"
 
+    @pytest.mark.fast
     def test_v2_returns_v2_v3(self):
         assert _get_track_category("V2") == "v2_v3"
 
+    @pytest.mark.fast
     def test_v3_returns_v2_v3(self):
         assert _get_track_category("V3") == "v2_v3"
 
+    @pytest.mark.fast
     def test_v4_returns_v4_v6(self):
         assert _get_track_category("V4") == "v4_v6"
 
+    @pytest.mark.fast
     def test_v5_returns_v4_v6(self):
         assert _get_track_category("V5") == "v4_v6"
 
+    @pytest.mark.fast
     def test_v6_returns_v4_v6(self):
         assert _get_track_category("V6") == "v4_v6"
 
+    @pytest.mark.fast
     def test_v7_returns_v7_plus(self):
         assert _get_track_category("V7") == "v7_plus"
 
+    @pytest.mark.fast
     def test_v8_returns_v7_plus(self):
         assert _get_track_category("V8") == "v7_plus"
 
+    @pytest.mark.fast
     def test_v9_returns_v7_plus(self):
         assert _get_track_category("V9") == "v7_plus"
 
+    @pytest.mark.fast
     def test_v10_returns_v7_plus(self):
         assert _get_track_category("V10") == "v7_plus"
 
+    @pytest.mark.fast
     def test_non_matcher_returns_none(self):
         assert _get_track_category("Audio 1") is None
 
+    @pytest.mark.fast
     def test_primary_keyword_returns_v1(self):
         assert _get_track_category("Primary") == "v1"
 
+    @pytest.mark.fast
     def test_alternative_keyword_returns_v2_v3(self):
         assert _get_track_category("Alternative") == "v2_v3"
 
+    @pytest.mark.fast
     def test_secondary_keyword_returns_v4_v6(self):
         assert _get_track_category("Secondary") == "v4_v6"
 
+    @pytest.mark.fast
     def test_embedding_keyword_returns_v7_plus(self):
         assert _get_track_category("Embedding") == "v7_plus"
 
+    @pytest.mark.fast
     def test_diversity_keyword_returns_v7_plus(self):
         assert _get_track_category("Diversity") == "v7_plus"
 
+    @pytest.mark.fast
     def test_empty_returns_none(self):
         assert _get_track_category("") is None
 
@@ -131,12 +158,15 @@ class TestRenderCoverageBar:
     def test_100_percent(self):
         assert _render_coverage_bar(100.0) == "[##########]"
 
+    @pytest.mark.fast
     def test_0_percent(self):
         assert _render_coverage_bar(0.0) == "[..........]"
 
+    @pytest.mark.fast
     def test_50_percent(self):
         assert _render_coverage_bar(50.0) == "[#####.....]"
 
+    @pytest.mark.fast
     def test_25_percent(self):
         # 25% of 10 = 2.5, rounds to 2 (Python rounds .5 to nearest even = 2)
         result = _render_coverage_bar(25.0)
@@ -144,13 +174,16 @@ class TestRenderCoverageBar:
         assert result.endswith("]")
         assert len(result) == 12  # [ + 10 chars + ]
 
+    @pytest.mark.fast
     def test_75_percent(self):
         # 75% of 10 = 7.5, rounds to 8
         assert _render_coverage_bar(75.0) == "[########..]"
 
+    @pytest.mark.fast
     def test_custom_width(self):
         assert _render_coverage_bar(50.0, width=20) == "[##########..........]"
 
+    @pytest.mark.fast
     def test_bar_length_always_correct(self):
         """Bar inner content should always be exactly width chars."""
         for pct in [0, 10, 33, 50, 67, 90, 100]:
@@ -171,30 +204,38 @@ class TestFormatTimecode:
     def test_90_seconds(self):
         assert _format_timecode(90) == "1:30"
 
+    @pytest.mark.fast
     def test_3661_seconds(self):
         assert _format_timecode(3661) == "1:01:01"
 
+    @pytest.mark.fast
     def test_0_seconds(self):
         assert _format_timecode(0) == "0:00"
 
+    @pytest.mark.fast
     def test_negative_seconds(self):
         result = _format_timecode(-90)
         assert result.startswith("-")
         assert "1:30" in result
 
+    @pytest.mark.fast
     def test_59_seconds(self):
         assert _format_timecode(59) == "0:59"
 
+    @pytest.mark.fast
     def test_60_seconds(self):
         assert _format_timecode(60) == "1:00"
 
+    @pytest.mark.fast
     def test_3600_seconds(self):
         assert _format_timecode(3600) == "1:00:00"
 
+    @pytest.mark.fast
     def test_large_value(self):
         # 2 hours, 30 minutes, 45 seconds = 9045
         assert _format_timecode(9045) == "2:30:45"
 
+    @pytest.mark.fast
     def test_negative_prepends_minus(self):
         result = _format_timecode(-5)
         assert result == "-0:05"
@@ -215,33 +256,39 @@ class TestFilenameBasedAnalysis:
     and the analysis result calculations.
     """
 
+    @pytest.mark.fast
     def test_normalize_strips_extension(self):
         from src.post_edit_analysis import FilenameAnalyzer
         # We can't instantiate without OTIO, so test _normalize as unbound
         analyzer = object.__new__(FilenameAnalyzer)
         assert analyzer._normalize("video_abc.mp4") == "video_abc"
 
+    @pytest.mark.fast
     def test_normalize_strips_segment_suffix(self):
         from src.post_edit_analysis import FilenameAnalyzer
         analyzer = object.__new__(FilenameAnalyzer)
         assert analyzer._normalize("abc123_0045.mp4") == "abc123"
 
+    @pytest.mark.fast
     def test_normalize_handles_empty(self):
         from src.post_edit_analysis import FilenameAnalyzer
         analyzer = object.__new__(FilenameAnalyzer)
         assert analyzer._normalize("") == ""
 
+    @pytest.mark.fast
     def test_normalize_handles_multiple_extensions(self):
         from src.post_edit_analysis import FilenameAnalyzer
         analyzer = object.__new__(FilenameAnalyzer)
         # Only strips known video extensions
         assert analyzer._normalize("file.backup.mp4") == "file.backup"
 
+    @pytest.mark.fast
     def test_normalize_extracts_basename(self):
         from src.post_edit_analysis import FilenameAnalyzer
         analyzer = object.__new__(FilenameAnalyzer)
         assert analyzer._normalize("E:/videos/project/clip.mov") == "clip"
 
+    @pytest.mark.fast
     def test_coverage_calculation_with_result(self):
         """Test coverage percentage calculation in FilenameAnalysisResult."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -256,6 +303,7 @@ class TestFilenameBasedAnalysis:
         expected_pct = (7 / 10) * 100
         assert expected_pct == 70.0
 
+    @pytest.mark.fast
     def test_result_clips_found_and_missing(self):
         """Test that result tracks both found and missing clips."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -272,6 +320,7 @@ class TestFilenameBasedAnalysis:
         assert len(result.dropped_v1_clips) == 2
         assert result.segments_covered + result.segments_not_covered == result.total_segments
 
+    @pytest.mark.fast
     def test_result_to_dict_preserves_counts(self):
         """Test to_dict() preserves clip counts correctly."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -294,6 +343,7 @@ class TestFilenameBasedAnalysis:
         assert d["summary"]["v2_v3_used"] == 3
         assert d["summary"]["external_added"] == 2
 
+    @pytest.mark.fast
     def test_result_empty_has_zero_coverage(self):
         """Test empty result defaults to 0 coverage."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -305,6 +355,7 @@ class TestFilenameBasedAnalysis:
         assert result._pct(0) == 0.0
         assert result._pct(5) == 0.0  # 0 total_segments
 
+    @pytest.mark.fast
     def test_normalize_case_insensitive_extensions(self):
         """Verify extension removal is case-insensitive."""
         from src.post_edit_analysis import FilenameAnalyzer
@@ -351,6 +402,7 @@ class TestTrackCategoryAggregation:
         total_used = result.v1_kept + result.v2_v3_used + result.v4_v6_used + result.v7_plus_used + result.external_added
         assert total_used == 10
 
+    @pytest.mark.fast
     def test_get_track_category_maps_all_tracks_to_buckets(self):
         """Verify all V1-V10 map to correct category bucket."""
         track_categories = {}
@@ -365,6 +417,7 @@ class TestTrackCategoryAggregation:
         assert set(track_categories["v4_v6"]) == {"V4", "V5", "V6"}
         assert set(track_categories["v7_plus"]) == {"V7", "V8", "V9", "V10"}
 
+    @pytest.mark.fast
     def test_track_breakdown_dict_records_per_track_counts(self):
         """Verify track_breakdown dict stores correct per-track clip counts."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -378,6 +431,7 @@ class TestTrackCategoryAggregation:
         assert result.track_breakdown["V8"] == 4
         assert sum(result.track_breakdown.values()) == 15
 
+    @pytest.mark.fast
     def test_user_added_tracks_separated_from_matcher(self):
         """Verify user-added tracks are tracked separately from matcher tracks."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -394,6 +448,7 @@ class TestTrackCategoryAggregation:
         # No overlap
         assert "Lower Thirds" not in result.track_breakdown
 
+    @pytest.mark.fast
     def test_aggregation_single_category_only(self):
         """Verify aggregation works when only one category has clips."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -430,6 +485,7 @@ class TestCoverageCalculation:
         coverage_pct = (result.segments_covered / result.total_segments) * 100
         assert coverage_pct == 75.0
 
+    @pytest.mark.fast
     def test_v1_kept_pct_calculation(self):
         """Verify v1_kept_pct = (v1_kept / total_segments) * 100."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -441,6 +497,7 @@ class TestCoverageCalculation:
         expected = (30 / 40) * 100
         assert result.v1_kept_pct == expected
 
+    @pytest.mark.fast
     def test_pct_helper_method(self):
         """Verify _pct() helper computes percentage of total_segments."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -449,6 +506,7 @@ class TestCoverageCalculation:
         assert result._pct(50) == 100.0
         assert result._pct(0) == 0.0
 
+    @pytest.mark.fast
     def test_coverage_ratio_duration_based(self):
         """Verify coverage_ratio = edited_duration / original_duration."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -460,6 +518,7 @@ class TestCoverageCalculation:
         )
         assert abs(result.coverage_ratio - 0.75) < 0.001
 
+    @pytest.mark.fast
     def test_segments_covered_plus_not_covered_equals_total(self):
         """Verify segments_covered + segments_not_covered == total when segment_order populated."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -487,6 +546,7 @@ class TestEmptyEditedOtio:
         assert result._pct(0) == 0.0
         assert result._pct(5) == 0.0
 
+    @pytest.mark.fast
     def test_empty_result_all_categories_zero(self):
         """Verify all category counts are 0 when no clips matched."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -499,12 +559,14 @@ class TestEmptyEditedOtio:
         assert result.segments_covered == 0
         assert result.segments_not_covered == 0
 
+    @pytest.mark.fast
     def test_empty_result_v1_kept_pct_is_zero(self):
         """Verify v1_kept_pct defaults to 0.0 on empty result."""
         from src.post_edit_analysis import FilenameAnalysisResult
         result = FilenameAnalysisResult()
         assert result.v1_kept_pct == 0.0
 
+    @pytest.mark.fast
     def test_empty_result_summary_no_crash(self):
         """Verify summary() doesn't crash on empty result (0 segments)."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -518,6 +580,7 @@ class TestEmptyEditedOtio:
         assert "0 total" in summary
         # Should not raise any exception
 
+    @pytest.mark.fast
     def test_empty_result_to_dict_no_crash(self):
         """Verify to_dict() doesn't crash on empty result."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -528,6 +591,7 @@ class TestEmptyEditedOtio:
         assert d["summary"]["v1_kept_pct"] == 0.0
         assert d["summary"]["segments_covered"] == 0
 
+    @pytest.mark.fast
     def test_empty_coverage_ratio_zero(self):
         """Verify coverage_ratio is 0.0 when original_duration is 0."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -561,6 +625,7 @@ class TestPositionBasedMatching:
         )
         assert result.position_exact_matches == 8
 
+    @pytest.mark.fast
     def test_position_gaps_tracked(self):
         """Verify gaps at segment positions are counted."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -571,6 +636,7 @@ class TestPositionBasedMatching:
         )
         assert result.position_gaps == 3
 
+    @pytest.mark.fast
     def test_position_alt_and_secondary_counted(self):
         """Verify alternative and secondary replacements at positions counted."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -582,6 +648,7 @@ class TestPositionBasedMatching:
         assert result.position_alt_used == 3
         assert result.position_secondary_used == 2
 
+    @pytest.mark.fast
     def test_position_mismatches_stored(self):
         """Verify position mismatch details stored correctly."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -597,6 +664,7 @@ class TestPositionBasedMatching:
         assert result.position_mismatches[0]["type"] == "alternative"
         assert result.position_mismatches[1]["type"] == "gap"
 
+    @pytest.mark.fast
     def test_position_result_to_dict(self):
         """Verify position matching data appears in to_dict() output."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -617,6 +685,7 @@ class TestPositionBasedMatching:
         assert d["position_matching"]["alt_used"] == 2
         assert d["position_matching"]["gaps"] == 0
 
+    @pytest.mark.fast
     def test_position_analysis_result_separate_dataclass(self):
         """Verify PositionAnalysisResult stores position stats correctly."""
         from src.post_edit_analysis import PositionAnalysisResult
@@ -633,6 +702,7 @@ class TestPositionBasedMatching:
         assert result.replaced_with_alt == 3
         assert result.track_usage["V1"] == 14
 
+    @pytest.mark.fast
     def test_position_analysis_result_to_dict(self):
         """Verify PositionAnalysisResult.to_dict() has correct structure."""
         from src.post_edit_analysis import PositionAnalysisResult
@@ -675,6 +745,7 @@ class TestReportGeneration:
         summary = result.summary()
         assert "POST-EDIT ANALYSIS REPORT" in summary
 
+    @pytest.mark.fast
     def test_summary_contains_track_breakdown_section(self):
         """Verify summary includes track preference breakdown section."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -691,6 +762,7 @@ class TestReportGeneration:
         assert "V2: 3 clips" in summary
         assert "V5: 2 clips" in summary
 
+    @pytest.mark.fast
     def test_summary_contains_coverage_map_with_bars(self):
         """Verify summary includes coverage map with ASCII bars when enabled."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -710,6 +782,7 @@ class TestReportGeneration:
         # Should contain ASCII bar chars
         assert "[" in summary and "#" in summary
 
+    @pytest.mark.fast
     def test_summary_contains_segment_counts(self):
         """Verify summary includes segment count and coverage stats."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -735,6 +808,7 @@ class TestReportGeneration:
         assert "V7+ STRATEGY" in summary
         assert "EXTERNAL CLIPS" in summary
 
+    @pytest.mark.fast
     def test_summary_duration_section_when_enabled(self):
         """Verify duration comparison appears when enabled."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -753,6 +827,7 @@ class TestReportGeneration:
         assert "5:00" in summary  # 300 seconds
         assert "4:00" in summary  # 240 seconds
 
+    @pytest.mark.fast
     def test_summary_position_section_when_enabled(self):
         """Verify position matching section appears when enabled."""
         from src.post_edit_analysis import FilenameAnalysisResult
@@ -772,6 +847,7 @@ class TestReportGeneration:
         assert "POSITION MATCHING" in summary
         assert "V1 at correct position" in summary
 
+    @pytest.mark.fast
     def test_to_dict_json_serializable(self):
         """Verify to_dict() output is fully JSON serializable."""
         import json as json_mod
@@ -812,6 +888,7 @@ class TestReportGeneration:
         assert "duration" in parsed
         assert "confidence" in parsed
 
+    @pytest.mark.fast
     def test_position_analysis_summary_format(self):
         """Verify PositionAnalysisResult.summary() produces readable output."""
         from src.post_edit_analysis import PositionAnalysisResult

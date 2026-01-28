@@ -139,17 +139,20 @@ def video_candidates():
 class TestFallbackMatchStrategyInit:
     """Tests for FallbackMatchStrategy initialization."""
 
+    @pytest.mark.fast
     def test_init_with_enabled_config(self, mock_config):
         """Test initialization with fallback enabled."""
         strategy = FallbackMatchStrategy(mock_config)
         assert strategy.enabled is True
         assert strategy.trigger_threshold == 0.4
 
+    @pytest.mark.fast
     def test_init_with_disabled_config(self, mock_config_disabled):
         """Test initialization with fallback disabled."""
         strategy = FallbackMatchStrategy(mock_config_disabled)
         assert strategy.enabled is False
 
+    @pytest.mark.fast
     def test_init_with_missing_config_uses_defaults(self):
         """Test that missing config values use defaults."""
         config = MagicMock()
@@ -162,20 +165,24 @@ class TestFallbackMatchStrategyInit:
 class TestShouldTrigger:
     """Tests for should_trigger method."""
 
+    @pytest.mark.fast
     def test_trigger_when_below_threshold(self, fallback_strategy):
         """Test fallback triggers when confidence is below threshold."""
         assert fallback_strategy.should_trigger(0.3) is True
         assert fallback_strategy.should_trigger(0.39) is True
 
+    @pytest.mark.fast
     def test_no_trigger_when_at_threshold(self, fallback_strategy):
         """Test fallback does not trigger at exactly threshold."""
         assert fallback_strategy.should_trigger(0.4) is False
 
+    @pytest.mark.fast
     def test_no_trigger_when_above_threshold(self, fallback_strategy):
         """Test fallback does not trigger above threshold."""
         assert fallback_strategy.should_trigger(0.5) is False
         assert fallback_strategy.should_trigger(0.8) is False
 
+    @pytest.mark.fast
     def test_no_trigger_when_disabled(self, mock_config_disabled):
         """Test fallback does not trigger when disabled."""
         strategy = FallbackMatchStrategy(mock_config_disabled)
@@ -185,6 +192,7 @@ class TestShouldTrigger:
 class TestKeywordOnlyFallback:
     """Tests for Level 1: Keyword-only matching."""
 
+    @pytest.mark.fast
     def test_keyword_match_success(self, fallback_strategy, vo_segment_with_keywords, video_candidates):
         """Test keyword matching finds correct candidate."""
         result = fallback_strategy.match_keyword_only(vo_segment_with_keywords, video_candidates)
@@ -196,6 +204,7 @@ class TestKeywordOnlyFallback:
         assert "Fallback L1" in reasoning
         assert "keyword match" in reasoning
 
+    @pytest.mark.fast
     def test_keyword_match_no_keywords_extracts_from_text(self, fallback_strategy, video_candidates):
         """Test that keywords are extracted from text when not present."""
         # Segment with text but no explicit keywords
@@ -215,6 +224,7 @@ class TestKeywordOnlyFallback:
         _, confidence, _ = result
         assert confidence <= FallbackMatchStrategy.KEYWORD_ONLY_CEILING
 
+    @pytest.mark.fast
     def test_keyword_match_no_match_possible(self, fallback_strategy):
         """Test keyword matching returns None when no matches."""
         segment = SRTSegment(
@@ -240,6 +250,7 @@ class TestKeywordOnlyFallback:
         result = fallback_strategy.match_keyword_only(segment, candidates)
         assert result is None
 
+    @pytest.mark.fast
     def test_keyword_confidence_ceiling_enforced(self, fallback_strategy, vo_segment_with_keywords, video_candidates):
         """Test that confidence is capped at KEYWORD_ONLY_CEILING."""
         result = fallback_strategy.match_keyword_only(vo_segment_with_keywords, video_candidates)
@@ -252,6 +263,7 @@ class TestKeywordOnlyFallback:
 class TestVisualDescriptionFallback:
     """Tests for Level 2: Visual-description matching."""
 
+    @pytest.mark.fast
     def test_visual_match_from_voiceover_terms(self, fallback_strategy, vo_segment_visual, video_candidates):
         """Test visual matching finds candidate based on visual terms in voiceover."""
         result = fallback_strategy.match_visual_description(vo_segment_visual, video_candidates)
@@ -261,6 +273,7 @@ class TestVisualDescriptionFallback:
         assert confidence <= FallbackMatchStrategy.VISUAL_DESCRIPTION_CEILING
         assert "Fallback L2" in reasoning
 
+    @pytest.mark.fast
     def test_visual_match_with_scenes(self, fallback_strategy, vo_segment_visual, video_candidates):
         """Test visual matching uses scene descriptions."""
         # Create scene info for video2 using the correct SceneInfo structure
@@ -281,6 +294,7 @@ class TestVisualDescriptionFallback:
         assert segment.source_file == "video2.mp4"
         assert confidence <= FallbackMatchStrategy.VISUAL_DESCRIPTION_CEILING
 
+    @pytest.mark.fast
     def test_visual_match_no_visual_terms(self, fallback_strategy, vo_segment_no_keywords, video_candidates):
         """Test visual matching returns None when no visual terms found."""
         result = fallback_strategy.match_visual_description(vo_segment_no_keywords, video_candidates)
@@ -289,6 +303,7 @@ class TestVisualDescriptionFallback:
             _, confidence, _ = result
             assert confidence <= FallbackMatchStrategy.VISUAL_DESCRIPTION_CEILING
 
+    @pytest.mark.fast
     def test_visual_confidence_ceiling_enforced(self, fallback_strategy, vo_segment_visual, video_candidates):
         """Test that confidence is capped at VISUAL_DESCRIPTION_CEILING."""
         result = fallback_strategy.match_visual_description(vo_segment_visual, video_candidates)
@@ -301,6 +316,7 @@ class TestVisualDescriptionFallback:
 class TestGenericBrollFallback:
     """Tests for Level 3: Generic B-roll matching."""
 
+    @pytest.mark.fast
     def test_broll_match_finds_broll_segment(self, fallback_strategy, vo_segment_no_keywords, video_candidates):
         """Test generic B-roll matching finds B-roll segment."""
         result = fallback_strategy.match_generic_broll(vo_segment_no_keywords, video_candidates)
@@ -312,6 +328,7 @@ class TestGenericBrollFallback:
         assert "Fallback L3" in reasoning
         assert "B-roll" in reasoning or "silent" in reasoning.lower()
 
+    @pytest.mark.fast
     def test_broll_match_finds_short_segment_when_no_broll(self, fallback_strategy, vo_segment_no_keywords):
         """Test generic B-roll finds short/silent segments when no B-roll flagged."""
         # Create candidates without is_broll flag
@@ -341,6 +358,7 @@ class TestGenericBrollFallback:
         assert segment.source_file == "video2.mp4"  # The short segment
         assert "silent" in reasoning or "short" in reasoning
 
+    @pytest.mark.fast
     def test_broll_fallback_to_best_available(self, fallback_strategy, vo_segment_no_keywords):
         """Test generic B-roll returns best available when no B-roll or short segments."""
         candidates = []
@@ -370,6 +388,7 @@ class TestGenericBrollFallback:
         assert "best available" in reasoning
         assert confidence <= FallbackMatchStrategy.GENERIC_BROLL_CEILING
 
+    @pytest.mark.fast
     def test_broll_confidence_ceiling_enforced(self, fallback_strategy, vo_segment_no_keywords, video_candidates):
         """Test that confidence is capped at GENERIC_BROLL_CEILING."""
         result = fallback_strategy.match_generic_broll(vo_segment_no_keywords, video_candidates)
@@ -378,6 +397,7 @@ class TestGenericBrollFallback:
         _, confidence, _ = result
         assert confidence <= FallbackMatchStrategy.GENERIC_BROLL_CEILING
 
+    @pytest.mark.fast
     def test_broll_match_empty_candidates(self, fallback_strategy, vo_segment_no_keywords):
         """Test generic B-roll returns None for empty candidates."""
         result = fallback_strategy.match_generic_broll(vo_segment_no_keywords, [])
@@ -387,6 +407,7 @@ class TestGenericBrollFallback:
 class TestApplyFallback:
     """Tests for the main apply_fallback method."""
 
+    @pytest.mark.fast
     def test_apply_fallback_uses_level1_first(self, fallback_strategy, vo_segment_with_keywords, video_candidates):
         """Test apply_fallback tries Level 1 first."""
         result = fallback_strategy.apply_fallback(
@@ -400,6 +421,7 @@ class TestApplyFallback:
         assert level == 1  # Should use keyword matching
         assert "L1" in reasoning
 
+    @pytest.mark.fast
     def test_apply_fallback_uses_level2_when_level1_fails(self, fallback_strategy, vo_segment_visual):
         """Test apply_fallback uses Level 2 when Level 1 fails."""
         # Create candidates that won't match on keywords but will on visual
@@ -425,6 +447,7 @@ class TestApplyFallback:
         # Level depends on whether keyword extraction from text finds matches
         assert level in [1, 2]
 
+    @pytest.mark.fast
     def test_apply_fallback_uses_level3_when_others_fail(self, fallback_strategy, vo_segment_no_keywords):
         """Test apply_fallback uses Level 3 when Levels 1 and 2 fail."""
         # Create candidates that won't match on keywords or visual
@@ -451,6 +474,7 @@ class TestApplyFallback:
         assert level == 3  # Should fall back to B-roll
         assert "L3" in reasoning
 
+    @pytest.mark.fast
     def test_apply_fallback_returns_none_when_not_triggered(self, fallback_strategy, vo_segment_with_keywords, video_candidates):
         """Test apply_fallback returns None when not triggered."""
         result = fallback_strategy.apply_fallback(
@@ -460,6 +484,7 @@ class TestApplyFallback:
         )
         assert result is None
 
+    @pytest.mark.fast
     def test_apply_fallback_returns_none_when_disabled(self, mock_config_disabled, vo_segment_with_keywords, video_candidates):
         """Test apply_fallback returns None when disabled."""
         strategy = FallbackMatchStrategy(mock_config_disabled)
@@ -470,6 +495,7 @@ class TestApplyFallback:
         )
         assert result is None
 
+    @pytest.mark.fast
     def test_apply_fallback_returns_none_for_empty_candidates(self, fallback_strategy, vo_segment_with_keywords):
         """Test apply_fallback returns None for empty candidates."""
         result = fallback_strategy.apply_fallback(
@@ -479,6 +505,7 @@ class TestApplyFallback:
         )
         assert result is None
 
+    @pytest.mark.fast
     def test_apply_fallback_with_scenes(self, fallback_strategy, vo_segment_visual, video_candidates):
         """Test apply_fallback passes scenes to visual matching."""
         scene = SceneInfo(
@@ -505,18 +532,22 @@ class TestApplyFallback:
 class TestConfidenceCeilings:
     """Tests to verify confidence ceilings are properly enforced."""
 
+    @pytest.mark.fast
     def test_keyword_ceiling_constant(self):
         """Test keyword-only ceiling constant value."""
         assert FallbackMatchStrategy.KEYWORD_ONLY_CEILING == 0.7
 
+    @pytest.mark.fast
     def test_visual_ceiling_constant(self):
         """Test visual-description ceiling constant value."""
         assert FallbackMatchStrategy.VISUAL_DESCRIPTION_CEILING == 0.5
 
+    @pytest.mark.fast
     def test_generic_broll_ceiling_constant(self):
         """Test generic B-roll ceiling constant value."""
         assert FallbackMatchStrategy.GENERIC_BROLL_CEILING == 0.3
 
+    @pytest.mark.fast
     def test_ceilings_are_in_order(self):
         """Test that ceilings are in decreasing order (L1 > L2 > L3)."""
         assert FallbackMatchStrategy.KEYWORD_ONLY_CEILING > FallbackMatchStrategy.VISUAL_DESCRIPTION_CEILING

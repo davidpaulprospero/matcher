@@ -18,6 +18,7 @@ class TestHandleRateLimitBackoffUS008:
     """AC1: _handle_rate_limit() sleeps backoff_time, returns RETRY,
     doubles on second call, capped at MAX_BACKOFF."""
 
+    @pytest.mark.fast
     def test_sleeps_initial_backoff_2s(self):
         """Verify time.sleep called with INITIAL_BACKOFF (2s) on first call."""
         from src.agents.healers.api import APIHealer
@@ -40,6 +41,7 @@ class TestHandleRateLimitBackoffUS008:
         assert result.action == HealerAction.RETRY
         assert result.success is True
 
+    @pytest.mark.fast
     def test_doubles_backoff_on_second_call(self):
         """Verify backoff doubles: 2s -> 4s on second call."""
         from src.agents.healers.api import APIHealer
@@ -60,6 +62,7 @@ class TestHandleRateLimitBackoffUS008:
             healer._handle_rate_limit(error, state)
             assert healer.backoff_time == 8.0  # 4 * 2
 
+    @pytest.mark.fast
     def test_backoff_capped_at_max(self):
         """Verify backoff is capped at MAX_BACKOFF."""
         from src.agents.healers.api import APIHealer
@@ -78,6 +81,7 @@ class TestHandleRateLimitBackoffUS008:
             # 200 * 2 = 400, capped at 300
             assert healer.backoff_time == 300.0
 
+    @pytest.mark.fast
     def test_retry_count_increments(self):
         """Verify retry_count increments on each call."""
         from src.agents.healers.api import APIHealer
@@ -98,6 +102,7 @@ class TestHandleRateLimitBackoffUS008:
             healer._handle_rate_limit(error, state)
             assert healer.retry_count == 2
 
+    @pytest.mark.fast
     def test_result_includes_backoff_seconds(self):
         """Verify result details include backoff_seconds and retry_count."""
         from src.agents.healers.api import APIHealer
@@ -125,6 +130,7 @@ class TestHandleAuthErrorProviderSwitchUS008:
     """AC2: _handle_auth_error() identifies provider from error message
     and attempts _try_provider_switch()."""
 
+    @pytest.mark.requires_api
     def test_gemini_error_triggers_switch_to_anthropic(self):
         """Mock error with 'gemini' provider, verify switch attempted."""
         from src.agents.healers.api import APIHealer
@@ -144,6 +150,7 @@ class TestHandleAuthErrorProviderSwitchUS008:
             assert result.action == HealerAction.MODIFY_CONFIG
             assert config.llm.provider == "anthropic"
 
+    @pytest.mark.requires_api
     def test_anthropic_error_tries_gemini_then_ollama(self):
         """Mock error with 'anthropic', verify switch to gemini or ollama."""
         from src.agents.healers.api import APIHealer
@@ -162,6 +169,7 @@ class TestHandleAuthErrorProviderSwitchUS008:
             assert result.success is True
             assert config.llm.provider == "gemini"
 
+    @pytest.mark.fast
     def test_anthropic_error_falls_back_to_ollama_no_keys(self):
         """When no API keys available, fall back to ollama."""
         from src.agents.healers.api import APIHealer
@@ -181,6 +189,7 @@ class TestHandleAuthErrorProviderSwitchUS008:
             assert result.success is True
             assert config.llm.provider == "ollama"
 
+    @pytest.mark.fast
     def test_unknown_provider_returns_failure_with_api_key_message(self):
         """Unknown provider returns failure with API_KEY suggestion."""
         from src.agents.healers.api import APIHealer
@@ -204,6 +213,7 @@ class TestHandleQuotaExceededUS008:
     """AC3: _handle_quota_exceeded() attempts provider switch and
     returns failed() when no alternatives available."""
 
+    @pytest.mark.requires_api
     def test_quota_exceeded_switches_provider_when_available(self):
         """When alternate provider available, switch succeeds."""
         from src.agents.healers.api import APIHealer
@@ -223,6 +233,7 @@ class TestHandleQuotaExceededUS008:
             assert result.action == HealerAction.MODIFY_CONFIG
             assert config.llm.provider == "anthropic"
 
+    @pytest.mark.fast
     def test_quota_exceeded_falls_back_to_ollama(self):
         """When no API keys, falls back to ollama."""
         from src.agents.healers.api import APIHealer
@@ -241,6 +252,7 @@ class TestHandleQuotaExceededUS008:
             assert result.success is True
             assert config.llm.provider == "ollama"
 
+    @pytest.mark.fast
     def test_quota_exceeded_fails_when_no_alternatives(self):
         """When no LLM config, provider switch fails, returns failed()."""
         from src.agents.healers.api import APIHealer
@@ -258,6 +270,7 @@ class TestHandleQuotaExceededUS008:
         assert result.action == HealerAction.ABORT
         assert "quota" in result.message.lower() or "exceeded" in result.message.lower()
 
+    @pytest.mark.fast
     def test_quota_exceeded_failure_message_descriptive(self):
         """Verify failed result includes descriptive quota message."""
         from src.agents.healers.api import APIHealer
@@ -283,6 +296,7 @@ class TestHandleQuotaExceededUS008:
 class TestHandleTimeoutUS008:
     """AC4: _handle_timeout() increases config timeout value up to 300s."""
 
+    @pytest.mark.fast
     def test_timeout_60_to_120(self):
         """Config timeout=60 becomes 120 after first call."""
         from src.agents.healers.api import APIHealer
@@ -303,6 +317,7 @@ class TestHandleTimeoutUS008:
         assert result.action == HealerAction.MODIFY_CONFIG
         assert result.modified_config is True
 
+    @pytest.mark.fast
     def test_timeout_capped_at_300(self):
         """Config timeout never exceeds 300s maximum."""
         from src.agents.healers.api import APIHealer
@@ -319,6 +334,7 @@ class TestHandleTimeoutUS008:
         # 200 * 2 = 400, capped at 300
         assert config.llm.timeout == 300
 
+    @pytest.mark.fast
     def test_repeated_timeout_caps_at_300(self):
         """Multiple timeout calls eventually cap at 300."""
         from src.agents.healers.api import APIHealer
@@ -347,6 +363,7 @@ class TestHandleTimeoutUS008:
         healer._handle_timeout(error, state)
         assert config.llm.timeout == 300
 
+    @pytest.mark.fast
     def test_timeout_result_includes_old_and_new(self):
         """Result details include old_timeout and new_timeout."""
         from src.agents.healers.api import APIHealer
@@ -363,6 +380,7 @@ class TestHandleTimeoutUS008:
         assert result.details.get("old_timeout") == 60
         assert result.details.get("new_timeout") == 120
 
+    @pytest.mark.fast
     def test_timeout_no_llm_config_retries_with_sleep(self):
         """When no LLM config, sleeps and returns RETRY."""
         from src.agents.healers.api import APIHealer
@@ -389,6 +407,7 @@ class TestHandleTimeoutUS008:
 class TestHandleConnectionErrorUS008:
     """AC5: _handle_connection_error() sleeps INITIAL_BACKOFF and returns RETRY."""
 
+    @pytest.mark.fast
     def test_connection_error_sleeps_initial_backoff(self):
         """Verify time.sleep called with INITIAL_BACKOFF."""
         from src.agents.healers.api import APIHealer
@@ -404,6 +423,7 @@ class TestHandleConnectionErrorUS008:
 
         mock_sleep.assert_called_once_with(healer.INITIAL_BACKOFF)
 
+    @pytest.mark.fast
     def test_connection_error_returns_retry_action(self):
         """Verify returns RETRY action on connection error."""
         from src.agents.healers.api import APIHealer
@@ -421,6 +441,7 @@ class TestHandleConnectionErrorUS008:
         assert result.success is True
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_connection_error_result_message(self):
         """Verify result message mentions connection retry."""
         from src.agents.healers.api import APIHealer
@@ -436,6 +457,7 @@ class TestHandleConnectionErrorUS008:
 
         assert "connection" in result.message.lower()
 
+    @pytest.mark.fast
     def test_connection_error_result_includes_waited_seconds(self):
         """Verify result details include waited_seconds."""
         from src.agents.healers.api import APIHealer
@@ -459,6 +481,7 @@ class TestIsProviderAvailableUS008:
     """AC6: _is_provider_available() returns True when API key env var is set,
     False when missing, Ollama always True."""
 
+    @pytest.mark.requires_api
     def test_gemini_available_with_key(self):
         """Gemini available when GEMINI_API_KEY is set."""
         from src.agents.healers.api import APIHealer
@@ -469,6 +492,7 @@ class TestIsProviderAvailableUS008:
         with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
             assert healer._is_provider_available("gemini") is True
 
+    @pytest.mark.requires_api
     def test_gemini_unavailable_without_key(self):
         """Gemini unavailable when GEMINI_API_KEY is missing."""
         from src.agents.healers.api import APIHealer
@@ -479,6 +503,7 @@ class TestIsProviderAvailableUS008:
         with patch.dict(os.environ, {}, clear=True):
             assert healer._is_provider_available("gemini") is False
 
+    @pytest.mark.requires_api
     def test_anthropic_available_with_key(self):
         """Anthropic available when ANTHROPIC_API_KEY is set."""
         from src.agents.healers.api import APIHealer
@@ -489,6 +514,7 @@ class TestIsProviderAvailableUS008:
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key123"}):
             assert healer._is_provider_available("anthropic") is True
 
+    @pytest.mark.requires_api
     def test_anthropic_unavailable_without_key(self):
         """Anthropic unavailable when ANTHROPIC_API_KEY is missing."""
         from src.agents.healers.api import APIHealer
@@ -499,6 +525,7 @@ class TestIsProviderAvailableUS008:
         with patch.dict(os.environ, {}, clear=True):
             assert healer._is_provider_available("anthropic") is False
 
+    @pytest.mark.fast
     def test_ollama_always_available_no_key_needed(self):
         """Ollama always available regardless of environment."""
         from src.agents.healers.api import APIHealer
@@ -509,6 +536,7 @@ class TestIsProviderAvailableUS008:
         with patch.dict(os.environ, {}, clear=True):
             assert healer._is_provider_available("ollama") is True
 
+    @pytest.mark.fast
     def test_unknown_provider_unavailable(self):
         """Unknown provider with no key mapping returns False."""
         from src.agents.healers.api import APIHealer

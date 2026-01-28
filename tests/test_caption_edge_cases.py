@@ -38,6 +38,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 1: 100+ char video title truncation preserves video ID ----
 
+    @pytest.mark.fast
     def test_long_video_title_preserves_video_id_in_cache(self):
         """100+ char video title truncation preserves video ID for matching.
 
@@ -82,6 +83,7 @@ class TestCaptionEdgeCases:
         assert key == "dQw4w9WgXcQ_en"
         assert long_title not in key
 
+    @pytest.mark.fast
     def test_long_video_title_in_segment_source_file(self):
         """CaptionSegment source_file with long content round-trips correctly."""
         # Even if someone accidentally puts a long path in source_file
@@ -112,6 +114,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 2: Video URL with special characters ----
 
+    @pytest.mark.fast
     def test_video_url_special_characters_parsed_correctly(self):
         """Video URL with quotes, ampersands, and special chars parsed correctly.
 
@@ -154,6 +157,7 @@ class TestCaptionEdgeCases:
             assert restored.video_id == vid_id
             assert restored.segments[0]['source_file'] == vid_id
 
+    @pytest.mark.fast
     def test_special_chars_in_caption_text_roundtrip(self):
         """Caption text with quotes, ampersands, angle brackets survives JSON."""
         special_texts = [
@@ -177,6 +181,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 3: Corrupted JSON cache file returns None gracefully ----
 
+    @pytest.mark.fast
     def test_corrupted_json_cache_returns_none(self):
         """Corrupted JSON cache file returns None gracefully (no crash).
 
@@ -211,6 +216,7 @@ class TestCaptionEdgeCases:
         result = cache.get_caption("dQw4w9WgXcQ", "en")
         assert result is None
 
+    @pytest.mark.fast
     def test_corrupted_entry_data_returns_none(self):
         """Corrupted entry data in valid JSON index returns None gracefully."""
         cache = CaptionCache.__new__(CaptionCache)
@@ -241,6 +247,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 4: Truncated cache file (partial write) ----
 
+    @pytest.mark.fast
     def test_truncated_cache_file_detected_and_handled(self):
         """Truncated cache file (partial write) detected and handled.
 
@@ -276,6 +283,7 @@ class TestCaptionEdgeCases:
         result = cache.get_caption("dQw4w9WgXcQ", "en")
         assert result is None
 
+    @pytest.mark.fast
     def test_empty_cache_file_handled(self):
         """Empty cache file (0 bytes) handled gracefully."""
         index_path = Path(self.temp_dir) / "caption_cache_index.json"
@@ -299,6 +307,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 5: Caption segments with 0 duration filtered out ----
 
+    @pytest.mark.fast
     def test_zero_duration_segments_filtered_during_normalization(self):
         """Caption segments with 0 duration (start == end) filtered out.
 
@@ -326,6 +335,7 @@ class TestCaptionEdgeCases:
             assert duration >= 0.1 - 1e-9, \
                 f"Segment {seg.index} duration {duration} below minimum 0.1"
 
+    @pytest.mark.fast
     def test_negative_duration_segment_handled(self):
         """Segment with end_time < start_time is fixed by normalizer."""
         normalizer = CaptionNormalizer()
@@ -344,6 +354,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 6: Unsorted caption timestamps reordered correctly ----
 
+    @pytest.mark.fast
     def test_unsorted_timestamps_reordered(self):
         """Unsorted caption timestamps reordered correctly by normalizer.
 
@@ -375,6 +386,7 @@ class TestCaptionEdgeCases:
                 f"Segment {i} start ({normalized[i].start_time}) < " \
                 f"segment {i-1} start ({normalized[i-1].start_time})"
 
+    @pytest.mark.fast
     def test_unsorted_with_reindexing(self):
         """Segments are re-indexed sequentially after sorting."""
         normalizer = CaptionNormalizer()
@@ -399,6 +411,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 7: Empty segment text (whitespace only) treated as missing ----
 
+    @pytest.mark.fast
     def test_whitespace_only_text_filtered_out(self):
         """Empty segment text (whitespace only) treated as missing.
 
@@ -424,6 +437,7 @@ class TestCaptionEdgeCases:
         # Whitespace segments are intentionally filtered, not counted as errors
         assert skipped == 0
 
+    @pytest.mark.fast
     def test_text_with_leading_trailing_whitespace_preserved(self):
         """Text with leading/trailing whitespace is NOT filtered (has content)."""
         normalizer = CaptionNormalizer()
@@ -442,6 +456,7 @@ class TestCaptionEdgeCases:
 
     # ---- Test 8: Additional edge cases with explicit assertions and cleanup ----
 
+    @pytest.mark.fast
     def test_cache_entry_with_missing_fields_handled(self):
         """Cache entry dict missing expected fields returns None gracefully."""
         cache = CaptionCache.__new__(CaptionCache)
@@ -478,6 +493,7 @@ class TestCaptionEdgeCases:
         # and get_caption catches exceptions, returning None
         assert result is None or isinstance(result, CachedCaption)
 
+    @pytest.mark.fast
     def test_segment_dict_missing_timing_fields_defaults_to_zero(self):
         """Segment dict missing 'start'/'end' keys defaults to 0.0 in to_caption_result."""
         cached = CachedCaption(
@@ -506,6 +522,7 @@ class TestCaptionEdgeCases:
         assert result.segments[1].index == 1
         assert result.segments[1].text == 'Also no index'
 
+    @pytest.mark.fast
     def test_all_segments_whitespace_returns_empty_list(self):
         """If ALL segments are whitespace-only, normalizer returns empty list."""
         normalizer = CaptionNormalizer()
@@ -521,6 +538,7 @@ class TestCaptionEdgeCases:
         assert len(normalized) == 0
         assert skipped == 0  # Filtering is intentional, not an error
 
+    @pytest.mark.fast
     def test_duplicate_timestamps_handled(self):
         """Multiple segments with identical timestamps are handled."""
         normalizer = CaptionNormalizer()

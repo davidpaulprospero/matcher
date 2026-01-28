@@ -44,6 +44,7 @@ class TestCaptionSegment:
         assert segment.text == "Hello world"
         assert segment.source_file == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_caption_segment_to_dict(self):
         """Test segment serialization"""
         segment = CaptionSegment(
@@ -62,6 +63,7 @@ class TestCaptionSegment:
         assert result['text'] == "Test text"
         assert result['source_file'] == "test123"
 
+    @pytest.mark.fast
     def test_caption_segment_default_source_file(self):
         """Test default source_file value"""
         segment = CaptionSegment(
@@ -99,6 +101,7 @@ class TestCaptionResult:
         assert result.is_auto_generated is False
         assert result.format_source == "vtt"
 
+    @pytest.mark.fast
     def test_caption_result_text_property(self):
         """Test text property concatenates all segment text"""
         segments = [
@@ -110,12 +113,14 @@ class TestCaptionResult:
 
         assert result.text == "Hello world"
 
+    @pytest.mark.fast
     def test_caption_result_text_empty(self):
         """Test text property with no segments"""
         result = CaptionResult(video_id="vid1", segments=[])
 
         assert result.text == ""
 
+    @pytest.mark.fast
     def test_caption_result_duration(self):
         """Test duration property calculation"""
         segments = [
@@ -128,12 +133,14 @@ class TestCaptionResult:
         # Duration is last.end - first.start = 10.0 - 1.0 = 9.0
         assert result.duration == 9.0
 
+    @pytest.mark.fast
     def test_caption_result_duration_empty(self):
         """Test duration with no segments"""
         result = CaptionResult(video_id="vid1", segments=[])
 
         assert result.duration == 0.0
 
+    @pytest.mark.fast
     def test_caption_result_to_dict(self):
         """Test result serialization"""
         segments = [
@@ -158,6 +165,7 @@ class TestCaptionResult:
         # US-007: caption_quality should be included in to_dict
         assert 'caption_quality' in data
 
+    @pytest.mark.fast
     def test_caption_result_caption_quality_high(self):
         """Test caption_quality returns 'high' for human captions with good completeness (US-007)"""
         # Create many segments for good completeness
@@ -176,6 +184,7 @@ class TestCaptionResult:
 
         assert result.caption_quality == "high"
 
+    @pytest.mark.fast
     def test_caption_result_caption_quality_medium_auto(self):
         """Test caption_quality returns 'medium' for auto-generated captions (US-007)"""
         segments = [
@@ -193,6 +202,7 @@ class TestCaptionResult:
 
         assert result.caption_quality == "medium"
 
+    @pytest.mark.fast
     def test_caption_result_caption_quality_low_sparse(self):
         """Test caption_quality returns 'low' for very sparse captions (US-007)"""
         # Only 2 segments over 60 seconds = very sparse
@@ -211,6 +221,7 @@ class TestCaptionResult:
 
         assert result.caption_quality == "low"
 
+    @pytest.mark.fast
     def test_caption_result_caption_quality_low_empty(self):
         """Test caption_quality returns 'low' for empty captions (US-007)"""
         result = CaptionResult(
@@ -225,6 +236,7 @@ class TestCaptionResult:
 
     # US-004: Coverage calculation tests
 
+    @pytest.mark.fast
     def test_calculate_coverage_full(self):
         """Test calculate_coverage returns 1.0 for full coverage (US-004)"""
         # 10 segments, each 10s, covering entire 100s video
@@ -237,6 +249,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 1.0
 
+    @pytest.mark.fast
     def test_calculate_coverage_partial(self):
         """Test calculate_coverage returns correct ratio for partial coverage (US-004)"""
         # 5 segments of 10s each = 50s out of 100s video
@@ -249,6 +262,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 0.5
 
+    @pytest.mark.fast
     def test_calculate_coverage_low(self):
         """Test calculate_coverage returns low ratio for sparse coverage (US-004)"""
         # 1 segment of 20s out of 100s video = 20%
@@ -258,6 +272,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 0.2
 
+    @pytest.mark.fast
     def test_calculate_coverage_no_duration(self):
         """Test calculate_coverage returns 0.0 when no video duration (US-004)"""
         segments = [CaptionSegment(0, 0.0, 10.0, "Test", "vid1")]
@@ -267,6 +282,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage()
         assert coverage == 0.0
 
+    @pytest.mark.fast
     def test_calculate_coverage_zero_duration(self):
         """Test calculate_coverage returns 0.0 for zero duration (US-004)"""
         segments = [CaptionSegment(0, 0.0, 10.0, "Test", "vid1")]
@@ -275,6 +291,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=0.0)
         assert coverage == 0.0
 
+    @pytest.mark.fast
     def test_calculate_coverage_empty_segments(self):
         """Test calculate_coverage returns 0.0 for empty segments (US-004)"""
         result = CaptionResult(video_id="vid1", segments=[])
@@ -282,6 +299,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 0.0
 
+    @pytest.mark.fast
     def test_calculate_coverage_capped_at_one(self):
         """Test calculate_coverage caps at 1.0 even if segments overlap (US-004)"""
         # Overlapping segments that sum to more than video duration
@@ -295,6 +313,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 1.0
 
+    @pytest.mark.fast
     def test_calculate_coverage_with_gaps(self):
         """Test calculate_coverage handles gaps between segments (US-004)"""
         # Segments with gaps: 0-10, 20-30, 40-50 = 30s out of 100s
@@ -308,6 +327,7 @@ class TestCaptionResult:
         coverage = result.calculate_coverage(video_duration=100.0)
         assert coverage == 0.3
 
+    @pytest.mark.fast
     def test_coverage_ratio_property(self):
         """Test coverage_ratio property uses video_duration field (US-004)"""
         segments = [CaptionSegment(0, 0.0, 50.0, "Half", "vid1")]
@@ -319,6 +339,7 @@ class TestCaptionResult:
 
         assert result.coverage_ratio == 0.5
 
+    @pytest.mark.fast
     def test_coverage_ratio_property_no_duration(self):
         """Test coverage_ratio returns 0.0 when video_duration not set (US-004)"""
         segments = [CaptionSegment(0, 0.0, 50.0, "Test", "vid1")]
@@ -327,6 +348,7 @@ class TestCaptionResult:
 
         assert result.coverage_ratio == 0.0
 
+    @pytest.mark.fast
     def test_to_dict_includes_coverage(self):
         """Test to_dict includes video_duration and coverage_ratio (US-004)"""
         segments = [CaptionSegment(0, 0.0, 50.0, "Half", "vid1")]
@@ -344,6 +366,7 @@ class TestCaptionResult:
 
     # US-007: Timing validation tests
 
+    @pytest.mark.fast
     def test_validate_timing_valid(self):
         """Test validate_timing returns valid for normal captions (US-007)"""
         # Captions end at 90s, video is 100s - should be valid
@@ -363,6 +386,7 @@ class TestCaptionResult:
         assert validation.video_duration == 100.0
         assert "Timing valid" in validation.message
 
+    @pytest.mark.fast
     def test_validate_timing_exceeds_duration(self):
         """Test validate_timing detects captions exceeding video duration (US-007)"""
         # Captions end at 120s, video is 100s - exceeds by 20% (over 10% tolerance)
@@ -379,6 +403,7 @@ class TestCaptionResult:
         assert validation.caption_end_time == 120.0
         assert "exceeds video duration" in validation.message.lower()
 
+    @pytest.mark.fast
     def test_validate_timing_within_tolerance(self):
         """Test validate_timing allows captions within 10% tolerance (US-007)"""
         # Captions end at 105s, video is 100s - within 10% tolerance
@@ -392,6 +417,7 @@ class TestCaptionResult:
         assert validation.is_valid is True
         assert validation.exceeds_duration is False
 
+    @pytest.mark.fast
     def test_validate_timing_at_tolerance_boundary(self):
         """Test validate_timing at exactly 110% boundary (US-007)"""
         # Captions end at exactly 110s when video is 100s - should be valid (<=110%)
@@ -403,6 +429,7 @@ class TestCaptionResult:
         assert validation.is_valid is True
         assert validation.exceeds_duration is False
 
+    @pytest.mark.fast
     def test_validate_timing_just_over_tolerance(self):
         """Test validate_timing just over 110% boundary (US-007)"""
         # Captions end at 110.1s when video is 100s - should fail (>110%)
@@ -414,6 +441,7 @@ class TestCaptionResult:
         assert validation.is_valid is False
         assert validation.exceeds_duration is True
 
+    @pytest.mark.fast
     def test_validate_timing_below_coverage(self):
         """Test validate_timing detects low coverage (US-007)"""
         # Captions only cover 0-40s of a 100s video (40% < 50% threshold)
@@ -430,6 +458,7 @@ class TestCaptionResult:
         assert validation.exceeds_duration is False
         assert "below minimum" in validation.message.lower()
 
+    @pytest.mark.fast
     def test_validate_timing_both_issues(self):
         """Test validate_timing detects both exceed and low coverage (US-007)"""
         # Captions at 120s but only one early segment (low coverage, exceeds duration)
@@ -446,6 +475,7 @@ class TestCaptionResult:
         assert validation.is_valid is False
         assert validation.exceeds_duration is True
 
+    @pytest.mark.fast
     def test_validate_timing_no_duration(self):
         """Test validate_timing without video duration (US-007)"""
         segments = [CaptionSegment(0, 0.0, 100.0, "Seg", "vid1")]
@@ -457,6 +487,7 @@ class TestCaptionResult:
         assert validation.is_valid is True
         assert "video duration unknown" in validation.message
 
+    @pytest.mark.fast
     def test_validate_timing_empty_segments(self):
         """Test validate_timing with no segments (US-007)"""
         result = CaptionResult(video_id="vid1", segments=[], video_duration=100.0)
@@ -468,6 +499,7 @@ class TestCaptionResult:
         assert validation.below_coverage is True
         assert validation.caption_end_time == 0.0
 
+    @pytest.mark.fast
     def test_validate_timing_stores_result(self):
         """Test validate_timing stores result in timing_validated field (US-007)"""
         segments = [CaptionSegment(0, 0.0, 50.0, "Seg", "vid1")]
@@ -480,6 +512,7 @@ class TestCaptionResult:
         assert result.timing_validated is validation
         assert result.timing_validated.is_valid is True
 
+    @pytest.mark.fast
     def test_validate_timing_custom_thresholds(self):
         """Test validate_timing with custom tolerance thresholds (US-007)"""
         # 115s captions on 100s video - fails with default 1.1, passes with 1.2
@@ -496,6 +529,7 @@ class TestCaptionResult:
         assert validation2.is_valid is True
         assert validation2.exceeds_duration is False
 
+    @pytest.mark.fast
     def test_validate_timing_custom_min_coverage(self):
         """Test validate_timing with custom minimum coverage (US-007)"""
         # 30s captions on 100s video - fails with default 0.5, passes with 0.25
@@ -512,6 +546,7 @@ class TestCaptionResult:
         assert validation2.is_valid is True
         assert validation2.below_coverage is False
 
+    @pytest.mark.fast
     def test_validate_timing_with_explicit_duration(self):
         """Test validate_timing with explicitly provided video duration (US-007)"""
         segments = [CaptionSegment(0, 0.0, 80.0, "Seg", "vid1")]
@@ -523,6 +558,7 @@ class TestCaptionResult:
         assert validation.video_duration == 200.0
         assert validation.below_coverage is True  # 80s < 50% of 200s
 
+    @pytest.mark.fast
     def test_to_dict_includes_timing_validated(self):
         """Test to_dict includes timing_validated field (US-007)"""
         segments = [CaptionSegment(0, 0.0, 90.0, "Seg", "vid1")]
@@ -566,6 +602,7 @@ class TestTimingValidationResult:
         assert result.below_coverage is False
         assert result.message == "Timing valid"
 
+    @pytest.mark.fast
     def test_timing_validation_result_to_dict(self):
         """Test TimingValidationResult serialization"""
         from src.caption_fetcher import TimingValidationResult
@@ -588,6 +625,7 @@ class TestTimingValidationResult:
         assert data['below_coverage'] is False
         assert data['message'] == "Caption exceeds video"
 
+    @pytest.mark.fast
     def test_timing_validation_result_defaults(self):
         """Test TimingValidationResult default values"""
         from src.caption_fetcher import TimingValidationResult
@@ -620,6 +658,7 @@ class TestTimingEpsilonTolerance:
         assert validation.timing_epsilon_applied == 100.0
         assert validation.caption_end_time == 300.05  # Original value preserved
 
+    @pytest.mark.fast
     def test_epsilon_invalid_beyond_tolerance(self):
         """Caption at 300.15s in 300s video is invalid with 100ms epsilon"""
         segments = [CaptionSegment(0, 0.0, 300.15, "Slightly over", "vid1")]
@@ -633,6 +672,7 @@ class TestTimingEpsilonTolerance:
         assert validation.exceeds_duration is False
         assert validation.timing_epsilon_applied == 100.0
 
+    @pytest.mark.fast
     def test_epsilon_strict_with_10ms(self):
         """Caption at 300.05s in 300s video is outside 10ms epsilon"""
         segments = [CaptionSegment(0, 0.0, 300.05, "Slightly over", "vid1")]
@@ -646,6 +686,7 @@ class TestTimingEpsilonTolerance:
         assert validation.exceeds_duration is False
         assert validation.timing_epsilon_applied == 10.0
 
+    @pytest.mark.fast
     def test_epsilon_affects_exceeds_check_at_boundary(self):
         """Epsilon snaps caption end to duration when within tolerance"""
         # Caption exactly at 110% of 100s video = 110s (boundary of max_exceed_ratio)
@@ -659,6 +700,7 @@ class TestTimingEpsilonTolerance:
         assert validation.is_valid is True
         assert validation.exceeds_duration is False
 
+    @pytest.mark.fast
     def test_epsilon_zero_exact_matching(self):
         """With epsilon=0, exact matching is used (may cause false positives)"""
         # 299.999s is technically less than 300s
@@ -671,6 +713,7 @@ class TestTimingEpsilonTolerance:
         assert validation.exceeds_duration is False
         assert validation.timing_epsilon_applied == 0.0
 
+    @pytest.mark.fast
     def test_epsilon_stored_in_result_no_duration(self):
         """Epsilon is stored in result even when video duration is unknown"""
         result = CaptionResult(video_id="vid1", segments=[])
@@ -680,6 +723,7 @@ class TestTimingEpsilonTolerance:
         assert validation.timing_epsilon_applied == 50.0
         assert validation.message == "Cannot validate timing: video duration unknown"
 
+    @pytest.mark.fast
     def test_epsilon_serialized_in_to_dict(self):
         """timing_epsilon_applied is included in serialized dict"""
         segments = [CaptionSegment(0, 0.0, 90.0, "Normal", "vid1")]
@@ -691,6 +735,7 @@ class TestTimingEpsilonTolerance:
         assert 'timing_epsilon_applied' in data
         assert data['timing_epsilon_applied'] == 75.0
 
+    @pytest.mark.fast
     def test_epsilon_combined_with_max_exceed_ratio(self):
         """Epsilon and max_exceed_ratio work together correctly"""
         # Caption at 110.05s for 100s video
@@ -707,6 +752,7 @@ class TestTimingEpsilonTolerance:
         assert validation.is_valid is False
         assert validation.exceeds_duration is True
 
+    @pytest.mark.fast
     def test_epsilon_negative_difference(self):
         """Epsilon handles captions ending slightly before video duration"""
         # Caption at 299.95s for 300s video (50ms before end)
@@ -720,6 +766,7 @@ class TestTimingEpsilonTolerance:
         assert validation.exceeds_duration is False
         # Coverage should still use original value (299.95/300 = 99.98%)
 
+    @pytest.mark.fast
     def test_epsilon_default_value(self):
         """Default epsilon is 100ms when not specified"""
         segments = [CaptionSegment(0, 0.0, 100.05, "Slight float error", "vid1")]
@@ -746,6 +793,7 @@ class TestTimingPenaltyFactor:
 
         assert result.timing_penalty_factor == 1.0
 
+    @pytest.mark.fast
     def test_low_coverage_penalty(self):
         """50% coverage with no exceeds gives ~10% penalty"""
         # Coverage penalty: (1 - 0.5) * 0.2 = 0.1
@@ -758,6 +806,7 @@ class TestTimingPenaltyFactor:
 
         assert penalty == pytest.approx(0.9, abs=0.01)
 
+    @pytest.mark.fast
     def test_exceeds_duration_penalty(self):
         """20% exceeds with 100% coverage gives ~6% penalty"""
         # Exceeds penalty: 0.2 * 0.3 = 0.06
@@ -771,6 +820,7 @@ class TestTimingPenaltyFactor:
 
         assert penalty == pytest.approx(0.94, abs=0.01)
 
+    @pytest.mark.fast
     def test_combined_penalty(self):
         """50% coverage, 20% exceeds gives ~16% penalty"""
         # Formula: 1.0 - (0.2 * 0.3) - ((1 - 0.5) * 0.2)
@@ -790,6 +840,7 @@ class TestTimingPenaltyFactor:
         # penalty = 1.0 - (0.2 * 0.3) - 0 = 0.94
         assert penalty == pytest.approx(0.94, abs=0.01)
 
+    @pytest.mark.fast
     def test_poor_timing_acceptance_criteria(self):
         """Test AC: 50% coverage, 20% exceeds reduces confidence by ~25%"""
         # For 50% coverage + 20% exceeds:
@@ -815,6 +866,7 @@ class TestTimingPenaltyFactor:
         # penalty = 1.0 - 0 - (0.5 * 0.2) = 0.9
         assert penalty == pytest.approx(0.9, abs=0.01)
 
+    @pytest.mark.fast
     def test_no_timing_validated_returns_1(self):
         """When timing not validated, penalty factor is 1.0 (no penalty)"""
         result = CaptionResult(video_id="vid1", segments=[])
@@ -824,6 +876,7 @@ class TestTimingPenaltyFactor:
 
         assert penalty == 1.0
 
+    @pytest.mark.fast
     def test_no_duration_validated_returns_1(self):
         """When video duration unknown, penalty factor is 1.0"""
         segments = [CaptionSegment(0, 0.0, 50.0, "Some text", "vid1")]
@@ -836,6 +889,7 @@ class TestTimingPenaltyFactor:
         # timing_validated is set but with is_valid=True (can't fail without duration)
         assert penalty == 1.0
 
+    @pytest.mark.fast
     def test_80_percent_coverage_penalty(self):
         """80% coverage, no exceeds gives ~4% penalty"""
         # coverage_penalty = (1 - 0.8) * 0.2 = 0.04
@@ -847,6 +901,7 @@ class TestTimingPenaltyFactor:
 
         assert penalty == pytest.approx(0.96, abs=0.01)
 
+    @pytest.mark.fast
     def test_10_percent_exceeds_penalty(self):
         """100% coverage, 10% exceeds gives ~3% penalty"""
         # exceeds_penalty = 0.1 * 0.3 = 0.03
@@ -858,6 +913,7 @@ class TestTimingPenaltyFactor:
 
         assert penalty == pytest.approx(0.97, abs=0.01)
 
+    @pytest.mark.fast
     def test_penalty_clamped_to_zero(self):
         """Extreme poor timing is clamped to 0.0 (not negative)"""
         # Very low coverage: 10% -> (1 - 0.1) * 0.2 = 0.18
@@ -889,6 +945,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "high"
 
+    @pytest.mark.fast
     def test_medium_quality_human_sparse(self):
         """Human captions with sparse segments = medium quality"""
         quality = determine_caption_quality(
@@ -898,6 +955,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "medium"
 
+    @pytest.mark.fast
     def test_medium_quality_auto_dense(self):
         """Auto-generated captions with dense segments = medium quality"""
         quality = determine_caption_quality(
@@ -907,6 +965,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "medium"
 
+    @pytest.mark.fast
     def test_low_quality_empty(self):
         """No segments = low quality"""
         quality = determine_caption_quality(
@@ -916,6 +975,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "low"
 
+    @pytest.mark.fast
     def test_low_quality_very_sparse(self):
         """Very few segments = low quality"""
         quality = determine_caption_quality(
@@ -925,6 +985,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "low"
 
+    @pytest.mark.fast
     def test_low_quality_auto_very_sparse_long_video(self):
         """Auto captions with very long avg duration on long video = low quality"""
         quality = determine_caption_quality(
@@ -934,6 +995,7 @@ class TestDetermineCaptionQuality:
         )
         assert quality == "low"
 
+    @pytest.mark.fast
     def test_custom_thresholds(self):
         """Test custom min_segments and max_avg_duration thresholds"""
         # With default thresholds (10 segments, 10s max avg), this would be medium
@@ -961,6 +1023,7 @@ class TestCaptionExceptions:
         assert "vid123" in str(error)
         assert "No subtitles" in str(error)
 
+    @pytest.mark.fast
     def test_caption_unavailable_error_no_reason(self):
         """Test CaptionUnavailableError without reason"""
         error = CaptionUnavailableError("vid123")
@@ -968,6 +1031,7 @@ class TestCaptionExceptions:
         assert error.video_id == "vid123"
         assert "vid123" in str(error)
 
+    @pytest.mark.fast
     def test_caption_fetch_error(self):
         """Test CaptionFetchError"""
         error = CaptionFetchError("vid123", "Network timeout")
@@ -977,6 +1041,7 @@ class TestCaptionExceptions:
         assert "vid123" in str(error)
         assert "Network timeout" in str(error)
 
+    @pytest.mark.fast
     def test_exception_inheritance(self):
         """Test exception inheritance"""
         assert issubclass(CaptionUnavailableError, CaptionError)
@@ -996,6 +1061,7 @@ class TestCaptionFetcherVideoIdValidation:
         assert fetcher._is_valid_video_id("abc123DEF-_") is True
         assert fetcher._is_valid_video_id("12345678901") is True
 
+    @pytest.mark.fast
     def test_invalid_video_id_too_short(self):
         """Test rejection of too-short ID"""
         fetcher = CaptionFetcher()
@@ -1003,12 +1069,14 @@ class TestCaptionFetcherVideoIdValidation:
         assert fetcher._is_valid_video_id("dQw4w9WgXc") is False  # 10 chars
         assert fetcher._is_valid_video_id("abc") is False
 
+    @pytest.mark.fast
     def test_invalid_video_id_too_long(self):
         """Test rejection of too-long ID"""
         fetcher = CaptionFetcher()
 
         assert fetcher._is_valid_video_id("dQw4w9WgXcQQ") is False  # 12 chars
 
+    @pytest.mark.fast
     def test_invalid_video_id_special_chars(self):
         """Test rejection of invalid characters"""
         fetcher = CaptionFetcher()
@@ -1017,6 +1085,7 @@ class TestCaptionFetcherVideoIdValidation:
         assert fetcher._is_valid_video_id("dQw4w9Wg cQ") is False  # space is invalid
         assert fetcher._is_valid_video_id("dQw4w9Wg.cQ") is False  # . is invalid
 
+    @pytest.mark.fast
     def test_invalid_video_id_empty(self):
         """Test rejection of empty ID"""
         fetcher = CaptionFetcher()
@@ -1038,6 +1107,7 @@ class TestCaptionFetcherTimestampParsing:
         assert fetcher._parse_timestamp("01:00:00.000") == 3600.0
         assert fetcher._parse_timestamp("01:30:45.123") == 5445.123
 
+    @pytest.mark.fast
     def test_parse_timestamp_srt_format(self):
         """Test parsing SRT timestamp format (HH:MM:SS,mmm)"""
         fetcher = CaptionFetcher()
@@ -1046,6 +1116,7 @@ class TestCaptionFetcherTimestampParsing:
         assert fetcher._parse_timestamp("00:01:30,500") == 90.5
         assert fetcher._parse_timestamp("01:00:00,000") == 3600.0
 
+    @pytest.mark.fast
     def test_parse_timestamp_short_format(self):
         """Test parsing short VTT format (MM:SS.mmm)"""
         fetcher = CaptionFetcher()
@@ -1054,6 +1125,7 @@ class TestCaptionFetcherTimestampParsing:
         assert fetcher._parse_timestamp("01:30.500") == 90.5
         assert fetcher._parse_timestamp("59:59.999") == 3599.999
 
+    @pytest.mark.fast
     def test_parse_timestamp_without_milliseconds(self):
         """Test parsing timestamp without milliseconds"""
         fetcher = CaptionFetcher()
@@ -1061,12 +1133,14 @@ class TestCaptionFetcherTimestampParsing:
         assert fetcher._parse_timestamp("00:00:01") == 1.0
         assert fetcher._parse_timestamp("01:30") == 90.0
 
+    @pytest.mark.fast
     def test_parse_timestamp_with_whitespace(self):
         """Test parsing timestamp with whitespace"""
         fetcher = CaptionFetcher()
 
         assert fetcher._parse_timestamp("  00:00:01.000  ") == 1.0
 
+    @pytest.mark.fast
     def test_parse_timestamp_invalid(self):
         """Test parsing invalid timestamp returns None"""
         fetcher = CaptionFetcher()
@@ -1103,6 +1177,7 @@ This is a test.
         assert segments[1].text == "This is a test."
         assert not result.has_skipped
 
+    @pytest.mark.fast
     def test_parse_vtt_with_style_tags(self):
         """Test VTT parsing removes style tags"""
         fetcher = CaptionFetcher()
@@ -1118,6 +1193,7 @@ This is a test.
         assert len(segments) == 1
         assert segments[0].text == "Hello world!"
 
+    @pytest.mark.fast
     def test_parse_vtt_multiline_text(self):
         """Test VTT parsing with multiline text"""
         fetcher = CaptionFetcher()
@@ -1135,6 +1211,7 @@ Line two
         assert "Line one" in segments[0].text
         assert "Line two" in segments[0].text
 
+    @pytest.mark.fast
     def test_parse_vtt_with_cue_identifiers(self):
         """Test VTT parsing with cue identifiers"""
         fetcher = CaptionFetcher()
@@ -1154,6 +1231,7 @@ Second cue
 
         assert len(segments) == 2
 
+    @pytest.mark.fast
     def test_parse_vtt_empty(self):
         """Test parsing empty VTT content"""
         fetcher = CaptionFetcher()
@@ -1166,6 +1244,7 @@ Second cue
 
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_vtt_sets_source_file(self):
         """Test that source_file is set correctly"""
         fetcher = CaptionFetcher()
@@ -1207,6 +1286,7 @@ This is a test.
         assert segments[1].text == "This is a test."
         assert not result.has_skipped
 
+    @pytest.mark.fast
     def test_parse_srt_with_tags(self):
         """Test SRT parsing removes formatting tags"""
         fetcher = CaptionFetcher()
@@ -1220,6 +1300,7 @@ This is a test.
 
         assert segments[0].text == "Italic and bold"
 
+    @pytest.mark.fast
     def test_parse_srt_multiline(self):
         """Test SRT with multiline subtitles"""
         fetcher = CaptionFetcher()
@@ -1240,6 +1321,7 @@ Single line
         assert "Line one" in segments[0].text
         assert "Line two" in segments[0].text
 
+    @pytest.mark.fast
     def test_parse_srt_empty_blocks(self):
         """Test SRT parsing handles empty blocks gracefully"""
         fetcher = CaptionFetcher()
@@ -1293,6 +1375,7 @@ class TestCaptionFetcherJson3Parsing:
         assert segments[1].end_time == 8.0
         assert not result.has_skipped
 
+    @pytest.mark.fast
     def test_parse_json3_multiple_segs(self):
         """Test JSON3 with multiple text segments per event"""
         fetcher = CaptionFetcher()
@@ -1316,6 +1399,7 @@ class TestCaptionFetcherJson3Parsing:
         assert len(segments) == 1
         assert segments[0].text == "Hello world!"
 
+    @pytest.mark.fast
     def test_parse_json3_empty_events(self):
         """Test JSON3 with empty events array"""
         fetcher = CaptionFetcher()
@@ -1327,6 +1411,7 @@ class TestCaptionFetcherJson3Parsing:
 
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_json3_events_without_segs(self):
         """Test JSON3 skips events without segs and records them as skipped (US-001)"""
         fetcher = CaptionFetcher()
@@ -1353,6 +1438,7 @@ class TestCaptionFetcherJson3Parsing:
         assert result.skipped_segments[0][0] == 0  # First event index
         assert "segs" in result.skipped_segments[0][1]  # Reason mentions segs
 
+    @pytest.mark.fast
     def test_parse_json3_invalid_json(self):
         """Test JSON3 parsing handles invalid JSON and records as skipped"""
         fetcher = CaptionFetcher()
@@ -1383,6 +1469,7 @@ class TestCaptionFetcherFetchCaptions:
 
     @patch('subprocess.run')
     @patch('tempfile.TemporaryDirectory')
+    @pytest.mark.fast
     def test_fetch_captions_no_subtitles_available(self, mock_tempdir, mock_run):
         """Test fetch when no subtitles available"""
         fetcher = CaptionFetcher()
@@ -1403,6 +1490,7 @@ class TestCaptionFetcherFetchCaptions:
 
     @patch('subprocess.run')
     @patch('tempfile.TemporaryDirectory')
+    @pytest.mark.fast
     def test_fetch_captions_network_error(self, mock_tempdir, mock_run):
         """Test fetch with network error"""
         fetcher = CaptionFetcher()
@@ -1422,6 +1510,7 @@ class TestCaptionFetcherFetchCaptions:
 
     @patch('subprocess.run')
     @patch('tempfile.TemporaryDirectory')
+    @pytest.mark.fast
     def test_fetch_captions_timeout(self, mock_tempdir, mock_run):
         """Test fetch with subprocess timeout"""
         fetcher = CaptionFetcher()
@@ -1438,6 +1527,7 @@ class TestCaptionFetcherFetchCaptions:
         assert "Timeout" in str(exc_info.value)
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_fetch_captions_success(self, mock_run, tmp_path):
         """Test successful caption fetch"""
         fetcher = CaptionFetcher()
@@ -1488,6 +1578,7 @@ class TestCaptionFetcherCookies:
 
         assert args == []
 
+    @pytest.mark.fast
     def test_get_cookies_args_browser_cookies(self):
         """Test cookie args with browser cookies configured"""
         mock_config = Mock()
@@ -1500,6 +1591,7 @@ class TestCaptionFetcherCookies:
 
         assert args == ['--cookies-from-browser', 'chrome']
 
+    @pytest.mark.fast
     def test_get_cookies_args_file_cookies(self):
         """Test cookie args with file cookies configured"""
         mock_config = Mock()
@@ -1512,6 +1604,7 @@ class TestCaptionFetcherCookies:
 
         assert args == ['--cookies', '/path/to/cookies.txt']
 
+    @pytest.mark.fast
     def test_get_cookies_args_browser_preferred(self):
         """Test that browser cookies are preferred over file"""
         mock_config = Mock()
@@ -1547,6 +1640,7 @@ Test caption
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
 
+    @pytest.mark.fast
     def test_parse_subtitle_file_srt(self, tmp_path):
         """Test parsing SRT file from disk"""
         fetcher = CaptionFetcher()
@@ -1563,6 +1657,7 @@ Test caption
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
 
+    @pytest.mark.fast
     def test_parse_subtitle_file_json3(self, tmp_path):
         """Test parsing JSON3 file from disk"""
         fetcher = CaptionFetcher()
@@ -1584,6 +1679,7 @@ Test caption
         assert len(segments) == 1
         assert segments[0].text == "Test caption"
 
+    @pytest.mark.fast
     def test_parse_subtitle_file_unicode(self, tmp_path):
         """Test parsing file with unicode characters"""
         fetcher = CaptionFetcher()
@@ -1619,6 +1715,7 @@ class TestCaptionFetcherRealVideos:
     - Some videos may have auto-generated captions only
     """
 
+    @pytest.mark.fast
     def test_fetch_video_with_captions(self):
         """Test fetching captions from a known video with captions"""
         fetcher = CaptionFetcher()
@@ -1657,6 +1754,7 @@ class TestAvailableLanguage:
         assert lang.name == "English"
         assert lang.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_available_language_auto_generated(self):
         """Test auto-generated language"""
         lang = AvailableLanguage(
@@ -1685,6 +1783,7 @@ class TestListAvailableLanguages:
         mock_run.assert_not_called()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_timeout(self, mock_run):
         """Test listing with subprocess timeout"""
         fetcher = CaptionFetcher()
@@ -1697,6 +1796,7 @@ class TestListAvailableLanguages:
         assert "Timeout" in str(exc_info.value)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_manual_only(self, mock_run):
         """Test parsing manual subtitles section"""
         fetcher = CaptionFetcher()
@@ -1721,6 +1821,7 @@ fr        French               vtt, ttml, srv3, srv2, srv1, json3
         assert languages[2].code == "fr"
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_auto_only(self, mock_run):
         """Test parsing auto-generated captions section"""
         fetcher = CaptionFetcher()
@@ -1741,6 +1842,7 @@ es        Spanish (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert all(lang.is_auto_generated for lang in languages)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_mixed(self, mock_run):
         """Test parsing both manual and auto sections"""
         fetcher = CaptionFetcher()
@@ -1775,6 +1877,7 @@ es        Spanish (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert languages[2].is_auto_generated is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_empty(self, mock_run):
         """Test parsing output with no subtitles"""
         fetcher = CaptionFetcher()
@@ -1792,6 +1895,7 @@ es        Spanish (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert len(languages) == 0
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_list_languages_regional_codes(self, mock_run):
         """Test parsing regional language codes like en-GB"""
         fetcher = CaptionFetcher()
@@ -1838,6 +1942,7 @@ en        English              vtt, ttml, srv3, srv2, srv1, json3
         assert result is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_has_captions_returns_true_when_auto_available(self, mock_run):
         """Test has_captions returns True when only auto captions exist"""
         fetcher = CaptionFetcher()
@@ -1856,6 +1961,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert result is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_has_captions_returns_false_when_none_available(self, mock_run):
         """Test has_captions returns False when no captions exist"""
         fetcher = CaptionFetcher()
@@ -1873,6 +1979,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert result is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_has_captions_raises_on_invalid_id(self, mock_run):
         """Test has_captions raises CaptionFetchError for invalid video ID"""
         fetcher = CaptionFetcher()
@@ -1884,6 +1991,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         mock_run.assert_not_called()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_has_captions_raises_on_timeout(self, mock_run):
         """Test has_captions raises CaptionFetchError on timeout"""
         fetcher = CaptionFetcher()
@@ -1896,6 +2004,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert "Timeout" in str(exc_info.value)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_has_captions_with_multiple_languages(self, mock_run):
         """Test has_captions returns True when multiple languages available"""
         fetcher = CaptionFetcher()
@@ -1939,6 +2048,7 @@ class TestSelectBestLanguage:
         assert result.code == "es"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_select_preferred_auto_fallback(self):
         """Test falling back to auto when manual not available"""
         fetcher = CaptionFetcher()
@@ -1953,6 +2063,7 @@ class TestSelectBestLanguage:
         assert result.code == "es"
         assert result.is_auto_generated is True
 
+    @pytest.mark.fast
     def test_select_english_fallback(self):
         """Test falling back to English when preferred not available"""
         fetcher = CaptionFetcher()
@@ -1967,6 +2078,7 @@ class TestSelectBestLanguage:
         assert result.code == "en"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_select_english_fallback_auto(self):
         """Test falling back to English auto when English manual not available"""
         fetcher = CaptionFetcher()
@@ -1987,6 +2099,7 @@ class TestSelectBestLanguage:
         assert result.code == "en"
         assert result.is_auto_generated is True
 
+    @pytest.mark.fast
     def test_select_any_fallback(self):
         """Test falling back to any available when preferred and en not available"""
         fetcher = CaptionFetcher()
@@ -2005,6 +2118,7 @@ class TestSelectBestLanguage:
         assert result.code == "de"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_select_empty_list(self):
         """Test selecting from empty list returns None"""
         fetcher = CaptionFetcher()
@@ -2013,6 +2127,7 @@ class TestSelectBestLanguage:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_select_prefer_manual_over_auto(self):
         """Test that manual captions are preferred over auto"""
         fetcher = CaptionFetcher()
@@ -2029,6 +2144,7 @@ class TestSelectBestLanguage:
         assert result.code == "en"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_select_prefer_auto_when_configured(self):
         """Test preferring auto when prefer_manual=False"""
         fetcher = CaptionFetcher()
@@ -2047,6 +2163,7 @@ class TestSelectBestLanguage:
         # First en in sorted list is manual
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_select_no_english_fallback(self):
         """Test disabling English fallback"""
         fetcher = CaptionFetcher()
@@ -2065,6 +2182,7 @@ class TestSelectBestLanguage:
         # en comes before fr alphabetically
         assert result.code == "en"
 
+    @pytest.mark.fast
     def test_select_english_as_preferred_no_double_check(self):
         """Test that English as preferred doesn't check English twice"""
         fetcher = CaptionFetcher()
@@ -2100,6 +2218,7 @@ class TestFallbackLanguageChain:
         assert result.code == "pt"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_fallback_chain_second_available(self):
         """Test fallback chain moves to second when first unavailable"""
         fetcher = CaptionFetcher()
@@ -2117,6 +2236,7 @@ class TestFallbackLanguageChain:
         assert result.code == "fr"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_fallback_chain_skips_to_english(self):
         """Test fallback chain falls through to English when chain exhausted"""
         fetcher = CaptionFetcher()
@@ -2134,6 +2254,7 @@ class TestFallbackLanguageChain:
         assert result.code == "en"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_fallback_chain_includes_english_no_double_check(self):
         """Test English in fallback chain doesn't cause double-checking"""
         fetcher = CaptionFetcher()
@@ -2151,6 +2272,7 @@ class TestFallbackLanguageChain:
 
         assert result.code == "en"
 
+    @pytest.mark.fast
     def test_fallback_chain_empty_preserves_default_behavior(self):
         """Test empty fallback_languages preserves default behavior"""
         fetcher = CaptionFetcher()
@@ -2167,6 +2289,7 @@ class TestFallbackLanguageChain:
 
         assert result.code == "en"  # Default English fallback
 
+    @pytest.mark.fast
     def test_fallback_chain_to_any_when_all_fail(self):
         """Test falls back to any available when chain + English fail"""
         fetcher = CaptionFetcher()
@@ -2183,6 +2306,7 @@ class TestFallbackLanguageChain:
 
         assert result.code == "de"  # First in sorted list
 
+    @pytest.mark.fast
     def test_fallback_chain_prefers_manual_at_each_step(self):
         """Test prefer_manual tries manual first, then auto, before moving to next language"""
         fetcher = CaptionFetcher()
@@ -2205,6 +2329,7 @@ class TestFallbackLanguageChain:
         assert result.code == "pt"
         assert result.is_auto_generated is True
 
+    @pytest.mark.fast
     def test_fallback_chain_manual_available_in_chain(self):
         """Test prefer_manual selects manual when available at same position"""
         fetcher = CaptionFetcher()
@@ -2224,6 +2349,7 @@ class TestFallbackLanguageChain:
         assert result.code == "pt"
         assert result.is_auto_generated is False
 
+    @pytest.mark.fast
     def test_fallback_chain_accepts_auto_when_only_option(self):
         """Test auto captions selected when no manual available in chain"""
         fetcher = CaptionFetcher()
@@ -2241,6 +2367,7 @@ class TestFallbackLanguageChain:
         assert result.code == "pt"
         assert result.is_auto_generated is True
 
+    @pytest.mark.fast
     def test_fallback_chain_skips_duplicates(self):
         """Test fallback chain skips already-tried languages"""
         fetcher = CaptionFetcher()
@@ -2256,6 +2383,7 @@ class TestFallbackLanguageChain:
 
         assert result.code == "fr"
 
+    @pytest.mark.fast
     def test_fallback_chain_case_insensitive(self):
         """Test fallback chain handles case variations"""
         fetcher = CaptionFetcher()
@@ -2271,6 +2399,7 @@ class TestFallbackLanguageChain:
 
         assert result.code == "PT"
 
+    @pytest.mark.fast
     def test_fallback_chain_multilingual_project(self):
         """Test realistic multilingual project scenario"""
         fetcher = CaptionFetcher()
@@ -2303,6 +2432,7 @@ class TestGetFallbackLanguagesFromConfig:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_reads_fallback_languages_from_config(self):
         """Test reading fallback_languages from config"""
         mock_config = Mock()
@@ -2314,6 +2444,7 @@ class TestGetFallbackLanguagesFromConfig:
 
         assert result == ["es", "pt", "fr"]
 
+    @pytest.mark.fast
     def test_returns_empty_for_none(self):
         """Test returns empty list when config value is None"""
         mock_config = Mock()
@@ -2325,6 +2456,7 @@ class TestGetFallbackLanguagesFromConfig:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_returns_empty_for_non_list(self):
         """Test returns empty list when config value is not a list"""
         mock_config = Mock()
@@ -2336,6 +2468,7 @@ class TestGetFallbackLanguagesFromConfig:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_handles_attribute_error(self):
         """Test handles missing config attributes gracefully"""
         mock_config = Mock()
@@ -2361,6 +2494,7 @@ class TestGetPreferredLanguageFromConfig:
 
         assert result == "en"
 
+    @pytest.mark.fast
     def test_caption_first_preferred_language(self):
         """Test reading from caption_first.preferred_language"""
         mock_config = Mock()
@@ -2372,6 +2506,7 @@ class TestGetPreferredLanguageFromConfig:
 
         assert result == "es"
 
+    @pytest.mark.fast
     def test_transcription_language_fallback(self):
         """Test falling back to transcription.language"""
         mock_config = Mock()
@@ -2384,6 +2519,7 @@ class TestGetPreferredLanguageFromConfig:
 
         assert result == "fr"
 
+    @pytest.mark.fast
     def test_caption_first_takes_precedence(self):
         """Test caption_first.preferred_language takes precedence"""
         mock_config = Mock()
@@ -2415,6 +2551,7 @@ es        Spanish              vtt, ttml, srv3, srv2, srv1, json3
         assert len(result) == 2
         assert all(not lang.is_auto_generated for lang in result)
 
+    @pytest.mark.fast
     def test_parse_auto_captions_section(self):
         """Test parsing auto-generated captions section"""
         fetcher = CaptionFetcher()
@@ -2428,6 +2565,7 @@ en        English (auto-generated)          vtt, ttml, srv3, srv2, srv1, json3
         assert len(result) == 1
         assert result[0].is_auto_generated is True
 
+    @pytest.mark.fast
     def test_parse_mixed_output(self):
         """Test parsing output with both sections"""
         fetcher = CaptionFetcher()
@@ -2450,6 +2588,7 @@ de        German (auto-generated)           vtt, ttml, srv3, srv2, srv1, json3
         assert result[1].code == "de"
         assert result[1].is_auto_generated is True
 
+    @pytest.mark.fast
     def test_parse_output_with_stderr(self):
         """Test parsing with content in stderr"""
         fetcher = CaptionFetcher()
@@ -2464,6 +2603,7 @@ ja        Japanese             vtt, ttml, srv3, srv2, srv1, json3
         assert len(result) == 1
         assert result[0].code == "ja"
 
+    @pytest.mark.fast
     def test_parse_handles_header_line(self):
         """Test that header line is skipped"""
         fetcher = CaptionFetcher()
@@ -2478,6 +2618,7 @@ en        English              vtt, ttml
         assert len(result) == 1
         assert result[0].code == "en"
 
+    @pytest.mark.fast
     def test_parse_language_code_variations(self):
         """Test parsing various language code formats"""
         fetcher = CaptionFetcher()
@@ -2504,6 +2645,7 @@ class TestFetchCaptionsAutoLanguage:
 
     @patch.object(CaptionFetcher, 'fetch_captions')
     @patch.object(CaptionFetcher, 'list_available_languages')
+    @pytest.mark.fast
     def test_auto_language_selects_best(self, mock_list, mock_fetch):
         """Test auto language selection and fetch"""
         fetcher = CaptionFetcher()
@@ -2527,6 +2669,7 @@ class TestFetchCaptionsAutoLanguage:
         )
 
     @patch.object(CaptionFetcher, 'list_available_languages')
+    @pytest.mark.fast
     def test_auto_language_no_captions_available(self, mock_list):
         """Test error when no captions available"""
         fetcher = CaptionFetcher()
@@ -2540,6 +2683,7 @@ class TestFetchCaptionsAutoLanguage:
 
     @patch.object(CaptionFetcher, 'fetch_captions')
     @patch.object(CaptionFetcher, 'list_available_languages')
+    @pytest.mark.fast
     def test_auto_language_uses_preferred(self, mock_list, mock_fetch):
         """Test auto language uses preferred language override"""
         fetcher = CaptionFetcher()
@@ -2564,6 +2708,7 @@ class TestFetchCaptionsAutoLanguage:
 
     @patch.object(CaptionFetcher, 'fetch_captions')
     @patch.object(CaptionFetcher, 'list_available_languages')
+    @pytest.mark.fast
     def test_auto_language_respects_prefer_human_config(self, mock_list, mock_fetch):
         """Test auto language respects prefer_human_captions config"""
         mock_config = Mock()
@@ -2601,6 +2746,7 @@ class TestCaptionFetcherRetry:
         assert fetcher._max_retries == 3
         assert fetcher._retry_delay == 2.0
 
+    @pytest.mark.fast
     def test_fetcher_init_config_retry_settings(self):
         """Test retry settings from config"""
         mock_config = Mock()
@@ -2615,6 +2761,7 @@ class TestCaptionFetcherRetry:
         assert fetcher._timeout == 45
 
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_success_first_attempt(self, mock_fetch):
         """Test successful fetch on first attempt"""
         fetcher = CaptionFetcher()
@@ -2633,6 +2780,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_temporary_error_then_success(self, mock_fetch, mock_sleep):
         """Test retry on CaptionFetchError then success"""
         fetcher = CaptionFetcher()
@@ -2657,6 +2805,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_exponential_backoff(self, mock_fetch, mock_sleep):
         """Test exponential backoff timing"""
         fetcher = CaptionFetcher()
@@ -2683,6 +2832,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_all_retries_exhausted(self, mock_fetch, mock_sleep):
         """Test all retries fail raises CaptionFetchError"""
         fetcher = CaptionFetcher()
@@ -2698,6 +2848,7 @@ class TestCaptionFetcherRetry:
         assert mock_fetch.call_count == 3
 
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_unavailable_not_retried(self, mock_fetch):
         """Test CaptionUnavailableError is NOT retried"""
         fetcher = CaptionFetcher()
@@ -2713,6 +2864,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_unexpected_error_wrapped(self, mock_fetch, mock_sleep):
         """Test unexpected exceptions are wrapped in CaptionFetchError"""
         fetcher = CaptionFetcher()
@@ -2726,6 +2878,7 @@ class TestCaptionFetcherRetry:
         assert mock_fetch.call_count == 2  # Initial + 1 retry
 
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_fetch_with_retry_override_params(self, mock_fetch):
         """Test override parameters are used"""
         mock_config = Mock()
@@ -2753,6 +2906,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'list_available_languages')
+    @pytest.mark.fast
     def test_list_languages_with_retry(self, mock_list, mock_sleep):
         """Test list_available_languages_with_retry"""
         fetcher = CaptionFetcher()
@@ -2771,6 +2925,7 @@ class TestCaptionFetcherRetry:
         assert mock_list.call_count == 2
 
     @patch.object(CaptionFetcher, 'fetch_captions_auto_language')
+    @pytest.mark.fast
     def test_fetch_auto_language_with_retry(self, mock_fetch):
         """Test fetch_captions_auto_language_with_retry"""
         fetcher = CaptionFetcher()
@@ -2789,6 +2944,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_retry_logs_context(self, mock_fetch, mock_sleep, caplog):
         """Test retry logging includes video_id and error details"""
         import logging
@@ -2816,6 +2972,7 @@ class TestCaptionFetcherRetry:
 
     @patch('time.sleep')
     @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
     def test_retry_logs_final_failure(self, mock_fetch, mock_sleep, caplog):
         """Test final failure is logged with error level"""
         import logging
@@ -2832,6 +2989,7 @@ class TestCaptionFetcherRetry:
         assert len(error_logs) >= 1
         assert "test1234567" in error_logs[-1].message
 
+    @pytest.mark.fast
     def test_with_retry_zero_retries(self):
         """Test max_retries=0 means only one attempt"""
         fetcher = CaptionFetcher()
@@ -2874,6 +3032,7 @@ class TestCaptionCacheRetry:
         mock_fetch.assert_called_once()
 
     @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    @pytest.mark.fast
     def test_get_or_fetch_with_retry_cache_hit(self, mock_fetch, tmp_path):
         """Test get_or_fetch_with_retry uses cache on hit"""
         from src.caption_fetcher import CaptionCache
@@ -2899,6 +3058,7 @@ class TestCaptionCacheRetry:
         mock_fetch.assert_not_called()
 
     @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    @pytest.mark.fast
     def test_get_or_fetch_with_retry_passes_params(self, mock_fetch, tmp_path):
         """Test retry parameters are passed through"""
         from src.caption_fetcher import CaptionCache
@@ -2932,6 +3092,7 @@ class TestCaptionCacheRetry:
         )
 
     @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    @pytest.mark.fast
     def test_get_or_fetch_with_retry_propagates_unavailable(self, mock_fetch, tmp_path):
         """Test CaptionUnavailableError propagates from retry"""
         from src.caption_fetcher import CaptionCache
@@ -2948,6 +3109,7 @@ class TestCaptionCacheRetry:
             cache.get_or_fetch_with_retry(fetcher, "errtest1234", "en")
 
     @patch.object(CaptionFetcher, 'fetch_captions_with_retry')
+    @pytest.mark.fast
     def test_get_or_fetch_with_retry_propagates_fetch_error(self, mock_fetch, tmp_path):
         """Test CaptionFetchError propagates after retry exhaustion"""
         from src.caption_fetcher import CaptionCache
@@ -2988,6 +3150,7 @@ class TestCaptionMetrics:
         assert metrics.auto_generated_count == 0
         assert metrics.human_caption_count == 0
 
+    @pytest.mark.fast
     def test_record_fetch_attempt(self):
         """Test recording fetch attempts"""
         from src.caption_fetcher import CaptionMetrics
@@ -2998,6 +3161,7 @@ class TestCaptionMetrics:
 
         assert metrics.fetch_attempts == 2
 
+    @pytest.mark.fast
     def test_record_fetch_success(self):
         """Test recording successful fetches with distribution tracking"""
         from src.caption_fetcher import CaptionMetrics
@@ -3032,6 +3196,7 @@ class TestCaptionMetrics:
         assert metrics.language_distribution == {"en": 2, "es": 1}
         assert metrics.quality_distribution == {"high": 2, "medium": 1}
 
+    @pytest.mark.fast
     def test_record_fetch_failure(self):
         """Test recording fetch failures"""
         from src.caption_fetcher import CaptionMetrics
@@ -3044,6 +3209,7 @@ class TestCaptionMetrics:
         assert metrics.failures == 3
         assert metrics.quality_distribution.get("unavailable") == 3
 
+    @pytest.mark.fast
     def test_record_cache_hit(self):
         """Test recording cache hits"""
         from src.caption_fetcher import CaptionMetrics
@@ -3063,6 +3229,7 @@ class TestCaptionMetrics:
         assert metrics.language_distribution == {"en": 1}
         assert metrics.quality_distribution == {"high": 1}
 
+    @pytest.mark.fast
     def test_total_processed(self):
         """Test total_processed property"""
         from src.caption_fetcher import CaptionMetrics
@@ -3074,6 +3241,7 @@ class TestCaptionMetrics:
 
         assert metrics.total_processed == 3
 
+    @pytest.mark.fast
     def test_success_rate(self):
         """Test success_rate calculation"""
         from src.caption_fetcher import CaptionMetrics
@@ -3085,6 +3253,7 @@ class TestCaptionMetrics:
 
         assert metrics.success_rate == 66.7  # 2/3 = 66.7%
 
+    @pytest.mark.fast
     def test_success_rate_no_attempts(self):
         """Test success_rate with no attempts"""
         from src.caption_fetcher import CaptionMetrics
@@ -3093,6 +3262,7 @@ class TestCaptionMetrics:
 
         assert metrics.success_rate == 0.0
 
+    @pytest.mark.fast
     def test_cache_hit_rate(self):
         """Test cache_hit_rate calculation"""
         from src.caption_fetcher import CaptionMetrics
@@ -3106,6 +3276,7 @@ class TestCaptionMetrics:
         # 2 cache hits out of 4 total = 50%
         assert metrics.cache_hit_rate == 50.0
 
+    @pytest.mark.fast
     def test_cache_hit_rate_no_processed(self):
         """Test cache_hit_rate with no processed videos"""
         from src.caption_fetcher import CaptionMetrics
@@ -3114,6 +3285,7 @@ class TestCaptionMetrics:
 
         assert metrics.cache_hit_rate == 0.0
 
+    @pytest.mark.fast
     def test_summary(self):
         """Test summary generation"""
         from src.caption_fetcher import CaptionMetrics
@@ -3138,6 +3310,7 @@ class TestCaptionMetrics:
         assert "Languages:" in summary
         assert "Quality:" in summary
 
+    @pytest.mark.fast
     def test_to_dict(self):
         """Test serialization to dictionary"""
         from src.caption_fetcher import CaptionMetrics
@@ -3157,6 +3330,7 @@ class TestCaptionMetrics:
         assert result['auto_generated_count'] == 0
         assert result['human_caption_count'] == 1
 
+    @pytest.mark.fast
     def test_from_dict(self):
         """Test deserialization from dictionary"""
         from src.caption_fetcher import CaptionMetrics
@@ -3185,6 +3359,7 @@ class TestCaptionMetrics:
         assert metrics.auto_generated_count == 3
         assert metrics.human_caption_count == 4
 
+    @pytest.mark.fast
     def test_from_dict_empty(self):
         """Test from_dict with empty data"""
         from src.caption_fetcher import CaptionMetrics
@@ -3194,6 +3369,7 @@ class TestCaptionMetrics:
         assert metrics.fetch_attempts == 0
         assert metrics.successes == 0
 
+    @pytest.mark.fast
     def test_from_dict_none(self):
         """Test from_dict with None"""
         from src.caption_fetcher import CaptionMetrics
@@ -3203,6 +3379,7 @@ class TestCaptionMetrics:
         assert metrics.fetch_attempts == 0
         assert metrics.successes == 0
 
+    @pytest.mark.fast
     def test_merge(self):
         """Test merging two CaptionMetrics instances"""
         from src.caption_fetcher import CaptionMetrics
@@ -3225,6 +3402,7 @@ class TestCaptionMetrics:
         assert metrics1.language_distribution == {"en": 2, "es": 1}
         assert metrics1.quality_distribution == {"high": 2, "medium": 1, "unavailable": 1}
 
+    @pytest.mark.fast
     def test_clear(self):
         """Test clearing all metrics"""
         from src.caption_fetcher import CaptionMetrics
@@ -3245,6 +3423,7 @@ class TestCaptionMetrics:
         assert metrics.auto_generated_count == 0
         assert metrics.human_caption_count == 0
 
+    @pytest.mark.fast
     def test_roundtrip_serialization(self):
         """Test that to_dict/from_dict preserves all data"""
         from src.caption_fetcher import CaptionMetrics
@@ -3290,6 +3469,7 @@ class TestCaptionMetricsPreCheck:
         assert metrics.pre_check_available == 0
         assert metrics.pre_check_unavailable == 0
 
+    @pytest.mark.fast
     def test_record_pre_check_available(self):
         """Test recording pre-check with captions available (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3302,6 +3482,7 @@ class TestCaptionMetricsPreCheck:
         assert metrics.pre_check_available == 3
         assert metrics.pre_check_unavailable == 0
 
+    @pytest.mark.fast
     def test_record_pre_check_unavailable(self):
         """Test recording pre-check with captions unavailable (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3313,6 +3494,7 @@ class TestCaptionMetricsPreCheck:
         assert metrics.pre_check_available == 0
         assert metrics.pre_check_unavailable == 2
 
+    @pytest.mark.fast
     def test_record_pre_check_mixed(self):
         """Test recording mixed pre-check results (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3327,6 +3509,7 @@ class TestCaptionMetricsPreCheck:
         assert metrics.pre_check_available == 3
         assert metrics.pre_check_unavailable == 2
 
+    @pytest.mark.fast
     def test_pre_check_in_summary(self):
         """Test pre-check stats appear in summary (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3340,6 +3523,7 @@ class TestCaptionMetricsPreCheck:
 
         assert "Pre-check: 2 available, 1 unavailable" in summary
 
+    @pytest.mark.fast
     def test_pre_check_not_in_summary_when_zero(self):
         """Test pre-check stats not shown in summary when all zero (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3349,6 +3533,7 @@ class TestCaptionMetricsPreCheck:
 
         assert "Pre-check" not in summary
 
+    @pytest.mark.fast
     def test_pre_check_in_to_dict(self):
         """Test pre-check stats serialized to dict (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3362,6 +3547,7 @@ class TestCaptionMetricsPreCheck:
         assert data['pre_check_available'] == 1
         assert data['pre_check_unavailable'] == 1
 
+    @pytest.mark.fast
     def test_pre_check_restored_from_dict(self):
         """Test pre-check stats restored from dict (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3377,6 +3563,7 @@ class TestCaptionMetricsPreCheck:
         assert restored.pre_check_available == 2
         assert restored.pre_check_unavailable == 1
 
+    @pytest.mark.fast
     def test_pre_check_merge(self):
         """Test pre-check stats merged correctly (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3395,6 +3582,7 @@ class TestCaptionMetricsPreCheck:
         assert metrics1.pre_check_available == 3  # 1 + 2
         assert metrics1.pre_check_unavailable == 2  # 1 + 1
 
+    @pytest.mark.fast
     def test_pre_check_clear(self):
         """Test pre-check stats cleared correctly (US-008)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3426,6 +3614,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution == {}
         assert metrics.low_coverage_videos == []
 
+    @pytest.mark.fast
     def test_record_fetch_success_with_high_coverage(self):
         """Test high coverage (>80%) tracking (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3444,6 +3633,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution.get('high') == 1
         assert 'vid1' not in metrics.low_coverage_videos
 
+    @pytest.mark.fast
     def test_record_fetch_success_with_medium_coverage(self):
         """Test medium coverage (50-80%) tracking (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3462,6 +3652,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution.get('medium') == 1
         assert 'vid1' not in metrics.low_coverage_videos
 
+    @pytest.mark.fast
     def test_record_fetch_success_with_low_coverage(self):
         """Test low coverage (<50%) tracking and warning (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3480,6 +3671,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution.get('low') == 1
         assert 'vid1' in metrics.low_coverage_videos
 
+    @pytest.mark.fast
     def test_record_fetch_success_without_coverage(self):
         """Test backward compatibility when coverage_ratio is None (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3498,6 +3690,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.low_coverage_videos == []
         assert metrics.successes == 1
 
+    @pytest.mark.fast
     def test_record_cache_hit_with_coverage(self):
         """Test cache hit with coverage tracking (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3516,6 +3709,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution.get('high') == 1
         assert 'vid1' not in metrics.low_coverage_videos
 
+    @pytest.mark.fast
     def test_record_cache_hit_low_coverage(self):
         """Test cache hit with low coverage warning (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3534,6 +3728,7 @@ class TestCaptionMetricsCoverage:
         assert metrics.coverage_distribution.get('low') == 1
         assert 'vid1' in metrics.low_coverage_videos
 
+    @pytest.mark.fast
     def test_classify_coverage_high(self):
         """Test _classify_coverage returns 'high' for >80% (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3542,6 +3737,7 @@ class TestCaptionMetricsCoverage:
         assert CaptionMetrics._classify_coverage(0.95) == 'high'
         assert CaptionMetrics._classify_coverage(1.0) == 'high'
 
+    @pytest.mark.fast
     def test_classify_coverage_medium(self):
         """Test _classify_coverage returns 'medium' for 50-80% (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3550,6 +3746,7 @@ class TestCaptionMetricsCoverage:
         assert CaptionMetrics._classify_coverage(0.65) == 'medium'
         assert CaptionMetrics._classify_coverage(0.80) == 'medium'
 
+    @pytest.mark.fast
     def test_classify_coverage_low(self):
         """Test _classify_coverage returns 'low' for <50% (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3558,6 +3755,7 @@ class TestCaptionMetricsCoverage:
         assert CaptionMetrics._classify_coverage(0.25) == 'low'
         assert CaptionMetrics._classify_coverage(0.49) == 'low'
 
+    @pytest.mark.fast
     def test_summary_includes_coverage(self):
         """Test summary() includes coverage distribution (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3575,6 +3773,7 @@ class TestCaptionMetricsCoverage:
         assert "low: 1" in summary
         assert "Low coverage: 1 videos" in summary
 
+    @pytest.mark.fast
     def test_to_dict_includes_coverage(self):
         """Test to_dict() includes coverage fields (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3591,6 +3790,7 @@ class TestCaptionMetricsCoverage:
         assert 'low_coverage_videos' in data
         assert 'vid2' in data['low_coverage_videos']
 
+    @pytest.mark.fast
     def test_from_dict_restores_coverage(self):
         """Test from_dict() restores coverage fields (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3605,6 +3805,7 @@ class TestCaptionMetricsCoverage:
         assert restored.coverage_distribution == original.coverage_distribution
         assert restored.low_coverage_videos == original.low_coverage_videos
 
+    @pytest.mark.fast
     def test_merge_includes_coverage(self):
         """Test merge() combines coverage distributions (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3621,6 +3822,7 @@ class TestCaptionMetricsCoverage:
         assert metrics1.coverage_distribution.get('low') == 1
         assert 'vid2' in metrics1.low_coverage_videos
 
+    @pytest.mark.fast
     def test_clear_resets_coverage(self):
         """Test clear() resets coverage fields (US-004)"""
         from src.caption_fetcher import CaptionMetrics
@@ -3672,6 +3874,7 @@ class TestCaptionMetricsThreadSafety:
         assert metrics.language_distribution['en'] == expected_total
         assert metrics.auto_generated_count + metrics.human_caption_count == expected_total
 
+    @pytest.mark.fast
     def test_concurrent_mixed_operations(self):
         """Test thread-safety with mixed record operations."""
         import threading
@@ -3729,6 +3932,7 @@ class TestBatchCaptionFetch:
         mock_fetch.assert_not_called()
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_single_success(self, mock_fetch):
         """Test batch fetch with single successful video."""
         from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
@@ -3750,6 +3954,7 @@ class TestBatchCaptionFetch:
         mock_fetch.assert_called_once()
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_with_failures(self, mock_fetch):
         """Test batch fetch with mixed success and failures."""
         from src.caption_fetcher import (
@@ -3780,6 +3985,7 @@ class TestBatchCaptionFetch:
         assert results['error12abc'].get('error') is True
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_metrics_tracking(self, mock_fetch):
         """Test that batch fetch correctly updates metrics."""
         from src.caption_fetcher import (
@@ -3814,6 +4020,7 @@ class TestBatchCaptionFetch:
         assert metrics.total_segments == 2  # 2 successes, 1 segment each
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_progress_callback(self, mock_fetch):
         """Test that progress callback is invoked correctly."""
         from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
@@ -3845,6 +4052,7 @@ class TestBatchCaptionFetch:
         assert ('def456test2', 'success') in statuses
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_skip_video_ids(self, mock_fetch):
         """Test that skip_video_ids are not fetched."""
         from src.caption_fetcher import CaptionFetcher, CaptionResult, CaptionSegment
@@ -3901,6 +4109,7 @@ class TestBatchCaptionFetch:
         assert elapsed < 0.6, f"Parallel fetch took too long: {elapsed}s"
 
     @patch('src.caption_fetcher.CaptionFetcher.fetch_captions_auto_language_with_retry')
+    @pytest.mark.fast
     def test_batch_fetch_uses_config_max_workers(self, mock_fetch):
         """Test that max_workers defaults to config value."""
         from unittest.mock import MagicMock
@@ -3922,6 +4131,7 @@ class TestBatchCaptionFetch:
 
         assert 'test12abcde' in results
 
+    @pytest.mark.fast
     def test_batch_fetch_parallel_faster_than_sequential(self):
         """US-001 acceptance: parallel execution faster than sequential for 10+ videos."""
         import time
@@ -3993,6 +4203,7 @@ class TestLiveStreamDetection:
         assert '--skip-download' in call_args
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_returns_true_for_was_live(self, mock_run):
         """Test detection of past live stream (was_live=True)."""
         mock_run.return_value = Mock(
@@ -4011,6 +4222,7 @@ class TestLiveStreamDetection:
         assert result is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_returns_false_for_regular_video(self, mock_run):
         """Test that regular videos return False."""
         mock_run.return_value = Mock(
@@ -4029,6 +4241,7 @@ class TestLiveStreamDetection:
         assert result is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_returns_false_on_metadata_error(self, mock_run):
         """Test that metadata fetch errors return False (don't block)."""
         mock_run.return_value = Mock(
@@ -4044,6 +4257,7 @@ class TestLiveStreamDetection:
         assert result is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_returns_false_on_invalid_json(self, mock_run):
         """Test that invalid JSON returns False."""
         mock_run.return_value = Mock(
@@ -4058,6 +4272,7 @@ class TestLiveStreamDetection:
         assert result is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_returns_false_on_timeout(self, mock_run):
         """Test that timeout returns False."""
         mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=30)
@@ -4067,6 +4282,7 @@ class TestLiveStreamDetection:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_is_live_stream_returns_false_for_invalid_video_id(self):
         """Test that invalid video IDs return False."""
         fetcher = CaptionFetcher()
@@ -4076,6 +4292,7 @@ class TestLiveStreamDetection:
         assert fetcher.is_live_stream('toolongvideoid') is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_is_live_stream_missing_fields_returns_false(self, mock_run):
         """Test that missing is_live/was_live fields return False."""
         mock_run.return_value = Mock(
@@ -4109,6 +4326,7 @@ class TestCaptionMetricsSkippedLiveStreams:
         assert metrics.skipped_live_streams == 1
         assert metrics.quality_distribution.get('skipped') == 1
 
+    @pytest.mark.fast
     def test_skipped_live_streams_in_total_processed(self):
         """Test that skipped live streams are included in total_processed."""
         from src.caption_fetcher import CaptionMetrics
@@ -4120,6 +4338,7 @@ class TestCaptionMetricsSkippedLiveStreams:
 
         assert metrics.total_processed == 3
 
+    @pytest.mark.fast
     def test_skipped_live_streams_in_summary(self):
         """Test that skipped live streams appear in summary."""
         from src.caption_fetcher import CaptionMetrics
@@ -4132,6 +4351,7 @@ class TestCaptionMetricsSkippedLiveStreams:
 
         assert '2 live streams skipped' in summary
 
+    @pytest.mark.fast
     def test_skipped_live_streams_to_dict(self):
         """Test serialization includes skipped_live_streams."""
         from src.caption_fetcher import CaptionMetrics
@@ -4143,6 +4363,7 @@ class TestCaptionMetricsSkippedLiveStreams:
 
         assert data['skipped_live_streams'] == 1
 
+    @pytest.mark.fast
     def test_skipped_live_streams_from_dict(self):
         """Test deserialization includes skipped_live_streams."""
         from src.caption_fetcher import CaptionMetrics
@@ -4152,6 +4373,7 @@ class TestCaptionMetricsSkippedLiveStreams:
 
         assert metrics.skipped_live_streams == 5
 
+    @pytest.mark.fast
     def test_skipped_live_streams_merge(self):
         """Test merging metrics combines skipped_live_streams."""
         from src.caption_fetcher import CaptionMetrics
@@ -4167,6 +4389,7 @@ class TestCaptionMetricsSkippedLiveStreams:
 
         assert metrics1.skipped_live_streams == 3
 
+    @pytest.mark.fast
     def test_skipped_live_streams_clear(self):
         """Test clear resets skipped_live_streams."""
         from src.caption_fetcher import CaptionMetrics
@@ -4189,6 +4412,7 @@ class TestCaptionFormatPreference:
 
         assert fetcher._preferred_formats == ["json3", "vtt", "srt"]
 
+    @pytest.mark.fast
     def test_config_preferred_formats(self):
         """Test preferred formats from config."""
         mock_config = Mock()
@@ -4201,6 +4425,7 @@ class TestCaptionFormatPreference:
 
         assert fetcher._preferred_formats == ["vtt", "srt"]
 
+    @pytest.mark.fast
     def test_config_empty_formats_uses_default(self):
         """Test that empty preferred_formats uses default."""
         mock_config = Mock()
@@ -4214,6 +4439,7 @@ class TestCaptionFormatPreference:
         assert fetcher._preferred_formats == ["json3", "vtt", "srt"]
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_fetch_tries_formats_in_order(self, mock_run, tmp_path):
         """Test that formats are tried in preference order."""
         fetcher = CaptionFetcher()
@@ -4269,6 +4495,7 @@ class TestCaptionFormatPreference:
         assert json3_idx < vtt_idx
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_fetch_fallback_on_parse_error(self, mock_run, tmp_path):
         """Test fallback to next format on parse error (not just unavailable)."""
         fetcher = CaptionFetcher()
@@ -4310,6 +4537,7 @@ class TestCaptionFormatPreference:
         assert result.format_source == "vtt"
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_fetch_uses_first_successful_format(self, mock_run, tmp_path):
         """Test that first successfully parsed format is used."""
         fetcher = CaptionFetcher()
@@ -4343,6 +4571,7 @@ class TestCaptionFormatPreference:
         assert result.format_source == "json3"
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_fetch_logs_format_used(self, mock_run, tmp_path, caplog):
         """Test that the used format is logged."""
         import logging
@@ -4374,6 +4603,7 @@ class TestCaptionFormatPreference:
         assert any("Using vtt format" in record.message for record in caplog.records)
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_all_formats_exhausted_raises_error(self, mock_run, tmp_path):
         """Test that error is raised when all formats fail."""
         fetcher = CaptionFetcher()
@@ -4410,6 +4640,7 @@ class TestCaptionFormatPreference:
             # Error message should indicate timeout
             assert "Connection timeout" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_custom_format_order(self):
         """Test custom format order preference."""
         mock_config = Mock()
@@ -4423,6 +4654,7 @@ class TestCaptionFormatPreference:
         assert fetcher._preferred_formats == ["srt", "vtt", "json3"]
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_single_format_preference(self, mock_run, tmp_path):
         """Test with only one format in preference list."""
         fetcher = CaptionFetcher()
@@ -4449,6 +4681,7 @@ class TestCaptionFormatPreference:
         assert result.format_source == "vtt"
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_format_preference_with_unavailable_error(self, mock_run, tmp_path):
         """Test that CaptionUnavailableError triggers next format."""
         fetcher = CaptionFetcher()
@@ -4506,6 +4739,7 @@ class TestLanguageConfigValidation:
     4. ConfigValidationError exception with suggestions
     """
 
+    @pytest.mark.fast
     def test_is_valid_language_code_valid_codes(self):
         """Test that valid ISO 639-1 codes are accepted."""
         from src.caption_fetcher import is_valid_language_code
@@ -4514,6 +4748,7 @@ class TestLanguageConfigValidation:
         for code in valid_codes:
             assert is_valid_language_code(code), f"{code} should be valid"
 
+    @pytest.mark.fast
     def test_is_valid_language_code_case_insensitive(self):
         """Test that language codes are validated case-insensitively."""
         from src.caption_fetcher import is_valid_language_code
@@ -4524,6 +4759,7 @@ class TestLanguageConfigValidation:
         assert is_valid_language_code('es')
         assert is_valid_language_code('ES')
 
+    @pytest.mark.fast
     def test_is_valid_language_code_invalid_codes(self):
         """Test that invalid codes are rejected."""
         from src.caption_fetcher import is_valid_language_code
@@ -4539,6 +4775,7 @@ class TestLanguageConfigValidation:
         for code in invalid_codes:
             assert not is_valid_language_code(code), f"{code} should be invalid"
 
+    @pytest.mark.fast
     def test_is_valid_language_code_non_strings(self):
         """Test that non-string inputs return False."""
         from src.caption_fetcher import is_valid_language_code
@@ -4548,6 +4785,7 @@ class TestLanguageConfigValidation:
         assert not is_valid_language_code(['en'])
         assert not is_valid_language_code({'code': 'en'})
 
+    @pytest.mark.fast
     def test_validate_language_config_valid(self):
         """Test that valid config passes validation."""
         from src.caption_fetcher import validate_language_config
@@ -4556,6 +4794,7 @@ class TestLanguageConfigValidation:
         issues = validate_language_config('en', ['es', 'pt', 'fr'])
         assert issues == []
 
+    @pytest.mark.fast
     def test_validate_language_config_empty_fallback(self):
         """Test that empty fallback list is valid."""
         from src.caption_fetcher import validate_language_config
@@ -4563,6 +4802,7 @@ class TestLanguageConfigValidation:
         issues = validate_language_config('en', [])
         assert issues == []
 
+    @pytest.mark.fast
     def test_validate_language_config_invalid_preferred(self):
         """Test that invalid preferred_language raises ConfigValidationError."""
         from src.caption_fetcher import validate_language_config, ConfigValidationError
@@ -4576,6 +4816,7 @@ class TestLanguageConfigValidation:
         assert 'ISO 639-1' in error.reason
         assert error.suggestion  # Has a suggestion
 
+    @pytest.mark.fast
     def test_validate_language_config_invalid_preferred_three_letter(self):
         """Test that 3-letter codes (ISO 639-2) are rejected."""
         from src.caption_fetcher import validate_language_config, ConfigValidationError
@@ -4587,6 +4828,7 @@ class TestLanguageConfigValidation:
         assert error.field == 'preferred_language'
         assert 'eng' in str(error.value)
 
+    @pytest.mark.fast
     def test_validate_language_config_invalid_fallback_code(self):
         """Test that invalid fallback language raises ConfigValidationError."""
         from src.caption_fetcher import validate_language_config, ConfigValidationError
@@ -4599,6 +4841,7 @@ class TestLanguageConfigValidation:
         assert error.value == 'invalid'
         assert 'position 1' in error.reason
 
+    @pytest.mark.fast
     def test_validate_language_config_duplicate_in_fallback(self):
         """Test that duplicate fallback languages raises ConfigValidationError."""
         from src.caption_fetcher import validate_language_config, ConfigValidationError
@@ -4611,6 +4854,7 @@ class TestLanguageConfigValidation:
         assert 'es' in str(error.value)
         assert 'multiple times' in error.reason
 
+    @pytest.mark.fast
     def test_validate_language_config_duplicate_case_insensitive(self):
         """Test that duplicates are detected case-insensitively."""
         from src.caption_fetcher import validate_language_config, ConfigValidationError
@@ -4621,6 +4865,7 @@ class TestLanguageConfigValidation:
         error = exc_info.value
         assert 'multiple times' in error.reason
 
+    @pytest.mark.fast
     def test_validate_language_config_preferred_in_fallback_warns(self):
         """Test that preferred_language in fallback produces warning, not error."""
         from src.caption_fetcher import validate_language_config
@@ -4632,6 +4877,7 @@ class TestLanguageConfigValidation:
         assert 'Warning' in issues[0]
         assert 'redundant' in issues[0]
 
+    @pytest.mark.fast
     def test_validate_language_config_no_raise_mode(self):
         """Test validation with raise_on_error=False returns all issues."""
         from src.caption_fetcher import validate_language_config
@@ -4643,6 +4889,7 @@ class TestLanguageConfigValidation:
         assert any('xyz' in issue for issue in issues)
         assert any('invalid' in issue for issue in issues)
 
+    @pytest.mark.fast
     def test_config_validation_error_message_format(self):
         """Test that ConfigValidationError has well-formatted message."""
         from src.caption_fetcher import ConfigValidationError
@@ -4660,6 +4907,7 @@ class TestLanguageConfigValidation:
         assert 'not valid' in message
         assert 'try something else' in message
 
+    @pytest.mark.fast
     def test_config_validation_error_attributes(self):
         """Test ConfigValidationError has expected attributes."""
         from src.caption_fetcher import ConfigValidationError
@@ -4676,6 +4924,7 @@ class TestLanguageConfigValidation:
         assert error.reason == 'invalid code'
         assert error.suggestion == 'use en, es, fr'
 
+    @pytest.mark.fast
     def test_iso_639_1_codes_coverage(self):
         """Test that ISO 639-1 code set includes common languages."""
         from src.caption_fetcher import ISO_639_1_CODES
@@ -4688,6 +4937,7 @@ class TestLanguageConfigValidation:
         for code in common_codes:
             assert code in ISO_639_1_CODES, f"Common code {code} missing from set"
 
+    @pytest.mark.fast
     def test_iso_639_1_codes_count(self):
         """Test that we have approximately the right number of ISO 639-1 codes."""
         from src.caption_fetcher import ISO_639_1_CODES
@@ -4737,6 +4987,7 @@ Valid segment {i}
         # VTT doesn't record non-matching patterns as skipped (they're just skipped lines)
         # The test verifies graceful handling - 95 valid segments are still parsed
 
+    @pytest.mark.fast
     def test_srt_100_segments_5_corrupted_returns_95_valid(self):
         """Test SRT with 100 segments and 5 corrupted still returns 95 valid segments."""
         fetcher = CaptionFetcher()
@@ -4775,6 +5026,7 @@ Valid segment {i}
         assert result.has_skipped
         assert len(result.skipped_segments) == 5
 
+    @pytest.mark.fast
     def test_json3_100_events_5_missing_fields_returns_95_valid(self):
         """Test JSON3 with 100 events and 5 missing required fields returns 95 valid."""
         fetcher = CaptionFetcher()
@@ -4810,6 +5062,7 @@ Valid segment {i}
         assert result.has_skipped
         assert len(result.skipped_segments) == 5
 
+    @pytest.mark.fast
     def test_partial_recovery_flag_set_when_segments_skipped(self):
         """Test partial_recovery flag is True when segments were skipped but result is usable."""
         fetcher = CaptionFetcher()
@@ -4834,6 +5087,7 @@ Also valid
         assert result.has_skipped
         assert len(result.skipped_segments) == 1
 
+    @pytest.mark.fast
     def test_skipped_segments_include_index_and_reason(self):
         """Test skipped_segments contains tuples of (index, reason)."""
         fetcher = CaptionFetcher()
@@ -4865,6 +5119,7 @@ Also valid
         assert result.skipped_segments[1][0] == 2
         assert "tStartMs" in result.skipped_segments[1][1]
 
+    @pytest.mark.fast
     def test_caption_result_skipped_segments_count_property(self):
         """Test CaptionResult.skipped_segments_count backwards compatibility."""
         result = CaptionResult(
@@ -4877,6 +5132,7 @@ Also valid
         # The property should return count
         assert result.skipped_segments_count == 3
 
+    @pytest.mark.fast
     def test_caption_result_partial_recovery_false_when_no_skips(self):
         """Test partial_recovery is False when no segments were skipped."""
         result = CaptionResult(
@@ -4889,6 +5145,7 @@ Also valid
         assert result.partial_recovery is False
         assert result.skipped_segments_count == 0
 
+    @pytest.mark.fast
     def test_parse_result_success_rate(self):
         """Test ParseResult.success_rate calculation."""
         result = ParseResult(
@@ -4899,6 +5156,7 @@ Also valid
 
         assert result.success_rate == 0.95
 
+    @pytest.mark.fast
     def test_parse_result_success_rate_empty(self):
         """Test ParseResult.success_rate with zero attempts."""
         result = ParseResult(segments=[], skipped_segments=[], total_attempted=0)
@@ -4925,6 +5183,7 @@ class TestCaptionErrorCategory:
         assert hasattr(CaptionErrorCategory, 'UNAVAILABLE')
         assert hasattr(CaptionErrorCategory, 'RATE_LIMIT')
 
+    @pytest.mark.fast
     def test_categorize_unavailable_error(self):
         """Test that CaptionUnavailableError is categorized as UNAVAILABLE."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4934,6 +5193,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.UNAVAILABLE
 
+    @pytest.mark.fast
     def test_categorize_timeout_error(self):
         """Test that TimeoutError is categorized as TIMEOUT."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4943,6 +5203,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.TIMEOUT
 
+    @pytest.mark.fast
     def test_categorize_json_decode_error(self):
         """Test that JSONDecodeError is categorized as PARSE."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4952,6 +5213,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.PARSE
 
+    @pytest.mark.fast
     def test_categorize_rate_limit_by_reason(self):
         """Test that 429 errors are categorized as RATE_LIMIT."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4961,6 +5223,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.RATE_LIMIT
 
+    @pytest.mark.fast
     def test_categorize_network_error_by_reason(self):
         """Test that connection errors are categorized as NETWORK."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4970,6 +5233,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.NETWORK
 
+    @pytest.mark.fast
     def test_categorize_parse_error_by_reason(self):
         """Test that parse errors are categorized as PARSE."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -4979,6 +5243,7 @@ class TestCaptionErrorCategory:
 
         assert category == CaptionErrorCategory.PARSE
 
+    @pytest.mark.fast
     def test_categorize_unknown_defaults_to_network(self):
         """Test that unknown errors default to NETWORK (most likely to benefit from retry)."""
         from src.caption_fetcher import CaptionErrorCategory, categorize_caption_error
@@ -5003,6 +5268,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.UNAVAILABLE] == 0
         assert DEFAULT_RETRY_BUDGETS[CaptionErrorCategory.RATE_LIMIT] == 2
 
+    @pytest.mark.fast
     def test_get_retry_budget_from_config(self):
         """Test that _get_retry_budget reads from config correctly."""
         from src.caption_fetcher import CaptionFetcher, CaptionErrorCategory
@@ -5023,6 +5289,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         assert fetcher._get_retry_budget(CaptionErrorCategory.TIMEOUT) == 1
         assert fetcher._get_retry_budget(CaptionErrorCategory.PARSE) == 0
 
+    @pytest.mark.fast
     def test_get_retry_budget_falls_back_to_default(self):
         """Test that _get_retry_budget falls back to defaults when config is missing."""
         from src.caption_fetcher import CaptionFetcher, CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
@@ -5032,6 +5299,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         for category in CaptionErrorCategory:
             assert fetcher._get_retry_budget(category) == DEFAULT_RETRY_BUDGETS.get(category, 0)
 
+    @pytest.mark.fast
     def test_parse_errors_skip_retries(self):
         """Test that parse errors with budget 1 don't retry (one attempt only)."""
         from src.caption_fetcher import CaptionFetcher, CaptionFetchError, CaptionMetrics
@@ -5061,6 +5329,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         # attempt 2 fails, attempts_for_category=2, 2 > 1 is True, stop
         assert len(attempts) == 2
 
+    @pytest.mark.fast
     def test_network_errors_use_full_budget(self):
         """Test that network errors use the full retry budget."""
         from src.caption_fetcher import CaptionFetcher, CaptionFetchError, CaptionMetrics
@@ -5087,6 +5356,7 @@ class TestCaptionErrorCategoryRetryBudgets:
         # With network budget 3: attempts 1,2,3 retry, attempt 4 stops (4 > 3)
         assert len(attempts) == 4
 
+    @pytest.mark.fast
     def test_unavailable_errors_never_retry(self):
         """Test that unavailable errors (budget 0) never retry."""
         from src.caption_fetcher import CaptionFetcher, CaptionMetrics
@@ -5130,6 +5400,7 @@ class TestCaptionMetricsErrorCategory:
         assert metrics.error_category_counts.get("NETWORK") == 2
         assert metrics.error_category_counts.get("PARSE") == 1
 
+    @pytest.mark.fast
     def test_get_error_category_summary_empty(self):
         """Test summary when no errors recorded."""
         from src.caption_fetcher import CaptionMetrics
@@ -5142,6 +5413,7 @@ class TestCaptionMetricsErrorCategory:
         assert summary['counts'] == {}
         assert summary['category_rates'] == {}
 
+    @pytest.mark.fast
     def test_get_error_category_summary_with_data(self):
         """Test summary with recorded errors."""
         from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
@@ -5167,6 +5439,7 @@ class TestCaptionMetricsErrorCategory:
         assert summary['category_rates']['PARSE'] == 30.0
         assert summary['category_rates']['TIMEOUT'] == 20.0
 
+    @pytest.mark.fast
     def test_error_category_tracking_thread_safe(self):
         """Test that error category tracking is thread-safe."""
         from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
@@ -5219,6 +5492,7 @@ class TestCaptionMetricsExportJson:
         # Return value should match file content
         assert result == data
 
+    @pytest.mark.fast
     def test_export_json_contains_schema_version(self, tmp_path):
         """Test that export includes schema version"""
         from src.caption_fetcher import CaptionMetrics
@@ -5230,6 +5504,7 @@ class TestCaptionMetricsExportJson:
 
         assert result["schema_version"] == "1.0"
 
+    @pytest.mark.fast
     def test_export_json_contains_timestamp(self, tmp_path):
         """Test that export includes ISO format timestamp"""
         from src.caption_fetcher import CaptionMetrics
@@ -5246,6 +5521,7 @@ class TestCaptionMetricsExportJson:
         timestamp = datetime.fromisoformat(result["export_timestamp"].replace("Z", "+00:00"))
         assert timestamp is not None
 
+    @pytest.mark.fast
     def test_export_json_contains_run_metadata(self, tmp_path):
         """Test that export includes run metadata"""
         from src.caption_fetcher import CaptionMetrics
@@ -5264,6 +5540,7 @@ class TestCaptionMetricsExportJson:
         assert result["run_metadata"]["video_count"] == 42
         assert result["run_metadata"]["export_path"] == str(output_file)
 
+    @pytest.mark.fast
     def test_export_json_contains_summary_statistics(self, tmp_path):
         """Test that export includes summary statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5286,6 +5563,7 @@ class TestCaptionMetricsExportJson:
         assert summary["cache_hits"] == 1
         assert summary["total_segments"] == 80  # 50 + 30
 
+    @pytest.mark.fast
     def test_export_json_contains_timing_metrics(self, tmp_path):
         """Test that export includes timing metrics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5306,6 +5584,7 @@ class TestCaptionMetricsExportJson:
         assert len(slowest) == 3
         assert slowest[0][1] >= slowest[1][1]  # First is slowest
 
+    @pytest.mark.fast
     def test_export_json_contains_format_statistics(self, tmp_path):
         """Test that export includes format success statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5325,6 +5604,7 @@ class TestCaptionMetricsExportJson:
         assert "fallback_count" in formats
         assert "video_format_used" in formats
 
+    @pytest.mark.fast
     def test_export_json_contains_language_statistics(self, tmp_path):
         """Test that export includes language statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5342,6 +5622,7 @@ class TestCaptionMetricsExportJson:
         assert "selection_trace" in languages
         assert "fallback_summary" in languages
 
+    @pytest.mark.fast
     def test_export_json_contains_error_statistics(self, tmp_path):
         """Test that export includes error category statistics"""
         from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
@@ -5358,6 +5639,7 @@ class TestCaptionMetricsExportJson:
         assert errors["category_counts"] == {"NETWORK": 2, "PARSE": 1}
         assert errors["top_category"] == "NETWORK"
 
+    @pytest.mark.fast
     def test_export_json_contains_coverage_statistics(self, tmp_path):
         """Test that export includes coverage statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5374,6 +5656,7 @@ class TestCaptionMetricsExportJson:
         assert "distribution" in coverage
         assert "low_coverage_videos" in coverage
 
+    @pytest.mark.fast
     def test_export_json_contains_quality_statistics(self, tmp_path):
         """Test that export includes quality statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5390,6 +5673,7 @@ class TestCaptionMetricsExportJson:
         assert quality["human_caption_count"] == 1
         assert quality["auto_generated_count"] == 1
 
+    @pytest.mark.fast
     def test_export_json_contains_cache_validation(self, tmp_path):
         """Test that export includes cache validation statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5407,6 +5691,7 @@ class TestCaptionMetricsExportJson:
         assert cache_val["rejected"] == 2
         assert cache_val["refetched"] == 2
 
+    @pytest.mark.fast
     def test_export_json_contains_pre_check_statistics(self, tmp_path):
         """Test that export includes pre-check statistics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5422,6 +5707,7 @@ class TestCaptionMetricsExportJson:
         assert pre_check["available"] == 1
         assert pre_check["unavailable"] == 1
 
+    @pytest.mark.fast
     def test_export_json_contains_raw_metrics(self, tmp_path):
         """Test that export includes raw to_dict() output"""
         from src.caption_fetcher import CaptionMetrics
@@ -5436,6 +5722,7 @@ class TestCaptionMetricsExportJson:
         assert result["raw_metrics"]["successes"] == 1
         assert result["raw_metrics"]["language_distribution"] == {"en": 1}
 
+    @pytest.mark.fast
     def test_export_json_with_config_snapshot(self, tmp_path):
         """Test that export includes config snapshot when provided"""
         from src.caption_fetcher import CaptionMetrics
@@ -5464,6 +5751,7 @@ class TestCaptionMetricsExportJson:
         assert result["config_snapshot"]["preferred_language"] == "es"
         assert result["config_snapshot"]["fallback_languages"] == ["en", "pt"]
 
+    @pytest.mark.fast
     def test_export_json_creates_parent_directories(self, tmp_path):
         """Test that export_json creates parent directories if needed"""
         from src.caption_fetcher import CaptionMetrics
@@ -5475,6 +5763,7 @@ class TestCaptionMetricsExportJson:
 
         assert output_file.exists()
 
+    @pytest.mark.fast
     def test_export_json_handles_empty_metrics(self, tmp_path):
         """Test that export_json works with empty metrics"""
         from src.caption_fetcher import CaptionMetrics
@@ -5489,6 +5778,7 @@ class TestCaptionMetricsExportJson:
         assert result["errors"]["category_counts"] == {}
         assert result["errors"]["top_category"] is None
 
+    @pytest.mark.fast
     def test_export_json_all_expected_fields(self, tmp_path):
         """Test that exported JSON contains all expected top-level fields"""
         from src.caption_fetcher import CaptionMetrics
@@ -5535,6 +5825,7 @@ class TestCaptionMetricsErrorCategorySerialization:
         assert "error_category_counts" in data
         assert data["error_category_counts"] == {"NETWORK": 1, "PARSE": 1}
 
+    @pytest.mark.fast
     def test_error_category_counts_in_from_dict(self):
         """Test that error_category_counts is restored from from_dict()"""
         from src.caption_fetcher import CaptionMetrics
@@ -5548,6 +5839,7 @@ class TestCaptionMetricsErrorCategorySerialization:
 
         assert metrics.error_category_counts == {"NETWORK": 3, "TIMEOUT": 2}
 
+    @pytest.mark.fast
     def test_error_category_counts_roundtrip(self):
         """Test that error_category_counts survives serialization roundtrip"""
         from src.caption_fetcher import CaptionMetrics, CaptionErrorCategory
@@ -5590,6 +5882,7 @@ class TestCaptionConfigValidationResult:
         assert result.warnings == []
         assert len(result.checks_performed) == 2
 
+    @pytest.mark.fast
     def test_invalid_result_with_errors(self):
         """Test creating an invalid result with errors."""
         from src.caption_fetcher import CaptionConfigValidationResult
@@ -5605,6 +5898,7 @@ class TestCaptionConfigValidationResult:
         assert len(result.errors) == 2
         assert "xyz" in result.errors[0]
 
+    @pytest.mark.fast
     def test_result_with_warnings(self):
         """Test result with warnings but still valid."""
         from src.caption_fetcher import CaptionConfigValidationResult
@@ -5619,6 +5913,7 @@ class TestCaptionConfigValidationResult:
         assert result.is_valid is True
         assert len(result.warnings) == 1
 
+    @pytest.mark.fast
     def test_str_representation_valid(self):
         """Test string representation for valid config."""
         from src.caption_fetcher import CaptionConfigValidationResult
@@ -5633,6 +5928,7 @@ class TestCaptionConfigValidationResult:
         output = str(result)
         assert "VALID" in output
 
+    @pytest.mark.fast
     def test_str_representation_invalid(self):
         """Test string representation for invalid config."""
         from src.caption_fetcher import CaptionConfigValidationResult
@@ -5679,6 +5975,7 @@ class TestValidateCaptionConfig:
         assert result.checks_performed["format_preferences"] == "passed"
         assert result.checks_performed["timeout_values"] == "passed"
 
+    @pytest.mark.fast
     def test_invalid_language_code(self):
         """Test validation catches invalid language code."""
         from src.caption_fetcher import validate_caption_config
@@ -5700,6 +5997,7 @@ class TestValidateCaptionConfig:
         assert result.checks_performed["language_codes"] == "failed"
         assert any("xyz" in e for e in result.errors)
 
+    @pytest.mark.fast
     def test_invalid_format_preference(self):
         """Test validation catches invalid format."""
         from src.caption_fetcher import validate_caption_config
@@ -5721,6 +6019,7 @@ class TestValidateCaptionConfig:
         assert result.checks_performed["format_preferences"] == "failed"
         assert any("invalid_format" in e for e in result.errors)
 
+    @pytest.mark.fast
     def test_empty_format_preference(self):
         """Test validation catches empty format list."""
         from src.caption_fetcher import validate_caption_config
@@ -5741,6 +6040,7 @@ class TestValidateCaptionConfig:
         assert result.is_valid is False
         assert any("empty" in e.lower() for e in result.errors)
 
+    @pytest.mark.fast
     def test_negative_timeout(self):
         """Test validation catches negative timeout."""
         from src.caption_fetcher import validate_caption_config
@@ -5761,6 +6061,7 @@ class TestValidateCaptionConfig:
         assert result.is_valid is False
         assert result.checks_performed["timeout_values"] == "failed"
 
+    @pytest.mark.fast
     def test_negative_retry_delay(self):
         """Test validation catches negative retry_delay."""
         from src.caption_fetcher import validate_caption_config
@@ -5780,6 +6081,7 @@ class TestValidateCaptionConfig:
 
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_low_timeout_warning(self):
         """Test validation warns about low timeout."""
         from src.caption_fetcher import validate_caption_config
@@ -5802,6 +6104,7 @@ class TestValidateCaptionConfig:
         assert result.checks_performed["timeout_values"] == "warning"
         assert len(result.warnings) > 0
 
+    @pytest.mark.fast
     def test_cache_path_writability(self, tmp_path):
         """Test validation checks cache path writability."""
         from src.caption_fetcher import validate_caption_config
@@ -5828,6 +6131,7 @@ class TestValidateCaptionConfig:
         # Verify directory was created
         assert cache_dir.exists()
 
+    @pytest.mark.fast
     def test_cache_disabled_skips_check(self):
         """Test validation skips cache check when disabled."""
         from src.caption_fetcher import validate_caption_config
@@ -5847,6 +6151,7 @@ class TestValidateCaptionConfig:
 
         assert result.checks_performed["cache_path"] == "skipped"
 
+    @pytest.mark.fast
     def test_negative_retry_budget(self):
         """Test validation catches negative retry budget."""
         from src.caption_fetcher import validate_caption_config
@@ -5867,6 +6172,7 @@ class TestValidateCaptionConfig:
         assert result.is_valid is False
         assert any("negative" in e.lower() for e in result.errors)
 
+    @pytest.mark.fast
     def test_unknown_retry_budget_category_warning(self):
         """Test validation warns about unknown retry budget categories."""
         from src.caption_fetcher import validate_caption_config
@@ -5889,6 +6195,7 @@ class TestValidateCaptionConfig:
         assert result.checks_performed["retry_budgets"] == "warning"
         assert any("unknown" in w.lower() for w in result.warnings)
 
+    @pytest.mark.fast
     def test_no_config_returns_error(self):
         """Test validation fails when no config is provided."""
         from src.caption_fetcher import validate_caption_config
@@ -5898,6 +6205,7 @@ class TestValidateCaptionConfig:
         assert result.is_valid is False
         assert any("no caption_first" in e.lower() for e in result.errors)
 
+    @pytest.mark.fast
     def test_extracts_caption_first_from_config(self):
         """Test validation extracts caption_first from full config."""
         from src.caption_fetcher import validate_caption_config
@@ -5949,6 +6257,7 @@ class TestTestFetchResult:
         assert result.segment_count == 100
         assert result.error == ""
 
+    @pytest.mark.fast
     def test_failed_fetch_result(self):
         """Test creating a failed fetch result."""
         from src.caption_fetcher import TestFetchResult
@@ -5995,6 +6304,7 @@ class TestTestFetchSummary:
         assert summary.avg_time == 1.5
         assert summary.dominant_format == "json3"
 
+    @pytest.mark.fast
     def test_summary_str_with_results(self):
         """Test string representation with results."""
         from src.caption_fetcher import TestFetchSummary
@@ -6012,6 +6322,7 @@ class TestTestFetchSummary:
         assert "2.1s" in output
         assert "json3" in output
 
+    @pytest.mark.fast
     def test_summary_str_empty(self):
         """Test string representation with no videos."""
         from src.caption_fetcher import TestFetchSummary
@@ -6059,6 +6370,7 @@ class TestRunCaptionTestFetch:
         assert mock_fetcher.fetch_captions.call_count == 2
 
     @patch('src.caption_fetcher.CaptionFetcher')
+    @pytest.mark.fast
     def test_mixed_success_and_failure(self, mock_fetcher_class):
         """Test handling mix of successful and failed fetches."""
         from src.caption_fetcher import (
@@ -6092,6 +6404,7 @@ class TestRunCaptionTestFetch:
         assert summary.successes == 1
         assert summary.failures == 1
 
+    @pytest.mark.fast
     def test_empty_video_list(self):
         """Test handling empty video list."""
         from src.caption_fetcher import run_caption_test_fetch
@@ -6103,6 +6416,7 @@ class TestRunCaptionTestFetch:
         assert summary.failures == 0
 
     @patch('src.caption_fetcher.CaptionFetcher')
+    @pytest.mark.fast
     def test_respects_max_videos(self, mock_fetcher_class):
         """Test that max_videos limits the number of test fetches."""
         from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
@@ -6122,6 +6436,7 @@ class TestRunCaptionTestFetch:
         assert mock_fetcher.fetch_captions.call_count == 3
 
     @patch('src.caption_fetcher.CaptionFetcher')
+    @pytest.mark.fast
     def test_tracks_dominant_format(self, mock_fetcher_class):
         """Test that dominant format is correctly identified."""
         from src.caption_fetcher import run_caption_test_fetch, CaptionResult, CaptionSegment
@@ -6203,6 +6518,7 @@ class TestErrorPatternDetector:
         assert detector._total_processed == 0
         assert not detector._pattern_checked
 
+    @pytest.mark.fast
     def test_detector_custom_params(self):
         """Test ErrorPatternDetector with custom threshold and sample size."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6212,6 +6528,7 @@ class TestErrorPatternDetector:
         assert detector.threshold == 0.5
         assert detector.sample_size == 20
 
+    @pytest.mark.fast
     def test_record_error_tracks_video_id(self):
         """Test that record_error tracks video IDs with error signatures."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6226,6 +6543,7 @@ class TestErrorPatternDetector:
         assert stats['error_counts'].get('403 Forbidden', 0) == 2
         assert stats['error_counts'].get('Timeout', 0) == 1
 
+    @pytest.mark.fast
     def test_record_success_tracks_count(self):
         """Test that record_success tracks successful videos."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6238,6 +6556,7 @@ class TestErrorPatternDetector:
         assert stats['total_processed'] == 2
         assert stats['success_count'] == 2
 
+    @pytest.mark.fast
     def test_should_check_pattern_after_sample_size(self):
         """Test should_check_pattern returns True after sample_size videos."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6253,6 +6572,7 @@ class TestErrorPatternDetector:
         detector.record_success("vid4")
         assert detector.should_check_pattern()
 
+    @pytest.mark.fast
     def test_pattern_detected_when_threshold_exceeded(self):
         """Test pattern detection when 30%+ videos fail with same error."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6274,6 +6594,7 @@ class TestErrorPatternDetector:
         assert result.ratio == 0.4
         assert "geoblocking" in result.likely_cause.lower()
 
+    @pytest.mark.fast
     def test_pattern_not_detected_below_threshold(self):
         """Test pattern NOT detected when below threshold."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6291,6 +6612,7 @@ class TestErrorPatternDetector:
         assert result.detected is False
         assert result.ratio == 0.2
 
+    @pytest.mark.fast
     def test_signature_extraction_403(self):
         """Test error signature extraction for 403 errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6305,6 +6627,7 @@ class TestErrorPatternDetector:
         stats = detector.get_stats()
         assert stats['error_counts'].get('403 Forbidden', 0) == 3
 
+    @pytest.mark.fast
     def test_signature_extraction_429(self):
         """Test error signature extraction for rate limit errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6318,6 +6641,7 @@ class TestErrorPatternDetector:
         stats = detector.get_stats()
         assert stats['error_counts'].get('429 Too Many Requests', 0) == 2
 
+    @pytest.mark.fast
     def test_signature_extraction_timeout(self):
         """Test error signature extraction for timeout errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6330,6 +6654,7 @@ class TestErrorPatternDetector:
         stats = detector.get_stats()
         assert stats['error_counts'].get('Timeout', 0) == 2
 
+    @pytest.mark.fast
     def test_50_videos_same_channel_uses_sample_checks(self):
         """Test pattern detection with 50 videos from same channel (acceptance criteria)."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6352,6 +6677,7 @@ class TestErrorPatternDetector:
         assert result.ratio == 0.8
         assert "403 Forbidden" in result.error_signature
 
+    @pytest.mark.fast
     def test_pattern_result_str_format(self):
         """Test ErrorPatternResult string format matches acceptance criteria."""
         from src.caption_fetcher import ErrorPatternResult
@@ -6374,6 +6700,7 @@ class TestErrorPatternDetector:
         assert "30.0%" in result_str
         assert "possible geoblocking" in result_str
 
+    @pytest.mark.fast
     def test_pattern_result_no_detection_str(self):
         """Test ErrorPatternResult string when no pattern detected."""
         from src.caption_fetcher import ErrorPatternResult
@@ -6381,6 +6708,7 @@ class TestErrorPatternDetector:
         result = ErrorPatternResult(detected=False)
         assert str(result) == "No error pattern detected"
 
+    @pytest.mark.fast
     def test_infer_cause_403(self):
         """Test likely cause inference for 403 errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6390,6 +6718,7 @@ class TestErrorPatternDetector:
 
         assert "geoblocking" in cause.lower() or "restriction" in cause.lower()
 
+    @pytest.mark.fast
     def test_infer_cause_rate_limit(self):
         """Test likely cause inference for rate limit errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6399,6 +6728,7 @@ class TestErrorPatternDetector:
 
         assert "rate limit" in cause.lower()
 
+    @pytest.mark.fast
     def test_infer_cause_timeout(self):
         """Test likely cause inference for timeout errors."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6408,6 +6738,7 @@ class TestErrorPatternDetector:
 
         assert "network" in cause.lower() or "timeout" in cause.lower()
 
+    @pytest.mark.fast
     def test_check_pattern_cached_result(self):
         """Test that check_pattern returns cached result on subsequent calls."""
         from src.caption_fetcher import ErrorPatternDetector
@@ -6425,6 +6756,7 @@ class TestErrorPatternDetector:
         # Should be same object
         assert result1 is result2
 
+    @pytest.mark.fast
     def test_thread_safety_with_concurrent_records(self):
         """Test thread safety of record_error and record_success."""
         import threading
@@ -6484,6 +6816,7 @@ class TestErrorPatternAbortError:
         assert error.partial_results == {"v1": {"error": True}}
         assert "403 Forbidden" in str(error)
 
+    @pytest.mark.fast
     def test_exception_default_partial_results(self):
         """Test ErrorPatternAbortError with default empty partial results."""
         from src.caption_fetcher import ErrorPatternAbortError, ErrorPatternResult
@@ -6535,6 +6868,7 @@ class TestFetchCaptionsBatchWithErrorPattern:
             # Should have processed all videos
             assert len(results) == 15
 
+    @pytest.mark.fast
     def test_batch_fetch_aborts_on_pattern_in_abort_mode(self):
         """Test batch fetch raises ErrorPatternAbortError in abort mode."""
         from src.caption_fetcher import CaptionFetcher, CaptionFetchError, ErrorPatternAbortError
@@ -6574,6 +6908,7 @@ class TestFetchCaptionsBatchWithErrorPattern:
             assert "403 Forbidden" in error.pattern_result.error_signature
             assert error.pattern_result.ratio >= 0.3
 
+    @pytest.mark.fast
     def test_batch_fetch_skip_mode_disables_detection(self):
         """Test batch fetch doesn't detect patterns in skip mode."""
         from src.caption_fetcher import CaptionFetcher, CaptionFetchError
@@ -6603,6 +6938,7 @@ class TestFetchCaptionsBatchWithErrorPattern:
             assert len(results) == 15
             assert all(r.get('error') for r in results.values())
 
+    @pytest.mark.fast
     def test_batch_fetch_records_pattern_in_metrics(self):
         """Test batch fetch records pattern detection in metrics."""
         from src.caption_fetcher import CaptionFetcher, CaptionMetrics, CaptionFetchError
@@ -6641,6 +6977,7 @@ class TestFetchCaptionsBatchWithErrorPattern:
             pattern = metrics.error_patterns_detected[0]
             assert pattern['error_signature'] == '403 Forbidden'
 
+    @pytest.mark.fast
     def test_batch_fetch_calls_progress_callback_on_pattern(self):
         """Test batch fetch calls progress callback when pattern detected."""
         from src.caption_fetcher import CaptionFetcher, CaptionFetchError
@@ -6702,6 +7039,7 @@ class TestErrorPatternConfigOptions:
         assert config.error_pattern_threshold == 0.3
         assert config.error_pattern_sample_size == 10
 
+    @pytest.mark.fast
     def test_config_accepts_abort_mode(self):
         """Test CaptionFirstConfig accepts abort mode."""
         from src.config.sections.download import CaptionFirstConfig
@@ -6709,6 +7047,7 @@ class TestErrorPatternConfigOptions:
         config = CaptionFirstConfig(abort_on_error_pattern="abort")
         assert config.abort_on_error_pattern == "abort"
 
+    @pytest.mark.fast
     def test_config_accepts_skip_mode(self):
         """Test CaptionFirstConfig accepts skip mode."""
         from src.config.sections.download import CaptionFirstConfig
@@ -6716,6 +7055,7 @@ class TestErrorPatternConfigOptions:
         config = CaptionFirstConfig(abort_on_error_pattern="skip")
         assert config.abort_on_error_pattern == "skip"
 
+    @pytest.mark.fast
     def test_config_custom_threshold(self):
         """Test CaptionFirstConfig accepts custom threshold."""
         from src.config.sections.download import CaptionFirstConfig
@@ -6723,6 +7063,7 @@ class TestErrorPatternConfigOptions:
         config = CaptionFirstConfig(error_pattern_threshold=0.5)
         assert config.error_pattern_threshold == 0.5
 
+    @pytest.mark.fast
     def test_config_custom_sample_size(self):
         """Test CaptionFirstConfig accepts custom sample size."""
         from src.config.sections.download import CaptionFirstConfig
@@ -6758,6 +7099,7 @@ class TestChannelPatternTracking:
         assert pattern.captions_found == 9
         assert pattern.success_rate == 0.9
 
+    @pytest.mark.fast
     def test_channel_pattern_update(self):
         """Test ChannelCaptionPattern.update() method."""
         from src.caption_fetcher import ChannelCaptionPattern
@@ -6781,6 +7123,7 @@ class TestChannelPatternTracking:
         assert pattern.captions_found == 1
         assert pattern.success_rate == 0.5
 
+    @pytest.mark.fast
     def test_channel_pattern_serialization(self):
         """Test ChannelCaptionPattern to_dict/from_dict round-trip."""
         from src.caption_fetcher import ChannelCaptionPattern
@@ -6821,6 +7164,7 @@ class TestCaptionMetricsChannelStatistics:
         assert stats['bottom_channels'] == []
         assert stats['avg_success_rate'] == 0.0
 
+    @pytest.mark.fast
     def test_get_channel_statistics_single_channel(self):
         """Test get_channel_statistics with one channel."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6838,6 +7182,7 @@ class TestCaptionMetricsChannelStatistics:
         assert stats['top_channels'][0][0] == 'UCabc'
         assert stats['top_channels'][0][1] == 0.8
 
+    @pytest.mark.fast
     def test_get_channel_statistics_multiple_channels(self):
         """Test get_channel_statistics with multiple channels."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6871,6 +7216,7 @@ class TestCaptionMetricsChannelStatistics:
         assert stats['channels_with_100pct'] == 1
         assert stats['channels_with_0pct'] == 1
 
+    @pytest.mark.fast
     def test_set_channel_patterns(self):
         """Test CaptionMetrics.set_channel_patterns() method."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6887,6 +7233,7 @@ class TestCaptionMetricsChannelStatistics:
         assert 'UCa' in metrics.channel_patterns
         assert 'UCb' in metrics.channel_patterns
 
+    @pytest.mark.fast
     def test_get_channel_summary_format(self):
         """Test get_channel_summary returns formatted string."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6906,6 +7253,7 @@ class TestCaptionMetricsChannelStatistics:
         assert "Bottom:" in summary
         assert "0%" in summary
 
+    @pytest.mark.fast
     def test_channel_patterns_in_to_dict(self):
         """Test channel_patterns included in to_dict() serialization."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6921,6 +7269,7 @@ class TestCaptionMetricsChannelStatistics:
         assert 'UCtest' in data['channel_patterns']
         assert data['channel_patterns']['UCtest']['videos_checked'] == 5
 
+    @pytest.mark.fast
     def test_channel_patterns_in_from_dict(self):
         """Test channel_patterns restored from from_dict()."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6947,6 +7296,7 @@ class TestCaptionMetricsChannelStatistics:
         assert 'UCtest' in metrics.channel_patterns
         assert metrics.channel_patterns['UCtest'].success_rate == 0.9
 
+    @pytest.mark.fast
     def test_channel_patterns_update_after_batch_fetch(self):
         """Test channel patterns update correctly after batch fetch (acceptance criteria)."""
         from src.caption_fetcher import CaptionMetrics, ChannelCaptionPattern
@@ -6995,6 +7345,7 @@ class TestChannelPrioritizedFetchOrder:
 
         assert result == video_ids
 
+    @pytest.mark.fast
     def test_sort_videos_by_channel_success_with_patterns(self):
         """Test sorting prioritizes high-success channels."""
         from src.caption_fetcher import CaptionFetcher, ChannelCaptionPattern
@@ -7022,6 +7373,7 @@ class TestChannelPrioritizedFetchOrder:
         assert result[1] == 'vid_good'
         assert result[2] == 'vid_bad'
 
+    @pytest.mark.fast
     def test_sort_videos_with_unknown_channels(self):
         """Test sorting handles videos with unknown channels."""
         from src.caption_fetcher import CaptionFetcher, ChannelCaptionPattern
@@ -7044,6 +7396,7 @@ class TestChannelPrioritizedFetchOrder:
         assert result[0] == 'vid_known'
         assert result[1] == 'vid_unknown'
 
+    @pytest.mark.fast
     def test_set_video_channel_map(self):
         """Test set_video_channel_map stores mapping correctly."""
         from src.caption_fetcher import CaptionFetcher
@@ -7059,6 +7412,7 @@ class TestChannelPrioritizedFetchOrder:
         assert fetcher._video_channel_map['vid1'] == 'UCchannel1'
         assert fetcher._video_channel_map['vid2'] == 'UCchannel2'
 
+    @pytest.mark.fast
     def test_prioritize_by_channel_config_option(self):
         """Test prioritize_by_channel config option exists."""
         from src.config.sections.download import CaptionFirstConfig
@@ -7096,6 +7450,7 @@ class TestChannelSummaryInMetricsSummary:
         assert "Bottom:" in summary
         assert "0%" in summary
 
+    @pytest.mark.fast
     def test_summary_without_channel_patterns(self):
         """Test summary() works without channel patterns."""
         from src.caption_fetcher import CaptionMetrics

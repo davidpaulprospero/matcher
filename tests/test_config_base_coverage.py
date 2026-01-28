@@ -55,6 +55,7 @@ class TestConfigFromYaml:
         assert config is not None
         assert config._config_path == str(tmp_path / "nonexistent.yaml")
 
+    @pytest.mark.fast
     def test_from_yaml_valid_file(self, tmp_path):
         """Test loading valid YAML file."""
         config_file = tmp_path / "config.yaml"
@@ -69,6 +70,7 @@ matching:
         assert config.project.name == "test_project"
         assert config.matching.min_confidence == 0.7
 
+    @pytest.mark.fast
     def test_from_yaml_load_error(self, tmp_path):
         """Test handling of YAML load error."""
         config_file = tmp_path / "config.yaml"
@@ -78,6 +80,7 @@ matching:
         # Should return default config on error
         assert config is not None
 
+    @pytest.mark.fast
     def test_from_yaml_empty_file(self, tmp_path):
         """Test loading empty YAML file."""
         config_file = tmp_path / "config.yaml"
@@ -98,6 +101,7 @@ class TestBuildDataclass:
         result = Config._build_dataclass(MatchingConfig, {})
         assert result is not None
 
+    @pytest.mark.fast
     def test_build_dataclass_empty_none(self):
         """Test building dataclass with None data."""
         from src.config.sections import MatchingConfig
@@ -105,6 +109,7 @@ class TestBuildDataclass:
         result = Config._build_dataclass(MatchingConfig, None)
         assert result is not None
 
+    @pytest.mark.fast
     def test_build_dataclass_unknown_field(self):
         """Test that unknown fields are ignored."""
         from src.config.sections import MatchingConfig
@@ -117,6 +122,7 @@ class TestBuildDataclass:
         assert result.min_confidence == 0.5
         assert not hasattr(result, 'unknown_field')
 
+    @pytest.mark.fast
     def test_build_dataclass_nested(self, tmp_path):
         """Test building nested dataclasses."""
         config_file = tmp_path / "config.yaml"
@@ -130,6 +136,7 @@ matching:
         # location_matching should be built as nested dataclass
         assert config.matching.location_matching.enabled == True
 
+    @pytest.mark.fast
     def test_build_dataclass_type_error(self):
         """Test handling TypeError in dataclass building."""
         from src.config.sections import MatchingConfig
@@ -191,6 +198,7 @@ class TestConfigToYaml:
         assert isinstance(yaml_str, str)
         assert 'project' in yaml_str
 
+    @pytest.mark.fast
     def test_to_yaml_file(self, tmp_path):
         """Test saving config to YAML file."""
         config = Config()
@@ -215,6 +223,7 @@ class TestConfigReload:
         result = config.reload()
         assert result == False
 
+    @pytest.mark.fast
     def test_reload_file_not_exists(self, tmp_path):
         """Test reload when file no longer exists."""
         config = Config()
@@ -223,6 +232,7 @@ class TestConfigReload:
         result = config.reload()
         assert result == False
 
+    @pytest.mark.fast
     def test_reload_no_changes(self, tmp_path):
         """Test reload when file has not changed."""
         config_file = tmp_path / "config.yaml"
@@ -236,6 +246,7 @@ project:
         result = config.reload()
         assert result == False  # No changes
 
+    @pytest.mark.fast
     def test_reload_with_changes(self, tmp_path):
         """Test reload when file has changed."""
         config_file = tmp_path / "config.yaml"
@@ -285,6 +296,7 @@ output:
         for error in errors:
             assert "must be" not in error or "API_KEY" in error
 
+    @pytest.mark.fast
     def test_validate_invalid_confidence(self, tmp_path):
         """Test validation with invalid min_confidence."""
         config_file = tmp_path / "config.yaml"
@@ -297,6 +309,7 @@ matching:
 
         assert any("min_confidence must be 0-1" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_invalid_max_clip_reuse(self, tmp_path):
         """Test validation with negative max_clip_reuse."""
         config_file = tmp_path / "config.yaml"
@@ -328,6 +341,7 @@ matching:
 
         assert any("hard_filter_level" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_invalid_face_preference(self, tmp_path):
         """Test validation with invalid face preference."""
         config_file = tmp_path / "config.yaml"
@@ -340,6 +354,7 @@ enhanced:
 
         assert any("face_preference" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_invalid_audio_quality(self, tmp_path):
         """Test validation with invalid audio quality."""
         config_file = tmp_path / "config.yaml"
@@ -354,6 +369,7 @@ download:
 
         assert any("audio_quality" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_invalid_embedding_provider(self, tmp_path):
         """Test validation with invalid embedding provider."""
         config_file = tmp_path / "config.yaml"
@@ -366,6 +382,7 @@ embedding:
 
         assert any("embedding.provider" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_invalid_matching_provider(self, tmp_path):
         """Test validation with invalid matching provider."""
         config_file = tmp_path / "config.yaml"
@@ -396,6 +413,7 @@ matching:
 
         assert any("min_confidence" in e and "high_confidence_threshold" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_embedding_candidates(self, tmp_path):
         """Test embedding_candidates vs num_alternatives."""
         config_file = tmp_path / "config.yaml"
@@ -410,6 +428,7 @@ output:
 
         assert any("embedding_candidates" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_split_otio(self, tmp_path):
         """Test split_otio requires generate_otio."""
         config_file = tmp_path / "config.yaml"
@@ -440,6 +459,7 @@ matching:
         result = config.get_nested("matching.min_confidence")
         assert result == 0.75
 
+    @pytest.mark.fast
     def test_get_nested_deep(self, tmp_path):
         """Test getting deeply nested value."""
         config_file = tmp_path / "config.yaml"
@@ -453,6 +473,7 @@ duration_tiers:
         result = config.get_nested("duration_tiers.short.min_seconds")
         assert result == 5
 
+    @pytest.mark.fast
     def test_get_nested_not_found(self, tmp_path):
         """Test get_nested with non-existent path."""
         config_file = tmp_path / "config.yaml"
@@ -462,6 +483,7 @@ duration_tiers:
         result = config.get_nested("nonexistent.path.here", default="default")
         assert result == "default"
 
+    @pytest.mark.fast
     def test_get_nested_partial_path(self, tmp_path):
         """Test get_nested with partial existing path."""
         config = Config()
@@ -482,6 +504,7 @@ class TestGlobalConfigFunctions:
         assert config is not None
         assert isinstance(config, Config)
 
+    @pytest.mark.fast
     def test_load_config(self, tmp_path):
         """Test load_config function."""
         config_file = tmp_path / "config.yaml"
@@ -492,6 +515,7 @@ project:
         config = load_config(str(config_file))
         assert config.project.name == "loaded_project"
 
+    @pytest.mark.fast
     def test_set_config(self):
         """Test set_config function."""
         new_config = Config()
@@ -502,12 +526,14 @@ project:
 
         assert result.project.name == "custom"
 
+    @pytest.mark.fast
     def test_reload_config_no_global(self):
         """Test reload_config when no global config."""
         set_config(None)
         result = reload_config()
         assert result == False
 
+    @pytest.mark.fast
     def test_reload_config_with_global(self, tmp_path):
         """Test reload_config with global config."""
         config_file = tmp_path / "config.yaml"
@@ -536,6 +562,7 @@ api_keys:
         assert get_api_key("anthropic") == "test_anthropic_key"
         assert get_api_key("unknown") is None
 
+    @pytest.mark.fast
     def test_ensure_dirs(self, tmp_path):
         """Test ensure_dirs creates directories."""
         config_file = tmp_path / "config.yaml"
@@ -557,6 +584,7 @@ logging:
         assert (tmp_path / 'cache').exists() or True  # May already exist
         assert (tmp_path / 'output').exists() or True
 
+    @pytest.mark.fast
     def test_log_hardcoded_warning(self, tmp_path):
         """Test log_hardcoded_warning function."""
         config_file = tmp_path / "config.yaml"
@@ -579,6 +607,7 @@ class TestEdgeCases:
         config = Config()
         assert config._loaded_at  # Should be set
 
+    @pytest.mark.fast
     def test_populate_api_keys(self):
         """Test API key population from api_keys section."""
         config = Config()
@@ -589,6 +618,7 @@ class TestEdgeCases:
 
         assert config.gemini_api_key == "test_key"
 
+    @pytest.mark.fast
     def test_resolve_paths_absolute(self, tmp_path):
         """Test path resolution with absolute paths."""
         config_file = tmp_path / "config.yaml"
@@ -601,6 +631,7 @@ output:
 
         assert config.output.output_dir == abs_path
 
+    @pytest.mark.fast
     def test_validate_location_matching_as_dict(self, tmp_path):
         """Test validation handles location_matching as dict."""
         config = Config()
@@ -613,6 +644,7 @@ output:
         errors = config._validate_enums()
         assert any("hard_filter_level" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_audio_first_as_dict(self, tmp_path):
         """Test validation handles audio_first as dict."""
         config = Config()
@@ -624,6 +656,7 @@ output:
         errors = config._validate_enums()
         assert any("audio_quality" in e for e in errors)
 
+    @pytest.mark.fast
     def test_validate_pause_split_as_dict(self, tmp_path):
         """Test validation handles pause_split as dict."""
         config = Config()
@@ -650,6 +683,7 @@ class TestTypeHintHandling:
         result = Config._build_dataclass(MatchingConfig, {'min_confidence': 0.5})
         assert result.min_confidence == 0.5
 
+    @pytest.mark.fast
     def test_optional_type_handling(self, tmp_path):
         """Test handling of Optional types."""
         config_file = tmp_path / "config.yaml"
@@ -661,6 +695,7 @@ matching:
         config = Config.from_yaml(str(config_file))
         assert config.matching.location_matching is not None
 
+    @pytest.mark.fast
     def test_get_type_hints_exception(self):
         """Test handling when get_type_hints raises exception."""
         from src.config.sections import MatchingConfig
@@ -737,6 +772,7 @@ output:
         config = Config.from_yaml(str(config_file))
         # Should not crash when output_dir is empty
 
+    @pytest.mark.fast
     def test_build_dataclass_typeerror(self):
         """Test TypeError handling in _build_dataclass (lines 388-390)."""
         from src.config.sections import MatchingConfig
@@ -753,6 +789,7 @@ output:
         # Should return default instance on error
         assert result is not None
 
+    @pytest.mark.fast
     def test_get_nested_dict_access(self):
         """Test get_nested with dict access path (line 675)."""
         config = Config()
@@ -763,6 +800,7 @@ output:
         # Should access dict
         assert result is not None
 
+    @pytest.mark.fast
     def test_get_nested_logging(self, tmp_path):
         """Test get_nested logs when path not found (line 678)."""
         config_file = tmp_path / "config.yaml"
@@ -776,6 +814,7 @@ logging:
         result = config.get_nested("nonexistent.path", default="default")
         assert result == "default"
 
+    @pytest.mark.fast
     def test_build_dataclass_optional_args(self, tmp_path):
         """Test _build_dataclass with Optional types (lines 373-375)."""
         # Test nested dataclass with Optional field
@@ -790,6 +829,7 @@ matching:
         # location_matching is Optional[LocationMatchingConfig]
         assert config.matching.location_matching.enabled == True
 
+    @pytest.mark.fast
     def test_yaml_safefolder_fallback(self):
         """Test that YAML loading works even if CSafeLoader unavailable."""
         # We can't easily test this path since CSafeLoader is usually available
@@ -854,6 +894,7 @@ class TestAPIKeyValidation:
         for key in env_keys:
             monkeypatch.delenv(key, raising=False)
 
+    @pytest.mark.requires_api
     def test_validate_gemini_key_missing(self, tmp_path):
         """Test validation error when Gemini API key is missing (line 522-523)."""
         config_file = tmp_path / "config.yaml"
@@ -868,6 +909,7 @@ api_keys:
 
         assert any("GEMINI_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_validate_anthropic_secondary_key_missing(self, tmp_path):
         """Test validation error when Anthropic secondary key is missing."""
         config_file = tmp_path / "config.yaml"
@@ -882,6 +924,7 @@ api_keys:
 
         assert any("ANTHROPIC_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_validate_pexels_key_missing(self, tmp_path):
         """Test validation error when Pexels key is missing."""
         config_file = tmp_path / "config.yaml"
@@ -896,6 +939,7 @@ api_keys:
 
         assert any("PEXELS_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_validate_pixabay_key_missing(self, tmp_path):
         """Test validation error when Pixabay key is missing."""
         config_file = tmp_path / "config.yaml"
@@ -910,6 +954,7 @@ api_keys:
 
         assert any("PIXABAY_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_validate_gemini_embedding_key_missing(self, tmp_path):
         """Test validation error when Gemini embedding key is missing."""
         config_file = tmp_path / "config.yaml"
@@ -924,6 +969,7 @@ api_keys:
 
         assert any("GEMINI_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_validate_keys_present(self, tmp_path):
         """Test no validation errors when keys are present."""
         config_file = tmp_path / "config.yaml"
@@ -962,6 +1008,7 @@ class TestStringTypeAnnotation:
             })
             assert result.min_confidence == 0.5
 
+    @pytest.mark.fast
     def test_string_annotation_not_in_module(self):
         """Test handling when string type annotation not found in module."""
         from src.config.sections import MatchingConfig
@@ -993,6 +1040,7 @@ output:
         # Absolute path should be used as-is
         assert config.output.output_dir == abs_output
 
+    @pytest.mark.fast
     def test_resolve_paths_with_empty_config_value(self, tmp_path):
         """Test _resolve_paths when config_value is falsy."""
         config_file = tmp_path / "config.yaml"
@@ -1026,6 +1074,7 @@ class TestTypeErrorHandling:
         # Should return default instance
         assert result is not None
 
+    @pytest.mark.fast
     def test_build_dataclass_typeerror_with_required_field(self):
         """Test TypeError with required field that can't be built."""
         @dataclass

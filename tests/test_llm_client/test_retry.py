@@ -11,6 +11,7 @@ from src.llm_client.exceptions import LLMTimeoutError, LLMProviderError
 class TestWithRetry:
     """Test with_retry function."""
 
+    @pytest.mark.fast
     def test_successful_call_first_try(self):
         """Test function succeeds on first try."""
         call_count = 0
@@ -25,6 +26,7 @@ class TestWithRetry:
         assert result == "success"
         assert call_count == 1
 
+    @pytest.mark.fast
     def test_retry_on_exception(self):
         """Test function retries on exception."""
         call_count = 0
@@ -41,6 +43,7 @@ class TestWithRetry:
         assert result == "success"
         assert call_count == 3
 
+    @pytest.mark.fast
     def test_max_retries_exhausted(self):
         """Test that max retries are exhausted and error is raised."""
         call_count = 0
@@ -56,6 +59,7 @@ class TestWithRetry:
         assert call_count == 3
         assert "failed after 3 attempts" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_timeout_error_converted(self):
         """Test that timeout errors are converted to LLMTimeoutError."""
         def func():
@@ -64,6 +68,7 @@ class TestWithRetry:
         with pytest.raises(LLMTimeoutError):
             with_retry(func, max_retries=2, base_delay=0.01)
 
+    @pytest.mark.fast
     def test_exponential_backoff(self):
         """Test exponential backoff delays."""
         call_times = []
@@ -90,6 +95,7 @@ class TestWithRetry:
             # Second delay should be ~0.1s (0.1^1)
             assert 0.05 < delay2 < 0.2
 
+    @pytest.mark.fast
     def test_different_max_retries(self):
         """Test different max_retries values."""
         # Test with 1 retry
@@ -112,6 +118,7 @@ class TestWithRetry:
 
         assert call_count == 5
 
+    @pytest.mark.fast
     def test_no_retries_on_success(self):
         """Test that successful calls don't trigger retries."""
         call_count = 0
@@ -131,6 +138,7 @@ class TestWithRetry:
         # Should be very fast (no delays)
         assert elapsed < 0.1
 
+    @pytest.mark.fast
     def test_provider_error_message(self):
         """Test that provider error message includes attempt count."""
         def func():
@@ -143,6 +151,7 @@ class TestWithRetry:
         assert "2 attempts" in error_msg
         assert "API key invalid" in error_msg
 
+    @pytest.mark.fast
     def test_timeout_in_error_message(self):
         """Test timeout errors are detected correctly."""
         def func():
@@ -157,6 +166,7 @@ class TestWithRetry:
         with pytest.raises(LLMTimeoutError):
             with_retry(func2, max_retries=1, base_delay=0.01)
 
+    @pytest.mark.fast
     def test_returns_correct_type(self):
         """Test that return types are preserved."""
         # String return
@@ -175,6 +185,7 @@ class TestWithRetry:
         result = with_retry(lambda: None, max_retries=1)
         assert result is None
 
+    @pytest.mark.fast
     def test_exception_chaining(self):
         """Test that original exception is chained."""
         original_error = ValueError("Original error")

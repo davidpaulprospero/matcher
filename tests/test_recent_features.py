@@ -1,3 +1,4 @@
+import pytest
 #!/usr/bin/env python3
 """
 Test Recent Feature Additions
@@ -83,6 +84,7 @@ class RecentFeaturesRunner:
             if self.verbose:
                 print(f"  Cleaned up temp dir")
 
+    @pytest.mark.fast
     def test_json_serialization(self) -> bool:
         """Test that to_dict() methods handle numpy types correctly"""
         print_section("JSON Serialization (numpy types)")
@@ -138,6 +140,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("JSON serialization", False, str(e))
 
+    @pytest.mark.fast
     def test_delta_matching_index(self) -> bool:
         """Test MatchAwareIndex for delta matching"""
         print_section("Delta Matching Index")
@@ -196,6 +199,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Delta matching index", False, str(e))
 
+    @pytest.mark.fast
     def test_topic_extraction(self) -> bool:
         """Test topic extraction classes"""
         print_section("Topic Extraction")
@@ -263,6 +267,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Topic extraction", False, str(e))
 
+    @pytest.mark.fast
     def test_chapter_dataclass(self) -> bool:
         """Test Chapter dataclass in utils"""
         print_section("Chapter Dataclass")
@@ -297,6 +302,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Chapter dataclass", False, str(e))
 
+    @pytest.mark.fast
     def test_srt_segment_topics(self) -> bool:
         """Test that SRTSegment has topics field"""
         print_section("SRTSegment Topics Field")
@@ -333,6 +339,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("SRTSegment topics", False, str(e))
 
+    @pytest.mark.fast
     def test_otio_tracks(self) -> bool:
         """Test that OTIO builder includes V9 and V10 tracks"""
         print_section("OTIO V9/V10 Tracks")
@@ -406,6 +413,7 @@ class RecentFeaturesRunner:
             traceback.print_exc()
             return print_result("OTIO tracks", False, str(e))
 
+    @pytest.mark.fast
     def test_config_chapter_options(self) -> bool:
         """Test that config has chapter matching options"""
         print_section("Config Chapter Options")
@@ -444,6 +452,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Config options", False, str(e))
 
+    @pytest.mark.fast
     def test_face_detection_module(self) -> bool:
         """Test FaceDetector class and B-roll functions"""
         print_section("Face Detection Module")
@@ -488,6 +497,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Face detection module", False, str(e))
 
+    @pytest.mark.fast
     def test_scene_info_face_score(self) -> bool:
         """Test SceneInfo has face_score and is_broll fields"""
         print_section("SceneInfo Face Score Fields")
@@ -537,6 +547,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("SceneInfo face fields", False, str(e))
 
+    @pytest.mark.fast
     def test_config_broll_options(self) -> bool:
         """Test that config has B-roll preference options"""
         print_section("Config B-roll Options")
@@ -584,6 +595,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Config B-roll options", False, str(e))
 
+    @pytest.mark.fast
     def test_global_cache_module(self) -> bool:
         """Test GlobalCacheManager class"""
         print_section("Global Cache Module")
@@ -668,6 +680,7 @@ class RecentFeaturesRunner:
             traceback.print_exc()
             return print_result("Global cache module", False, str(e))
 
+    @pytest.mark.fast
     def test_config_global_cache_options(self) -> bool:
         """Test that config has global cache options"""
         print_section("Config Global Cache Options")
@@ -713,6 +726,7 @@ class RecentFeaturesRunner:
         except Exception as e:
             return print_result("Config global cache options", False, str(e))
 
+    @pytest.mark.fast
     def test_segment_ids_in_clip_names(self) -> bool:
         """Test that OTIO builder adds segment IDs to clip names"""
         print_section("Segment IDs in Clip Names")
@@ -815,6 +829,7 @@ class RecentFeaturesRunner:
             traceback.print_exc()
             return print_result("Segment IDs", False, str(e))
 
+    @pytest.mark.fast
     def test_post_edit_analyzer(self) -> bool:
         """Test PostEditAnalyzer module"""
         print_section("Post-Edit Analyzer Module")

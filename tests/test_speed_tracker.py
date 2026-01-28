@@ -26,6 +26,7 @@ class TestDownloadSpeedConfig:
         assert config.max_timeout_multiplier == 2.0
         assert config.enable_adaptive_timeout is True
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test config can be customized."""
         config = DownloadSpeedConfig(
@@ -58,6 +59,7 @@ class TestDownloadRecord:
         # 10 MB / 5s = 2 MB/s
         assert record.speed_mbps == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_speed_with_zero_duration(self):
         """Test speed_mbps returns 0 for zero duration."""
         record = DownloadRecord(
@@ -80,12 +82,14 @@ class TestTrackerInitialization:
         assert tracker.config.enabled is True
         assert tracker.config.window_size == 5
 
+    @pytest.mark.fast
     def test_custom_config(self):
         """Test tracker initializes with custom config."""
         config = DownloadSpeedConfig(window_size=10)
         tracker = DownloadSpeedTracker(config)
         assert tracker.config.window_size == 10
 
+    @pytest.mark.fast
     def test_empty_records_on_init(self):
         """Test tracker starts with no records."""
         tracker = DownloadSpeedTracker()
@@ -109,6 +113,7 @@ class TestRecordDownload:
         assert tracker._records[0].video_id == "abc123"
         assert tracker._records[0].tier == "medium"
 
+    @pytest.mark.fast
     def test_skips_invalid_values(self):
         """Test invalid values are skipped."""
         tracker = DownloadSpeedTracker()
@@ -125,6 +130,7 @@ class TestRecordDownload:
         tracker.record_download("test3", -1000, 10.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_skips_when_disabled(self):
         """Test recording is skipped when tracker is disabled."""
         config = DownloadSpeedConfig(enabled=False)
@@ -132,6 +138,7 @@ class TestRecordDownload:
         tracker.record_download("test123", 50 * 1024 * 1024, 10.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_sliding_window_limit(self):
         """Test records are limited to window_size."""
         config = DownloadSpeedConfig(window_size=3)
@@ -161,6 +168,7 @@ class TestAverageSpeed:
         tracker = DownloadSpeedTracker()
         assert tracker.get_average_speed_mbps() == 0.0
 
+    @pytest.mark.fast
     def test_single_record(self):
         """Test average with single record."""
         tracker = DownloadSpeedTracker()
@@ -173,6 +181,7 @@ class TestAverageSpeed:
         # 10 MB / 5s = 2 MB/s
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_multiple_records(self):
         """Test average across multiple records."""
         tracker = DownloadSpeedTracker()
@@ -199,6 +208,7 @@ class TestAdaptiveTimeout:
         tracker.record_download("video1", 10 * 1024 * 1024, 5.0, "short")
         assert tracker.get_adjusted_timeout(120) == 120
 
+    @pytest.mark.fast
     def test_no_adjustment_when_fast(self):
         """Test no adjustment when speed is above minimum."""
         config = DownloadSpeedConfig(min_speed_mbps=1.0)
@@ -210,6 +220,7 @@ class TestAdaptiveTimeout:
 
         assert tracker.get_adjusted_timeout(120) == 120
 
+    @pytest.mark.fast
     def test_timeout_extended_on_slow_network(self):
         """Test timeout is extended when network is slow."""
         config = DownloadSpeedConfig(
@@ -227,6 +238,7 @@ class TestAdaptiveTimeout:
         adjusted = tracker.get_adjusted_timeout(120)
         assert adjusted == 240  # 120 * 2.0
 
+    @pytest.mark.fast
     def test_timeout_capped_at_max_multiplier(self):
         """Test timeout extension is capped at max_timeout_multiplier."""
         config = DownloadSpeedConfig(
@@ -243,6 +255,7 @@ class TestAdaptiveTimeout:
         adjusted = tracker.get_adjusted_timeout(120)
         assert adjusted == 240  # 120 * 2.0 (capped)
 
+    @pytest.mark.fast
     def test_adaptive_timeout_disabled(self):
         """Test no adjustment when adaptive timeout is disabled."""
         config = DownloadSpeedConfig(
@@ -276,6 +289,7 @@ class TestSpeedStats:
         assert stats['total_duration'] == 0.0
         assert stats['records'] == []
 
+    @pytest.mark.fast
     def test_stats_with_records(self):
         """Test stats with multiple records."""
         tracker = DownloadSpeedTracker()
@@ -311,6 +325,7 @@ class TestCheckpointPersistence:
         assert checkpoint['records'][0]['video_id'] == "video1"
         assert checkpoint['records'][1]['video_id'] == "video2"
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict(self):
         """Test restoration from checkpoint dict."""
         tracker = DownloadSpeedTracker()
@@ -341,6 +356,7 @@ class TestCheckpointPersistence:
         assert tracker._records[1].video_id == "video2"
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict_handles_missing_tier(self):
         """Test restoration handles missing tier field gracefully."""
         tracker = DownloadSpeedTracker()
@@ -362,6 +378,7 @@ class TestCheckpointPersistence:
         assert len(tracker._records) == 1
         assert tracker._records[0].tier == "unknown"
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict_handles_invalid_records(self):
         """Test restoration skips invalid records."""
         tracker = DownloadSpeedTracker()
@@ -393,6 +410,7 @@ class TestCheckpointPersistence:
         # Should have 2 valid records, skipped 1 invalid
         assert len(tracker._records) == 2
 
+    @pytest.mark.fast
     def test_clear_removes_all_records(self):
         """Test clear() removes all records."""
         tracker = DownloadSpeedTracker()
@@ -443,6 +461,7 @@ class TestIntegration:
         # Multiplier: 2.0 / 1.0 = 2.0x
         assert tracker.get_adjusted_timeout(120) == 240
 
+    @pytest.mark.fast
     def test_roundtrip_checkpoint(self):
         """Test full save/restore checkpoint cycle."""
         # Create tracker with records
@@ -490,6 +509,7 @@ class TestRateLimitSignalDataclass:
         assert signal.threshold == 0.1
         assert signal.message == "Test signal"
 
+    @pytest.mark.fast
     def test_signal_false_detected(self):
         """Test RateLimitSignal with no detection."""
         signal = RateLimitSignal(
@@ -512,16 +532,19 @@ class TestRateLimitSignalConfigDefaults:
         config = DownloadSpeedConfig()
         assert config.rate_limit_signal_threshold == 0.1
 
+    @pytest.mark.fast
     def test_default_consecutive_samples(self):
         """Test default consecutive slow samples is 3."""
         config = DownloadSpeedConfig()
         assert config.consecutive_slow_samples == 3
 
+    @pytest.mark.fast
     def test_custom_threshold(self):
         """Test custom rate limit signal threshold."""
         config = DownloadSpeedConfig(rate_limit_signal_threshold=0.05)
         assert config.rate_limit_signal_threshold == 0.05
 
+    @pytest.mark.fast
     def test_custom_consecutive_samples(self):
         """Test custom consecutive slow samples."""
         config = DownloadSpeedConfig(consecutive_slow_samples=5)
@@ -545,6 +568,7 @@ class TestDetectRateLimitSignals:
         assert signal.detected is False
         assert "Insufficient samples" in signal.message
 
+    @pytest.mark.fast
     def test_signal_detected_with_consecutive_slow_downloads(self):
         """Test signal detected when 3+ consecutive downloads are slow."""
         config = DownloadSpeedConfig(
@@ -563,6 +587,7 @@ class TestDetectRateLimitSignals:
         assert signal.consecutive_slow_count >= 3
         assert "Rate limit signal" in signal.message
 
+    @pytest.mark.fast
     def test_no_signal_when_downloads_fast(self):
         """Test no signal when downloads are above threshold."""
         config = DownloadSpeedConfig(
@@ -580,6 +605,7 @@ class TestDetectRateLimitSignals:
         assert signal.detected is False
         assert "No rate limit signal" in signal.message
 
+    @pytest.mark.fast
     def test_signal_requires_consecutive_slow(self):
         """Test signal only fires when slow samples are consecutive (most recent)."""
         config = DownloadSpeedConfig(
@@ -598,6 +624,7 @@ class TestDetectRateLimitSignals:
         assert signal.detected is False  # Only 2 consecutive slow, need 3
         assert signal.consecutive_slow_count == 2
 
+    @pytest.mark.fast
     def test_signal_triggers_on_three_consecutive_at_end(self):
         """Test signal fires when last 3 are slow, even after fast ones."""
         config = DownloadSpeedConfig(
@@ -616,6 +643,7 @@ class TestDetectRateLimitSignals:
         assert signal.detected is True
         assert signal.consecutive_slow_count == 3
 
+    @pytest.mark.fast
     def test_signal_includes_recent_speeds(self):
         """Test signal includes recent speeds for debugging."""
         config = DownloadSpeedConfig(
@@ -659,6 +687,7 @@ class TestSignalLogging:
             mock_logger.warning.assert_called_once()
             assert "Rate limit signal" in mock_logger.warning.call_args[0][0]
 
+    @pytest.mark.fast
     def test_no_warning_when_no_signal(self):
         """Test no WARNING log when no signal detected."""
         config = DownloadSpeedConfig(
@@ -710,6 +739,7 @@ class TestSignalWithCircuitBreaker:
         # Verify failure was recorded
         assert breaker.state.consecutive_failures == 1
 
+    @pytest.mark.fast
     def test_multiple_signals_can_trip_circuit_breaker(self):
         """Test multiple signals can accumulate to trip circuit breaker."""
         from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -756,6 +786,7 @@ class TestSignalEdgeCases:
         assert signal.consecutive_slow_count == 0
         assert signal.recent_speeds == []
 
+    @pytest.mark.fast
     def test_exactly_at_threshold(self):
         """Test download speed exactly at threshold is NOT considered slow."""
         config = DownloadSpeedConfig(
@@ -773,6 +804,7 @@ class TestSignalEdgeCases:
         # At threshold should NOT be considered slow (< not <=)
         assert signal.detected is False
 
+    @pytest.mark.fast
     def test_just_below_threshold(self):
         """Test download speed just below threshold IS considered slow."""
         config = DownloadSpeedConfig(
@@ -790,6 +822,7 @@ class TestSignalEdgeCases:
         signal = tracker.detect_rate_limit_signals()
         assert signal.detected is True
 
+    @pytest.mark.fast
     def test_custom_high_threshold(self):
         """Test with higher threshold (more sensitive detection)."""
         config = DownloadSpeedConfig(
@@ -837,6 +870,7 @@ class TestRollingWindowAverage:
         assert len(tracker._records) == 5
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_rolling_window_drops_oldest(self):
         """Record 7 samples with window_size=5, verify only last 5 used."""
         config = DownloadSpeedConfig(window_size=5)
@@ -891,6 +925,7 @@ class TestFastSampleResetsCounter:
         assert signal.detected is False
         assert signal.consecutive_slow_count == 2  # Only last 2 are slow
 
+    @pytest.mark.fast
     def test_fast_sample_at_end_clears_detection(self):
         """Even after many slow samples, one fast sample at end clears detection."""
         config = DownloadSpeedConfig(
@@ -944,6 +979,7 @@ class TestPerKeywordIsolation:
         assert signal_a.detected is True
         assert signal_b.detected is False
 
+    @pytest.mark.fast
     def test_per_keyword_average_speed_isolated(self):
         """Each keyword has independent average speed."""
         config = DownloadSpeedConfig(window_size=5)
@@ -961,6 +997,7 @@ class TestPerKeywordIsolation:
         assert avg_a == pytest.approx(1.0, rel=0.01)
         assert avg_b == pytest.approx(5.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_unknown_keyword_returns_no_signal(self):
         """Unknown keyword returns no signal without error."""
         tracker = PerKeywordSpeedTracker()
@@ -970,11 +1007,13 @@ class TestPerKeywordIsolation:
         assert signal.consecutive_slow_count == 0
         assert "No data" in signal.message
 
+    @pytest.mark.fast
     def test_unknown_keyword_average_returns_zero(self):
         """Unknown keyword returns 0.0 average speed."""
         tracker = PerKeywordSpeedTracker()
         assert tracker.get_average_speed_mbps("nonexistent") == 0.0
 
+    @pytest.mark.fast
     def test_get_keywords_returns_tracked(self):
         """get_keywords() returns only keywords with recorded data."""
         config = DownloadSpeedConfig(window_size=5)
@@ -986,6 +1025,7 @@ class TestPerKeywordIsolation:
         keywords = tracker.get_keywords()
         assert set(keywords) == {"cats", "dogs"}
 
+    @pytest.mark.fast
     def test_clear_specific_keyword(self):
         """Clearing one keyword doesn't affect another."""
         config = DownloadSpeedConfig(window_size=5)
@@ -999,6 +1039,7 @@ class TestPerKeywordIsolation:
         assert tracker.get_average_speed_mbps("cats") == 0.0
         assert tracker.get_average_speed_mbps("dogs") == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_clear_all_keywords(self):
         """Clearing all keywords removes everything."""
         config = DownloadSpeedConfig(window_size=5)
@@ -1026,6 +1067,7 @@ class TestFewerThan2SamplesAverage:
         tracker = DownloadSpeedTracker()
         assert tracker.get_average_speed_mbps() == 0.0
 
+    @pytest.mark.fast
     def test_one_sample_returns_valid_average(self):
         """With exactly 1 sample, average is computed from that sample."""
         tracker = DownloadSpeedTracker()
@@ -1033,6 +1075,7 @@ class TestFewerThan2SamplesAverage:
         tracker.record_download("video1", 10 * 1024 * 1024, 5.0, "short")
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_one_sample_timeout_unchanged(self):
         """With fewer than 2 samples, get_adjusted_timeout returns base unchanged."""
         tracker = DownloadSpeedTracker()
@@ -1040,6 +1083,7 @@ class TestFewerThan2SamplesAverage:
         # Need 2+ samples for adjustment - should return base timeout
         assert tracker.get_adjusted_timeout(120) == 120
 
+    @pytest.mark.fast
     def test_two_samples_enables_timeout_adjustment(self):
         """With exactly 2 samples, timeout adjustment becomes enabled."""
         config = DownloadSpeedConfig(min_speed_mbps=2.0, max_timeout_multiplier=2.0)
@@ -1062,6 +1106,7 @@ class TestZeroDurationSamplesUS008:
         tracker.record_download("video1", 10 * 1024 * 1024, 0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_zero_duration_mixed_with_valid(self):
         """Zero duration samples don't corrupt valid samples."""
         tracker = DownloadSpeedTracker()
@@ -1072,6 +1117,7 @@ class TestZeroDurationSamplesUS008:
         assert len(tracker._records) == 2
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_speed_property_zero_duration_returns_zero(self):
         """DownloadRecord.speed_mbps returns 0.0 for zero duration (no division error)."""
         record = DownloadRecord(
@@ -1083,6 +1129,7 @@ class TestZeroDurationSamplesUS008:
         )
         assert record.speed_mbps == 0.0  # Not inf, not NaN, not exception
 
+    @pytest.mark.fast
     def test_negative_duration_also_skipped(self):
         """Negative duration (invalid) is also skipped gracefully."""
         tracker = DownloadSpeedTracker()
@@ -1106,6 +1153,7 @@ class TestSlidingWindowDropsOldUS008:
         video_ids = [r.video_id for r in tracker._records]
         assert video_ids == ["video2", "video3", "video4"]
 
+    @pytest.mark.fast
     def test_window_size_1_always_keeps_single_sample(self):
         """Window size 1: only most recent sample kept."""
         config = DownloadSpeedConfig(window_size=1)
@@ -1117,6 +1165,7 @@ class TestSlidingWindowDropsOldUS008:
         assert len(tracker._records) == 1
         assert tracker._records[0].video_id == "second"
 
+    @pytest.mark.fast
     def test_dropping_old_samples_updates_average(self):
         """Dropping old samples should update average correctly."""
         config = DownloadSpeedConfig(window_size=2)
@@ -1147,24 +1196,28 @@ class TestNegativeSpeedValuesUS008:
         tracker.record_download("video1", -10 * 1024 * 1024, 5.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_negative_duration_skipped(self):
         """Negative duration is skipped (would produce negative speed)."""
         tracker = DownloadSpeedTracker()
         tracker.record_download("video1", 10 * 1024 * 1024, -5.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_both_negative_skipped(self):
         """Both negative bytes and duration is skipped."""
         tracker = DownloadSpeedTracker()
         tracker.record_download("video1", -10 * 1024 * 1024, -5.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_zero_bytes_skipped(self):
         """Zero bytes is skipped (meaningless speed)."""
         tracker = DownloadSpeedTracker()
         tracker.record_download("video1", 0, 5.0, "short")
         assert len(tracker._records) == 0
 
+    @pytest.mark.fast
     def test_checkpoint_restore_invalid_values_skipped(self):
         """Checkpoint restoration skips records with invalid values."""
         tracker = DownloadSpeedTracker()
@@ -1218,6 +1271,7 @@ class TestConcurrentSpeedRecordingUS008:
 
         assert len(tracker._records) == 100
 
+    @pytest.mark.fast
     def test_concurrent_record_download_no_data_loss(self):
         """Concurrent recording doesn't lose any downloads (within window)."""
         import threading
@@ -1258,6 +1312,7 @@ class TestConcurrentSpeedRecordingUS008:
         actual_bytes = sum(r.bytes_downloaded for r in tracker._records)
         assert actual_bytes == expected_bytes
 
+    @pytest.mark.fast
     def test_concurrent_average_speed_consistent(self):
         """Concurrent recording produces mathematically correct average."""
         import threading
@@ -1281,6 +1336,7 @@ class TestConcurrentSpeedRecordingUS008:
         # Average should be exactly 2.0 MB/s regardless of thread interleaving
         assert tracker.get_average_speed_mbps() == pytest.approx(2.0, rel=0.01)
 
+    @pytest.mark.fast
     def test_concurrent_with_window_overflow(self):
         """Concurrent recording with window overflow maintains correct window size."""
         import threading
@@ -1304,6 +1360,7 @@ class TestConcurrentSpeedRecordingUS008:
         # Due to deque maxlen, exactly 20 remain
         assert len(tracker._records) == 20
 
+    @pytest.mark.fast
     def test_per_keyword_tracker_concurrent_isolation(self):
         """PerKeywordSpeedTracker isolates concurrent access per keyword."""
         import threading

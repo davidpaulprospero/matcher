@@ -18,6 +18,7 @@ from src.caption_fetcher import (
 class TestWorkerProgress:
     """Tests for individual WorkerProgress tracking."""
 
+    @pytest.mark.fast
     def test_init_default_values(self):
         """Test WorkerProgress initializes with correct defaults."""
         progress = WorkerProgress(worker_id=0)
@@ -28,6 +29,7 @@ class TestWorkerProgress:
         assert progress.fetch_times == []
         assert progress.max_fetch_times == 10
 
+    @pytest.mark.fast
     def test_start_video_sets_state(self):
         """Test start_video sets current_video and start_time."""
         progress = WorkerProgress(worker_id=1)
@@ -65,6 +67,7 @@ class TestWorkerProgress:
         for t in progress.fetch_times:
             assert t > 0
 
+    @pytest.mark.fast
     def test_fetch_times_rolling_window(self):
         """Test fetch_times maintains rolling window."""
         progress = WorkerProgress(worker_id=0, max_fetch_times=3)
@@ -87,11 +90,13 @@ class TestWorkerProgress:
         assert elapsed > 0
         assert elapsed < 1.0
 
+    @pytest.mark.fast
     def test_get_elapsed_when_idle(self):
         """Test get_elapsed returns 0 when not processing."""
         progress = WorkerProgress(worker_id=0)
         assert progress.get_elapsed() == 0.0
 
+    @pytest.mark.fast
     def test_is_stuck_true_when_exceeds_threshold(self):
         """Test is_stuck returns True when exceeding threshold."""
         progress = WorkerProgress(worker_id=0)
@@ -100,6 +105,7 @@ class TestWorkerProgress:
 
         assert progress.is_stuck(threshold_seconds=60.0) is True
 
+    @pytest.mark.fast
     def test_is_stuck_false_when_below_threshold(self):
         """Test is_stuck returns False when below threshold."""
         progress = WorkerProgress(worker_id=0)
@@ -107,11 +113,13 @@ class TestWorkerProgress:
 
         assert progress.is_stuck(threshold_seconds=60.0) is False
 
+    @pytest.mark.fast
     def test_is_stuck_false_when_idle(self):
         """Test is_stuck returns False when not processing."""
         progress = WorkerProgress(worker_id=0)
         assert progress.is_stuck(threshold_seconds=60.0) is False
 
+    @pytest.mark.fast
     def test_get_average_fetch_time(self):
         """Test get_average_fetch_time calculates correct average."""
         progress = WorkerProgress(worker_id=0)
@@ -120,11 +128,13 @@ class TestWorkerProgress:
         avg = progress.get_average_fetch_time()
         assert avg == 2.0
 
+    @pytest.mark.fast
     def test_get_average_fetch_time_empty(self):
         """Test get_average_fetch_time returns 0 when no history."""
         progress = WorkerProgress(worker_id=0)
         assert progress.get_average_fetch_time() == 0.0
 
+    @pytest.mark.fast
     def test_to_dict_serialization(self):
         """Test to_dict returns expected structure."""
         progress = WorkerProgress(worker_id=3)
@@ -145,6 +155,7 @@ class TestWorkerProgress:
 class TestWorkerProgressTracker:
     """Tests for WorkerProgressTracker aggregate tracking."""
 
+    @pytest.mark.fast
     def test_init_default_values(self):
         """Test WorkerProgressTracker initializes correctly."""
         tracker = WorkerProgressTracker(total_videos=100)
@@ -155,6 +166,7 @@ class TestWorkerProgressTracker:
         assert tracker.all_fetch_times == []
         assert tracker.stuck_threshold_seconds == 60.0
 
+    @pytest.mark.fast
     def test_initialize_workers(self):
         """Test initialize_workers creates correct number of workers."""
         tracker = WorkerProgressTracker(total_videos=50)
@@ -165,6 +177,7 @@ class TestWorkerProgressTracker:
             assert i in tracker.workers
             assert tracker.workers[i].worker_id == i
 
+    @pytest.mark.fast
     def test_worker_start_creates_if_missing(self):
         """Test worker_start creates worker if not exists."""
         tracker = WorkerProgressTracker(total_videos=10)
@@ -185,6 +198,7 @@ class TestWorkerProgressTracker:
         assert tracker.completed_videos == 1
         assert len(tracker.all_fetch_times) == 1
 
+    @pytest.mark.fast
     def test_get_active_workers(self):
         """Test get_active_workers returns workers with current_video."""
         tracker = WorkerProgressTracker(total_videos=10)
@@ -198,6 +212,7 @@ class TestWorkerProgressTracker:
         worker_ids = {w.worker_id for w in active}
         assert worker_ids == {0, 2}
 
+    @pytest.mark.fast
     def test_get_slow_workers(self):
         """Test get_slow_workers identifies stuck workers."""
         tracker = WorkerProgressTracker(
@@ -218,6 +233,7 @@ class TestWorkerProgressTracker:
         assert len(slow) == 1
         assert slow[0].worker_id == 1
 
+    @pytest.mark.fast
     def test_calculate_eta_basic(self):
         """Test calculate_eta with known fetch times."""
         tracker = WorkerProgressTracker(total_videos=100)
@@ -239,11 +255,13 @@ class TestWorkerProgressTracker:
         expected = 45.0
         assert abs(eta - expected) / expected <= 0.20, f"ETA {eta} not within 20% of {expected}"
 
+    @pytest.mark.fast
     def test_calculate_eta_no_history(self):
         """Test calculate_eta returns 0 with no history."""
         tracker = WorkerProgressTracker(total_videos=100)
         assert tracker.calculate_eta() == 0.0
 
+    @pytest.mark.fast
     def test_calculate_eta_all_completed(self):
         """Test calculate_eta returns 0 when all completed."""
         tracker = WorkerProgressTracker(total_videos=10)
@@ -279,6 +297,7 @@ class TestWorkerProgressTracker:
         assert 'avg_fetch_time' in stats
         assert 'eta_seconds' in stats
 
+    @pytest.mark.fast
     def test_format_progress_message(self):
         """Test format_progress_message returns readable string."""
         tracker = WorkerProgressTracker(
@@ -293,6 +312,7 @@ class TestWorkerProgressTracker:
         msg = tracker.format_progress_message()
         assert "Workers: 2 active" in msg
 
+    @pytest.mark.fast
     def test_format_progress_message_with_slow(self):
         """Test format_progress_message includes slow worker info."""
         tracker = WorkerProgressTracker(
@@ -348,6 +368,7 @@ class TestWorkerProgressTrackerThreadSafety:
 class TestETAAccuracy:
     """Tests verifying ETA calculation accuracy within 20%."""
 
+    @pytest.mark.fast
     def test_eta_accuracy_with_uniform_times(self):
         """Test ETA accuracy within 20% for uniform fetch times."""
         tracker = WorkerProgressTracker(total_videos=100)
@@ -368,6 +389,7 @@ class TestETAAccuracy:
         # Within 20%
         assert abs(eta - expected) / expected <= 0.20
 
+    @pytest.mark.fast
     def test_eta_accuracy_with_variable_times(self):
         """Test ETA accuracy within 20% for variable fetch times."""
         tracker = WorkerProgressTracker(total_videos=100)
@@ -389,6 +411,7 @@ class TestETAAccuracy:
         tolerance = expected * 0.20
         assert abs(eta - expected) <= tolerance, f"ETA {eta} not within 20% of {expected}"
 
+    @pytest.mark.fast
     def test_eta_accuracy_batch_50_videos(self):
         """Test ETA accuracy for batch of 50 videos (acceptance criteria)."""
         tracker = WorkerProgressTracker(total_videos=50)
@@ -418,6 +441,7 @@ class TestETAAccuracy:
         assert abs(eta - expected) <= tolerance, \
             f"ETA {eta:.2f}s not within 20% of expected {expected:.2f}s"
 
+    @pytest.mark.fast
     def test_eta_accounts_for_parallel_workers(self):
         """Test ETA correctly accounts for parallel workers."""
         tracker = WorkerProgressTracker(total_videos=100)

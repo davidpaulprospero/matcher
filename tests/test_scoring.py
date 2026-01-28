@@ -86,6 +86,7 @@ def sample_video_segment():
 class TestApplyDurationPenalty:
     """Test duration-based confidence penalties"""
 
+    @pytest.mark.fast
     def test_ideal_speed_no_penalty(self, mock_config):
         """Test no penalty for ideal speed ratio"""
         confidence = 0.8
@@ -95,6 +96,7 @@ class TestApplyDurationPenalty:
 
         assert result == 0.8  # No change
 
+    @pytest.mark.fast
     def test_ideal_speed_boundary_no_penalty(self, mock_config):
         """Test boundaries of ideal range"""
         # Lower boundary
@@ -105,6 +107,7 @@ class TestApplyDurationPenalty:
         result2 = scoring.apply_duration_penalty(0.8, 1.1, mock_config)
         assert result2 == 0.8
 
+    @pytest.mark.fast
     def test_soft_speed_small_penalty(self, mock_config):
         """Test small penalty for soft speed range"""
         confidence = 0.8
@@ -115,6 +118,7 @@ class TestApplyDurationPenalty:
         # penalty_factor = 0.1
         assert abs(result - 0.7) < 0.001  # 0.8 - 0.1 (allow floating point imprecision)
 
+    @pytest.mark.fast
     def test_outside_both_ranges_large_penalty(self, mock_config):
         """Test large penalty for speed outside both ranges"""
         confidence = 0.9
@@ -125,6 +129,7 @@ class TestApplyDurationPenalty:
         # penalty_factor * 2 = 0.2
         assert result == 0.7  # 0.9 - 0.2
 
+    @pytest.mark.fast
     def test_very_fast_speed_large_penalty(self, mock_config):
         """Test penalty for very fast speeds"""
         confidence = 0.9
@@ -142,6 +147,7 @@ class TestApplyDurationPenalty:
 class TestApplyTopicPenalty:
     """Test topic-based confidence penalties"""
 
+    @pytest.mark.fast
     def test_chapter_matching_disabled(self, sample_vo_segment, sample_video_segment):
         """Test no penalty when chapter matching is disabled"""
         confidence = 0.8
@@ -158,6 +164,7 @@ class TestApplyTopicPenalty:
         assert result_conf == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_vo_segment_no_topics(self, sample_vo_segment, sample_video_segment):
         """Test no penalty when voiceover has no topics"""
         confidence = 0.8
@@ -175,6 +182,7 @@ class TestApplyTopicPenalty:
         assert result_conf == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_video_not_in_video_topics(self, sample_vo_segment, sample_video_segment):
         """Test no penalty when video not in video_topics dict"""
         confidence = 0.8
@@ -194,6 +202,7 @@ class TestApplyTopicPenalty:
         assert result_conf == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_video_topics_empty(self, sample_vo_segment, sample_video_segment):
         """Test no penalty when video has no topics"""
         confidence = 0.8
@@ -218,6 +227,7 @@ class TestApplyTopicPenalty:
         assert result_conf == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_topic_mismatch_penalty_applied(self, sample_vo_segment, sample_video_segment):
         """Test penalty applied for topic mismatch"""
         confidence = 0.8
@@ -244,6 +254,7 @@ class TestApplyTopicPenalty:
             assert "topic mismatch penalty" in reason
             assert "-0.20" in reason
 
+    @pytest.mark.fast
     def test_topic_match_no_penalty(self, sample_vo_segment, sample_video_segment):
         """Test no penalty when topics match"""
         confidence = 0.8
@@ -277,6 +288,7 @@ class TestApplyTopicPenalty:
 class TestApplyBRollBoost:
     """Test B-roll/silent video confidence boosts"""
 
+    @pytest.mark.fast
     def test_not_broll_no_boost(self, mock_config, sample_video_segment):
         """Test no boost for non-B-roll segments"""
         confidence = 0.7
@@ -291,6 +303,7 @@ class TestApplyBRollBoost:
         assert result_conf == 0.7
         assert reason == ""
 
+    @pytest.mark.fast
     def test_broll_boost_applied(self, mock_config, sample_video_segment):
         """Test boost applied for B-roll segments"""
         confidence = 0.7
@@ -309,6 +322,7 @@ class TestApplyBRollBoost:
         assert "B-roll boost" in reason
         assert "+0.10" in reason
 
+    @pytest.mark.fast
     def test_broll_boost_capped_at_1(self, mock_config, sample_video_segment):
         """Test boost is capped at 1.0"""
         confidence = 0.95
@@ -325,6 +339,7 @@ class TestApplyBRollBoost:
         assert result_conf == 1.0  # Not 1.05
         assert "B-roll boost" in reason
 
+    @pytest.mark.fast
     def test_broll_boost_zero_config(self, mock_config, sample_video_segment):
         """Test no boost when config is zero"""
         confidence = 0.7
@@ -341,6 +356,7 @@ class TestApplyBRollBoost:
         assert result_conf == 0.7  # No boost
         assert reason == ""
 
+    @pytest.mark.fast
     def test_broll_boost_missing_config(self, sample_video_segment):
         """Test fallback when config missing broll_boost"""
         confidence = 0.7
@@ -367,6 +383,7 @@ class TestApplyBRollBoost:
 class TestApplyCurrentProjectBoost:
     """Test current project vs global cache scoring"""
 
+    @pytest.mark.fast
     def test_current_project_no_penalty(self, mock_config, sample_video_segment):
         """Test no penalty for current project videos"""
         confidence = 0.8
@@ -381,6 +398,7 @@ class TestApplyCurrentProjectBoost:
         assert result_conf == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_global_cache_penalty(self, mock_config, sample_video_segment):
         """Test penalty for global cache videos"""
         confidence = 0.8
@@ -399,6 +417,7 @@ class TestApplyCurrentProjectBoost:
         assert "global cache" in reason
         assert "-0.10" in reason
 
+    @pytest.mark.fast
     def test_global_cache_zero_boost(self, mock_config, sample_video_segment):
         """Test no penalty when boost is zero"""
         confidence = 0.8
@@ -415,6 +434,7 @@ class TestApplyCurrentProjectBoost:
         assert result_conf == 0.8  # No penalty
         assert reason == ""
 
+    @pytest.mark.fast
     def test_global_cache_missing_config(self, sample_video_segment):
         """Test fallback when config missing"""
         confidence = 0.8
@@ -440,6 +460,7 @@ class TestApplyCurrentProjectBoost:
 class TestComputeDurationPenalty:
     """Test duration penalty computation"""
 
+    @pytest.mark.fast
     def test_duration_scoring_disabled(self, mock_config, sample_vo_segment, sample_video_segment):
         """Test no penalty when duration scoring disabled"""
         mock_config.matching.duration_scoring_enabled = False
@@ -448,6 +469,7 @@ class TestComputeDurationPenalty:
 
         assert penalty == 0.0
 
+    @pytest.mark.fast
     def test_ideal_speed_no_penalty(self, mock_config, sample_vo_segment, sample_video_segment):
         """Test no penalty for ideal speed match"""
         # VO: 10s, Video: 10s → speed_ratio = 1.0 (ideal)
@@ -455,6 +477,7 @@ class TestComputeDurationPenalty:
 
         assert penalty == 0.0
 
+    @pytest.mark.fast
     def test_soft_penalty_range(self, mock_config, sample_vo_segment):
         """Test small penalty for soft range"""
         # VO: 10s, Video: 7.5s → speed_ratio = 0.75 (soft range)
@@ -471,6 +494,7 @@ class TestComputeDurationPenalty:
         # penalty_factor = 0.1
         assert penalty == 0.1
 
+    @pytest.mark.fast
     def test_large_penalty_outside_ranges(self, mock_config, sample_vo_segment):
         """Test large penalty outside both ranges"""
         # VO: 10s, Video: 5s → speed_ratio = 0.5 (outside soft range)
@@ -487,6 +511,7 @@ class TestComputeDurationPenalty:
         # penalty_factor * 2 = 0.2
         assert penalty == 0.2
 
+    @pytest.mark.fast
     def test_zero_duration_no_penalty(self, mock_config):
         """Test no penalty for zero-duration segments"""
         vo_seg = SRTSegment(
@@ -508,6 +533,7 @@ class TestComputeDurationPenalty:
 
         assert penalty == 0.0
 
+    @pytest.mark.fast
     def test_very_long_video_penalty(self, mock_config, sample_vo_segment):
         """Test penalty for very long video segments"""
         # VO: 10s, Video: 20s → speed_ratio = 2.0 (much too fast)
@@ -532,6 +558,7 @@ class TestComputeDurationPenalty:
 class TestApplyDurationScoring:
     """Test duration scoring application to candidates"""
 
+    @pytest.mark.fast
     def test_apply_duration_scoring_empty(self, mock_config, sample_vo_segment):
         """Test with empty candidates"""
         candidates = []
@@ -540,6 +567,7 @@ class TestApplyDurationScoring:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_apply_duration_scoring_single(self, mock_config, sample_vo_segment):
         """Test with single candidate"""
         video_seg = SRTSegment(
@@ -559,6 +587,7 @@ class TestApplyDurationScoring:
         assert result[0][1] == 0.8  # No penalty
         assert result[0][2] == 0.0  # Penalty = 0
 
+    @pytest.mark.fast
     def test_apply_duration_scoring_multiple(self, mock_config, sample_vo_segment):
         """Test with multiple candidates"""
         # Ideal match
@@ -587,6 +616,7 @@ class TestApplyDurationScoring:
         assert abs(result[1][1] - 0.75) < 0.001  # 0.85 - 0.1
         assert abs(result[2][1] - 0.6) < 0.001   # 0.8 - 0.2
 
+    @pytest.mark.fast
     def test_apply_duration_scoring_sorts_by_adjusted(self, mock_config, sample_vo_segment):
         """Test that results are sorted by adjusted score"""
         # Create candidates where penalties change the order
@@ -608,6 +638,7 @@ class TestApplyDurationScoring:
         assert result[0][0] == video_seg2  # v2 first
         assert result[1][0] == video_seg1  # v1 second
 
+    @pytest.mark.fast
     def test_apply_duration_scoring_negative_adjusted(self, mock_config, sample_vo_segment):
         """Test that adjusted scores don't go below 0"""
         video_seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="V1", source_file="/v1.mp4")
@@ -628,6 +659,7 @@ class TestApplyDurationScoring:
 class TestScoringEdgeCases:
     """Test edge cases and boundary conditions"""
 
+    @pytest.mark.fast
     def test_all_scoring_functions_combined(self, mock_config, sample_vo_segment):
         """Test realistic scenario with all scoring functions"""
         video_seg = SRTSegment(
@@ -673,6 +705,7 @@ class TestScoringEdgeCases:
         # Final score balances all factors
         assert 0.6 <= confidence <= 0.7
 
+    @pytest.mark.fast
     def test_extreme_speed_ratios(self, mock_config):
         """Test handling of extreme speed ratios"""
         # Very slow (speed up 10x)
@@ -683,6 +716,7 @@ class TestScoringEdgeCases:
         penalty2 = scoring.apply_duration_penalty(0.8, 0.1, mock_config)
         assert penalty2 <= 0.601  # Large penalty (allow floating point tolerance)
 
+    @pytest.mark.fast
     def test_config_object_vs_dict(self):
         """Test that scoring works with both object and dict configs"""
         # Config as object
@@ -716,6 +750,7 @@ class TestApplyCaptionQualityAdjustment:
         config.matching = matching
         return config
 
+    @pytest.mark.fast
     def test_high_quality_boost(self, caption_quality_config, sample_video_segment):
         """Test confidence boost for high-quality human captions"""
         confidence = 0.7
@@ -731,6 +766,7 @@ class TestApplyCaptionQualityAdjustment:
         assert "caption quality high" in reason
         assert "+0.05" in reason
 
+    @pytest.mark.fast
     def test_medium_quality_no_adjustment(self, caption_quality_config, sample_video_segment):
         """Test no adjustment for medium-quality auto captions"""
         confidence = 0.7
@@ -745,6 +781,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 0.7  # No change
         assert reason == ""
 
+    @pytest.mark.fast
     def test_low_quality_penalty(self, caption_quality_config, sample_video_segment):
         """Test confidence penalty for low-quality/fallback captions"""
         confidence = 0.7
@@ -760,6 +797,7 @@ class TestApplyCaptionQualityAdjustment:
         assert "caption quality low" in reason
         assert "-0.10" in reason
 
+    @pytest.mark.fast
     def test_no_caption_quality_attribute(self, caption_quality_config, sample_video_segment):
         """Test no adjustment when caption_quality not set"""
         confidence = 0.7
@@ -774,6 +812,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 0.7
         assert reason == ""
 
+    @pytest.mark.fast
     def test_disabled_via_config(self, sample_video_segment):
         """Test no adjustment when feature disabled in config"""
         config = Mock()
@@ -791,6 +830,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 0.7
         assert reason == ""
 
+    @pytest.mark.fast
     def test_boost_capped_at_1(self, caption_quality_config, sample_video_segment):
         """Test that boost is capped at 1.0"""
         confidence = 0.98
@@ -805,6 +845,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 1.0  # Not 1.03
         assert "caption quality high" in reason
 
+    @pytest.mark.fast
     def test_penalty_capped_at_0(self, caption_quality_config, sample_video_segment):
         """Test that penalty doesn't go below 0"""
         confidence = 0.05
@@ -819,6 +860,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 0.0  # Not negative
         assert "caption quality low" in reason
 
+    @pytest.mark.fast
     def test_zero_boost_config(self, sample_video_segment):
         """Test no boost when config boost is zero"""
         config = Mock()
@@ -838,6 +880,7 @@ class TestApplyCaptionQualityAdjustment:
         assert result_conf == 0.7
         assert reason == ""
 
+    @pytest.mark.fast
     def test_missing_config_defaults(self, sample_video_segment):
         """Test fallback to default values when config attributes missing"""
         config = Mock()
@@ -879,6 +922,7 @@ class TestCaptionQualityMultiplicativeWeights:
         config.matching = matching
         return config
 
+    @pytest.mark.fast
     def test_high_quality_weight_no_change(self, weights_config, sample_video_segment):
         """Test high quality weight=1.0 produces no change (US-006 AC)"""
         confidence = 0.85
@@ -894,6 +938,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert result_conf == 0.85
         assert reason == ""  # No reason when weight=1.0
 
+    @pytest.mark.fast
     def test_medium_quality_weight_reduces_confidence(self, weights_config, sample_video_segment):
         """Test medium quality weight=0.9 reduces confidence by 10% (US-006 AC)"""
         confidence = 0.85
@@ -910,6 +955,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert "x0.90" in reason
         assert "caption quality medium" in reason
 
+    @pytest.mark.fast
     def test_low_quality_weight_significantly_reduces_confidence(self, weights_config, sample_video_segment):
         """Test low quality weight=0.75 reduces confidence by 25% (US-006 AC)"""
         confidence = 0.85
@@ -926,6 +972,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert "x0.75" in reason
         assert "caption quality low" in reason
 
+    @pytest.mark.fast
     def test_same_text_different_quality_different_confidence(self, weights_config, sample_video_segment):
         """Test that same match text produces different confidence with high vs low quality (US-006 AC)"""
         base_confidence = 0.80
@@ -952,6 +999,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert high_conf > low_conf
         assert high_conf - low_conf >= 0.15  # At least 15% difference
 
+    @pytest.mark.fast
     def test_weights_override_additive_mode(self, sample_video_segment):
         """Test that weights mode ignores legacy additive settings"""
         config = Mock()
@@ -976,6 +1024,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert abs(result_conf - 0.6375) < 0.001
         assert "x0.75" in reason
 
+    @pytest.mark.fast
     def test_custom_weights(self, sample_video_segment):
         """Test custom weight values in config"""
         config = Mock()
@@ -996,6 +1045,7 @@ class TestCaptionQualityMultiplicativeWeights:
         # 0.80 * 0.5 = 0.4
         assert abs(result_conf - 0.40) < 0.001
 
+    @pytest.mark.fast
     def test_weights_capped_at_1(self, sample_video_segment):
         """Test that multiplicative result is capped at 1.0"""
         config = Mock()
@@ -1015,6 +1065,7 @@ class TestCaptionQualityMultiplicativeWeights:
         # 0.90 * 1.5 = 1.35 -> capped at 1.0
         assert result_conf == 1.0
 
+    @pytest.mark.fast
     def test_weights_capped_at_0(self, sample_video_segment):
         """Test that multiplicative result is capped at 0.0"""
         config = Mock()
@@ -1034,6 +1085,7 @@ class TestCaptionQualityMultiplicativeWeights:
         # 0.50 * -0.5 = -0.25 -> capped at 0.0
         assert result_conf == 0.0
 
+    @pytest.mark.fast
     def test_unknown_quality_uses_default_weight(self, weights_config, sample_video_segment):
         """Test that unknown quality level defaults to weight=1.0"""
         confidence = 0.80
@@ -1049,6 +1101,7 @@ class TestCaptionQualityMultiplicativeWeights:
         assert result_conf == 0.80
         assert reason == ""
 
+    @pytest.mark.fast
     def test_partial_weights_dict_uses_defaults(self, sample_video_segment):
         """Test that missing quality keys use default weights"""
         config = Mock()
@@ -1069,6 +1122,7 @@ class TestCaptionQualityMultiplicativeWeights:
         # medium not in dict -> use default 0.9
         assert abs(result_conf - 0.72) < 0.001  # 0.80 * 0.9 = 0.72
 
+    @pytest.mark.fast
     def test_empty_weights_dict_falls_back_to_defaults(self, sample_video_segment):
         """Test that empty weights dict uses all default weights"""
         config = Mock()
@@ -1123,6 +1177,7 @@ class TestApplyTimingPenalty:
         config.matching = matching
         return config
 
+    @pytest.mark.fast
     def test_no_penalty_when_perfect_timing(self, timing_penalty_config, sample_video_segment):
         """Test no penalty when timing_penalty=1.0"""
         confidence = 0.85
@@ -1137,6 +1192,7 @@ class TestApplyTimingPenalty:
         assert result_conf == 0.85
         assert reason == ""
 
+    @pytest.mark.fast
     def test_penalty_applied_multiplicatively(self, timing_penalty_config, sample_video_segment):
         """Test that timing penalty is applied multiplicatively"""
         confidence = 0.80
@@ -1153,6 +1209,7 @@ class TestApplyTimingPenalty:
         assert "timing penalty" in reason
         assert "x0.84" in reason
 
+    @pytest.mark.fast
     def test_penalty_disabled_no_effect(self, timing_penalty_disabled_config, sample_video_segment):
         """Test no penalty when config disabled"""
         confidence = 0.80
@@ -1167,6 +1224,7 @@ class TestApplyTimingPenalty:
         assert result_conf == 0.80  # No change
         assert reason == ""
 
+    @pytest.mark.fast
     def test_no_timing_penalty_attribute(self, timing_penalty_config, sample_video_segment):
         """Test no penalty when timing_penalty attribute missing"""
         confidence = 0.80
@@ -1181,6 +1239,7 @@ class TestApplyTimingPenalty:
         assert result_conf == 0.80
         assert reason == ""
 
+    @pytest.mark.fast
     def test_penalty_capped_at_zero(self, timing_penalty_config, sample_video_segment):
         """Test that result is capped at 0.0"""
         confidence = 0.50
@@ -1194,6 +1253,7 @@ class TestApplyTimingPenalty:
 
         assert result_conf == 0.0
 
+    @pytest.mark.fast
     def test_penalty_above_one_is_no_penalty(self, timing_penalty_config, sample_video_segment):
         """Test that timing_penalty >= 1.0 means no penalty applied"""
         confidence = 0.80
@@ -1209,6 +1269,7 @@ class TestApplyTimingPenalty:
         assert result_conf == 0.80
         assert reason == ""
 
+    @pytest.mark.fast
     def test_10_percent_penalty(self, timing_penalty_config, sample_video_segment):
         """Test 10% penalty (90% coverage, no exceeds)"""
         confidence = 0.85
@@ -1223,6 +1284,7 @@ class TestApplyTimingPenalty:
         # 0.85 * 0.98 = 0.833
         assert abs(result_conf - 0.833) < 0.001
 
+    @pytest.mark.fast
     def test_reason_format(self, timing_penalty_config, sample_video_segment):
         """Test reason string format"""
         confidence = 0.80
@@ -1239,6 +1301,7 @@ class TestApplyTimingPenalty:
         assert "x0.90" in reason
         assert "-10%" in reason
 
+    @pytest.mark.fast
     def test_config_default_enabled(self, sample_video_segment):
         """Test default behavior when config attribute missing"""
         config = Mock()

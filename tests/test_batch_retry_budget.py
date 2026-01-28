@@ -28,6 +28,7 @@ from src.caption_fetcher import (
 class TestBatchRetryBudgetInit:
     """Test BatchRetryBudget initialization."""
 
+    @pytest.mark.fast
     def test_default_initialization(self):
         """Test default values on initialization."""
         budget = BatchRetryBudget()
@@ -36,18 +37,21 @@ class TestBatchRetryBudgetInit:
         assert budget.category_counts == {}
         assert budget.budget_reductions == []
 
+    @pytest.mark.fast
     def test_initialization_with_total_videos(self):
         """Test initialization with total video count."""
         budget = BatchRetryBudget(total_videos=100)
         assert budget.total_videos == 100
         assert budget.processed_videos == 0
 
+    @pytest.mark.fast
     def test_budgets_initialized_from_defaults(self):
         """Test original and reduced budgets match defaults."""
         budget = BatchRetryBudget()
         assert budget.original_budgets == DEFAULT_RETRY_BUDGETS
         assert budget.reduced_budgets == DEFAULT_RETRY_BUDGETS
 
+    @pytest.mark.fast
     def test_default_thresholds(self):
         """Test default threshold values."""
         budget = BatchRetryBudget()
@@ -58,12 +62,14 @@ class TestBatchRetryBudgetInit:
 class TestBatchRetryBudgetRecording:
     """Test recording success and errors."""
 
+    @pytest.mark.fast
     def test_record_success_increments_processed(self):
         """Test record_success increments processed count."""
         budget = BatchRetryBudget(total_videos=10)
         budget.record_success("video1")
         assert budget.processed_videos == 1
 
+    @pytest.mark.fast
     def test_record_error_increments_category_count(self):
         """Test record_error increments category count."""
         budget = BatchRetryBudget(total_videos=10)
@@ -72,6 +78,7 @@ class TestBatchRetryBudgetRecording:
         assert budget.processed_videos == 1
         assert budget.category_counts[CaptionErrorCategory.NETWORK] == 1
 
+    @pytest.mark.fast
     def test_record_multiple_errors_different_categories(self):
         """Test recording errors of different categories."""
         budget = BatchRetryBudget(total_videos=10)
@@ -88,6 +95,7 @@ class TestBatchRetryBudgetRecording:
 class TestBatchRetryBudgetThresholds:
     """Test threshold detection and budget reduction."""
 
+    @pytest.mark.fast
     def test_30_percent_network_errors_reduces_to_1(self):
         """Test >30% network errors reduces retry budget from 3 to 1."""
         budget = BatchRetryBudget(total_videos=100)
@@ -103,6 +111,7 @@ class TestBatchRetryBudgetThresholds:
         assert len(budget.budget_reductions) == 1
         assert budget.budget_reductions[0][3] == 1  # new_budget
 
+    @pytest.mark.fast
     def test_50_percent_network_errors_disables_retries(self):
         """Test >50% network errors disables retries entirely."""
         budget = BatchRetryBudget(total_videos=100)
@@ -118,6 +127,7 @@ class TestBatchRetryBudgetThresholds:
         # Should have 2 reductions: first to 1 at >30%, then to 0 at >50%
         assert len(budget.budget_reductions) >= 1
 
+    @pytest.mark.fast
     def test_below_30_percent_no_reduction(self):
         """Test <30% network errors keeps original budget."""
         budget = BatchRetryBudget(total_videos=100)
@@ -132,6 +142,7 @@ class TestBatchRetryBudgetThresholds:
         assert budget.budget_remaining(CaptionErrorCategory.NETWORK) == 3
         assert len(budget.budget_reductions) == 0
 
+    @pytest.mark.fast
     def test_exactly_30_percent_no_reduction(self):
         """Test exactly 30% network errors does NOT trigger reduction."""
         budget = BatchRetryBudget(total_videos=100)
@@ -145,6 +156,7 @@ class TestBatchRetryBudgetThresholds:
         # 30% exactly should NOT trigger reduction (>30% required)
         assert budget.budget_remaining(CaptionErrorCategory.NETWORK) == 3
 
+    @pytest.mark.fast
     def test_only_network_errors_trigger_reduction(self):
         """Test only NETWORK errors trigger threshold logic."""
         budget = BatchRetryBudget(total_videos=100)
@@ -163,6 +175,7 @@ class TestBatchRetryBudgetThresholds:
 class TestBatchRetryBudget40PercentScenario:
     """Test the specific acceptance criteria scenario: 40% errors use 60% fewer retries."""
 
+    @pytest.mark.fast
     def test_40_percent_network_errors_uses_60_percent_fewer_retries(self):
         """Test batch with 40% network errors uses 60% fewer retries on remaining videos.
 
@@ -195,6 +208,7 @@ class TestBatchRetryBudget40PercentScenario:
         reduction_percent = (original_budget - new_budget) / original_budget
         assert reduction_percent >= 0.60, f"Expected at least 60% reduction, got {reduction_percent:.1%}"
 
+    @pytest.mark.fast
     def test_estimated_retries_saved_calculation(self):
         """Test that estimated retries saved is calculated correctly."""
         budget = BatchRetryBudget(total_videos=100)
@@ -221,6 +235,7 @@ class TestBatchRetryBudget40PercentScenario:
 class TestBatchRetryBudgetGetters:
     """Test getter methods."""
 
+    @pytest.mark.fast
     def test_budget_remaining_default(self):
         """Test budget_remaining returns default for unprocessed budget."""
         budget = BatchRetryBudget()
@@ -228,11 +243,13 @@ class TestBatchRetryBudgetGetters:
         assert budget.budget_remaining(CaptionErrorCategory.TIMEOUT) == 2
         assert budget.budget_remaining(CaptionErrorCategory.UNAVAILABLE) == 0
 
+    @pytest.mark.fast
     def test_get_error_rate_empty(self):
         """Test get_error_rate returns 0 for empty budget."""
         budget = BatchRetryBudget()
         assert budget.get_error_rate(CaptionErrorCategory.NETWORK) == 0.0
 
+    @pytest.mark.fast
     def test_get_error_rate_calculated(self):
         """Test get_error_rate returns correct rate."""
         budget = BatchRetryBudget(total_videos=100)
@@ -243,6 +260,7 @@ class TestBatchRetryBudgetGetters:
 
         assert budget.get_error_rate(CaptionErrorCategory.NETWORK) == 0.5
 
+    @pytest.mark.fast
     def test_get_summary(self):
         """Test get_summary returns complete information."""
         budget = BatchRetryBudget(total_videos=100)
@@ -263,6 +281,7 @@ class TestBatchRetryBudgetGetters:
 class TestBatchRetryBudgetSerialization:
     """Test checkpoint serialization."""
 
+    @pytest.mark.fast
     def test_to_dict_roundtrip(self):
         """Test serialization and deserialization roundtrip."""
         budget = BatchRetryBudget(total_videos=100)
@@ -279,12 +298,14 @@ class TestBatchRetryBudgetSerialization:
         assert restored.category_counts[CaptionErrorCategory.NETWORK] == 4
         assert restored.budget_remaining(CaptionErrorCategory.NETWORK) == 1
 
+    @pytest.mark.fast
     def test_from_dict_none(self):
         """Test from_dict with None returns fresh budget."""
         budget = BatchRetryBudget.from_dict(None)
         assert budget.total_videos == 0
         assert budget.processed_videos == 0
 
+    @pytest.mark.fast
     def test_from_dict_empty(self):
         """Test from_dict with empty dict returns fresh budget."""
         budget = BatchRetryBudget.from_dict({})
@@ -294,6 +315,7 @@ class TestBatchRetryBudgetSerialization:
 class TestBatchRetryBudgetReset:
     """Test reset functionality."""
 
+    @pytest.mark.fast
     def test_reset_clears_state(self):
         """Test reset clears processed videos and counts."""
         budget = BatchRetryBudget(total_videos=100)
@@ -312,6 +334,7 @@ class TestBatchRetryBudgetReset:
 class TestBatchRetryBudgetThreadSafety:
     """Test thread safety of BatchRetryBudget."""
 
+    @pytest.mark.fast
     def test_concurrent_recording(self):
         """Test concurrent recording from multiple threads."""
         budget = BatchRetryBudget(total_videos=1000)
@@ -342,12 +365,14 @@ class TestBatchRetryBudgetThreadSafety:
 class TestCaptionMetricsBatchRetryBudget:
     """Test integration with CaptionMetrics."""
 
+    @pytest.mark.fast
     def test_batch_retry_budget_field_exists(self):
         """Test CaptionMetrics has batch_retry_budget field."""
         metrics = CaptionMetrics()
         assert hasattr(metrics, 'batch_retry_budget')
         assert metrics.batch_retry_budget is None
 
+    @pytest.mark.fast
     def test_set_batch_retry_budget(self):
         """Test setting batch_retry_budget from BatchRetryBudget summary."""
         metrics = CaptionMetrics()
@@ -367,6 +392,7 @@ class TestCaptionMetricsBatchRetryBudget:
         assert metrics.batch_retry_budget['processed_videos'] == 10
         assert metrics.batch_retry_budget['reductions_applied'] == 1
 
+    @pytest.mark.fast
     def test_batch_retry_budget_in_summary(self):
         """Test batch_retry_budget is accessible after setting."""
         metrics = CaptionMetrics()
@@ -388,12 +414,14 @@ class TestCaptionMetricsBatchRetryBudget:
 class TestBatchRetryBudgetEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    @pytest.mark.fast
     def test_zero_processed_videos(self):
         """Test behavior with no processed videos."""
         budget = BatchRetryBudget(total_videos=100)
         assert budget.get_error_rate(CaptionErrorCategory.NETWORK) == 0.0
         assert budget.budget_remaining(CaptionErrorCategory.NETWORK) == 3
 
+    @pytest.mark.fast
     def test_all_errors_one_category(self):
         """Test all videos failing with same error."""
         budget = BatchRetryBudget(total_videos=10)
@@ -403,6 +431,7 @@ class TestBatchRetryBudgetEdgeCases:
         # 100% network errors - should be disabled
         assert budget.budget_remaining(CaptionErrorCategory.NETWORK) == 0
 
+    @pytest.mark.fast
     def test_no_errors_in_batch(self):
         """Test batch with no errors."""
         budget = BatchRetryBudget(total_videos=10)
@@ -413,6 +442,7 @@ class TestBatchRetryBudgetEdgeCases:
         assert budget.budget_remaining(CaptionErrorCategory.NETWORK) == 3
         assert budget.get_total_retries_saved() == 0
 
+    @pytest.mark.fast
     def test_gradual_threshold_crossing(self):
         """Test that budget reduction happens at correct threshold crossing."""
         budget = BatchRetryBudget(total_videos=100)
@@ -443,6 +473,7 @@ class TestBatchRetryBudgetEdgeCases:
 class TestBatchRetryBudgetLogging:
     """Test logging behavior."""
 
+    @pytest.mark.fast
     def test_warning_logged_on_30_percent_reduction(self):
         """Test that warning is logged when reducing budget at 30% threshold."""
         budget = BatchRetryBudget(total_videos=100)
@@ -458,6 +489,7 @@ class TestBatchRetryBudgetLogging:
                           if '>30%' in str(c)]
             assert len(warning_calls) >= 1
 
+    @pytest.mark.fast
     def test_warning_logged_on_50_percent_disable(self):
         """Test that warning is logged when disabling retries at 50% threshold."""
         budget = BatchRetryBudget(total_videos=100)

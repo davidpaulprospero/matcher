@@ -44,6 +44,7 @@ class TestCheckpointDataClass:
         assert result['version'] == "1.0"
         assert result['last_completed_stage'] == "ANALYZE"
 
+    @pytest.mark.fast
     def test_from_dict_filters_unknown_fields(self):
         """Test from_dict filters unknown fields."""
         raw_data = {
@@ -71,6 +72,7 @@ class TestSavedKeywordsDataClass:
         assert result['name'] == "test"
         assert result['keywords'] == ["kw1", "kw2"]
 
+    @pytest.mark.fast
     def test_from_dict_filters_unknown_fields(self):
         """Test from_dict filters unknown fields."""
         raw_data = {
@@ -94,11 +96,13 @@ class TestCheckpointManagerBasics:
         assert manager.config_hash == "abc123"
         assert manager.data is None
 
+    @pytest.mark.fast
     def test_exists_false(self, tmp_path):
         """Test exists returns False when no checkpoint."""
         manager = CheckpointManager(tmp_path)
         assert manager.exists() == False
 
+    @pytest.mark.fast
     def test_exists_true(self, tmp_path):
         """Test exists returns True when checkpoint exists."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -120,6 +124,7 @@ class TestCheckpointCorruption:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_load_small_file(self, tmp_path):
         """Test loading a file with less than 10 chars."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -129,6 +134,7 @@ class TestCheckpointCorruption:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_load_invalid_json(self, tmp_path):
         """Test loading a file with invalid JSON."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -138,6 +144,7 @@ class TestCheckpointCorruption:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_load_json_not_dict(self, tmp_path):
         """Test loading a file where JSON is not a dict."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -147,6 +154,7 @@ class TestCheckpointCorruption:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_backup_restoration(self, tmp_path):
         """Test restoring from backup when main is corrupt."""
         # Create corrupt main checkpoint
@@ -172,6 +180,7 @@ class TestCheckpointCorruption:
         assert result is not None
         assert result.version == '1.0'
 
+    @pytest.mark.fast
     def test_backup_restoration_copy_fails(self, tmp_path):
         """Test when backup restoration copy fails."""
         # Create corrupt main checkpoint
@@ -195,6 +204,7 @@ class TestCheckpointCorruption:
             # Should still return data even if copy fails
             assert result is not None
 
+    @pytest.mark.fast
     def test_both_corrupt(self, tmp_path):
         """Test when both main and backup are corrupt."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -207,6 +217,7 @@ class TestCheckpointCorruption:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_load_file_read_error(self, tmp_path):
         """Test handling of file read errors."""
         checkpoint_file = tmp_path / "checkpoint.json"
@@ -244,6 +255,7 @@ class TestCheckpointMigration:
         assert result.analyze == {'keywords': ['test']}
         assert result.download == {'video_paths': ['/path/to/video.mp4']}
 
+    @pytest.mark.fast
     def test_migrate_already_v10(self, tmp_path):
         """Test that v1.0 data is not migrated."""
         v10_format = {
@@ -263,6 +275,7 @@ class TestCheckpointMigration:
         assert result is not None
         assert result.version == '1.0'
 
+    @pytest.mark.fast
     def test_migrate_save_failure(self, tmp_path):
         """Test migration when save fails."""
         old_format = {
@@ -283,6 +296,7 @@ class TestCheckpointMigration:
             assert result is not None
             assert result.version == '1.0'
 
+    @pytest.mark.fast
     def test_migrate_missing_version(self, tmp_path):
         """Test migration when version is missing (defaults to 0.9)."""
         old_format = {
@@ -310,12 +324,14 @@ class TestCheckpointIsStale:
         manager = CheckpointManager(tmp_path)
         assert manager.is_stale() == False
 
+    @pytest.mark.fast
     def test_is_stale_no_timestamp(self, tmp_path):
         """Test is_stale when no timestamp in data."""
         manager = CheckpointManager(tmp_path)
         manager.data = CheckpointData()  # Empty timestamps
         assert manager.is_stale() == True
 
+    @pytest.mark.fast
     def test_is_stale_fresh_checkpoint(self, tmp_path):
         """Test is_stale with recent checkpoint."""
         manager = CheckpointManager(tmp_path)
@@ -324,6 +340,7 @@ class TestCheckpointIsStale:
         )
         assert manager.is_stale(max_age_hours=1.0) == False
 
+    @pytest.mark.fast
     def test_is_stale_old_checkpoint(self, tmp_path):
         """Test is_stale with old checkpoint."""
         manager = CheckpointManager(tmp_path)
@@ -333,6 +350,7 @@ class TestCheckpointIsStale:
         )
         assert manager.is_stale(max_age_hours=24.0) == True
 
+    @pytest.mark.fast
     def test_is_stale_malformed_timestamp(self, tmp_path):
         """Test is_stale with malformed timestamp."""
         manager = CheckpointManager(tmp_path)
@@ -341,6 +359,7 @@ class TestCheckpointIsStale:
         )
         assert manager.is_stale() == True
 
+    @pytest.mark.fast
     def test_is_stale_uses_created_at_fallback(self, tmp_path):
         """Test is_stale uses created_at when updated_at is empty."""
         manager = CheckpointManager(tmp_path)
@@ -360,12 +379,14 @@ class TestCheckpointGetAgeHours:
         manager = CheckpointManager(tmp_path)
         assert manager.get_age_hours() == 0.0
 
+    @pytest.mark.fast
     def test_get_age_hours_no_timestamp(self, tmp_path):
         """Test get_age_hours with no timestamp."""
         manager = CheckpointManager(tmp_path)
         manager.data = CheckpointData()
         assert manager.get_age_hours() == 0.0
 
+    @pytest.mark.fast
     def test_get_age_hours_valid(self, tmp_path):
         """Test get_age_hours with valid timestamp."""
         manager = CheckpointManager(tmp_path)
@@ -376,6 +397,7 @@ class TestCheckpointGetAgeHours:
         age = manager.get_age_hours()
         assert 0.9 < age < 1.1  # Approximately 1 hour
 
+    @pytest.mark.fast
     def test_get_age_hours_exception(self, tmp_path):
         """Test get_age_hours with invalid timestamp returns 0."""
         manager = CheckpointManager(tmp_path)
@@ -399,6 +421,7 @@ class TestCheckpointValidation:
         )
         assert manager._validate_checkpoint_data(data) == True
 
+    @pytest.mark.fast
     def test_validate_checkpoint_data_wrong_version(self, tmp_path):
         """Test validation with wrong version."""
         manager = CheckpointManager(tmp_path)
@@ -409,6 +432,7 @@ class TestCheckpointValidation:
         )
         assert manager._validate_checkpoint_data(data) == False
 
+    @pytest.mark.fast
     def test_validate_checkpoint_data_missing_created_at(self, tmp_path):
         """Test validation with missing created_at."""
         manager = CheckpointManager(tmp_path)
@@ -419,6 +443,7 @@ class TestCheckpointValidation:
         )
         assert manager._validate_checkpoint_data(data) == False
 
+    @pytest.mark.fast
     def test_validate_checkpoint_data_no_stage(self, tmp_path):
         """Test validation with no completed stage."""
         manager = CheckpointManager(tmp_path)
@@ -429,6 +454,7 @@ class TestCheckpointValidation:
         )
         assert manager._validate_checkpoint_data(data) == False
 
+    @pytest.mark.fast
     def test_validate_checkpoint_data_unknown_stage(self, tmp_path):
         """Test validation with unknown stage."""
         manager = CheckpointManager(tmp_path)
@@ -451,6 +477,7 @@ class TestCheckpointValidateMethod:
         assert result['valid'] == False
         assert "No checkpoint data loaded" in result['errors']
 
+    @pytest.mark.fast
     def test_validate_config_hash_mismatch(self, tmp_path):
         """Test validate with config hash mismatch."""
         manager = CheckpointManager(tmp_path, config_hash="new_hash")
@@ -462,6 +489,7 @@ class TestCheckpointValidateMethod:
         result = manager.validate()
         assert any("Configuration has changed" in w for w in result['warnings'])
 
+    @pytest.mark.fast
     def test_validate_voiceover_changed(self, tmp_path):
         """Test validate with voiceover hash mismatch."""
         # Create a test voiceover file
@@ -477,6 +505,7 @@ class TestCheckpointValidateMethod:
         result = manager.validate(voiceover_path=str(vo_file))
         assert any("Voiceover file has changed" in w for w in result['warnings'])
 
+    @pytest.mark.fast
     def test_validate_unknown_stage(self, tmp_path):
         """Test validate with unknown stage in checkpoint."""
         manager = CheckpointManager(tmp_path)
@@ -487,6 +516,7 @@ class TestCheckpointValidateMethod:
         result = manager.validate()
         assert any("Unknown stage" in w for w in result['warnings'])
 
+    @pytest.mark.fast
     def test_validate_pipeline_completed(self, tmp_path):
         """Test validate when pipeline already completed."""
         manager = CheckpointManager(tmp_path)
@@ -498,6 +528,7 @@ class TestCheckpointValidateMethod:
         assert result['valid'] == False
         assert "Pipeline already completed" in result['errors']
 
+    @pytest.mark.fast
     def test_validate_missing_videos(self, tmp_path):
         """Test validate with missing video files."""
         manager = CheckpointManager(tmp_path)
@@ -509,6 +540,7 @@ class TestCheckpointValidateMethod:
         result = manager.validate()
         assert any("missing from disk" in w for w in result['warnings'])
 
+    @pytest.mark.fast
     def test_validate_successful(self, tmp_path):
         """Test successful validation with resume point."""
         manager = CheckpointManager(tmp_path)
@@ -535,6 +567,7 @@ class TestCheckpointSaveAndRestore:
         assert manager.data is not None
         assert manager.data.last_completed_stage == "ANALYZE"
 
+    @pytest.mark.fast
     def test_save_creates_backup(self, tmp_path):
         """Test saving creates backup of existing checkpoint."""
         manager = CheckpointManager(tmp_path)
@@ -547,6 +580,7 @@ class TestCheckpointSaveAndRestore:
 
         assert manager.backup_path.exists()
 
+    @pytest.mark.fast
     def test_save_atomic_failure_cleanup(self, tmp_path):
         """Test that temp file is cleaned up on failure."""
         manager = CheckpointManager(tmp_path)
@@ -556,6 +590,7 @@ class TestCheckpointSaveAndRestore:
             with pytest.raises(Exception):
                 manager._atomic_save()
 
+    @pytest.mark.fast
     def test_set_voiceover(self, tmp_path):
         """Test set_voiceover method."""
         vo_file = tmp_path / "voiceover.srt"
@@ -568,6 +603,7 @@ class TestCheckpointSaveAndRestore:
         assert manager.data.voiceover_path == str(vo_file)
         assert len(manager.data.voiceover_hash) > 0
 
+    @pytest.mark.fast
     def test_hash_file_error(self, tmp_path):
         """Test _hash_file with non-existent file."""
         manager = CheckpointManager(tmp_path)
@@ -584,6 +620,7 @@ class TestCheckpointStageOperations:
         manager = CheckpointManager(tmp_path)
         assert manager.get_stage_data("ANALYZE") == {}
 
+    @pytest.mark.fast
     def test_get_stage_data_valid(self, tmp_path):
         """Test get_stage_data with valid data."""
         manager = CheckpointManager(tmp_path)
@@ -592,11 +629,13 @@ class TestCheckpointStageOperations:
         )
         assert manager.get_stage_data("ANALYZE") == {"keywords": ["test"]}
 
+    @pytest.mark.fast
     def test_should_skip_stage_no_data(self, tmp_path):
         """Test should_skip_stage when no data."""
         manager = CheckpointManager(tmp_path)
         assert manager.should_skip_stage("ANALYZE") == False
 
+    @pytest.mark.fast
     def test_should_skip_stage_completed(self, tmp_path):
         """Test should_skip_stage for completed stage."""
         manager = CheckpointManager(tmp_path)
@@ -607,6 +646,7 @@ class TestCheckpointStageOperations:
         assert manager.should_skip_stage("DOWNLOAD") == True
         assert manager.should_skip_stage("TRANSCRIBE") == False
 
+    @pytest.mark.fast
     def test_should_skip_stage_unknown(self, tmp_path):
         """Test should_skip_stage with unknown stage."""
         manager = CheckpointManager(tmp_path)
@@ -642,6 +682,7 @@ class TestCheckpointSummary:
         manager = CheckpointManager(tmp_path)
         assert manager.get_summary() == "No checkpoint found"
 
+    @pytest.mark.fast
     def test_get_summary_full(self, tmp_path):
         """Test get_summary with full data."""
         manager = CheckpointManager(tmp_path)
@@ -671,6 +712,7 @@ class TestKeywordManager:
         manager = KeywordManager(tmp_path)
         assert manager.presets == {}
 
+    @pytest.mark.fast
     def test_load_new_format(self, tmp_path):
         """Test loading new format (multiple presets)."""
         keywords_file = tmp_path / "saved_keywords.json"
@@ -689,6 +731,7 @@ class TestKeywordManager:
         assert 'preset1' in manager.presets
         assert manager.presets['preset1'].keywords == ['kw1', 'kw2']
 
+    @pytest.mark.fast
     def test_load_old_format(self, tmp_path):
         """Test loading old format (single preset)."""
         keywords_file = tmp_path / "saved_keywords.json"
@@ -703,6 +746,7 @@ class TestKeywordManager:
         assert 'default' in manager.presets
         assert manager.presets['default'].keywords == ['kw1', 'kw2']
 
+    @pytest.mark.fast
     def test_load_error_handling(self, tmp_path):
         """Test load handles errors gracefully."""
         keywords_file = tmp_path / "saved_keywords.json"
@@ -711,6 +755,7 @@ class TestKeywordManager:
         manager = KeywordManager(tmp_path)
         assert manager.presets == {}
 
+    @pytest.mark.fast
     def test_save_keywords(self, tmp_path):
         """Test saving keywords."""
         manager = KeywordManager(tmp_path)
@@ -724,6 +769,7 @@ class TestKeywordManager:
         assert 'test_preset' in manager.presets
         assert manager.keywords_path.exists()
 
+    @pytest.mark.fast
     def test_save_keywords_auto_name(self, tmp_path):
         """Test saving keywords with auto-generated name."""
         manager = KeywordManager(tmp_path)
@@ -732,6 +778,7 @@ class TestKeywordManager:
         # Name should be timestamp-based
         assert len(name) == 15  # YYYYMMDD_HHMMSS format
 
+    @pytest.mark.fast
     def test_save_keywords_with_voiceover(self, tmp_path):
         """Test saving keywords with voiceover hash."""
         vo_file = tmp_path / "voiceover.srt"
@@ -746,6 +793,7 @@ class TestKeywordManager:
 
         assert len(manager.presets['test'].voiceover_hash) > 0
 
+    @pytest.mark.fast
     def test_save_keywords_voiceover_error(self, tmp_path):
         """Test saving keywords when voiceover hash fails."""
         manager = KeywordManager(tmp_path)
@@ -758,6 +806,7 @@ class TestKeywordManager:
 
         assert manager.presets['test'].voiceover_hash == ""
 
+    @pytest.mark.fast
     def test_save_error_handling(self, tmp_path):
         """Test _save handles errors gracefully."""
         manager = KeywordManager(tmp_path)
@@ -766,6 +815,7 @@ class TestKeywordManager:
         with patch('builtins.open', side_effect=PermissionError("Cannot write")):
             manager._save()  # Should not raise
 
+    @pytest.mark.fast
     def test_get_preset_by_name(self, tmp_path):
         """Test getting preset by name."""
         manager = KeywordManager(tmp_path)
@@ -775,12 +825,14 @@ class TestKeywordManager:
         assert result is not None
         assert result.name == 'test'
 
+    @pytest.mark.fast
     def test_get_preset_not_found(self, tmp_path):
         """Test getting non-existent preset."""
         manager = KeywordManager(tmp_path)
         result = manager.get_preset('nonexistent')
         assert result is None
 
+    @pytest.mark.fast
     def test_get_preset_latest(self, tmp_path):
         """Test getting latest preset."""
         manager = KeywordManager(tmp_path)
@@ -798,6 +850,7 @@ class TestKeywordManager:
         result = manager.get_preset()  # No name = latest
         assert result.name == 'new'
 
+    @pytest.mark.fast
     def test_get_latest(self, tmp_path):
         """Test get_latest method."""
         manager = KeywordManager(tmp_path)
@@ -810,6 +863,7 @@ class TestKeywordManager:
         result = manager.get_latest()
         assert result.name == 'test'
 
+    @pytest.mark.fast
     def test_list_presets(self, tmp_path):
         """Test listing presets."""
         manager = KeywordManager(tmp_path)
@@ -826,6 +880,7 @@ class TestKeywordManager:
         assert len(result) == 2
         assert result[0].name == 'new'  # Newest first
 
+    @pytest.mark.fast
     def test_delete_preset(self, tmp_path):
         """Test deleting preset."""
         manager = KeywordManager(tmp_path)
@@ -835,12 +890,14 @@ class TestKeywordManager:
         assert result == True
         assert 'test' not in manager.presets
 
+    @pytest.mark.fast
     def test_delete_preset_not_found(self, tmp_path):
         """Test deleting non-existent preset."""
         manager = KeywordManager(tmp_path)
         result = manager.delete_preset('nonexistent')
         assert result == False
 
+    @pytest.mark.fast
     def test_has_presets(self, tmp_path):
         """Test has_presets method."""
         manager = KeywordManager(tmp_path)
@@ -849,11 +906,13 @@ class TestKeywordManager:
         manager.presets['test'] = SavedKeywords(name='test')
         assert manager.has_presets() == True
 
+    @pytest.mark.fast
     def test_get_summary_empty(self, tmp_path):
         """Test get_summary with no presets."""
         manager = KeywordManager(tmp_path)
         assert manager.get_summary() == "No saved keyword presets"
 
+    @pytest.mark.fast
     def test_get_summary_with_presets(self, tmp_path):
         """Test get_summary with presets."""
         manager = KeywordManager(tmp_path)
@@ -881,6 +940,7 @@ class TestRemainingCoverage:
         result = manager.load()
         assert result is None
 
+    @pytest.mark.fast
     def test_validation_warning_logged(self, tmp_path):
         """Test validation warning is logged (line 180)."""
         # Create a valid checkpoint that loads
@@ -900,6 +960,7 @@ class TestRemainingCoverage:
         assert result is not None
         # Validation fails but data is returned
 
+    @pytest.mark.fast
     def test_atomic_save_temp_cleanup(self, tmp_path):
         """Test temp file cleanup on write failure (line 342)."""
         manager = CheckpointManager(tmp_path)
@@ -925,6 +986,7 @@ class TestRemainingCoverage:
         # Temp file should be cleaned up
         # Note: The cleanup happens in the except block
 
+    @pytest.mark.fast
     def test_clear_with_backup(self, tmp_path):
         """Test clear removes backup file too (line 455)."""
         manager = CheckpointManager(tmp_path)
@@ -940,6 +1002,7 @@ class TestRemainingCoverage:
         assert not manager.backup_path.exists()
         assert manager.data is None
 
+    @pytest.mark.fast
     def test_get_summary_more_than_5_presets(self, tmp_path):
         """Test get_summary with more than 5 presets (line 674)."""
         manager = KeywordManager(tmp_path)
@@ -973,6 +1036,7 @@ class TestFormatFunctions:
         assert "[R] Resume" in result
         assert "[F] Fresh start" in result
 
+    @pytest.mark.fast
     def test_format_resume_prompt_with_warnings(self, tmp_path):
         """Test format_resume_prompt with warnings."""
         manager = CheckpointManager(tmp_path, config_hash="new")
@@ -985,6 +1049,7 @@ class TestFormatFunctions:
         result = format_resume_prompt(manager)
         assert "Warnings" in result
 
+    @pytest.mark.fast
     def test_format_keyword_prompt(self, tmp_path):
         """Test format_keyword_prompt function."""
         manager = KeywordManager(tmp_path)

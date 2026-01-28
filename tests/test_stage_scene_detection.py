@@ -93,16 +93,19 @@ def mock_video_scene_data(mock_scene_info):
 class TestSceneDetectionStageInit:
     """Test stage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name"""
         stage = SceneDetectionStage()
         assert stage.name == "SCENE_DETECTION"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = SceneDetectionStage()
         assert "scene" in stage.description.lower() or "Scene" in stage.description
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
@@ -117,6 +120,7 @@ class TestSceneDetectionStageInit:
 class TestInputValidation:
     """Test input validation"""
 
+    @pytest.mark.fast
     def test_validate_no_videos(self, mock_config):
         """Test validation fails when no videos"""
         stage = SceneDetectionStage()
@@ -127,6 +131,7 @@ class TestInputValidation:
         assert error is not None
         assert "video" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_with_downloaded_videos(self, mock_config):
         """Test validation succeeds with downloaded videos"""
         stage = SceneDetectionStage()
@@ -137,6 +142,7 @@ class TestInputValidation:
 
         assert error is None
 
+    @pytest.mark.fast
     def test_validate_with_downloaded_audio(self, mock_config):
         """Test validation succeeds with downloaded audio"""
         stage = SceneDetectionStage()
@@ -155,6 +161,7 @@ class TestInputValidation:
 class TestGetVideoFiles:
     """Test _get_video_files method"""
 
+    @pytest.mark.fast
     def test_get_files_from_downloaded_videos(self):
         """Test getting video files from downloaded_videos"""
         stage = SceneDetectionStage()
@@ -170,6 +177,7 @@ class TestGetVideoFiles:
         assert all(isinstance(f, Path) for f in files)
         assert str(files[0]) == "video1.mp4"
 
+    @pytest.mark.fast
     def test_get_files_empty_state(self):
         """Test getting files from empty state"""
         stage = SceneDetectionStage()
@@ -179,6 +187,7 @@ class TestGetVideoFiles:
 
         assert len(files) == 0
 
+    @pytest.mark.fast
     def test_get_files_handles_missing_file_attribute(self):
         """Test handling videos without file attribute"""
         stage = SceneDetectionStage()
@@ -198,6 +207,7 @@ class TestSceneDetectionProcessing:
     """Test scene detection processing"""
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_process_single_video_success(self, mock_detector_class, mock_config,
                                          mock_checkpoint, mock_scene_info,
                                          mock_video_scene_data):
@@ -234,6 +244,7 @@ class TestSceneDetectionProcessing:
         assert result.data['broll_count'] == 1
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_process_multiple_videos(self, mock_detector_class, mock_config,
                                     mock_checkpoint, mock_scene_info,
                                     mock_video_scene_data):
@@ -265,6 +276,7 @@ class TestSceneDetectionProcessing:
         assert result.data['broll_count'] == 1
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_process_video_detection_failure(self, mock_detector_class, mock_config,
                                             mock_checkpoint):
         """Test handling when scene detection fails for a video"""
@@ -283,6 +295,7 @@ class TestSceneDetectionProcessing:
         assert "failed" in result.warnings[0].lower()
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_process_video_exception_handling(self, mock_detector_class, mock_config,
                                              mock_checkpoint):
         """Test exception handling during video processing"""
@@ -307,6 +320,7 @@ class TestSceneDetectionProcessing:
 class TestMergeSceneDataToTranscripts:
     """Test merging scene metadata into transcripts"""
 
+    @pytest.mark.fast
     def test_merge_no_transcripts(self, mock_config, mock_video_scene_data, mock_scene_info):
         """Test merge when no transcripts exist"""
         stage = SceneDetectionStage()
@@ -319,6 +333,7 @@ class TestMergeSceneDataToTranscripts:
         # Should not raise
         stage._merge_scene_data_to_transcripts(state, {"video1": scene_data}, mock_config)
 
+    @pytest.mark.fast
     def test_merge_with_transcripts(self, mock_config, mock_video_scene_data, mock_scene_info):
         """Test merging scene metadata into transcript segments"""
         stage = SceneDetectionStage()
@@ -344,6 +359,7 @@ class TestMergeSceneDataToTranscripts:
         assert segment.face_score == 0.8
         assert segment.scene_index == 0
 
+    @pytest.mark.fast
     def test_merge_broll_segment(self, mock_config, mock_video_scene_data, mock_scene_info):
         """Test merging B-roll scene metadata"""
         stage = SceneDetectionStage()
@@ -364,6 +380,7 @@ class TestMergeSceneDataToTranscripts:
         assert segment.is_broll is True
         assert segment.face_score == 0.1
 
+    @pytest.mark.fast
     def test_merge_updates_text_metadata(self, mock_config, mock_video_scene_data, mock_scene_info):
         """Test merging updates text_metadata when embeddings exist"""
         stage = SceneDetectionStage()
@@ -404,6 +421,7 @@ class TestMergeSceneDataToTranscripts:
 class TestSilentVideoHandling:
     """Test text_metadata creation for silent videos"""
 
+    @pytest.mark.fast
     def test_create_text_metadata_no_silent_videos(self, mock_config):
         """Test when there are no silent videos"""
         stage = SceneDetectionStage()
@@ -415,6 +433,7 @@ class TestSilentVideoHandling:
 
         assert count == 0
 
+    @pytest.mark.fast
     def test_create_text_metadata_for_silent_video(self, mock_config, mock_video_scene_data,
                                                    mock_scene_info):
         """Test creating text_metadata for silent video"""
@@ -447,6 +466,7 @@ class TestSilentVideoHandling:
         assert "[Silent video: video1]" in state.text_metadata[0]['text']
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_create_text_metadata_with_vision_api(self, mock_vision_class, mock_config,
                                                   mock_video_scene_data, mock_scene_info):
         """Test creating text_metadata with Vision API descriptions"""
@@ -494,6 +514,7 @@ class TestSilentVideoEmbeddings:
 
     @patch('sentence_transformers.SentenceTransformer')
     @patch('faiss.IndexFlatL2')
+    @pytest.mark.fast
     def test_compute_embeddings_for_silent_videos(self, mock_index_class, mock_model_class):
         """Test computing embeddings for silent video entries"""
         stage = SceneDetectionStage()
@@ -525,6 +546,7 @@ class TestSilentVideoEmbeddings:
         assert state.embeddings.shape[0] == 4
         assert mock_index.add.called
 
+    @pytest.mark.fast
     def test_compute_embeddings_no_existing_embeddings(self):
         """Test handling when no existing embeddings"""
         stage = SceneDetectionStage()
@@ -539,6 +561,7 @@ class TestSilentVideoEmbeddings:
         # Should remain None
         assert state.embeddings is None
 
+    @pytest.mark.fast
     def test_compute_embeddings_empty_entries(self):
         """Test with no new entries"""
         stage = SceneDetectionStage()
@@ -561,6 +584,7 @@ class TestSilentVideoEmbeddings:
 class TestSkipSceneDetection:
     """Test scene detection skip behavior"""
 
+    @pytest.mark.fast
     def test_skip_when_configured(self, mock_config, mock_checkpoint):
         """Test skipping scene detection when config says so"""
         stage = SceneDetectionStage()
@@ -574,6 +598,7 @@ class TestSkipSceneDetection:
         assert result.data.get('skipped') is True
         assert result.data.get('reason') == 'skip_pipeline_config'
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = SceneDetectionStage()
@@ -583,6 +608,7 @@ class TestSkipSceneDetection:
 
         assert stage.can_skip(state, mock_checkpoint) is False
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = SceneDetectionStage()
@@ -600,6 +626,7 @@ class TestSkipSceneDetection:
 class TestSceneDetectionStageExecution:
     """Test full stage execution"""
 
+    @pytest.mark.fast
     def test_run_no_videos(self, mock_config, mock_checkpoint):
         """Test running with no videos"""
         stage = SceneDetectionStage()
@@ -612,6 +639,7 @@ class TestSceneDetectionStageExecution:
         assert len(result.warnings) > 0
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_success_full_pipeline(self, mock_detector_class, mock_config,
                                       mock_checkpoint, mock_scene_info,
                                       mock_video_scene_data):
@@ -648,6 +676,7 @@ class TestSceneDetectionStageExecution:
         assert state.text_metadata[0].get('is_broll') is True
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_detector_class, mock_config, mock_checkpoint):
         """Test exception handling in main run method"""
         stage = SceneDetectionStage()
@@ -670,6 +699,7 @@ class TestSceneDetectionStageExecution:
 class TestSceneDetectionCheckpoint:
     """Test checkpoint operations"""
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = SceneDetectionStage()
@@ -681,6 +711,7 @@ class TestSceneDetectionCheckpoint:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_skipped_stage(self, mock_checkpoint):
         """Test restore when stage was skipped"""
         stage = SceneDetectionStage()
@@ -693,6 +724,7 @@ class TestSceneDetectionCheckpoint:
         assert result is False
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_restore_success(self, mock_detector_class, mock_checkpoint):
         """Test successful restore from checkpoint"""
         stage = SceneDetectionStage()
@@ -716,6 +748,7 @@ class TestSceneDetectionCheckpoint:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_checkpoint):
         """Test restore handles exceptions"""
         stage = SceneDetectionStage()
@@ -735,6 +768,7 @@ class TestSceneDetectionCheckpoint:
 class TestSceneDetectionEdgeCases:
     """Test edge cases and error conditions"""
 
+    @pytest.mark.fast
     def test_segment_without_dict_attribute(self, mock_config, mock_video_scene_data,
                                            mock_scene_info):
         """Test handling segment without __dict__ attribute"""
@@ -751,6 +785,7 @@ class TestSceneDetectionEdgeCases:
         # Should not raise
         stage._merge_scene_data_to_transcripts(state, {"video1": scene_data}, mock_config)
 
+    @pytest.mark.fast
     def test_text_metadata_non_dict_entries(self, mock_config, mock_video_scene_data,
                                            mock_scene_info):
         """Test handling non-dict entries in text_metadata"""
@@ -781,6 +816,7 @@ class TestSceneDetectionEdgeCases:
         # Second entry should be updated
         assert state.text_metadata[1].get('is_broll') is True
 
+    @pytest.mark.fast
     def test_video_name_mismatch(self, mock_config, mock_video_scene_data, mock_scene_info):
         """Test handling when video names don't match"""
         stage = SceneDetectionStage()
@@ -802,6 +838,7 @@ class TestSceneDetectionEdgeCases:
         # Segment should not have scene metadata (no matching video name)
         assert not hasattr(segment, 'is_broll')
 
+    @pytest.mark.fast
     def test_segment_outside_scene_bounds(self, mock_config, mock_video_scene_data,
                                          mock_scene_info):
         """Test segment that falls outside all scene boundaries"""
@@ -824,6 +861,7 @@ class TestSceneDetectionEdgeCases:
         assert not hasattr(segment, 'is_broll')
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_initialization_failure(self, mock_vision_class, mock_config,
                                               mock_video_scene_data, mock_scene_info):
         """Test handling Vision API initialization failure"""

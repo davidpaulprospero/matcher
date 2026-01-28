@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 class TestKeywordExtractionPerformance:
     """Benchmark keyword extraction operations."""
 
+    @pytest.mark.fast
     def test_tfidf_extraction_speed(self, sample_segments, benchmark):
         """Benchmark TF-IDF keyword extraction speed."""
         from src.keyword_extractor import TFIDFKeywordExtractor
@@ -33,6 +34,7 @@ class TestKeywordExtractionPerformance:
         assert len(result) > 0
         print(f"\nTF-IDF extracted {len(result)} keywords from {len(sample_segments)} segments")
 
+    @pytest.mark.fast
     def test_entity_extraction_speed(self, sample_text_corpus, benchmark):
         """Benchmark entity extraction speed."""
         from src.keyword_extractor import EntityExtractor
@@ -46,6 +48,7 @@ class TestKeywordExtractionPerformance:
         assert isinstance(result, list)
         print(f"\nEntity extraction found {len(result)} entities")
 
+    @pytest.mark.fast
     def test_topic_detection_speed(self, sample_text_corpus, benchmark):
         """Benchmark topic detection speed."""
         from src.topic_extraction import TopicDetector
@@ -80,6 +83,7 @@ class TestKeywordExtractionPerformance:
         print(f"\nLLM extraction: {elapsed:.2f}s for 10 segments ({elapsed/10:.2f}s per segment)")
         assert len(result) > 0
 
+    @pytest.mark.fast
     def test_keyword_remixing_speed(self, sample_keywords, benchmark):
         """Benchmark keyword remixing speed."""
         from src.keyword_remix import KeywordRemixer
@@ -93,6 +97,7 @@ class TestKeywordExtractionPerformance:
         assert len(result) > 0
         print(f"\nKeyword remixer generated {len(result)} alternatives from {len(sample_keywords)} keywords")
 
+    @pytest.mark.fast
     def test_segment_processing_throughput(self, sample_segments, benchmark):
         """Benchmark segment processing throughput."""
         from src.keyword_extractor.segment_processor import SegmentProcessor
@@ -113,6 +118,7 @@ class TestKeywordExtractionPerformance:
 class TestKeywordMemoryUsage:
     """Memory profiling for keyword extraction."""
 
+    @pytest.mark.fast
     def test_tfidf_memory_usage(self, sample_segments):
         """Profile memory usage of TF-IDF extraction."""
         import tracemalloc
@@ -137,6 +143,7 @@ class TestKeywordMemoryUsage:
         # Should use less than 50MB for 100 segments
         assert memory_used_mb < 50
 
+    @pytest.mark.fast
     def test_entity_extraction_memory_usage(self, sample_text_corpus):
         """Profile memory usage of entity extraction."""
         import tracemalloc

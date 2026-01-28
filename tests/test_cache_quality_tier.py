@@ -32,6 +32,7 @@ pytestmark = pytest.mark.unit
 class TestComputeQualityTier:
     """Tests for compute_quality_tier() function."""
 
+    @pytest.mark.fast
     def test_high_confidence_returns_high_tier(self):
         """Confidence >= 0.8 should return 'high' tier."""
         from src.llm_client.cache import compute_quality_tier
@@ -40,6 +41,7 @@ class TestComputeQualityTier:
         assert compute_quality_tier(1.0) == 'high'
         assert compute_quality_tier(0.85) == 'high'
 
+    @pytest.mark.fast
     def test_medium_confidence_returns_medium_tier(self):
         """Confidence 0.5 <= x < 0.8 should return 'medium' tier."""
         from src.llm_client.cache import compute_quality_tier
@@ -48,6 +50,7 @@ class TestComputeQualityTier:
         assert compute_quality_tier(0.7) == 'medium'
         assert compute_quality_tier(0.79) == 'medium'
 
+    @pytest.mark.fast
     def test_low_confidence_returns_low_tier(self):
         """Confidence < 0.5 should return 'low' tier."""
         from src.llm_client.cache import compute_quality_tier
@@ -56,6 +59,7 @@ class TestComputeQualityTier:
         assert compute_quality_tier(0.3) == 'low'
         assert compute_quality_tier(0.49) == 'low'
 
+    @pytest.mark.fast
     def test_boundary_values(self):
         """Test exact boundary values."""
         from src.llm_client.cache import compute_quality_tier
@@ -68,6 +72,7 @@ class TestComputeQualityTier:
 class TestExtractConfidenceFromResponse:
     """Tests for extract_confidence_from_response() function."""
 
+    @pytest.mark.fast
     def test_extract_from_dict_parsed_data(self):
         """Extract confidence from dict parsed_data."""
         from src.llm_client.cache import extract_confidence_from_response
@@ -79,6 +84,7 @@ class TestExtractConfidenceFromResponse:
         )
         assert extract_confidence_from_response(response) == 0.85
 
+    @pytest.mark.fast
     def test_extract_from_list_parsed_data(self):
         """Extract confidence from list parsed_data (batch responses)."""
         from src.llm_client.cache import extract_confidence_from_response
@@ -90,6 +96,7 @@ class TestExtractConfidenceFromResponse:
         )
         assert extract_confidence_from_response(response) == 0.75
 
+    @pytest.mark.fast
     def test_returns_none_when_no_parsed_data(self):
         """Return None when parsed_data is None."""
         from src.llm_client.cache import extract_confidence_from_response
@@ -98,6 +105,7 @@ class TestExtractConfidenceFromResponse:
         response = LLMResponse(text='some text')
         assert extract_confidence_from_response(response) is None
 
+    @pytest.mark.fast
     def test_returns_none_when_no_confidence_in_dict(self):
         """Return None when confidence not in dict."""
         from src.llm_client.cache import extract_confidence_from_response
@@ -109,6 +117,7 @@ class TestExtractConfidenceFromResponse:
         )
         assert extract_confidence_from_response(response) is None
 
+    @pytest.mark.fast
     def test_returns_none_when_empty_list(self):
         """Return None when parsed_data is empty list."""
         from src.llm_client.cache import extract_confidence_from_response
@@ -125,11 +134,13 @@ class TestExtractConfidenceFromResponse:
 class TestQualityTierConstants:
     """Tests for quality tier threshold constants."""
 
+    @pytest.mark.fast
     def test_high_threshold_is_0_8(self):
         """High tier threshold should be 0.8."""
         from src.llm_client.cache import QUALITY_TIER_HIGH_THRESHOLD
         assert QUALITY_TIER_HIGH_THRESHOLD == 0.8
 
+    @pytest.mark.fast
     def test_medium_threshold_is_0_5(self):
         """Medium tier threshold should be 0.5."""
         from src.llm_client.cache import QUALITY_TIER_MEDIUM_THRESHOLD
@@ -151,6 +162,7 @@ class TestCacheEntryQualityTier:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_cache_entry_has_quality_tier_field(self):
         """Cache entry should have quality_tier field after set()."""
         from src.llm_client.cache import LLMCache
@@ -177,6 +189,7 @@ class TestCacheEntryQualityTier:
         assert 'quality_tier' in data
         assert data['quality_tier'] == 'high'
 
+    @pytest.mark.fast
     def test_cache_entry_stores_high_tier_for_high_confidence(self):
         """Cache entry should store 'high' tier for confidence >= 0.8."""
         from src.llm_client.cache import LLMCache
@@ -196,6 +209,7 @@ class TestCacheEntryQualityTier:
         cached = cache.get(request)
         assert cached['quality_tier'] == 'high'
 
+    @pytest.mark.fast
     def test_cache_entry_stores_medium_tier_for_medium_confidence(self):
         """Cache entry should store 'medium' tier for 0.5 <= confidence < 0.8."""
         from src.llm_client.cache import LLMCache
@@ -215,6 +229,7 @@ class TestCacheEntryQualityTier:
         cached = cache.get(request)
         assert cached['quality_tier'] == 'medium'
 
+    @pytest.mark.fast
     def test_cache_entry_stores_low_tier_for_low_confidence(self):
         """Cache entry should store 'low' tier for confidence < 0.5."""
         from src.llm_client.cache import LLMCache
@@ -234,6 +249,7 @@ class TestCacheEntryQualityTier:
         cached = cache.get(request)
         assert cached['quality_tier'] == 'low'
 
+    @pytest.mark.fast
     def test_cache_entry_stores_unknown_tier_when_no_confidence(self):
         """Cache entry should store 'unknown' tier when confidence not in response."""
         from src.llm_client.cache import LLMCache
@@ -269,6 +285,7 @@ class TestSkipLowQualityCacheEntries:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_skip_low_quality_returns_none_for_low_tier(self):
         """When skip_low_quality=True, should return None for low-quality entries."""
         from src.llm_client.cache import LLMCache
@@ -289,6 +306,7 @@ class TestSkipLowQualityCacheEntries:
         cached = cache.get(request)
         assert cached is None
 
+    @pytest.mark.fast
     def test_skip_low_quality_returns_data_for_high_tier(self):
         """When skip_low_quality=True, should return data for high-quality entries."""
         from src.llm_client.cache import LLMCache
@@ -309,6 +327,7 @@ class TestSkipLowQualityCacheEntries:
         assert cached is not None
         assert cached['quality_tier'] == 'high'
 
+    @pytest.mark.fast
     def test_skip_low_quality_returns_data_for_medium_tier(self):
         """When skip_low_quality=True, should return data for medium-quality entries."""
         from src.llm_client.cache import LLMCache
@@ -329,6 +348,7 @@ class TestSkipLowQualityCacheEntries:
         assert cached is not None
         assert cached['quality_tier'] == 'medium'
 
+    @pytest.mark.fast
     def test_skip_low_quality_false_returns_low_tier_data(self):
         """When skip_low_quality=False (default), should return low-quality entries."""
         from src.llm_client.cache import LLMCache
@@ -349,6 +369,7 @@ class TestSkipLowQualityCacheEntries:
         assert cached is not None
         assert cached['quality_tier'] == 'low'
 
+    @pytest.mark.fast
     def test_skip_low_quality_logs_on_skip(self):
         """When skipping low-quality entry, should log info message."""
         from src.llm_client.cache import LLMCache
@@ -389,6 +410,7 @@ class TestCacheQualityTierLogging:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_cache_hit_logs_quality_tier(self):
         """Cache hit should log quality tier info."""
         from src.llm_client.cache import LLMCache
@@ -413,6 +435,7 @@ class TestCacheQualityTierLogging:
             log_message = mock_logger.debug.call_args[0][0]
             assert 'quality_tier=high' in log_message or 'high' in log_message
 
+    @pytest.mark.fast
     def test_cache_hit_logs_confidence_range(self):
         """Cache hit should log confidence range for tier."""
         from src.llm_client.cache import LLMCache
@@ -442,18 +465,21 @@ class TestCacheQualityTierLogging:
 class TestConfigOption:
     """Tests for expire_low_quality config option."""
 
+    @pytest.mark.fast
     def test_llm_cache_config_has_expire_low_quality_field(self):
         """LLMCacheConfig should have expire_low_quality field."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig()
         assert hasattr(config, 'expire_low_quality')
 
+    @pytest.mark.fast
     def test_llm_cache_config_expire_low_quality_default_false(self):
         """expire_low_quality should default to False."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig()
         assert config.expire_low_quality is False
 
+    @pytest.mark.fast
     def test_llm_cache_config_expire_low_quality_can_be_true(self):
         """expire_low_quality can be set to True."""
         from src.config.sections.llm import LLMCacheConfig
@@ -476,12 +502,14 @@ class TestLLMCacheConstructor:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_llm_cache_accepts_skip_low_quality_param(self):
         """LLMCache should accept skip_low_quality parameter."""
         from src.llm_client.cache import LLMCache
         cache = LLMCache(self.temp_dir, 'test', skip_low_quality=True)
         assert cache.skip_low_quality is True
 
+    @pytest.mark.fast
     def test_llm_cache_skip_low_quality_defaults_to_false(self):
         """LLMCache skip_low_quality should default to False."""
         from src.llm_client.cache import LLMCache
@@ -496,6 +524,7 @@ class TestLLMCacheConstructor:
 class TestFactoryIntegration:
     """Tests for factory passing cache_skip_low_quality to clients."""
 
+    @pytest.mark.fast
     def test_create_client_accepts_cache_skip_low_quality(self):
         """create_client should accept cache_skip_low_quality parameter."""
         from src.llm_client.factory import create_client
@@ -504,6 +533,7 @@ class TestFactoryIntegration:
         sig = inspect.signature(create_client)
         assert 'cache_skip_low_quality' in sig.parameters
 
+    @pytest.mark.fast
     def test_create_client_from_config_reads_expire_low_quality(self):
         """create_client_from_config should read expire_low_quality from config."""
         from src.llm_client.factory import create_client_from_config
@@ -532,6 +562,7 @@ class TestFactoryIntegration:
 class TestLLMClientBaseIntegration:
     """Tests for LLMClient passing skip_low_quality to cache."""
 
+    @pytest.mark.fast
     def test_llm_client_accepts_cache_skip_low_quality(self):
         """LLMClient.__init__ should accept cache_skip_low_quality parameter."""
         from src.llm_client.base import LLMClient
@@ -539,6 +570,7 @@ class TestLLMClientBaseIntegration:
         sig = inspect.signature(LLMClient.__init__)
         assert 'cache_skip_low_quality' in sig.parameters
 
+    @pytest.mark.integration
     def test_llm_client_passes_skip_low_quality_to_cache(self):
         """LLMClient should pass cache_skip_low_quality to LLMCache."""
         # We can't instantiate abstract LLMClient directly, so test via providers
@@ -567,6 +599,7 @@ class TestLLMClientBaseIntegration:
 class TestProviderClassesIntegration:
     """Tests for provider classes accepting cache_skip_low_quality."""
 
+    @pytest.mark.fast
     def test_gemini_client_accepts_cache_skip_low_quality(self):
         """GeminiClient should accept cache_skip_low_quality parameter."""
         from src.llm_client.providers import GeminiClient
@@ -574,6 +607,7 @@ class TestProviderClassesIntegration:
         sig = inspect.signature(GeminiClient.__init__)
         assert 'cache_skip_low_quality' in sig.parameters
 
+    @pytest.mark.fast
     def test_anthropic_client_accepts_cache_skip_low_quality(self):
         """AnthropicClient should accept cache_skip_low_quality parameter."""
         from src.llm_client.providers import AnthropicClient
@@ -581,6 +615,7 @@ class TestProviderClassesIntegration:
         sig = inspect.signature(AnthropicClient.__init__)
         assert 'cache_skip_low_quality' in sig.parameters
 
+    @pytest.mark.fast
     def test_ollama_client_accepts_cache_skip_low_quality(self):
         """OllamaClient should accept cache_skip_low_quality parameter."""
         from src.llm_client.providers import OllamaClient
@@ -604,6 +639,7 @@ class TestLegacyCacheEntryCompatibility:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_legacy_cache_entry_without_quality_tier_returns_unknown(self):
         """Legacy cache entries without quality_tier should be treated as 'unknown'."""
         from src.llm_client.cache import LLMCache
@@ -641,6 +677,7 @@ class TestLegacyCacheEntryCompatibility:
         assert cached is not None
         assert cached.get('quality_tier', 'unknown') == 'unknown'
 
+    @pytest.mark.fast
     def test_legacy_cache_entry_not_skipped_when_skip_low_quality_true(self):
         """Legacy entries (unknown tier) should NOT be skipped even with skip_low_quality=True."""
         from src.llm_client.cache import LLMCache
@@ -685,6 +722,7 @@ class TestGetConfidenceRangeHelper:
         """Remove the temporary directory."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_get_confidence_range_high(self):
         """High tier should show >= 0.8."""
         from src.llm_client.cache import LLMCache
@@ -692,6 +730,7 @@ class TestGetConfidenceRangeHelper:
         result = cache._get_confidence_range('high')
         assert '0.8' in result
 
+    @pytest.mark.fast
     def test_get_confidence_range_medium(self):
         """Medium tier should show range."""
         from src.llm_client.cache import LLMCache
@@ -700,6 +739,7 @@ class TestGetConfidenceRangeHelper:
         assert '0.5' in result
         assert '0.8' in result
 
+    @pytest.mark.fast
     def test_get_confidence_range_low(self):
         """Low tier should show < 0.5."""
         from src.llm_client.cache import LLMCache
@@ -707,6 +747,7 @@ class TestGetConfidenceRangeHelper:
         result = cache._get_confidence_range('low')
         assert '0.5' in result
 
+    @pytest.mark.fast
     def test_get_confidence_range_unknown(self):
         """Unknown tier should return empty string."""
         from src.llm_client.cache import LLMCache

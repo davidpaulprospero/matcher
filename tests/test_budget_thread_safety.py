@@ -40,6 +40,7 @@ def thread_safe_budget():
 class TestConcurrentRecordRotation:
     """Test concurrent record_rotation() — verify no race condition overwrites."""
 
+    @pytest.mark.fast
     def test_10_threads_each_record_one_rotation(self, thread_safe_budget):
         """10 threads each call record_rotation() once — rotations_used must equal 10."""
         budget = thread_safe_budget
@@ -60,6 +61,7 @@ class TestConcurrentRecordRotation:
 
         assert budget.rotations_used == 10
 
+    @pytest.mark.fast
     def test_10_threads_each_record_100_rotations(self, thread_safe_budget):
         """10 threads each call record_rotation() 100 times — total must be 1000."""
         budget = thread_safe_budget
@@ -79,6 +81,7 @@ class TestConcurrentRecordRotation:
 
         assert budget.rotations_used == 1000
 
+    @pytest.mark.fast
     def test_concurrent_rotations_track_all_keywords(self, thread_safe_budget):
         """Concurrent rotations from distinct keywords track all of them."""
         budget = thread_safe_budget
@@ -110,6 +113,7 @@ class TestConcurrentRecordRotation:
 class TestConcurrentCanRotateAndRecord:
     """Test concurrent can_rotate() + record_rotation() — budget never exceeds max."""
 
+    @pytest.mark.fast
     def test_budget_never_exceeds_max_rotations(self):
         """Under contention, rotations_used should never exceed max_rotations."""
         budget = RateLimitBudget()
@@ -143,6 +147,7 @@ class TestConcurrentCanRotateAndRecord:
         assert budget.rotations_used <= 50  # Upper bound: all could succeed (race)
         assert results["rotated"] + results["denied"] == 50
 
+    @pytest.mark.fast
     def test_tight_budget_single_rotation_remaining(self):
         """When 1 rotation remains, at most 1 thread should get True from can_rotate."""
         budget = RateLimitBudget()
@@ -182,6 +187,7 @@ class TestConcurrentCanRotateAndRecord:
 class TestConcurrentRecordBackoff:
     """Test concurrent record_backoff() — verify sum is correct."""
 
+    @pytest.mark.fast
     def test_5_threads_record_different_durations(self, thread_safe_budget):
         """5 threads each record a known duration — total must be exact sum."""
         budget = thread_safe_budget
@@ -203,6 +209,7 @@ class TestConcurrentRecordBackoff:
 
         assert budget.backoff_time_spent == pytest.approx(sum(durations))
 
+    @pytest.mark.fast
     def test_5_threads_each_record_100_small_backoffs(self, thread_safe_budget):
         """5 threads each record 100 x 1.0s backoff — total must be 500.0."""
         budget = thread_safe_budget
@@ -222,6 +229,7 @@ class TestConcurrentRecordBackoff:
 
         assert budget.backoff_time_spent == pytest.approx(500.0)
 
+    @pytest.mark.fast
     def test_concurrent_backoff_keywords_all_tracked(self, thread_safe_budget):
         """5 threads with different keywords — all keywords tracked."""
         budget = thread_safe_budget
@@ -252,6 +260,7 @@ class TestConcurrentRecordBackoff:
 class TestConcurrentSuccessFailure:
     """Test concurrent success/failure recording — total must equal call count."""
 
+    @pytest.mark.fast
     def test_mixed_success_failure_from_10_threads(self, thread_safe_budget):
         """10 threads: 5 record successes, 5 record failures — counts must match."""
         budget = thread_safe_budget
@@ -283,6 +292,7 @@ class TestConcurrentSuccessFailure:
         assert budget.failures == 500   # 5 threads x 100 failures
         assert budget.successes + budget.failures == 1000
 
+    @pytest.mark.fast
     def test_interleaved_success_failure_same_thread_count(self, thread_safe_budget):
         """Each thread records both successes and failures."""
         budget = thread_safe_budget
@@ -304,6 +314,7 @@ class TestConcurrentSuccessFailure:
         assert budget.failures == 500    # 10 threads x 50
         assert budget.successes + budget.failures == 1000
 
+    @pytest.mark.fast
     def test_concurrent_failures_track_keywords(self, thread_safe_budget):
         """Concurrent failures with unique keywords track all keywords."""
         budget = thread_safe_budget
@@ -334,6 +345,7 @@ class TestConcurrentSuccessFailure:
 class TestAtomicLastRotation:
     """Test that can_rotate() is atomic when last rotation consumed."""
 
+    @pytest.mark.fast
     def test_no_two_threads_both_get_true_on_last_rotation(self):
         """With 1 rotation left, verify budget isn't severely overrun."""
         # Run this test multiple times to increase confidence
@@ -369,6 +381,7 @@ class TestAtomicLastRotation:
             # The budget has been consumed at least once
             assert budget.can_rotate() is False
 
+    @pytest.mark.fast
     def test_exact_budget_consumed_matches_successes(self):
         """With limited budget, gated record_rotation count matches rotations_used."""
         budget = RateLimitBudget()
@@ -397,6 +410,7 @@ class TestAtomicLastRotation:
         # Budget should be fully consumed
         assert budget.can_rotate() is False
 
+    @pytest.mark.fast
     def test_stress_concurrent_rotation_boundary(self):
         """Stress test: 50 threads compete for exactly 10 rotations."""
         budget = RateLimitBudget()

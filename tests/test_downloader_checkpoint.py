@@ -102,6 +102,7 @@ def manager(mock_config, checkpoint_file, sources_file):
 class TestDownloadCheckpoint:
     """Test DownloadCheckpoint dataclass"""
 
+    @pytest.mark.fast
     def test_checkpoint_creation(self):
         """Test basic checkpoint creation"""
         checkpoint = DownloadCheckpoint(
@@ -120,6 +121,7 @@ class TestDownloadCheckpoint:
         assert checkpoint.current_tier == "short"
         assert checkpoint.timestamp == "2026-01-10T10:00:00"
 
+    @pytest.mark.fast
     def test_checkpoint_to_dict(self):
         """Test checkpoint serialization to dict"""
         checkpoint = DownloadCheckpoint(
@@ -141,6 +143,7 @@ class TestDownloadCheckpoint:
         assert data['current_tier'] == "medium"
         assert data['timestamp'] == "2026-01-10T10:00:00"
 
+    @pytest.mark.fast
     def test_checkpoint_from_dict(self):
         """Test checkpoint deserialization from dict"""
         data = {
@@ -162,6 +165,7 @@ class TestDownloadCheckpoint:
         assert checkpoint.current_tier == "long"
         assert checkpoint.timestamp == "2026-01-10T12:00:00"
 
+    @pytest.mark.fast
     def test_checkpoint_with_none_values(self):
         """Test checkpoint with None for optional fields"""
         checkpoint = DownloadCheckpoint(
@@ -190,6 +194,7 @@ class TestDownloadCheckpoint:
 class TestCheckpointManagerInit:
     """Test CheckpointManager initialization"""
 
+    @pytest.mark.fast
     def test_init_basic(self, mock_config, checkpoint_file, sources_file):
         """Test basic initialization"""
         manager = CheckpointManager(
@@ -203,6 +208,7 @@ class TestCheckpointManagerInit:
         assert manager.sources_file == sources_file
         assert isinstance(manager.duration_tiers, dict)
 
+    @pytest.mark.fast
     def test_init_loads_tiers(self, manager):
         """Test that initialization loads duration tiers"""
         assert 'short' in manager.duration_tiers
@@ -210,6 +216,7 @@ class TestCheckpointManagerInit:
         assert 'long' in manager.duration_tiers
         assert 'longer' in manager.duration_tiers
 
+    @pytest.mark.fast
     def test_init_with_custom_paths(self, mock_config):
         """Test initialization with custom paths"""
         custom_checkpoint = Path("/custom/checkpoint.json")
@@ -232,6 +239,7 @@ class TestCheckpointManagerInit:
 class TestDurationTierLoading:
     """Test duration tier configuration loading"""
 
+    @pytest.mark.fast
     def test_load_duration_tiers_from_config(self, manager):
         """Test loading tiers from config"""
         tiers = manager.duration_tiers
@@ -254,6 +262,7 @@ class TestDurationTierLoading:
         assert tiers['longer']['min'] == 1500
         assert tiers['longer']['max'] == 3000
 
+    @pytest.mark.fast
     def test_load_duration_tiers_no_config(self, checkpoint_file, sources_file):
         """Test default tiers when config missing"""
         config = Mock()
@@ -275,6 +284,7 @@ class TestDurationTierLoading:
         assert tiers['long']['per_keyword'] == 5
         assert tiers['longer']['per_keyword'] == 1
 
+    @pytest.mark.fast
     def test_load_duration_tiers_missing_hasattr(self, checkpoint_file, sources_file):
         """Test when config doesn't have duration_tiers attribute"""
         config = Mock(spec=[])  # No duration_tiers attribute
@@ -289,6 +299,7 @@ class TestDurationTierLoading:
         assert 'short' in manager.duration_tiers
         assert manager.duration_tiers['short']['min'] == 20
 
+    @pytest.mark.fast
     def test_load_duration_tiers_empty_dict(self, checkpoint_file, sources_file):
         """Test when duration_tiers config is empty"""
         config = Mock()
@@ -312,6 +323,7 @@ class TestDurationTierLoading:
 class TestTierValueRetrieval:
     """Test getting tier config values"""
 
+    @pytest.mark.fast
     def test_get_tier_value_dict_format(self, manager):
         """Test retrieving values from dict format"""
         # Manager has dict-formatted tiers
@@ -320,16 +332,19 @@ class TestTierValueRetrieval:
         assert manager.get_tier_value('short', 'per_keyword') == 8
         assert manager.get_tier_value('short', 'max_total') == 0
 
+    @pytest.mark.fast
     def test_get_tier_value_with_default(self, manager):
         """Test default value when key missing"""
         result = manager.get_tier_value('short', 'nonexistent', default=999)
         assert result == 999
 
+    @pytest.mark.fast
     def test_get_tier_value_missing_tier(self, manager):
         """Test retrieving from non-existent tier"""
         result = manager.get_tier_value('invalid_tier', 'min', default=100)
         assert result == 100
 
+    @pytest.mark.fast
     def test_get_tier_value_dataclass_format(self, mock_config, checkpoint_file, sources_file):
         """Test retrieving values from dataclass format (not dict)"""
         # Manually set a dataclass-formatted tier
@@ -349,6 +364,7 @@ class TestTierValueRetrieval:
         assert manager.get_tier_value('test_tier', 'per_keyword') == 10
         assert manager.get_tier_value('test_tier', 'max_total') == 5
 
+    @pytest.mark.fast
     def test_get_tier_value_dataclass_fallback_names(self, mock_config, checkpoint_file, sources_file):
         """Test fallback attribute names for dataclass"""
         # Create tier with fallback attribute names (e.g., 'min' instead of 'min_seconds')
@@ -365,6 +381,7 @@ class TestTierValueRetrieval:
         assert manager.get_tier_value('test_tier', 'max') == 80
         assert manager.get_tier_value('test_tier', 'per_keyword') == 12
 
+    @pytest.mark.fast
     def test_get_tier_value_none_value(self, manager):
         """Test handling None values"""
         # Set a tier value to None
@@ -381,6 +398,7 @@ class TestTierValueRetrieval:
 class TestCheckpointLoading:
     """Test loading checkpoints from file"""
 
+    @pytest.mark.fast
     def test_load_checkpoint_success(self, manager, checkpoint_file):
         """Test successfully loading checkpoint"""
         # Create checkpoint file
@@ -402,12 +420,14 @@ class TestCheckpointLoading:
         assert checkpoint.current_keyword == "beach"
         assert checkpoint.current_tier == "medium"
 
+    @pytest.mark.fast
     def test_load_checkpoint_not_found(self, manager, checkpoint_file):
         """Test loading when checkpoint doesn't exist"""
         # No file created
         checkpoint = manager.load_checkpoint()
         assert checkpoint is None
 
+    @pytest.mark.fast
     def test_load_checkpoint_invalid_json(self, manager, checkpoint_file):
         """Test loading when JSON is corrupted"""
         checkpoint_file.write_text("{ invalid json }")
@@ -415,6 +435,7 @@ class TestCheckpointLoading:
         checkpoint = manager.load_checkpoint()
         assert checkpoint is None  # Should return None on error
 
+    @pytest.mark.fast
     def test_load_checkpoint_missing_fields(self, manager, checkpoint_file, caplog):
         """Test loading with missing required fields"""
         import logging
@@ -439,6 +460,7 @@ class TestCheckpointLoading:
 class TestCheckpointSaving:
     """Test saving checkpoints to file"""
 
+    @pytest.mark.fast
     def test_save_checkpoint_basic(self, manager, checkpoint_file):
         """Test basic checkpoint saving"""
         checkpoint = DownloadCheckpoint(
@@ -462,6 +484,7 @@ class TestCheckpointSaving:
         assert data['current_keyword'] == "beach"
         assert data['current_tier'] == "short"
 
+    @pytest.mark.fast
     def test_save_checkpoint_creates_directory(self, manager, temp_dir):
         """Test that save creates parent directory if missing"""
         nested_checkpoint = temp_dir / "nested" / "dir" / "checkpoint.json"
@@ -482,6 +505,7 @@ class TestCheckpointSaving:
         assert nested_checkpoint.exists()
         assert nested_checkpoint.parent.exists()
 
+    @pytest.mark.fast
     def test_save_checkpoint_updates_timestamp(self, manager, checkpoint_file):
         """Test that save updates timestamp"""
         checkpoint = DownloadCheckpoint(
@@ -502,6 +526,7 @@ class TestCheckpointSaving:
         # Verify it's a valid ISO format
         datetime.fromisoformat(data['timestamp'])
 
+    @pytest.mark.fast
     def test_save_checkpoint_overwrites_existing(self, manager, checkpoint_file):
         """Test that save overwrites existing checkpoint"""
         # Create initial checkpoint
@@ -540,6 +565,7 @@ class TestCheckpointSaving:
 class TestCheckpointClearing:
     """Test clearing checkpoints"""
 
+    @pytest.mark.fast
     def test_clear_checkpoint_existing(self, manager, checkpoint_file):
         """Test clearing existing checkpoint"""
         # Create checkpoint
@@ -553,6 +579,7 @@ class TestCheckpointClearing:
         # Verify deleted
         assert not checkpoint_file.exists()
 
+    @pytest.mark.fast
     def test_clear_checkpoint_not_existing(self, manager, checkpoint_file):
         """Test clearing when checkpoint doesn't exist (no error)"""
         # No checkpoint file
@@ -571,6 +598,7 @@ class TestCheckpointClearing:
 class TestSourcesLoading:
     """Test loading sources.json"""
 
+    @pytest.mark.fast
     def test_load_sources_success(self, manager, sources_file):
         """Test successfully loading sources"""
         sources_data = [
@@ -601,12 +629,14 @@ class TestSourcesLoading:
         assert sources[1].file == '/videos/vid2.mp4'
         assert sources[1].title == 'Beach Video'
 
+    @pytest.mark.fast
     def test_load_sources_not_found(self, manager, sources_file):
         """Test loading when sources.json doesn't exist"""
         # No file created
         sources = manager.load_sources()
         assert sources == []
 
+    @pytest.mark.fast
     def test_load_sources_invalid_json(self, manager, sources_file):
         """Test loading when JSON is corrupted"""
         sources_file.write_text("{ invalid json }")
@@ -614,6 +644,7 @@ class TestSourcesLoading:
         sources = manager.load_sources()
         assert sources == []  # Should return empty list on error
 
+    @pytest.mark.fast
     def test_load_sources_empty_list(self, manager, sources_file):
         """Test loading empty sources list"""
         sources_file.write_text(json.dumps([]))
@@ -621,6 +652,7 @@ class TestSourcesLoading:
         sources = manager.load_sources()
         assert sources == []
 
+    @pytest.mark.fast
     def test_load_sources_logs_count(self, manager, sources_file, caplog):
         """Test that load logs the count of loaded sources"""
         import logging
@@ -646,6 +678,7 @@ class TestSourcesLoading:
 class TestSourcesSaving:
     """Test saving sources.json"""
 
+    @pytest.mark.fast
     def test_save_sources_basic(self, manager, sources_file):
         """Test basic sources saving"""
         from src.state import DownloadedVideo
@@ -673,6 +706,7 @@ class TestSourcesSaving:
         assert data[0]['file'] == '/videos/vid1.mp4'
         assert data[0]['title'] == 'Travel Video'
 
+    @pytest.mark.fast
     def test_save_sources_creates_directory(self, manager, temp_dir):
         """Test that save creates parent directory if missing"""
         from src.state import DownloadedVideo
@@ -697,6 +731,7 @@ class TestSourcesSaving:
         assert nested_sources.exists()
         assert nested_sources.parent.exists()
 
+    @pytest.mark.fast
     def test_save_sources_empty_list(self, manager, sources_file):
         """Test saving empty sources list"""
         manager.save_sources([])
@@ -707,6 +742,7 @@ class TestSourcesSaving:
             data = json.load(f)
         assert data == []
 
+    @pytest.mark.fast
     def test_save_sources_overwrites_existing(self, manager, sources_file):
         """Test that save overwrites existing sources"""
         from src.state import DownloadedVideo

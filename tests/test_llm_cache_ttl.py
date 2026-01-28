@@ -29,30 +29,35 @@ pytestmark = pytest.mark.unit
 class TestLLMCacheConfigField:
     """Tests for llm.cache.ttl_hours field in LLMCacheConfig."""
 
+    @pytest.mark.fast
     def test_llm_cache_config_has_ttl_hours_field(self):
         """LLMCacheConfig dataclass has ttl_hours field."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig()
         assert hasattr(config, 'ttl_hours')
 
+    @pytest.mark.fast
     def test_llm_cache_config_ttl_hours_default_is_24(self):
         """Default ttl_hours is 24 (hours)."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig()
         assert config.ttl_hours == 24
 
+    @pytest.mark.fast
     def test_llm_cache_config_ttl_hours_can_be_set_to_1(self):
         """ttl_hours can be set to 1 hour."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig(ttl_hours=1)
         assert config.ttl_hours == 1
 
+    @pytest.mark.fast
     def test_llm_cache_config_ttl_hours_can_be_set_to_0(self):
         """ttl_hours=0 means never expire."""
         from src.config.sections.llm import LLMCacheConfig
         config = LLMCacheConfig(ttl_hours=0)
         assert config.ttl_hours == 0
 
+    @pytest.mark.fast
     def test_llm_cache_config_ttl_hours_type_is_int(self):
         """ttl_hours field type is int."""
         from src.config.sections.llm import LLMCacheConfig
@@ -69,18 +74,21 @@ class TestLLMCacheConfigField:
 class TestLLMConfigCacheSection:
     """Tests for llm.cache nested config in LLMConfig."""
 
+    @pytest.mark.fast
     def test_llm_config_has_cache_section(self):
         """LLMConfig has cache field (LLMCacheConfig)."""
         from src.config.sections.llm import LLMConfig
         config = LLMConfig()
         assert hasattr(config, 'cache')
 
+    @pytest.mark.fast
     def test_llm_config_cache_has_ttl_hours(self):
         """LLMConfig.cache has ttl_hours field."""
         from src.config.sections.llm import LLMConfig
         config = LLMConfig()
         assert hasattr(config.cache, 'ttl_hours')
 
+    @pytest.mark.fast
     def test_llm_config_cache_ttl_default_24(self):
         """LLMConfig.cache.ttl_hours defaults to 24."""
         from src.config.sections.llm import LLMConfig
@@ -95,24 +103,28 @@ class TestLLMConfigCacheSection:
 class TestLLMCacheTTLHandling:
     """Tests for LLMCache class TTL handling."""
 
+    @pytest.mark.fast
     def test_llm_cache_accepts_ttl_hours_parameter(self, tmp_path):
         """LLMCache.__init__ accepts ttl_hours parameter."""
         from src.llm_client.cache import LLMCache
         cache = LLMCache(base_dir=str(tmp_path), provider="test", ttl_hours=48)
         assert cache.ttl_seconds == 48 * 3600
 
+    @pytest.mark.fast
     def test_llm_cache_ttl_hours_default_is_24(self, tmp_path):
         """LLMCache ttl_hours defaults to 24."""
         from src.llm_client.cache import LLMCache
         cache = LLMCache(base_dir=str(tmp_path), provider="test")
         assert cache.ttl_seconds == 24 * 3600
 
+    @pytest.mark.fast
     def test_llm_cache_ttl_hours_0_disables_expiration(self, tmp_path):
         """LLMCache with ttl_hours=0 never expires entries."""
         from src.llm_client.cache import LLMCache
         cache = LLMCache(base_dir=str(tmp_path), provider="test", ttl_hours=0)
         assert cache.ttl_seconds == 0
 
+    @pytest.mark.fast
     def test_llm_cache_ttl_hours_1_expires_after_1_hour(self, tmp_path):
         """LLMCache with ttl_hours=1 expires entries after 1 hour."""
         from src.llm_client.cache import LLMCache
@@ -154,6 +166,7 @@ class TestLLMCacheTTLHandling:
 class TestLLMClientCacheTTL:
     """Tests for LLMClient passing TTL to cache."""
 
+    @pytest.mark.fast
     def test_llm_client_accepts_cache_ttl_hours_parameter(self, tmp_path):
         """LLMClient.__init__ accepts cache_ttl_hours parameter."""
         from src.llm_client.base import LLMClient
@@ -170,6 +183,7 @@ class TestLLMClientCacheTTL:
         client = TestClient(api_key="test", model="test", cache_ttl_hours=48)
         assert client.cache_ttl_hours == 48
 
+    @pytest.mark.fast
     def test_llm_client_cache_ttl_hours_default_is_24(self, tmp_path):
         """LLMClient cache_ttl_hours defaults to 24."""
         from src.llm_client.base import LLMClient
@@ -185,6 +199,7 @@ class TestLLMClientCacheTTL:
         client = TestClient(api_key="test", model="test")
         assert client.cache_ttl_hours == 24
 
+    @pytest.mark.fast
     def test_llm_client_passes_ttl_to_cache(self, tmp_path):
         """LLMClient.cache property passes ttl_hours to LLMCache."""
         from src.llm_client.base import LLMClient
@@ -218,6 +233,7 @@ class TestLLMClientCacheTTL:
 class TestProviderClientsTTL:
     """Tests for provider clients accepting cache_ttl_hours."""
 
+    @pytest.mark.fast
     def test_gemini_client_accepts_cache_ttl_hours(self, tmp_path):
         """GeminiClient.__init__ accepts cache_ttl_hours parameter."""
         from src.llm_client.providers.gemini import GeminiClient
@@ -232,6 +248,7 @@ class TestProviderClientsTTL:
                 )
                 assert client.cache_ttl_hours == 6
 
+    @pytest.mark.fast
     def test_anthropic_client_accepts_cache_ttl_hours(self, tmp_path):
         """AnthropicClient.__init__ accepts cache_ttl_hours parameter."""
         from src.llm_client.providers.anthropic import AnthropicClient
@@ -245,6 +262,7 @@ class TestProviderClientsTTL:
             )
             assert client.cache_ttl_hours == 48
 
+    @pytest.mark.fast
     def test_ollama_client_accepts_cache_ttl_hours(self, tmp_path):
         """OllamaClient.__init__ accepts cache_ttl_hours parameter."""
         from src.llm_client.providers.ollama import OllamaClient
@@ -265,6 +283,7 @@ class TestProviderClientsTTL:
 class TestFactoryCacheTTL:
     """Tests for factory functions using cache_ttl_hours."""
 
+    @pytest.mark.fast
     def test_create_client_accepts_cache_ttl_hours(self, tmp_path):
         """create_client() accepts cache_ttl_hours parameter."""
         from src.llm_client.factory import create_client
@@ -279,6 +298,7 @@ class TestFactoryCacheTTL:
                 )
                 assert client.cache_ttl_hours == 36
 
+    @pytest.mark.fast
     def test_create_client_default_cache_ttl_is_24(self, tmp_path):
         """create_client() defaults cache_ttl_hours to 24."""
         from src.llm_client.factory import create_client
@@ -292,6 +312,7 @@ class TestFactoryCacheTTL:
                 )
                 assert client.cache_ttl_hours == 24
 
+    @pytest.mark.fast
     def test_create_client_from_config_uses_cache_ttl_hours(self, tmp_path):
         """create_client_from_config() extracts ttl_hours from config.llm.cache."""
         from src.llm_client.factory import create_client_from_config
@@ -320,6 +341,7 @@ class TestFactoryCacheTTL:
 class TestTTL1HourExpiration:
     """Tests that cache_ttl_hours=1 expires entries after 1 hour."""
 
+    @pytest.mark.fast
     def test_setting_cache_ttl_hours_1_expires_after_1_hour(self, tmp_path):
         """Setting cache_ttl_hours=1 expires entries after 1 hour."""
         from src.llm_client.cache import LLMCache
@@ -355,6 +377,7 @@ class TestTTL1HourExpiration:
         expired = cache.get(request)
         assert expired is None
 
+    @pytest.mark.fast
     def test_cache_ttl_1_entry_valid_at_59_minutes(self, tmp_path):
         """Entry cached 59 minutes ago is still valid with ttl_hours=1."""
         from src.llm_client.cache import LLMCache
@@ -388,6 +411,7 @@ class TestTTL1HourExpiration:
 class TestCacheTTLDocumentation:
     """Tests that cache_ttl_hours is documented in config.yaml."""
 
+    @pytest.mark.fast
     def test_config_yaml_has_llm_cache_ttl_hours(self):
         """config.yaml has llm.cache.ttl_hours setting."""
         config_path = Path(__file__).parent.parent / "config.yaml"
@@ -406,6 +430,7 @@ class TestCacheTTLDocumentation:
 class TestCacheTTLIntegration:
     """Integration tests for cache TTL through the full stack."""
 
+    @pytest.mark.fast
     def test_end_to_end_ttl_configuration(self, tmp_path):
         """Test that TTL flows from config to cache correctly."""
         from src.llm_client.factory import create_client
@@ -430,6 +455,7 @@ class TestCacheTTLIntegration:
                 # Verify cache has correct TTL
                 assert cache.ttl_seconds == 6 * 3600
 
+    @pytest.mark.fast
     def test_ttl_0_never_expires(self, tmp_path):
         """Test that ttl_hours=0 results in entries that never expire."""
         from src.llm_client.cache import LLMCache

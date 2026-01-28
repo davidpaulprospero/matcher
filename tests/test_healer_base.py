@@ -8,31 +8,37 @@ from unittest.mock import MagicMock, patch
 class TestHealerAction:
     """Test HealerAction enum values."""
 
+    @pytest.mark.fast
     def test_retry_value(self):
         """Test RETRY action value."""
         from src.agents.base import HealerAction
         assert HealerAction.RETRY.value == "retry"
 
+    @pytest.mark.fast
     def test_skip_value(self):
         """Test SKIP action value."""
         from src.agents.base import HealerAction
         assert HealerAction.SKIP.value == "skip"
 
+    @pytest.mark.fast
     def test_modify_config_value(self):
         """Test MODIFY_CONFIG action value."""
         from src.agents.base import HealerAction
         assert HealerAction.MODIFY_CONFIG.value == "modify"
 
+    @pytest.mark.fast
     def test_restore_value(self):
         """Test RESTORE action value."""
         from src.agents.base import HealerAction
         assert HealerAction.RESTORE.value == "restore"
 
+    @pytest.mark.fast
     def test_abort_value(self):
         """Test ABORT action value."""
         from src.agents.base import HealerAction
         assert HealerAction.ABORT.value == "abort"
 
+    @pytest.mark.fast
     def test_enum_has_five_values(self):
         """Test that HealerAction has exactly 5 values."""
         from src.agents.base import HealerAction
@@ -42,36 +48,42 @@ class TestHealerAction:
 class TestHealerResultFixed:
     """Test HealerResult.fixed() factory method."""
 
+    @pytest.mark.fast
     def test_fixed_returns_success_true(self):
         """Test that fixed() returns result with success=True."""
         from src.agents.base import HealerResult
         result = HealerResult.fixed("Test message")
         assert result.success is True
 
+    @pytest.mark.fast
     def test_fixed_default_action_is_retry(self):
         """Test that fixed() defaults to RETRY action."""
         from src.agents.base import HealerResult, HealerAction
         result = HealerResult.fixed("Test message")
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_fixed_with_custom_action(self):
         """Test that fixed() accepts custom action."""
         from src.agents.base import HealerResult, HealerAction
         result = HealerResult.fixed("Test message", action=HealerAction.SKIP)
         assert result.action == HealerAction.SKIP
 
+    @pytest.mark.fast
     def test_fixed_stores_message(self):
         """Test that fixed() stores the message."""
         from src.agents.base import HealerResult
         result = HealerResult.fixed("Test message")
         assert result.message == "Test message"
 
+    @pytest.mark.fast
     def test_fixed_modified_config_false_by_default(self):
         """Test that fixed() has modified_config=False by default."""
         from src.agents.base import HealerResult
         result = HealerResult.fixed("Test message")
         assert result.modified_config is False
 
+    @pytest.mark.fast
     def test_fixed_accepts_extra_details(self):
         """Test that fixed() accepts and stores extra details."""
         from src.agents.base import HealerResult
@@ -83,24 +95,28 @@ class TestHealerResultFixed:
 class TestHealerResultFailed:
     """Test HealerResult.failed() factory method."""
 
+    @pytest.mark.fast
     def test_failed_returns_success_false(self):
         """Test that failed() returns result with success=False."""
         from src.agents.base import HealerResult
         result = HealerResult.failed("Error message")
         assert result.success is False
 
+    @pytest.mark.fast
     def test_failed_action_is_abort(self):
         """Test that failed() has action=ABORT."""
         from src.agents.base import HealerResult, HealerAction
         result = HealerResult.failed("Error message")
         assert result.action == HealerAction.ABORT
 
+    @pytest.mark.fast
     def test_failed_stores_message(self):
         """Test that failed() stores the message."""
         from src.agents.base import HealerResult
         result = HealerResult.failed("Error message")
         assert result.message == "Error message"
 
+    @pytest.mark.fast
     def test_failed_accepts_extra_details(self):
         """Test that failed() accepts and stores extra details."""
         from src.agents.base import HealerResult
@@ -111,30 +127,35 @@ class TestHealerResultFailed:
 class TestHealerResultConfigChanged:
     """Test HealerResult.config_changed() factory method."""
 
+    @pytest.mark.fast
     def test_config_changed_returns_success_true(self):
         """Test that config_changed() returns result with success=True."""
         from src.agents.base import HealerResult
         result = HealerResult.config_changed("Config updated")
         assert result.success is True
 
+    @pytest.mark.fast
     def test_config_changed_action_is_modify_config(self):
         """Test that config_changed() has action=MODIFY_CONFIG."""
         from src.agents.base import HealerResult, HealerAction
         result = HealerResult.config_changed("Config updated")
         assert result.action == HealerAction.MODIFY_CONFIG
 
+    @pytest.mark.fast
     def test_config_changed_sets_modified_config_true(self):
         """Test that config_changed() sets modified_config=True."""
         from src.agents.base import HealerResult
         result = HealerResult.config_changed("Config updated")
         assert result.modified_config is True
 
+    @pytest.mark.fast
     def test_config_changed_stores_message(self):
         """Test that config_changed() stores the message."""
         from src.agents.base import HealerResult
         result = HealerResult.config_changed("Timeout increased")
         assert result.message == "Timeout increased"
 
+    @pytest.mark.fast
     def test_config_changed_accepts_extra_details(self):
         """Test that config_changed() accepts and stores extra details."""
         from src.agents.base import HealerResult
@@ -146,6 +167,7 @@ class TestHealerResultConfigChanged:
 class TestHealerCanHandle:
     """Test Healer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_matches_error_pattern(self):
         """Test can_handle() matches error patterns in message."""
         from src.agents.base import Healer, HealerResult, HealerAction
@@ -168,6 +190,7 @@ class TestHealerCanHandle:
         error = Exception("HTTP 429 Too Many Requests")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_case_insensitive(self):
         """Test can_handle() is case insensitive."""
         from src.agents.base import Healer, HealerResult
@@ -189,6 +212,7 @@ class TestHealerCanHandle:
         error = Exception("TimeOut error")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_no_match(self):
         """Test can_handle() returns False when no pattern matches."""
         from src.agents.base import Healer, HealerResult
@@ -207,6 +231,7 @@ class TestHealerCanHandle:
         error = Exception("File not found")
         assert healer.can_handle(error, "TEST") is False
 
+    @pytest.mark.fast
     def test_can_handle_matches_exception_type(self):
         """Test can_handle() matches exception types."""
         from src.agents.base import Healer, HealerResult
@@ -233,6 +258,7 @@ class TestHealerCanHandle:
         error = Exception("Generic error")
         assert healer.can_handle(error, "TEST") is False
 
+    @pytest.mark.fast
     def test_can_handle_exception_type_inheritance(self):
         """Test can_handle() matches exception subclasses."""
         from src.agents.base import Healer, HealerResult
@@ -256,6 +282,7 @@ class TestHealerCanHandle:
         error = PermissionError("Permission denied")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_pattern_or_exception(self):
         """Test can_handle() matches if either pattern or exception matches."""
         from src.agents.base import Healer, HealerResult
@@ -287,6 +314,7 @@ class TestHealerCanHandle:
 class TestHealerLogging:
     """Test Healer logging methods."""
 
+    @pytest.mark.fast
     def test_log_attempt(self, caplog):
         """Test log_attempt() logs to INFO level."""
         from src.agents.base import Healer, HealerResult
@@ -306,6 +334,7 @@ class TestHealerLogging:
         assert "[test-healer]" in caplog.text
         assert "Attempting to fix error" in caplog.text
 
+    @pytest.mark.fast
     def test_log_success(self, caplog):
         """Test log_success() logs to INFO level with checkmark."""
         from src.agents.base import Healer, HealerResult
@@ -326,6 +355,7 @@ class TestHealerLogging:
         assert "✓" in caplog.text
         assert "Error fixed successfully" in caplog.text
 
+    @pytest.mark.fast
     def test_log_failure(self, caplog):
         """Test log_failure() logs to WARNING level with x mark."""
         from src.agents.base import Healer, HealerResult
@@ -350,6 +380,7 @@ class TestHealerLogging:
 class TestHealerInit:
     """Test Healer initialization."""
 
+    @pytest.mark.fast
     def test_healer_stores_config(self):
         """Test that Healer stores config in self.config."""
         from src.agents.base import Healer, HealerResult
@@ -367,6 +398,7 @@ class TestHealerInit:
         assert healer.config is config
         assert healer.config.some_setting == "value"
 
+    @pytest.mark.fast
     def test_healer_stores_project_dir(self):
         """Test that Healer stores project_dir."""
         from src.agents.base import Healer, HealerResult
@@ -386,6 +418,7 @@ class TestHealerInit:
 class TestHealerResultDefaults:
     """Test HealerResult default values."""
 
+    @pytest.mark.fast
     def test_details_default_empty_dict(self):
         """Test that details defaults to empty dict."""
         from src.agents.base import HealerResult, HealerAction
@@ -397,6 +430,7 @@ class TestHealerResultDefaults:
         assert result.details == {}
         assert isinstance(result.details, dict)
 
+    @pytest.mark.fast
     def test_modified_config_default_false(self):
         """Test that modified_config defaults to False."""
         from src.agents.base import HealerResult, HealerAction

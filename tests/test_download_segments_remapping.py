@@ -18,6 +18,7 @@ from src.state import AudioDownload
 class TestTimestampSuffixStripping:
     """Test that timestamp suffixes are stripped when matching video_id"""
 
+    @pytest.mark.fast
     def test_strips_timestamp_suffix_from_youtube_segment(self):
         """Test that YB4UyAHH5Ig_0000 matches YB4UyAHH5Ig"""
         # This is the core bug fix: matches reference timestamped files
@@ -55,6 +56,7 @@ class TestTimestampSuffixStripping:
         assert video_id == "YB4UyAHH5Ig", f"Failed to match {audio_file} -> {base_audio_file}"
         assert base_audio_file == "YB4UyAHH5Ig"
 
+    @pytest.mark.fast
     def test_strips_multiple_digit_timestamp_suffixes(self):
         """Test various timestamp formats: _0000, _1234, _9999"""
         test_cases = [
@@ -76,6 +78,7 @@ class TestTimestampSuffixStripping:
 
             assert base_audio_file == expected_base, f"Failed for {filename}"
 
+    @pytest.mark.fast
     def test_preserves_underscores_in_video_id(self):
         """Test that underscores in video_id are preserved"""
         # Some video IDs might have underscores as part of their ID
@@ -91,6 +94,7 @@ class TestTimestampSuffixStripping:
         # Should strip only the timestamp, preserve the ID underscore
         assert base_audio_file == "my_video_id"
 
+    @pytest.mark.fast
     def test_does_not_strip_non_numeric_suffix(self):
         """Test that non-numeric suffixes are not stripped"""
         test_cases = [
@@ -113,6 +117,7 @@ class TestTimestampSuffixStripping:
 class TestStockVideoSkipping:
     """Test that stock videos and entity images are skipped during remapping"""
 
+    @pytest.mark.fast
     def test_skips_pexels_videos(self):
         """Test that pexels_ videos are skipped silently"""
         # Replicate the skip logic from download.py line 569
@@ -123,6 +128,7 @@ class TestStockVideoSkipping:
 
         assert should_skip == True, "Pexels videos should be skipped"
 
+    @pytest.mark.fast
     def test_skips_pixabay_videos(self):
         """Test that pixabay_ videos are skipped silently"""
         audio_file = "pixabay_1191_Vimeo-Free-Videos_720p"
@@ -132,6 +138,7 @@ class TestStockVideoSkipping:
 
         assert should_skip == True, "Pixabay videos should be skipped"
 
+    @pytest.mark.fast
     def test_skips_entity_images(self):
         """Test that entity_ images are skipped silently"""
         audio_file = "entity_CaesarsPalace_001"
@@ -141,6 +148,7 @@ class TestStockVideoSkipping:
 
         assert should_skip == True, "Entity images should be skipped"
 
+    @pytest.mark.fast
     def test_does_not_skip_youtube_videos(self):
         """Test that YouTube videos are NOT skipped"""
         audio_file = "YB4UyAHH5Ig_0000"
@@ -150,6 +158,7 @@ class TestStockVideoSkipping:
 
         assert should_skip == False, "YouTube videos should NOT be skipped"
 
+    @pytest.mark.fast
     def test_does_not_skip_regular_videos(self):
         """Test that regular video files are NOT skipped"""
         test_cases = [
@@ -166,6 +175,7 @@ class TestStockVideoSkipping:
 class TestRegressionPrevention:
     """Tests to prevent regression of the original bug"""
 
+    @pytest.mark.fast
     def test_youtube_segment_with_timestamp_gets_remapped(self):
         """Regression test: ensure YouTube segments with timestamps are remapped"""
         # Replicate the full remapping logic for a YouTube segment with timestamp
@@ -211,6 +221,7 @@ class TestRegressionPrevention:
         assert found_video_id == "Q5_QZ6bLKzY", f"Failed to find video_id for {audio_file} -> {base_audio_file}"
         assert found_video_id == segment_video_id, "video_id mismatch between segment and audio"
 
+    @pytest.mark.fast
     def test_no_warnings_for_stock_videos(self):
         """Regression test: ensure no warnings for stock videos"""
         # Replicate the skip logic for stock videos

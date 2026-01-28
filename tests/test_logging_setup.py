@@ -95,12 +95,14 @@ def cleanup_logger(logger):
 class TestSetupLoggingBasic:
     """Test basic setup_logging functionality."""
 
+    @pytest.mark.fast
     def test_setup_logging_returns_logger(self, mock_config, temp_dir):
         """Test that setup_logging returns a logger instance."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
         assert isinstance(logger, logging.Logger)
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_creates_log_directory(self, mock_config, temp_dir):
         """Test that setup_logging creates the logs subdirectory."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -109,6 +111,7 @@ class TestSetupLoggingBasic:
         assert logs_dir.is_dir()
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_creates_log_files(self, mock_config, temp_dir):
         """Test that setup_logging creates both log files."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test123")
@@ -121,6 +124,7 @@ class TestSetupLoggingBasic:
         assert normal_log.exists()
         assert verbose_log.exists()
 
+    @pytest.mark.fast
     def test_setup_logging_log_paths_attribute(self, mock_config, temp_dir):
         """Test that logger has log_paths attribute."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test456")
@@ -141,6 +145,7 @@ class TestSetupLoggingBasic:
 class TestSetupLoggingLevels:
     """Test log level configuration."""
 
+    @pytest.mark.fast
     def test_setup_logging_info_level(self, mock_config, temp_dir):
         """Test INFO log level configuration."""
         mock_config.logging.log_level = "INFO"
@@ -154,6 +159,7 @@ class TestSetupLoggingLevels:
         assert console_handlers[0].level == logging.INFO
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_debug_level(self, mock_config, temp_dir):
         """Test DEBUG log level configuration."""
         mock_config.logging.log_level = "DEBUG"
@@ -167,6 +173,7 @@ class TestSetupLoggingLevels:
         assert console_handlers[0].level == logging.DEBUG
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_warning_level(self, mock_config, temp_dir):
         """Test WARNING log level configuration."""
         mock_config.logging.log_level = "WARNING"
@@ -180,6 +187,7 @@ class TestSetupLoggingLevels:
         assert console_handlers[0].level == logging.WARNING
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_invalid_level_defaults_to_info(self, mock_config, temp_dir):
         """Test that invalid log level defaults to INFO."""
         mock_config.logging.log_level = "INVALID_LEVEL"
@@ -193,6 +201,7 @@ class TestSetupLoggingLevels:
         assert console_handlers[0].level == logging.INFO
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_lowercase_level(self, mock_config, temp_dir):
         """Test that lowercase log levels are handled."""
         mock_config.logging.log_level = "debug"
@@ -214,6 +223,7 @@ class TestSetupLoggingLevels:
 class TestSetupLoggingHandlers:
     """Test handler creation and configuration."""
 
+    @pytest.mark.fast
     def test_setup_logging_clears_existing_handlers(self, mock_config, temp_dir):
         """Test that existing handlers are cleared."""
         root_logger = logging.getLogger()
@@ -227,6 +237,7 @@ class TestSetupLoggingHandlers:
         assert dummy_handler not in root_logger.handlers
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_creates_console_handler(self, mock_config, temp_dir):
         """Test that console handler is created."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -238,6 +249,7 @@ class TestSetupLoggingHandlers:
         assert len(console_handlers) >= 1
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_creates_file_handlers(self, mock_config, temp_dir):
         """Test that file handlers are created."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -248,6 +260,7 @@ class TestSetupLoggingHandlers:
         assert len(file_handlers) >= 2  # Normal and verbose
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_normal_handler_info_level(self, mock_config, temp_dir):
         """Test that normal file handler has INFO level."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test")
@@ -262,6 +275,7 @@ class TestSetupLoggingHandlers:
         assert normal_handlers[0].level == logging.INFO
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_verbose_handler_debug_level(self, mock_config, temp_dir):
         """Test that verbose file handler has DEBUG level."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test")
@@ -284,6 +298,7 @@ class TestSetupLoggingHandlers:
 class TestSetupLoggingTimestamp:
     """Test timestamp handling."""
 
+    @pytest.mark.fast
     def test_setup_logging_custom_timestamp(self, mock_config, temp_dir):
         """Test that custom timestamp is used."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="custom_ts")
@@ -292,6 +307,7 @@ class TestSetupLoggingTimestamp:
         assert 'custom_ts' in logger.log_paths['verbose']
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_auto_timestamp(self, mock_config, temp_dir):
         """Test that timestamp is auto-generated when not provided."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -312,6 +328,7 @@ class TestSetupLoggingTimestamp:
 class TestSetupLoggingOutputDir:
     """Test output directory handling."""
 
+    @pytest.mark.fast
     def test_setup_logging_creates_nested_directories(self, mock_config, temp_dir):
         """Test that nested directories are created."""
         nested_dir = temp_dir / "deep" / "nested" / "path"
@@ -321,6 +338,7 @@ class TestSetupLoggingOutputDir:
         assert logs_dir.exists()
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_uses_config_output_dir(self, mock_config, temp_dir):
         """Test that config output_dir is used when output_dir is None."""
         mock_config.output.output_dir = str(temp_dir)
@@ -330,6 +348,7 @@ class TestSetupLoggingOutputDir:
         assert logs_dir.exists()
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_string_output_dir(self, mock_config, temp_dir):
         """Test that string output_dir is converted to Path."""
         logger = setup_logging(mock_config, output_dir=str(temp_dir))
@@ -346,6 +365,7 @@ class TestSetupLoggingOutputDir:
 class TestSetupLoggingErrorHandling:
     """Test error handling in setup_logging."""
 
+    @pytest.mark.fast
     def test_setup_logging_normal_file_error(self, mock_config, temp_dir, capsys):
         """Test handling of normal log file creation error."""
         call_count = [0]
@@ -364,6 +384,7 @@ class TestSetupLoggingErrorHandling:
         captured = capsys.readouterr()
         assert "Warning: Could not create normal log file" in captured.out
 
+    @pytest.mark.fast
     def test_setup_logging_verbose_file_error(self, mock_config, temp_dir, capsys):
         """Test handling of verbose log file creation error."""
         call_count = [0]
@@ -382,6 +403,7 @@ class TestSetupLoggingErrorHandling:
         captured = capsys.readouterr()
         assert "Warning: Could not create verbose log file" in captured.out
 
+    @pytest.mark.fast
     def test_setup_logging_ffmpeg_setup_error(self, mock_config, temp_dir, capsys):
         """Test handling of FFmpeg setup error."""
         mock_utils = MagicMock()
@@ -402,6 +424,7 @@ class TestSetupLoggingErrorHandling:
 class TestSetupLoggingFFmpeg:
     """Test FFmpeg debug log integration."""
 
+    @pytest.mark.fast
     def test_setup_logging_with_ffmpeg(self, mock_config, temp_dir):
         """Test setup_logging when FFmpeg utils are available."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -409,6 +432,7 @@ class TestSetupLoggingFFmpeg:
         assert 'ffmpeg_debug' in logger.log_paths
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_ffmpeg_path_stored(self, mock_config, temp_dir):
         """Test that FFmpeg path is stored when successful."""
         mock_ffmpeg_path = str(temp_dir / "logs" / "ffmpeg.log")
@@ -428,6 +452,7 @@ class TestSetupLoggingFFmpeg:
 class TestSetupLoggingOutput:
     """Test actual logging output."""
 
+    @pytest.mark.fast
     def test_setup_logging_writes_to_normal_log(self, mock_config, temp_dir):
         """Test that INFO messages are written to normal log."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test")
@@ -444,6 +469,7 @@ class TestSetupLoggingOutput:
         content = normal_log.read_text()
         assert "Test info message" in content
 
+    @pytest.mark.fast
     def test_setup_logging_writes_to_verbose_log(self, mock_config, temp_dir):
         """Test that DEBUG messages are written to verbose log."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test")
@@ -460,6 +486,7 @@ class TestSetupLoggingOutput:
         content = verbose_log.read_text()
         assert "Test debug message" in content
 
+    @pytest.mark.fast
     def test_setup_logging_debug_not_in_normal_log(self, mock_config, temp_dir):
         """Test that DEBUG messages are NOT in normal log (only INFO+)."""
         mock_config.logging.log_level = "INFO"
@@ -485,6 +512,7 @@ class TestSetupLoggingOutput:
 class TestSetupLoggingRootLogger:
     """Test root logger configuration."""
 
+    @pytest.mark.fast
     def test_setup_logging_root_level_debug(self, mock_config, temp_dir):
         """Test that root logger level is set to DEBUG to capture all."""
         logger = setup_logging(mock_config, output_dir=temp_dir)
@@ -493,6 +521,7 @@ class TestSetupLoggingRootLogger:
         assert root_logger.level == logging.DEBUG
         cleanup_logger(logger)
 
+    @pytest.mark.fast
     def test_setup_logging_init_message(self, mock_config, temp_dir):
         """Test that initialization message is logged."""
         logger = setup_logging(mock_config, output_dir=temp_dir, run_timestamp="test")

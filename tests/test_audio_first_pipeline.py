@@ -91,6 +91,7 @@ def audio_pipeline(mock_config):
 class TestDownloadAudioForKeyword:
     """Test audio download phase"""
 
+    @pytest.mark.fast
     def test_download_audio_no_config(self, temp_dir):
         """Test when audio_first config is missing"""
         config = Mock()
@@ -112,6 +113,7 @@ class TestDownloadAudioForKeyword:
         # Should return empty list when config missing
         assert result == []
 
+    @pytest.mark.fast
     def test_download_audio_max_total_limit(self, audio_pipeline, temp_dir):
         """Test max_total tier limit"""
         # Set tier download count to limit
@@ -179,6 +181,7 @@ class TestDownloadAudioForKeyword:
             assert len(result) >= 1  # At least one audio file should be recognized
             # Note: May return more than 1 if per_keyword > 1 and download succeeds
 
+    @pytest.mark.fast
     def test_download_audio_no_search_results(self, audio_pipeline, temp_dir):
         """Test when YouTube search returns no results"""
         audio_pipeline._get_tier_value = Mock(return_value=10)
@@ -191,6 +194,7 @@ class TestDownloadAudioForKeyword:
         # Should not call filter or download
         audio_pipeline._filter_titles_with_llm.assert_not_called()
 
+    @pytest.mark.fast
     def test_download_audio_llm_filter_rejects_all(self, audio_pipeline, temp_dir):
         """Test when LLM filter rejects all videos"""
         audio_pipeline._get_tier_value = Mock(return_value=10)
@@ -243,6 +247,7 @@ class TestDownloadVideoSegments:
             if len(result) > 0:
                 assert result[0].video_id == "vid1"
 
+    @pytest.mark.fast
     def test_download_video_segments_empty(self, audio_pipeline, temp_dir):
         """Test with no merged segments"""
         result = audio_pipeline.download_video_segments([], temp_dir)
@@ -298,6 +303,7 @@ class TestDownloadVideoSegments:
 class TestAudioFirstEdgeCases:
     """Test edge cases and error handling"""
 
+    @pytest.mark.fast
     def test_download_audio_tier_increment(self, audio_pipeline, temp_dir):
         """Test tier download counter increments"""
         initial_count = audio_pipeline.tier_download_counts.get('short', 0)
@@ -324,6 +330,7 @@ class TestAudioFirstEdgeCases:
         assert audio_pipeline.tier_download_counts.get('short', 0) >= initial_count
 
 
+    @pytest.mark.fast
     def test_download_segment_error_handling(self, audio_pipeline, temp_dir):
         """Test segment download error handling"""
         merged_segments = [
@@ -353,6 +360,7 @@ class TestAudioFirstEdgeCases:
 class TestDownloadFullVideoFallback:
     """Test full video fallback when segment download fails"""
 
+    @pytest.mark.integration
     def test_fallback_no_timeout(self, audio_pipeline, temp_dir):
         """Test fallback download without timeout"""
         video_dir = temp_dir / "video_dir"
@@ -394,6 +402,7 @@ class TestDownloadFullVideoFallback:
                 assert result[0].original_start == 0
                 assert result[0].file_duration == 300.0
 
+    @pytest.mark.integration
     def test_fallback_download_failure(self, audio_pipeline, temp_dir):
         """Test fallback when download fails"""
         video_dir = temp_dir / "video_dir"
@@ -424,6 +433,7 @@ class TestDownloadFullVideoFallback:
 
             assert result == []
 
+    @pytest.mark.integration
     def test_fallback_timeout(self, audio_pipeline, temp_dir):
         """Test fallback timeout handling"""
         import subprocess
@@ -455,6 +465,7 @@ class TestDownloadFullVideoFallback:
 
             assert result == []
 
+    @pytest.mark.integration
     def test_fallback_no_duration_estimates_from_segments(self, audio_pipeline, temp_dir):
         """Test fallback when duration can't be determined"""
         video_dir = temp_dir / "video_dir"
@@ -499,6 +510,7 @@ class TestDownloadFullVideoFallback:
 class TestGetVideoDuration:
     """Test video duration extraction via ffprobe"""
 
+    @pytest.mark.integration
     def test_get_video_duration_success(self, audio_pipeline, temp_dir):
         """Test successful duration extraction"""
         video_path = temp_dir / "test.mp4"
@@ -518,6 +530,7 @@ class TestGetVideoDuration:
             args = mock_run.call_args[0][0]
             assert 'ffprobe' in args
 
+    @pytest.mark.integration
     def test_get_video_duration_failure(self, audio_pipeline, temp_dir):
         """Test when ffprobe fails"""
         video_path = temp_dir / "test.mp4"
@@ -530,6 +543,7 @@ class TestGetVideoDuration:
 
             assert duration is None
 
+    @pytest.mark.integration
     def test_get_video_duration_timeout(self, audio_pipeline, temp_dir):
         """Test ffprobe timeout handling"""
         import subprocess
@@ -542,6 +556,7 @@ class TestGetVideoDuration:
 
             assert duration is None
 
+    @pytest.mark.integration
     def test_get_video_duration_invalid_output(self, audio_pipeline, temp_dir):
         """Test handling of invalid ffprobe output"""
         video_path = temp_dir / "test.mp4"
@@ -565,6 +580,7 @@ class TestGetVideoDuration:
 class TestDownloadVideoSegmentsAdditional:
     """Additional tests for video segment download workflow"""
 
+    @pytest.mark.integration
     def test_download_segments_groups_by_video(self, audio_pipeline, temp_dir):
         """Test that segments are grouped by video_id"""
         # Multiple segments from same video
@@ -613,6 +629,7 @@ class TestDownloadVideoSegmentsAdditional:
                 # Should make only 1 yt-dlp call (grouped by video_id)
                 assert call_count[0] == 1
 
+    @pytest.mark.integration
     def test_download_segments_fallback_on_failure(self, audio_pipeline, temp_dir):
         """Test fallback to full video when segment download fails"""
         merged_segments = [
@@ -641,6 +658,7 @@ class TestDownloadVideoSegmentsAdditional:
                 # Fallback should have been called
                 assert fallback_called[0]
 
+    @pytest.mark.integration
     def test_download_segments_no_fallback_when_disabled(self, audio_pipeline, temp_dir):
         """Test no fallback when fallback_full_video is False"""
         # Disable fallback
@@ -675,6 +693,7 @@ class TestDownloadVideoSegmentsAdditional:
 class TestDownloadAudioAdditional:
     """Additional tests for audio download workflow"""
 
+    @pytest.mark.integration
     def test_download_audio_filters_by_duration(self, audio_pipeline, temp_dir):
         """Test that videos are filtered by tier duration range"""
         audio_pipeline._get_tier_value = Mock(side_effect=lambda tier, key, default: {
@@ -702,6 +721,7 @@ class TestDownloadAudioAdditional:
             # Should have filtered to only vid2
             # (Actual download logic would show this, but we're testing filter logic)
 
+    @pytest.mark.fast
     def test_download_audio_skips_live_streams(self, audio_pipeline, temp_dir):
         """Test that live streams are skipped"""
         audio_pipeline._get_tier_value = Mock(side_effect=lambda tier, key, default: {
@@ -719,6 +739,7 @@ class TestDownloadAudioAdditional:
         # The filter should remove live streams
         # (Testing the filtering logic that happens before download)
 
+    @pytest.mark.fast
     def test_download_audio_handles_none_duration(self, audio_pipeline, temp_dir):
         """Test handling of videos with None duration"""
         audio_pipeline._get_tier_value = Mock(side_effect=lambda tier, key, default: {
@@ -735,6 +756,7 @@ class TestDownloadAudioAdditional:
 
         # Videos with None duration should be filtered out
 
+    @pytest.mark.fast
     def test_download_audio_cleans_stale_part_files(self, audio_pipeline, temp_dir):
         """Test cleanup of stale .part files"""
         audio_pipeline._get_tier_value = Mock(return_value=10)

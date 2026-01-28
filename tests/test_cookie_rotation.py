@@ -26,6 +26,7 @@ class MockCookieRotationConfig:
 class TestCookieValidation:
     """Tests for cookie file validation at startup (US-001)."""
 
+    @pytest.mark.fast
     def test_validates_existence_and_readability(self, tmp_path):
         """Test that validation checks both existence AND readability."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -43,6 +44,7 @@ class TestCookieValidation:
         assert len(rotator._cookie_files) == 1
         assert len(rotator._invalid_cookies) == 0
 
+    @pytest.mark.fast
     def test_logs_warning_for_missing_file(self, tmp_path, caplog):
         """Test warning logged for missing file with path and reason."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -62,6 +64,7 @@ class TestCookieValidation:
         assert "file not found" in caplog.text
         assert rotator._invalid_cookies[missing_path] == "file not found"
 
+    @pytest.mark.fast
     def test_logs_warning_for_directory(self, tmp_path, caplog):
         """Test warning logged when path is a directory, not a file."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -83,6 +86,7 @@ class TestCookieValidation:
         assert rotator._invalid_cookies[dir_path] == "not a file"
 
     @pytest.mark.skipif(os.name == 'nt', reason="Permission tests unreliable on Windows")
+    @pytest.mark.fast
     def test_logs_warning_for_unreadable_file(self, tmp_path, caplog):
         """Test warning logged for file that exists but is unreadable."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -108,6 +112,7 @@ class TestCookieValidation:
             # Restore permissions for cleanup
             unreadable.chmod(0o644)
 
+    @pytest.mark.fast
     def test_get_status_includes_valid_cookies_count(self, tmp_path):
         """Test get_status() returns valid_cookies separate from total_cookies."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -137,6 +142,7 @@ class TestCookieValidation:
         assert missing in status["invalid_cookies"]
         assert status["invalid_cookies"][missing] == "file not found"
 
+    @pytest.mark.fast
     def test_continue_on_partial_true_allows_startup(self, tmp_path):
         """Test continue_on_partial=True (default) allows startup with some invalid cookies."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -154,6 +160,7 @@ class TestCookieValidation:
         assert rotator.is_enabled
         assert len(rotator._cookie_files) == 1
 
+    @pytest.mark.fast
     def test_continue_on_partial_false_raises_on_invalid(self, tmp_path):
         """Test continue_on_partial=False raises ValueError when any cookie invalid."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -174,6 +181,7 @@ class TestCookieValidation:
         assert missing in str(exc_info.value)
         assert "file not found" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_mixed_valid_invalid_cookies(self, tmp_path):
         """Test startup with mix of valid and invalid cookie files."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -224,6 +232,7 @@ class TestCustomErrorPatterns:
         cookie_file.write_text("# Cookie file\n")
         return str(cookie_file)
 
+    @pytest.mark.fast
     def test_custom_pattern_triggers_rotation(self, temp_cookie):
         """Test that custom error patterns trigger rotation."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -243,6 +252,7 @@ class TestCustomErrorPatterns:
         # Custom pattern SHOULD trigger
         assert rotator.should_rotate("Some CUSTOM_ERROR_XYZ occurred")
 
+    @pytest.mark.fast
     def test_case_insensitive_matching(self, temp_cookie):
         """Test that error patterns match case-insensitively."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -259,6 +269,7 @@ class TestCustomErrorPatterns:
         assert rotator.should_rotate("error: mypattern detected")
         assert rotator.should_rotate("error: MyPattern detected")
 
+    @pytest.mark.fast
     def test_empty_patterns_validation_when_enabled(self):
         """Test that empty rotate_on_errors raises ValueError when enabled."""
         from src.config.sections.download import CookieRotationConfig
@@ -273,6 +284,7 @@ class TestCustomErrorPatterns:
         assert "non-empty list" in str(exc_info.value)
         assert "rotate_on_errors" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_empty_patterns_allowed_when_disabled(self):
         """Test that empty rotate_on_errors is allowed when rotation disabled."""
         from src.config.sections.download import CookieRotationConfig
@@ -284,6 +296,7 @@ class TestCustomErrorPatterns:
         )
         assert config.rotate_on_errors == []
 
+    @pytest.mark.fast
     def test_multiple_custom_patterns(self, temp_cookie):
         """Test rotation with multiple custom patterns."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -325,6 +338,7 @@ class TestCookieRotator:
         )
         return CookieRotator(config)
 
+    @pytest.mark.fast
     def test_init_with_valid_cookies(self, temp_cookies):
         """Test initialization with valid cookie files."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -338,6 +352,7 @@ class TestCookieRotator:
         assert rotator.is_enabled
         assert rotator.available_cookies == 3
 
+    @pytest.mark.fast
     def test_init_with_missing_cookies(self, tmp_path):
         """Test initialization with missing cookie files."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -354,6 +369,7 @@ class TestCookieRotator:
         assert not rotator.is_enabled  # No valid cookies
         assert rotator.available_cookies == 0
 
+    @pytest.mark.fast
     def test_init_disabled(self, temp_cookies):
         """Test initialization when disabled."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -366,22 +382,26 @@ class TestCookieRotator:
 
         assert not rotator.is_enabled
 
+    @pytest.mark.fast
     def test_get_current_cookie(self, rotator, temp_cookies):
         """Test getting current cookie."""
         current = rotator.get_current_cookie()
         assert current == temp_cookies[0]
 
+    @pytest.mark.fast
     def test_should_rotate_on_429(self, rotator):
         """Test rotation trigger on 429 error."""
         assert rotator.should_rotate("HTTP Error 429: Too Many Requests")
         assert rotator.should_rotate("rate limit exceeded")
         assert rotator.should_rotate("Please sign in to continue")
 
+    @pytest.mark.fast
     def test_should_not_rotate_on_other_errors(self, rotator):
         """Test no rotation on unrelated errors."""
         assert not rotator.should_rotate("Video not found")
         assert not rotator.should_rotate("Network timeout")
 
+    @pytest.mark.fast
     def test_rotate_round_robin(self, rotator, temp_cookies):
         """Test round-robin rotation strategy."""
         # Initial cookie
@@ -401,6 +421,7 @@ class TestCookieRotator:
         new_cookie = rotator.rotate()
         assert new_cookie == temp_cookies[0]
 
+    @pytest.mark.fast
     def test_rotate_random(self, temp_cookies):
         """Test random rotation strategy."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -416,6 +437,7 @@ class TestCookieRotator:
         new_cookie = rotator.rotate()
         assert new_cookie in temp_cookies
 
+    @pytest.mark.fast
     def test_cooldown_tracking(self, rotator, temp_cookies):
         """Test that failed cookies enter cooldown."""
         # Rotate from first cookie
@@ -446,6 +468,7 @@ class TestCookieRotator:
         # Cookie should be available again
         assert rotator.is_available(temp_cookies[0])
 
+    @pytest.mark.fast
     def test_all_cookies_exhausted(self, rotator, temp_cookies):
         """Test behavior when all cookies are in cooldown."""
         # Exhaust all cookies
@@ -458,6 +481,7 @@ class TestCookieRotator:
         # Next rotation should fail
         assert rotator.rotate() is None
 
+    @pytest.mark.fast
     def test_max_rotations_limit(self, temp_cookies):
         """Test max rotations per session limit."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -477,6 +501,7 @@ class TestCookieRotator:
         assert rotator.rotate() is None
         assert not rotator.can_rotate()
 
+    @pytest.mark.fast
     def test_reset(self, rotator, temp_cookies):
         """Test reset clears all state."""
         # Do some rotations
@@ -492,6 +517,7 @@ class TestCookieRotator:
         assert len(rotator._failed_cookies) == 0
         assert rotator.available_cookies == 3
 
+    @pytest.mark.fast
     def test_get_status(self, rotator, temp_cookies):
         """Test status reporting."""
         status = rotator.get_status()
@@ -504,6 +530,7 @@ class TestCookieRotator:
         assert status["strategy"] == "on_error"
         assert status["invalid_cookies"] == {}  # No invalid cookies
 
+    @pytest.mark.fast
     def test_can_rotate(self, rotator, temp_cookies):
         """Test can_rotate check."""
         assert rotator.can_rotate()
@@ -539,6 +566,7 @@ class TestCookieRotatorIntegration:
 
         return config
 
+    @pytest.mark.fast
     def test_rotator_used_in_add_cookies_to_cmd(self, mock_config, tmp_path):
         """Test that VideoDownloader uses rotator when enabled."""
         # This is a conceptual test - actual integration would require
@@ -586,6 +614,7 @@ class TestMidSessionFileValidation:
         )
         return CookieRotator(config)
 
+    @pytest.mark.fast
     def test_rotate_when_current_cookie_deleted_mid_session(self, rotator_with_cookies, three_cookies):
         """AC1: rotate() when current cookie file is deleted mid-session
         — verify graceful fallback to next available cookie (no FileNotFoundError crash)."""
@@ -607,6 +636,7 @@ class TestMidSessionFileValidation:
         # Deleted file should be removed from active list
         assert three_cookies[0] not in rotator._cookie_files
 
+    @pytest.mark.fast
     def test_rotate_when_cookie_becomes_empty_mid_session(self, rotator_with_cookies, three_cookies):
         """AC2: rotate() when cookie file becomes empty (0 bytes) mid-session
         — verify it skips to next cookie instead of using empty file."""
@@ -629,6 +659,7 @@ class TestMidSessionFileValidation:
         assert three_cookies[0] in rotator._invalid_cookies
         assert "empty" in rotator._invalid_cookies[three_cookies[0]]
 
+    @pytest.mark.fast
     def test_rotate_with_all_cookies_deleted(self, rotator_with_cookies, three_cookies, caplog):
         """AC3: rotate() with all cookie files deleted — verify returns None
         and logs warning (not exception)."""
@@ -655,6 +686,7 @@ class TestMidSessionFileValidation:
         # All cookies should be marked invalid
         assert len(rotator._cookie_files) == 0
 
+    @pytest.mark.fast
     def test_round_robin_single_cookie_no_infinite_loop(self, tmp_path):
         """AC4: round-robin rotation with single cookie file — verify it returns
         that file on every call (no infinite loop in _select_round_robin)."""
@@ -685,6 +717,7 @@ class TestMidSessionFileValidation:
         current = rotator.get_current_cookie()
         assert current == str(single)
 
+    @pytest.mark.fast
     def test_get_current_cookie_after_deletion_returns_none_or_fallback(
         self, rotator_with_cookies, three_cookies
     ):
@@ -705,6 +738,7 @@ class TestMidSessionFileValidation:
         # It should return a valid fallback (cookie_1 or cookie_2)
         assert result in [three_cookies[1], three_cookies[2]]
 
+    @pytest.mark.fast
     def test_get_current_cookie_all_deleted_returns_none(self, rotator_with_cookies, three_cookies):
         """get_current_cookie() with all files deleted returns None."""
         rotator = rotator_with_cookies
@@ -716,6 +750,7 @@ class TestMidSessionFileValidation:
         result = rotator.get_current_cookie()
         assert result is None
 
+    @pytest.mark.fast
     def test_deleted_cookie_tracked_in_invalid_cookies(self, rotator_with_cookies, three_cookies):
         """Deleted cookie is moved to _invalid_cookies with 'deleted' reason."""
         rotator = rotator_with_cookies
@@ -728,6 +763,7 @@ class TestMidSessionFileValidation:
         assert three_cookies[0] in rotator._invalid_cookies
         assert rotator._invalid_cookies[three_cookies[0]] == "deleted"
 
+    @pytest.mark.fast
     def test_is_cookie_file_valid_checks_existence_and_size(self, tmp_path):
         """_is_cookie_file_valid returns False for missing and empty files."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -753,6 +789,7 @@ class TestMidSessionFileValidation:
         # Missing file
         assert rotator._is_cookie_file_valid(str(tmp_path / "missing.txt")) is False
 
+    @pytest.mark.fast
     def test_rotate_skips_deleted_in_middle_of_chain(self, rotator_with_cookies, three_cookies):
         """rotate() skips a deleted cookie in the middle and goes to the next valid one."""
         rotator = rotator_with_cookies
@@ -767,6 +804,7 @@ class TestMidSessionFileValidation:
         # cookie_1 should be removed from active list
         assert three_cookies[1] not in rotator._cookie_files
 
+    @pytest.mark.fast
     def test_status_reflects_mid_session_invalidation(self, rotator_with_cookies, three_cookies):
         """get_status() reflects mid-session invalidation correctly."""
         rotator = rotator_with_cookies

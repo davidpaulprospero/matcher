@@ -38,6 +38,7 @@ def create_downloader(config):
 class TestRetryConfiguration:
     """Test that retry configuration is read from config."""
 
+    @pytest.mark.fast
     def test_uses_config_max_retries(self, tmp_path):
         """Test that max_retries is read from config."""
         config = create_mock_downloader_config(tmp_path, max_retries=5)
@@ -46,6 +47,7 @@ class TestRetryConfiguration:
             downloader = VideoDownloader(config)
             assert config.download.max_retries == 5
 
+    @pytest.mark.fast
     def test_uses_config_retry_delay(self, tmp_path):
         """Test that retry_delay is read from config."""
         config = create_mock_downloader_config(tmp_path, retry_delay=5.0)
@@ -54,6 +56,7 @@ class TestRetryConfiguration:
             downloader = VideoDownloader(config)
             assert config.download.retry_delay == 5.0
 
+    @pytest.mark.fast
     def test_uses_config_retry_backoff(self, tmp_path):
         """Test that retry_backoff is read from config."""
         config = create_mock_downloader_config(tmp_path, retry_backoff=3.0)
@@ -74,22 +77,27 @@ class TestTransientErrorDetection:
             from src.downloader.core import VideoDownloader
             yield VideoDownloader(config)
 
+    @pytest.mark.fast
     def test_is_transient_error_429(self, downloader):
         """Test that 429 rate limit is detected as transient."""
         assert downloader._is_transient_error("ERROR: HTTP Error 429: Too Many Requests")
 
+    @pytest.mark.fast
     def test_is_transient_error_connection_reset(self, downloader):
         """Test that connection reset is detected as transient."""
         assert downloader._is_transient_error("Connection reset by peer")
 
+    @pytest.mark.fast
     def test_is_transient_error_rate_limit(self, downloader):
         """Test that rate limit text is detected as transient."""
         assert downloader._is_transient_error("rate limit exceeded, please wait")
 
+    @pytest.mark.fast
     def test_is_transient_error_service_unavailable(self, downloader):
         """Test that service unavailable is detected as transient."""
         assert downloader._is_transient_error("HTTP Error 503: Service Unavailable")
 
+    @pytest.mark.fast
     def test_not_transient_for_unrelated_error(self, downloader):
         """Test that unrelated errors are not classified as transient."""
         assert not downloader._is_transient_error("Some random error message")
@@ -106,22 +114,27 @@ class TestPermanentErrorDetection:
             from src.downloader.core import VideoDownloader
             yield VideoDownloader(config)
 
+    @pytest.mark.fast
     def test_is_permanent_error_video_unavailable(self, downloader):
         """Test that video unavailable is detected as permanent."""
         assert downloader._is_permanent_error("Video unavailable")
 
+    @pytest.mark.fast
     def test_is_permanent_error_private_video(self, downloader):
         """Test that private video is detected as permanent."""
         assert downloader._is_permanent_error("This video is private")
 
+    @pytest.mark.fast
     def test_is_permanent_error_age_restricted(self, downloader):
         """Test that age-restricted is detected as permanent."""
         assert downloader._is_permanent_error("Sign in to confirm your age")
 
+    @pytest.mark.fast
     def test_is_permanent_error_copyright(self, downloader):
         """Test that copyright claim is detected as permanent."""
         assert downloader._is_permanent_error("Video removed due to copyright claim")
 
+    @pytest.mark.fast
     def test_not_permanent_for_transient_error(self, downloader):
         """Test that transient errors are not classified as permanent."""
         assert not downloader._is_permanent_error("HTTP Error 429: Too Many Requests")
@@ -130,6 +143,7 @@ class TestPermanentErrorDetection:
 class TestRetryBehavior:
     """Test the actual retry behavior with mocked subprocess."""
 
+    @pytest.mark.integration
     def test_retry_on_timeout(self, tmp_path):
         """Test that timeouts trigger retry with exponential backoff."""
         config = create_mock_downloader_config(
@@ -169,6 +183,7 @@ class TestRetryBehavior:
                         # Verify exponential backoff: 0.1, 0.2
                         assert_retry_backoff_correct(mock_sleep, 0.1, 2.0, 2)
 
+    @pytest.mark.integration
     def test_retry_on_transient_error(self, tmp_path):
         """Test that transient errors trigger retry."""
         config = create_mock_downloader_config(
@@ -214,6 +229,7 @@ class TestRetryBehavior:
                         # Should have slept once for retry
                         assert mock_sleep.call_count >= 1
 
+    @pytest.mark.integration
     def test_no_retry_on_permanent_error(self, tmp_path):
         """Test that permanent errors fail immediately without retry."""
         config = create_mock_downloader_config(tmp_path, max_retries=3, retry_delay=0.1)
@@ -252,6 +268,7 @@ class TestRetryBehavior:
                     # Should NOT have slept (no retry)
                     assert mock_sleep.call_count == 0
 
+    @pytest.mark.integration
     def test_success_on_first_attempt(self, tmp_path):
         """Test that successful downloads don't retry."""
         config = create_mock_downloader_config(tmp_path, max_retries=3, retry_delay=0.1)
@@ -297,6 +314,7 @@ class TestRetryBehavior:
 class TestExponentialBackoffCalculation:
     """Test that exponential backoff delay is calculated correctly."""
 
+    @pytest.mark.integration
     def test_backoff_formula_attempt_0(self, tmp_path):
         """Test backoff delay for first retry (attempt=0)."""
         # delay = retry_delay * (retry_backoff ^ attempt)
@@ -349,6 +367,7 @@ class TestExponentialBackoffCalculation:
                         sleep_delays = [call[0][0] for call in mock_sleep.call_args_list]
                         assert 2.0 in sleep_delays or any(abs(d - 2.0) < 0.01 for d in sleep_delays)
 
+    @pytest.mark.integration
     def test_backoff_formula_progressive(self, tmp_path):
         """Test that delays increase with each retry."""
         config = create_mock_downloader_config(
@@ -388,6 +407,7 @@ class TestExponentialBackoffCalculation:
 class TestRetryLogging:
     """Test that retry attempts are properly logged."""
 
+    @pytest.mark.integration
     def test_retry_attempt_logged(self, tmp_path, caplog):
         """Test that each retry attempt is logged with attempt number."""
         import logging
@@ -427,6 +447,7 @@ class TestRetryLogging:
                         assert "retry 1/2" in log_text
                         assert "retry 2/2" in log_text
 
+    @pytest.mark.integration
     def test_exhausted_retries_logged(self, tmp_path, caplog):
         """Test that exhausted retries are logged as warning."""
         import logging

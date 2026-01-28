@@ -60,6 +60,7 @@ class TestProgressLoggingMilestones:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_10_percent_milestone_logged(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -86,6 +87,7 @@ class TestProgressLoggingMilestones:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_multiple_milestones_logged(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -114,6 +116,7 @@ class TestProgressLoggingMilestones:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_100_percent_always_logged(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -166,6 +169,7 @@ class TestProgressLogFormat:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_log_format_includes_percentage(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -195,6 +199,7 @@ class TestProgressLogFormat:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_log_format_includes_keyword_count(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -225,6 +230,7 @@ class TestProgressLogFormat:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_log_format_100_percent_shows_total(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -280,6 +286,7 @@ class TestMilestoneUniqueness:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_each_milestone_logged_once(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -318,6 +325,7 @@ class TestMilestoneUniqueness:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_no_duplicate_milestones(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -373,6 +381,7 @@ class TestProgressEdgeCases:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_single_keyword_logs_100_percent(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -398,6 +407,7 @@ class TestProgressEdgeCases:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_few_keywords_logs_100_percent_only(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -454,6 +464,7 @@ class TestProgressLoggingIntervals:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_50_keywords_logs_correct_milestones(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -484,6 +495,7 @@ class TestProgressLoggingIntervals:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_logging_does_not_log_0_percent(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):
@@ -539,6 +551,7 @@ class TestProgressPerformance:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_milestone_tracking_is_efficient(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path, caplog
     ):

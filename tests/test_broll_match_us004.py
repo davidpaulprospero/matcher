@@ -83,6 +83,7 @@ class TestDetectSilentScenesWordCountUS004:
         state.downloaded_videos = []
         return state
 
+    @pytest.mark.fast
     def test_detects_3_silent_scenes_from_5(self, stage, state_5_entries):
         """3 entries have word_count < 10, 2 have >= 10 words."""
         broll_config = BrollConfig(min_words_threshold=10)
@@ -94,6 +95,7 @@ class TestDetectSilentScenesWordCountUS004:
         assert "/videos/silent2.mp4" in silent_files
         assert "/videos/silent3.mp4" in silent_files
 
+    @pytest.mark.fast
     def test_speech_scenes_excluded(self, stage, state_5_entries):
         """Speech entries (>= 10 words) should NOT appear in results."""
         broll_config = BrollConfig(min_words_threshold=10)
@@ -103,6 +105,7 @@ class TestDetectSilentScenesWordCountUS004:
         assert "/videos/speech1.mp4" not in scene_files
         assert "/videos/speech2.mp4" not in scene_files
 
+    @pytest.mark.fast
     def test_returns_broll_scene_objects(self, stage, state_5_entries):
         """Each result is a BrollScene with correct fields."""
         broll_config = BrollConfig(min_words_threshold=10)
@@ -115,6 +118,7 @@ class TestDetectSilentScenesWordCountUS004:
             assert isinstance(scene.end_time, float)
             assert isinstance(scene.word_count, int)
 
+    @pytest.mark.fast
     def test_ignore_markers_stripped_before_count(self, stage):
         """[Music] markers are stripped before word counting."""
         state = PipelineState()
@@ -136,6 +140,7 @@ class TestDetectSilentScenesWordCountUS004:
         # After stripping markers, text is mostly empty -> silent
         assert len(scenes) == 1
 
+    @pytest.mark.fast
     def test_custom_threshold_changes_detection(self, stage):
         """Changing threshold to 5 should exclude entries with 5+ words."""
         state = PipelineState()
@@ -177,6 +182,7 @@ class TestDetectSilentScenesFaceDetectionUS004:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_is_broll_true_included(self, stage):
         """Entries with is_broll=True are included regardless of word count."""
         state = PipelineState()
@@ -198,6 +204,7 @@ class TestDetectSilentScenesFaceDetectionUS004:
         assert len(scenes) == 1
         assert scenes[0].source_file == "/videos/face_broll.mp4"
 
+    @pytest.mark.fast
     def test_both_detection_methods_contribute(self, stage):
         """Both word-count silent and is_broll=True scenes appear in results."""
         state = PipelineState()
@@ -239,6 +246,7 @@ class TestDetectSilentScenesFaceDetectionUS004:
         assert "/videos/word_count_silent.mp4" in scene_files
         assert "/videos/not_broll.mp4" not in scene_files
 
+    @pytest.mark.fast
     def test_is_broll_scene_has_word_count_zero(self, stage):
         """Scenes detected via is_broll=True have word_count=0."""
         state = PipelineState()
@@ -260,6 +268,7 @@ class TestDetectSilentScenesFaceDetectionUS004:
         assert len(scenes) == 1
         assert scenes[0].word_count == 0
 
+    @pytest.mark.fast
     def test_empty_transcripts_with_downloaded_video(self, stage):
         """Videos with empty transcript list in state.transcripts are detected."""
         state = PipelineState()
@@ -287,12 +296,14 @@ class TestValidateAndNormalizeWeightsUS004:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_default_weights_no_warning(self, stage):
         """Default weights (0.4 + 0.35 + 0.25 = 1.0) return None (no warning)."""
         broll_config = BrollConfig()
         result = stage._validate_and_normalize_weights(broll_config)
         assert result is None
 
+    @pytest.mark.fast
     def test_exact_sum_no_normalization(self, stage):
         """Weights that sum exactly to 1.0 return None."""
         broll_config = BrollConfig(
@@ -303,6 +314,7 @@ class TestValidateAndNormalizeWeightsUS004:
         result = stage._validate_and_normalize_weights(broll_config)
         assert result is None
 
+    @pytest.mark.fast
     def test_within_tolerance_normalizes(self, stage):
         """Weights within 0.01 tolerance are auto-normalized."""
         broll_config = BrollConfig(
@@ -320,6 +332,7 @@ class TestValidateAndNormalizeWeightsUS004:
         new_sum = broll_config.embedding_weight + broll_config.keyword_weight + broll_config.entity_weight
         assert abs(new_sum - 1.0) < 1e-6
 
+    @pytest.mark.fast
     def test_outside_tolerance_returns_warning(self, stage):
         """Weights outside 0.01 tolerance return warning without normalizing."""
         broll_config = BrollConfig(
@@ -338,6 +351,7 @@ class TestValidateAndNormalizeWeightsUS004:
         assert broll_config.keyword_weight == 0.5
         assert broll_config.entity_weight == 0.5
 
+    @pytest.mark.fast
     def test_logs_warning_when_sum_differs(self, stage, caplog):
         """Logger.warning called when weights don't sum to 1.0."""
         broll_config = BrollConfig(
@@ -362,12 +376,14 @@ class TestCalculateEmbeddingScoreUS004:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_identical_vectors_score_one(self, stage):
         """Same vector should return ~1.0."""
         vec = np.array([1.0, 2.0, 3.0])
         score = stage._calculate_embedding_score(vec, vec)
         assert abs(score - 1.0) < 0.01
 
+    @pytest.mark.fast
     def test_orthogonal_vectors_score_zero(self, stage):
         """Orthogonal vectors should return ~0.0."""
         v1 = np.array([1.0, 0.0, 0.0])
@@ -375,6 +391,7 @@ class TestCalculateEmbeddingScoreUS004:
         score = stage._calculate_embedding_score(v1, v2)
         assert abs(score) < 0.01
 
+    @pytest.mark.fast
     def test_returns_float_in_range(self, stage):
         """Score should be a float in [0.0, 1.0]."""
         v1 = np.array([0.5, 0.3, 0.8])
@@ -383,21 +400,25 @@ class TestCalculateEmbeddingScoreUS004:
         assert isinstance(score, float)
         assert 0.0 <= score <= 1.0
 
+    @pytest.mark.fast
     def test_none_voiceover_embedding_returns_zero(self, stage):
         """None voiceover embedding returns 0.0."""
         score = stage._calculate_embedding_score(None, np.array([1.0, 2.0]))
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_none_scene_embedding_returns_zero(self, stage):
         """None scene embedding returns 0.0."""
         score = stage._calculate_embedding_score(np.array([1.0, 2.0]), None)
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_both_none_returns_zero(self, stage):
         """Both None returns 0.0."""
         score = stage._calculate_embedding_score(None, None)
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_zero_vector_no_crash(self, stage):
         """Zero-vector input should not crash (returns 0.0)."""
         zero_vec = np.array([0.0, 0.0, 0.0])
@@ -408,6 +429,7 @@ class TestCalculateEmbeddingScoreUS004:
         # Division by zero in norm produces nan/inf, caught by try/except -> 0.0
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_negative_cosine_clamped_to_zero(self, stage):
         """Opposite vectors have negative cosine; result clamped to 0.0."""
         v1 = np.array([1.0, 0.0])
@@ -427,6 +449,7 @@ class TestCalculateKeywordScoreUS004:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_identical_keyword_sets_score_one(self, stage):
         """Identical keyword overlap should return 1.0."""
         keywords = {"earthquake", "damage"}
@@ -437,6 +460,7 @@ class TestCalculateKeywordScoreUS004:
         )
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_disjoint_sets_score_zero(self, stage):
         """No keyword overlap returns 0.0."""
         keywords = {"earthquake", "tsunami"}
@@ -447,6 +471,7 @@ class TestCalculateKeywordScoreUS004:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_empty_keyword_list_fallback(self, stage):
         """Empty keyword set falls back to direct word overlap."""
         keywords = set()
@@ -458,6 +483,7 @@ class TestCalculateKeywordScoreUS004:
         # "sunset" and "beach" overlap out of 3 vo words -> 2/3
         assert abs(score - 2.0 / 3.0) < 0.01
 
+    @pytest.mark.fast
     def test_empty_voiceover_text(self, stage):
         """Empty voiceover text with keywords returns 0.0."""
         keywords = {"earthquake"}
@@ -470,6 +496,7 @@ class TestCalculateKeywordScoreUS004:
         # Empty vo_words -> len(vo_words)==0 -> return 0.0
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_empty_scene_description_returns_zero(self, stage):
         """Empty scene description returns 0.0."""
         keywords = {"earthquake"}
@@ -480,6 +507,7 @@ class TestCalculateKeywordScoreUS004:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_partial_keyword_overlap(self, stage):
         """Partial overlap returns fractional score."""
         keywords = {"earthquake", "tsunami", "flood"}
@@ -504,6 +532,7 @@ class TestCalculateEntityScoreUS004:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_full_entity_overlap(self, stage):
         """All entities in both texts -> score 1.0."""
         entities = {"california", "san francisco"}
@@ -514,6 +543,7 @@ class TestCalculateEntityScoreUS004:
         )
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_partial_entity_match(self, stage):
         """Only some entities match -> fractional score."""
         entities = {"california", "new york"}
@@ -525,6 +555,7 @@ class TestCalculateEntityScoreUS004:
         # vo has both, scene has only "california" -> 1/2
         assert abs(score - 0.5) < 0.01
 
+    @pytest.mark.fast
     def test_substring_entity_match(self, stage):
         """Substring matching: 'san' inside 'san francisco' counts."""
         entities = {"san francisco"}
@@ -536,6 +567,7 @@ class TestCalculateEntityScoreUS004:
         # "san francisco" is in both -> 1/1
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_empty_entities_returns_zero(self, stage):
         """Empty entity set returns 0.0."""
         score = stage._calculate_entity_score(
@@ -545,6 +577,7 @@ class TestCalculateEntityScoreUS004:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_no_entities_in_voiceover(self, stage):
         """Entities not in voiceover text -> 0.0."""
         entities = {"california", "new york"}
@@ -555,6 +588,7 @@ class TestCalculateEntityScoreUS004:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_empty_scene_description(self, stage):
         """Empty scene description returns 0.0."""
         entities = {"california"}
@@ -565,6 +599,7 @@ class TestCalculateEntityScoreUS004:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_case_insensitive_matching(self, stage):
         """Entity matching is case-insensitive."""
         entities = {"california"}

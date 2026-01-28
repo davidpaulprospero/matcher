@@ -67,6 +67,7 @@ class TestMatchingPerformance:
             ))
         return transcripts
 
+    @pytest.mark.fast
     def test_embedding_matching_speed(self, mock_voiceover_segments, mock_video_transcripts, benchmark):
         """Benchmark embedding-based matching speed."""
         from src.matching import EmbeddingMatcher
@@ -88,6 +89,7 @@ class TestMatchingPerformance:
         matches_per_second = len(mock_voiceover_segments[:10]) / benchmark.stats['mean']
         print(f"Matching throughput: {matches_per_second:.1f} segments/second")
 
+    @pytest.mark.fast
     def test_scoring_algorithm_speed(self, mock_voiceover_segments, mock_video_transcripts, benchmark):
         """Benchmark scoring algorithm speed."""
         from src.matching.scoring import calculate_match_score
@@ -116,6 +118,7 @@ class TestMatchingPerformance:
         scores_per_second = len(result) / benchmark.stats['mean']
         print(f"Scoring throughput: {scores_per_second:.0f} candidates/second")
 
+    @pytest.mark.fast
     def test_diversity_filtering_speed(self, mock_video_transcripts, benchmark):
         """Benchmark diversity filtering speed."""
         from src.matching.strategies import DiversityStrategy
@@ -139,6 +142,7 @@ class TestMatchingPerformance:
         assert len(result) <= 20
         print(f"\nFiltered {len(matches)} matches to {len(result)} diverse results")
 
+    @pytest.mark.fast
     def test_location_filtering_speed(self, mock_video_transcripts, benchmark):
         """Benchmark location-based filtering speed."""
         from src.matching.location_matching import LocationMatcher
@@ -189,6 +193,7 @@ class TestMatchingPerformance:
 class TestMatchingMemoryUsage:
     """Memory profiling for matching operations."""
 
+    @pytest.mark.fast
     def test_embedding_matching_memory(self):
         """Profile memory usage of embedding-based matching."""
         import tracemalloc
@@ -215,6 +220,7 @@ class TestMatchingMemoryUsage:
         # Should use less than 200MB
         assert memory_used_mb < 200
 
+    @pytest.mark.fast
     def test_match_result_storage_memory(self):
         """Profile memory usage of match result storage."""
         import tracemalloc

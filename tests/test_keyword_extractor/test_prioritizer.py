@@ -17,6 +17,7 @@ from src.keyword_extractor.models import PrioritizedKeyword
 class TestBuildPrioritizedKeywords:
     """Test build_prioritized_keywords() function"""
 
+    @pytest.mark.fast
     def test_build_prioritized_empty(self):
         """Test with empty keywords"""
         result = build_prioritized_keywords(
@@ -28,6 +29,7 @@ class TestBuildPrioritizedKeywords:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_build_prioritized_entity_keywords(self):
         """Test entity keywords get high priority (0.9 base)"""
         entity_keywords = ["Mount Everest", "Nepal"]
@@ -50,6 +52,7 @@ class TestBuildPrioritizedKeywords:
             assert pk.priority >= 0.9
             assert pk.source == "entity"
 
+    @pytest.mark.fast
     def test_build_prioritized_topic_keywords(self):
         """Test topic-matching keywords get medium-high priority (0.8 base)"""
         result = build_prioritized_keywords(
@@ -68,6 +71,7 @@ class TestBuildPrioritizedKeywords:
         for pk in topic_keywords:
             assert pk.priority >= 0.8
 
+    @pytest.mark.fast
     def test_build_prioritized_general_keywords(self):
         """Test general keywords get lower priority (0.5 base)"""
         result = build_prioritized_keywords(
@@ -86,6 +90,7 @@ class TestBuildPrioritizedKeywords:
         for pk in general_keywords:
             assert 0.5 <= pk.priority <= 0.7
 
+    @pytest.mark.fast
     def test_build_prioritized_mention_boost(self):
         """Test mention frequency increases priority"""
         full_text = "Mountain mountain mountain mountain mountain"  # 5 mentions
@@ -103,6 +108,7 @@ class TestBuildPrioritizedKeywords:
         assert pk.priority > 0.5  # Base 0.5 + mention boost
         assert pk.mention_count >= 5
 
+    @pytest.mark.fast
     def test_build_prioritized_visual_specificity_boost(self):
         """Test visual specificity terms increase priority"""
         keywords_with_boost = [
@@ -123,6 +129,7 @@ class TestBuildPrioritizedKeywords:
         for pk in result:
             assert pk.priority >= 0.5  # Base + boost
 
+    @pytest.mark.fast
     def test_build_prioritized_sorting(self):
         """Test results are sorted by priority (highest first)"""
         entity_keywords = ["Mount Everest"]
@@ -144,6 +151,7 @@ class TestBuildPrioritizedKeywords:
         assert result[0].keyword == "Mount Everest"
         assert result[0].source == "entity"
 
+    @pytest.mark.fast
     def test_build_prioritized_mixed_sources(self):
         """Test mixed entity/topic/general keywords"""
         entity_keywords = ["Paris"]
@@ -175,6 +183,7 @@ class TestBuildPrioritizedKeywords:
         assert scenery.source == "general"
         assert scenery.priority < 0.8
 
+    @pytest.mark.fast
     def test_build_prioritized_max_priority(self):
         """Test priority is capped at 1.0"""
         # Create scenario with maximum boosts
@@ -191,6 +200,7 @@ class TestBuildPrioritizedKeywords:
         # Priority should not exceed 1.0
         assert all(pk.priority <= 1.0 for pk in result)
 
+    @pytest.mark.fast
     def test_build_prioritized_entity_name_substring_match(self):
         """Test entity keywords match by substring"""
         entity_keywords = ["Mount Everest summit"]
@@ -209,6 +219,7 @@ class TestBuildPrioritizedKeywords:
         assert pk.source == "entity"
         assert pk.priority >= 0.9
 
+    @pytest.mark.fast
     def test_build_prioritized_topic_word_match(self):
         """Test topic matching works with word subsets"""
         result = build_prioritized_keywords(
@@ -230,6 +241,7 @@ class TestBuildPrioritizedKeywords:
 class TestPrioritizerEdgeCases:
     """Test edge cases for prioritizer"""
 
+    @pytest.mark.fast
     def test_empty_topic(self):
         """Test with empty topic string"""
         result = build_prioritized_keywords(
@@ -244,6 +256,7 @@ class TestPrioritizerEdgeCases:
         assert len(result) == 1
         assert result[0].source == "general"
 
+    @pytest.mark.fast
     def test_empty_text(self):
         """Test with empty text"""
         result = build_prioritized_keywords(
@@ -259,6 +272,7 @@ class TestPrioritizerEdgeCases:
         # Mention count should be 0 or 1
         assert result[0].mention_count >= 0
 
+    @pytest.mark.fast
     def test_keyword_not_in_text(self):
         """Test keyword that doesn't appear in text"""
         result = build_prioritized_keywords(
@@ -273,6 +287,7 @@ class TestPrioritizerEdgeCases:
         # Should have low mention count
         assert pk.mention_count <= 1
 
+    @pytest.mark.fast
     def test_case_insensitive_matching(self):
         """Test case-insensitive topic and entity matching"""
         entity_keywords = ["PARIS"]
@@ -290,6 +305,7 @@ class TestPrioritizerEdgeCases:
         pk = result[0]
         assert pk.source in ["entity", "topic"]
 
+    @pytest.mark.fast
     def test_special_characters_in_keywords(self):
         """Test keywords with special characters"""
         result = build_prioritized_keywords(

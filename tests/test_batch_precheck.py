@@ -22,6 +22,7 @@ from src.caption_fetcher import (
 class TestChannelCaptionPattern:
     """Test ChannelCaptionPattern dataclass (US-006 Sprint 7)"""
 
+    @pytest.mark.fast
     def test_pattern_creation(self):
         """Test creating a channel caption pattern"""
         pattern = ChannelCaptionPattern(
@@ -38,6 +39,7 @@ class TestChannelCaptionPattern:
         assert pattern.success_rate == 0.9
         assert pattern.last_updated == 1234567890.0
 
+    @pytest.mark.fast
     def test_pattern_update_with_caption(self):
         """Test updating pattern when video has captions"""
         pattern = ChannelCaptionPattern(
@@ -54,6 +56,7 @@ class TestChannelCaptionPattern:
         assert pattern.success_rate == pytest.approx(5/6)
         assert pattern.last_updated > 0
 
+    @pytest.mark.fast
     def test_pattern_update_without_caption(self):
         """Test updating pattern when video has no captions"""
         pattern = ChannelCaptionPattern(
@@ -69,6 +72,7 @@ class TestChannelCaptionPattern:
         assert pattern.captions_found == 5
         assert pattern.success_rate == pytest.approx(5/6)
 
+    @pytest.mark.fast
     def test_pattern_to_dict(self):
         """Test pattern serialization"""
         pattern = ChannelCaptionPattern(
@@ -87,6 +91,7 @@ class TestChannelCaptionPattern:
         assert result['success_rate'] == 0.9
         assert result['last_updated'] == 1234567890.0
 
+    @pytest.mark.fast
     def test_pattern_from_dict(self):
         """Test pattern deserialization"""
         data = {
@@ -104,6 +109,7 @@ class TestChannelCaptionPattern:
         assert pattern.captions_found == 8
         assert pattern.success_rate == 0.8
 
+    @pytest.mark.fast
     def test_pattern_initial_state(self):
         """Test pattern with default initial state"""
         pattern = ChannelCaptionPattern(channel_id="UCnew123")
@@ -112,6 +118,7 @@ class TestChannelCaptionPattern:
         assert pattern.captions_found == 0
         assert pattern.success_rate == 0.0
 
+    @pytest.mark.fast
     def test_pattern_first_update(self):
         """Test updating fresh pattern"""
         pattern = ChannelCaptionPattern(channel_id="UCnew123")
@@ -126,6 +133,7 @@ class TestChannelCaptionPattern:
 class TestBatchPreCheckResult:
     """Test BatchPreCheckResult dataclass (US-006 Sprint 7)"""
 
+    @pytest.mark.fast
     def test_result_creation(self):
         """Test creating batch pre-check result"""
         result = BatchPreCheckResult(
@@ -140,6 +148,7 @@ class TestBatchPreCheckResult:
         assert result.skipped_by_pattern == 40
         assert result.api_calls_saved == 40
 
+    @pytest.mark.fast
     def test_result_video_results(self):
         """Test video results dictionary"""
         result = BatchPreCheckResult()
@@ -152,6 +161,7 @@ class TestBatchPreCheckResult:
         assert result.video_results["vid1"] is True
         assert result.video_results["vid3"] is False
 
+    @pytest.mark.fast
     def test_result_to_dict(self):
         """Test result serialization"""
         result = BatchPreCheckResult(
@@ -181,6 +191,7 @@ class TestCaptionCacheChannelPatterns:
         mock_config.enabled = True
         return mock_config
 
+    @pytest.mark.fast
     def test_save_and_load_patterns(self, cache_config):
         """Test saving and loading channel patterns"""
         cache = CaptionCache(cache_config)
@@ -204,6 +215,7 @@ class TestCaptionCacheChannelPatterns:
         assert "UCtest2" in loaded
         assert loaded["UCtest2"].captions_found == 0
 
+    @pytest.mark.fast
     def test_get_channel_pattern(self, cache_config):
         """Test getting single channel pattern"""
         cache = CaptionCache(cache_config)
@@ -221,6 +233,7 @@ class TestCaptionCacheChannelPatterns:
         missing = cache.get_channel_pattern("UCmissing")
         assert missing is None
 
+    @pytest.mark.fast
     def test_update_channel_pattern(self, cache_config):
         """Test updating channel pattern"""
         cache = CaptionCache(cache_config)
@@ -243,6 +256,7 @@ class TestCaptionCacheChannelPatterns:
         assert pattern.captions_found == 2
         assert pattern.success_rate == pytest.approx(2/3)
 
+    @pytest.mark.fast
     def test_patterns_disabled_cache(self, tmp_path):
         """Test pattern methods with disabled cache"""
         mock_config = Mock()
@@ -264,6 +278,7 @@ class TestCaptionCacheChannelPatterns:
 class TestCaptionMetricsBatchPrecheck:
     """Test CaptionMetrics batch pre-check tracking (US-006 Sprint 7)"""
 
+    @pytest.mark.fast
     def test_record_pre_check_batched_checked(self):
         """Test recording batch pre-check with actual check"""
         metrics = CaptionMetrics()
@@ -274,6 +289,7 @@ class TestCaptionMetricsBatchPrecheck:
         assert metrics.pre_check_batched_checked == 1
         assert metrics.pre_check_batched_skipped == 0
 
+    @pytest.mark.fast
     def test_record_pre_check_batched_skipped(self):
         """Test recording batch pre-check skipped by pattern"""
         metrics = CaptionMetrics()
@@ -284,6 +300,7 @@ class TestCaptionMetricsBatchPrecheck:
         assert metrics.pre_check_batched_checked == 0
         assert metrics.pre_check_batched_skipped == 1
 
+    @pytest.mark.fast
     def test_record_pre_check_batched_multiple(self):
         """Test recording multiple batch pre-checks"""
         metrics = CaptionMetrics()
@@ -300,6 +317,7 @@ class TestCaptionMetricsBatchPrecheck:
         assert metrics.pre_check_batched_checked == 5
         assert metrics.pre_check_batched_skipped == 10
 
+    @pytest.mark.fast
     def test_set_batch_precheck_savings(self):
         """Test setting API calls saved"""
         metrics = CaptionMetrics()
@@ -308,6 +326,7 @@ class TestCaptionMetricsBatchPrecheck:
 
         assert metrics.pre_check_api_calls_saved == 45
 
+    @pytest.mark.fast
     def test_metrics_serialization(self):
         """Test batch pre-check metrics in to_dict/from_dict"""
         metrics = CaptionMetrics()
@@ -326,6 +345,7 @@ class TestCaptionMetricsBatchPrecheck:
         assert restored.pre_check_batched_total == 50
         assert restored.pre_check_api_calls_saved == 40
 
+    @pytest.mark.fast
     def test_metrics_summary_includes_batch_info(self):
         """Test batch pre-check info in summary"""
         metrics = CaptionMetrics()
@@ -354,6 +374,7 @@ class TestBatchPrecheckByChannel:
             fetcher._cookies_file = None
             return fetcher
 
+    @pytest.mark.fast
     def test_empty_video_list(self, mock_fetcher):
         """Test with empty video list"""
         result = mock_fetcher.batch_precheck_by_channel([])
@@ -362,6 +383,7 @@ class TestBatchPrecheckByChannel:
         assert result.actual_checks == 0
         assert result.api_calls_saved == 0
 
+    @pytest.mark.fast
     def test_single_video_no_channel_info(self, mock_fetcher):
         """Test single video without pre-computed channel info"""
         # Mock get_video_metadata and has_captions
@@ -374,6 +396,7 @@ class TestBatchPrecheckByChannel:
         assert "vid1" in result.video_results
         assert result.video_results["vid1"] is True
 
+    @pytest.mark.fast
     def test_with_precomputed_channel_info(self, mock_fetcher):
         """Test with pre-computed channel_info mapping"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -394,6 +417,7 @@ class TestBatchPrecheckByChannel:
         # But individual has_captions calls still made for new channel
         assert mock_fetcher.has_captions.call_count >= 1
 
+    @pytest.mark.fast
     def test_high_confidence_pattern_skips_checks(self, mock_fetcher, tmp_path):
         """Test that high-confidence patterns skip individual checks"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -428,6 +452,7 @@ class TestBatchPrecheckByChannel:
         # No has_captions calls made
         mock_fetcher.has_captions.assert_not_called()
 
+    @pytest.mark.fast
     def test_low_confidence_pattern_checks_samples(self, mock_fetcher, tmp_path):
         """Test that low-confidence patterns check sample videos"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -460,6 +485,7 @@ class TestBatchPrecheckByChannel:
         assert result.total_videos == 10
         assert mock_fetcher.has_captions.call_count >= 3  # At least 3 more to reach min_samples
 
+    @pytest.mark.fast
     def test_mixed_channels(self, mock_fetcher, tmp_path):
         """Test batch with videos from multiple channels"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -482,6 +508,7 @@ class TestBatchPrecheckByChannel:
         assert result.total_videos == 5
         assert len(result.video_results) == 5
 
+    @pytest.mark.fast
     def test_metrics_tracking(self, mock_fetcher):
         """Test that metrics are properly tracked during batch pre-check"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -500,6 +527,7 @@ class TestBatchPrecheckByChannel:
         assert metrics.pre_check_batched_total >= 2
         assert metrics.pre_check_available >= 2  # Both videos have captions
 
+    @pytest.mark.fast
     def test_unknown_channel_fallback(self, mock_fetcher):
         """Test handling videos where channel_id cannot be determined"""
         mock_fetcher.has_captions = Mock(return_value=True)
@@ -515,6 +543,7 @@ class TestBatchPrecheckByChannel:
         assert len(result.video_results) == 2
         assert mock_fetcher.has_captions.call_count == 2
 
+    @pytest.mark.fast
     def test_error_handling_in_precheck(self, mock_fetcher):
         """Test that pre-check errors are handled gracefully"""
         mock_fetcher.has_captions = Mock(side_effect=CaptionFetchError("Network error"))
@@ -530,6 +559,7 @@ class TestBatchPrecheckByChannel:
         # On error, should assume available (True) to avoid false negatives
         assert result.video_results["vid1"] is True
 
+    @pytest.mark.fast
     def test_50_videos_same_channel_uses_5_checks(self, mock_fetcher, tmp_path):
         """Test acceptance criteria: 50 videos from same channel use ~5 sample checks"""
         mock_fetcher.has_captions = Mock(return_value=True)

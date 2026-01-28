@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 class TestComputeTopicPenaltySignature:
     """Test the updated function signature and parameters."""
 
+    @pytest.mark.fast
     def test_embedding_provider_parameter_exists(self):
         """Test that embedding_provider parameter is accepted."""
         # Should not raise TypeError
@@ -36,6 +37,7 @@ class TestComputeTopicPenaltySignature:
         )
         assert isinstance(result, float)
 
+    @pytest.mark.fast
     def test_default_embedding_provider_is_none(self):
         """Test that embedding_provider defaults to None."""
         import inspect
@@ -44,6 +46,7 @@ class TestComputeTopicPenaltySignature:
         assert param is not None
         assert param.default is None
 
+    @pytest.mark.fast
     def test_backward_compatible_without_embedding_provider(self):
         """Test that function works without embedding_provider argument."""
         # Original call signature should still work
@@ -55,6 +58,7 @@ class TestComputeTopicPenaltySignature:
 class TestSemanticPenaltyHelper:
     """Test the _compute_semantic_topic_penalty helper function."""
 
+    @pytest.mark.fast
     def test_semantic_penalty_returns_float_or_none(self):
         """Test that semantic penalty returns float or None."""
         mock_provider = MagicMock()
@@ -68,6 +72,7 @@ class TestSemanticPenaltyHelper:
         # Should return a float (not None since embed succeeded)
         assert result is None or isinstance(result, float)
 
+    @pytest.mark.fast
     def test_semantic_penalty_returns_none_on_embed_failure(self):
         """Test that semantic penalty returns None when embedding fails."""
         mock_provider = MagicMock()
@@ -79,6 +84,7 @@ class TestSemanticPenaltyHelper:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_semantic_penalty_returns_none_for_wrong_embedding_count(self):
         """Test that semantic penalty returns None for wrong embedding count."""
         mock_provider = MagicMock()
@@ -90,6 +96,7 @@ class TestSemanticPenaltyHelper:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_semantic_penalty_returns_none_for_empty_topics(self):
         """Test that semantic penalty returns None for empty topic text."""
         mock_provider = MagicMock()
@@ -125,6 +132,7 @@ class TestSemanticSimilarityScaling:
         mock_provider.embed.return_value = [v1, v2]
         return mock_provider
 
+    @pytest.mark.fast
     def test_high_similarity_returns_zero_penalty(self):
         """Test that high similarity (>=0.8) returns zero penalty."""
         provider = self._mock_provider_with_similarity(0.85)
@@ -135,6 +143,7 @@ class TestSemanticSimilarityScaling:
 
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_identical_topics_return_zero_penalty(self):
         """Test that identical topics (similarity ~1.0) return zero penalty."""
         provider = self._mock_provider_with_similarity(0.99)
@@ -145,6 +154,7 @@ class TestSemanticSimilarityScaling:
 
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_moderate_similarity_returns_small_penalty(self):
         """Test that moderate similarity (0.6-0.8) returns small penalty."""
         provider = self._mock_provider_with_similarity(0.7)
@@ -157,6 +167,7 @@ class TestSemanticSimilarityScaling:
         assert result is not None
         assert 0 < result <= 0.15 * 0.3
 
+    @pytest.mark.fast
     def test_low_similarity_returns_medium_penalty(self):
         """Test that low similarity (0.4-0.6) returns medium penalty."""
         provider = self._mock_provider_with_similarity(0.5)
@@ -169,6 +180,7 @@ class TestSemanticSimilarityScaling:
         assert result is not None
         assert 0.15 * 0.3 <= result <= 0.15 * 0.6
 
+    @pytest.mark.fast
     def test_very_low_similarity_returns_high_penalty(self):
         """Test that very low similarity (<0.4) returns high penalty."""
         provider = self._mock_provider_with_similarity(0.2)
@@ -181,6 +193,7 @@ class TestSemanticSimilarityScaling:
         assert result is not None
         assert 0.15 * 0.6 <= result <= 0.15
 
+    @pytest.mark.fast
     def test_zero_similarity_returns_max_penalty(self):
         """Test that zero similarity returns maximum penalty."""
         provider = self._mock_provider_with_similarity(0.0)
@@ -206,6 +219,7 @@ class TestRelatedVsUnrelatedTopics:
         mock_provider.embed.side_effect = embed_func
         return mock_provider
 
+    @pytest.mark.fast
     def test_related_topics_lower_penalty_than_unrelated(self):
         """Test that earthquake/disaster gets lower penalty than earthquake/cooking."""
         import numpy as np
@@ -237,6 +251,7 @@ class TestRelatedVsUnrelatedTopics:
         # Related topics should have lower penalty
         assert penalty_related < penalty_unrelated
 
+    @pytest.mark.fast
     def test_semantically_similar_concepts(self):
         """Test semantically similar concepts get low penalty."""
         import numpy as np
@@ -264,6 +279,7 @@ class TestRelatedVsUnrelatedTopics:
 class TestKeywordFallback:
     """Test the keyword overlap fallback when embeddings unavailable."""
 
+    @pytest.mark.fast
     def test_fallback_used_when_no_embedding_provider(self):
         """Test that keyword fallback is used when no embedding provider."""
         result = compute_topic_penalty(
@@ -276,6 +292,7 @@ class TestKeywordFallback:
         assert isinstance(result, float)
         assert 0 <= result <= 0.15
 
+    @pytest.mark.fast
     def test_fallback_used_when_embedding_fails(self):
         """Test that keyword fallback is used when embedding fails."""
         mock_provider = MagicMock()
@@ -291,6 +308,7 @@ class TestKeywordFallback:
         # earthquake vs cooking has no overlap, so max penalty
         assert result == 0.15
 
+    @pytest.mark.fast
     def test_keyword_fallback_partial_overlap(self):
         """Test keyword fallback with partial topic overlap."""
         result = _compute_keyword_topic_penalty(0.4, 0.15)
@@ -298,6 +316,7 @@ class TestKeywordFallback:
         # Ratio > 0.3 means small penalty
         assert result == 0.15 * 0.3
 
+    @pytest.mark.fast
     def test_keyword_fallback_weak_overlap(self):
         """Test keyword fallback with weak topic overlap."""
         result = _compute_keyword_topic_penalty(0.1, 0.15)
@@ -305,6 +324,7 @@ class TestKeywordFallback:
         # Ratio > 0 but <= 0.3 means medium penalty
         assert result == 0.15 * 0.6
 
+    @pytest.mark.fast
     def test_keyword_fallback_no_overlap(self):
         """Test keyword fallback with no topic overlap."""
         result = _compute_keyword_topic_penalty(0.0, 0.15)
@@ -316,6 +336,7 @@ class TestKeywordFallback:
 class TestExactOverlapFastPath:
     """Test that exact keyword overlap bypasses semantic similarity."""
 
+    @pytest.mark.fast
     def test_exact_overlap_returns_zero_without_embedding(self):
         """Test that exact overlap returns zero penalty without calling embeddings."""
         mock_provider = MagicMock()
@@ -330,6 +351,7 @@ class TestExactOverlapFastPath:
         assert result == 0.0
         mock_provider.embed.assert_not_called()
 
+    @pytest.mark.fast
     def test_partial_string_overlap_uses_ratio(self):
         """Test that partial string match affects overlap ratio but not exact count."""
         mock_provider = MagicMock()
@@ -351,21 +373,25 @@ class TestExactOverlapFastPath:
 class TestEmptyAndEdgeCases:
     """Test edge cases and empty inputs."""
 
+    @pytest.mark.fast
     def test_empty_vo_topics_returns_zero(self):
         """Test that empty voiceover topics returns zero penalty."""
         result = compute_topic_penalty([], ["disaster"])
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_empty_video_topics_returns_zero(self):
         """Test that empty video topics returns zero penalty."""
         result = compute_topic_penalty(["earthquake"], [])
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_both_empty_returns_zero(self):
         """Test that both empty returns zero penalty."""
         result = compute_topic_penalty([], [])
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_custom_max_penalty(self):
         """Test that custom max_penalty is respected."""
         result = compute_topic_penalty(
@@ -377,6 +403,7 @@ class TestEmptyAndEdgeCases:
         # Should use custom max penalty
         assert result <= 0.30
 
+    @pytest.mark.fast
     def test_zero_max_penalty(self):
         """Test that zero max_penalty always returns zero."""
         result = compute_topic_penalty(
@@ -391,6 +418,7 @@ class TestEmptyAndEdgeCases:
 class TestIntegrationWithEmbeddingProvider:
     """Integration-style tests with mock embedding provider."""
 
+    @pytest.mark.fast
     def test_full_flow_with_provider(self):
         """Test complete flow with embedding provider."""
         import numpy as np
@@ -413,6 +441,7 @@ class TestIntegrationWithEmbeddingProvider:
         assert isinstance(result, float)
         assert 0 <= result <= 0.15 * 0.3  # Small penalty range
 
+    @pytest.mark.fast
     def test_multiple_topics_combined(self):
         """Test that multiple topics are combined into single embedding."""
         mock_provider = MagicMock()
@@ -434,11 +463,13 @@ class TestIntegrationWithEmbeddingProvider:
 class TestSemanticPenaltyHelperExported:
     """Test that helper functions can be imported."""
 
+    @pytest.mark.fast
     def test_semantic_penalty_helper_importable(self):
         """Test that _compute_semantic_topic_penalty is importable."""
         from src.topic_extraction import _compute_semantic_topic_penalty
         assert callable(_compute_semantic_topic_penalty)
 
+    @pytest.mark.fast
     def test_keyword_penalty_helper_importable(self):
         """Test that _compute_keyword_topic_penalty is importable."""
         from src.topic_extraction import _compute_keyword_topic_penalty
@@ -448,6 +479,7 @@ class TestSemanticPenaltyHelperExported:
 class TestHighVarianceIndicatesUncertainty:
     """Test that high variance in penalty indicates uncertain match (per US-003 criteria)."""
 
+    @pytest.mark.fast
     def test_high_penalty_indicates_topic_mismatch(self):
         """Test that penalty > 0.1 indicates likely topic mismatch."""
         import numpy as np
@@ -468,6 +500,7 @@ class TestHighVarianceIndicatesUncertainty:
         # High penalty (> 0.1) indicates uncertain/poor match
         assert result > 0.1, "Unrelated topics should have penalty > 0.1"
 
+    @pytest.mark.fast
     def test_low_penalty_indicates_topic_match(self):
         """Test that penalty < 0.05 indicates good topic match."""
         import numpy as np

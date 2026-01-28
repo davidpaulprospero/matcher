@@ -27,6 +27,7 @@ from src.caption_fetcher import (
 class TestStreamStateEnum:
     """Tests for the StreamState enum."""
 
+    @pytest.mark.fast
     def test_has_all_expected_states(self):
         """Verify all 5 required states exist."""
         assert hasattr(StreamState, 'LIVE')
@@ -35,11 +36,13 @@ class TestStreamStateEnum:
         assert hasattr(StreamState, 'PREMIERE')
         assert hasattr(StreamState, 'UNKNOWN')
 
+    @pytest.mark.fast
     def test_states_are_unique(self):
         """Verify all states have unique values."""
         values = [s.value for s in StreamState]
         assert len(values) == len(set(values)), "Stream states should have unique values"
 
+    @pytest.mark.fast
     def test_exactly_five_states(self):
         """Verify exactly 5 states exist."""
         assert len(list(StreamState)) == 5
@@ -48,6 +51,7 @@ class TestStreamStateEnum:
 class TestClassifyStreamState:
     """Tests for the classify_stream_state() function."""
 
+    @pytest.mark.fast
     def test_live_status_is_live(self):
         """live_status='is_live' -> LIVE."""
         metadata = {'live_status': 'is_live', 'is_live': True}
@@ -55,24 +59,28 @@ class TestClassifyStreamState:
         assert result.state == StreamState.LIVE
         assert result.is_live is True
 
+    @pytest.mark.fast
     def test_live_status_is_live_case_insensitive(self):
         """live_status='IS_LIVE' (uppercase) -> LIVE."""
         metadata = {'live_status': 'IS_LIVE'}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.LIVE
 
+    @pytest.mark.fast
     def test_is_live_boolean_true(self):
         """is_live=True without live_status -> LIVE."""
         metadata = {'is_live': True}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.LIVE
 
+    @pytest.mark.fast
     def test_upcoming_without_release_timestamp(self):
         """live_status='is_upcoming' without release_timestamp -> UPCOMING."""
         metadata = {'live_status': 'is_upcoming'}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.UPCOMING
 
+    @pytest.mark.fast
     def test_upcoming_with_release_timestamp(self):
         """live_status='is_upcoming' with release_timestamp -> PREMIERE."""
         future_ts = time.time() + 86400  # 1 day in future
@@ -81,6 +89,7 @@ class TestClassifyStreamState:
         assert result.state == StreamState.PREMIERE
         assert result.scheduled_start is not None
 
+    @pytest.mark.fast
     def test_was_live_with_duration(self):
         """live_status='was_live' with duration -> VOD (completed live)."""
         metadata = {'live_status': 'was_live', 'was_live': True, 'duration': 3600}
@@ -88,42 +97,49 @@ class TestClassifyStreamState:
         assert result.state == StreamState.VOD
         assert result.was_live is True
 
+    @pytest.mark.fast
     def test_post_live_with_duration(self):
         """live_status='post_live' with duration -> VOD."""
         metadata = {'live_status': 'post_live', 'duration': 7200}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.VOD
 
+    @pytest.mark.fast
     def test_not_live_with_duration(self):
         """live_status='not_live' with duration -> VOD."""
         metadata = {'live_status': 'not_live', 'duration': 300}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.VOD
 
+    @pytest.mark.fast
     def test_regular_video_with_duration(self):
         """Regular video with only duration -> VOD."""
         metadata = {'duration': 600}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.VOD
 
+    @pytest.mark.fast
     def test_empty_metadata(self):
         """Empty metadata -> UNKNOWN."""
         metadata = {}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_no_duration_no_live(self):
         """No duration and not live -> UNKNOWN."""
         metadata = {'title': 'Some Video'}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_was_live_no_duration(self):
         """was_live=True without duration -> UNKNOWN (might still be processing)."""
         metadata = {'was_live': True}
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_future_release_timestamp_without_duration(self):
         """Future release_timestamp without live_status or duration -> PREMIERE."""
         future_ts = time.time() + 86400
@@ -131,6 +147,7 @@ class TestClassifyStreamState:
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.PREMIERE
 
+    @pytest.mark.fast
     def test_past_release_timestamp_with_duration(self):
         """Past release_timestamp with duration -> VOD."""
         past_ts = time.time() - 86400  # 1 day in past
@@ -138,12 +155,14 @@ class TestClassifyStreamState:
         result = classify_stream_state(metadata, 'test123')
         assert result.state == StreamState.VOD
 
+    @pytest.mark.fast
     def test_video_id_preserved(self):
         """Video ID is preserved in result."""
         metadata = {'duration': 300}
         result = classify_stream_state(metadata, 'myVideoId12')
         assert result.video_id == 'myVideoId12'
 
+    @pytest.mark.fast
     def test_scheduled_start_formatting(self):
         """Scheduled start time is formatted correctly."""
         # Use a known timestamp: 2026-01-27 10:00:00 UTC
@@ -157,6 +176,7 @@ class TestClassifyStreamState:
 class TestStreamStateResult:
     """Tests for the StreamStateResult dataclass."""
 
+    @pytest.mark.fast
     def test_str_format_live(self):
         """String format for LIVE state."""
         result = StreamStateResult(
@@ -170,6 +190,7 @@ class TestStreamStateResult:
         assert 'LIVE' in s
         assert 'is_live' in s
 
+    @pytest.mark.fast
     def test_str_format_upcoming_with_scheduled(self):
         """String format for UPCOMING with scheduled time."""
         result = StreamStateResult(
@@ -183,6 +204,7 @@ class TestStreamStateResult:
         assert 'UPCOMING' in s
         assert '2026-01-27 10:00 UTC' in s
 
+    @pytest.mark.fast
     def test_str_format_premiere_with_scheduled(self):
         """String format for PREMIERE with scheduled time."""
         result = StreamStateResult(
@@ -195,6 +217,7 @@ class TestStreamStateResult:
         assert 'PREMIERE' in s
         assert '2026-02-01 15:00 UTC' in s
 
+    @pytest.mark.fast
     def test_str_format_vod_simple(self):
         """String format for VOD is simple."""
         result = StreamStateResult(
@@ -217,23 +240,27 @@ class TestCaptionFetcherGetStreamState:
         """Create a CaptionFetcher instance."""
         return CaptionFetcher()
 
+    @pytest.mark.fast
     def test_invalid_video_id_returns_unknown(self, fetcher):
         """Invalid video ID returns UNKNOWN state."""
         result = fetcher.get_stream_state('invalid')
         assert result.state == StreamState.UNKNOWN
         assert result.video_id == 'invalid'
 
+    @pytest.mark.fast
     def test_short_video_id_returns_unknown(self, fetcher):
         """Short video ID (< 11 chars) returns UNKNOWN state."""
         result = fetcher.get_stream_state('abc')
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_empty_video_id_returns_unknown(self, fetcher):
         """Empty video ID returns UNKNOWN state."""
         result = fetcher.get_stream_state('')
         assert result.state == StreamState.UNKNOWN
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_subprocess_timeout_returns_unknown(self, mock_run, fetcher):
         """Subprocess timeout returns UNKNOWN state."""
         import subprocess
@@ -243,6 +270,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.state == StreamState.UNKNOWN
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_subprocess_failure_returns_unknown(self, mock_run, fetcher):
         """Subprocess failure (non-zero return) returns UNKNOWN state."""
         mock_result = MagicMock()
@@ -254,6 +282,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.state == StreamState.UNKNOWN
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_live_stream_detected(self, mock_run, fetcher):
         """Live stream is correctly detected."""
         import json
@@ -270,6 +299,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.state == StreamState.LIVE
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_vod_detected(self, mock_run, fetcher):
         """Regular VOD is correctly detected."""
         import json
@@ -286,6 +316,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.state == StreamState.VOD
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_upcoming_detected(self, mock_run, fetcher):
         """Upcoming stream is correctly detected."""
         import json
@@ -301,6 +332,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.state == StreamState.UPCOMING
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_premiere_detected(self, mock_run, fetcher):
         """Premiere is correctly detected."""
         import json
@@ -319,6 +351,7 @@ class TestCaptionFetcherGetStreamState:
         assert result.scheduled_start is not None
 
     @patch('src.caption_fetcher.subprocess.run')
+    @pytest.mark.fast
     def test_invalid_json_returns_unknown(self, mock_run, fetcher):
         """Invalid JSON output returns UNKNOWN state."""
         mock_result = MagicMock()
@@ -333,12 +366,14 @@ class TestCaptionFetcherGetStreamState:
 class TestStreamStateEdgeCases:
     """Edge case tests for stream state classification."""
 
+    @pytest.mark.fast
     def test_conflicting_is_live_and_was_live(self):
         """Both is_live and was_live True -> LIVE takes priority."""
         metadata = {'is_live': True, 'was_live': True, 'duration': 3600}
         result = classify_stream_state(metadata, 'conflict')
         assert result.state == StreamState.LIVE
 
+    @pytest.mark.fast
     def test_live_status_overrides_booleans(self):
         """live_status takes priority over boolean flags."""
         metadata = {
@@ -350,6 +385,7 @@ class TestStreamStateEdgeCases:
         result = classify_stream_state(metadata, 'override')
         assert result.state == StreamState.VOD
 
+    @pytest.mark.fast
     def test_zero_duration_treated_as_no_duration(self):
         """Duration of 0 treated as no duration."""
         metadata = {'duration': 0, 'live_status': 'not_live'}
@@ -357,12 +393,14 @@ class TestStreamStateEdgeCases:
         # not_live without positive duration is ambiguous
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_negative_duration_treated_as_no_duration(self):
         """Negative duration treated as no duration."""
         metadata = {'duration': -100}
         result = classify_stream_state(metadata, 'negdur')
         assert result.state == StreamState.UNKNOWN
 
+    @pytest.mark.fast
     def test_invalid_release_timestamp(self):
         """Invalid release_timestamp is handled gracefully."""
         metadata = {
@@ -373,6 +411,7 @@ class TestStreamStateEdgeCases:
         # Should still detect as UPCOMING, but without scheduled_start
         assert result.state in (StreamState.UPCOMING, StreamState.PREMIERE)
 
+    @pytest.mark.fast
     def test_very_old_release_timestamp(self):
         """Very old release_timestamp with duration -> VOD."""
         metadata = {
@@ -395,6 +434,7 @@ class TestStreamStateIntegration:
         config.download.caption_first.handle_upcoming = 'skip'
         return config
 
+    @pytest.mark.fast
     def test_all_states_have_distinct_handling(self, mock_config):
         """Verify each state has distinct handling in acceptance criteria."""
         # LIVE: Always skipped
@@ -425,6 +465,7 @@ class TestStreamStateIntegration:
         assert vod in fetch_states
         assert unknown in fetch_states
 
+    @pytest.mark.fast
     def test_handle_upcoming_modes(self, mock_config):
         """Verify all 3 handle_upcoming modes are valid."""
         valid_modes = {'skip', 'queue', 'check_later'}

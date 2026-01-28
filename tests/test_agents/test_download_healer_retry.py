@@ -68,6 +68,7 @@ class MockConfig:
 class TestDownloadError:
     """Test DownloadError exception class."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test DownloadError with default values."""
         from src.downloader.types import DownloadError
@@ -81,6 +82,7 @@ class TestDownloadError:
         assert error.original_error == "Test error"
         assert not error.retries_exhausted
 
+    @pytest.mark.fast
     def test_custom_retry_context(self):
         """Test DownloadError with custom retry context."""
         from src.downloader.types import DownloadError
@@ -98,6 +100,7 @@ class TestDownloadError:
         assert error.error_type == 'transient'
         assert error.retries_exhausted is True
 
+    @pytest.mark.fast
     def test_retries_exhausted_property(self):
         """Test retries_exhausted property."""
         from src.downloader.types import DownloadError
@@ -114,6 +117,7 @@ class TestDownloadError:
         error3 = DownloadError("Error", retry_count=5, max_retries=3)
         assert error3.retries_exhausted
 
+    @pytest.mark.fast
     def test_str_includes_retry_info(self):
         """Test __str__ includes retry information."""
         from src.downloader.types import DownloadError
@@ -130,6 +134,7 @@ class TestDownloadError:
 class TestGetRetryContext:
     """Test _get_retry_context() method."""
 
+    @pytest.mark.fast
     def test_with_download_error(self, project_dir):
         """Test retry context extraction from DownloadError."""
         from src.agents.healers.download import DownloadHealer
@@ -144,6 +149,7 @@ class TestGetRetryContext:
         assert max_retries == 3
         assert exhausted is True
 
+    @pytest.mark.fast
     def test_with_regular_exception(self, project_dir):
         """Test retry context with regular exception returns defaults."""
         from src.agents.healers.download import DownloadHealer
@@ -157,6 +163,7 @@ class TestGetRetryContext:
         assert max_retries == 3
         assert exhausted is False
 
+    @pytest.mark.fast
     def test_with_value_error(self, project_dir):
         """Test retry context with ValueError returns defaults."""
         from src.agents.healers.download import DownloadHealer
@@ -175,6 +182,7 @@ class TestHealerSkipsRedundantBackoff:
     """Test healer skips redundant backoff when retries exhausted."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_rate_limit_skips_backoff_when_exhausted(self, mock_sleep, project_dir):
         """Test rate limit handler skips backoff when retries exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -199,6 +207,7 @@ class TestHealerSkipsRedundantBackoff:
         assert result.details.get('core_retries_exhausted') is True
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_rate_limit_applies_backoff_when_not_exhausted(self, mock_sleep, project_dir):
         """Test rate limit handler applies backoff when retries not exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -222,6 +231,7 @@ class TestHealerSkipsRedundantBackoff:
         assert result.success
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_network_error_skips_backoff_when_exhausted(self, mock_sleep, project_dir):
         """Test network error handler skips backoff when retries exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -246,6 +256,7 @@ class TestHealerSkipsRedundantBackoff:
         assert result.details.get('core_retries_exhausted') is True
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_generic_error_fails_when_exhausted(self, mock_sleep, project_dir):
         """Test generic error handler fails fast when retries exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -274,6 +285,7 @@ class TestCookieRotationWithRetryContext:
     """Test cookie rotation still works after retry exhaustion."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_cookie_rotation_triggered_when_retries_exhausted(self, mock_sleep, project_dir, tmp_path):
         """Test cookie rotation is tried even when core retries exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -314,6 +326,7 @@ class TestCookieRotationWithRetryContext:
         mock_sleep.assert_not_called()
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_vpn_switch_triggered_after_cookie_exhaustion(self, mock_sleep, project_dir, tmp_path):
         """Test VPN switch is tried after cookies exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -368,6 +381,7 @@ class TestHandoffLogging:
     """Test clear logging shows handoff between core retry and healer."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_logs_core_retry_exhaustion(self, mock_sleep, project_dir, caplog):
         """Test that core retry exhaustion is logged clearly."""
         from src.agents.healers.download import DownloadHealer
@@ -391,6 +405,7 @@ class TestHandoffLogging:
         assert any("Core retry exhausted (3/3)" in record.message for record in caplog.records)
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_logs_skipping_healer_backoff(self, mock_sleep, project_dir, caplog):
         """Test that skipping healer backoff is logged."""
         from src.agents.healers.download import DownloadHealer
@@ -418,6 +433,7 @@ class TestHealerWithRegularException:
     """Test healer behavior with regular exceptions (no retry context)."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_rate_limit_with_regular_exception_applies_backoff(self, mock_sleep, project_dir):
         """Test rate limit handler applies backoff for regular exception."""
         from src.agents.healers.download import DownloadHealer
@@ -434,6 +450,7 @@ class TestHealerWithRegularException:
         assert result.success
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_network_error_with_regular_exception_applies_backoff(self, mock_sleep, project_dir):
         """Test network error handler applies backoff for regular exception."""
         from src.agents.healers.download import DownloadHealer
@@ -454,6 +471,7 @@ class TestHealerResultDetails:
     """Test that healer results include retry context details."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_result_includes_core_retries_exhausted_flag(self, mock_sleep, project_dir):
         """Test result includes core_retries_exhausted flag."""
         from src.agents.healers.download import DownloadHealer
@@ -474,6 +492,7 @@ class TestHealerResultDetails:
         assert result.details['core_retries_exhausted'] is True
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_result_includes_healer_retry_count(self, mock_sleep, project_dir):
         """Test result includes healer_retry_count when applicable."""
         from src.agents.healers.download import DownloadHealer
@@ -499,6 +518,7 @@ class TestSharedEscalationManager:
     """Test DownloadHealer integration with shared EscalationManager."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_healer_uses_shared_escalation_manager(self, mock_sleep, project_dir):
         """Test healer consults escalation_manager.get_escalation_args() for rate limits."""
         from src.agents.healers.download import DownloadHealer
@@ -531,6 +551,7 @@ class TestSharedEscalationManager:
         assert healer.cookie_rotator is None
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_healer_records_success_on_reset(self, mock_sleep, project_dir):
         """Test healer calls record_success when reset_backoff is called after healing."""
         from src.agents.healers.download import DownloadHealer
@@ -560,6 +581,7 @@ class TestSharedEscalationManager:
         mock_esc_mgr.record_success.assert_called_once()
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_healer_records_failure_on_rate_limit(self, mock_sleep, project_dir):
         """Test healer calls record_failure when encountering rate limit errors."""
         from src.agents.healers.download import DownloadHealer
@@ -589,6 +611,7 @@ class TestSharedEscalationManager:
         assert result.details.get('rotate_cookies') is True
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_healer_without_escalation_manager_still_works(self, mock_sleep, project_dir):
         """Test healer works correctly without escalation_manager (backward compatible)."""
         from src.agents.healers.download import DownloadHealer
@@ -609,6 +632,7 @@ class TestSharedEscalationManager:
         assert result.success
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_healer_skips_cookie_rotator_when_escalation_manager_present(self, mock_sleep, project_dir, tmp_path):
         """Test that CookieRotator is not created when escalation_manager is provided."""
         from src.agents.healers.download import DownloadHealer
@@ -640,6 +664,7 @@ class TestSharedEscalationManager:
         assert healer_without.escalation_manager is None
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_orchestrator_wire_escalation_manager(self, mock_sleep, project_dir):
         """Test HealingOrchestrator can wire escalation_manager into DownloadHealer."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -666,6 +691,7 @@ class TestMaxEscalationTierFailure:
     """Test DownloadHealer fails properly when max escalation tier + retries exhausted."""
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_failed_when_max_tier_and_retries_exhausted_no_escalation_mgr(self, mock_sleep, project_dir):
         """Test .failed() returned when all escalation exhausted (no escalation manager)."""
         from src.agents.healers.download import DownloadHealer
@@ -689,6 +715,7 @@ class TestMaxEscalationTierFailure:
         assert result.details.get('core_retries_exhausted') is True
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_failure_logged_with_tier_info(self, mock_sleep, project_dir, caplog):
         """Test failure is logged with escalation tier information."""
         from src.agents.healers.download import DownloadHealer
@@ -713,6 +740,7 @@ class TestMaxEscalationTierFailure:
         assert any("core retry exhausted" in record.message.lower() for record in caplog.records)
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_escalation_manager_max_tier_still_returns_fixed_for_retry(self, mock_sleep, project_dir):
         """Test escalation manager at max tier still returns .fixed() with tier info for retry."""
         from src.agents.healers.download import DownloadHealer
@@ -752,6 +780,7 @@ class TestMaxEscalationTierFailure:
 class TestExportFromDownloader:
     """Test DownloadError is properly exported from downloader package."""
 
+    @pytest.mark.fast
     def test_download_error_importable(self):
         """Test DownloadError can be imported from src.downloader."""
         from src.downloader import DownloadError
@@ -759,6 +788,7 @@ class TestExportFromDownloader:
         error = DownloadError("Test", retry_count=1, max_retries=3)
         assert error.retry_count == 1
 
+    @pytest.mark.fast
     def test_download_error_in_all(self):
         """Test DownloadError is in __all__."""
         from src import downloader

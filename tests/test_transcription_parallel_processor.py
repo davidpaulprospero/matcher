@@ -79,6 +79,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_all_videos_cached(
         self, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -117,6 +118,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_uncached_videos_parallel_processing(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -158,6 +160,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @pytest.mark.fast
     def test_mixed_cached_uncached(
         self, mock_rmtree, mock_extract, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -200,6 +203,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_force_reprocess_ignores_cache(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -235,6 +239,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.integration
     def test_audio_extraction_error_handling(
         self, mock_logger, mock_extract, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -276,6 +281,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.integration
     def test_transcription_error_handling(
         self, mock_logger, mock_extract, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config
@@ -310,6 +316,7 @@ class TestTranscribeVideosParallel:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_cache_as_string(self, MockWhisperClient, MockTranscriptCache, mock_config, sample_raw_segments):
         """Test when cache is passed as string instead of object"""
         # Pass cache as string
@@ -332,6 +339,7 @@ class TestTranscribeVideosParallel:
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
+    @pytest.mark.integration
     def test_config_none_uses_defaults(
         self, mock_extract, MockWhisperClient, MockTranscriptCache,
         mock_cache, sample_raw_segments
@@ -376,6 +384,7 @@ class TestTranscribeVideo:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_transcribe_video_cache_hit(
         self, mock_unlink, mock_extract, MockWhisperClient,
         sample_raw_segments
@@ -397,6 +406,7 @@ class TestTranscribeVideo:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_transcribe_video_cache_miss(
         self, mock_unlink, mock_extract, MockWhisperClient,
         sample_raw_segments
@@ -429,6 +439,7 @@ class TestTranscribeVideo:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_transcribe_video_extraction_failure(
         self, mock_logger, mock_extract, MockWhisperClient
     ):
@@ -449,6 +460,7 @@ class TestTranscribeVideo:
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.logger')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_transcribe_video_transcription_failure(
         self, mock_unlink, mock_logger, mock_extract, MockWhisperClient
     ):
@@ -471,6 +483,7 @@ class TestTranscribeVideo:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_transcribe_video_custom_settings(
         self, mock_unlink, mock_extract, MockWhisperClient,
         sample_raw_segments
@@ -513,6 +526,7 @@ class TestTranscribeVoiceoverAudio:
     """Test transcribe_voiceover_audio() function"""
 
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_transcribe_voiceover_audio_defaults(
         self, MockWhisperClient, sample_raw_segments
     ):
@@ -538,6 +552,7 @@ class TestTranscribeVoiceoverAudio:
         )
 
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_transcribe_voiceover_audio_custom_settings(
         self, MockWhisperClient, sample_raw_segments
     ):
@@ -574,6 +589,7 @@ class TestTranscribeVoiceoverMedia:
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
     @patch('builtins.open', create=True)
+    @pytest.mark.fast
     def test_transcribe_video_file(
         self, mock_open, mock_mkdir, mock_unlink, mock_write_srt,
         mock_extract, MockWhisperClient, tmp_path, sample_raw_segments
@@ -611,6 +627,7 @@ class TestTranscribeVoiceoverMedia:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.write_srt')
+    @pytest.mark.fast
     def test_transcribe_audio_file(
         self, mock_write_srt, mock_extract, MockWhisperClient,
         tmp_path, sample_raw_segments
@@ -636,6 +653,7 @@ class TestTranscribeVoiceoverMedia:
 
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.write_srt')
+    @pytest.mark.fast
     def test_transcribe_with_custom_output_path(
         self, mock_write_srt, MockWhisperClient,
         tmp_path, sample_raw_segments
@@ -661,6 +679,7 @@ class TestTranscribeVoiceoverMedia:
     @patch('src.transcription.parallel_processor.write_srt')
     @patch('pathlib.Path.mkdir')
     @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
     def test_transcribe_with_cache_dir(
         self, mock_unlink, mock_mkdir, mock_write_srt,
         mock_extract, MockWhisperClient,
@@ -685,6 +704,7 @@ class TestTranscribeVoiceoverMedia:
         assert mock_mkdir.called
 
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_unsupported_format(self, MockWhisperClient, tmp_path):
         """Test error with unsupported format"""
         media_path = tmp_path / "voiceover.txt"
@@ -696,6 +716,7 @@ class TestTranscribeVoiceoverMedia:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_extraction_failure(
         self, mock_logger, mock_extract, MockWhisperClient, tmp_path
     ):
@@ -711,6 +732,7 @@ class TestTranscribeVoiceoverMedia:
 
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.write_srt')
+    @pytest.mark.fast
     def test_no_segments_generated(
         self, mock_write_srt, MockWhisperClient, tmp_path
     ):
@@ -728,6 +750,7 @@ class TestTranscribeVoiceoverMedia:
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.write_srt')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_word_timestamps_json_save(
         self, mock_logger, mock_write_srt, MockWhisperClient,
         tmp_path, sample_raw_segments
@@ -760,6 +783,7 @@ class TestParallelErrorRecovery:
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_audio_extraction_error_logs_full_traceback(
         self, mock_logger, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -800,6 +824,7 @@ class TestParallelErrorRecovery:
     @patch('src.transcription.parallel_processor.extract_audio')
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_transcription_error_logs_full_traceback(
         self, mock_logger, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -849,6 +874,7 @@ class TestParallelErrorRecovery:
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_cleanup_error_does_not_affect_results(
         self, mock_logger, mock_mkdir, mock_unlink, mock_rmtree,
         mock_extract, MockWhisperClient, MockTranscriptCache,
@@ -889,6 +915,7 @@ class TestGetTranscriptSegments:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.transcribe_video')
+    @pytest.mark.fast
     def test_get_transcript_segments(
         self, mock_transcribe, MockTranscriptCache,
         sample_transcript_segments

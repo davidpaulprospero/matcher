@@ -32,6 +32,7 @@ from src.downloader.circuit_breaker import (
 class TestCircuitBreakerConfig:
     """Test CircuitBreakerConfig defaults and custom values."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Config should have sensible defaults."""
         config = CircuitBreakerConfig()
@@ -40,6 +41,7 @@ class TestCircuitBreakerConfig:
         assert config.consecutive_failures_threshold == 5
         assert config.pause_seconds == 60.0
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Config should accept custom values."""
         config = CircuitBreakerConfig(
@@ -61,6 +63,7 @@ class TestCircuitBreakerConfig:
 class TestCircuitBreakerInitialization:
     """Test CircuitBreaker initialization and initial state."""
 
+    @pytest.mark.fast
     def test_default_initialization(self):
         """Circuit breaker should initialize with default config."""
         breaker = CircuitBreaker()
@@ -71,6 +74,7 @@ class TestCircuitBreakerInitialization:
         assert breaker.state.opened_at is None
         assert breaker.state.total_trips == 0
 
+    @pytest.mark.fast
     def test_custom_config_initialization(self):
         """Circuit breaker should accept custom config."""
         config = CircuitBreakerConfig(
@@ -82,6 +86,7 @@ class TestCircuitBreakerInitialization:
         assert breaker.config.consecutive_failures_threshold == 3
         assert breaker.config.pause_seconds == 30.0
 
+    @pytest.mark.fast
     def test_disabled_breaker(self):
         """Disabled circuit breaker should not track failures."""
         config = CircuitBreakerConfig(enabled=False)
@@ -98,6 +103,7 @@ class TestCircuitBreakerInitialization:
 class TestFailureRecording:
     """Test recording failures and counting."""
 
+    @pytest.mark.fast
     def test_single_failure_increments_count(self):
         """Recording failure should increment consecutive_failures."""
         breaker = CircuitBreaker()
@@ -106,6 +112,7 @@ class TestFailureRecording:
         breaker.record_failure()
         assert breaker.state.consecutive_failures == 1
 
+    @pytest.mark.fast
     def test_multiple_failures_accumulate(self):
         """Multiple failures should accumulate."""
         breaker = CircuitBreaker()
@@ -115,6 +122,7 @@ class TestFailureRecording:
 
         assert breaker.state.consecutive_failures == 4
 
+    @pytest.mark.fast
     def test_failure_on_disabled_breaker_noop(self):
         """Recording failure on disabled breaker should be no-op."""
         config = CircuitBreakerConfig(enabled=False)
@@ -134,6 +142,7 @@ class TestFailureRecording:
 class TestCircuitTrip:
     """Test circuit tripping (opening) behavior."""
 
+    @pytest.mark.fast
     def test_trips_at_threshold(self):
         """Circuit should trip when failures reach threshold."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=3)
@@ -149,6 +158,7 @@ class TestCircuitTrip:
         assert breaker.is_open is True
         assert breaker.state.total_trips == 1
 
+    @pytest.mark.fast
     def test_trips_logs_info(self):
         """Circuit trip should log at INFO level."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=2)
@@ -163,6 +173,7 @@ class TestCircuitTrip:
             call_args = str(mock_logger.info.call_args)
             assert 'TRIPPED' in call_args or 'consecutive' in call_args.lower()
 
+    @pytest.mark.fast
     def test_opened_at_timestamp_set(self):
         """opened_at should be set when circuit trips."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=1)
@@ -184,6 +195,7 @@ class TestCircuitTrip:
 class TestSuccessRecording:
     """Test recording success and resetting."""
 
+    @pytest.mark.fast
     def test_success_resets_failure_count(self):
         """Recording success should reset consecutive_failures to 0."""
         breaker = CircuitBreaker()
@@ -195,6 +207,7 @@ class TestSuccessRecording:
         breaker.record_success()
         assert breaker.state.consecutive_failures == 0
 
+    @pytest.mark.fast
     def test_success_closes_open_circuit(self):
         """Success should close an open circuit."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=1)
@@ -207,6 +220,7 @@ class TestSuccessRecording:
         assert breaker.is_open is False
         assert breaker.state.opened_at is None
 
+    @pytest.mark.fast
     def test_success_on_disabled_breaker_noop(self):
         """Recording success on disabled breaker should be no-op."""
         config = CircuitBreakerConfig(enabled=False)
@@ -224,6 +238,7 @@ class TestSuccessRecording:
 class TestCheckAndWait:
     """Test check_and_wait behavior with pause."""
 
+    @pytest.mark.fast
     def test_returns_true_when_closed(self):
         """check_and_wait should return True when circuit is closed."""
         breaker = CircuitBreaker()
@@ -232,6 +247,7 @@ class TestCheckAndWait:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_returns_false_when_disabled(self):
         """check_and_wait should return False when disabled."""
         config = CircuitBreakerConfig(enabled=False)
@@ -241,6 +257,7 @@ class TestCheckAndWait:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_waits_when_open(self):
         """check_and_wait should sleep when circuit is open."""
         config = CircuitBreakerConfig(
@@ -257,6 +274,7 @@ class TestCheckAndWait:
         # Should have waited at least pause_seconds
         assert elapsed >= 0.1
 
+    @pytest.mark.fast
     def test_closes_after_pause(self):
         """Circuit should close after pause completes."""
         config = CircuitBreakerConfig(
@@ -270,6 +288,7 @@ class TestCheckAndWait:
         breaker.check_and_wait()
         assert breaker.is_open is False
 
+    @pytest.mark.fast
     def test_pause_duration_logged(self):
         """Pause should be logged at INFO level."""
         config = CircuitBreakerConfig(
@@ -284,6 +303,7 @@ class TestCheckAndWait:
 
             assert mock_logger.info.called
 
+    @pytest.mark.fast
     def test_tracks_total_paused_seconds(self):
         """Should track total paused time for reporting."""
         config = CircuitBreakerConfig(
@@ -326,6 +346,7 @@ class TestCheckAndWait:
 class TestManualReset:
     """Test manual reset functionality."""
 
+    @pytest.mark.fast
     def test_reset_clears_failures(self):
         """reset() should clear consecutive failures."""
         breaker = CircuitBreaker()
@@ -336,6 +357,7 @@ class TestManualReset:
 
         assert breaker.state.consecutive_failures == 0
 
+    @pytest.mark.fast
     def test_reset_closes_circuit(self):
         """reset() should close an open circuit."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=1)
@@ -356,6 +378,7 @@ class TestManualReset:
 class TestGetStats:
     """Test statistics reporting."""
 
+    @pytest.mark.fast
     def test_stats_empty_state(self):
         """Stats should reflect initial state."""
         breaker = CircuitBreaker()
@@ -369,6 +392,7 @@ class TestGetStats:
         assert stats['threshold'] == 5
         assert stats['pause_seconds'] == 60.0
 
+    @pytest.mark.fast
     def test_stats_after_trips(self):
         """Stats should reflect state after trips."""
         config = CircuitBreakerConfig(
@@ -403,6 +427,7 @@ class TestGetStats:
 class TestCheckpointPersistence:
     """Test checkpoint save/restore."""
 
+    @pytest.mark.fast
     def test_to_checkpoint_dict(self):
         """Should serialize cumulative stats to checkpoint."""
         config = CircuitBreakerConfig(consecutive_failures_threshold=1)
@@ -419,6 +444,7 @@ class TestCheckpointPersistence:
         assert 'is_open' not in checkpoint
         assert 'opened_at' not in checkpoint
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict_restores_cumulative(self):
         """Should restore cumulative stats from checkpoint."""
         breaker = CircuitBreaker()
@@ -435,6 +461,7 @@ class TestCheckpointPersistence:
         assert breaker.state.consecutive_failures == 0
         assert breaker.is_open is False
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict_empty(self):
         """Should handle empty/None checkpoint gracefully."""
         breaker = CircuitBreaker()
@@ -453,6 +480,7 @@ class TestCheckpointPersistence:
 class TestIntegrationWithVideoDownloader:
     """Test integration with VideoDownloader initialization."""
 
+    @pytest.mark.fast
     def test_circuit_breaker_initialized_from_config(self):
         """VideoDownloader should initialize circuit breaker from config."""
         from unittest.mock import MagicMock, patch, PropertyMock
@@ -494,6 +522,7 @@ class TestIntegrationWithVideoDownloader:
             assert downloader.circuit_breaker.config.enabled is True
             assert downloader.circuit_breaker.config.consecutive_failures_threshold == 3
 
+    @pytest.mark.fast
     def test_circuit_breaker_disabled_when_config_disabled(self):
         """Circuit breaker should be disabled when config says so."""
         from unittest.mock import MagicMock, patch
@@ -532,6 +561,7 @@ class TestIntegrationWithVideoDownloader:
 class TestCircuitBreakerInDownloadFlow:
     """Test circuit breaker behavior in download flow."""
 
+    @pytest.mark.fast
     def test_check_and_wait_called_before_search(self):
         """Circuit breaker check should be called before searches."""
         from unittest.mock import MagicMock, patch
@@ -547,6 +577,7 @@ class TestCircuitBreakerInDownloadFlow:
         breaker.check_and_wait()
         assert breaker.check_and_wait.called
 
+    @pytest.mark.fast
     def test_failure_recorded_on_no_results(self):
         """Failure should be recorded when search returns no results."""
         breaker = CircuitBreaker()
@@ -556,6 +587,7 @@ class TestCircuitBreakerInDownloadFlow:
 
         assert breaker.state.consecutive_failures == 1
 
+    @pytest.mark.fast
     def test_success_recorded_on_results(self):
         """Success should be recorded when search returns results."""
         breaker = CircuitBreaker()

@@ -27,6 +27,7 @@ from src.config import Config
 class TestCheckpointPerformance:
     """Benchmark checkpoint save/load operations"""
 
+    @pytest.mark.integration
     def test_checkpoint_save_small_state(self, benchmark):
         """Benchmark saving small pipeline state (10 segments)"""
         state = PipelineState()
@@ -56,6 +57,7 @@ class TestCheckpointPerformance:
         finally:
             Path(checkpoint_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_checkpoint_save_large_state(self, benchmark):
         """Benchmark saving large pipeline state (1000 segments)"""
         state = PipelineState()
@@ -85,6 +87,7 @@ class TestCheckpointPerformance:
         finally:
             Path(checkpoint_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_checkpoint_load_performance(self, benchmark):
         """Benchmark loading checkpoint from disk"""
         checkpoint_data = {
@@ -118,6 +121,7 @@ class TestCheckpointPerformance:
 class TestStateManagementPerformance:
     """Benchmark PipelineState operations"""
 
+    @pytest.mark.fast
     def test_state_initialization(self, benchmark):
         """Benchmark PipelineState creation"""
         def create_state():
@@ -128,6 +132,7 @@ class TestStateManagementPerformance:
         # Should be instantaneous (< 1ms)
         assert benchmark.stats.stats.mean < 0.001
 
+    @pytest.mark.fast
     def test_state_with_large_transcript_dict(self, benchmark):
         """Benchmark state with 100 videos × 50 segments each"""
         def create_large_state():
@@ -145,6 +150,7 @@ class TestStateManagementPerformance:
         # Should complete in < 50ms
         assert benchmark.stats.stats.mean < 0.05
 
+    @pytest.mark.fast
     def test_state_match_list_append_performance(self, benchmark):
         """Benchmark appending 1000 matches to state"""
         state = PipelineState()
@@ -171,6 +177,7 @@ class TestStateManagementPerformance:
 class TestConfigPerformance:
     """Benchmark configuration loading and validation"""
 
+    @pytest.mark.fast
     def test_config_initialization(self, benchmark):
         """Benchmark Config object creation"""
         def create_config():
@@ -181,6 +188,7 @@ class TestConfigPerformance:
         # Should be fast (< 2ms)
         assert benchmark.stats.stats.mean < 0.002
 
+    @pytest.mark.fast
     def test_config_from_dict(self, benchmark):
         """Benchmark loading config from dictionary"""
         config_dict = {
@@ -205,6 +213,7 @@ class TestConfigPerformance:
 class TestSegmentProcessingPerformance:
     """Benchmark SRT segment operations"""
 
+    @pytest.mark.fast
     def test_create_1000_segments(self, benchmark):
         """Benchmark creating 1000 SRTSegment objects"""
         def create_segments():
@@ -224,6 +233,7 @@ class TestSegmentProcessingPerformance:
         # Should complete in < 20ms
         assert benchmark.stats.stats.mean < 0.02
 
+    @pytest.mark.fast
     def test_segment_duration_calculation(self, benchmark):
         """Benchmark duration calculation for 10000 segments"""
         segments = [
@@ -247,6 +257,7 @@ class TestSegmentProcessingPerformance:
 class TestMatchResultPerformance:
     """Benchmark Match and MatchResult creation"""
 
+    @pytest.mark.fast
     def test_create_1000_match_results(self, benchmark):
         """Benchmark creating 1000 MatchResult objects"""
         vo_seg = SRTSegment(0, 0.0, 3.0, "test", "vo.srt")
@@ -270,6 +281,7 @@ class TestMatchResultPerformance:
         # Should complete in < 30ms
         assert benchmark.stats.stats.mean < 0.03
 
+    @pytest.mark.fast
     def test_match_result_with_alternatives(self, benchmark):
         """Benchmark MatchResult with 5 alternatives each"""
         vo_seg = SRTSegment(0, 0.0, 3.0, "test", "vo.srt")
@@ -308,6 +320,7 @@ class TestMatchResultPerformance:
 class TestMemoryEfficiency:
     """Benchmark memory usage and large data structure performance"""
 
+    @pytest.mark.fast
     def test_large_state_memory(self, benchmark):
         """Test memory footprint of large PipelineState"""
         def create_large_state():
@@ -323,6 +336,7 @@ class TestMemoryEfficiency:
         result = benchmark(create_large_state)
         assert len(result.transcripts) == 500
 
+    @pytest.mark.fast
     def test_match_result_list_memory(self, benchmark):
         """Test memory usage of 10000 MatchResults"""
         vo_seg = SRTSegment(0, 0.0, 3.0, "test", "vo.srt")

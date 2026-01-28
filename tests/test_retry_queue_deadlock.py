@@ -59,16 +59,19 @@ class MockCookieRotator:
 class TestMaxCombinedWaitConfig:
     """Tests for max_combined_wait_seconds config option."""
 
+    @pytest.mark.fast
     def test_default_value(self):
         """max_combined_wait_seconds defaults to 300."""
         config = BatchRetryConfig()
         assert config.max_combined_wait_seconds == 300.0
 
+    @pytest.mark.fast
     def test_custom_value(self):
         """max_combined_wait_seconds can be customized."""
         config = BatchRetryConfig(max_combined_wait_seconds=600.0)
         assert config.max_combined_wait_seconds == 600.0
 
+    @pytest.mark.fast
     def test_in_config_section(self):
         """max_combined_wait_seconds in config/sections/download.py."""
         from src.config.sections.download import BatchRetryConfig as ConfigBRC
@@ -76,6 +79,7 @@ class TestMaxCombinedWaitConfig:
         assert hasattr(config, 'max_combined_wait_seconds')
         assert config.max_combined_wait_seconds == 300.0
 
+    @pytest.mark.fast
     def test_in_stats(self):
         """max_combined_wait_seconds appears in get_stats()."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=200.0))
@@ -83,6 +87,7 @@ class TestMaxCombinedWaitConfig:
         assert 'max_combined_wait_seconds' in stats
         assert stats['max_combined_wait_seconds'] == 200.0
 
+    @pytest.mark.fast
     def test_forced_retry_in_stats(self):
         """forced_retry flag appears in get_stats()."""
         queue = RetryQueue()
@@ -90,6 +95,7 @@ class TestMaxCombinedWaitConfig:
         assert 'forced_retry' in stats
         assert stats['forced_retry'] is False
 
+    @pytest.mark.fast
     def test_in_config_yaml(self):
         """max_combined_wait_seconds exists in config.yaml."""
         import yaml
@@ -110,11 +116,13 @@ class TestMaxCombinedWaitConfig:
 class TestGetCbRemaining:
     """Tests for _get_cb_remaining() non-blocking check."""
 
+    @pytest.mark.fast
     def test_no_circuit_breaker_returns_zero(self):
         """Returns 0 when no CB linked."""
         queue = RetryQueue()
         assert queue._get_cb_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_respect_disabled_returns_zero(self):
         """Returns 0 when respect_circuit_breaker is False."""
         queue = RetryQueue(BatchRetryConfig(respect_circuit_breaker=False))
@@ -124,6 +132,7 @@ class TestGetCbRemaining:
         queue.set_circuit_breaker(cb)
         assert queue._get_cb_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_closed_returns_zero(self):
         """Returns 0 when CB not tripped."""
         queue = RetryQueue()
@@ -132,6 +141,7 @@ class TestGetCbRemaining:
         queue.set_circuit_breaker(cb)
         assert queue._get_cb_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_open_returns_remaining(self):
         """Returns positive remaining time when CB is open."""
         queue = RetryQueue()
@@ -143,6 +153,7 @@ class TestGetCbRemaining:
         remaining = queue._get_cb_remaining()
         assert 49.0 < remaining <= 50.0
 
+    @pytest.mark.fast
     def test_elapsed_returns_zero(self):
         """Returns 0 when CB pause already elapsed."""
         queue = RetryQueue()
@@ -157,11 +168,13 @@ class TestGetCbRemaining:
 class TestGetCookieCooldownRemaining:
     """Tests for _get_cookie_cooldown_remaining() non-blocking check."""
 
+    @pytest.mark.fast
     def test_no_rotator_returns_zero(self):
         """Returns 0 when no rotator linked."""
         queue = RetryQueue()
         assert queue._get_cookie_cooldown_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_disabled_returns_zero(self):
         """Returns 0 when wait_for_cookie_cooldown disabled."""
         queue = RetryQueue(BatchRetryConfig(wait_for_cookie_cooldown=False))
@@ -169,6 +182,7 @@ class TestGetCookieCooldownRemaining:
         queue.set_cookie_rotator(rotator)
         assert queue._get_cookie_cooldown_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_cookies_available_returns_zero(self):
         """Returns 0 when cookies available."""
         queue = RetryQueue()
@@ -176,6 +190,7 @@ class TestGetCookieCooldownRemaining:
         queue.set_cookie_rotator(rotator)
         assert queue._get_cookie_cooldown_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_cooldown_active_returns_remaining(self):
         """Returns remaining seconds when all cookies in cooldown."""
         queue = RetryQueue()
@@ -198,6 +213,7 @@ class TestGetCookieCooldownRemaining:
 class TestWaitCombined:
     """Tests for _wait_combined() method."""
 
+    @pytest.mark.fast
     def test_neither_blocking_returns_zero(self):
         """Returns 0 when neither CB nor cooldown active."""
         queue = RetryQueue()
@@ -206,6 +222,7 @@ class TestWaitCombined:
         assert wait == 0.0
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_only_cb_blocking_uses_cb_wait(self):
         """When only CB blocks, delegates to _wait_for_circuit_breaker."""
         queue = RetryQueue()
@@ -221,6 +238,7 @@ class TestWaitCombined:
         assert queue._forced_retry is False
         assert queue._circuit_breaker_wait_time > 0
 
+    @pytest.mark.fast
     def test_only_cooldown_blocking_uses_cooldown_wait(self):
         """When only cooldown blocks, delegates to _wait_for_cookie_cooldown."""
         queue = RetryQueue()
@@ -236,6 +254,7 @@ class TestWaitCombined:
         assert queue._forced_retry is False
         assert queue._cookie_cooldown_wait_time > 0
 
+    @pytest.mark.fast
     def test_both_blocking_uses_min_plus_buffer(self):
         """When both block, waits min(cb, cooldown) + 5s buffer."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=500.0))
@@ -261,6 +280,7 @@ class TestWaitCombined:
         assert 34.0 < called_time <= 36.0
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_combined_exceeds_max_forces_retry(self):
         """When combined estimate exceeds max_combined_wait_seconds, forces retry."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=20.0))
@@ -285,6 +305,7 @@ class TestWaitCombined:
         assert queue._forced_retry is True
         mock_sleep.assert_not_called()
 
+    @pytest.mark.fast
     def test_forced_retry_logs_deadlock_detection(self):
         """Forced retry logs a warning with deadlock details."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=10.0))
@@ -314,6 +335,7 @@ class TestWaitCombined:
 class TestCombinedWaitRespectsCap:
     """Tests that combined wait respects max_combined_wait_seconds."""
 
+    @pytest.mark.fast
     def test_cap_at_300_default(self):
         """Default 300s cap prevents excessive waiting."""
         queue = RetryQueue()  # default max_combined_wait_seconds=300
@@ -337,6 +359,7 @@ class TestCombinedWaitRespectsCap:
         assert wait > 0
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_cap_exceeded_forces_retry(self):
         """Cap exceeded forces immediate retry."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=100.0))
@@ -361,6 +384,7 @@ class TestCombinedWaitRespectsCap:
         assert queue._forced_retry is True
         mock_sleep.assert_not_called()
 
+    @pytest.mark.fast
     def test_forced_retry_uses_best_available_cookie(self):
         """When forced, should retry with whatever cookie is available (not waiting)."""
         queue = RetryQueue(BatchRetryConfig(
@@ -395,6 +419,7 @@ class TestCombinedWaitRespectsCap:
 class TestStartRetryPassWithDeadlock:
     """Tests for start_retry_pass() with combined wait logic."""
 
+    @pytest.mark.fast
     def test_normal_pass_no_blocking(self):
         """Normal pass with no CB or cooldown blocking."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -406,6 +431,7 @@ class TestStartRetryPassWithDeadlock:
         assert pass_num == 1
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_forced_pass_logs_correctly(self):
         """Forced pass logs FORCED message."""
         queue = RetryQueue(BatchRetryConfig(
@@ -435,6 +461,7 @@ class TestStartRetryPassWithDeadlock:
         assert len(forced_logs) >= 1
         assert 'best-available cookie' in forced_logs[0].lower()
 
+    @pytest.mark.fast
     def test_clear_resets_forced_retry(self):
         """clear() resets _forced_retry flag."""
         queue = RetryQueue()
@@ -442,6 +469,7 @@ class TestStartRetryPassWithDeadlock:
         queue.clear()
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_forced_retry_property(self):
         """forced_retry property reflects _forced_retry."""
         queue = RetryQueue()
@@ -455,6 +483,7 @@ class TestStartRetryPassWithDeadlock:
 class TestEdgeCases:
     """Edge cases for deadlock detection."""
 
+    @pytest.mark.fast
     def test_cb_only_at_exact_cap_allows_wait(self):
         """When only CB remaining equals cap, waits (no deadlock)."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=50.0))
@@ -470,6 +499,7 @@ class TestEdgeCases:
         assert wait > 0
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_both_blocking_just_under_cap(self):
         """Combined wait just under cap proceeds normally."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=50.0))
@@ -493,6 +523,7 @@ class TestEdgeCases:
         assert wait > 0
         assert queue._forced_retry is False
 
+    @pytest.mark.fast
     def test_both_blocking_just_over_cap(self):
         """Combined wait just over cap forces retry."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=20.0))
@@ -517,6 +548,7 @@ class TestEdgeCases:
         assert queue._forced_retry is True
         mock_sleep.assert_not_called()
 
+    @pytest.mark.fast
     def test_zero_max_combined_wait_always_forces(self):
         """max_combined_wait_seconds=0 always forces when both blocking."""
         queue = RetryQueue(BatchRetryConfig(max_combined_wait_seconds=0.0))

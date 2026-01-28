@@ -93,6 +93,7 @@ class TestHealerCookieRotationIntegration:
         )
         return config
 
+    @pytest.mark.fast
     def test_healer_tries_cookie_rotation_first(self, config_with_rotation):
         """Verify healer tries cookie rotation before backoff."""
         from src.agents.healers.download import DownloadHealer
@@ -111,6 +112,7 @@ class TestHealerCookieRotationIntegration:
         if healer.cookie_rotator and healer.cookie_rotator.is_enabled:
             assert healer.cookie_rotator._rotation_count >= 0
 
+    @pytest.mark.integration
     def test_healer_tries_vpn_when_no_cookies(self, config_with_vpn):
         """Verify healer tries VPN when cookies not configured."""
         from src.agents.healers.download import DownloadHealer
@@ -132,6 +134,7 @@ class TestHealerCookieRotationIntegration:
                 assert mock_run.called or "backoff" in result.message.lower()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_healer_vpn_after_cookies_exhausted(self, mock_run, config_with_both):
         """Verify healer tries VPN after cookie rotation exhausted."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -158,6 +161,7 @@ class TestHealerCookieRotationIntegration:
             assert mock_run.called or healer.vpn_manager.switch_count > 0
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_cookie_rotator_resets_after_vpn_switch(self, mock_run, config_with_both):
         """Verify cookie rotator resets after successful VPN switch."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -183,6 +187,7 @@ class TestHealerCookieRotationIntegration:
                 # After VPN switch, cookie state should be reset
                 assert healer.cookie_rotator._rotation_count == 0 or healer.cookie_rotator.available_cookies > 0
 
+    @pytest.mark.fast
     def test_healer_fallback_to_backoff(self, config_with_rotation):
         """Verify healer falls back to backoff when rotation disabled."""
         from src.agents.healers.download import DownloadHealer
@@ -206,6 +211,7 @@ class TestHealerCookieRotationIntegration:
         # Should have waited at least initial backoff time
         assert elapsed >= healer.INITIAL_BACKOFF - 1  # Small margin
 
+    @pytest.mark.fast
     def test_healer_result_includes_rotation_info(self, config_with_rotation):
         """Verify HealerResult includes rotation information."""
         from src.agents.healers.download import DownloadHealer
@@ -260,6 +266,7 @@ class TestVideoDownloaderIntegration:
 
         return config
 
+    @pytest.mark.fast
     def test_downloader_initializes_rotator(self, mock_config, temp_cookies):
         """Test VideoDownloader initializes cookie rotator."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -270,6 +277,7 @@ class TestVideoDownloaderIntegration:
         assert rotator.is_enabled
         assert rotator.available_cookies == 2
 
+    @pytest.mark.fast
     def test_downloader_initializes_vpn(self, mock_config):
         """Test VideoDownloader initializes VPN manager."""
         from src.downloader.vpn_manager import VPNManager
@@ -279,6 +287,7 @@ class TestVideoDownloaderIntegration:
         assert manager.is_enabled
         assert manager.can_switch()
 
+    @pytest.mark.fast
     def test_add_cookies_uses_rotator(self, temp_cookies):
         """Test _add_cookies_to_cmd uses rotator when enabled."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -298,6 +307,7 @@ class TestVideoDownloaderIntegration:
         assert '--cookies' in cmd
         assert temp_cookies[0] in cmd[1]
 
+    @pytest.mark.fast
     def test_handle_rate_limit_error(self, temp_cookies):
         """Test handle_rate_limit_error method."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -323,6 +333,7 @@ class TestVideoDownloaderIntegration:
         assert rotator._rotation_count == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_vpn_switch_after_cookie_exhaust(self, mock_run, temp_cookies):
         """Test VPN switch after cookies exhausted."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -365,6 +376,7 @@ class TestEndToEndRotation:
         return cookies
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_full_recovery_flow(self, mock_run, temp_cookies):
         """Test full recovery flow: cookies -> VPN -> backoff."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -424,6 +436,7 @@ class TestEndToEndRotation:
         # Expected: 3 (initial) + 3 (after VPN1) + 3 (after VPN2) until we hit backoff
         assert recovery_methods.count("cookie") >= 3  # At least max_rotations before first VPN
 
+    @pytest.mark.fast
     def test_rotation_strategy_selection(self, temp_cookies):
         """Test different rotation strategies work correctly."""
         from src.downloader.cookie_rotator import CookieRotator
@@ -456,6 +469,7 @@ class TestEndToEndRotation:
             if cookie:
                 assert cookie in temp_cookies
 
+    @pytest.mark.fast
     def test_config_propagation(self, temp_cookies):
         """Test config values are correctly used."""
         from src.downloader.cookie_rotator import CookieRotator

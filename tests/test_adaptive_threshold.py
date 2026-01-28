@@ -28,6 +28,7 @@ def create_mock_segment(text: str = "Test video", index: int = 0) -> SRTSegment:
 class TestAdaptiveThreshold:
     """Test suite for adaptive threshold calculation."""
 
+    @pytest.mark.fast
     def test_no_adjustment_with_normal_input(self):
         """Normal voiceover length and varied candidates should have no adjustment."""
         base_threshold = 0.85
@@ -51,6 +52,7 @@ class TestAdaptiveThreshold:
         assert threshold == base_threshold
         assert reason == "no_adjustment"
 
+    @pytest.mark.fast
     def test_short_voiceover_increases_threshold(self):
         """Short voiceover (<20 chars) should increase threshold by 0.05."""
         base_threshold = 0.85
@@ -73,6 +75,7 @@ class TestAdaptiveThreshold:
         assert "short_vo" in reason
         assert "+0.05" in reason
 
+    @pytest.mark.fast
     def test_low_variance_decreases_threshold(self):
         """Low candidate variance (<0.05) should decrease threshold by 0.05."""
         base_threshold = 0.85
@@ -95,6 +98,7 @@ class TestAdaptiveThreshold:
         assert "low_var" in reason
         assert "-0.05" in reason
 
+    @pytest.mark.fast
     def test_short_vo_and_low_variance_cancel_out(self):
         """Short voiceover + low variance adjustments should cancel out (+0.05 -0.05)."""
         base_threshold = 0.85
@@ -118,6 +122,7 @@ class TestAdaptiveThreshold:
         assert "short_vo" in reason
         assert "low_var" in reason
 
+    @pytest.mark.fast
     def test_threshold_clamped_to_minimum(self):
         """Threshold should not go below 0.5."""
         base_threshold = 0.52
@@ -137,6 +142,7 @@ class TestAdaptiveThreshold:
         # Should clamp to 0.5, not go to 0.47
         assert threshold >= 0.5
 
+    @pytest.mark.fast
     def test_threshold_clamped_to_maximum(self):
         """Threshold should not exceed 0.99."""
         base_threshold = 0.97
@@ -155,6 +161,7 @@ class TestAdaptiveThreshold:
         # Should clamp to 0.99, not go to 1.02
         assert threshold <= 0.99
 
+    @pytest.mark.fast
     def test_empty_voiceover_triggers_short_adjustment(self):
         """Empty voiceover should trigger short voiceover adjustment."""
         base_threshold = 0.85
@@ -172,6 +179,7 @@ class TestAdaptiveThreshold:
         assert threshold == 0.90  # +0.05 for short
         assert "short_vo(0c)" in reason
 
+    @pytest.mark.fast
     def test_none_voiceover_handles_gracefully(self):
         """None voiceover should be handled gracefully."""
         base_threshold = 0.85
@@ -188,6 +196,7 @@ class TestAdaptiveThreshold:
 
         assert threshold == 0.90  # +0.05 for short (treated as length 0)
 
+    @pytest.mark.fast
     def test_empty_candidates_no_variance_adjustment(self):
         """Empty candidates list should not trigger variance adjustment."""
         base_threshold = 0.85
@@ -200,6 +209,7 @@ class TestAdaptiveThreshold:
         assert threshold == base_threshold
         assert reason == "no_adjustment"
 
+    @pytest.mark.fast
     def test_single_candidate_no_variance_adjustment(self):
         """Single candidate should not trigger variance adjustment."""
         base_threshold = 0.85
@@ -214,6 +224,7 @@ class TestAdaptiveThreshold:
         assert threshold == base_threshold
         assert reason == "no_adjustment"
 
+    @pytest.mark.fast
     def test_whitespace_only_voiceover(self):
         """Whitespace-only voiceover should count as empty (0 chars after strip)."""
         base_threshold = 0.85
@@ -230,6 +241,7 @@ class TestAdaptiveThreshold:
 
         assert "short_vo(0c)" in reason
 
+    @pytest.mark.fast
     def test_exactly_20_chars_no_short_adjustment(self):
         """Exactly 20 chars should NOT trigger short voiceover adjustment."""
         base_threshold = 0.85
@@ -247,6 +259,7 @@ class TestAdaptiveThreshold:
         # 20 chars is not < 20, so no adjustment
         assert "short_vo" not in reason
 
+    @pytest.mark.fast
     def test_exactly_19_chars_triggers_short_adjustment(self):
         """19 chars should trigger short voiceover adjustment."""
         base_threshold = 0.85
@@ -263,6 +276,7 @@ class TestAdaptiveThreshold:
 
         assert "short_vo(19c)" in reason
 
+    @pytest.mark.fast
     def test_variance_exactly_0_05_no_adjustment(self):
         """Variance exactly 0.05 should NOT trigger low variance adjustment."""
         base_threshold = 0.85
@@ -293,6 +307,7 @@ class TestAdaptiveThreshold:
 class TestAdaptiveThresholdIntegration:
     """Integration tests for adaptive threshold in TieredMatcher context."""
 
+    @pytest.mark.fast
     def test_config_option_respected(self):
         """Test that adaptive_threshold_enabled config is respected."""
         # This would require mocking TieredMatcher, but the unit tests above

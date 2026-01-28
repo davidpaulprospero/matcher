@@ -194,6 +194,7 @@ def scenes():
 class TestTieredMatcherInit:
     """Test TieredMatcher initialization and configuration"""
 
+    @pytest.mark.fast
     def test_init_default_config(self, config, cache_manager):
         """Test initialization with default config"""
         matcher = TieredMatcher(config, cache_manager)
@@ -206,6 +207,7 @@ class TestTieredMatcherInit:
         assert matcher.embedding_candidates == 30
         assert matcher.face_preference == "neutral"
 
+    @pytest.mark.fast
     def test_init_with_video_topics(self, config, cache_manager):
         """Test initialization with video topics"""
         video_topics = {"video1.mp4": Mock()}
@@ -214,6 +216,7 @@ class TestTieredMatcherInit:
         assert matcher.video_topics == video_topics
         assert "video1.mp4" in matcher.video_topics
 
+    @pytest.mark.fast
     def test_init_without_cache(self, config):
         """Test initialization without cache manager"""
         matcher = TieredMatcher(config, cache=None)
@@ -221,6 +224,7 @@ class TestTieredMatcherInit:
         assert matcher.cache is None
         assert matcher.config == config
 
+    @pytest.mark.fast
     def test_init_providers(self, config, cache_manager):
         """Test LLM provider initialization"""
         with patch('src.matching.llm_providers.GeminiMatcher'):
@@ -229,6 +233,7 @@ class TestTieredMatcherInit:
             # Primary provider should be initialized
             assert matcher.primary_provider is not None
 
+    @pytest.mark.fast
     def test_location_matching_enabled_by_default(self, config, cache_manager):
         """Test location matching is enabled by default"""
         matcher = TieredMatcher(config, cache_manager)
@@ -247,6 +252,7 @@ class TestTieredMatcherInit:
 class TestTieredMatcherLocation:
     """Test location-aware matching"""
 
+    @pytest.mark.fast
     def test_set_location_chapters(self, config, cache_manager):
         """Test setting location chapters"""
         matcher = TieredMatcher(config, cache_manager)
@@ -257,6 +263,7 @@ class TestTieredMatcherLocation:
 
         matcher.location_matcher.set_location_chapters.assert_called_once_with(chapters)
 
+    @pytest.mark.fast
     def test_set_video_locations(self, config, cache_manager):
         """Test setting video locations"""
         matcher = TieredMatcher(config, cache_manager)
@@ -275,6 +282,7 @@ class TestTieredMatcherLocation:
 class TestTieredMatcherCache:
     """Test LLM response caching"""
 
+    @pytest.mark.fast
     def test_get_cache_key_generates_unique_key(self, config, cache_manager, video_segments):
         """Test cache key generation"""
         matcher = TieredMatcher(config, cache_manager)
@@ -285,6 +293,7 @@ class TestTieredMatcherCache:
         assert isinstance(key, str)
         assert len(key) == 16  # MD5 hash truncated to 16 chars
 
+    @pytest.mark.fast
     def test_get_cached_response_returns_none_if_disabled(self, config, cache_manager):
         """Test cache returns None if caching disabled"""
         config.matching.cache_llm_responses = False
@@ -294,6 +303,7 @@ class TestTieredMatcherCache:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_cached_response_returns_data(self, config, cache_manager):
         """Test cache returns data if available"""
         cache_manager.get_llm_response = Mock(return_value={
@@ -307,6 +317,7 @@ class TestTieredMatcherCache:
 
         assert result == (0, 0.85, 'Best match')
 
+    @pytest.mark.fast
     def test_cache_response_saves_data(self, config, cache_manager):
         """Test caching LLM response"""
         matcher = TieredMatcher(config, cache_manager)
@@ -326,6 +337,7 @@ class TestTieredMatcherCache:
 class TestTieredMatcherScene:
     """Test scene-related methods"""
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_finds_scene(self, config, cache_manager, video_segments, scenes):
         """Test finding scene for segment"""
         matcher = TieredMatcher(config, cache_manager)
@@ -336,6 +348,7 @@ class TestTieredMatcherScene:
         assert scene.start_time == 0.0
         assert "Tokyo cityscape" in scene.description
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_no_scenes(self, config, cache_manager, video_segments):
         """Test scene lookup when no scenes available"""
         matcher = TieredMatcher(config, cache_manager)
@@ -352,6 +365,7 @@ class TestTieredMatcherScene:
 class TestTieredMatcherContext:
     """Test context building for LLM"""
 
+    @pytest.mark.fast
     def test_build_context_with_before_and_after(self, config, cache_manager, vo_segments):
         """Test building context from surrounding segments"""
         matcher = TieredMatcher(config, cache_manager)
@@ -365,6 +379,7 @@ class TestTieredMatcherContext:
         assert "Before:" in context
         assert "After:" in context
 
+    @pytest.mark.fast
     def test_build_context_with_only_before(self, config, cache_manager, vo_segments):
         """Test building context with only before segments"""
         matcher = TieredMatcher(config, cache_manager)
@@ -378,6 +393,7 @@ class TestTieredMatcherContext:
         assert "Before:" in context
         assert "After:" not in context
 
+    @pytest.mark.fast
     def test_build_context_empty_returns_none(self, config, cache_manager):
         """Test building context with no segments"""
         matcher = TieredMatcher(config, cache_manager)
@@ -397,6 +413,7 @@ class TestTieredMatcherContext:
 class TestTieredMatcherMatchSegment:
     """Test single segment matching"""
 
+    @pytest.mark.fast
     def test_match_segment_no_candidates_returns_gap(self, config, cache_manager, vo_segments):
         """Test matching with no candidates returns gap"""
         matcher = TieredMatcher(config, cache_manager)
@@ -407,6 +424,7 @@ class TestTieredMatcherMatchSegment:
         assert result.gap_reason == "No candidates"
         assert result.primary_match.confidence == 0.0
 
+    @pytest.mark.fast
     def test_match_segment_high_similarity_skips_llm(self, config, cache_manager, vo_segments, video_segments, scenes):
         """Test high embedding similarity skips LLM"""
         config.matching.skip_llm_threshold = 0.9
@@ -421,6 +439,7 @@ class TestTieredMatcherMatchSegment:
         assert result.primary_match.confidence >= 0.9
         assert "High embedding similarity" in result.primary_match.reasoning
 
+    @pytest.mark.fast
     def test_match_segment_uses_cached_response(self, config, cache_manager, vo_segments, video_segments, scenes):
         """Test matching uses cached LLM response"""
         cache_manager.get_llm_response = Mock(return_value={
@@ -437,6 +456,7 @@ class TestTieredMatcherMatchSegment:
         assert "(cached)" in result.primary_match.reasoning
         assert result.primary_match.confidence == 0.85
 
+    @pytest.mark.fast
     def test_match_segment_with_llm(self, config, cache_manager, vo_segments, video_segments, scenes):
         """Test matching with LLM provider"""
         matcher = TieredMatcher(config, cache_manager)
@@ -457,6 +477,7 @@ class TestTieredMatcherMatchSegment:
         assert result.primary_match.confidence > 0.0
         mock_provider.match_batch.assert_called_once()
 
+    @pytest.mark.fast
     def test_match_segment_generates_alternatives(self, config, cache_manager, vo_segments, video_segments, scenes):
         """Test matching generates alternatives"""
         config.output.num_alternatives = 2
@@ -480,6 +501,7 @@ class TestTieredMatcherMatchSegment:
 class TestTieredMatcherAlternatives:
     """Test alternative match generation"""
 
+    @pytest.mark.fast
     def test_get_alternatives_prefers_different_sources(self, config, cache_manager, video_segments, scenes):
         """Test alternatives prefer different source files"""
         config.output.num_alternatives = 2
@@ -500,6 +522,7 @@ class TestTieredMatcherAlternatives:
         if len(alternatives) > 0:
             assert alternatives[0].video_segment.source_file != primary.source_file
 
+    @pytest.mark.fast
     def test_get_alternatives_respects_num_alternatives_config(self, config, cache_manager, video_segments, scenes):
         """Test alternatives respects num_alternatives config"""
         config.output.num_alternatives = 1
@@ -523,6 +546,7 @@ class TestTieredMatcherAlternatives:
 class TestStrategyMatcher:
     """Test matching strategies"""
 
+    @pytest.mark.fast
     def test_strategy_matcher_init(self, config, scenes):
         """Test StrategyMatcher initialization"""
         matcher = StrategyMatcher(config, scenes)
@@ -531,6 +555,7 @@ class TestStrategyMatcher:
         assert matcher.scenes == scenes
         assert matcher.variety_config is not None
 
+    @pytest.mark.fast
     def test_get_clip_id_generates_unique_id(self, config, scenes, video_segments):
         """Test clip ID generation"""
         matcher = StrategyMatcher(config, scenes)
@@ -541,6 +566,7 @@ class TestStrategyMatcher:
         assert "0.00" in clip_id  # start time
         assert "10.00" in clip_id  # end time
 
+    @pytest.mark.fast
     def test_is_clip_excluded_same_clip(self, config, scenes, video_segments):
         """Test exclusion of same clip"""
         matcher = StrategyMatcher(config, scenes)
@@ -555,6 +581,7 @@ class TestStrategyMatcher:
         assert is_excluded is True
         assert "Same clip" in reason
 
+    @pytest.mark.fast
     def test_is_clip_excluded_different_source_required(self, config, scenes, video_segments):
         """Test exclusion when different source required"""
         config.output.variety.require_different_source = True
@@ -579,6 +606,7 @@ class TestStrategyMatcher:
 class TestMatchingStrategies:
     """Test individual matching strategies"""
 
+    @pytest.mark.fast
     def test_match_visual_first_uses_scene_descriptions(self, config, scenes, vo_segments, video_segments):
         """Test visual_first strategy prioritizes scenes"""
         matcher = StrategyMatcher(config, scenes)
@@ -595,6 +623,7 @@ class TestMatchingStrategies:
         # Should return a match
         assert result is not None or len(existing_matches) > 0  # May fail if all excluded
 
+    @pytest.mark.fast
     def test_match_different_source_enforces_variety(self, config, scenes, vo_segments, video_segments):
         """Test different_source strategy enforces source variety"""
         matcher = StrategyMatcher(config, scenes)
@@ -612,6 +641,7 @@ class TestMatchingStrategies:
         if result:
             assert result.video_segment.source_file not in [m.source_file for m in existing_matches]
 
+    @pytest.mark.fast
     def test_match_keyword_only_uses_keywords(self, config, scenes, vo_segments, video_segments):
         """Test keyword_only strategy uses keyword overlap"""
         matcher = StrategyMatcher(config, scenes)
@@ -633,6 +663,7 @@ class TestMatchingStrategies:
         # Should return a match based on keywords
         assert result is not None or len(candidates) == 0
 
+    @pytest.mark.fast
     def test_match_embedding_diversity_maximizes_difference(self, config, scenes, vo_segments, video_segments):
         """Test embedding_diversity finds different clips"""
         matcher = StrategyMatcher(config, scenes)
@@ -663,6 +694,7 @@ class TestMatchingStrategies:
             # The diverse clip should be selected if it meets minimum relevance
             assert result.strategy == "embedding_diversity"
 
+    @pytest.mark.fast
     def test_match_broll_only_filters_by_is_broll(self, config, scenes, vo_segments, video_segments):
         """Test broll_only strategy filters by is_broll flag"""
         matcher = StrategyMatcher(config, scenes)
@@ -700,6 +732,7 @@ class TestMatchingStrategies:
 class TestMatchAllSegments:
     """Test main matching orchestration"""
 
+    @pytest.mark.fast
     def test_match_all_segments_processes_all(self, config, cache_manager, vo_segments, video_segments, embeddings, scenes):
         """Test matching all segments"""
         vo_embeddings, video_embeddings = embeddings
@@ -726,6 +759,7 @@ class TestMatchAllSegments:
         for result in results:
             assert result.primary_match is not None
 
+    @pytest.mark.fast
     def test_match_all_segments_with_strategies(self, config, cache_manager, vo_segments, video_segments, embeddings, scenes):
         """Test matching with strategy tracks enabled"""
         config.output.include_strategy_tracks = True

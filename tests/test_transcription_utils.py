@@ -22,6 +22,7 @@ class TestExtractAudio:
     """Test extract_audio() function"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_success(self, mock_run, tmp_path):
         """Test successful audio extraction"""
         video_file = tmp_path / "test.mp4"
@@ -44,6 +45,7 @@ class TestExtractAudio:
             mock_run.assert_called_once()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_with_output_dir(self, mock_run, tmp_path):
         """Test audio extraction to specific output directory"""
         video_file = tmp_path / "test.mp4"
@@ -64,6 +66,7 @@ class TestExtractAudio:
             assert str(output_dir) in result
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_skips_existing(self, mock_run, tmp_path):
         """Test that extraction skips if audio already exists"""
         video_file = tmp_path / "test.mp4"
@@ -83,6 +86,7 @@ class TestExtractAudio:
             mock_run.assert_not_called()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_ffmpeg_error(self, mock_run, tmp_path):
         """Test handling of ffmpeg errors"""
         video_file = tmp_path / "test.mp4"
@@ -100,6 +104,7 @@ class TestExtractAudio:
             assert result is None
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_timeout(self, mock_run, tmp_path):
         """Test handling of ffmpeg timeout"""
         video_file = tmp_path / "test.mp4"
@@ -114,6 +119,7 @@ class TestExtractAudio:
             assert result is None
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_exception(self, mock_run, tmp_path):
         """Test handling of unexpected exceptions"""
         video_file = tmp_path / "test.mp4"
@@ -128,6 +134,7 @@ class TestExtractAudio:
             assert result is None
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_filename_hash(self, mock_run, tmp_path):
         """Test that filename includes hash for uniqueness"""
         video_file = tmp_path / "test.mp4"
@@ -147,6 +154,7 @@ class TestExtractAudio:
             assert '_' in Path(result).stem  # Has underscore separator
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_long_filename(self, mock_run, tmp_path):
         """Test handling of very long filenames"""
         long_name = "a" * 100 + ".mp4"
@@ -170,6 +178,7 @@ class TestExtractAudio:
 class TestWriteSrt:
     """Test write_srt() function"""
 
+    @pytest.mark.fast
     def test_write_srt_basic(self, tmp_path):
         """Test basic SRT file writing"""
         segments = [
@@ -189,6 +198,7 @@ class TestWriteSrt:
         assert "Second segment" in content
         assert "-->" in content
 
+    @pytest.mark.fast
     def test_write_srt_timestamp_format(self, tmp_path):
         """Test SRT timestamp formatting"""
         segments = [
@@ -203,6 +213,7 @@ class TestWriteSrt:
         assert "00:00:00,500" in content
         assert "00:00:03,123" in content
 
+    @pytest.mark.fast
     def test_write_srt_strips_whitespace(self, tmp_path):
         """Test that text is stripped of whitespace"""
         segments = [
@@ -216,6 +227,7 @@ class TestWriteSrt:
         assert "Trimmed text" in content
         assert "  Trimmed text  " not in content
 
+    @pytest.mark.fast
     def test_write_srt_empty_segments(self, tmp_path):
         """Test writing empty segment list"""
         srt_file = tmp_path / "test.srt"
@@ -225,6 +237,7 @@ class TestWriteSrt:
         content = srt_file.read_text(encoding='utf-8')
         assert content == ""
 
+    @pytest.mark.fast
     def test_write_srt_missing_keys(self, tmp_path):
         """Test handling of segments with missing keys"""
         segments = [
@@ -239,6 +252,7 @@ class TestWriteSrt:
         # Should use default values (0 for start/end, empty for text)
         assert "00:00:00,000" in content
 
+    @pytest.mark.fast
     def test_write_srt_unicode_text(self, tmp_path):
         """Test handling of unicode characters"""
         segments = [
@@ -254,6 +268,7 @@ class TestWriteSrt:
         assert "мир" in content
         assert "🎉" in content
 
+    @pytest.mark.fast
     def test_write_srt_multiline_text(self, tmp_path):
         """Test handling of text with newlines"""
         segments = [
@@ -266,6 +281,7 @@ class TestWriteSrt:
         content = srt_file.read_text(encoding='utf-8')
         assert "Line 1\nLine 2" in content
 
+    @pytest.mark.fast
     def test_write_srt_long_duration(self, tmp_path):
         """Test timestamp formatting for long durations (hours)"""
         segments = [
@@ -285,6 +301,7 @@ class TestWriteSrt:
 class TestExtractVideoId:
     """Test extract_video_id() function"""
 
+    @pytest.mark.fast
     def test_extract_video_id_regular_file(self):
         """Test extraction from regular filename with 11-char ID"""
         filename = "dQw4w9WgXcQ.mp4"
@@ -292,6 +309,7 @@ class TestExtractVideoId:
 
         assert result == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_extract_video_id_segment_file(self):
         """Test extraction from segment filename"""
         filename = "dQw4w9WgXcQ_0045.mp4"
@@ -299,6 +317,7 @@ class TestExtractVideoId:
 
         assert result == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_extract_video_id_audio_file(self):
         """Test extraction from audio filename"""
         filename = "dQw4w9WgXcQ.mp3"
@@ -306,6 +325,7 @@ class TestExtractVideoId:
 
         assert result == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_extract_video_id_with_path(self):
         """Test extraction from full path"""
         filename = "/path/to/videos/dQw4w9WgXcQ.mp4"
@@ -313,6 +333,7 @@ class TestExtractVideoId:
 
         assert result == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_extract_video_id_embedded_in_name(self):
         """Test extraction when ID is embedded in longer filename"""
         filename = "prefix_dQw4w9WgXcQ_suffix.mp4"
@@ -324,6 +345,7 @@ class TestExtractVideoId:
         assert result is not None
         assert len(result) == 11
 
+    @pytest.mark.fast
     def test_extract_video_id_invalid_filename(self):
         """Test with filename that has no valid ID"""
         filename = "regular_video_name.mp4"
@@ -333,6 +355,7 @@ class TestExtractVideoId:
         # Behavior depends on whether there's a valid 11-char sequence
         assert result is None or len(result) == 11
 
+    @pytest.mark.fast
     def test_extract_video_id_too_short(self):
         """Test with filename shorter than 11 characters"""
         filename = "short.mp4"
@@ -340,6 +363,7 @@ class TestExtractVideoId:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_extract_video_id_special_characters(self):
         """Test with valid YouTube ID characters (A-Za-z0-9_-)"""
         # Valid YouTube IDs can contain underscores and hyphens
@@ -349,6 +373,7 @@ class TestExtractVideoId:
         # Should extract the 11-char ID
         assert result == "abc-def_123"
 
+    @pytest.mark.fast
     def test_extract_video_id_numeric_only(self):
         """Test with numeric-only ID"""
         filename = "12345678901.mp4"
@@ -356,6 +381,7 @@ class TestExtractVideoId:
 
         assert result == "12345678901"
 
+    @pytest.mark.fast
     def test_extract_video_id_mixed_case(self):
         """Test with mixed case ID"""
         filename = "AbCdEfGhIjK.mp4"
@@ -367,55 +393,65 @@ class TestExtractVideoId:
 class TestFormatTimestampSrt:
     """Test format_timestamp_srt() function"""
 
+    @pytest.mark.fast
     def test_format_timestamp_zero(self):
         """Test formatting zero timestamp"""
         result = format_timestamp_srt(0.0)
         assert result == "00:00:00,000"
 
+    @pytest.mark.fast
     def test_format_timestamp_subsecond(self):
         """Test formatting subsecond timestamp"""
         result = format_timestamp_srt(0.123)
         assert result == "00:00:00,123"
 
+    @pytest.mark.fast
     def test_format_timestamp_seconds(self):
         """Test formatting seconds only"""
         result = format_timestamp_srt(45.5)
         assert result == "00:00:45,500"
 
+    @pytest.mark.fast
     def test_format_timestamp_minutes(self):
         """Test formatting with minutes"""
         result = format_timestamp_srt(125.250)
         # 125.250 seconds = 2:05.250
         assert result == "00:02:05,250"
 
+    @pytest.mark.fast
     def test_format_timestamp_hours(self):
         """Test formatting with hours"""
         result = format_timestamp_srt(3661.123)
         # 3661.123 seconds = 1:01:01.123
         assert result == "01:01:01,123"
 
+    @pytest.mark.fast
     def test_format_timestamp_long_duration(self):
         """Test formatting very long duration"""
         result = format_timestamp_srt(359999.999)
         # 359999.999 seconds = 99:59:59.999
         assert result == "99:59:59,999"
 
+    @pytest.mark.fast
     def test_format_timestamp_milliseconds_rounding(self):
         """Test milliseconds are truncated (not rounded)"""
         result = format_timestamp_srt(1.9999)
         # Should truncate to 999 ms, not round to 2.000
         assert result == "00:00:01,999"
 
+    @pytest.mark.fast
     def test_format_timestamp_exact_minute(self):
         """Test exact minute boundary"""
         result = format_timestamp_srt(60.0)
         assert result == "00:01:00,000"
 
+    @pytest.mark.fast
     def test_format_timestamp_exact_hour(self):
         """Test exact hour boundary"""
         result = format_timestamp_srt(3600.0)
         assert result == "01:00:00,000"
 
+    @pytest.mark.fast
     def test_format_timestamp_negative_not_expected(self):
         """Test behavior with negative value (edge case)"""
         # Not expected in normal use, but test graceful handling
@@ -428,6 +464,7 @@ class TestFormatTimestampSrt:
 class TestEdgeCases:
     """Test edge cases and integration scenarios"""
 
+    @pytest.mark.fast
     def test_extract_audio_and_write_srt_integration(self, tmp_path):
         """Test integration of audio extraction and SRT writing"""
         # This would normally be an integration test, but testing the flow
@@ -440,6 +477,7 @@ class TestEdgeCases:
 
         assert srt_file.exists()
 
+    @pytest.mark.fast
     def test_format_timestamp_matches_write_srt(self):
         """Test that standalone format function matches write_srt internal format"""
         # Test that public format_timestamp_srt matches the internal one used by write_srt
@@ -456,6 +494,7 @@ class TestEdgeCases:
 
         assert standalone_result == expected
 
+    @pytest.mark.fast
     def test_video_id_extraction_consistency(self):
         """Test that video ID extraction is consistent across formats"""
         video_id = "dQw4w9WgXcQ"
@@ -471,6 +510,7 @@ class TestEdgeCases:
             result = extract_video_id(filename)
             assert result == video_id, f"Failed for {filename}"
 
+    @pytest.mark.integration
     def test_audio_filename_collision_prevention(self, tmp_path):
         """Test that hash prevents collisions for similar names"""
         # Create two videos with similar names in different directories

@@ -34,11 +34,13 @@ def create_mock_segment(
 class TestSelectNegativeSample:
     """Test suite for select_negative_sample function."""
 
+    @pytest.mark.fast
     def test_returns_none_for_empty_candidates(self):
         """Empty candidates list should return None."""
         result = select_negative_sample([])
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_for_insufficient_candidates(self):
         """Less than 4 candidates should return None (need meaningful bottom 25%)."""
         # 3 candidates is not enough for meaningful bottom 25%
@@ -49,6 +51,7 @@ class TestSelectNegativeSample:
         result = select_negative_sample(candidates)
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_sample_for_4_candidates(self):
         """4 candidates should return a sample from bottom 25% (index 3)."""
         candidates = [
@@ -66,6 +69,7 @@ class TestSelectNegativeSample:
         assert result[0].text == "Low score"
         assert result[1] == 0.40
 
+    @pytest.mark.fast
     def test_selects_from_bottom_25_percent(self):
         """Should select from bottom 25% of candidates."""
         # 8 candidates: bottom 25% = last 2 (indices 6, 7)
@@ -81,6 +85,7 @@ class TestSelectNegativeSample:
             # Bottom 25% of 8 = indices 6 and 7
             assert result[0].text in ["Segment 6", "Segment 7"]
 
+    @pytest.mark.fast
     def test_selects_from_bottom_with_custom_percentile(self):
         """Should respect custom bottom_percentile parameter."""
         # 10 candidates: bottom 50% = last 5 (indices 5-9)
@@ -97,6 +102,7 @@ class TestSelectNegativeSample:
             seg_index = int(result[0].text.split()[1])
             assert seg_index >= 5
 
+    @pytest.mark.fast
     def test_handles_large_candidate_list(self):
         """Should work correctly with large candidate lists."""
         # 100 candidates: bottom 25% = last 25 (indices 75-99)
@@ -110,6 +116,7 @@ class TestSelectNegativeSample:
         seg_index = int(result[0].text.split()[1])
         assert seg_index >= 75  # Bottom 25%
 
+    @pytest.mark.fast
     def test_random_selection_varies(self):
         """Should randomly select different samples from bottom candidates."""
         candidates = [
@@ -128,6 +135,7 @@ class TestSelectNegativeSample:
         # Bottom 25% of 20 = 5 samples, so we expect variety
         assert len(samples) > 1
 
+    @pytest.mark.fast
     def test_preserves_segment_and_similarity(self):
         """Returned tuple should preserve original segment and similarity."""
         expected_seg = create_mock_segment(text="Bottom segment", source_file="bottom.mp4")
@@ -148,6 +156,7 @@ class TestSelectNegativeSample:
 class TestFormatNegativeSampleForPrompt:
     """Test suite for format_negative_sample_for_prompt function."""
 
+    @pytest.mark.fast
     def test_formats_basic_sample(self):
         """Should format negative sample with standard label."""
         segment = create_mock_segment(text="This is a test transcript", source_file="test_video.mp4")
@@ -158,6 +167,7 @@ class TestFormatNegativeSampleForPrompt:
         assert "This is a test transcript" in result
         assert "unlikely match" in result.lower()
 
+    @pytest.mark.fast
     def test_truncates_long_source_file_name(self):
         """Should truncate long source file names to 30 chars."""
         long_name = "this_is_a_very_long_video_filename_that_exceeds_30_chars.mp4"
@@ -169,6 +179,7 @@ class TestFormatNegativeSampleForPrompt:
         # The formatted output should contain a truncated version
         assert "this_is_a_very_long_video_file" in result
 
+    @pytest.mark.fast
     def test_truncates_long_text(self):
         """Should truncate long transcript text to 60 chars with ellipsis."""
         long_text = "This is a very long transcript that definitely exceeds sixty characters and should be truncated"
@@ -180,6 +191,7 @@ class TestFormatNegativeSampleForPrompt:
         # Should not contain full text
         assert long_text not in result
 
+    @pytest.mark.fast
     def test_handles_short_text(self):
         """Short text should not have ellipsis."""
         short_text = "Short text"
@@ -190,6 +202,7 @@ class TestFormatNegativeSampleForPrompt:
         # Should not add unnecessary ellipsis
         assert result.count("...") == 0
 
+    @pytest.mark.fast
     def test_escapes_quotes_in_text(self):
         """Should escape double quotes in text to prevent JSON issues."""
         text_with_quotes = 'He said "hello" to everyone'
@@ -200,6 +213,7 @@ class TestFormatNegativeSampleForPrompt:
         assert '"hello"' not in result
         assert "'hello'" in result
 
+    @pytest.mark.fast
     def test_uses_custom_label(self):
         """Should respect custom index_label parameter."""
         segment = create_mock_segment(text="Test transcript")
@@ -208,6 +222,7 @@ class TestFormatNegativeSampleForPrompt:
         assert "NEGATIVE" in result
         assert "UNLIKELY" not in result
 
+    @pytest.mark.fast
     def test_handles_empty_source_file(self):
         """Should handle empty source file gracefully."""
         segment = create_mock_segment(text="Test", source_file="")
@@ -216,6 +231,7 @@ class TestFormatNegativeSampleForPrompt:
         # Should not crash, should use "unknown"
         assert "unknown" in result.lower() or result  # Either has unknown or just works
 
+    @pytest.mark.fast
     def test_handles_empty_text(self):
         """Should handle empty transcript text gracefully."""
         segment = create_mock_segment(text="", source_file="video.mp4")
@@ -229,6 +245,7 @@ class TestFormatNegativeSampleForPrompt:
 class TestNegativeSamplingIntegration:
     """Integration tests for negative sampling in LLM matchers."""
 
+    @pytest.mark.fast
     def test_config_option_exists(self):
         """Verify negative_sampling_enabled config option exists in MatchingConfig."""
         from src.config.sections.matching import MatchingConfig
@@ -237,6 +254,7 @@ class TestNegativeSamplingIntegration:
         assert hasattr(config, 'negative_sampling_enabled')
         assert config.negative_sampling_enabled is True  # Default should be True
 
+    @pytest.mark.fast
     def test_llm_provider_accepts_negative_samples_parameter(self):
         """Verify LLMProvider.match_batch accepts negative_samples parameter."""
         from src.matching.llm_providers import LLMProvider
@@ -246,6 +264,7 @@ class TestNegativeSamplingIntegration:
         params = list(sig.parameters.keys())
         assert 'negative_samples' in params
 
+    @pytest.mark.fast
     def test_gemini_matcher_accepts_negative_samples(self):
         """Verify GeminiMatcher.match_batch accepts negative_samples parameter."""
         from src.matching.llm_providers import GeminiMatcher
@@ -256,6 +275,7 @@ class TestNegativeSamplingIntegration:
         params = list(sig.parameters.keys())
         assert 'negative_samples' in params
 
+    @pytest.mark.fast
     def test_claude_matcher_accepts_negative_samples(self):
         """Verify ClaudeMatcher.match_batch accepts negative_samples parameter."""
         from src.matching.llm_providers import ClaudeMatcher
@@ -265,6 +285,7 @@ class TestNegativeSamplingIntegration:
         params = list(sig.parameters.keys())
         assert 'negative_samples' in params
 
+    @pytest.mark.fast
     def test_local_llm_matcher_accepts_negative_samples(self):
         """Verify LocalLLMMatcher.match_batch accepts negative_samples parameter."""
         from src.matching.llm_providers import LocalLLMMatcher
@@ -278,6 +299,7 @@ class TestNegativeSamplingIntegration:
 class TestNegativeSamplingEdgeCases:
     """Edge case tests for negative sampling functions."""
 
+    @pytest.mark.fast
     def test_select_with_identical_scores(self):
         """Should work when all candidates have identical similarity scores."""
         candidates = [
@@ -289,6 +311,7 @@ class TestNegativeSamplingEdgeCases:
         assert result is not None
         assert result[1] == 0.75
 
+    @pytest.mark.fast
     def test_select_with_zero_similarity_scores(self):
         """Should work when bottom candidates have zero similarity."""
         candidates = [
@@ -305,6 +328,7 @@ class TestNegativeSamplingEdgeCases:
         assert result[0].text == "Zero"
         assert result[1] == 0.00
 
+    @pytest.mark.fast
     def test_select_with_negative_similarity_scores(self):
         """Should handle negative similarity scores (edge case)."""
         candidates = [
@@ -317,6 +341,7 @@ class TestNegativeSamplingEdgeCases:
         result = select_negative_sample(candidates)
         assert result is not None
 
+    @pytest.mark.fast
     def test_format_with_unicode_text(self):
         """Should handle unicode characters in transcript text."""
         segment = create_mock_segment(
@@ -329,6 +354,7 @@ class TestNegativeSamplingEdgeCases:
         assert "unicode_video" in result
         assert "unlikely match" in result.lower()
 
+    @pytest.mark.fast
     def test_format_with_special_characters(self):
         """Should handle special characters in text."""
         segment = create_mock_segment(

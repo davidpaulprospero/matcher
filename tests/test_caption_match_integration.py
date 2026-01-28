@@ -134,6 +134,7 @@ class TestCaptionQualityMatchIntegration:
     # AC1: Low-quality auto-generated captions flow to MatchStage with quality='low'
     # =========================================================================
 
+    @pytest.mark.fast
     def test_low_quality_caption_flows_to_match_stage(
         self,
         sample_text_metadata_low_quality,
@@ -178,6 +179,7 @@ class TestCaptionQualityMatchIntegration:
         assert abs(adjusted_confidence - 0.6375) < 0.001
         assert 'low' in reason.lower() or 'caption quality' in reason.lower()
 
+    @pytest.mark.fast
     def test_auto_generated_flag_correlates_with_quality(
         self,
         sample_text_metadata_low_quality,
@@ -203,6 +205,7 @@ class TestCaptionQualityMatchIntegration:
     # AC2: Match confidence differs for same text when quality is 'high' vs 'low'
     # =========================================================================
 
+    @pytest.mark.fast
     def test_same_text_different_quality_different_confidence(
         self,
         mock_config_with_weights,
@@ -259,6 +262,7 @@ class TestCaptionQualityMatchIntegration:
         # Difference should be significant (at least 15%)
         assert high_conf - low_conf >= 0.15
 
+    @pytest.mark.fast
     def test_medium_quality_between_high_and_low(
         self,
         mock_config_with_weights,
@@ -289,6 +293,7 @@ class TestCaptionQualityMatchIntegration:
     # AC3: Final OTIO segments include caption_quality metadata
     # =========================================================================
 
+    @pytest.mark.fast
     def test_caption_quality_preserved_in_segment(
         self,
         sample_text_metadata_low_quality
@@ -328,6 +333,7 @@ class TestCaptionQualityMatchIntegration:
 
         assert segment_dict['caption_quality'] == 'low'
 
+    @pytest.mark.fast
     def test_caption_quality_in_match_result_metadata(self):
         """Test that caption_quality can be included in match result metadata.
 
@@ -362,6 +368,7 @@ class TestCaptionQualityMatchIntegration:
         assert match_result['caption_quality'] == 'low'
         assert match_result['caption_auto_generated'] is True
 
+    @pytest.mark.fast
     def test_text_metadata_to_match_quality_flow(
         self,
         sample_text_metadata_low_quality,
@@ -423,6 +430,7 @@ class TestCaptionQualityMatchIntegration:
     # AC4: Quality weights config correctly applied (US-006 integration)
     # =========================================================================
 
+    @pytest.mark.fast
     def test_quality_weights_config_applied(
         self,
         sample_video_segment,
@@ -447,6 +455,7 @@ class TestCaptionQualityMatchIntegration:
         assert abs(adjusted_conf - 0.81) < 0.001
         assert "x0.90" in reason
 
+    @pytest.mark.fast
     def test_custom_weights_override_defaults(self, sample_video_segment):
         """Test that custom weights in config override default values."""
         # Custom config with different weights
@@ -471,6 +480,7 @@ class TestCaptionQualityMatchIntegration:
         # With custom low=0.5: 0.80 * 0.5 = 0.40
         assert abs(adjusted_conf - 0.40) < 0.001
 
+    @pytest.mark.fast
     def test_additive_mode_when_weights_none(
         self,
         sample_video_segment,
@@ -493,6 +503,7 @@ class TestCaptionQualityMatchIntegration:
         assert abs(adjusted_conf - 0.70) < 0.001
         assert "-0.10" in reason or "low" in reason.lower()
 
+    @pytest.mark.fast
     def test_adjustment_disabled_no_change(
         self,
         sample_video_segment,
@@ -516,6 +527,7 @@ class TestCaptionQualityMatchIntegration:
     # Edge Cases and Boundary Tests
     # =========================================================================
 
+    @pytest.mark.fast
     def test_no_caption_quality_attribute_no_change(
         self,
         sample_video_segment,
@@ -534,6 +546,7 @@ class TestCaptionQualityMatchIntegration:
         assert adjusted_conf == base_confidence
         assert reason == ""
 
+    @pytest.mark.fast
     def test_unknown_quality_value_defaults_to_1(self, sample_video_segment):
         """Test that unknown quality values default to weight=1.0."""
         config = Mock()
@@ -553,6 +566,7 @@ class TestCaptionQualityMatchIntegration:
         # Unknown defaults to 1.0, so no change
         assert adjusted_conf == base_confidence
 
+    @pytest.mark.fast
     def test_confidence_capped_at_1_and_0(self, mock_config_with_weights):
         """Test that adjusted confidence is clamped to [0.0, 1.0]."""
         # Test upper cap with boost
@@ -591,6 +605,7 @@ class TestCaptionQualityDistributionLogging:
     This test class verifies that tracking works correctly.
     """
 
+    @pytest.mark.fast
     def test_quality_distribution_counting(self):
         """Test that caption quality distribution is correctly counted.
 
@@ -622,6 +637,7 @@ class TestCaptionQualityDistributionLogging:
         total_counted = sum(caption_quality_count.values())
         assert total_counted == 6
 
+    @pytest.mark.fast
     def test_empty_quality_distribution(self):
         """Test that empty quality distribution is handled gracefully."""
         text_metadata = [
@@ -656,6 +672,7 @@ class TestCaptionQualityPipelineSmokeTest:
     - scoring.py (apply_caption_quality_adjustment)
     """
 
+    @pytest.mark.fast
     def test_full_pipeline_smoke_test(self):
         """Comprehensive smoke test for caption quality pipeline.
 
@@ -856,6 +873,7 @@ class TestTimingPenaltyPipeline:
     # AC1: CaptionResult.timing_penalty_factor is calculated correctly
     # =========================================================================
 
+    @pytest.mark.fast
     def test_timing_penalty_factor_calculated_correctly_perfect(
         self, sample_caption_segments_perfect
     ):
@@ -875,6 +893,7 @@ class TestTimingPenaltyPipeline:
         # Perfect timing = no penalty (factor 1.0)
         assert result.timing_penalty_factor == pytest.approx(1.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_timing_penalty_factor_calculated_correctly_poor(
         self, sample_caption_segments_poor
     ):
@@ -898,6 +917,7 @@ class TestTimingPenaltyPipeline:
         # penalty = 1.0 - (0.2 * 0.3) - 0 = 0.94
         assert result.timing_penalty_factor == pytest.approx(0.94, abs=0.02)
 
+    @pytest.mark.fast
     def test_timing_penalty_factor_low_coverage(self):
         """Test penalty factor with 50% coverage."""
         segments = [
@@ -921,6 +941,7 @@ class TestTimingPenaltyPipeline:
     # AC2: timing_penalty stored in text_metadata by CaptionStage
     # =========================================================================
 
+    @pytest.mark.fast
     def test_timing_penalty_stored_in_text_metadata(self):
         """Test that timing_penalty is correctly stored in text_metadata.
 
@@ -962,6 +983,7 @@ class TestTimingPenaltyPipeline:
         assert text_metadata['timing_penalty'] == pytest.approx(0.90, abs=0.01)
         assert text_metadata['timing_penalty'] < 1.0  # Has penalty
 
+    @pytest.mark.fast
     def test_timing_penalty_perfect_timing_stored_as_1(self):
         """Test that perfect timing stores timing_penalty=1.0."""
         segments = [
@@ -989,6 +1011,7 @@ class TestTimingPenaltyPipeline:
     # AC3: MatchStage retrieves timing_penalty from text_metadata
     # =========================================================================
 
+    @pytest.mark.fast
     def test_match_stage_retrieves_timing_penalty(
         self, sample_text_metadata_with_timing_penalty
     ):
@@ -1015,6 +1038,7 @@ class TestTimingPenaltyPipeline:
         assert hasattr(vid_segment, 'timing_penalty')
         assert vid_segment.timing_penalty == 0.75
 
+    @pytest.mark.fast
     def test_match_stage_handles_missing_timing_penalty(self):
         """Test that MatchStage handles missing timing_penalty gracefully."""
         meta = {
@@ -1045,6 +1069,7 @@ class TestTimingPenaltyPipeline:
     # AC4: apply_timing_penalty() reduces confidence correctly
     # =========================================================================
 
+    @pytest.mark.fast
     def test_apply_timing_penalty_reduces_confidence(
         self, timing_penalty_config
     ):
@@ -1071,6 +1096,7 @@ class TestTimingPenaltyPipeline:
         assert "timing penalty" in reason.lower()
         assert "x0.75" in reason
 
+    @pytest.mark.fast
     def test_apply_timing_penalty_no_change_when_1(
         self, timing_penalty_config
     ):
@@ -1093,6 +1119,7 @@ class TestTimingPenaltyPipeline:
         assert adjusted_conf == base_confidence
         assert reason == ""
 
+    @pytest.mark.fast
     def test_apply_timing_penalty_disabled_no_change(
         self, timing_penalty_disabled_config
     ):
@@ -1119,6 +1146,7 @@ class TestTimingPenaltyPipeline:
     # AC5: Mock pipeline with CaptionStage and MatchStage integration
     # =========================================================================
 
+    @pytest.mark.fast
     def test_full_pipeline_timing_penalty_flow(self, timing_penalty_config):
         """Test complete flow: CaptionResult -> text_metadata -> segment -> confidence.
 
@@ -1176,6 +1204,7 @@ class TestTimingPenaltyPipeline:
         assert adjusted_conf == pytest.approx(0.81, abs=0.01)
         assert "timing penalty" in reason.lower()
 
+    @pytest.mark.fast
     def test_full_pipeline_perfect_vs_poor_timing(self, timing_penalty_config):
         """Test that perfect and poor timing produce different confidence.
 
@@ -1238,6 +1267,7 @@ class TestTimingPenaltyPipeline:
         assert perfect['adjusted_confidence'] == base_confidence  # No penalty
         assert poor['adjusted_confidence'] < base_confidence  # Has penalty
 
+    @pytest.mark.fast
     def test_timing_penalty_combined_with_caption_quality(self, timing_penalty_config):
         """Test that timing penalty can be combined with caption quality adjustment.
 
@@ -1298,6 +1328,7 @@ class TestTimingPenaltyEdgeCases:
         config.matching.apply_timing_penalty = True
         return config
 
+    @pytest.mark.fast
     def test_zero_duration_video_no_penalty(self):
         """Test that zero-duration video produces no penalty (can't calculate)."""
         segments = [
@@ -1315,6 +1346,7 @@ class TestTimingPenaltyEdgeCases:
         # Can't calculate penalty without valid duration
         assert result.timing_penalty_factor == 1.0
 
+    @pytest.mark.fast
     def test_negative_penalty_clamped_to_zero(self, timing_config):
         """Test that extreme timing issues clamp penalty at 0.0."""
         segment = SRTSegment(
@@ -1331,6 +1363,7 @@ class TestTimingPenaltyEdgeCases:
 
         assert conf == 0.0  # Clamped at 0
 
+    @pytest.mark.fast
     def test_penalty_above_one_is_no_penalty(self, timing_config):
         """Test that timing_penalty >= 1.0 means no penalty."""
         segment = SRTSegment(
@@ -1348,6 +1381,7 @@ class TestTimingPenaltyEdgeCases:
         assert conf == 0.80  # No change
         assert reason == ""
 
+    @pytest.mark.fast
     def test_caption_exceeds_duration_significantly(self):
         """Test penalty for caption far exceeding video duration."""
         segments = [
@@ -1369,6 +1403,7 @@ class TestTimingPenaltyEdgeCases:
         # penalty = 1.0 - 0.3 = 0.7
         assert penalty == pytest.approx(0.7, abs=0.02)
 
+    @pytest.mark.fast
     def test_very_sparse_captions_low_coverage(self):
         """Test penalty for very sparse captions."""
         segments = [
@@ -1408,6 +1443,7 @@ class TestTimingPenaltyPipelineSmokeTest:
     - tiered_matcher.py (timing penalty application)
     """
 
+    @pytest.mark.fast
     def test_full_pipeline_smoke_test(self):
         """Comprehensive smoke test for timing penalty pipeline.
 

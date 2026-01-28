@@ -119,12 +119,14 @@ def sample_video_files(temp_dir):
 class TestVideoScore:
     """Test VideoScore dataclass"""
 
+    @pytest.mark.fast
     def test_video_score_creation(self, sample_video_score):
         """Test creating VideoScore"""
         assert sample_video_score.filename == "beach_video.mp4"
         assert sample_video_score.match_score == 0.67
         assert len(sample_video_score.keyword_matches) == 2
 
+    @pytest.mark.fast
     def test_video_score_to_dict(self, sample_video_score):
         """Test VideoScore serialization"""
         data = sample_video_score.to_dict()
@@ -141,6 +143,7 @@ class TestVideoScore:
 class TestRemixResult:
     """Test RemixResult dataclass"""
 
+    @pytest.mark.fast
     def test_remix_result_creation(self, sample_video_score):
         """Test creating RemixResult"""
         result = RemixResult(
@@ -158,6 +161,7 @@ class TestRemixResult:
         assert result.included_files == 7
         assert result.avg_match_score == 0.65
 
+    @pytest.mark.fast
     def test_remix_result_to_dict(self, sample_video_score):
         """Test RemixResult serialization"""
         result = RemixResult(
@@ -184,6 +188,7 @@ class TestRemixResult:
 class TestRemixConfig:
     """Test RemixConfig"""
 
+    @pytest.mark.fast
     def test_config_defaults(self):
         """Test default config values"""
         config = RemixConfig()
@@ -193,6 +198,7 @@ class TestRemixConfig:
         assert config.max_files_to_include == 100
         assert config.fuzzy_match is True
 
+    @pytest.mark.fast
     def test_config_custom_values(self):
         """Test custom config values"""
         config = RemixConfig(
@@ -213,6 +219,7 @@ class TestRemixConfig:
 class TestKeywordRemixProcessorInit:
     """Test KeywordRemixProcessor initialization"""
 
+    @pytest.mark.fast
     def test_init_basic(self, remix_config, sample_keywords):
         """Test basic initialization"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -221,6 +228,7 @@ class TestKeywordRemixProcessorInit:
         assert len(processor.keywords) == 3
         assert processor.metrics['files_scanned'] == 0
 
+    @pytest.mark.fast
     def test_init_case_normalization(self, remix_config):
         """Test keyword case normalization"""
         processor = KeywordRemixProcessor(remix_config, ["TRAVEL", "Beach"])
@@ -228,6 +236,7 @@ class TestKeywordRemixProcessorInit:
         # Should be lowercase when case_sensitive=False
         assert processor.keywords == ["travel", "beach"]
 
+    @pytest.mark.fast
     def test_init_case_sensitive(self):
         """Test case-sensitive mode"""
         config = RemixConfig(case_sensitive=True)
@@ -236,6 +245,7 @@ class TestKeywordRemixProcessorInit:
         # Should preserve case
         assert processor.keywords == ["TRAVEL", "Beach"]
 
+    @pytest.mark.fast
     def test_compile_keyword_patterns(self, remix_config, sample_keywords):
         """Test regex pattern compilation"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -252,6 +262,7 @@ class TestKeywordRemixProcessorInit:
 class TestFilenameScoring:
     """Test filename scoring against keywords"""
 
+    @pytest.mark.fast
     def test_score_filename_exact_match(self, remix_config):
         """Test exact keyword match in filename"""
         processor = KeywordRemixProcessor(remix_config, ["beach", "vacation"])
@@ -262,6 +273,7 @@ class TestFilenameScoring:
         assert "beach" in matches
         assert "vacation" in matches
 
+    @pytest.mark.fast
     def test_score_filename_partial_match(self, remix_config):
         """Test partial keyword match"""
         processor = KeywordRemixProcessor(remix_config, ["travel", "beach"])
@@ -271,6 +283,7 @@ class TestFilenameScoring:
         assert score > 0
         assert "travel" in matches
 
+    @pytest.mark.fast
     def test_score_filename_no_match(self, remix_config):
         """Test no keyword match"""
         processor = KeywordRemixProcessor(remix_config, ["beach", "ocean"])
@@ -280,6 +293,7 @@ class TestFilenameScoring:
         assert score == 0.0
         assert len(matches) == 0
 
+    @pytest.mark.fast
     def test_score_filename_special_chars(self, remix_config):
         """Test filename with special characters"""
         processor = KeywordRemixProcessor(remix_config, ["travel"])
@@ -297,6 +311,7 @@ class TestFilenameScoring:
 class TestMetadataScoring:
     """Test metadata scoring"""
 
+    @pytest.mark.fast
     def test_score_metadata_with_file(self, temp_dir, remix_config):
         """Test scoring with existing info.json"""
         processor = KeywordRemixProcessor(remix_config, ["travel", "beach"])
@@ -318,6 +333,7 @@ class TestMetadataScoring:
         assert "beach" in matches
         assert meta['duration'] == 120
 
+    @pytest.mark.fast
     def test_score_metadata_missing_file(self, temp_dir, remix_config):
         """Test scoring with missing info.json"""
         processor = KeywordRemixProcessor(remix_config, ["travel"])
@@ -329,6 +345,7 @@ class TestMetadataScoring:
         assert len(matches) == 0
         assert meta == {}
 
+    @pytest.mark.fast
     def test_score_metadata_invalid_json(self, temp_dir, remix_config):
         """Test scoring with invalid JSON"""
         processor = KeywordRemixProcessor(remix_config, ["travel"])
@@ -348,6 +365,7 @@ class TestMetadataScoring:
 class TestVideoScoring:
     """Test complete video scoring"""
 
+    @pytest.mark.fast
     def test_score_video_with_metadata(self, temp_dir, remix_config):
         """Test scoring video with metadata"""
         processor = KeywordRemixProcessor(remix_config, ["travel", "beach"])
@@ -371,6 +389,7 @@ class TestVideoScoring:
         assert score.file_size_mb > 0
         assert score.duration_estimate == 180
 
+    @pytest.mark.fast
     def test_score_video_without_metadata(self, temp_dir, remix_config):
         """Test scoring video without metadata (filename only)"""
         processor = KeywordRemixProcessor(remix_config, ["beach"])
@@ -391,6 +410,7 @@ class TestVideoScoring:
 class TestDirectoryScanning:
     """Test directory scanning"""
 
+    @pytest.mark.fast
     def test_scan_directory_videos_only(self, temp_dir, remix_config, sample_keywords):
         """Test scanning for video files only"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -406,6 +426,7 @@ class TestDirectoryScanning:
         assert len(files) == 2
         assert all(f.suffix in {'.mp4', '.mkv'} for f in files)
 
+    @pytest.mark.fast
     def test_scan_directory_with_audio(self, temp_dir, remix_config, sample_keywords):
         """Test scanning including audio files"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -418,6 +439,7 @@ class TestDirectoryScanning:
 
         assert len(files) == 3
 
+    @pytest.mark.fast
     def test_scan_directory_max_files(self, temp_dir, sample_keywords):
         """Test max files limit"""
         config = RemixConfig(max_files_to_process=2)
@@ -439,6 +461,7 @@ class TestDirectoryScanning:
 class TestFileListProcessing:
     """Test processing file lists"""
 
+    @pytest.mark.fast
     def test_process_empty_list(self, remix_config, sample_keywords):
         """Test processing empty file list"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -448,6 +471,7 @@ class TestFileListProcessing:
         assert result.total_files == 0
         assert result.included_files == 0
 
+    @pytest.mark.fast
     def test_process_file_list_basic(self, sample_video_files, remix_config):
         """Test processing list of files"""
         processor = KeywordRemixProcessor(remix_config, ["travel", "beach"])
@@ -458,6 +482,7 @@ class TestFileListProcessing:
         assert result.included_files > 0
         assert result.processing_time_seconds >= 0
 
+    @pytest.mark.fast
     def test_process_file_list_filtering(self, sample_video_files):
         """Test relevance filtering"""
         config = RemixConfig(min_relevance_score=0.5, parallel_scoring=False)
@@ -477,6 +502,7 @@ class TestFileListProcessing:
 class TestKeywordRemixer:
     """Test LLM-based KeywordRemixer"""
 
+    @pytest.mark.fast
     def test_init_basic(self):
         """Test basic initialization"""
         remixer = KeywordRemixer(
@@ -488,6 +514,7 @@ class TestKeywordRemixer:
         assert remixer.topic_context == "travel videos"
         assert remixer.stats['total_remixes'] == 0
 
+    @pytest.mark.fast
     def test_cache_key_generation(self):
         """Test cache key generation"""
         remixer = KeywordRemixer(topic_context="test")
@@ -500,6 +527,7 @@ class TestKeywordRemixer:
         assert key1 != key2  # Different attempts = different keys
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_remix_keyword_with_cache(self, mock_generator_class, temp_dir):
         """Test remix with caching"""
         remixer = KeywordRemixer(cache_dir=str(temp_dir))
@@ -523,6 +551,7 @@ class TestKeywordRemixer:
         assert result2.provider == "cache"
         assert result2.remixed_keywords == result1.remixed_keywords
 
+    @pytest.mark.fast
     def test_fallback_remix(self):
         """Test rule-based fallback remix"""
         remixer = KeywordRemixer()
@@ -540,6 +569,7 @@ class TestKeywordRemixer:
 class TestConvenienceFunctions:
     """Test convenience functions"""
 
+    @pytest.mark.fast
     def test_get_remix_summary(self, sample_video_score):
         """Test generating remix summary"""
         result = RemixResult(
@@ -559,12 +589,14 @@ class TestConvenienceFunctions:
         assert "7" in summary
         assert "65" in summary
 
+    @pytest.mark.fast
     def test_get_remix_summary_none(self):
         """Test summary when result is None"""
         summary = get_remix_summary(None)
 
         assert "not performed" in summary.lower()
 
+    @pytest.mark.fast
     def test_save_remix_report(self, temp_dir, sample_video_score):
         """Test saving remix report to JSON"""
         result = RemixResult(
@@ -590,6 +622,7 @@ class TestConvenienceFunctions:
         assert data['avg_match_score'] == 0.7
 
     @patch('src.keyword_remix.KeywordRemixer')
+    @pytest.mark.fast
     def test_remix_zero_download_keywords(self, mock_remixer_class):
         """Test convenience function for remixing failed keywords"""
         mock_remixer = mock_remixer_class.return_value
@@ -624,6 +657,7 @@ class TestConvenienceFunctions:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_processor_no_keywords(self, remix_config):
         """Test processor with no keywords"""
         processor = KeywordRemixProcessor(remix_config, [])
@@ -633,6 +667,7 @@ class TestEdgeCases:
         assert score == 0.0
         assert len(matches) == 0
 
+    @pytest.mark.fast
     def test_score_video_nonexistent_file(self, temp_dir, remix_config, sample_keywords):
         """Test scoring nonexistent file"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -648,6 +683,7 @@ class TestEdgeCases:
             pass  # Acceptable to raise exception
 
     @patch('src.keyword_remix.KeywordRemixer')
+    @pytest.mark.fast
     def test_remix_empty_keywords_list(self, mock_remixer_class):
         """Test remixing with empty keywords list"""
         remixed, result = remix_zero_download_keywords(
@@ -658,6 +694,7 @@ class TestEdgeCases:
         assert remixed == []
         assert result is None
 
+    @pytest.mark.fast
     def test_remix_config_disabled(self, temp_dir):
         """Test remix when disabled in config"""
         config = RemixConfig(enabled=False)

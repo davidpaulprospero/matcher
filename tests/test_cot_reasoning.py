@@ -30,11 +30,13 @@ from src.utils import SRTSegment
 class TestCotReasoningDataclass:
     """Test CotReasoning dataclass functionality."""
 
+    @pytest.mark.fast
     def test_empty_cot_is_not_complete(self):
         """Empty CotReasoning should not be complete."""
         cot = CotReasoning()
         assert not cot.is_complete
 
+    @pytest.mark.fast
     def test_partial_cot_is_not_complete(self):
         """Partial CotReasoning should not be complete."""
         cot = CotReasoning(
@@ -45,6 +47,7 @@ class TestCotReasoningDataclass:
         )
         assert not cot.is_complete
 
+    @pytest.mark.fast
     def test_complete_cot_is_complete(self):
         """Complete CotReasoning should be marked complete."""
         cot = CotReasoning(
@@ -60,6 +63,7 @@ class TestCotReasoningDataclass:
         )
         assert cot.is_complete
 
+    @pytest.mark.fast
     def test_compute_weighted_score_with_all_rubrics(self):
         """Weighted score should use all rubric weights."""
         cot = CotReasoning(
@@ -75,6 +79,7 @@ class TestCotReasoningDataclass:
         expected = 0.24 + 0.36 + 0.14 + 0.08  # = 0.82
         assert abs(cot.compute_weighted_score() - expected) < 0.01
 
+    @pytest.mark.fast
     def test_compute_weighted_score_with_partial_rubrics(self):
         """Weighted score should normalize for missing rubrics."""
         cot = CotReasoning(
@@ -89,6 +94,7 @@ class TestCotReasoningDataclass:
         expected = (0.8 * 0.30 + 0.9 * 0.40) / 0.70
         assert abs(cot.compute_weighted_score() - expected) < 0.01
 
+    @pytest.mark.fast
     def test_compute_weighted_score_empty_rubrics_uses_final_score(self):
         """Empty rubrics should fall back to final_score."""
         cot = CotReasoning(
@@ -101,11 +107,13 @@ class TestCotReasoningDataclass:
 class TestCotRubricWeights:
     """Test rubric weight constants."""
 
+    @pytest.mark.fast
     def test_rubric_weights_sum_to_one(self):
         """Rubric weights should sum to 1.0."""
         total = sum(COT_RUBRIC_WEIGHTS.values())
         assert abs(total - 1.0) < 0.001
 
+    @pytest.mark.fast
     def test_rubric_weights_correct_values(self):
         """Rubric weights should match specification."""
         assert COT_RUBRIC_WEIGHTS['visual_relevance'] == 0.30
@@ -113,6 +121,7 @@ class TestCotRubricWeights:
         assert COT_RUBRIC_WEIGHTS['keyword_overlap'] == 0.20
         assert COT_RUBRIC_WEIGHTS['flow'] == 0.10
 
+    @pytest.mark.fast
     def test_all_rubric_keys_present(self):
         """All required rubric keys should be present."""
         required_keys = {'visual_relevance', 'topic_match', 'keyword_overlap', 'flow'}
@@ -132,6 +141,7 @@ class TestBuildCotPrompt:
             source_file=source_file
         )
 
+    @pytest.mark.fast
     def test_build_cot_prompt_basic(self):
         """Build basic CoT prompt without extras."""
         voiceover = "The forest is home to many wildlife species"
@@ -157,6 +167,7 @@ class TestBuildCotPrompt:
         assert "STEP 4 - FINAL SCORE" in prompt
         assert "## RESPONSE FORMAT" in prompt
 
+    @pytest.mark.fast
     def test_build_cot_prompt_with_context(self):
         """Build CoT prompt with context."""
         voiceover = "Nature documentary"
@@ -166,6 +177,7 @@ class TestBuildCotPrompt:
 
         assert "CONTEXT: Documentary about forests" in prompt
 
+    @pytest.mark.fast
     def test_build_cot_prompt_with_negative_sample(self):
         """Build CoT prompt with negative sample."""
         voiceover = "Nature documentary"
@@ -177,6 +189,7 @@ class TestBuildCotPrompt:
         assert "unlikely match" in prompt.lower()
         assert "do NOT select them" in prompt
 
+    @pytest.mark.fast
     def test_build_cot_prompt_with_negative_rules(self):
         """Build CoT prompt with negative rules."""
         voiceover = "Nature documentary"
@@ -189,6 +202,7 @@ class TestBuildCotPrompt:
         assert "Don't match talking heads" in prompt
         assert "Avoid static images" in prompt
 
+    @pytest.mark.fast
     def test_build_cot_prompt_escapes_quotes(self):
         """Prompt should escape quotes in text."""
         voiceover = 'He said "hello" to her'
@@ -199,6 +213,7 @@ class TestBuildCotPrompt:
         # Should escape double quotes to single quotes
         assert '"hello"' not in prompt or "'hello'" in prompt
 
+    @pytest.mark.fast
     def test_build_cot_prompt_truncates_long_text(self):
         """Prompt should truncate very long text."""
         voiceover = "A" * 200  # Very long voiceover
@@ -223,6 +238,7 @@ class TestBuildCotBatchPrompt:
             source_file=source_file
         )
 
+    @pytest.mark.fast
     def test_build_batch_prompt_multiple_items(self):
         """Build batch prompt with multiple voiceover items."""
         items = [
@@ -238,6 +254,7 @@ class TestBuildCotBatchPrompt:
         assert "Ocean waves" in prompt
         assert "## SCORING RUBRIC" in prompt
 
+    @pytest.mark.fast
     def test_build_batch_prompt_with_negative_samples(self):
         """Build batch prompt with negative samples per item."""
         items = [
@@ -255,6 +272,7 @@ class TestBuildCotBatchPrompt:
 class TestParseCotReasoning:
     """Test parsing of CoT reasoning responses."""
 
+    @pytest.mark.fast
     def test_parse_complete_response(self):
         """Parse complete CoT response."""
         response = {
@@ -281,6 +299,7 @@ class TestParseCotReasoning:
         assert cot.final_score == 0.87
         assert "thematic alignment" in cot.reasoning_text
 
+    @pytest.mark.fast
     def test_parse_empty_response(self):
         """Parse empty/None response returns empty CotReasoning."""
         cot = parse_cot_reasoning(None)
@@ -289,6 +308,7 @@ class TestParseCotReasoning:
         cot = parse_cot_reasoning({})
         assert not cot.is_complete
 
+    @pytest.mark.fast
     def test_parse_string_theme_converted_to_list(self):
         """Single string theme should be converted to list."""
         response = {
@@ -302,6 +322,7 @@ class TestParseCotReasoning:
 
         assert cot.voiceover_themes == ["single theme"]
 
+    @pytest.mark.fast
     def test_parse_clamps_out_of_range_scores(self):
         """Scores should be clamped to [0, 1]."""
         response = {
@@ -322,6 +343,7 @@ class TestParseCotReasoning:
         assert cot.rubric_scores["keyword_overlap"] == 0.5
         assert cot.final_score == 1.0
 
+    @pytest.mark.fast
     def test_parse_ignores_unknown_rubric_keys(self):
         """Unknown rubric keys should be ignored."""
         response = {
@@ -341,6 +363,7 @@ class TestParseCotReasoning:
         assert "unknown_metric" not in cot.rubric_scores
         assert "another_unknown" not in cot.rubric_scores
 
+    @pytest.mark.fast
     def test_parse_handles_invalid_rubric_scores(self):
         """Invalid rubric score values should be skipped."""
         response = {
@@ -360,6 +383,7 @@ class TestParseCotReasoning:
         assert "topic_match" not in cot.rubric_scores
         assert cot.rubric_scores["keyword_overlap"] == 0.7
 
+    @pytest.mark.fast
     def test_parse_truncates_long_reason(self):
         """Long reason text should be truncated."""
         response = {
@@ -374,6 +398,7 @@ class TestParseCotReasoning:
 
         assert len(cot.reasoning_text) <= 100
 
+    @pytest.mark.fast
     def test_parse_handles_nested_quotes_in_themes(self):
         """Parse should handle nested quotes in theme strings."""
         response = {
@@ -390,6 +415,7 @@ class TestParseCotReasoning:
         assert '"hello"' in cot.voiceover_themes[0]
         assert "'special'" in cot.voiceover_themes[1]
 
+    @pytest.mark.fast
     def test_parse_handles_special_characters_in_elements(self):
         """Parse should handle special characters in video elements."""
         response = {
@@ -413,6 +439,7 @@ class TestParseCotReasoning:
         assert "\\n" in cot.video_elements[2]
         assert "<script>" in cot.video_elements[3]
 
+    @pytest.mark.fast
     def test_parse_handles_special_characters_in_reason(self):
         """Parse should handle special characters in reason text."""
         response = {
@@ -444,6 +471,7 @@ class TestCotIntegration:
         )
 
     @patch('src.matching.llm_providers.GeminiMatcher.__init__', return_value=None)
+    @pytest.mark.fast
     def test_gemini_matcher_use_cot_flag_changes_prompt(self, mock_init):
         """GeminiMatcher should use CoT prompt when use_cot=True."""
         from src.matching.llm_providers import GeminiMatcher
@@ -481,6 +509,7 @@ class TestCotIntegration:
         # Check that CoT cache key prefix was used
         assert call_args.cache_key_prefix == "matching_cot"
 
+    @pytest.mark.fast
     def test_cot_weighted_score_blending(self):
         """Test that CoT weighted score is blended correctly."""
         # Simulate a response with CoT
@@ -515,6 +544,7 @@ class TestCotIntegration:
 class TestCotConfigOption:
     """Test chain_of_thought_enabled config option."""
 
+    @pytest.mark.fast
     def test_matching_config_has_chain_of_thought_option(self):
         """MatchingConfig should have chain_of_thought_enabled field."""
         from src.config.sections.matching import MatchingConfig
@@ -523,6 +553,7 @@ class TestCotConfigOption:
         assert hasattr(config, 'chain_of_thought_enabled')
         assert config.chain_of_thought_enabled is True  # Default
 
+    @pytest.mark.fast
     def test_chain_of_thought_disabled(self):
         """chain_of_thought_enabled can be set to False."""
         from src.config.sections.matching import MatchingConfig

@@ -14,6 +14,7 @@ from src.keyword_extractor import prompts
 class TestPromptExistence:
     """Test that all prompts exist and are valid"""
 
+    @pytest.mark.fast
     def test_all_prompts_exist(self):
         """Test all 6 expected prompts exist"""
         required_prompts = [
@@ -27,6 +28,7 @@ class TestPromptExistence:
         for prompt_name in required_prompts:
             assert hasattr(prompts, prompt_name), f"Missing prompt: {prompt_name}"
 
+    @pytest.mark.fast
     def test_prompts_are_strings(self):
         """Test all prompts are strings"""
         all_prompts = [
@@ -45,30 +47,35 @@ class TestPromptExistence:
 class TestPromptPlaceholders:
     """Test that prompts have required placeholders"""
 
+    @pytest.mark.fast
     def test_segment_keyword_prompt_placeholders(self):
         """Test SEGMENT_KEYWORD_PROMPT has required placeholders"""
         prompt = prompts.SEGMENT_KEYWORD_PROMPT
         assert '{segment_text}' in prompt
         assert '{topic}' in prompt
 
+    @pytest.mark.fast
     def test_batch_segment_keywords_prompt_placeholders(self):
         """Test BATCH_SEGMENT_KEYWORDS_PROMPT has required placeholders"""
         prompt = prompts.BATCH_SEGMENT_KEYWORDS_PROMPT
         assert '{segments_text}' in prompt
         assert '{topic}' in prompt
 
+    @pytest.mark.fast
     def test_keyword_extraction_prompt_placeholders(self):
         """Test KEYWORD_EXTRACTION_PROMPT has required placeholders"""
         prompt = prompts.KEYWORD_EXTRACTION_PROMPT
         assert '{voiceover_text}' in prompt
         assert '{max_keywords}' in prompt
 
+    @pytest.mark.fast
     def test_entity_extraction_prompt_placeholders(self):
         """Test ENTITY_EXTRACTION_PROMPT has required placeholders"""
         prompt = prompts.ENTITY_EXTRACTION_PROMPT
         assert '{text}' in prompt
         # Note: topic is NOT a placeholder in this prompt - entities extracted from text only
 
+    @pytest.mark.fast
     def test_keyword_expansion_prompt_placeholders(self):
         """Test KEYWORD_EXPANSION_PROMPT has required placeholders"""
         prompt = prompts.KEYWORD_EXPANSION_PROMPT
@@ -76,6 +83,7 @@ class TestPromptPlaceholders:
         assert '{topic}' in prompt
         assert '{max_keywords}' in prompt
 
+    @pytest.mark.fast
     def test_topic_detection_prompt_placeholders(self):
         """Test TOPIC_DETECTION_PROMPT has required placeholders"""
         prompt = prompts.TOPIC_DETECTION_PROMPT
@@ -85,6 +93,7 @@ class TestPromptPlaceholders:
 class TestPromptFormatting:
     """Test that prompts can be formatted with sample data"""
 
+    @pytest.mark.fast
     def test_segment_keyword_prompt_formatting(self):
         """Test SEGMENT_KEYWORD_PROMPT formats correctly"""
         prompt = prompts.SEGMENT_KEYWORD_PROMPT.format(
@@ -95,6 +104,7 @@ class TestPromptFormatting:
         assert "Geography" in prompt
         assert '{' not in prompt  # No unfilled placeholders
 
+    @pytest.mark.fast
     def test_batch_segment_keywords_prompt_formatting(self):
         """Test BATCH_SEGMENT_KEYWORDS_PROMPT formats correctly"""
         prompt = prompts.BATCH_SEGMENT_KEYWORDS_PROMPT.format(
@@ -105,6 +115,7 @@ class TestPromptFormatting:
         assert "Nature" in prompt
         assert '{' not in prompt
 
+    @pytest.mark.fast
     def test_keyword_extraction_prompt_formatting(self):
         """Test KEYWORD_EXTRACTION_PROMPT formats correctly"""
         prompt = prompts.KEYWORD_EXTRACTION_PROMPT.format(
@@ -115,6 +126,7 @@ class TestPromptFormatting:
         assert "30" in prompt
         assert '{' not in prompt
 
+    @pytest.mark.fast
     def test_entity_extraction_prompt_formatting(self):
         """Test ENTITY_EXTRACTION_PROMPT formats correctly"""
         prompt = prompts.ENTITY_EXTRACTION_PROMPT.format(
@@ -124,6 +136,7 @@ class TestPromptFormatting:
         # Check no unfilled placeholders (prompt contains JSON examples with {{ }})
         assert '{text}' not in prompt
 
+    @pytest.mark.fast
     def test_keyword_expansion_prompt_formatting(self):
         """Test KEYWORD_EXPANSION_PROMPT formats correctly"""
         prompt = prompts.KEYWORD_EXPANSION_PROMPT.format(
@@ -136,6 +149,7 @@ class TestPromptFormatting:
         assert "50" in prompt
         assert '{' not in prompt
 
+    @pytest.mark.fast
     def test_topic_detection_prompt_formatting(self):
         """Test TOPIC_DETECTION_PROMPT formats correctly"""
         prompt = prompts.TOPIC_DETECTION_PROMPT.format(
@@ -148,22 +162,26 @@ class TestPromptFormatting:
 class TestPromptContent:
     """Test prompt content has expected instructions"""
 
+    @pytest.mark.fast
     def test_batch_segment_keywords_prompt_has_json_instruction(self):
         """Test BATCH_SEGMENT_KEYWORDS_PROMPT asks for JSON output"""
         prompt = prompts.BATCH_SEGMENT_KEYWORDS_PROMPT.lower()
         assert 'json' in prompt
 
+    @pytest.mark.fast
     def test_keyword_extraction_prompt_has_youtube_mention(self):
         """Test KEYWORD_EXTRACTION_PROMPT mentions YouTube search"""
         prompt = prompts.KEYWORD_EXTRACTION_PROMPT.lower()
         assert 'youtube' in prompt or 'search' in prompt
 
+    @pytest.mark.fast
     def test_entity_extraction_prompt_has_entity_types(self):
         """Test ENTITY_EXTRACTION_PROMPT mentions entity types"""
         prompt = prompts.ENTITY_EXTRACTION_PROMPT.lower()
         # Should mention at least some entity types
         assert any(term in prompt for term in ['person', 'place', 'location', 'organization', 'date'])
 
+    @pytest.mark.fast
     def test_prompts_have_reasonable_length(self):
         """Test prompts are not too short or too long"""
         all_prompts = [

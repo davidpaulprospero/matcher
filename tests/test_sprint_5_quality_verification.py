@@ -11,6 +11,7 @@ import pytest
 class TestModuleImports:
     """Verify that quality-related modules import cleanly."""
 
+    @pytest.mark.fast
     def test_scoring_module_imports(self):
         """Test that src/matching/scoring.py imports cleanly."""
         # Should not raise any import errors
@@ -21,6 +22,7 @@ class TestModuleImports:
         assert hasattr(scoring, "__name__")
         assert "scoring" in scoring.__name__
 
+    @pytest.mark.fast
     def test_tiered_matcher_module_imports(self):
         """Test that src/matching/tiered_matcher.py imports cleanly."""
         # Should not raise any import errors
@@ -31,6 +33,7 @@ class TestModuleImports:
         assert hasattr(tiered_matcher, "__name__")
         assert "tiered_matcher" in tiered_matcher.__name__
 
+    @pytest.mark.fast
     def test_llm_providers_module_imports(self):
         """Test that src/matching/llm_providers.py imports cleanly."""
         # Should not raise any import errors
@@ -45,6 +48,7 @@ class TestModuleImports:
 class TestModuleStructure:
     """Verify expected module structure exists for Sprint 5 enhancements."""
 
+    @pytest.mark.fast
     def test_scoring_module_has_expected_classes(self):
         """Verify scoring module structure."""
         from src.matching import scoring
@@ -53,6 +57,7 @@ class TestModuleStructure:
         # will be added by subsequent user stories
         assert scoring is not None
 
+    @pytest.mark.fast
     def test_tiered_matcher_has_expected_classes(self):
         """Verify tiered_matcher module has TieredMatcher class."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -61,6 +66,7 @@ class TestModuleStructure:
         # Verify it's a class
         assert isinstance(TieredMatcher, type)
 
+    @pytest.mark.fast
     def test_llm_providers_has_expected_classes(self):
         """Verify llm_providers module structure."""
         from src.matching import llm_providers
@@ -73,6 +79,7 @@ class TestModuleStructure:
 class TestIntegration:
     """Basic integration tests for quality modules."""
 
+    @pytest.mark.fast
     def test_modules_can_be_imported_together(self):
         """Verify all quality modules can be imported in same session."""
         from src.matching import scoring
@@ -82,6 +89,7 @@ class TestIntegration:
         # All should be accessible
         assert all([scoring, tiered_matcher, llm_providers])
 
+    @pytest.mark.fast
     def test_tiered_matcher_can_be_instantiated(self):
         """Verify TieredMatcher can be instantiated with minimal config."""
         from src.matching.tiered_matcher import TieredMatcher

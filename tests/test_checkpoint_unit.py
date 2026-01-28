@@ -25,6 +25,7 @@ from src.checkpoint import (
 class TestSavedKeywordsDataclass:
     """Test SavedKeywords dataclass."""
 
+    @pytest.mark.fast
     def test_create_with_minimal_fields(self):
         """Test creating SavedKeywords with minimal fields."""
         keywords = SavedKeywords()
@@ -33,6 +34,7 @@ class TestSavedKeywordsDataclass:
         assert keywords.keywords == []
         assert keywords.num_keywords == 0
 
+    @pytest.mark.fast
     def test_create_with_all_fields(self):
         """Test creating SavedKeywords with all fields."""
         keywords = SavedKeywords(
@@ -50,6 +52,7 @@ class TestSavedKeywordsDataclass:
         assert keywords.num_keywords == 3
         assert keywords.topic_context == "travel vlog"
 
+    @pytest.mark.fast
     def test_to_dict_conversion(self):
         """Test converting to dictionary."""
         keywords = SavedKeywords(
@@ -65,6 +68,7 @@ class TestSavedKeywordsDataclass:
         assert "keywords" in data
         assert data["name"] == "test"
 
+    @pytest.mark.fast
     def test_from_dict_conversion(self):
         """Test creating from dictionary."""
         data = {
@@ -80,6 +84,7 @@ class TestSavedKeywordsDataclass:
         assert len(keywords.keywords) == 2
         assert keywords.topic_context == "test topic"
 
+    @pytest.mark.fast
     def test_round_trip_serialization(self):
         """Test to_dict -> from_dict round trip."""
         original = SavedKeywords(
@@ -100,6 +105,7 @@ class TestSavedKeywordsDataclass:
 class TestCheckpointDataDataclass:
     """Test CheckpointData dataclass."""
 
+    @pytest.mark.fast
     def test_create_default(self):
         """Test creating with defaults."""
         checkpoint = CheckpointData()
@@ -109,6 +115,7 @@ class TestCheckpointDataDataclass:
         assert checkpoint.analyze == {}
         assert checkpoint.download == {}
 
+    @pytest.mark.fast
     def test_create_with_stage_data(self):
         """Test creating with stage data."""
         checkpoint = CheckpointData(
@@ -119,6 +126,7 @@ class TestCheckpointDataDataclass:
         assert checkpoint.last_completed_stage == "DOWNLOAD"
         assert checkpoint.download["videos_count"] == 50
 
+    @pytest.mark.fast
     def test_all_stage_fields_exist(self):
         """Test all expected stage fields are present."""
         checkpoint = CheckpointData()
@@ -133,6 +141,7 @@ class TestCheckpointDataDataclass:
         assert hasattr(checkpoint, "transcribe")
         assert hasattr(checkpoint, "match")
 
+    @pytest.mark.fast
     def test_to_dict_includes_all_fields(self):
         """Test to_dict includes all fields."""
         checkpoint = CheckpointData(
@@ -147,6 +156,7 @@ class TestCheckpointDataDataclass:
         assert "voiceover_path" in data
         assert "analyze" in data
 
+    @pytest.mark.fast
     def test_from_dict_with_partial_data(self):
         """Test from_dict handles partial data."""
         data = {
@@ -166,6 +176,7 @@ class TestCheckpointDataDataclass:
 class TestCheckpointManagerInit:
     """Test CheckpointManager initialization."""
 
+    @pytest.mark.fast
     def test_create_manager(self, tmp_path):
         """Test creating checkpoint manager."""
         manager = CheckpointManager(
@@ -177,6 +188,7 @@ class TestCheckpointManagerInit:
         assert manager.config_hash == "test_hash"
         assert manager.data is None
 
+    @pytest.mark.fast
     def test_checkpoint_paths(self, tmp_path):
         """Test checkpoint file paths."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -184,12 +196,14 @@ class TestCheckpointManagerInit:
         assert manager.checkpoint_path == tmp_path / "checkpoint.json"
         assert manager.backup_path == tmp_path / "checkpoint.backup.json"
 
+    @pytest.mark.fast
     def test_exists_no_file(self, tmp_path):
         """Test exists() returns False when no checkpoint."""
         manager = CheckpointManager(project_dir=tmp_path)
 
         assert not manager.exists()
 
+    @pytest.mark.fast
     def test_exists_with_file(self, tmp_path):
         """Test exists() returns True when checkpoint exists."""
         # Create checkpoint file
@@ -204,11 +218,13 @@ class TestCheckpointManagerInit:
 class TestStageOrder:
     """Test STAGE_ORDER constant."""
 
+    @pytest.mark.fast
     def test_stage_order_exists(self):
         """Test STAGE_ORDER is defined."""
         assert STAGE_ORDER is not None
         assert isinstance(STAGE_ORDER, (list, tuple))
 
+    @pytest.mark.fast
     def test_stage_order_has_expected_stages(self):
         """Test STAGE_ORDER contains expected stages."""
         expected_stages = ["ANALYZE", "DOWNLOAD", "TRANSCRIBE", "MATCH", "OUTPUT"]
@@ -216,6 +232,7 @@ class TestStageOrder:
         for stage in expected_stages:
             assert stage in STAGE_ORDER
 
+    @pytest.mark.fast
     def test_stage_order_is_sequential(self):
         """Test stages are in correct order."""
         # ANALYZE should come before DOWNLOAD
@@ -234,12 +251,14 @@ class TestStageOrder:
 class TestCheckpointAge:
     """Test checkpoint age tracking."""
 
+    @pytest.mark.fast
     def test_is_stale_no_data(self, tmp_path):
         """Test is_stale() with no checkpoint data."""
         manager = CheckpointManager(project_dir=tmp_path)
 
         assert not manager.is_stale()
 
+    @pytest.mark.fast
     def test_is_stale_recent_checkpoint(self, tmp_path):
         """Test is_stale() with recent checkpoint."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -251,6 +270,7 @@ class TestCheckpointAge:
         # Recent checkpoint should not be stale
         assert not manager.is_stale(max_age_hours=24.0)
 
+    @pytest.mark.fast
     def test_is_stale_old_checkpoint(self, tmp_path):
         """Test is_stale() with old checkpoint."""
         old_time = datetime.now() - timedelta(hours=48)
@@ -263,6 +283,7 @@ class TestCheckpointAge:
         # 48-hour old checkpoint should be stale (max 24 hours)
         assert manager.is_stale(max_age_hours=24.0)
 
+    @pytest.mark.fast
     def test_is_stale_no_timestamp(self, tmp_path):
         """Test is_stale() with no timestamp."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -271,6 +292,7 @@ class TestCheckpointAge:
         # No timestamp = stale
         assert manager.is_stale()
 
+    @pytest.mark.fast
     def test_get_age_hours_no_data(self, tmp_path):
         """Test get_age_hours() with no data."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -279,6 +301,7 @@ class TestCheckpointAge:
 
         assert age == 0.0
 
+    @pytest.mark.fast
     def test_get_age_hours_recent(self, tmp_path):
         """Test get_age_hours() with recent checkpoint."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -295,6 +318,7 @@ class TestCheckpointAge:
 class TestCheckpointValidation:
     """Test checkpoint validation."""
 
+    @pytest.mark.fast
     def test_checkpoint_with_valid_stage(self):
         """Test checkpoint with valid stage name."""
         checkpoint = CheckpointData(
@@ -303,6 +327,7 @@ class TestCheckpointValidation:
 
         assert checkpoint.last_completed_stage in STAGE_ORDER
 
+    @pytest.mark.fast
     def test_checkpoint_stage_progression(self):
         """Test stages progress in order."""
         stages = ["ANALYZE", "DOWNLOAD", "TRANSCRIBE"]
@@ -315,12 +340,14 @@ class TestCheckpointValidation:
 class TestCheckpointBackup:
     """Test checkpoint backup functionality."""
 
+    @pytest.mark.fast
     def test_backup_path_different_from_main(self, tmp_path):
         """Test backup path is different from main checkpoint."""
         manager = CheckpointManager(project_dir=tmp_path)
 
         assert manager.checkpoint_path != manager.backup_path
 
+    @pytest.mark.fast
     def test_backup_path_in_same_directory(self, tmp_path):
         """Test backup is in same directory as main checkpoint."""
         manager = CheckpointManager(project_dir=tmp_path)
@@ -331,6 +358,7 @@ class TestCheckpointBackup:
 class TestConfigHash:
     """Test config hash functionality."""
 
+    @pytest.mark.fast
     def test_config_hash_stored(self, tmp_path):
         """Test config hash is stored."""
         manager = CheckpointManager(
@@ -340,6 +368,7 @@ class TestConfigHash:
 
         assert manager.config_hash == "abc123"
 
+    @pytest.mark.fast
     def test_checkpoint_data_stores_hash(self):
         """Test CheckpointData can store config hash."""
         checkpoint = CheckpointData(config_hash="xyz789")
@@ -350,6 +379,7 @@ class TestConfigHash:
 class TestVoiceoverTracking:
     """Test voiceover file tracking."""
 
+    @pytest.mark.fast
     def test_voiceover_path_storage(self):
         """Test storing voiceover path."""
         checkpoint = CheckpointData(
@@ -358,6 +388,7 @@ class TestVoiceoverTracking:
 
         assert checkpoint.voiceover_path == "/project/voiceover.srt"
 
+    @pytest.mark.fast
     def test_voiceover_hash_storage(self):
         """Test storing voiceover hash."""
         checkpoint = CheckpointData(
@@ -366,6 +397,7 @@ class TestVoiceoverTracking:
 
         assert checkpoint.voiceover_hash == "file_hash_abc123"
 
+    @pytest.mark.fast
     def test_both_voiceover_fields(self):
         """Test storing both path and hash."""
         checkpoint = CheckpointData(

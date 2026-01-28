@@ -91,17 +91,20 @@ And here's the third one about beaches.
 class TestAnalyzeStageInit:
     """Test AnalyzeStage initialization and metadata"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name is ANALYZE"""
         stage = AnalyzeStage()
         assert stage.name == "ANALYZE"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage has description"""
         stage = AnalyzeStage()
         assert "voiceover" in stage.description.lower()
         assert "keyword" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
@@ -117,6 +120,7 @@ class TestAnalyzeStageInit:
 class TestInputValidation:
     """Test validate_inputs method"""
 
+    @pytest.mark.fast
     def test_validate_no_voiceover_path(self, mock_config):
         """Test validation fails when no voiceover path"""
         stage = AnalyzeStage()
@@ -128,6 +132,7 @@ class TestInputValidation:
         assert error is not None
         assert "voiceover path" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_missing_file(self, mock_config):
         """Test validation fails when file doesn't exist"""
         stage = AnalyzeStage()
@@ -139,6 +144,7 @@ class TestInputValidation:
         assert error is not None
         assert "not found" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_success(self, mock_config, temp_project_dir):
         """Test validation succeeds with valid file"""
         stage = AnalyzeStage()
@@ -161,6 +167,7 @@ class TestInputValidation:
 class TestSRTParsing:
     """Test _parse_srt method"""
 
+    @pytest.mark.fast
     def test_parse_srt_success(self, sample_srt_content, temp_project_dir):
         """Test successful SRT parsing"""
         stage = AnalyzeStage()
@@ -176,6 +183,7 @@ class TestSRTParsing:
         assert segments[1].start == 3.5
         assert segments[2].text == "And here's the third one about beaches."
 
+    @pytest.mark.fast
     def test_parse_srt_with_utf8_bom(self, temp_project_dir):
         """Test parsing SRT with UTF-8 BOM"""
         stage = AnalyzeStage()
@@ -190,6 +198,7 @@ class TestSRTParsing:
         assert len(segments) == 1
         assert segments[0].text == "Test with BOM"
 
+    @pytest.mark.fast
     def test_parse_srt_multiline_text(self, temp_project_dir):
         """Test parsing SRT with multiline subtitles"""
         stage = AnalyzeStage()
@@ -207,6 +216,7 @@ Third line
         assert len(segments) == 1
         assert "First line Second line Third line" in segments[0].text
 
+    @pytest.mark.fast
     def test_parse_srt_malformed_skips_invalid(self, temp_project_dir):
         """Test parsing SRT skips malformed entries"""
         stage = AnalyzeStage()
@@ -231,6 +241,7 @@ Another valid entry
         assert segments[0].text == "Valid entry"
         assert segments[1].text == "Another valid entry"
 
+    @pytest.mark.fast
     def test_parse_srt_empty_file(self, temp_project_dir):
         """Test parsing empty SRT file"""
         stage = AnalyzeStage()
@@ -250,6 +261,7 @@ class TestAudioTranscription:
     """Test _transcribe_audio method"""
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_transcribe_audio_success(self, mock_logger, mock_config, temp_project_dir):
         """Test successful audio transcription"""
         stage = AnalyzeStage()
@@ -291,6 +303,7 @@ class TestAudioTranscription:
         assert segments[1].end == 5.0
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_transcribe_audio_failure(self, mock_logger, mock_config, temp_project_dir):
         """Test audio transcription failure handling"""
         stage = AnalyzeStage()
@@ -326,6 +339,7 @@ class TestAudioTranscription:
 class TestVoiceoverLoading:
     """Test _load_voiceover_segments method"""
 
+    @pytest.mark.fast
     def test_load_srt_file(self, mock_config, sample_srt_content, temp_project_dir):
         """Test loading SRT file"""
         stage = AnalyzeStage()
@@ -338,6 +352,7 @@ class TestVoiceoverLoading:
         assert all(isinstance(s, VoiceoverSegment) for s in segments)
 
     @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
     def test_load_audio_file_mp3(self, mock_transcribe, mock_config, temp_project_dir):
         """Test loading MP3 audio file"""
         stage = AnalyzeStage()
@@ -354,6 +369,7 @@ class TestVoiceoverLoading:
         mock_transcribe.assert_called_once()
 
     @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
     def test_load_audio_file_wav(self, mock_transcribe, mock_config, temp_project_dir):
         """Test loading WAV audio file"""
         stage = AnalyzeStage()
@@ -367,6 +383,7 @@ class TestVoiceoverLoading:
         mock_transcribe.assert_called_once()
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_load_unknown_format(self, mock_logger, mock_config, temp_project_dir):
         """Test loading unknown file format"""
         stage = AnalyzeStage()
@@ -386,6 +403,7 @@ class TestVoiceoverLoading:
 class TestKeywordExtraction:
     """Test _extract_keywords method"""
 
+    @pytest.mark.fast
     def test_extract_keywords_success(self, mock_config):
         """Test successful keyword extraction"""
         stage = AnalyzeStage()
@@ -413,6 +431,7 @@ class TestKeywordExtraction:
         assert topic == 'Travel'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_extract_keywords_llm_failure_tfidf_fallback(self, mock_logger, mock_config):
         """Test TF-IDF fallback when LLM extraction fails"""
         stage = AnalyzeStage()
@@ -438,6 +457,7 @@ class TestKeywordExtraction:
 class TestTFIDFFallback:
     """Test _tfidf_fallback method"""
 
+    @pytest.mark.fast
     def test_tfidf_fallback_success(self, mock_config):
         """Test TF-IDF fallback keyword extraction"""
         stage = AnalyzeStage()
@@ -454,6 +474,7 @@ class TestTFIDFFallback:
         assert topic == ''  # TF-IDF doesn't detect topic
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_tfidf_fallback_failure(self, mock_logger, mock_config):
         """Test TF-IDF fallback handles sklearn import error"""
         stage = AnalyzeStage()
@@ -475,6 +496,7 @@ class TestTFIDFFallback:
 class TestTopicDetection:
     """Test _detect_topic_from_keywords method"""
 
+    @pytest.mark.fast
     def test_detect_topic_from_keywords(self, mock_config):
         """Test topic detection from keywords"""
         stage = AnalyzeStage()
@@ -485,6 +507,7 @@ class TestTopicDetection:
         assert 'beach' in topic.lower()
         assert 'ocean' in topic.lower()
 
+    @pytest.mark.fast
     def test_detect_topic_empty_keywords(self, mock_config):
         """Test topic detection with empty keywords"""
         stage = AnalyzeStage()
@@ -501,6 +524,7 @@ class TestTopicDetection:
 class TestChapterDetection:
     """Test _detect_chapters method"""
 
+    @pytest.mark.fast
     def test_detect_chapters_success(self, mock_config):
         """Test successful chapter detection"""
         stage = AnalyzeStage()
@@ -518,6 +542,7 @@ class TestChapterDetection:
         assert chapters[0]['title'] == 'Chapter 1'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_detect_chapters_failure(self, mock_logger, mock_config):
         """Test chapter detection failure handling"""
         stage = AnalyzeStage()
@@ -537,6 +562,7 @@ class TestChapterDetection:
 class TestLocationChapterDetection:
     """Test _detect_location_chapters method"""
 
+    @pytest.mark.fast
     def test_location_chapters_disabled(self, mock_config):
         """Test location chapter detection when disabled"""
         stage = AnalyzeStage()
@@ -548,6 +574,7 @@ class TestLocationChapterDetection:
 
         assert location_chapters == []
 
+    @pytest.mark.fast
     def test_location_chapters_no_config(self, mock_config):
         """Test location chapter detection with no location config"""
         stage = AnalyzeStage()
@@ -559,6 +586,7 @@ class TestLocationChapterDetection:
 
         assert location_chapters == []
 
+    @pytest.mark.fast
     def test_location_chapters_success(self, mock_config):
         """Test successful location chapter detection"""
         stage = AnalyzeStage()
@@ -584,6 +612,7 @@ class TestLocationChapterDetection:
         assert location_chapters[0]['location'] == 'Paris'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_location_chapters_failure(self, mock_logger, mock_config):
         """Test location chapter detection failure handling"""
         stage = AnalyzeStage()
@@ -605,6 +634,7 @@ class TestLocationChapterDetection:
 class TestStageExecution:
     """Test run() method"""
 
+    @pytest.mark.fast
     def test_run_no_voiceover_path(self, mock_config, mock_checkpoint):
         """Test run fails when no voiceover path"""
         stage = AnalyzeStage()
@@ -616,6 +646,7 @@ class TestStageExecution:
         assert result.success is False
         assert "voiceover path" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_file_not_found(self, mock_config, mock_checkpoint):
         """Test run fails when file doesn't exist"""
         stage = AnalyzeStage()
@@ -627,6 +658,7 @@ class TestStageExecution:
         assert result.success is False
         assert "not found" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_no_segments(self, mock_config, mock_checkpoint, temp_project_dir):
         """Test run fails when no segments found"""
         stage = AnalyzeStage()
@@ -642,6 +674,7 @@ class TestStageExecution:
         assert result.success is False
         assert "no segments" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_success(self, mock_config, mock_checkpoint, sample_srt_content, temp_project_dir):
         """Test successful stage execution"""
         stage = AnalyzeStage()
@@ -672,6 +705,7 @@ class TestStageExecution:
         assert result.data is not None
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_logger, mock_config, mock_checkpoint, temp_project_dir):
         """Test run handles exceptions gracefully"""
         stage = AnalyzeStage()
@@ -699,6 +733,7 @@ class TestStageExecution:
 class TestCheckpointOperations:
     """Test can_skip and restore methods"""
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = AnalyzeStage()
@@ -708,6 +743,7 @@ class TestCheckpointOperations:
 
         assert can_skip is False
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = AnalyzeStage()
@@ -717,6 +753,7 @@ class TestCheckpointOperations:
 
         assert restored is False
 
+    @pytest.mark.fast
     def test_restore_success(self, temp_project_dir):
         """Test successful restore from checkpoint"""
         stage = AnalyzeStage()
@@ -744,6 +781,7 @@ class TestCheckpointOperations:
         assert state.voiceover_segments[0].text == 'Test segment'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_logger, mock_checkpoint):
         """Test restore handles exceptions gracefully"""
         stage = AnalyzeStage()
@@ -765,6 +803,7 @@ class TestCheckpointOperations:
 class TestHelperMethods:
     """Test helper conversion methods"""
 
+    @pytest.mark.fast
     def test_segment_to_dict(self):
         """Test segment to dict conversion"""
         stage = AnalyzeStage()
@@ -783,6 +822,7 @@ class TestHelperMethods:
         assert segment_dict['text'] == "Test segment"
         assert 'duration' in segment_dict
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict_with_dataclass(self):
         """Test location chapter to dict with dataclass"""
         stage = AnalyzeStage()
@@ -794,6 +834,7 @@ class TestHelperMethods:
 
         assert chapter_dict['location'] == 'Paris'
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict_with_dict(self):
         """Test location chapter to dict with dict input"""
         stage = AnalyzeStage()
@@ -811,6 +852,7 @@ class TestHelperMethods:
 class TestEdgeCases:
     """Test edge cases and boundary conditions"""
 
+    @pytest.mark.fast
     def test_srt_with_hours(self, temp_project_dir):
         """Test SRT parsing with hours in timestamp"""
         stage = AnalyzeStage()
@@ -824,6 +866,7 @@ class TestEdgeCases:
         assert segments[0].start == 5400.0  # 1h 30m = 5400s
         assert segments[0].end == 5405.0
 
+    @pytest.mark.fast
     def test_srt_with_period_separator(self, temp_project_dir):
         """Test SRT parsing with period as millisecond separator"""
         stage = AnalyzeStage()
@@ -836,6 +879,7 @@ class TestEdgeCases:
         assert len(segments) == 1
         assert segments[0].end == 2.5
 
+    @pytest.mark.fast
     def test_max_keywords_limit(self, mock_config):
         """Test keyword extraction respects max_keywords limit"""
         stage = AnalyzeStage()
@@ -856,6 +900,7 @@ class TestEdgeCases:
 
         assert len(keywords) <= 5
 
+    @pytest.mark.fast
     def test_empty_segment_text(self):
         """Test handling segments with empty text"""
         stage = AnalyzeStage()

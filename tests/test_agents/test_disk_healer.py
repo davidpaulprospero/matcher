@@ -12,6 +12,7 @@ from src.agents.base import HealerResult, HealerAction
 class TestDiskHealerInit:
     """Test DiskHealer initialization."""
 
+    @pytest.mark.fast
     def test_init_stores_config_and_project(self):
         """Test that DiskHealer stores config and project_dir."""
         config = MagicMock()
@@ -20,6 +21,7 @@ class TestDiskHealerInit:
         assert healer.config is config
         assert healer.project_dir == "/path/to/project"
 
+    @pytest.mark.fast
     def test_init_has_correct_name(self):
         """Test that DiskHealer has correct name."""
         config = MagicMock()
@@ -27,6 +29,7 @@ class TestDiskHealerInit:
 
         assert healer.name == "disk-healer"
 
+    @pytest.mark.fast
     def test_init_has_min_free_space_constant(self):
         """Test that DiskHealer has MIN_FREE_SPACE_GB constant."""
         config = MagicMock()
@@ -35,6 +38,7 @@ class TestDiskHealerInit:
         assert hasattr(healer, 'MIN_FREE_SPACE_GB')
         assert healer.MIN_FREE_SPACE_GB >= 0.5  # At least 0.5 GB
 
+    @pytest.mark.fast
     def test_init_has_cache_dirs_list(self):
         """Test that DiskHealer has CACHE_DIRS list."""
         config = MagicMock()
@@ -48,6 +52,7 @@ class TestDiskHealerInit:
 class TestDiskHealerCanHandle:
     """Test DiskHealer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_disk_full(self):
         """Test that DiskHealer can handle disk full errors."""
         config = MagicMock()
@@ -59,6 +64,7 @@ class TestDiskHealerCanHandle:
         error = Exception("Disk full - cannot write file")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_errno_28(self):
         """Test that DiskHealer can handle ENOSPC (errno 28)."""
         config = MagicMock()
@@ -67,6 +73,7 @@ class TestDiskHealerCanHandle:
         error = OSError("[Errno 28] No space left on device")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_permission_denied(self):
         """Test that DiskHealer can handle permission denied errors."""
         config = MagicMock()
@@ -78,6 +85,7 @@ class TestDiskHealerCanHandle:
         error = Exception("Access denied: cannot write to directory")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_errno_13(self):
         """Test that DiskHealer can handle EACCES (errno 13)."""
         config = MagicMock()
@@ -86,6 +94,7 @@ class TestDiskHealerCanHandle:
         error = OSError("[Errno 13] Permission denied")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_storage_errors(self):
         """Test that DiskHealer can handle generic storage errors."""
         config = MagicMock()
@@ -94,6 +103,7 @@ class TestDiskHealerCanHandle:
         error = Exception("Storage error: disk is read-only")
         assert healer.can_handle(error, "DOWNLOAD") is True
 
+    @pytest.mark.fast
     def test_cannot_handle_unrelated_error(self):
         """Test that DiskHealer doesn't handle unrelated errors."""
         config = MagicMock()
@@ -109,6 +119,7 @@ class TestDiskHealerCanHandle:
 class TestDiskHealerHandleDiskFull:
     """Test DiskHealer._handle_disk_full() method."""
 
+    @pytest.mark.fast
     def test_disk_full_cleans_project_caches(self, tmp_path):
         """Test that disk full handler cleans project caches."""
         config = MagicMock()
@@ -130,6 +141,7 @@ class TestDiskHealerHandleDiskFull:
         assert result.action == HealerAction.RETRY
         assert result.details.get('freed_bytes', 0) > 0
 
+    @pytest.mark.fast
     def test_disk_full_returns_success_when_space_freed(self, tmp_path):
         """Test that disk full returns success when space is freed."""
         config = MagicMock()
@@ -149,6 +161,7 @@ class TestDiskHealerHandleDiskFull:
         assert result.success is True
         assert "cleaned_dirs" in result.details
 
+    @pytest.mark.fast
     def test_disk_full_fails_when_no_space_freed(self, tmp_path):
         """Test that disk full fails when no space can be freed."""
         config = MagicMock()
@@ -170,6 +183,7 @@ class TestDiskHealerHandleDiskFull:
 class TestDiskHealerHandlePermission:
     """Test DiskHealer._handle_permission_error() method."""
 
+    @pytest.mark.fast
     def test_permission_error_succeeds_when_dir_writable(self, tmp_path):
         """Test permission handler succeeds when project dir is writable."""
         config = MagicMock()
@@ -184,6 +198,7 @@ class TestDiskHealerHandlePermission:
         assert result.success is True
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_permission_error_fails_when_dir_not_writable(self, tmp_path):
         """Test permission handler fails when project dir is not writable."""
         config = MagicMock()
@@ -200,6 +215,7 @@ class TestDiskHealerHandlePermission:
 class TestDiskHealerGetDirSize:
     """Test DiskHealer._get_dir_size() method."""
 
+    @pytest.mark.fast
     def test_get_dir_size_returns_total_bytes(self, tmp_path):
         """Test that _get_dir_size returns correct total bytes."""
         config = MagicMock()
@@ -215,6 +231,7 @@ class TestDiskHealerGetDirSize:
 
         assert size == 300
 
+    @pytest.mark.fast
     def test_get_dir_size_handles_empty_directory(self, tmp_path):
         """Test that _get_dir_size handles empty directory."""
         config = MagicMock()
@@ -227,6 +244,7 @@ class TestDiskHealerGetDirSize:
 
         assert size == 0
 
+    @pytest.mark.fast
     def test_get_dir_size_handles_nonexistent_directory(self, tmp_path):
         """Test that _get_dir_size handles nonexistent directory."""
         config = MagicMock()
@@ -242,6 +260,7 @@ class TestDiskHealerGetDirSize:
 class TestDiskHealerGetFreeSpace:
     """Test DiskHealer._get_free_space() method."""
 
+    @pytest.mark.fast
     def test_get_free_space_returns_bytes(self, tmp_path):
         """Test that _get_free_space returns free space in bytes."""
         config = MagicMock()
@@ -252,6 +271,7 @@ class TestDiskHealerGetFreeSpace:
         assert isinstance(free_space, int)
         assert free_space >= 0
 
+    @pytest.mark.fast
     def test_get_free_space_handles_invalid_path(self, tmp_path):
         """Test that _get_free_space handles invalid paths gracefully."""
         config = MagicMock()
@@ -268,6 +288,7 @@ class TestDiskHealerGetFreeSpace:
 class TestDiskHealerFormatSize:
     """Test DiskHealer._format_size() method."""
 
+    @pytest.mark.fast
     def test_format_size_bytes(self, tmp_path):
         """Test formatting small sizes as bytes."""
         config = MagicMock()
@@ -278,6 +299,7 @@ class TestDiskHealerFormatSize:
         assert "500" in result
         assert "B" in result
 
+    @pytest.mark.fast
     def test_format_size_kilobytes(self, tmp_path):
         """Test formatting as kilobytes."""
         config = MagicMock()
@@ -287,6 +309,7 @@ class TestDiskHealerFormatSize:
 
         assert "KB" in result
 
+    @pytest.mark.fast
     def test_format_size_megabytes(self, tmp_path):
         """Test formatting as megabytes."""
         config = MagicMock()
@@ -296,6 +319,7 @@ class TestDiskHealerFormatSize:
 
         assert "MB" in result
 
+    @pytest.mark.fast
     def test_format_size_gigabytes(self, tmp_path):
         """Test formatting as gigabytes."""
         config = MagicMock()
@@ -309,6 +333,7 @@ class TestDiskHealerFormatSize:
 class TestDiskHealerCheckSpace:
     """Test DiskHealer.check_space() method."""
 
+    @pytest.mark.fast
     def test_check_space_returns_tuple(self, tmp_path):
         """Test that check_space returns (bool, float) tuple."""
         config = MagicMock()
@@ -321,6 +346,7 @@ class TestDiskHealerCheckSpace:
         assert isinstance(result[0], bool)
         assert isinstance(result[1], float)
 
+    @pytest.mark.fast
     def test_check_space_with_custom_required_gb(self, tmp_path):
         """Test check_space with custom required_gb parameter."""
         config = MagicMock()
@@ -330,6 +356,7 @@ class TestDiskHealerCheckSpace:
         has_enough, free_gb = healer.check_space(required_gb=0.0001)
         assert has_enough is True
 
+    @pytest.mark.fast
     def test_check_space_uses_min_free_space_default(self, tmp_path):
         """Test that check_space uses MIN_FREE_SPACE_GB as default."""
         config = MagicMock()
@@ -344,6 +371,7 @@ class TestDiskHealerCheckSpace:
 class TestDiskHealerFindOldFiles:
     """Test DiskHealer._find_old_files() method."""
 
+    @pytest.mark.fast
     def test_find_old_files_returns_list(self, tmp_path):
         """Test that _find_old_files returns a list of Paths."""
         config = MagicMock()
@@ -353,6 +381,7 @@ class TestDiskHealerFindOldFiles:
 
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_find_old_files_empty_directory(self, tmp_path):
         """Test _find_old_files on empty directory."""
         config = MagicMock()
@@ -362,6 +391,7 @@ class TestDiskHealerFindOldFiles:
 
         assert len(result) == 0
 
+    @pytest.mark.fast
     def test_find_old_files_nonexistent_directory(self, tmp_path):
         """Test _find_old_files on nonexistent directory."""
         config = MagicMock()
@@ -377,6 +407,7 @@ class TestDiskHealerFindOldFiles:
 class TestDiskHealerFix:
     """Test DiskHealer.fix() method routing."""
 
+    @pytest.mark.fast
     def test_fix_routes_disk_full(self, tmp_path):
         """Test that fix() routes disk full errors correctly."""
         config = MagicMock()
@@ -392,6 +423,7 @@ class TestDiskHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_permission_error(self, tmp_path):
         """Test that fix() routes permission errors correctly."""
         config = MagicMock()
@@ -405,6 +437,7 @@ class TestDiskHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_errno_28(self, tmp_path):
         """Test that fix() routes ENOSPC errors correctly."""
         config = MagicMock()

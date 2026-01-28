@@ -78,17 +78,20 @@ class TestDownloadStageInit:
         stage = DownloadStage()
         assert stage.name == "DOWNLOAD"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = DownloadStage()
         assert "Download" in stage.description or "download" in stage.description
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
         stage_class = get_stage("DOWNLOAD")
         assert stage_class is DownloadStage
 
+    @pytest.mark.fast
     def test_initial_attributes(self):
         """Test initial attributes are None"""
         stage = DownloadStage()
@@ -115,6 +118,7 @@ class TestDownloadInputValidation:
         assert error is not None
         assert "keywords" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_success(self, mock_config):
         """Test validation succeeds with keywords"""
         stage = DownloadStage()
@@ -166,6 +170,7 @@ class TestFullDownloadMode:
         assert state.failed_keywords == []
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_full_download_with_failures(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test full download with some failed keywords"""
         stage = DownloadStage()
@@ -190,6 +195,7 @@ class TestFullDownloadMode:
         assert "mountain" in state.failed_keywords
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_full_download_with_global_cache_reuse(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test full download reusing videos from global cache"""
         stage = DownloadStage()
@@ -211,6 +217,7 @@ class TestFullDownloadMode:
         assert state.downloaded_videos[0].source == 'global_cache'
         assert state.downloaded_videos[0].face_score == 0.8
 
+    @pytest.mark.fast
     def test_full_download_import_error(self, mock_config, mock_checkpoint):
         """Test full download handles import error"""
         stage = DownloadStage()
@@ -239,6 +246,7 @@ class TestAudioFirstMode:
 
         assert stage._is_audio_first_enabled(mock_config) is True
 
+    @pytest.mark.fast
     def test_is_audio_first_enabled_false(self, mock_config):
         """Test audio-first mode detection when disabled"""
         stage = DownloadStage()
@@ -246,6 +254,7 @@ class TestAudioFirstMode:
 
         assert stage._is_audio_first_enabled(mock_config) is False
 
+    @pytest.mark.fast
     def test_is_audio_first_no_config(self):
         """Test audio-first mode when config missing"""
         stage = DownloadStage()
@@ -260,6 +269,7 @@ class TestAudioFirstMode:
 
     @patch('src.downloader.VideoDownloader')
     @patch('src.state.AudioDownload')
+    @pytest.mark.fast
     def test_run_audio_first_success(self, mock_audio_class, mock_downloader_class, mock_config, mock_checkpoint):
         """Test successful audio-first download"""
         stage = DownloadStage()
@@ -288,6 +298,7 @@ class TestAudioFirstMode:
         assert result.data['mode'] == 'audio_first'
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_run_audio_first_with_failures(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test audio-first download with failed keywords"""
         stage = DownloadStage()
@@ -309,6 +320,7 @@ class TestAudioFirstMode:
         assert len(state.downloaded_audio) == 1
         assert "ocean" in state.failed_keywords
 
+    @pytest.mark.fast
     def test_run_audio_first_import_error(self, mock_config, mock_checkpoint):
         """Test audio-first download handles import error"""
         stage = DownloadStage()
@@ -351,6 +363,7 @@ class TestSkipDownload:
         assert len(state.downloaded_videos) == 2
         assert all(v.source == 'existing' for v in state.downloaded_videos)
 
+    @pytest.mark.fast
     def test_skip_download_subdirectory(self, mock_config, mock_checkpoint, temp_project_dir):
         """Test skip_download finds videos in subdirectories"""
         stage = DownloadStage()
@@ -371,6 +384,7 @@ class TestSkipDownload:
         assert result.success is True
         assert len(state.downloaded_videos) == 1
 
+    @pytest.mark.fast
     def test_skip_download_missing_directory(self, mock_config, mock_checkpoint, temp_project_dir):
         """Test skip_download handles missing directory"""
         stage = DownloadStage()
@@ -418,6 +432,7 @@ class TestDownloadStageExecution:
         assert len(state.downloaded_videos) > 0
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_run_success_audio_first_mode(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test successful run in audio-first mode"""
         stage = DownloadStage()
@@ -439,6 +454,7 @@ class TestDownloadStageExecution:
         assert result.success is True
         assert len(state.downloaded_audio) > 0
 
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_config, mock_checkpoint):
         """Test run handles exceptions gracefully"""
         stage = DownloadStage()
@@ -468,6 +484,7 @@ class TestDownloadCheckpoint:
 
         assert stage.can_skip(state, mock_checkpoint) is False
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = DownloadStage()
@@ -476,6 +493,7 @@ class TestDownloadCheckpoint:
 
         assert stage.can_skip(state, mock_checkpoint) is True
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint):
         """Test successful restore from checkpoint"""
         stage = DownloadStage()
@@ -498,6 +516,7 @@ class TestDownloadCheckpoint:
         assert state.downloaded_videos[0].file == 'video1.mp4'
         assert "mountain" in state.failed_keywords
 
+    @pytest.mark.fast
     def test_restore_audio_downloads(self, mock_checkpoint):
         """Test successful restore of audio downloads (audio-first mode)"""
         stage = DownloadStage()
@@ -523,6 +542,7 @@ class TestDownloadCheckpoint:
         assert state.downloaded_audio[1].video_id == 'vid2'
         assert "mountain" in state.failed_keywords
 
+    @pytest.mark.fast
     def test_restore_audio_downloads_legacy_field_names(self, mock_checkpoint):
         """Test restore with old checkpoint field names (audio_file, video_url)"""
         stage = DownloadStage()
@@ -551,6 +571,7 @@ class TestDownloadCheckpoint:
         assert state.downloaded_audio[1].url == 'url2'
         assert state.downloaded_audio[1].video_id == 'vid2'
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = DownloadStage()
@@ -562,6 +583,7 @@ class TestDownloadCheckpoint:
         assert result is False
 
     @patch('src.stages.download.logger')
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_logger, mock_checkpoint):
         """Test restore handles exceptions gracefully"""
         stage = DownloadStage()
@@ -598,6 +620,7 @@ class TestDownloadHelpers:
         assert result['file'] == 'video.mp4'
         assert result['title'] == 'Test Video'
 
+    @pytest.mark.fast
     def test_audio_to_dict(self):
         """Test audio serialization"""
         stage = DownloadStage()
@@ -614,6 +637,7 @@ class TestDownloadHelpers:
         assert result['file'] == 'audio.mp3'
         assert result['video_id'] == 'vid123'
 
+    @pytest.mark.fast
     def test_check_global_cache(self, mock_config):
         """Test global cache checking"""
         stage = DownloadStage()
@@ -625,6 +649,7 @@ class TestDownloadHelpers:
         assert keywords_to_download == keywords
         assert reusable == []
 
+    @pytest.mark.fast
     def test_store_download_results_dict(self):
         """Test storing download results from dicts"""
         stage = DownloadStage()
@@ -644,6 +669,7 @@ class TestDownloadHelpers:
         assert state.downloaded_videos[0].keyword == 'beach'
         assert state.failed_keywords == ["mountain"]
 
+    @pytest.mark.fast
     def test_store_download_results_objects(self):
         """Test storing download results from objects"""
         stage = DownloadStage()
@@ -672,11 +698,13 @@ class TestDownloadVideoSegmentsStageInit:
         stage = DownloadVideoSegmentsStage()
         assert stage.name == "DOWNLOAD_SEGMENTS"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = DownloadVideoSegmentsStage()
         assert "segment" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_initial_attributes(self):
         """Test initial attributes"""
         stage = DownloadVideoSegmentsStage()
@@ -697,6 +725,7 @@ class TestDownloadVideoSegmentsValidation:
 
         assert error is None
 
+    @pytest.mark.fast
     def test_validate_skip_download(self, mock_config):
         """Test validation passes when skip_download=true"""
         stage = DownloadVideoSegmentsStage()
@@ -708,6 +737,7 @@ class TestDownloadVideoSegmentsValidation:
 
         assert error is None
 
+    @pytest.mark.fast
     def test_validate_no_matches(self, mock_config):
         """Test validation fails when no matches"""
         stage = DownloadVideoSegmentsStage()
@@ -720,6 +750,7 @@ class TestDownloadVideoSegmentsValidation:
         assert error is not None
         assert "matches" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_success(self, mock_config):
         """Test validation succeeds with audio and matches"""
         stage = DownloadVideoSegmentsStage()
@@ -747,6 +778,7 @@ class TestDownloadVideoSegmentsExecution:
         assert result.success is True
         assert result.data['skipped'] is True
 
+    @pytest.mark.fast
     def test_run_skip_download_with_audio_warning(self, mock_config, mock_checkpoint):
         """Test run warns when skip_download=true but audio exists"""
         stage = DownloadVideoSegmentsStage()
@@ -760,6 +792,7 @@ class TestDownloadVideoSegmentsExecution:
         assert len(result.warnings) > 0
         assert "Incomplete" in result.warnings[0]
 
+    @pytest.mark.fast
     def test_run_no_matches_fails(self, mock_config, mock_checkpoint):
         """Test run fails when no matches"""
         stage = DownloadVideoSegmentsStage()
@@ -775,6 +808,7 @@ class TestDownloadVideoSegmentsExecution:
     @patch('src.downloader.VideoDownloader')
     @patch('src.downloader.collect_matched_segments')
     @patch('src.downloader.prepare_merged_segments')
+    @pytest.mark.fast
     def test_run_success(self, mock_prepare, mock_collect, mock_downloader_class,
                         mock_config, mock_checkpoint):
         """Test successful segment download"""
@@ -826,6 +860,7 @@ class TestDownloadVideoSegmentsCheckpoint:
 
         assert stage.can_skip(state, mock_checkpoint) is True
 
+    @pytest.mark.fast
     def test_restore(self, mock_checkpoint):
         """Test restore always succeeds (no state to restore)"""
         stage = DownloadVideoSegmentsStage()
@@ -916,6 +951,7 @@ class TestMatchRemapping:
         assert match1.video_start == 10.0
         assert match1.confidence == 0.9
 
+    @pytest.mark.fast
     def test_remap_match_result_with_alternatives(self):
         """Test remapping MatchResult objects with alternatives and strategy matches"""
         from src.state import Match, AudioDownload
@@ -1078,6 +1114,7 @@ class TestMatchRemapping:
         assert alternative.video_segment.source_file == "segment_video1_20.0-25.0.mp4"
         assert strategy.video_segment.source_file == "segment_video2_30.0-35.0.mp4"
 
+    @pytest.mark.fast
     def test_remap_match_not_found_in_segments(self):
         """Test remapping when match is not found in downloaded segments"""
         from src.state import Match, AudioDownload
@@ -1138,6 +1175,7 @@ class TestMatchRemapping:
         # Match should remain unchanged (not remapped)
         assert match1.video_file == "audio_video1.mp3"
 
+    @pytest.mark.fast
     def test_remap_with_multiple_match_results(self):
         """Test remapping multiple MatchResult objects in one pass"""
         from src.state import Match, AudioDownload
@@ -1232,6 +1270,7 @@ class TestMatchRemapping:
         assert match1.video_file == "segment_video1_10.0-15.0.mp4"
         assert match2.video_file == "segment_video1_20.0-25.0.mp4"
 
+    @pytest.mark.fast
     def test_remap_secondary_matches(self):
         """Test remapping secondary matches (V4-V6) separately from alternatives"""
         from src.state import Match, AudioDownload
@@ -1355,6 +1394,7 @@ class TestDownloadEdgeCases:
 
         assert error is not None
 
+    @pytest.mark.fast
     def test_load_existing_no_video_extensions(self, mock_config, temp_project_dir):
         """Test loading existing videos with no valid extensions"""
         stage = DownloadStage()
@@ -1370,6 +1410,7 @@ class TestDownloadEdgeCases:
 
         assert len(state.downloaded_videos) == 0
 
+    @pytest.mark.fast
     def test_video_to_dict_with_dict(self):
         """Test video serialization when already a dict"""
         stage = DownloadStage()
@@ -1380,6 +1421,7 @@ class TestDownloadEdgeCases:
         assert result == video_dict
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_audio_first_zero_per_keyword(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test audio-first mode skips tiers with zero per_keyword"""
         stage = DownloadStage()
@@ -1445,6 +1487,7 @@ class TestDownloadSegmentsException:
     @patch('src.downloader.VideoDownloader')
     @patch('src.downloader.collect_matched_segments')
     @patch('src.downloader.prepare_merged_segments')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_prepare, mock_collect, mock_downloader_class,
                                     mock_config, mock_checkpoint):
         """Test segment download handles exceptions (lines 514-516)"""
@@ -1478,6 +1521,7 @@ class TestRemapMethodIntegration:
     @patch('src.downloader.VideoDownloader')
     @patch('src.downloader.collect_matched_segments')
     @patch('src.downloader.prepare_merged_segments')
+    @pytest.mark.fast
     def test_remap_called_with_correct_args(self, mock_prepare, mock_collect, mock_downloader_class,
                                             mock_config, mock_checkpoint):
         """Test _remap_matches_to_video_segments is called with correct arguments"""
@@ -1538,6 +1582,7 @@ class TestAudioDictHandling:
 
         assert result == audio_dict
 
+    @pytest.mark.fast
     def test_audio_to_dict_with_object_input(self):
         """Test _audio_to_dict converts object to dict"""
         stage = DownloadStage()
@@ -1577,6 +1622,7 @@ class TestStoreDownloadResultsExtended:
         assert len(state.downloaded_videos) == 1
         assert state.downloaded_videos[0].file == 'video1.mp4'
 
+    @pytest.mark.fast
     def test_store_download_with_tier_field(self):
         """Test storing downloads when dict uses 'tier' instead of 'duration_tier'"""
         stage = DownloadStage()
@@ -1591,6 +1637,7 @@ class TestStoreDownloadResultsExtended:
         assert len(state.downloaded_videos) == 1
         assert state.downloaded_videos[0].duration_tier == 'short'
 
+    @pytest.mark.fast
     def test_store_download_with_reusable_and_failed(self):
         """Test storing with both reusable videos and failed keywords"""
         stage = DownloadStage()
@@ -1649,6 +1696,7 @@ class TestDownloadRetryLogic:
         assert attempts == 1
         assert call_count == 1
 
+    @pytest.mark.fast
     def test_retry_with_backoff_success_after_retries(self, mock_config):
         """Test successful operation after retries"""
         stage = DownloadStage()
@@ -1673,6 +1721,7 @@ class TestDownloadRetryLogic:
         assert attempts == 3
         assert call_count == 3
 
+    @pytest.mark.fast
     def test_retry_with_backoff_all_attempts_fail(self, mock_config):
         """Test all retry attempts fail"""
         stage = DownloadStage()
@@ -1695,6 +1744,7 @@ class TestDownloadRetryLogic:
         assert attempts == 3
         assert call_count == 3
 
+    @pytest.mark.fast
     def test_retry_with_backoff_uses_config_defaults(self):
         """Test retry uses getattr defaults when config fields missing"""
         stage = DownloadStage()
@@ -1722,6 +1772,7 @@ class TestDownloadRetryLogic:
         assert call_count == 1
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_retry_with_backoff_exponential_delay(self, mock_sleep, mock_config):
         """Test exponential backoff delays are calculated correctly"""
         stage = DownloadStage()
@@ -1748,6 +1799,7 @@ class TestDownloadRetryLogic:
         assert delays[2] == 8.0   # Third retry delay
 
     @patch('src.stages.download.logger')
+    @pytest.mark.fast
     def test_retry_logs_warnings_and_errors(self, mock_logger, mock_config):
         """Test retry logs appropriate messages"""
         stage = DownloadStage()
@@ -1808,6 +1860,7 @@ class TestAudioFirstRetryIntegration:
         assert call_count == 3
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_audio_first_marks_keyword_failed_after_all_retries(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test audio-first mode marks keyword as failed after all retries exhausted"""
         stage = DownloadStage()
@@ -1831,6 +1884,7 @@ class TestAudioFirstRetryIntegration:
         assert "beach" in state.failed_keywords
 
     @patch('src.downloader.VideoDownloader')
+    @pytest.mark.fast
     def test_audio_first_partial_tier_success(self, mock_downloader_class, mock_config, mock_checkpoint):
         """Test audio-first mode succeeds if any tier succeeds (even if others fail)"""
         stage = DownloadStage()
@@ -1906,6 +1960,7 @@ class TestRestoreObsoleteFields:
         assert not hasattr(state.downloaded_audio[0], 'channel')
         assert not hasattr(state.downloaded_audio[0], 'upload_date')
 
+    @pytest.mark.fast
     def test_restore_audio_already_object(self, mock_checkpoint):
         """Test restore when audio downloads are already AudioDownload objects"""
         stage = DownloadStage()

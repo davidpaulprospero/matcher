@@ -176,11 +176,13 @@ class TestStallDetectorTimeout:
         assert 2.0 <= elapsed < 4.0, f"Expected ~2s elapsed, got {elapsed:.2f}s"
         assert process._killed, "Process should have been killed"
 
+    @pytest.mark.fast
     def test_stall_timeout_uses_config_default_60s(self, tmp_path):
         """Test that default stall_timeout of 60s is used from config."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=60)
         assert config.download.stall_timeout == 60
 
+    @pytest.mark.fast
     def test_no_stall_when_output_continues(self, tmp_path):
         """Test that stall detector does not trigger when output continues."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=2)
@@ -231,6 +233,7 @@ class TestStallDetectorTimerReset:
         assert timeout_type is None, f"Expected no timeout, got {timeout_type}"
         assert elapsed >= 2.5, f"Expected >=2.5s runtime, got {elapsed:.2f}s"
 
+    @pytest.mark.fast
     def test_timer_resets_on_stdout_output(self, tmp_path):
         """Test that stall timer also resets on stdout output."""
         import inspect
@@ -250,6 +253,7 @@ class TestStallDetectorTimerReset:
         # Verify lock is used for thread safety
         assert 'with lock:' in source, "Should use lock for thread safety"
 
+    @pytest.mark.fast
     def test_timer_not_reset_without_output(self, tmp_path):
         """Test that timer continues counting when no output occurs."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=1)
@@ -357,6 +361,7 @@ class TestResumeOnRetry:
             assert any(kw in pattern.lower() for kw in ['resum', 'fragment', 'byte']), \
                 f"Pattern should indicate resume: {pattern}"
 
+    @pytest.mark.fast
     def test_stall_kills_preserves_partial_file(self, tmp_path):
         """Test that stall detection kill preserves partial .mp4 for resume."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=1)
@@ -419,6 +424,7 @@ class TestMetadataVsProgress:
         # Should not stall - metadata output keeps timer reset
         assert timeout_type is None, f"Expected no timeout, got {timeout_type}"
 
+    @pytest.mark.fast
     def test_warning_output_resets_timer(self, tmp_path):
         """Test that warning messages also reset stall timer."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=2)
@@ -472,6 +478,7 @@ class TestMaxTimeoutBehavior:
         assert timeout_type == 'max_timeout', f"Expected 'max_timeout', got {timeout_type}"
         assert process._killed, "Process should have been killed"
 
+    @pytest.mark.fast
     def test_stall_timeout_wins_over_max_when_no_output(self, tmp_path):
         """Test that stall_timeout triggers before max_timeout if no output."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=1)
@@ -505,6 +512,7 @@ class TestEdgeCases:
         assert config.download.stall_timeout == 0
         assert config.download.download_timeout == 2
 
+    @pytest.mark.fast
     def test_very_long_lines_still_reset_timer(self, tmp_path):
         """Test that very long output lines still reset the stall timer."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=1)
@@ -527,6 +535,7 @@ class TestEdgeCases:
         # Should not stall - long lines still reset timer
         assert timeout_type is None, f"Expected no timeout, got {timeout_type}"
 
+    @pytest.mark.fast
     def test_empty_lines_reset_timer(self, tmp_path):
         """Test that even empty lines reset the stall timer."""
         config = create_mock_downloader_config(tmp_path, stall_timeout=1)

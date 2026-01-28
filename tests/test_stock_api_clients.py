@@ -51,6 +51,7 @@ def temp_output_dir(tmp_path):
 class TestPexelsImageClientInit:
     """Test Pexels client initialization"""
 
+    @pytest.mark.fast
     def test_init_with_api_key(self, mock_config, temp_output_dir):
         """Test initialization with provided API key"""
         client = PexelsImageClient(
@@ -63,6 +64,7 @@ class TestPexelsImageClientInit:
         assert client.output_dir == Path(temp_output_dir)
         assert client.min_size == int(1.0 * 1024 * 1024)
 
+    @pytest.mark.requires_api
     def test_init_with_env_var(self, mock_config, temp_output_dir):
         """Test initialization with env var fallback"""
         with patch.dict('os.environ', {'PEXELS_API_KEY': 'env_key'}):
@@ -73,6 +75,7 @@ class TestPexelsImageClientInit:
 
             assert client.api_key == "env_key"
 
+    @pytest.mark.fast
     def test_init_custom_params(self, mock_config, temp_output_dir):
         """Test initialization with custom parameters"""
         client = PexelsImageClient(
@@ -90,6 +93,7 @@ class TestPexelsImageClientInit:
 class TestPexelsImageClientSearch:
     """Test Pexels search functionality"""
 
+    @pytest.mark.fast
     def test_search_no_api_key(self, mock_config, temp_output_dir):
         """Test search without API key"""
         # Ensure no API key in environment
@@ -103,6 +107,7 @@ class TestPexelsImageClientSearch:
 
             assert results == []
 
+    @pytest.mark.fast
     def test_search_success(self, mock_config, temp_output_dir):
         """Test successful search"""
         client = PexelsImageClient(
@@ -149,6 +154,7 @@ class TestPexelsImageClientSearch:
             assert results[0].width == 1920
             assert results[0].height == 1080
 
+    @pytest.mark.fast
     def test_search_api_error(self, mock_config, temp_output_dir):
         """Test search with API error"""
         client = PexelsImageClient(
@@ -164,6 +170,7 @@ class TestPexelsImageClientSearch:
 
             assert results == []
 
+    @pytest.mark.fast
     def test_search_missing_url(self, mock_config, temp_output_dir):
         """Test search with missing download URL"""
         client = PexelsImageClient(
@@ -200,6 +207,7 @@ class TestPexelsImageClientSearch:
 class TestPixabayImageClientInit:
     """Test Pixabay client initialization"""
 
+    @pytest.mark.fast
     def test_init_with_api_key(self, mock_config, temp_output_dir):
         """Test initialization with provided API key"""
         client = PixabayImageClient(
@@ -211,6 +219,7 @@ class TestPixabayImageClientInit:
         assert client.api_key == "test_api_key"
         assert client.output_dir == Path(temp_output_dir)
 
+    @pytest.mark.requires_api
     def test_init_with_env_var(self, mock_config, temp_output_dir):
         """Test initialization with env var fallback"""
         with patch.dict('os.environ', {'PIXABAY_API_KEY': 'env_key'}):
@@ -225,6 +234,7 @@ class TestPixabayImageClientInit:
 class TestPixabayImageClientSearch:
     """Test Pixabay search functionality"""
 
+    @pytest.mark.fast
     def test_search_no_api_key(self, mock_config, temp_output_dir):
         """Test search without API key"""
         # Ensure no API key in environment
@@ -238,6 +248,7 @@ class TestPixabayImageClientSearch:
 
             assert results == []
 
+    @pytest.mark.fast
     def test_search_success(self, mock_config, temp_output_dir):
         """Test successful search"""
         client = PixabayImageClient(
@@ -278,6 +289,7 @@ class TestPixabayImageClientSearch:
             assert "pixabay.com" in results[0].download_url
             assert results[0].width == 1920
 
+    @pytest.mark.fast
     def test_search_api_error(self, mock_config, temp_output_dir):
         """Test search with API error"""
         client = PixabayImageClient(
@@ -301,6 +313,7 @@ class TestPixabayImageClientSearch:
 class TestUnsplashImageClientInit:
     """Test Unsplash client initialization"""
 
+    @pytest.mark.fast
     def test_init_with_api_key(self, mock_config, temp_output_dir):
         """Test initialization with provided API key"""
         client = UnsplashImageClient(
@@ -312,6 +325,7 @@ class TestUnsplashImageClientInit:
         assert client.api_key == "test_api_key"
         assert client.output_dir == Path(temp_output_dir)
 
+    @pytest.mark.fast
     def test_init_with_env_var(self, mock_config, temp_output_dir):
         """Test initialization with env var fallback"""
         with patch.dict('os.environ', {'UNSPLASH_API_KEY': 'env_key'}):
@@ -326,6 +340,7 @@ class TestUnsplashImageClientInit:
 class TestUnsplashImageClientSearch:
     """Test Unsplash search functionality"""
 
+    @pytest.mark.fast
     def test_search_no_api_key(self, mock_config, temp_output_dir):
         """Test search without API key"""
         client = UnsplashImageClient(
@@ -337,6 +352,7 @@ class TestUnsplashImageClientSearch:
 
         assert results == []
 
+    @pytest.mark.fast
     def test_search_success(self, mock_config, temp_output_dir):
         """Test successful search"""
         client = UnsplashImageClient(
@@ -382,6 +398,7 @@ class TestUnsplashImageClientSearch:
             assert "unsplash.com" in results[0].download_url
             assert results[0].width == 3000
 
+    @pytest.mark.fast
     def test_search_api_error(self, mock_config, temp_output_dir):
         """Test search with API error"""
         client = UnsplashImageClient(
@@ -405,6 +422,7 @@ class TestUnsplashImageClientSearch:
 class TestStockAPIEdgeCases:
     """Test edge cases across all stock API clients"""
 
+    @pytest.mark.fast
     def test_all_clients_have_rate_limiting(self, mock_config, temp_output_dir):
         """Test that all clients implement rate limiting"""
         pexels = PexelsImageClient(config=mock_config, output_dir=temp_output_dir, api_key="key")
@@ -416,6 +434,7 @@ class TestStockAPIEdgeCases:
         assert hasattr(pixabay, '_rate_limit')
         assert hasattr(unsplash, '_rate_limit')
 
+    @pytest.mark.fast
     def test_all_clients_accept_output_dir(self, mock_config, temp_output_dir):
         """Test that all clients accept output_dir parameter"""
         pexels = PexelsImageClient(config=mock_config, output_dir=temp_output_dir, api_key="key")
@@ -426,6 +445,7 @@ class TestStockAPIEdgeCases:
         assert pixabay.output_dir == Path(temp_output_dir)
         assert unsplash.output_dir == Path(temp_output_dir)
 
+    @pytest.mark.fast
     def test_all_clients_return_empty_list_without_api_key(self, mock_config, temp_output_dir):
         """Test that all clients return empty list when no API key"""
         # Ensure no API keys in environment
@@ -438,6 +458,7 @@ class TestStockAPIEdgeCases:
             assert pixabay.search("query") == []
             assert unsplash.search("query") == []
 
+    @pytest.mark.fast
     def test_all_clients_handle_api_errors_gracefully(self, mock_config, temp_output_dir):
         """Test that all clients handle API errors gracefully"""
         pexels = PexelsImageClient(config=mock_config, output_dir=temp_output_dir, api_key="key")

@@ -25,6 +25,7 @@ from src.caption_fetcher import (
 class TestCaptionBatchCheckpoint:
     """Test CaptionBatchCheckpoint dataclass creation and basic operations."""
 
+    @pytest.mark.fast
     def test_checkpoint_creation_empty(self):
         """Test creating an empty checkpoint."""
         checkpoint = CaptionBatchCheckpoint()
@@ -40,6 +41,7 @@ class TestCaptionBatchCheckpoint:
         assert checkpoint.created_at > 0
         assert checkpoint.updated_at > 0
 
+    @pytest.mark.fast
     def test_checkpoint_creation_with_values(self):
         """Test creating a checkpoint with initial values."""
         checkpoint = CaptionBatchCheckpoint(
@@ -50,6 +52,7 @@ class TestCaptionBatchCheckpoint:
         assert checkpoint.total_requested == 100
         assert checkpoint.remaining_video_ids == ['vid1', 'vid2', 'vid3']
 
+    @pytest.mark.fast
     def test_update_with_caption_result(self):
         """Test updating checkpoint with a successful CaptionResult."""
         checkpoint = CaptionBatchCheckpoint(
@@ -78,6 +81,7 @@ class TestCaptionBatchCheckpoint:
         assert checkpoint.results['vid1']['language'] == 'en'
         assert checkpoint.results['vid1']['segment_count'] == 1
 
+    @pytest.mark.fast
     def test_update_with_error_dict(self):
         """Test updating checkpoint with an error result."""
         checkpoint = CaptionBatchCheckpoint(
@@ -98,6 +102,7 @@ class TestCaptionBatchCheckpoint:
         assert checkpoint.error_count == 1
         assert 'vid1' not in checkpoint.remaining_video_ids
 
+    @pytest.mark.fast
     def test_update_with_unavailable_dict(self):
         """Test updating checkpoint with an unavailable result."""
         checkpoint = CaptionBatchCheckpoint(
@@ -120,6 +125,7 @@ class TestCaptionBatchCheckpoint:
 class TestCaptionBatchCheckpointAbort:
     """Test checkpoint abort functionality."""
 
+    @pytest.mark.fast
     def test_mark_aborted_basic(self):
         """Test marking a checkpoint as aborted."""
         checkpoint = CaptionBatchCheckpoint()
@@ -133,6 +139,7 @@ class TestCaptionBatchCheckpointAbort:
         assert checkpoint.abort_reason == 'Error pattern detected: 403 Forbidden'
         assert checkpoint.remaining_video_ids == ['vid5', 'vid6', 'vid7']
 
+    @pytest.mark.fast
     def test_mark_aborted_with_pattern_result(self):
         """Test marking aborted with ErrorPatternResult details."""
         checkpoint = CaptionBatchCheckpoint()
@@ -162,6 +169,7 @@ class TestCaptionBatchCheckpointAbort:
 class TestCaptionBatchCheckpointSerialization:
     """Test checkpoint serialization and deserialization."""
 
+    @pytest.mark.fast
     def test_to_dict(self):
         """Test converting checkpoint to dict."""
         checkpoint = CaptionBatchCheckpoint(
@@ -180,6 +188,7 @@ class TestCaptionBatchCheckpointSerialization:
         assert data['results'] == {'vid3': {'video_id': 'vid3', 'segments': []}}
         assert data['remaining_video_ids'] == ['vid1', 'vid2']
 
+    @pytest.mark.fast
     def test_from_dict(self):
         """Test creating checkpoint from dict."""
         data = {
@@ -207,6 +216,7 @@ class TestCaptionBatchCheckpointSerialization:
 class TestCaptionBatchCheckpointPersistence:
     """Test checkpoint file save/load operations."""
 
+    @pytest.mark.fast
     def test_save_and_load(self, tmp_path):
         """Test saving and loading a checkpoint."""
         checkpoint_path = tmp_path / '.cache' / 'caption_checkpoint.json'
@@ -244,6 +254,7 @@ class TestCaptionBatchCheckpointPersistence:
         assert 'vid4' in loaded.results
         assert loaded.results['vid4']['language'] == 'en'
 
+    @pytest.mark.fast
     def test_load_nonexistent(self, tmp_path):
         """Test loading from non-existent file returns None."""
         checkpoint_path = tmp_path / 'nonexistent.json'
@@ -252,6 +263,7 @@ class TestCaptionBatchCheckpointPersistence:
 
         assert loaded is None
 
+    @pytest.mark.fast
     def test_load_corrupt_json(self, tmp_path):
         """Test loading corrupt JSON returns None gracefully."""
         checkpoint_path = tmp_path / 'corrupt.json'
@@ -261,6 +273,7 @@ class TestCaptionBatchCheckpointPersistence:
 
         assert loaded is None
 
+    @pytest.mark.fast
     def test_get_checkpoint_path(self, tmp_path):
         """Test get_checkpoint_path returns correct path."""
         path = CaptionBatchCheckpoint.get_checkpoint_path(tmp_path)
@@ -271,6 +284,7 @@ class TestCaptionBatchCheckpointPersistence:
 class TestCaptionBatchCheckpointHelpers:
     """Test checkpoint helper methods."""
 
+    @pytest.mark.fast
     def test_get_remaining_ids(self):
         """Test getting remaining IDs from checkpoint."""
         checkpoint = CaptionBatchCheckpoint()
@@ -284,6 +298,7 @@ class TestCaptionBatchCheckpointHelpers:
 
         assert remaining == ['vid3', 'vid4', 'vid5']
 
+    @pytest.mark.fast
     def test_has_result(self):
         """Test checking if video has result."""
         checkpoint = CaptionBatchCheckpoint()
@@ -292,6 +307,7 @@ class TestCaptionBatchCheckpointHelpers:
         assert checkpoint.has_result('vid1') is True
         assert checkpoint.has_result('vid2') is False
 
+    @pytest.mark.fast
     def test_get_successful_results(self):
         """Test getting only successful results."""
         checkpoint = CaptionBatchCheckpoint()
@@ -327,6 +343,7 @@ class TestBatchFetchWithCheckpoint:
         fetcher = CaptionFetcher(config=config)
         return fetcher
 
+    @pytest.mark.fast
     def test_batch_fetch_updates_checkpoint(self, mock_fetcher):
         """Test that batch fetch updates checkpoint as results arrive."""
         checkpoint = CaptionBatchCheckpoint(
@@ -363,6 +380,7 @@ class TestBatchFetchWithCheckpoint:
 class TestAbortSavesCheckpoint:
     """Test that ErrorPatternAbortError properly saves checkpoint."""
 
+    @pytest.mark.fast
     def test_abort_marks_checkpoint(self):
         """Test abort at video 50/100 saves 50 results and marks remaining."""
         # Create a checkpoint with partial results
@@ -426,6 +444,7 @@ class TestResumeFromCheckpoint:
         fetcher = CaptionFetcher(config=config)
         return fetcher
 
+    @pytest.mark.fast
     def test_resume_skips_already_fetched(self, mock_fetcher):
         """Test that resume skips videos already in checkpoint."""
         # Create checkpoint with some results
@@ -477,6 +496,7 @@ class TestResumeFromCheckpoint:
         # Checkpoint should no longer be marked aborted
         assert checkpoint.aborted is False
 
+    @pytest.mark.fast
     def test_resume_all_already_fetched(self, mock_fetcher):
         """Test resume when all videos already in checkpoint."""
         checkpoint = CaptionBatchCheckpoint(
@@ -501,6 +521,7 @@ class TestResumeFromCheckpoint:
 class TestEndToEndAbortResume:
     """End-to-end test: abort at 50/100, save, resume, fetch remaining 50."""
 
+    @pytest.mark.fast
     def test_abort_resume_scenario(self, tmp_path):
         """Test complete abort and resume scenario."""
         checkpoint_path = tmp_path / '.cache' / 'caption_checkpoint.json'

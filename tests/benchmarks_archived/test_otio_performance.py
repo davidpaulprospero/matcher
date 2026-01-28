@@ -87,6 +87,7 @@ class TestOTIOPerformance:
 
         return matches
 
+    @pytest.mark.fast
     def test_timeline_creation_speed(self, mock_matches, benchmark):
         """Benchmark timeline creation speed."""
         from src.otio import create_timeline
@@ -110,6 +111,7 @@ class TestOTIOPerformance:
         segments_per_second = len(mock_matches) / benchmark.stats['mean']
         print(f"Timeline generation: {segments_per_second:.1f} segments/second")
 
+    @pytest.mark.fast
     def test_track_building_speed(self, mock_matches, benchmark):
         """Benchmark individual track building speed."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -133,6 +135,7 @@ class TestOTIOPerformance:
         assert len(result) == len(mock_matches)
         print(f"\nBuilt track with {len(result)} clips")
 
+    @pytest.mark.fast
     def test_otio_serialization_speed(self, mock_matches, temp_benchmark_dir, benchmark):
         """Benchmark OTIO serialization speed."""
         from src.otio import create_timeline, save_timeline
@@ -150,6 +153,7 @@ class TestOTIOPerformance:
         file_size_mb = output_file.stat().st_size / 1024 / 1024
         print(f"\nOTIO file size: {file_size_mb:.2f} MB for {len(mock_matches)} segments")
 
+    @pytest.mark.fast
     def test_edl_export_speed(self, mock_matches, temp_benchmark_dir, benchmark):
         """Benchmark EDL export speed."""
         from src.otio import create_timeline, save_timeline_as_edl
@@ -167,6 +171,7 @@ class TestOTIOPerformance:
         file_size_kb = output_file.stat().st_size / 1024
         print(f"\nEDL file size: {file_size_kb:.2f} KB")
 
+    @pytest.mark.fast
     def test_xml_generation_speed(self, mock_matches, temp_benchmark_dir, benchmark):
         """Benchmark FCP7 XML generation speed."""
         from src.otio import create_timeline, generate_resolve_xml_with_bins
@@ -184,6 +189,7 @@ class TestOTIOPerformance:
         file_size_kb = output_file.stat().st_size / 1024
         print(f"\nXML file size: {file_size_kb:.2f} KB")
 
+    @pytest.mark.fast
     def test_split_timeline_export_speed(self, mock_matches, temp_benchmark_dir, benchmark):
         """Benchmark split timeline export speed."""
         from src.otio import create_timeline, save_timeline_split
@@ -202,6 +208,7 @@ class TestOTIOPerformance:
         split_files = list(temp_benchmark_dir.glob("split_timeline_*.otio"))
         print(f"\nGenerated {len(split_files)} split timeline files")
 
+    @pytest.mark.fast
     def test_segment_map_generation_speed(self, mock_matches, benchmark):
         """Benchmark segment map generation speed."""
         from src.otio import create_timeline, generate_segment_map
@@ -222,6 +229,7 @@ class TestOTIOPerformance:
 class TestOTIOMemoryUsage:
     """Memory profiling for OTIO operations."""
 
+    @pytest.mark.fast
     def test_timeline_memory_usage(self):
         """Profile memory usage of timeline creation."""
         import tracemalloc

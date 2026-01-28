@@ -20,6 +20,7 @@ from src.agents.base import Healer, HealerResult, HealerAction
 class TestPreflightIssue:
     """Tests for PreflightIssue dataclass."""
 
+    @pytest.mark.fast
     def test_create_issue(self):
         """Test creating a preflight issue."""
         issue = PreflightIssue(
@@ -34,6 +35,7 @@ class TestPreflightIssue:
         assert issue.severity == "warning"
         assert issue.auto_fixable is True
 
+    @pytest.mark.fast
     def test_issue_defaults(self):
         """Test default values."""
         issue = PreflightIssue(
@@ -49,6 +51,7 @@ class TestPreflightIssue:
 class TestEscalationRequest:
     """Tests for EscalationRequest dataclass."""
 
+    @pytest.mark.fast
     def test_create_request(self):
         """Test creating an escalation request."""
         request = EscalationRequest(
@@ -66,6 +69,7 @@ class TestEscalationRequest:
 class TestHealingOrchestrator:
     """Tests for HealingOrchestrator."""
 
+    @pytest.mark.fast
     def test_initialization(self, mock_config, project_dir):
         """Test orchestrator initializes correctly."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -75,6 +79,7 @@ class TestHealingOrchestrator:
         assert orchestrator.strategy is not None
         assert len(orchestrator.healers) > 0
 
+    @pytest.mark.fast
     def test_initialization_with_strategy(self, mock_config, project_dir):
         """Test orchestrator uses provided strategy."""
         strategy = HealingStrategy.aggressive()
@@ -82,6 +87,7 @@ class TestHealingOrchestrator:
 
         assert orchestrator.strategy.mode == HealingMode.AGGRESSIVE
 
+    @pytest.mark.fast
     def test_healer_priority(self, mock_config, project_dir):
         """Test healers are ordered by strategy priority."""
         strategy = HealingStrategy()
@@ -94,6 +100,7 @@ class TestHealingOrchestrator:
         if "checkpoint-healer" in healer_names and "otio-healer" in healer_names:
             assert healer_names.index("checkpoint-healer") < healer_names.index("otio-healer")
 
+    @pytest.mark.fast
     def test_skip_healers(self, mock_config, project_dir):
         """Test healers in skip_healers are excluded."""
         strategy = HealingStrategy(skip_healers={"disk-healer"})
@@ -107,6 +114,7 @@ class TestHealingOrchestrator:
 class TestPreflightChecks:
     """Tests for preflight check functionality."""
 
+    @pytest.mark.fast
     def test_run_preflight_disabled(self, mock_config, project_dir):
         """Test preflight returns empty when disabled."""
         strategy = HealingStrategy(run_preflight=False)
@@ -118,6 +126,7 @@ class TestPreflightChecks:
         assert issues == []
 
     @patch('shutil.disk_usage')
+    @pytest.mark.fast
     def test_check_disk_space_low(self, mock_usage, mock_config, project_dir):
         """Test disk space check detects low space."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -132,6 +141,7 @@ class TestPreflightChecks:
         assert "disk" in issues[0].category
 
     @patch('shutil.disk_usage')
+    @pytest.mark.fast
     def test_check_disk_space_warning(self, mock_usage, mock_config, project_dir):
         """Test disk space check warns for moderate space."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -145,6 +155,7 @@ class TestPreflightChecks:
         assert issues[0].severity == "warning"
 
     @patch('os.environ.get')
+    @pytest.mark.fast
     def test_check_api_keys(self, mock_env, mock_config, project_dir):
         """Test API key check detects missing keys."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -157,6 +168,7 @@ class TestPreflightChecks:
         assert len(issues) >= 1
         assert any("GEMINI" in i.message for i in issues)
 
+    @pytest.mark.fast
     def test_check_paths_missing_project(self, mock_config, tmp_path):
         """Test path check detects missing project dir."""
         nonexistent = tmp_path / "nonexistent"
@@ -167,6 +179,7 @@ class TestPreflightChecks:
         assert len(issues) >= 1
         assert any(i.severity == "critical" for i in issues)
 
+    @pytest.mark.fast
     def test_check_matches_missing_media(self, mock_config, project_dir, mock_matches):
         """Test match check detects missing media files."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -182,6 +195,7 @@ class TestPreflightChecks:
         assert len(issues) == 1
         assert "media" in issues[0].category
 
+    @pytest.mark.fast
     def test_fix_preflight_issues(self, mock_config, project_dir):
         """Test fixing preflight issues."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -205,6 +219,7 @@ class TestPreflightChecks:
 class TestConfigSnapshots:
     """Tests for config snapshot and rollback."""
 
+    @pytest.mark.fast
     def test_snapshot_config(self, mock_config, project_dir):
         """Test creating config snapshot."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -215,6 +230,7 @@ class TestConfigSnapshots:
         assert snapshot.timestamp > 0
         assert len(snapshot.config_values) > 0
 
+    @pytest.mark.fast
     def test_snapshot_excludes_protected(self, mock_config, project_dir):
         """Test snapshot excludes protected keys."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -226,6 +242,7 @@ class TestConfigSnapshots:
             assert "api_key" not in key.lower()
             assert "password" not in key.lower()
 
+    @pytest.mark.fast
     def test_rollback_config(self, mock_config, project_dir):
         """Test rolling back config."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -246,6 +263,7 @@ class TestConfigSnapshots:
         assert success
         assert orchestrator.metrics.rollbacks_performed == 1
 
+    @pytest.mark.fast
     def test_rollback_disabled(self, mock_config, project_dir):
         """Test rollback when disabled in strategy."""
         strategy = HealingStrategy(enable_rollback=False)
@@ -256,6 +274,7 @@ class TestConfigSnapshots:
 
         assert not success
 
+    @pytest.mark.fast
     def test_rollback_no_snapshots(self, mock_config, project_dir):
         """Test rollback with no snapshots available."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -268,6 +287,7 @@ class TestConfigSnapshots:
 class TestHealerCoordination:
     """Tests for healer selection and coordination."""
 
+    @pytest.mark.fast
     def test_select_healers(self, mock_config, project_dir):
         """Test selecting healers for an error."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -280,6 +300,7 @@ class TestHealerCoordination:
         healer_names = [h.name for h in healers]
         assert "otio-healer" in healer_names
 
+    @pytest.mark.fast
     def test_select_healers_aggressive_mode(self, mock_config, project_dir):
         """Test aggressive mode returns all applicable healers."""
         strategy = HealingStrategy.aggressive()
@@ -291,6 +312,7 @@ class TestHealerCoordination:
         # Aggressive mode returns all applicable
         assert len(healers) >= 1
 
+    @pytest.mark.fast
     def test_select_healers_minimal_mode(self, mock_config, project_dir):
         """Test minimal mode returns only first healer."""
         strategy = HealingStrategy.minimal()
@@ -302,6 +324,7 @@ class TestHealerCoordination:
         # Minimal mode returns at most 1
         assert len(healers) <= 1
 
+    @pytest.mark.fast
     def test_select_healers_returns_empty_for_unknown_error(self, mock_config, project_dir):
         """Test select_healers returns empty list when no healer can handle error."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -316,6 +339,7 @@ class TestHealerCoordination:
         # Should return empty list
         assert healers == []
 
+    @pytest.mark.fast
     def test_select_healers_respects_can_handle(self, mock_config, project_dir):
         """Test select_healers only returns healers where can_handle() is True."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -336,6 +360,7 @@ class TestHealerCoordination:
         # Should have at most 1 healer (the last one)
         assert len(healers) <= 1
 
+    @pytest.mark.fast
     def test_select_healers_logs_decision(self, mock_config, project_dir, caplog):
         """Test select_healers logs healer selection decision."""
         import logging
@@ -352,6 +377,7 @@ class TestHealerCoordination:
             # At least verify it ran without error
             assert True
 
+    @pytest.mark.fast
     def test_coordinate_heal_success(self, mock_config, project_dir, mock_state):
         """Test coordinated healing on success."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -364,6 +390,7 @@ class TestHealerCoordination:
 
         assert result.success
 
+    @pytest.mark.fast
     def test_coordinate_heal_always_escalate(self, mock_config, project_dir, mock_state):
         """Test immediate escalation for always_escalate patterns."""
         strategy = HealingStrategy()
@@ -377,6 +404,7 @@ class TestHealerCoordination:
         assert not result.success
         assert orchestrator.metrics.user_escalations > 0
 
+    @pytest.mark.fast
     def test_notify_healers_on_config_change(self, mock_config, project_dir):
         """Test healer notification on config changes."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -391,6 +419,7 @@ class TestHealerCoordination:
 class TestMetricsAndReporting:
     """Tests for metrics and reporting."""
 
+    @pytest.mark.fast
     def test_get_metrics(self, mock_config, project_dir):
         """Test getting metrics."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -400,6 +429,7 @@ class TestMetricsAndReporting:
         assert isinstance(metrics, HealingMetrics)
         assert metrics.total_heals == 0
 
+    @pytest.mark.fast
     def test_reset(self, mock_config, project_dir):
         """Test resetting orchestrator state."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -413,6 +443,7 @@ class TestMetricsAndReporting:
         assert orchestrator.metrics.total_heals == 0
         assert len(orchestrator.config_snapshots) == 0
 
+    @pytest.mark.fast
     def test_print_report(self, mock_config, project_dir, capsys):
         """Test print_report outputs correctly."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -427,6 +458,7 @@ class TestMetricsAndReporting:
 class TestEscalation:
     """Tests for user escalation."""
 
+    @pytest.mark.fast
     def test_escalate_to_user_with_callback(self, mock_config, project_dir):
         """Test escalation with callback."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -441,6 +473,7 @@ class TestEscalation:
         assert result.success
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_escalate_to_user_skip(self, mock_config, project_dir):
         """Test escalation with skip decision."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -452,6 +485,7 @@ class TestEscalation:
         assert result.success
         assert result.action == HealerAction.SKIP
 
+    @pytest.mark.fast
     def test_escalate_to_user_abort(self, mock_config, project_dir):
         """Test escalation with abort decision."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -462,6 +496,7 @@ class TestEscalation:
 
         assert not result.success
 
+    @pytest.mark.fast
     def test_escalate_to_user_rollback(self, mock_config, project_dir):
         """Test escalation with rollback decision."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -480,6 +515,7 @@ class TestEscalation:
 class TestFactoryFunction:
     """Tests for create_orchestrated_pipeline factory."""
 
+    @pytest.mark.fast
     def test_create_orchestrated_pipeline(self, mock_config, project_dir):
         """Test factory function creates all components."""
         with patch('src.pipeline.create_default_pipeline') as mock_create:
@@ -496,6 +532,7 @@ class TestFactoryFunction:
             assert isinstance(orchestrator, HealingOrchestrator)
             assert runner.orchestrator == orchestrator
 
+    @pytest.mark.fast
     def test_create_orchestrated_pipeline_with_strategy(self, mock_config, project_dir):
         """Test factory function uses provided strategy."""
         with patch('src.pipeline.create_default_pipeline') as mock_create:
@@ -524,6 +561,7 @@ class TestClassifyError:
     - Returns PatternClassification with needs_llm_healer=True for unknown patterns
     """
 
+    @pytest.mark.fast
     def test_classify_error_uses_watcher_when_available(self, mock_config, project_dir):
         """Test classify_error() uses watcher when available and returns WatcherClassification."""
         # Create orchestrator
@@ -560,6 +598,7 @@ class TestClassifyError:
         mock_watcher.classify_error.assert_called_once()
         mock_fallback.check_watcher_available.assert_called_once()
 
+    @pytest.mark.fast
     def test_classify_error_falls_back_to_pattern_route_when_watcher_unavailable(
         self, mock_config, project_dir
     ):
@@ -585,6 +624,7 @@ class TestClassifyError:
         # Watcher's classify_error should not be called
         orchestrator.watcher.classify_error.assert_not_called()
 
+    @pytest.mark.fast
     def test_classify_error_falls_back_when_watcher_returns_none(
         self, mock_config, project_dir
     ):
@@ -612,6 +652,7 @@ class TestClassifyError:
         assert result.category == "disk"
         assert result.suggested_healer == "disk-healer"
 
+    @pytest.mark.fast
     def test_classify_error_falls_back_when_no_watcher_configured(
         self, mock_config, project_dir
     ):
@@ -632,6 +673,7 @@ class TestClassifyError:
         assert result.category == "checkpoint"
         assert result.suggested_healer == "checkpoint-healer"
 
+    @pytest.mark.fast
     def test_classify_error_falls_back_when_no_fallback_chain(
         self, mock_config, project_dir
     ):
@@ -652,6 +694,7 @@ class TestClassifyError:
         assert result.category == "otio"
         assert result.suggested_healer == "otio-healer"
 
+    @pytest.mark.fast
     def test_classify_error_returns_pattern_classification_with_needs_llm_healer_for_unknown(
         self, mock_config, project_dir
     ):
@@ -674,6 +717,7 @@ class TestClassifyError:
         assert result.confidence == 0.3
         assert result.needs_llm_healer is True
 
+    @pytest.mark.fast
     def test_classify_error_context_passed_to_watcher(self, mock_config, project_dir):
         """Test classify_error() passes correct context to watcher."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -704,6 +748,7 @@ class TestClassifyError:
         assert context['stage'] == "DOWNLOAD"
         assert context['stage_name'] == "DOWNLOAD"
 
+    @pytest.mark.fast
     def test_classify_error_pattern_routes_various_error_types(
         self, mock_config, project_dir
     ):
@@ -734,6 +779,7 @@ class TestClassifyError:
             assert result.category == expected_category, f"Failed category for: {error_msg}"
             assert result.suggested_healer == expected_healer, f"Failed healer for: {error_msg}"
 
+    @pytest.mark.fast
     def test_classify_error_watcher_logs_fallback_on_failure(self, mock_config, project_dir):
         """Test classify_error() logs fallback activation via healing_logger.log_fallback().
 

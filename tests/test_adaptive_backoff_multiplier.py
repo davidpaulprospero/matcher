@@ -81,6 +81,7 @@ def create_downloader(tmp_path, rate_limit_config=None, **overrides):
 class TestErrorSeverityClassification:
     """Test error message severity classification."""
 
+    @pytest.mark.fast
     def test_classify_high_severity_quota_exceeded(self):
         """Test that 'quota exceeded' errors are classified as high severity."""
         from src.downloader.core import classify_error_severity
@@ -88,6 +89,7 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("HTTP 429: Quota exceeded") == 'high'
         assert classify_error_severity("Daily quota has been exceeded") == 'high'
 
+    @pytest.mark.fast
     def test_classify_high_severity_bot_detection(self):
         """Test that bot detection errors are classified as high severity."""
         from src.downloader.core import classify_error_severity
@@ -96,6 +98,7 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("Automated traffic detected") == 'high'
         assert classify_error_severity("Suspicious activity on your account") == 'high'
 
+    @pytest.mark.fast
     def test_classify_high_severity_blocks(self):
         """Test that severe blocks are classified as high severity."""
         from src.downloader.core import classify_error_severity
@@ -104,6 +107,7 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("Account suspended") == 'high'
         assert classify_error_severity("You have been permanently banned") == 'high'
 
+    @pytest.mark.fast
     def test_classify_medium_severity_429(self):
         """Test that standard 429 errors are classified as medium severity."""
         from src.downloader.core import classify_error_severity
@@ -111,6 +115,7 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("429 Too Many Requests") == 'medium'
         assert classify_error_severity("HTTP Error 429") == 'medium'
 
+    @pytest.mark.fast
     def test_classify_medium_severity_rate_limit(self):
         """Test that rate limit messages are classified as medium severity."""
         from src.downloader.core import classify_error_severity
@@ -119,12 +124,14 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("Too many requests, please wait") == 'medium'
         assert classify_error_severity("Please try again later") == 'medium'
 
+    @pytest.mark.fast
     def test_classify_medium_severity_temporarily_unavailable(self):
         """Test that temporary unavailability is medium severity."""
         from src.downloader.core import classify_error_severity
 
         assert classify_error_severity("Service temporarily unavailable") == 'medium'
 
+    @pytest.mark.fast
     def test_classify_low_severity_sign_in(self):
         """Test that sign-in errors are classified as low severity."""
         from src.downloader.core import classify_error_severity
@@ -132,18 +139,21 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("Sign in to confirm you're not a bot") == 'low'
         assert classify_error_severity("Login required") == 'low'
 
+    @pytest.mark.fast
     def test_classify_low_severity_age_confirm(self):
         """Test that age confirmation errors are classified as low severity."""
         from src.downloader.core import classify_error_severity
 
         assert classify_error_severity("Please confirm your age") == 'low'
 
+    @pytest.mark.fast
     def test_classify_low_severity_slow_down(self):
         """Test that 'slow down' messages are classified as low severity."""
         from src.downloader.core import classify_error_severity
 
         assert classify_error_severity("Slow down please") == 'low'
 
+    @pytest.mark.fast
     def test_classify_unknown_defaults_to_medium(self):
         """Test that unknown error patterns default to medium severity."""
         from src.downloader.core import classify_error_severity
@@ -151,6 +161,7 @@ class TestErrorSeverityClassification:
         assert classify_error_severity("Some unknown error") == 'medium'
         assert classify_error_severity("Random failure xyz123") == 'medium'
 
+    @pytest.mark.fast
     def test_classification_case_insensitive(self):
         """Test that classification is case-insensitive."""
         from src.downloader.core import classify_error_severity
@@ -164,6 +175,7 @@ class TestErrorSeverityClassification:
 class TestSeverityMultipliers:
     """Test severity multiplier values."""
 
+    @pytest.mark.fast
     def test_multiplier_values(self):
         """Test that multipliers match specification: low=1.5, medium=2.0, high=3.0."""
         from src.downloader.core import SEVERITY_MULTIPLIERS
@@ -176,6 +188,7 @@ class TestSeverityMultipliers:
 class TestAdaptiveBackoffEnabled:
     """Test adaptive backoff when enabled (default)."""
 
+    @pytest.mark.fast
     def test_low_severity_uses_1_5x_multiplier(self, tmp_path):
         """Test that low severity errors use 1.5x multiplier."""
         rate_config = MockRateLimitConfig(
@@ -194,6 +207,7 @@ class TestAdaptiveBackoffEnabled:
             downloader.handle_rate_limit_error("Please sign in to continue")
             assert abs(mock_sleep.call_args[0][0] - 15.0) < 0.01
 
+    @pytest.mark.fast
     def test_medium_severity_uses_2x_multiplier(self, tmp_path):
         """Test that medium severity errors use 2.0x multiplier."""
         rate_config = MockRateLimitConfig(
@@ -213,6 +227,7 @@ class TestAdaptiveBackoffEnabled:
             downloader.handle_rate_limit_error("429 Too Many Requests")
             assert abs(mock_sleep.call_args[0][0] - 20.0) < 0.01
 
+    @pytest.mark.fast
     def test_high_severity_uses_3x_multiplier(self, tmp_path):
         """Test that high severity errors use 3.0x multiplier."""
         rate_config = MockRateLimitConfig(
@@ -236,6 +251,7 @@ class TestAdaptiveBackoffEnabled:
             downloader.handle_rate_limit_error("Quota exceeded for today")
             assert abs(mock_sleep.call_args[0][0] - 45.0) < 0.01
 
+    @pytest.mark.fast
     def test_different_errors_different_multipliers_same_session(self, tmp_path):
         """Test that different error types in same session use appropriate multipliers."""
         rate_config = MockRateLimitConfig(
@@ -262,6 +278,7 @@ class TestAdaptiveBackoffEnabled:
 class TestAdaptiveBackoffDisabled:
     """Test behavior when adaptive multiplier is disabled."""
 
+    @pytest.mark.fast
     def test_uses_fixed_multiplier_when_disabled(self, tmp_path):
         """Test that fixed multiplier is used when adaptive is disabled."""
         rate_config = MockRateLimitConfig(
@@ -280,6 +297,7 @@ class TestAdaptiveBackoffDisabled:
             downloader.handle_rate_limit_error("Quota exceeded")
             assert abs(mock_sleep.call_args[0][0] - 20.0) < 0.01  # 10 * (2 ^ 1)
 
+    @pytest.mark.fast
     def test_fixed_multiplier_ignores_severity(self, tmp_path):
         """Test that all severities use same multiplier when adaptive disabled."""
         rate_config = MockRateLimitConfig(
@@ -304,6 +322,7 @@ class TestAdaptiveBackoffDisabled:
 class TestSeverityMetricsTracking:
     """Test that metrics track backoff events by severity."""
 
+    @pytest.mark.fast
     def test_records_severity_in_metrics(self, tmp_path):
         """Test that backoff events are recorded by severity in metrics."""
         rate_config = MockRateLimitConfig(
@@ -325,6 +344,7 @@ class TestSeverityMetricsTracking:
         assert metrics.backoff_events_by_severity.get('medium', 0) == 1
         assert metrics.backoff_events_by_severity.get('high', 0) == 2
 
+    @pytest.mark.fast
     def test_metrics_summary_includes_severity(self, tmp_path):
         """Test that metrics summary includes severity breakdown."""
         rate_config = MockRateLimitConfig(
@@ -343,6 +363,7 @@ class TestSeverityMetricsTracking:
         assert "high" in summary
         assert "medium" in summary
 
+    @pytest.mark.fast
     def test_metrics_persist_severity_to_checkpoint(self, tmp_path):
         """Test that severity tracking persists through checkpoint save/load."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -368,6 +389,7 @@ class TestSeverityMetricsTracking:
 class TestSeverityLogging:
     """Test that severity classification is logged."""
 
+    @pytest.mark.fast
     def test_logs_severity_classification(self, tmp_path, caplog):
         """Test that severity is logged with rate limit events."""
         import logging
@@ -387,6 +409,7 @@ class TestSeverityLogging:
         assert "severity" in log_text
         assert "multiplier" in log_text
 
+    @pytest.mark.fast
     def test_logs_multiplier_value(self, tmp_path, caplog):
         """Test that the multiplier value is logged."""
         import logging
@@ -404,6 +427,7 @@ class TestSeverityLogging:
         log_text = caplog.text
         assert "3.0x" in log_text or "3x" in log_text
 
+    @pytest.mark.fast
     def test_logs_severity_in_backoff_message(self, tmp_path, caplog):
         """Test that backoff log message includes severity label."""
         import logging
@@ -425,6 +449,7 @@ class TestSeverityLogging:
 class TestConfigOption:
     """Test the adaptive_multiplier config option."""
 
+    @pytest.mark.fast
     def test_config_default_is_true(self):
         """Test that adaptive_multiplier defaults to True."""
         from src.config.sections.download import RateLimitConfig
@@ -432,6 +457,7 @@ class TestConfigOption:
         config = RateLimitConfig()
         assert config.adaptive_multiplier is True
 
+    @pytest.mark.fast
     def test_config_can_be_disabled(self):
         """Test that adaptive_multiplier can be set to False."""
         from src.config.sections.download import RateLimitConfig
@@ -443,6 +469,7 @@ class TestConfigOption:
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
+    @pytest.mark.fast
     def test_empty_error_message(self):
         """Test classification of empty error message."""
         from src.downloader.core import classify_error_severity
@@ -450,6 +477,7 @@ class TestEdgeCases:
         # Empty string should default to medium
         assert classify_error_severity("") == 'medium'
 
+    @pytest.mark.fast
     def test_very_long_error_message(self):
         """Test classification with very long error message."""
         from src.downloader.core import classify_error_severity
@@ -457,6 +485,7 @@ class TestEdgeCases:
         long_msg = "x" * 10000 + " quota exceeded " + "y" * 10000
         assert classify_error_severity(long_msg) == 'high'
 
+    @pytest.mark.fast
     def test_none_rate_limit_config(self, tmp_path):
         """Test behavior when rate_limit config is None."""
         config = create_mock_config(tmp_path)
@@ -479,6 +508,7 @@ class TestEdgeCases:
                                         # High severity: 5 * (3 ^ 0) = 5 (defaults)
                                         assert abs(mock_sleep.call_args[0][0] - 5.0) < 0.01
 
+    @pytest.mark.fast
     def test_multiple_patterns_match_uses_highest_severity(self):
         """Test that when multiple patterns match, highest severity wins."""
         from src.downloader.core import classify_error_severity
@@ -488,6 +518,7 @@ class TestEdgeCases:
         # High is checked first, so should return high
         assert classify_error_severity(msg) == 'high'
 
+    @pytest.mark.fast
     def test_metrics_clear_resets_severity_tracking(self):
         """Test that metrics.clear() resets severity tracking."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics

@@ -52,6 +52,7 @@ class TestOTIOStyle:
         assert style.num_alternatives == 2
         assert style.include_strategy_tracks is True
 
+    @pytest.mark.fast
     def test_init_custom_values(self):
         """Test initialization with custom values"""
         style = OTIOStyle(
@@ -66,6 +67,7 @@ class TestOTIOStyle:
         assert style.num_alternatives == 3
         assert style.prefer_longer_clips is True
 
+    @pytest.mark.fast
     def test_to_dict(self):
         """Test conversion to dict"""
         style = OTIOStyle(
@@ -99,6 +101,7 @@ class TestPresetStyles:
         assert STYLE_DEFAULT.num_alternatives == 2
         assert STYLE_DEFAULT.include_strategy_tracks is True
 
+    @pytest.mark.fast
     def test_style_strict(self):
         """Test strict style preset"""
         assert STYLE_STRICT.name == "strict"
@@ -106,6 +109,7 @@ class TestPresetStyles:
         assert STYLE_STRICT.num_alternatives == 1
         assert STYLE_STRICT.include_strategy_tracks is False
 
+    @pytest.mark.fast
     def test_style_stock_heavy(self):
         """Test stock_heavy style preset"""
         assert STYLE_STOCK_HEAVY.name == "stock_heavy"
@@ -113,12 +117,14 @@ class TestPresetStyles:
         assert STYLE_STOCK_HEAVY.prefer_youtube is False
         assert STYLE_STOCK_HEAVY.num_alternatives == 3
 
+    @pytest.mark.fast
     def test_style_fast_paced(self):
         """Test fast_paced style preset"""
         assert STYLE_FAST_PACED.name == "fast_paced"
         assert STYLE_FAST_PACED.prefer_shorter_clips is True
         assert STYLE_FAST_PACED.ideal_speed_range == (0.7, 1.0)
 
+    @pytest.mark.fast
     def test_style_cinematic(self):
         """Test cinematic style preset"""
         assert STYLE_CINEMATIC.name == "cinematic"
@@ -126,6 +132,7 @@ class TestPresetStyles:
         assert STYLE_CINEMATIC.ideal_speed_range == (1.0, 1.5)
         assert STYLE_CINEMATIC.confidence_threshold == 0.6
 
+    @pytest.mark.fast
     def test_preset_styles_dict(self):
         """Test PRESET_STYLES dictionary"""
         assert len(PRESET_STYLES) == 5
@@ -144,6 +151,7 @@ class TestPresetStyles:
 class TestMultiStyleOTIOGeneratorInit:
     """Test MultiStyleOTIOGenerator initialization"""
 
+    @pytest.mark.integration
     def test_init_creates_output_dir(self):
         """Test initialization creates output directory"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -154,6 +162,7 @@ class TestMultiStyleOTIOGeneratorInit:
             assert output_dir.exists()
             assert generator.output_dir == output_dir
 
+    @pytest.mark.integration
     def test_init_empty_styles(self):
         """Test initialization with no styles"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,6 +180,7 @@ class TestMultiStyleOTIOGeneratorInit:
 class TestStyleManagement:
     """Test style management functionality"""
 
+    @pytest.mark.integration
     def test_add_style(self):
         """Test adding a style"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -182,6 +192,7 @@ class TestStyleManagement:
             assert len(generator.styles) == 1
             assert generator.styles[0] == style
 
+    @pytest.mark.integration
     def test_add_multiple_styles(self):
         """Test adding multiple styles"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -192,6 +203,7 @@ class TestStyleManagement:
 
             assert len(generator.styles) == 2
 
+    @pytest.mark.integration
     def test_add_preset(self):
         """Test adding a preset style by name"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -202,6 +214,7 @@ class TestStyleManagement:
             assert len(generator.styles) == 1
             assert generator.styles[0].name == "strict"
 
+    @pytest.mark.integration
     def test_add_preset_unknown(self):
         """Test adding unknown preset (logs warning)"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -212,6 +225,7 @@ class TestStyleManagement:
             # Should not add anything
             assert len(generator.styles) == 0
 
+    @pytest.mark.integration
     def test_create_custom_style(self):
         """Test creating a custom style"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -231,6 +245,7 @@ class TestStyleManagement:
             assert style.num_alternatives == 4
             assert style.prefer_longer_clips is True
 
+    @pytest.mark.integration
     def test_create_custom_style_ignores_invalid_attrs(self):
         """Test creating custom style ignores invalid attributes"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -254,6 +269,7 @@ class TestStyleManagement:
 class TestConfigConversion:
     """Test style to config conversion"""
 
+    @pytest.mark.integration
     def test_get_style_config_for_matching(self):
         """Test converting style to matching config"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -273,6 +289,7 @@ class TestConfigConversion:
             assert config['prefer_stock_footage'] is True
             assert 'num_alternatives' not in config  # Output config only
 
+    @pytest.mark.integration
     def test_get_style_config_for_output(self):
         """Test converting style to output config"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -292,6 +309,7 @@ class TestConfigConversion:
             assert config['strategy_tracks'] == ["visual_first"]
             assert 'confidence_threshold' not in config  # Matching config only
 
+    @pytest.mark.integration
     def test_config_separation(self):
         """Test matching and output configs are separate"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -324,24 +342,28 @@ class TestTrackDefinitions:
 
         assert track == "V1"  # Primary track
 
+    @pytest.mark.fast
     def test_get_track_for_pexels(self):
         """Test track assignment for Pexels stock footage"""
         track = get_track_for_source("pexels")
 
         assert track == STOCK_FOOTAGE_TRACK
 
+    @pytest.mark.fast
     def test_get_track_for_pixabay(self):
         """Test track assignment for Pixabay stock footage"""
         track = get_track_for_source("pixabay")
 
         assert track == STOCK_FOOTAGE_TRACK
 
+    @pytest.mark.fast
     def test_get_track_for_image(self):
         """Test track assignment for image sources"""
         track = get_track_for_source("image")
 
         assert track == IMAGE_TRACK
 
+    @pytest.mark.fast
     def test_get_track_for_unknown_source(self):
         """Test track assignment for unknown source"""
         track = get_track_for_source("unknown")
@@ -363,44 +385,52 @@ class TestSourceTypeDetection:
 
         assert is_stock_footage(metadata) is True
 
+    @pytest.mark.fast
     def test_is_stock_footage_pixabay(self):
         """Test detection of Pixabay stock footage"""
         metadata = {"source": "pixabay"}
 
         assert is_stock_footage(metadata) is True
 
+    @pytest.mark.fast
     def test_is_stock_footage_youtube(self):
         """Test YouTube is not stock footage"""
         metadata = {"source": "youtube"}
 
         assert is_stock_footage(metadata) is False
 
+    @pytest.mark.fast
     def test_is_stock_footage_tag(self):
         """Test detection via tags"""
         metadata = {"source": "other", "tags": ["stock_footage"]}
 
         assert is_stock_footage(metadata) is True
 
+    @pytest.mark.fast
     def test_is_stock_footage_stock_tag(self):
         """Test detection via 'stock' tag"""
         metadata = {"source": "other", "tags": ["stock"]}
 
         assert is_stock_footage(metadata) is True
 
+    @pytest.mark.fast
     def test_is_stock_footage_flag(self):
         """Test detection via is_stock_footage flag"""
         metadata = {"is_stock_footage": True}
 
         assert is_stock_footage(metadata) is True
 
+    @pytest.mark.fast
     def test_is_stock_footage_empty_metadata(self):
         """Test with empty metadata"""
         assert is_stock_footage({}) is False
 
+    @pytest.mark.fast
     def test_is_stock_footage_none_metadata(self):
         """Test with None metadata"""
         assert is_stock_footage(None) is False
 
+    @pytest.mark.fast
     def test_is_stock_footage_case_insensitive(self):
         """Test case-insensitive source matching"""
         metadata = {"source": "Pexels"}
@@ -426,6 +456,7 @@ class TestEdgeCases:
 
         assert style.strategy_tracks == []
 
+    @pytest.mark.fast
     def test_to_dict_with_tuple(self):
         """Test to_dict handles tuple values"""
         style = OTIOStyle(
@@ -438,6 +469,7 @@ class TestEdgeCases:
 
         assert result['ideal_speed_range'] == (0.9, 1.1)
 
+    @pytest.mark.integration
     def test_generator_output_dir_already_exists(self):
         """Test initialization when output dir already exists"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -449,6 +481,7 @@ class TestEdgeCases:
 
             assert generator.output_dir == output_dir
 
+    @pytest.mark.integration
     def test_add_preset_all_presets(self):
         """Test adding all preset styles"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -459,6 +492,7 @@ class TestEdgeCases:
 
             assert len(generator.styles) == len(PRESET_STYLES)
 
+    @pytest.mark.fast
     def test_style_default_factory_for_strategy_tracks(self):
         """Test default factory creates new list for each instance"""
         style1 = OTIOStyle(name="test1", description="Test 1")
@@ -488,6 +522,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_select_preset_2_stock_heavy(self):
         """Test selecting preset 2 (stock_heavy)"""
         from src.multi_style import prompt_for_second_style
@@ -497,6 +532,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "stock_heavy"
 
+    @pytest.mark.fast
     def test_select_preset_3_fast_paced(self):
         """Test selecting preset 3 (fast_paced)"""
         from src.multi_style import prompt_for_second_style
@@ -506,6 +542,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "fast_paced"
 
+    @pytest.mark.fast
     def test_select_preset_4_cinematic(self):
         """Test selecting preset 4 (cinematic)"""
         from src.multi_style import prompt_for_second_style
@@ -515,6 +552,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "cinematic"
 
+    @pytest.mark.fast
     def test_select_preset_by_name_strict(self):
         """Test selecting preset by name 'strict'"""
         from src.multi_style import prompt_for_second_style
@@ -524,6 +562,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_select_preset_by_name_stock_heavy(self):
         """Test selecting preset by name 'stock_heavy'"""
         from src.multi_style import prompt_for_second_style
@@ -533,6 +572,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "stock_heavy"
 
+    @pytest.mark.fast
     def test_select_preset_by_name_fast_paced(self):
         """Test selecting preset by name 'fast_paced'"""
         from src.multi_style import prompt_for_second_style
@@ -542,6 +582,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "fast_paced"
 
+    @pytest.mark.fast
     def test_select_preset_by_name_cinematic(self):
         """Test selecting preset by name 'cinematic'"""
         from src.multi_style import prompt_for_second_style
@@ -551,6 +592,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "cinematic"
 
+    @pytest.mark.fast
     def test_default_selection_empty_input(self):
         """Test default selection with empty input"""
         from src.multi_style import prompt_for_second_style
@@ -560,6 +602,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_invalid_selection_defaults_to_strict(self):
         """Test invalid selection defaults to strict"""
         from src.multi_style import prompt_for_second_style
@@ -569,6 +612,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_eof_error_handling(self):
         """Test EOFError returns strict style"""
         from src.multi_style import prompt_for_second_style
@@ -578,6 +622,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_keyboard_interrupt_handling(self):
         """Test KeyboardInterrupt returns strict style"""
         from src.multi_style import prompt_for_second_style
@@ -587,6 +632,7 @@ class TestPromptForSecondStyle:
 
         assert style.name == "strict"
 
+    @pytest.mark.fast
     def test_select_custom_option_5(self):
         """Test selecting custom option 5"""
         from src.multi_style import prompt_for_second_style
@@ -600,6 +646,7 @@ class TestPromptForSecondStyle:
         assert style.name == "mycustom"
         assert style.confidence_threshold == 0.65
 
+    @pytest.mark.fast
     def test_select_custom_by_name(self):
         """Test selecting 'custom' by name"""
         from src.multi_style import prompt_for_second_style
@@ -632,6 +679,7 @@ class TestPromptCustomStyle:
         assert style.prefer_longer_clips is False
         assert style.include_strategy_tracks is True
 
+    @pytest.mark.fast
     def test_custom_confidence(self):
         """Test custom confidence threshold"""
         from src.multi_style import _prompt_custom_style
@@ -643,6 +691,7 @@ class TestPromptCustomStyle:
 
         assert style.confidence_threshold == 0.75
 
+    @pytest.mark.fast
     def test_custom_alternatives(self):
         """Test custom number of alternatives"""
         from src.multi_style import _prompt_custom_style
@@ -654,6 +703,7 @@ class TestPromptCustomStyle:
 
         assert style.num_alternatives == 5
 
+    @pytest.mark.fast
     def test_prefer_shorter_clips(self):
         """Test selecting shorter clips preference"""
         from src.multi_style import _prompt_custom_style
@@ -666,6 +716,7 @@ class TestPromptCustomStyle:
         assert style.prefer_shorter_clips is True
         assert style.prefer_longer_clips is False
 
+    @pytest.mark.fast
     def test_prefer_longer_clips(self):
         """Test selecting longer clips preference"""
         from src.multi_style import _prompt_custom_style
@@ -678,6 +729,7 @@ class TestPromptCustomStyle:
         assert style.prefer_longer_clips is True
         assert style.prefer_shorter_clips is False
 
+    @pytest.mark.fast
     def test_prefer_stock_footage(self):
         """Test selecting stock footage preference"""
         from src.multi_style import _prompt_custom_style
@@ -690,6 +742,7 @@ class TestPromptCustomStyle:
         assert style.prefer_stock_footage is True
         assert style.prefer_youtube is False
 
+    @pytest.mark.fast
     def test_prefer_youtube(self):
         """Test selecting YouTube preference"""
         from src.multi_style import _prompt_custom_style
@@ -702,6 +755,7 @@ class TestPromptCustomStyle:
         assert style.prefer_stock_footage is False
         assert style.prefer_youtube is True
 
+    @pytest.mark.fast
     def test_disable_strategy_tracks(self):
         """Test disabling strategy tracks"""
         from src.multi_style import _prompt_custom_style
@@ -713,6 +767,7 @@ class TestPromptCustomStyle:
 
         assert style.include_strategy_tracks is False
 
+    @pytest.mark.fast
     def test_custom_name(self):
         """Test custom style name"""
         from src.multi_style import _prompt_custom_style
@@ -724,6 +779,7 @@ class TestPromptCustomStyle:
 
         assert style.name == "my_named_style"
 
+    @pytest.mark.fast
     def test_custom_description(self):
         """Test custom style description"""
         from src.multi_style import _prompt_custom_style
@@ -735,6 +791,7 @@ class TestPromptCustomStyle:
 
         assert style.description == "My custom description"
 
+    @pytest.mark.fast
     def test_eof_error_returns_partial_style(self):
         """Test EOFError returns partial custom style"""
         from src.multi_style import _prompt_custom_style
@@ -744,6 +801,7 @@ class TestPromptCustomStyle:
 
         assert style.name == "custom"
 
+    @pytest.mark.fast
     def test_keyboard_interrupt_returns_partial_style(self):
         """Test KeyboardInterrupt returns partial custom style"""
         from src.multi_style import _prompt_custom_style
@@ -753,6 +811,7 @@ class TestPromptCustomStyle:
 
         assert style.name == "custom"
 
+    @pytest.mark.fast
     def test_value_error_returns_partial_style(self):
         """Test invalid number input returns partial style"""
         from src.multi_style import _prompt_custom_style
@@ -779,6 +838,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_yes_full_word(self):
         """Test 'yes' returns True"""
         from src.multi_style import prompt_multi_style_enabled
@@ -788,6 +848,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_no_returns_false(self):
         """Test 'n' returns False"""
         from src.multi_style import prompt_multi_style_enabled
@@ -797,6 +858,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_empty_returns_false(self):
         """Test empty input returns False (default)"""
         from src.multi_style import prompt_multi_style_enabled
@@ -806,6 +868,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_random_input_returns_false(self):
         """Test random input returns False"""
         from src.multi_style import prompt_multi_style_enabled
@@ -815,6 +878,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_eof_error_returns_false(self):
         """Test EOFError returns False"""
         from src.multi_style import prompt_multi_style_enabled
@@ -824,6 +888,7 @@ class TestPromptMultiStyleEnabled:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_keyboard_interrupt_returns_false(self):
         """Test KeyboardInterrupt returns False"""
         from src.multi_style import prompt_multi_style_enabled

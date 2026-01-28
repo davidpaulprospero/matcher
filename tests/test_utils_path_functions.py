@@ -28,50 +28,60 @@ from src.utils import (
 class TestIsEmbeddingsEmpty:
     """Test is_embeddings_empty() function"""
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_none(self):
         """Test with None input"""
         assert is_embeddings_empty(None) is True
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_empty_list(self):
         """Test with empty list"""
         assert is_embeddings_empty([]) is True
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_empty_numpy_array(self):
         """Test with empty numpy array"""
         embeddings = np.array([])
         assert is_embeddings_empty(embeddings) is True
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_non_empty_list(self):
         """Test with non-empty list"""
         embeddings = [1.0, 2.0, 3.0]
         assert is_embeddings_empty(embeddings) is False
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_non_empty_numpy_array(self):
         """Test with non-empty numpy array"""
         embeddings = np.array([1.0, 2.0, 3.0])
         assert is_embeddings_empty(embeddings) is False
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_multidimensional_array(self):
         """Test with multidimensional numpy array"""
         embeddings = np.array([[1.0, 2.0], [3.0, 4.0]])
         assert is_embeddings_empty(embeddings) is False
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_empty_multidimensional_array(self):
         """Test with empty multidimensional array"""
         embeddings = np.array([[]])
         # Has length 1 (one row), not empty
         assert is_embeddings_empty(embeddings) is False
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_zero_shape_array(self):
         """Test with (0,) shape array"""
         embeddings = np.zeros((0,))
         assert is_embeddings_empty(embeddings) is True
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_tuple(self):
         """Test with tuple"""
         embeddings = (1.0, 2.0, 3.0)
         assert is_embeddings_empty(embeddings) is False
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_empty_tuple(self):
         """Test with empty tuple"""
         embeddings = ()
@@ -81,6 +91,7 @@ class TestIsEmbeddingsEmpty:
 class TestSanitizePath:
     """Test sanitize_path() function"""
 
+    @pytest.mark.fast
     def test_sanitize_path_windows_extended_length_prefix(self):
         r"""Test removing \\?\ prefix"""
         path = r'\\?\C:\Users\test\file.txt'
@@ -89,6 +100,7 @@ class TestSanitizePath:
         assert result == 'C:/Users/test/file.txt'
         assert not result.startswith(r'\\?')
 
+    @pytest.mark.fast
     def test_sanitize_path_device_form_prefix(self):
         r"""Test removing \\.\ prefix"""
         path = r'\\.\C:\path\to\file.txt'
@@ -97,6 +109,7 @@ class TestSanitizePath:
         assert 'C:/path/to/file.txt' in result
         assert not result.startswith(r'\\.')
 
+    @pytest.mark.fast
     def test_sanitize_path_forward_slash_extended(self):
         """Test removing //? / prefix"""
         path = '//?/C:/path/file.txt'
@@ -104,6 +117,7 @@ class TestSanitizePath:
 
         assert 'C:/path/file.txt' in result
 
+    @pytest.mark.fast
     def test_sanitize_path_question_mark_prefix(self):
         r"""Test removing ?\ prefix"""
         path = r'?\C:\path\file.txt'
@@ -112,6 +126,7 @@ class TestSanitizePath:
         assert 'C:/path/file.txt' in result
         assert not result.startswith('?')
 
+    @pytest.mark.fast
     def test_sanitize_path_backslash_to_forward_slash(self):
         """Test converting backslashes to forward slashes"""
         path = r'C:\Users\test\Documents\file.txt'
@@ -120,6 +135,7 @@ class TestSanitizePath:
         assert result == 'C:/Users/test/Documents/file.txt'
         assert '\\' not in result
 
+    @pytest.mark.fast
     def test_sanitize_path_remove_double_slashes(self):
         """Test removing double slashes"""
         path = 'C://Users//test//file.txt'
@@ -128,6 +144,7 @@ class TestSanitizePath:
         assert '//' not in result
         assert result == 'C:/Users/test/file.txt'
 
+    @pytest.mark.fast
     def test_sanitize_path_unix_path(self):
         """Test Unix-style path"""
         path = '/home/user/documents/file.txt'
@@ -135,6 +152,7 @@ class TestSanitizePath:
 
         assert result == '/home/user/documents/file.txt'
 
+    @pytest.mark.fast
     def test_sanitize_path_with_path_object(self):
         """Test with Path object input"""
         path = Path(r'C:\Users\test\file.txt')
@@ -143,6 +161,7 @@ class TestSanitizePath:
         assert '/' in result
         assert '\\' not in result
 
+    @pytest.mark.fast
     def test_sanitize_path_relative_path(self):
         """Test with relative path"""
         path = r'docs\readme.txt'
@@ -150,6 +169,7 @@ class TestSanitizePath:
 
         assert result == 'docs/readme.txt'
 
+    @pytest.mark.fast
     def test_sanitize_path_network_path(self):
         """Test with network path"""
         path = r'\\server\share\file.txt'
@@ -158,6 +178,7 @@ class TestSanitizePath:
         # Should handle network paths
         assert isinstance(result, str)
 
+    @pytest.mark.fast
     def test_sanitize_path_empty_string(self):
         """Test with empty string"""
         result = sanitize_path('')
@@ -168,6 +189,7 @@ class TestSanitizePath:
 class TestNormalizePath:
     """Test normalize_path() function"""
 
+    @pytest.mark.fast
     def test_normalize_path_backslash_to_forward(self):
         """Test converting backslashes to forward slashes"""
         path = r'C:\Users\test\file.txt'
@@ -176,6 +198,7 @@ class TestNormalizePath:
         assert result == 'c:/users/test/file.txt'
         assert '\\' not in result
 
+    @pytest.mark.fast
     def test_normalize_path_lowercase(self):
         """Test converting to lowercase"""
         path = 'C:/Users/Test/FILE.TXT'
@@ -184,6 +207,7 @@ class TestNormalizePath:
         assert result == 'c:/users/test/file.txt'
         assert result.islower()
 
+    @pytest.mark.fast
     def test_normalize_path_unix_path(self):
         """Test Unix path normalization"""
         path = '/HOME/USER/Documents/File.txt'
@@ -191,6 +215,7 @@ class TestNormalizePath:
 
         assert result == '/home/user/documents/file.txt'
 
+    @pytest.mark.fast
     def test_normalize_path_mixed_slashes(self):
         """Test path with mixed slashes"""
         path = r'C:\Users/test\Documents/file.txt'
@@ -199,18 +224,21 @@ class TestNormalizePath:
         assert result == 'c:/users/test/documents/file.txt'
         assert '\\' not in result
 
+    @pytest.mark.fast
     def test_normalize_path_empty_string(self):
         """Test with empty string"""
         result = normalize_path('')
 
         assert result == ''
 
+    @pytest.mark.fast
     def test_normalize_path_none_like(self):
         """Test with None-like values"""
         result = normalize_path(None)
 
         assert result == ''
 
+    @pytest.mark.fast
     def test_normalize_path_relative(self):
         """Test with relative path"""
         path = r'docs\README.MD'
@@ -218,6 +246,7 @@ class TestNormalizePath:
 
         assert result == 'docs/readme.md'
 
+    @pytest.mark.fast
     def test_normalize_path_consistency(self):
         """Test that different representations normalize to same value"""
         path1 = r'C:\Users\test\file.txt'
@@ -234,6 +263,7 @@ class TestNormalizePath:
 class TestResolvePath:
     """Test resolve_path() function"""
 
+    @pytest.mark.fast
     def test_resolve_path_absolute_path(self):
         """Test with absolute path"""
         path = 'C:/Users/test/file.txt'
@@ -242,6 +272,7 @@ class TestResolvePath:
         assert isinstance(result, str)
         assert '/' in result  # Sanitized
 
+    @pytest.mark.fast
     def test_resolve_path_relative_with_base(self):
         """Test relative path with base directory"""
         path = 'subdir/file.txt'
@@ -252,6 +283,7 @@ class TestResolvePath:
         assert 'subdir/file.txt' in result
         assert isinstance(result, str)
 
+    @pytest.mark.fast
     def test_resolve_path_path_object(self):
         """Test with Path object"""
         path = Path('file.txt')
@@ -260,6 +292,7 @@ class TestResolvePath:
         assert isinstance(result, str)
         assert '/' in result or result == 'file.txt'
 
+    @pytest.mark.fast
     def test_resolve_path_current_directory(self, tmp_path):
         """Test resolving from current directory"""
         # Create test file
@@ -279,6 +312,7 @@ class TestResolvePath:
         finally:
             os.chdir(original_dir)
 
+    @pytest.mark.fast
     def test_resolve_path_sanitizes_output(self):
         """Test that output is sanitized"""
         path = r'C:\Users\test\file.txt'
@@ -287,6 +321,7 @@ class TestResolvePath:
         # Should have forward slashes
         assert '\\' not in result
 
+    @pytest.mark.fast
     def test_resolve_path_with_base_path_object(self):
         """Test with Path object as base_dir"""
         path = 'file.txt'
@@ -297,6 +332,7 @@ class TestResolvePath:
         assert isinstance(result, str)
         assert 'file.txt' in result
 
+    @pytest.mark.fast
     def test_resolve_path_handles_symlinks(self, tmp_path):
         """Test resolving symlinks"""
         # Create a file and directory
@@ -312,6 +348,7 @@ class TestResolvePath:
 class TestPathEdgeCases:
     """Test edge cases for path utilities"""
 
+    @pytest.mark.fast
     def test_sanitize_multiple_prefixes(self):
         """Test path with multiple prefix patterns"""
         # Edge case: path that might trigger multiple prefix checks
@@ -321,6 +358,7 @@ class TestPathEdgeCases:
         assert isinstance(result, str)
         assert '?' not in result[:5]  # No ? in first 5 chars
 
+    @pytest.mark.fast
     def test_normalize_unicode_path(self):
         """Test normalization with Unicode characters"""
         path = 'C:/Users/日本語/文件.txt'
@@ -329,6 +367,7 @@ class TestPathEdgeCases:
         assert isinstance(result, str)
         assert '日本語' in result
 
+    @pytest.mark.fast
     def test_sanitize_very_long_path(self):
         """Test with very long path (>260 chars on Windows)"""
         # Create a path > 260 characters
@@ -340,6 +379,7 @@ class TestPathEdgeCases:
         assert isinstance(result, str)
         assert len(result) > 260
 
+    @pytest.mark.fast
     def test_resolve_nonexistent_path_with_base(self):
         """Test resolving nonexistent path with base dir"""
         path = 'nonexistent/path/file.txt'
@@ -351,6 +391,7 @@ class TestPathEdgeCases:
         assert isinstance(result, str)
         assert 'nonexistent' in result
 
+    @pytest.mark.fast
     def test_embeddings_with_complex_nested_structure(self):
         """Test is_embeddings_empty with complex nested arrays"""
         embeddings = np.array([[[1.0, 2.0], [3.0, 4.0]]])
@@ -359,6 +400,7 @@ class TestPathEdgeCases:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_embeddings_with_single_element(self):
         """Test with single element array"""
         embeddings = np.array([1.0])

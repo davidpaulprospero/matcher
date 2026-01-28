@@ -5,6 +5,7 @@ from src.state import PipelineState, AudioDownload
 from src.stages.download import DownloadStage
 
 
+@pytest.mark.fast
 def test_restore_audio_downloads_with_obsolete_fields():
     """Test that obsolete fields (channel, duration_tier) are removed during restore"""
     stage = DownloadStage()
@@ -76,6 +77,7 @@ def test_restore_audio_downloads_with_obsolete_fields():
     assert 'duration_tier' not in audio2_dict
 
 
+@pytest.mark.fast
 def test_audio_download_dataclass_fields():
     """Verify AudioDownload only has expected fields"""
     audio = AudioDownload(

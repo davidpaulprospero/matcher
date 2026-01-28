@@ -41,6 +41,7 @@ class MockConfig:
 class TestGlobalCacheInit:
     """Tests for _init_global_cache method"""
 
+    @pytest.mark.fast
     def test_init_returns_none_when_disabled(self):
         """Global cache returns None when disabled"""
         stage = DownloadStage()
@@ -50,6 +51,7 @@ class TestGlobalCacheInit:
         result = stage._init_global_cache(config)
         assert result is None
 
+    @pytest.mark.fast
     def test_init_returns_none_when_check_disabled(self):
         """Global cache returns None when check_before_download is False"""
         stage = DownloadStage()
@@ -59,6 +61,7 @@ class TestGlobalCacheInit:
         result = stage._init_global_cache(config)
         assert result is None
 
+    @pytest.mark.fast
     def test_init_returns_none_when_no_config(self):
         """Global cache returns None when global_cache config missing"""
         stage = DownloadStage()
@@ -69,6 +72,7 @@ class TestGlobalCacheInit:
         assert result is None
 
     @patch('src.global_cache.GlobalCacheManager')
+    @pytest.mark.fast
     def test_init_creates_manager_when_enabled(self, mock_manager_class, tmp_path):
         """Global cache creates manager when properly configured"""
         stage = DownloadStage()
@@ -96,6 +100,7 @@ class TestGlobalCacheInit:
 class TestCheckGlobalCache:
     """Tests for _check_global_cache method"""
 
+    @pytest.mark.fast
     def test_returns_all_keywords_when_cache_disabled(self):
         """Returns all keywords when cache is disabled"""
         stage = DownloadStage()
@@ -108,6 +113,7 @@ class TestCheckGlobalCache:
         assert result_kw == keywords
         assert result_videos == []
 
+    @pytest.mark.fast
     def test_returns_all_keywords_when_init_fails(self, tmp_path):
         """Returns all keywords when cache init fails"""
         stage = DownloadStage()
@@ -121,6 +127,7 @@ class TestCheckGlobalCache:
         assert set(result_kw) == set(keywords)
         assert result_videos == []
 
+    @pytest.mark.fast
     def test_handles_empty_keyword_list(self):
         """Handles empty keyword list"""
         stage = DownloadStage()
@@ -132,6 +139,7 @@ class TestCheckGlobalCache:
         assert result_kw == []
         assert result_videos == []
 
+    @pytest.mark.fast
     def test_check_disabled_when_check_before_download_false(self):
         """Cache check is skipped when check_before_download is False"""
         stage = DownloadStage()
@@ -149,6 +157,7 @@ class TestCheckGlobalCache:
 class TestRegisterDownloadedVideos:
     """Tests for _register_downloaded_videos method"""
 
+    @pytest.mark.fast
     def test_does_nothing_when_cache_not_initialized(self):
         """Does nothing when global_cache is None"""
         stage = DownloadStage()
@@ -158,6 +167,7 @@ class TestRegisterDownloadedVideos:
         # Should not raise
         stage._register_downloaded_videos([], config, "test_project")
 
+    @pytest.mark.fast
     def test_registers_videos_from_dict_list(self, tmp_path):
         """Registers videos from list of dicts"""
         stage = DownloadStage()
@@ -185,6 +195,7 @@ class TestRegisterDownloadedVideos:
             project_id='test_project'
         )
 
+    @pytest.mark.fast
     def test_skips_nonexistent_files(self, tmp_path):
         """Skips videos where file doesn't exist"""
         stage = DownloadStage()
@@ -206,6 +217,7 @@ class TestRegisterDownloadedVideos:
 class TestGlobalCacheWithTopics:
     """Tests for topic-based cache queries"""
 
+    @pytest.mark.fast
     def test_topics_param_accepted(self):
         """_check_global_cache accepts topics parameter"""
         stage = DownloadStage()
@@ -224,6 +236,7 @@ class TestGlobalCacheWithTopics:
 class TestGlobalCacheErrorHandling:
     """Tests for error handling in global cache integration"""
 
+    @pytest.mark.fast
     def test_handles_none_global_cache_config(self):
         """Returns all keywords when global_cache config is None"""
         stage = DownloadStage()
@@ -236,6 +249,7 @@ class TestGlobalCacheErrorHandling:
         assert result_kw == keywords
         assert result_videos == []
 
+    @pytest.mark.fast
     def test_handles_registration_exception(self, tmp_path):
         """Continues on registration exception"""
         stage = DownloadStage()

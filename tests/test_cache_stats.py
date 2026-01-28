@@ -41,6 +41,7 @@ class ConcreteCache(BaseCache[str]):
 class TestCacheStatsCounters:
     """Test that hits, misses, and bytes_saved counters exist and work."""
 
+    @pytest.mark.fast
     def test_counters_initialized_to_zero(self, tmp_path):
         """Counters should be initialized to zero."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -48,6 +49,7 @@ class TestCacheStatsCounters:
         assert cache._misses == 0
         assert cache._bytes_saved == 0
 
+    @pytest.mark.fast
     def test_hit_counter_incremented_on_cache_hit(self, tmp_path):
         """Hit counter should increment when get() returns a cached entry."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -59,6 +61,7 @@ class TestCacheStatsCounters:
         assert cache._hits == 1
         assert cache._misses == 0
 
+    @pytest.mark.fast
     def test_miss_counter_incremented_on_cache_miss(self, tmp_path):
         """Miss counter should increment when get() returns None."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -69,6 +72,7 @@ class TestCacheStatsCounters:
         assert cache._misses == 1
         assert cache._hits == 0
 
+    @pytest.mark.fast
     def test_multiple_hits_and_misses(self, tmp_path):
         """Counters should track multiple hits and misses correctly."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -87,6 +91,7 @@ class TestCacheStatsCounters:
         assert cache._hits == 2
         assert cache._misses == 3
 
+    @pytest.mark.fast
     def test_bytes_saved_incremented_on_hit(self, tmp_path):
         """bytes_saved should increase when cache hit occurs."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -101,6 +106,7 @@ class TestCacheStatsCounters:
 class TestCacheStatsGetStats:
     """Test get_stats() method returns correct statistics."""
 
+    @pytest.mark.fast
     def test_get_stats_returns_hits(self, tmp_path):
         """get_stats() should return hits count."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -111,6 +117,7 @@ class TestCacheStatsGetStats:
         assert 'hits' in stats
         assert stats['hits'] == 1
 
+    @pytest.mark.fast
     def test_get_stats_returns_misses(self, tmp_path):
         """get_stats() should return misses count."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -120,6 +127,7 @@ class TestCacheStatsGetStats:
         assert 'misses' in stats
         assert stats['misses'] == 1
 
+    @pytest.mark.fast
     def test_get_stats_returns_hit_rate(self, tmp_path):
         """get_stats() should return hit_rate."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -127,6 +135,7 @@ class TestCacheStatsGetStats:
         stats = cache.get_stats()
         assert 'hit_rate' in stats
 
+    @pytest.mark.fast
     def test_get_stats_returns_bytes_saved(self, tmp_path):
         """get_stats() should return bytes_saved."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -139,6 +148,7 @@ class TestCacheStatsGetStats:
 class TestCacheHitRateCalculation:
     """Test hit_rate calculation is correct."""
 
+    @pytest.mark.fast
     def test_hit_rate_zero_with_no_requests(self, tmp_path):
         """hit_rate should be 0.0 when no requests made."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -146,6 +156,7 @@ class TestCacheHitRateCalculation:
         stats = cache.get_stats()
         assert stats['hit_rate'] == 0.0
 
+    @pytest.mark.fast
     def test_hit_rate_one_with_all_hits(self, tmp_path):
         """hit_rate should be 1.0 when all requests are hits."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -158,6 +169,7 @@ class TestCacheHitRateCalculation:
         stats = cache.get_stats()
         assert stats['hit_rate'] == 1.0
 
+    @pytest.mark.fast
     def test_hit_rate_zero_with_all_misses(self, tmp_path):
         """hit_rate should be 0.0 when all requests are misses."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -168,6 +180,7 @@ class TestCacheHitRateCalculation:
         stats = cache.get_stats()
         assert stats['hit_rate'] == 0.0
 
+    @pytest.mark.fast
     def test_hit_rate_calculation_mixed(self, tmp_path):
         """hit_rate should be hits / (hits + misses)."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -185,6 +198,7 @@ class TestCacheHitRateCalculation:
         # 2 hits / (2 hits + 2 misses) = 0.5
         assert stats['hit_rate'] == 0.5
 
+    @pytest.mark.fast
     def test_hit_rate_calculation_75_percent(self, tmp_path):
         """hit_rate should correctly calculate 75%."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -206,6 +220,7 @@ class TestCacheHitRateCalculation:
 class TestCacheStatsResetStats:
     """Test reset_stats() method."""
 
+    @pytest.mark.fast
     def test_reset_stats_clears_hits(self, tmp_path):
         """reset_stats() should clear hits counter."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -216,6 +231,7 @@ class TestCacheStatsResetStats:
         cache.reset_stats()
         assert cache._hits == 0
 
+    @pytest.mark.fast
     def test_reset_stats_clears_misses(self, tmp_path):
         """reset_stats() should clear misses counter."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -225,6 +241,7 @@ class TestCacheStatsResetStats:
         cache.reset_stats()
         assert cache._misses == 0
 
+    @pytest.mark.fast
     def test_reset_stats_clears_bytes_saved(self, tmp_path):
         """reset_stats() should clear bytes_saved counter."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -235,6 +252,7 @@ class TestCacheStatsResetStats:
         cache.reset_stats()
         assert cache._bytes_saved == 0
 
+    @pytest.mark.fast
     def test_reset_stats_affects_get_stats(self, tmp_path):
         """reset_stats() should affect values returned by get_stats()."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -254,6 +272,7 @@ class TestCacheStatsResetStats:
 class TestCacheStatsExpiredEntries:
     """Test stats tracking with expired entries."""
 
+    @pytest.mark.fast
     def test_expired_entry_counts_as_miss(self, tmp_path):
         """Getting an expired entry should count as a miss."""
         cache = ConcreteCache(tmp_path / "cache", ttl_seconds=1)
@@ -271,6 +290,7 @@ class TestCacheStatsExpiredEntries:
 class TestCacheStatsExistingStats:
     """Test that existing stats fields are still present."""
 
+    @pytest.mark.fast
     def test_get_stats_still_has_total_entries(self, tmp_path):
         """get_stats() should still return total_entries."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -281,6 +301,7 @@ class TestCacheStatsExistingStats:
         assert 'total_entries' in stats
         assert stats['total_entries'] == 2
 
+    @pytest.mark.fast
     def test_get_stats_still_has_cache_dir(self, tmp_path):
         """get_stats() should still return cache_dir."""
         cache = ConcreteCache(tmp_path / "cache")
@@ -288,6 +309,7 @@ class TestCacheStatsExistingStats:
         stats = cache.get_stats()
         assert 'cache_dir' in stats
 
+    @pytest.mark.fast
     def test_get_stats_still_has_ttl_seconds(self, tmp_path):
         """get_stats() should still return ttl_seconds."""
         cache = ConcreteCache(tmp_path / "cache", ttl_seconds=3600)

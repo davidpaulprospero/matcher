@@ -18,6 +18,7 @@ from src.downloader.title_filter import TitleFilter, SearchResult
 class TestSearchResult:
     """Tests for SearchResult dataclass."""
 
+    @pytest.mark.fast
     def test_search_result_with_videos(self):
         """SearchResult is truthy when videos exist."""
         videos = [{'id': 'abc123', 'title': 'Test Video'}]
@@ -27,6 +28,7 @@ class TestSearchResult:
         assert result.timed_out is False
         assert result.error is None
 
+    @pytest.mark.fast
     def test_search_result_empty_is_falsy(self):
         """SearchResult is falsy when no videos."""
         result = SearchResult(videos=[])
@@ -34,6 +36,7 @@ class TestSearchResult:
         assert result.videos == []
         assert result.timed_out is False
 
+    @pytest.mark.fast
     def test_search_result_timeout(self):
         """SearchResult captures timeout state."""
         result = SearchResult(videos=[], timed_out=True, error="Timeout after 30s")
@@ -41,6 +44,7 @@ class TestSearchResult:
         assert result.timed_out is True
         assert result.error == "Timeout after 30s"
 
+    @pytest.mark.fast
     def test_search_result_error_without_timeout(self):
         """SearchResult captures error without timeout."""
         result = SearchResult(videos=[], timed_out=False, error="Network error")
@@ -67,6 +71,7 @@ class TestSearchTimeout:
         get_tier_value = lambda tier, key, default: {'min': 0, 'max': 120}.get(key, default)
         return TitleFilter(mock_config, cookies_args, get_tier_value)
 
+    @pytest.mark.integration
     def test_search_timeout_returns_search_result_with_timeout_flag(self, title_filter):
         """Search timeout returns SearchResult with timed_out=True."""
         import subprocess
@@ -81,6 +86,7 @@ class TestSearchTimeout:
             assert result.videos == []
             assert "timeout" in result.error.lower()
 
+    @pytest.mark.integration
     def test_successful_search_returns_videos_with_no_timeout(self, title_filter):
         """Successful search returns videos with timed_out=False."""
         mock_stdout = '{"id": "abc123", "title": "Test", "duration": 60, "channel": "Test Channel"}'
@@ -99,6 +105,7 @@ class TestSearchTimeout:
             assert len(result.videos) == 1
             assert result.videos[0]['id'] == 'abc123'
 
+    @pytest.mark.integration
     def test_search_uses_config_timeout(self, title_filter, mock_config):
         """Search uses timeout from config."""
         mock_config.download.search_timeout = 45  # Custom timeout
@@ -112,6 +119,7 @@ class TestSearchTimeout:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs['timeout'] == 45
 
+    @pytest.mark.integration
     def test_search_default_timeout_is_30_seconds(self, mock_config):
         """Default search timeout is 30 seconds (US-004 requirement)."""
         # Remove the search_timeout attribute to test default
@@ -151,6 +159,7 @@ class TestSearchTimeoutRemix:
 
         return downloader
 
+    @pytest.mark.fast
     def test_remix_tried_on_search_timeout(self, mock_video_downloader):
         """LLM keyword remix is tried when search times out."""
         from src.downloader.core import VideoDownloader
@@ -189,6 +198,7 @@ class TestSearchTimeoutRemix:
         assert len(search_calls) == 2
         assert len(remix_calls) == 1  # Remix called once
 
+    @pytest.mark.fast
     def test_max_2_remix_attempts(self):
         """Maximum 2 remix attempts per original keyword."""
         # Simulate the retry logic from _download_single
@@ -209,6 +219,7 @@ class TestSearchTimeoutRemix:
 
         assert remix_attempts == 2  # Stopped at max
 
+    @pytest.mark.fast
     def test_remix_not_tried_on_successful_search(self):
         """Remix is NOT tried when search succeeds."""
         remix_called = False
@@ -227,6 +238,7 @@ class TestSearchTimeoutRemix:
 
         assert not remix_called
 
+    @pytest.mark.fast
     def test_remix_not_tried_when_remix_returns_same_keyword(self):
         """Stop remix attempts if remix returns same keyword."""
         current_keyword = "unique term"
@@ -254,6 +266,7 @@ class TestSearchTimeoutRemix:
 class TestSearchTimeoutLogging:
     """Tests for logging of timeout and remix attempts."""
 
+    @pytest.mark.integration
     def test_timeout_logged_with_keyword(self):
         """Search timeout is logged with the original keyword."""
         from src.downloader.title_filter import TitleFilter, SearchResult
@@ -282,6 +295,7 @@ class TestSearchTimeoutLogging:
                 warning_msg = str(mock_logger.warning.call_args)
                 assert "timeout" in warning_msg.lower() or "nature documentary" in warning_msg
 
+    @pytest.mark.fast
     def test_remix_attempts_logged(self):
         """Each remix attempt is logged with attempt number."""
         import logging
@@ -306,6 +320,7 @@ class TestSearchTimeoutLogging:
 class TestConfigDefaults:
     """Tests for configuration defaults."""
 
+    @pytest.mark.fast
     def test_search_timeout_default_is_30(self):
         """Default search_timeout in config is 30 seconds."""
         from src.config.sections.download import DownloadConfig
@@ -313,6 +328,7 @@ class TestConfigDefaults:
         config = DownloadConfig()
         assert config.search_timeout == 30
 
+    @pytest.mark.fast
     def test_search_timeout_separate_from_download_timeout(self):
         """search_timeout is separate from download_timeout."""
         from src.config.sections.download import DownloadConfig
@@ -326,6 +342,7 @@ class TestConfigDefaults:
 class TestIntegration:
     """Integration tests for the full search timeout remix flow."""
 
+    @pytest.mark.fast
     def test_search_result_backward_compatible(self):
         """SearchResult maintains backward compatibility with list checks."""
         # Old code might do: if videos: (expecting list)
@@ -345,6 +362,7 @@ class TestIntegration:
             passed = False
         assert passed is True
 
+    @pytest.mark.fast
     def test_full_remix_flow_simulation(self):
         """Simulate complete search timeout → remix → success flow."""
         # This simulates what happens in VideoDownloader._download_single

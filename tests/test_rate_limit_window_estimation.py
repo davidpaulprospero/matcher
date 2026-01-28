@@ -26,6 +26,7 @@ class TestEstimatedRateLimitWindowNone:
         metrics = RateLimitMetrics()
         assert metrics.get_estimated_rate_limit_window("sunset") is None
 
+    @pytest.mark.fast
     def test_returns_none_with_zero_pairs(self):
         """Only failures, no recoveries → no pairs → None."""
         metrics = RateLimitMetrics()
@@ -34,6 +35,7 @@ class TestEstimatedRateLimitWindowNone:
         metrics.record_rate_limit_failure("sunset")
         assert metrics.get_estimated_rate_limit_window("sunset") is None
 
+    @pytest.mark.fast
     def test_returns_none_with_one_pair(self):
         """Only 1 failure/recovery pair → below threshold → None."""
         metrics = RateLimitMetrics()
@@ -43,6 +45,7 @@ class TestEstimatedRateLimitWindowNone:
         ]
         assert metrics.get_estimated_rate_limit_window("sunset") is None
 
+    @pytest.mark.fast
     def test_returns_none_with_two_pairs(self):
         """Only 2 failure/recovery pairs → below threshold → None."""
         metrics = RateLimitMetrics()
@@ -54,6 +57,7 @@ class TestEstimatedRateLimitWindowNone:
         ]
         assert metrics.get_estimated_rate_limit_window("sunset") is None
 
+    @pytest.mark.fast
     def test_returns_none_for_unknown_keyword(self):
         """Querying a keyword with no events → None."""
         metrics = RateLimitMetrics()
@@ -85,6 +89,7 @@ class TestEstimatedRateLimitWindowMedian:
         result = metrics.get_estimated_rate_limit_window("sunset")
         assert result == 60.0
 
+    @pytest.mark.fast
     def test_median_with_even_pairs(self):
         """4 pairs with gaps 20, 40, 60, 80 → median = (40+60)/2 = 50."""
         metrics = RateLimitMetrics()
@@ -117,6 +122,7 @@ class TestEstimatedRateLimitWindowMinThreshold:
         result = metrics.get_estimated_rate_limit_window("sunset")
         assert result == 60.0
 
+    @pytest.mark.fast
     def test_3_pairs_with_equal_gaps(self):
         """3 pairs with identical gaps → median = that gap."""
         metrics = RateLimitMetrics()
@@ -159,6 +165,7 @@ class TestEstimatedRateLimitWindowLastTenPairs:
         # If ALL 15 pairs were used, median would be higher
         assert result == 10.0
 
+    @pytest.mark.fast
     def test_exactly_10_pairs_uses_all(self):
         """Record exactly 10 pairs; all should be used."""
         metrics = RateLimitMetrics()
@@ -201,6 +208,7 @@ class TestPerKeywordWindowIsolation:
         assert metrics.get_estimated_rate_limit_window("ocean") == 60.0
         assert metrics.get_estimated_rate_limit_window("sunset") == 20.0
 
+    @pytest.mark.fast
     def test_keyword_with_no_data_returns_none(self):
         """Keyword with no events returns None even when other keywords have data."""
         metrics = RateLimitMetrics()
@@ -240,6 +248,7 @@ class TestWindowEstimateInExportJson:
         assert windows["ocean"] == 60.0
         assert windows["sunset"] == 20.0
 
+    @pytest.mark.fast
     def test_estimated_window_empty_when_insufficient_data(self):
         """Verify estimated_window_seconds is empty dict with insufficient data."""
         metrics = RateLimitMetrics()
@@ -252,6 +261,7 @@ class TestWindowEstimateInExportJson:
         assert "estimated_window_seconds" in export["rate_limiting"]
         assert export["rate_limiting"]["estimated_window_seconds"] == {}
 
+    @pytest.mark.fast
     def test_estimated_window_only_includes_valid_keywords(self):
         """Keywords with insufficient data excluded from export."""
         metrics = RateLimitMetrics()
@@ -287,6 +297,7 @@ class TestRecordMethods:
         assert len(metrics._rate_limit_events_log["sunset"]) == 1
         assert metrics._rate_limit_events_log["sunset"][0][1] == 'failure'
 
+    @pytest.mark.fast
     def test_record_recovery_creates_keyword_entry(self):
         """First recovery for a keyword creates the events log entry."""
         metrics = RateLimitMetrics()
@@ -295,6 +306,7 @@ class TestRecordMethods:
         assert len(metrics._rate_limit_events_log["sunset"]) == 1
         assert metrics._rate_limit_events_log["sunset"][0][1] == 'recovery'
 
+    @pytest.mark.fast
     def test_record_failure_and_recovery_sequence(self):
         """Sequence of failure/recovery events recorded correctly."""
         metrics = RateLimitMetrics()
@@ -310,6 +322,7 @@ class TestRecordMethods:
         assert events[2][1] == 'failure'
         assert events[3][1] == 'recovery'
 
+    @pytest.mark.fast
     def test_timestamps_are_monotonically_increasing(self):
         """Timestamps from record methods should be increasing."""
         metrics = RateLimitMetrics()
@@ -319,6 +332,7 @@ class TestRecordMethods:
         events = metrics._rate_limit_events_log["sunset"]
         assert events[0][0] <= events[1][0]
 
+    @pytest.mark.fast
     def test_clear_resets_events_log(self):
         """clear() should reset the events log."""
         metrics = RateLimitMetrics()
@@ -358,6 +372,7 @@ class TestSparseTimingDataUS009:
         result = metrics.get_estimated_rate_limit_window("sparse")
         assert result == 30.0  # Median is robust to outlier
 
+    @pytest.mark.fast
     def test_very_small_gaps_near_zero(self):
         """Test with gaps close to zero (immediate recoveries).
 
@@ -373,6 +388,7 @@ class TestSparseTimingDataUS009:
         result = metrics.get_estimated_rate_limit_window("quick")
         assert abs(result - 0.1) < 0.001
 
+    @pytest.mark.fast
     def test_large_time_gaps_between_pairs(self):
         """Test with large time separation between failure/recovery pairs.
 
@@ -388,6 +404,7 @@ class TestSparseTimingDataUS009:
         result = metrics.get_estimated_rate_limit_window("sparse")
         assert result == 45.0  # median of [60, 30, 45] sorted = [30, 45, 60] → 45
 
+    @pytest.mark.fast
     def test_alternating_small_and_large_gaps(self):
         """Test with alternating small/large gaps.
 
@@ -406,6 +423,7 @@ class TestSparseTimingDataUS009:
         result = metrics.get_estimated_rate_limit_window("alternating")
         assert result == 10.0  # Median of odd number, center value
 
+    @pytest.mark.fast
     def test_identical_timestamps_failure_recovery(self):
         """Test with failure and recovery at identical timestamps (0 gap).
 
@@ -452,6 +470,7 @@ class TestSessionCountPersistenceUS009:
         restored = RateLimitMetrics.from_dict(data)
         assert restored._rate_limit_events_log == {}
 
+    @pytest.mark.fast
     def test_session_count_increments_on_checkpoint_restore(self):
         """Test session_count increments when restoring from checkpoint."""
         metrics = RateLimitMetrics(session_count=1)
@@ -460,6 +479,7 @@ class TestSessionCountPersistenceUS009:
         restored = RateLimitMetrics.from_checkpoint(data)
         assert restored.session_count == 2
 
+    @pytest.mark.fast
     def test_session_count_tracks_multiple_resumptions(self):
         """Test session_count accumulates across multiple checkpoint restores."""
         # Session 1
@@ -475,6 +495,7 @@ class TestSessionCountPersistenceUS009:
         metrics3 = RateLimitMetrics.from_checkpoint(data2)
         assert metrics3.session_count == 3
 
+    @pytest.mark.fast
     def test_window_estimation_requires_fresh_data_each_session(self):
         """Test that window estimation needs new data after restore.
 
@@ -497,6 +518,7 @@ class TestSessionCountPersistenceUS009:
         # No events in restored (expected)
         assert restored.get_estimated_rate_limit_window("sunset") is None
 
+    @pytest.mark.fast
     def test_keyword_rate_limit_events_persist_across_sessions(self):
         """Test keyword_rate_limit_events (counts) DO persist across sessions."""
         metrics = RateLimitMetrics()
@@ -527,6 +549,7 @@ class TestPerKeywordBreakdownAggregationUS009:
         export = metrics.export_to_json()
         assert export["rate_limiting"]["by_keyword"] == keywords
 
+    @pytest.mark.fast
     def test_export_by_keyword_empty_when_no_keywords(self):
         """Test export has empty by_keyword when no keywords recorded."""
         metrics = RateLimitMetrics()
@@ -536,6 +559,7 @@ class TestPerKeywordBreakdownAggregationUS009:
         export = metrics.export_to_json()
         assert export["rate_limiting"]["by_keyword"] == {}
 
+    @pytest.mark.fast
     def test_export_by_keyword_accumulates_across_multiple_records(self):
         """Test that by_keyword accumulates from multiple recording calls."""
         metrics = RateLimitMetrics()
@@ -552,6 +576,7 @@ class TestPerKeywordBreakdownAggregationUS009:
         assert export["rate_limiting"]["by_keyword"]["sunset"] == 7
         assert export["rate_limiting"]["by_keyword"]["ocean"] == 2
 
+    @pytest.mark.fast
     def test_export_by_keyword_with_special_characters(self):
         """Test keywords with spaces, unicode, and special chars."""
         metrics = RateLimitMetrics()
@@ -565,6 +590,7 @@ class TestPerKeywordBreakdownAggregationUS009:
         assert by_keyword["日本語"] == 1
         assert by_keyword["key-with-dashes"] == 1
 
+    @pytest.mark.fast
     def test_export_estimated_window_matches_keyword_data(self):
         """Test that estimated_window_seconds aligns with by_keyword keys."""
         metrics = RateLimitMetrics()
@@ -584,6 +610,7 @@ class TestPerKeywordBreakdownAggregationUS009:
         assert "sunset" in export["rate_limiting"]["by_keyword"]
         assert "sunset" in export["rate_limiting"]["estimated_window_seconds"]
 
+    @pytest.mark.fast
     def test_export_by_keyword_total_matches_rate_limit_events(self):
         """Test sum of by_keyword equals rate_limit_events when all have keywords."""
         metrics = RateLimitMetrics()
@@ -624,6 +651,7 @@ class TestOverlappingFailureWindowsUS009:
         # gaps = [100, 60, 80] → median = 80
         assert result == 80.0
 
+    @pytest.mark.fast
     def test_interleaved_failures_and_recoveries(self):
         """Test with interleaved F/R pattern that isn't strictly alternating.
 
@@ -645,6 +673,7 @@ class TestOverlappingFailureWindowsUS009:
         # gaps = [30, 60, 45] → median = 45
         assert result == 45.0
 
+    @pytest.mark.fast
     def test_recovery_without_prior_failure(self):
         """Test with recovery events that have no matching prior failure.
 
@@ -666,6 +695,7 @@ class TestOverlappingFailureWindowsUS009:
         # gaps = [30, 60, 90] → median = 60
         assert result == 60.0
 
+    @pytest.mark.fast
     def test_consecutive_recoveries(self):
         """Test with consecutive recovery events.
 
@@ -688,6 +718,7 @@ class TestOverlappingFailureWindowsUS009:
         # gaps = [30, 60, 45] → median = 45
         assert result == 45.0
 
+    @pytest.mark.fast
     def test_all_failures_no_recoveries(self):
         """Test with only failures and no recoveries."""
         metrics = RateLimitMetrics()
@@ -701,6 +732,7 @@ class TestOverlappingFailureWindowsUS009:
         result = metrics.get_estimated_rate_limit_window("all_fail")
         assert result is None
 
+    @pytest.mark.fast
     def test_all_recoveries_no_failures(self):
         """Test with only recoveries and no failures."""
         metrics = RateLimitMetrics()
@@ -713,6 +745,7 @@ class TestOverlappingFailureWindowsUS009:
         result = metrics.get_estimated_rate_limit_window("all_recover")
         assert result is None
 
+    @pytest.mark.fast
     def test_overlapping_windows_different_keywords(self):
         """Test overlapping windows don't affect other keywords."""
         metrics = RateLimitMetrics()
@@ -741,6 +774,7 @@ class TestOverlappingFailureWindowsUS009:
         # Clean: gaps = [30, 60, 90] → median = 60
         assert clean_result == 60.0
 
+    @pytest.mark.fast
     def test_trailing_failure_without_recovery(self):
         """Test with a trailing failure that never recovers.
 

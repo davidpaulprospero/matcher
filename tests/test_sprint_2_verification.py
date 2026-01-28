@@ -13,26 +13,31 @@ from unittest.mock import MagicMock, patch
 class TestOTIOModuleImports:
     """Test that OTIO modules can be imported."""
 
+    @pytest.mark.fast
     def test_import_otio_timeline(self):
         """Test src.otio.timeline can be imported."""
         from src.otio import timeline
         assert timeline is not None
 
+    @pytest.mark.fast
     def test_import_otio_tracks(self):
         """Test src.otio.tracks can be imported."""
         from src.otio import tracks
         assert tracks is not None
 
+    @pytest.mark.fast
     def test_import_otio_utils(self):
         """Test src.otio.utils can be imported."""
         from src.otio import utils
         assert utils is not None
 
+    @pytest.mark.fast
     def test_import_otio_export(self):
         """Test src.otio.export can be imported."""
         from src.otio import export
         assert export is not None
 
+    @pytest.mark.fast
     def test_import_otio_package(self):
         """Test src.otio package can be imported."""
         from src import otio
@@ -43,18 +48,21 @@ class TestOTIOModuleImports:
 class TestCreateTimelineFunction:
     """Test that create_timeline function exists and is callable."""
 
+    @pytest.mark.fast
     def test_create_timeline_exists(self):
         """Test create_timeline function exists in the package."""
         from src.otio import create_timeline
         assert create_timeline is not None
         assert callable(create_timeline)
 
+    @pytest.mark.fast
     def test_create_timeline_importable_from_timeline_module(self):
         """Test create_timeline is importable from timeline module."""
         from src.otio.timeline import create_timeline
         assert create_timeline is not None
         assert callable(create_timeline)
 
+    @pytest.mark.fast
     def test_create_timeline_in_public_api(self):
         """Test create_timeline is in __all__."""
         from src import otio
@@ -64,17 +72,20 @@ class TestCreateTimelineFunction:
 class TestTrackBuilderBaseClass:
     """Test that TrackBuilder base class can be imported."""
 
+    @pytest.mark.fast
     def test_trackbuilder_exists(self):
         """Test TrackBuilder class exists."""
         from src.otio.tracks import TrackBuilder
         assert TrackBuilder is not None
 
+    @pytest.mark.fast
     def test_trackbuilder_is_abstract(self):
         """Test TrackBuilder is an abstract base class."""
         from src.otio.tracks import TrackBuilder
         from abc import ABC
         assert issubclass(TrackBuilder, ABC)
 
+    @pytest.mark.fast
     def test_trackbuilder_has_build_method(self):
         """Test TrackBuilder has abstract build method."""
         from src.otio.tracks import TrackBuilder
@@ -110,6 +121,7 @@ class TestTrackBuilderInstantiation:
         config.output.num_alternatives = 2
         return config
 
+    @pytest.mark.fast
     def test_primary_track_builder_instantiation(self, mock_matches, mock_config):
         """Test PrimaryTrackBuilder can be instantiated."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -124,6 +136,7 @@ class TestTrackBuilderInstantiation:
         assert builder.config == mock_config
         assert builder.frame_rate == 30.0
 
+    @pytest.mark.fast
     def test_alternative_track_builder_instantiation(self, mock_matches, mock_config):
         """Test AlternativeTrackBuilder can be instantiated."""
         from src.otio.tracks import AlternativeTrackBuilder
@@ -136,6 +149,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_diversity_track_builder_instantiation(self, mock_matches, mock_config):
         """Test DiversityTrackBuilder can be instantiated."""
         from src.otio.tracks import DiversityTrackBuilder
@@ -148,6 +162,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_embedding_diversity_track_builder_instantiation(self, mock_matches, mock_config):
         """Test EmbeddingDiversityTrackBuilder can be instantiated."""
         from src.otio.tracks import EmbeddingDiversityTrackBuilder
@@ -160,6 +175,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_broll_track_builder_instantiation(self, mock_matches, mock_config):
         """Test BRollTrackBuilder can be instantiated."""
         from src.otio.tracks import BRollTrackBuilder
@@ -172,6 +188,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_entity_image_track_builder_instantiation(self, mock_matches, mock_config):
         """Test EntityImageTrackBuilder can be instantiated."""
         from src.otio.tracks import EntityImageTrackBuilder
@@ -184,6 +201,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_entity_video_track_builder_instantiation(self, mock_matches, mock_config):
         """Test EntityVideoTrackBuilder can be instantiated."""
         from src.otio.tracks import EntityVideoTrackBuilder
@@ -196,6 +214,7 @@ class TestTrackBuilderInstantiation:
         assert builder is not None
         assert builder.matches == mock_matches
 
+    @pytest.mark.fast
     def test_all_track_builders_count(self):
         """Verify all 7 track builders exist."""
         from src.otio.tracks import (
@@ -237,6 +256,7 @@ class TestGetTrackBuilderFactory:
         config.output.num_alternatives = 2
         return config
 
+    @pytest.mark.fast
     def test_get_track_builder_v1(self, mock_matches, mock_config):
         """Test get_track_builder returns PrimaryTrackBuilder for V1."""
         from src.otio.tracks import get_track_builder, PrimaryTrackBuilder
@@ -244,6 +264,7 @@ class TestGetTrackBuilderFactory:
         builder = get_track_builder(0, mock_matches, mock_config, 30.0)
         assert isinstance(builder, PrimaryTrackBuilder)
 
+    @pytest.mark.fast
     def test_get_track_builder_v2(self, mock_matches, mock_config):
         """Test get_track_builder returns AlternativeTrackBuilder for V2."""
         from src.otio.tracks import get_track_builder, AlternativeTrackBuilder
@@ -251,6 +272,7 @@ class TestGetTrackBuilderFactory:
         builder = get_track_builder(1, mock_matches, mock_config, 30.0)
         assert isinstance(builder, AlternativeTrackBuilder)
 
+    @pytest.mark.fast
     def test_get_track_builder_v8(self, mock_matches, mock_config):
         """Test get_track_builder returns BRollTrackBuilder for V8."""
         from src.otio.tracks import get_track_builder, BRollTrackBuilder
@@ -258,6 +280,7 @@ class TestGetTrackBuilderFactory:
         builder = get_track_builder(7, mock_matches, mock_config, 30.0)
         assert isinstance(builder, BRollTrackBuilder)
 
+    @pytest.mark.fast
     def test_get_track_builder_v10(self, mock_matches, mock_config):
         """Test get_track_builder returns EntityVideoTrackBuilder for V10."""
         from src.otio.tracks import get_track_builder, EntityVideoTrackBuilder
@@ -265,6 +288,7 @@ class TestGetTrackBuilderFactory:
         builder = get_track_builder(9, mock_matches, mock_config, 30.0)
         assert isinstance(builder, EntityVideoTrackBuilder)
 
+    @pytest.mark.fast
     def test_get_track_builder_invalid_index(self, mock_matches, mock_config):
         """Test get_track_builder raises ValueError for invalid index."""
         from src.otio.tracks import get_track_builder
@@ -276,24 +300,28 @@ class TestGetTrackBuilderFactory:
 class TestOTIOExportFunctions:
     """Test export functions are importable."""
 
+    @pytest.mark.fast
     def test_save_timeline_exists(self):
         """Test save_timeline function exists."""
         from src.otio.export import save_timeline
         assert save_timeline is not None
         assert callable(save_timeline)
 
+    @pytest.mark.fast
     def test_save_timeline_split_exists(self):
         """Test save_timeline_split function exists."""
         from src.otio.export import save_timeline_split
         assert save_timeline_split is not None
         assert callable(save_timeline_split)
 
+    @pytest.mark.fast
     def test_save_timeline_as_edl_exists(self):
         """Test save_timeline_as_edl function exists."""
         from src.otio.export import save_timeline_as_edl
         assert save_timeline_as_edl is not None
         assert callable(save_timeline_as_edl)
 
+    @pytest.mark.fast
     def test_export_functions_in_public_api(self):
         """Test export functions are in __all__."""
         from src import otio

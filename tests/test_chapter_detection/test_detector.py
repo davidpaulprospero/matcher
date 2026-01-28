@@ -10,12 +10,14 @@ from src.chapter_detection.models import ChapterCandidate, DetectionResult
 class TestEnhancedChapterDetector:
     """Test the main detector class."""
 
+    @pytest.mark.fast
     def test_init_with_config(self, mock_config):
         """Test detector initialization."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
             detector = EnhancedChapterDetector(mock_config)
             assert detector.config == mock_config
 
+    @pytest.mark.fast
     def test_detect_chapters_empty(self, mock_config):
         """Test empty segments return empty list."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -23,6 +25,7 @@ class TestEnhancedChapterDetector:
             result = detector.detect_chapters([])
             assert result == []
 
+    @pytest.mark.fast
     def test_detect_chapters_full_empty(self, mock_config):
         """Test detect_chapters_full with empty segments."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -33,6 +36,7 @@ class TestEnhancedChapterDetector:
             assert result.chapters == []
             assert result.total_segments == 0
 
+    @pytest.mark.fast
     def test_fallback_when_no_llm_client(self, mock_config, sample_segments):
         """Test fallback result when no LLM client."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -45,6 +49,7 @@ class TestEnhancedChapterDetector:
             assert len(result.chapters) == 1
             assert result.chapters[0].detection_strategy == 'fallback'
 
+    @pytest.mark.fast
     def test_fallback_with_topic(self, mock_config, sample_segments):
         """Test fallback uses overall_topic."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -61,6 +66,7 @@ class TestEnhancedChapterDetector:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_runs_passes(
         self,
         mock_coverage,
@@ -92,6 +98,7 @@ class TestEnhancedChapterDetector:
         assert 'coverage' in result.detection_passes_run
         assert not result.fallback_used
 
+    @pytest.mark.fast
     def test_detect_chapters_returns_dicts(self, mock_config, sample_segments):
         """Test detect_chapters returns list of dicts."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -105,6 +112,7 @@ class TestEnhancedChapterDetector:
             assert isinstance(result[0], dict)
             assert 'title' in result[0]
 
+    @pytest.mark.fast
     def test_content_type_mapping(self, mock_config):
         """Test content type to strategy mapping."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -125,6 +133,7 @@ class TestDetectorWithMockedPasses:
     @patch('src.chapter_detection.detector.compute_voiceover_embeddings')
     @patch('src.chapter_detection.detector.run_validation')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_full_pipeline(
         self,
         mock_coverage,
@@ -174,6 +183,7 @@ class TestDetectorWithMockedPasses:
 class TestDetectorConfigAccess:
     """Test config value access."""
 
+    @pytest.mark.fast
     def test_get_config_value_from_chapter_detection(self):
         """Test reading config from chapter_detection section."""
         config = Mock()
@@ -185,6 +195,7 @@ class TestDetectorConfigAccess:
 
         assert value == 5
 
+    @pytest.mark.fast
     def test_get_config_value_default(self):
         """Test default value when config missing."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -193,6 +204,7 @@ class TestDetectorConfigAccess:
 
         assert value == 'default'
 
+    @pytest.mark.fast
     def test_get_config_value_dict_config(self):
         """Test reading from dict-style config."""
         config = Mock()
@@ -211,6 +223,7 @@ class TestDetectorConfigAccess:
 class TestDetectorLocationResolution:
     """Test location resolution integration."""
 
+    @pytest.mark.fast
     def test_resolves_locations(self, mock_config):
         """Test location resolution is called when service provided."""
         location_service = Mock()
@@ -250,6 +263,7 @@ class TestDetectorReturnsValidBoundariesUS004:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_detect_returns_result_with_valid_boundaries(
         self,
         mock_coverage,
@@ -287,6 +301,7 @@ class TestDetectorReturnsValidBoundariesUS004:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_detect_boundaries_cover_entire_transcript(
         self,
         mock_coverage,
@@ -323,6 +338,7 @@ class TestDetectorHandlesOverlappingChaptersUS004:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_overlapping_chapters_from_llm_resolved(
         self,
         mock_coverage,
@@ -374,6 +390,7 @@ class TestDetectorHandlesOverlappingChaptersUS004:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_heavily_overlapping_chapters_handled(
         self,
         mock_coverage,
@@ -411,6 +428,7 @@ class TestDetectorMergesShortChaptersUS004:
 
     @patch('src.chapter_detection.detector.run_initial_detection')
     @patch('src.chapter_detection.detector.run_coverage_resolution')
+    @pytest.mark.fast
     def test_short_chapters_merged_by_coverage(
         self,
         mock_coverage,
@@ -447,6 +465,7 @@ class TestDetectorMergesShortChaptersUS004:
         assert result.chapters[0].start_segment_idx == 0
         assert result.chapters[0].end_segment_idx == 5
 
+    @pytest.mark.fast
     def test_coverage_resolution_merges_tiny_directly(self, mock_config):
         """Test _merge_tiny_chapters function directly with min_segments config."""
         from src.chapter_detection.passes.coverage import _merge_tiny_chapters
@@ -466,6 +485,7 @@ class TestDetectorMergesShortChaptersUS004:
 class TestDetectorRejectsNegativeDurationsUS004:
     """AC4: Test ChapterDetector validation rejects chapters with negative durations."""
 
+    @pytest.mark.fast
     def test_validate_chapters_rejects_negative_duration(self):
         """Test _validate_chapters clamps negative indices to valid range."""
         from src.chapter_detection.passes.initial import _validate_chapters
@@ -487,6 +507,7 @@ class TestDetectorRejectsNegativeDurationsUS004:
             assert result[0]['end_segment_idx'] >= result[0]['start_segment_idx']
         # If empty, it was rejected - either outcome is valid
 
+    @pytest.mark.fast
     def test_validate_chapters_clamps_out_of_bounds_indices(self):
         """Test _validate_chapters clamps indices to valid segment range."""
         from src.chapter_detection.passes.initial import _validate_chapters
@@ -508,6 +529,7 @@ class TestDetectorRejectsNegativeDurationsUS004:
         assert result[0]['end_segment_idx'] < 10
         assert result[0]['end_segment_idx'] >= result[0]['start_segment_idx']
 
+    @pytest.mark.fast
     def test_coverage_resolution_handles_inverted_boundaries(self):
         """Test coverage resolution handles inverted start/end gracefully."""
         from src.chapter_detection.passes.coverage import run_coverage_resolution
@@ -534,6 +556,7 @@ class TestDetectorRejectsNegativeDurationsUS004:
 class TestDetectorHandlesEmptyTranscriptUS004:
     """AC5: Test ChapterDetector handles empty transcript gracefully."""
 
+    @pytest.mark.fast
     def test_detect_with_empty_segments_returns_empty_result(self, mock_config):
         """Test detect() with empty segments returns empty DetectionResult."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -546,6 +569,7 @@ class TestDetectorHandlesEmptyTranscriptUS004:
         assert result.detection_passes_run == []
         assert not result.fallback_used
 
+    @pytest.mark.fast
     def test_detect_with_none_segments_handles_gracefully(self, mock_config):
         """Test detect() handles None-like input gracefully."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -557,6 +581,7 @@ class TestDetectorHandlesEmptyTranscriptUS004:
         assert isinstance(result, list)
         assert len(result) == 0
 
+    @pytest.mark.fast
     def test_detect_dict_output_with_empty_segments(self, mock_config):
         """Test detect_chapters (dict output) with empty segments."""
         with patch.object(EnhancedChapterDetector, '_init_llm_client'):
@@ -565,6 +590,7 @@ class TestDetectorHandlesEmptyTranscriptUS004:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_coverage_resolution_with_zero_total_segments(self, mock_config):
         """Test coverage resolution handles zero total_segments."""
         from src.chapter_detection.passes.coverage import run_coverage_resolution

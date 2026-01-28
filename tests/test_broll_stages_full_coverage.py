@@ -67,6 +67,7 @@ class TestBrollDownloadStageFullRun:
 
     @patch.object(BrollDownloadStage, '_download_youtube_broll')
     @patch.object(BrollDownloadStage, '_download_stock_broll')
+    @pytest.mark.fast
     def test_run_success_youtube_only(
         self, mock_stock, mock_youtube,
         stage, full_mock_state, full_mock_config, mock_checkpoint, tmp_path
@@ -90,6 +91,7 @@ class TestBrollDownloadStageFullRun:
 
     @patch.object(BrollDownloadStage, '_download_youtube_broll')
     @patch.object(BrollDownloadStage, '_download_stock_broll')
+    @pytest.mark.fast
     def test_run_success_mixed_sources(
         self, mock_stock, mock_youtube,
         stage, full_mock_state, full_mock_config, mock_checkpoint, tmp_path
@@ -114,6 +116,7 @@ class TestBrollDownloadStageFullRun:
 
     @patch.object(BrollDownloadStage, '_download_youtube_broll')
     @patch.object(BrollDownloadStage, '_download_stock_broll')
+    @pytest.mark.fast
     def test_run_respects_max_total(
         self, mock_stock, mock_youtube,
         stage, full_mock_state, full_mock_config, mock_checkpoint, tmp_path
@@ -140,6 +143,7 @@ class TestBrollDownloadStageFullRun:
         assert result.data['broll_count'] == 5
 
     @patch.object(BrollDownloadStage, '_download_youtube_broll')
+    @pytest.mark.fast
     def test_run_no_search_terms(
         self, mock_youtube,
         stage, mock_checkpoint, tmp_path
@@ -163,6 +167,7 @@ class TestBrollDownloadStageFullRun:
         assert result.data['reason'] in ('no_keywords', 'no_search_terms')
         mock_youtube.assert_not_called()
 
+    @pytest.mark.fast
     def test_run_duplicate_video_not_added(
         self, stage, full_mock_state, full_mock_config, mock_checkpoint, tmp_path
     ):
@@ -253,6 +258,7 @@ class TestBrollMatchStageFullRun:
         checkpoint.save = Mock()
         return checkpoint
 
+    @pytest.mark.fast
     def test_run_success_with_matches(
         self,
         stage, full_state_for_matching, full_config_for_matching, mock_checkpoint
@@ -269,6 +275,7 @@ class TestBrollMatchStageFullRun:
         assert result.data['silent_count'] >= 1
         assert 'match_count' in result.data
 
+    @pytest.mark.fast
     def test_run_stores_broll_matches(
         self,
         stage, full_state_for_matching, full_config_for_matching, mock_checkpoint
@@ -285,6 +292,7 @@ class TestBrollMatchStageFullRun:
         assert hasattr(full_state_for_matching, 'broll_matches')
         # Should have matches for detected silent scenes
 
+    @pytest.mark.fast
     def test_run_no_silent_scenes(self, stage, mock_checkpoint):
         """Test run when no silent scenes detected"""
         state = PipelineState()
@@ -314,6 +322,7 @@ class TestBrollMatchStageFullRun:
         assert result.success is True
         assert result.data['silent_count'] == 0
 
+    @pytest.mark.fast
     def test_run_always_match_picks_best(
         self,
         stage, full_state_for_matching, mock_checkpoint
@@ -352,6 +361,7 @@ class TestBrollMatchVisionAPI:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_should_use_vision_no_global_vision(self, stage):
         """Test Vision API disabled when global vision config missing"""
         config = Mock()
@@ -365,6 +375,7 @@ class TestBrollMatchVisionAPI:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_should_use_vision_global_disabled(self, stage):
         """Test Vision API disabled when global vision.enabled=False"""
         config = Mock()
@@ -379,6 +390,7 @@ class TestBrollMatchVisionAPI:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_enrich_with_vision_success(self, stage):
         """Test successful Vision API enrichment"""
         scenes = [
@@ -402,6 +414,7 @@ class TestBrollMatchVisionAPI:
         # Should have enriched with filename keywords
         assert count >= 0
 
+    @pytest.mark.fast
     def test_enrich_with_vision_fallback_on_error(self, stage):
         """Test Vision API falls back to keywords on error"""
         scenes = [
@@ -425,6 +438,7 @@ class TestBrollMatchVisionAPI:
         # Should have extracted keywords from filename
         assert "earthquake" in scenes[0].description.lower() or "damage" in scenes[0].description.lower()
 
+    @pytest.mark.fast
     def test_enrich_with_vision_import_error(self, stage):
         """Test handling when vision module not available"""
         scenes = [
@@ -458,6 +472,7 @@ class TestBrollMatchVoiceoverEmbeddings:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_get_voiceover_embeddings_success(self, stage):
         """Test successful voiceover embedding creation"""
         with patch('sentence_transformers.SentenceTransformer') as mock_transformer:
@@ -481,6 +496,7 @@ class TestBrollMatchVoiceoverEmbeddings:
             assert 0 in embeddings
             assert 1 in embeddings
 
+    @pytest.mark.fast
     def test_get_voiceover_embeddings_no_transformer(self, stage):
         """Test handling when sentence_transformers not available"""
         state = PipelineState()
@@ -509,6 +525,7 @@ class TestBrollMatchingAlgorithm:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_match_scenes_to_voiceover_basic(self, stage):
         """Test basic matching logic"""
         with patch('sentence_transformers.SentenceTransformer') as mock_transformer:
@@ -545,6 +562,7 @@ class TestBrollMatchingAlgorithm:
 
             assert len(matches) >= 0  # May or may not match depending on scores
 
+    @pytest.mark.fast
     def test_match_scenes_source_boost_applied(self, stage):
         """Test that source boost is applied correctly"""
         with patch('sentence_transformers.SentenceTransformer') as mock_transformer:
@@ -596,6 +614,7 @@ class TestBrollMatchingAlgorithm:
                 # Best match should be YouTube due to higher boost
                 assert matches[0].scene.source == "youtube"
 
+    @pytest.mark.fast
     def test_match_returns_best_per_segment(self, stage):
         """Test that only best match per segment is returned"""
         scenes = [
@@ -648,6 +667,7 @@ class TestBrollCheckpointData:
 
     @patch.object(BrollDownloadStage, '_download_youtube_broll')
     @patch.object(BrollDownloadStage, '_download_stock_broll')
+    @pytest.mark.fast
     def test_download_checkpoint_data_structure(
         self, mock_stock, mock_youtube, download_stage, tmp_path
     ):
@@ -678,6 +698,7 @@ class TestBrollCheckpointData:
         assert 'youtube_count' in result.data
         assert 'stock_count' in result.data
 
+    @pytest.mark.fast
     def test_match_checkpoint_data_structure(self, match_stage):
         """Test match stage checkpoint data structure"""
         with patch('sentence_transformers.SentenceTransformer') as mock_transformer:
@@ -727,6 +748,7 @@ class TestBrollCheckpointData:
 class TestBrollStateModification:
     """Test that stages properly modify state"""
 
+    @pytest.mark.fast
     def test_download_stage_initializes_broll_downloads(self):
         """Test broll_downloads is initialized if missing"""
         stage = BrollDownloadStage()
@@ -745,6 +767,7 @@ class TestBrollStateModification:
 
         # Stage should handle missing attribute gracefully
 
+    @pytest.mark.fast
     def test_match_stage_initializes_broll_matches(self):
         """Test broll_matches is initialized if missing"""
         stage = BrollMatchStage()
@@ -773,6 +796,7 @@ class TestBrollFindVideoFile:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_find_video_file_exact_match(self, stage):
         """Test finding video file by exact stem match"""
         state = PipelineState()
@@ -785,6 +809,7 @@ class TestBrollFindVideoFile:
 
         assert result == "/videos/my_video.mp4"
 
+    @pytest.mark.fast
     def test_find_video_file_not_found(self, stage):
         """Test when video file not found"""
         state = PipelineState()
@@ -796,6 +821,7 @@ class TestBrollFindVideoFile:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_find_video_file_empty_downloads(self, stage):
         """Test with empty downloaded_videos"""
         state = PipelineState()

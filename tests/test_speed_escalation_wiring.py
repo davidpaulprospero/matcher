@@ -176,6 +176,7 @@ class TestCheckSpeedEscalationCallsRecordSlowSpeed:
 
         mock_record.assert_called_once_with("travel", speed_mbps=0.04)
 
+    @pytest.mark.fast
     def test_no_call_when_signal_not_detected(self, esc_mgr):
         """When detect_rate_limit_signals().detected is False,
         record_slow_speed is NOT called."""
@@ -190,6 +191,7 @@ class TestCheckSpeedEscalationCallsRecordSlowSpeed:
 
         mock_record.assert_not_called()
 
+    @pytest.mark.fast
     def test_passes_correct_keyword_and_speed(self, esc_mgr):
         """Verifies keyword and average speed are forwarded correctly."""
         speed_tracker = _make_speed_tracker(detected=True, avg_speed=1.23)
@@ -203,6 +205,7 @@ class TestCheckSpeedEscalationCallsRecordSlowSpeed:
 
         mock_record.assert_called_once_with("nature documentary", speed_mbps=1.23)
 
+    @pytest.mark.fast
     def test_speed_tracker_detect_invoked(self, esc_mgr):
         """detect_rate_limit_signals() is invoked exactly once per call."""
         speed_tracker = _make_speed_tracker(detected=True)
@@ -224,6 +227,7 @@ class TestCheckSpeedEscalationCallsRecordSlowSpeed:
 class TestSpeedEscalationCalledAfterAudioDownload:
     """_check_speed_escalation() is invoked after download_audio_for_keyword()."""
 
+    @pytest.mark.integration
     def test_called_once_after_audio_download(self, temp_dir, esc_mgr):
         """_check_speed_escalation is called exactly once after
         download_audio_for_keyword() completes, regardless of video count."""
@@ -255,6 +259,7 @@ class TestSpeedEscalationCalledAfterAudioDownload:
         # Called exactly once at end of method (not per video)
         mock_check.assert_called_once_with("test")
 
+    @pytest.mark.integration
     def test_called_even_when_no_downloads_succeed(self, temp_dir, esc_mgr):
         """_check_speed_escalation is called even when all downloads fail."""
         speed_tracker = _make_speed_tracker(detected=False)
@@ -276,6 +281,7 @@ class TestSpeedEscalationCalledAfterAudioDownload:
 
         mock_check.assert_called_once_with("test")
 
+    @pytest.mark.integration
     def test_called_with_correct_keyword(self, temp_dir, esc_mgr):
         """_check_speed_escalation receives the keyword passed to download_audio_for_keyword."""
         speed_tracker = _make_speed_tracker(detected=False)
@@ -311,6 +317,7 @@ class TestSpeedEscalationCalledAfterAudioDownload:
 class TestSpeedEscalationCalledAfterSegmentDownload:
     """_check_speed_escalation() is invoked per video in download_video_segments()."""
 
+    @pytest.mark.integration
     def test_called_per_video_in_segments(self, temp_dir, esc_mgr):
         """_check_speed_escalation is called once per video_id group."""
         speed_tracker = _make_speed_tracker(detected=False)
@@ -350,6 +357,7 @@ class TestSpeedEscalationCalledAfterSegmentDownload:
         # Called once per video_id (2 videos)
         assert mock_check.call_count == 2
 
+    @pytest.mark.integration
     def test_called_with_correct_keyword_per_video(self, temp_dir, esc_mgr):
         """Each call uses the keyword from the corresponding segment group."""
         speed_tracker = _make_speed_tracker(detected=False)
@@ -397,6 +405,7 @@ class TestSpeedEscalationCalledAfterSegmentDownload:
         assert "travel" in call_keywords
         assert "nature" in call_keywords
 
+    @pytest.mark.integration
     def test_called_even_on_download_failure(self, temp_dir, esc_mgr):
         """_check_speed_escalation is called after segment download fails."""
         speed_tracker = _make_speed_tracker(detected=False)
@@ -447,6 +456,7 @@ class TestSpeedEscalationWithNullSpeedTracker:
         # Should return silently, no exception
         pipeline._check_speed_escalation("test_keyword")
 
+    @pytest.mark.fast
     def test_record_slow_speed_not_called_when_tracker_none(self, esc_mgr):
         """record_slow_speed is never called when speed_tracker is None."""
         pipeline = _make_pipeline(
@@ -459,6 +469,7 @@ class TestSpeedEscalationWithNullSpeedTracker:
 
         mock_record.assert_not_called()
 
+    @pytest.mark.fast
     def test_no_error_when_speed_tracker_disabled(self, esc_mgr):
         """No error when speed_tracker exists but config.enabled is False."""
         tracker = MagicMock()
@@ -495,6 +506,7 @@ class TestSpeedEscalationWithNullEscalationManager:
         # Should return silently, no AttributeError
         pipeline._check_speed_escalation("test_keyword")
 
+    @pytest.mark.fast
     def test_detect_called_but_record_skipped_when_no_manager(self):
         """With speed_tracker active but no escalation_manager, detect may or
         may not be called but no record_slow_speed happens."""
@@ -510,6 +522,7 @@ class TestSpeedEscalationWithNullEscalationManager:
         # so detect_rate_limit_signals should NOT be called
         speed_tracker.detect_rate_limit_signals.assert_not_called()
 
+    @pytest.mark.fast
     def test_both_none_no_crash(self):
         """No error when both speed_tracker and escalation_manager are None."""
         pipeline = _make_pipeline(
@@ -520,6 +533,7 @@ class TestSpeedEscalationWithNullEscalationManager:
         # Should return silently
         pipeline._check_speed_escalation("any_keyword")
 
+    @pytest.mark.integration
     def test_integration_audio_download_with_none_managers(self, temp_dir):
         """download_audio_for_keyword() works when both managers are None."""
         pipeline = _make_pipeline(

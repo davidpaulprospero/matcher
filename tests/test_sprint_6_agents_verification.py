@@ -12,6 +12,7 @@ import pytest
 class TestAgentsMainImports:
     """Test that main agent modules import cleanly."""
 
+    @pytest.mark.fast
     def test_agents_init_imports(self):
         """Test that src/agents/__init__.py imports cleanly."""
         # This should not raise any ImportError
@@ -60,6 +61,7 @@ class TestAgentsMainImports:
         assert 'HealingOrchestrator' in agents.__all__
         assert 'ResilientRunner' in agents.__all__
 
+    @pytest.mark.fast
     def test_base_module_imports(self):
         """Test that src/agents/base.py imports cleanly."""
         from src.agents.base import Healer, HealerResult, HealerAction
@@ -71,6 +73,7 @@ class TestAgentsMainImports:
         assert HealerAction.RESTORE is not None
         assert HealerAction.ABORT is not None
 
+    @pytest.mark.fast
     def test_strategy_module_imports(self):
         """Test that src/agents/strategy.py imports cleanly."""
         from src.agents.strategy import (
@@ -92,6 +95,7 @@ class TestAgentsMainImports:
         assert callable(HealingStrategy.interactive)
         assert callable(HealingStrategy.minimal)
 
+    @pytest.mark.fast
     def test_orchestrator_module_imports(self):
         """Test that src/agents/orchestrator.py imports cleanly."""
         from src.agents.orchestrator import (
@@ -118,6 +122,7 @@ class TestAgentsMainImports:
         assert request.stage_name == "TEST"
         assert request.recommendation is None  # default
 
+    @pytest.mark.fast
     def test_runner_module_imports(self):
         """Test that src/agents/runner.py imports cleanly."""
         from src.agents.runner import (
@@ -134,6 +139,7 @@ class TestAgentsMainImports:
 class TestHealerImports:
     """Test that all healers in src/agents/healers/ import cleanly."""
 
+    @pytest.mark.fast
     def test_healers_init_imports(self):
         """Test that src/agents/healers/__init__.py imports cleanly."""
         from src.agents.healers import (
@@ -158,36 +164,43 @@ class TestHealerImports:
         # LLMHealer should NOT be in registry (invoked by orchestrator)
         assert LLMHealer not in HEALER_REGISTRY
 
+    @pytest.mark.fast
     def test_api_healer_imports(self):
         """Test that src/agents/healers/api.py imports cleanly."""
         from src.agents.healers.api import APIHealer
         assert APIHealer.name == "api-healer"
 
+    @pytest.mark.fast
     def test_checkpoint_healer_imports(self):
         """Test that src/agents/healers/checkpoint.py imports cleanly."""
         from src.agents.healers.checkpoint import CheckpointHealer
         assert CheckpointHealer.name == "checkpoint-healer"
 
+    @pytest.mark.fast
     def test_disk_healer_imports(self):
         """Test that src/agents/healers/disk.py imports cleanly."""
         from src.agents.healers.disk import DiskHealer
         assert DiskHealer.name == "disk-healer"
 
+    @pytest.mark.fast
     def test_download_healer_imports(self):
         """Test that src/agents/healers/download.py imports cleanly."""
         from src.agents.healers.download import DownloadHealer
         assert DownloadHealer.name == "download-healer"
 
+    @pytest.mark.fast
     def test_path_healer_imports(self):
         """Test that src/agents/healers/path.py imports cleanly."""
         from src.agents.healers.path import PathHealer
         assert PathHealer.name == "path-healer"
 
+    @pytest.mark.fast
     def test_otio_healer_imports(self):
         """Test that src/agents/healers/otio.py imports cleanly."""
         from src.agents.healers.otio import OTIOHealer
         assert OTIOHealer.name == "otio-healer"
 
+    @pytest.mark.fast
     def test_llm_healer_imports(self):
         """Test that src/agents/healers/llm_healer.py imports cleanly."""
         from src.agents.healers.llm_healer import LLMHealer
@@ -197,6 +210,7 @@ class TestHealerImports:
 class TestWatcherAndFallbackImports:
     """Test two-tier LLM delegation components import cleanly."""
 
+    @pytest.mark.fast
     def test_watcher_module_imports(self):
         """Test that src/agents/watcher.py imports cleanly."""
         from src.agents.watcher import WatcherAgent, ErrorClassification
@@ -213,6 +227,7 @@ class TestWatcherAndFallbackImports:
         assert classification.category == "api"
         assert classification.confidence == 0.9
 
+    @pytest.mark.fast
     def test_fallback_module_imports(self):
         """Test that src/agents/fallback.py imports cleanly."""
         from src.agents.fallback import (
@@ -231,6 +246,7 @@ class TestWatcherAndFallbackImports:
         assert hasattr(result, 'category')
         assert hasattr(result, 'suggested_healer')
 
+    @pytest.mark.fast
     def test_healing_logger_imports(self):
         """Test that src/agents/healing_logger.py imports cleanly."""
         from src.agents.healing_logger import HealingLogger, HealingLogEntry
@@ -254,6 +270,7 @@ class TestWatcherAndFallbackImports:
 class TestHealerBaseClass:
     """Test that Healer base class functionality works."""
 
+    @pytest.mark.fast
     def test_healer_result_factory_methods(self):
         """Test HealerResult.fixed(), .failed(), .config_changed() methods."""
         from src.agents.base import HealerResult, HealerAction
@@ -276,6 +293,7 @@ class TestHealerBaseClass:
         assert result.action == HealerAction.MODIFY_CONFIG
         assert result.modified_config is True
 
+    @pytest.mark.fast
     def test_healer_action_enum_complete(self):
         """Test all HealerAction enum values are present."""
         from src.agents.base import HealerAction
@@ -291,6 +309,7 @@ class TestHealerBaseClass:
 class TestHealingMetrics:
     """Test HealingMetrics tracking functionality."""
 
+    @pytest.mark.fast
     def test_metrics_initialization(self):
         """Test HealingMetrics initializes with zeroed counters."""
         from src.agents.strategy import HealingMetrics
@@ -305,6 +324,7 @@ class TestHealingMetrics:
         assert len(metrics.heals_by_healer) == 0
         assert len(metrics.heals_by_stage) == 0
 
+    @pytest.mark.fast
     def test_metrics_record_heal(self):
         """Test HealingMetrics.record_heal() updates counters."""
         from src.agents.strategy import HealingMetrics
@@ -324,6 +344,7 @@ class TestHealingMetrics:
         assert metrics.successful_heals == 1  # unchanged
         assert metrics.heals_by_healer.get("disk-healer") == 1
 
+    @pytest.mark.fast
     def test_metrics_summary(self):
         """Test HealingMetrics.summary() returns formatted string."""
         from src.agents.strategy import HealingMetrics
@@ -339,6 +360,7 @@ class TestHealingMetrics:
 class TestConfigSnapshot:
     """Test ConfigSnapshot save/restore functionality."""
 
+    @pytest.mark.fast
     def test_config_snapshot_creation(self):
         """Test ConfigSnapshot stores stage name and timestamp."""
         from src.agents.strategy import ConfigSnapshot

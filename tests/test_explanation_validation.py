@@ -27,6 +27,7 @@ from src.matching.llm_providers import (
 class TestExplanationValidationDataclass:
     """Test ExplanationValidation dataclass structure."""
 
+    @pytest.mark.fast
     def test_dataclass_has_required_fields(self):
         """ExplanationValidation should have all required fields."""
         validation = ExplanationValidation(
@@ -46,6 +47,7 @@ class TestExplanationValidationDataclass:
         assert validation.confidence_penalty == 0.0
         assert validation.warning_message is None
 
+    @pytest.mark.fast
     def test_dataclass_with_warning(self):
         """ExplanationValidation should include warning_message when invalid."""
         validation = ExplanationValidation(
@@ -65,6 +67,7 @@ class TestExplanationValidationDataclass:
 class TestValidateExplanationConfidenceBasic:
     """Basic functionality tests for validate_explanation_confidence."""
 
+    @pytest.mark.fast
     def test_empty_explanation_returns_invalid(self):
         """Empty explanation should return invalid result with penalty."""
         result = validate_explanation_confidence(
@@ -76,6 +79,7 @@ class TestValidateExplanationConfidenceBasic:
         assert result.confidence_penalty == EXPLANATION_CONFIDENCE_PENALTY
         assert "Empty explanation" in result.warning_message
 
+    @pytest.mark.fast
     def test_none_explanation_returns_invalid(self):
         """None explanation should return invalid result."""
         result = validate_explanation_confidence(
@@ -85,6 +89,7 @@ class TestValidateExplanationConfidenceBasic:
         assert result.is_valid is False
         assert result.confidence_penalty == EXPLANATION_CONFIDENCE_PENALTY
 
+    @pytest.mark.fast
     def test_no_keywords_in_explanation_returns_valid(self):
         """Explanation with no extractable keywords is assumed valid."""
         # All stopwords, no meaningful keywords
@@ -97,6 +102,7 @@ class TestValidateExplanationConfidenceBasic:
         assert result.confidence_penalty == 0.0
         assert len(result.explanation_keywords) == 0
 
+    @pytest.mark.fast
     def test_all_keywords_verifiable(self):
         """All explanation keywords found in source returns valid."""
         result = validate_explanation_confidence(
@@ -115,6 +121,7 @@ class TestValidateExplanationConfidenceBasic:
 class TestVerificationRatioCalculation:
     """Tests for verification ratio calculation logic."""
 
+    @pytest.mark.fast
     def test_100_percent_verification(self):
         """100% verifiable keywords should have ratio 1.0."""
         result = validate_explanation_confidence(
@@ -125,6 +132,7 @@ class TestVerificationRatioCalculation:
         assert result.verification_ratio == 1.0
         assert result.is_valid is True
 
+    @pytest.mark.fast
     def test_0_percent_verification(self):
         """0% verifiable keywords should have ratio 0.0."""
         result = validate_explanation_confidence(
@@ -136,6 +144,7 @@ class TestVerificationRatioCalculation:
         assert result.is_valid is False
         assert result.confidence_penalty == EXPLANATION_CONFIDENCE_PENALTY
 
+    @pytest.mark.fast
     def test_50_percent_threshold_exact(self):
         """Exactly 50% should pass (>= threshold)."""
         result = validate_explanation_confidence(
@@ -147,6 +156,7 @@ class TestVerificationRatioCalculation:
         assert result.is_valid is True
         assert result.confidence_penalty == 0.0
 
+    @pytest.mark.fast
     def test_below_50_percent_threshold(self):
         """Below 50% should fail and apply penalty."""
         result = validate_explanation_confidence(
@@ -162,6 +172,7 @@ class TestVerificationRatioCalculation:
 class TestVideoTextIntegration:
     """Tests for combining voiceover and video text sources."""
 
+    @pytest.mark.fast
     def test_video_text_contributes_to_verification(self):
         """Keywords in video text should count as verified."""
         result = validate_explanation_confidence(
@@ -172,6 +183,7 @@ class TestVideoTextIntegration:
         assert result.verification_ratio == 1.0
         assert result.is_valid is True
 
+    @pytest.mark.fast
     def test_combined_voiceover_and_video(self):
         """Keywords from both voiceover and video should combine."""
         result = validate_explanation_confidence(
@@ -183,6 +195,7 @@ class TestVideoTextIntegration:
         assert result.verification_ratio == pytest.approx(2/3, rel=0.01)
         assert result.is_valid is True
 
+    @pytest.mark.fast
     def test_none_video_text_handled(self):
         """None video_text should not cause errors."""
         result = validate_explanation_confidence(
@@ -198,6 +211,7 @@ class TestVideoTextIntegration:
 class TestVerifiedUnverifiedKeywords:
     """Tests for verified and unverified keyword tracking."""
 
+    @pytest.mark.fast
     def test_verified_keywords_populated(self):
         """Verified keywords list should contain matching keywords."""
         result = validate_explanation_confidence(
@@ -209,6 +223,7 @@ class TestVerifiedUnverifiedKeywords:
         assert "peaceful" in result.verified_keywords
         assert "mountains" not in result.verified_keywords
 
+    @pytest.mark.fast
     def test_unverified_keywords_populated(self):
         """Unverified keywords list should contain non-matching keywords."""
         result = validate_explanation_confidence(
@@ -220,6 +235,7 @@ class TestVerifiedUnverifiedKeywords:
         assert "forest" in result.unverified_keywords
         assert "sunset" not in result.unverified_keywords
 
+    @pytest.mark.fast
     def test_keywords_are_sorted(self):
         """Keywords lists should be sorted alphabetically."""
         result = validate_explanation_confidence(
@@ -235,14 +251,17 @@ class TestVerifiedUnverifiedKeywords:
 class TestConfidencePenalty:
     """Tests for confidence penalty application."""
 
+    @pytest.mark.fast
     def test_default_penalty_value(self):
         """Default penalty should be 0.1."""
         assert EXPLANATION_CONFIDENCE_PENALTY == 0.1
 
+    @pytest.mark.fast
     def test_default_threshold_value(self):
         """Default threshold should be 0.5 (50%)."""
         assert EXPLANATION_VERIFICATION_THRESHOLD == 0.5
 
+    @pytest.mark.fast
     def test_penalty_applied_when_invalid(self):
         """Penalty should be applied when validation fails."""
         result = validate_explanation_confidence(
@@ -253,6 +272,7 @@ class TestConfidencePenalty:
         assert result.is_valid is False
         assert result.confidence_penalty == 0.1
 
+    @pytest.mark.fast
     def test_no_penalty_when_valid(self):
         """No penalty should be applied when validation passes."""
         result = validate_explanation_confidence(
@@ -263,6 +283,7 @@ class TestConfidencePenalty:
         assert result.is_valid is True
         assert result.confidence_penalty == 0.0
 
+    @pytest.mark.fast
     def test_custom_penalty_value(self):
         """Custom penalty value should be respected."""
         result = validate_explanation_confidence(
@@ -273,6 +294,7 @@ class TestConfidencePenalty:
         )
         assert result.confidence_penalty == 0.2
 
+    @pytest.mark.fast
     def test_custom_threshold_value(self):
         """Custom threshold should be respected."""
         # With default 50% threshold, 33% would fail
@@ -291,6 +313,7 @@ class TestConfidencePenalty:
 class TestLogging:
     """Tests for logging behavior."""
 
+    @pytest.mark.fast
     def test_warning_logged_when_invalid(self, caplog):
         """Warning should be logged when validation fails."""
         with caplog.at_level(logging.WARNING):
@@ -304,6 +327,7 @@ class TestLogging:
         assert "non-existent content" in caplog.text
         assert "keywords verifiable" in caplog.text
 
+    @pytest.mark.fast
     def test_warning_includes_unverified_keywords(self, caplog):
         """Warning message should list unverified keywords."""
         with caplog.at_level(logging.WARNING):
@@ -316,6 +340,7 @@ class TestLogging:
         assert "mountains" in caplog.text or "mountains" in str(result.warning_message)
         assert "forest" in caplog.text or "forest" in str(result.warning_message)
 
+    @pytest.mark.fast
     def test_warning_limited_to_5_keywords(self, caplog):
         """Warning should limit unverified keywords to 5 for readability."""
         with caplog.at_level(logging.WARNING):
@@ -330,6 +355,7 @@ class TestLogging:
         # Warning should not have more than 5 unverified keywords displayed
         assert result.warning_message is not None
 
+    @pytest.mark.fast
     def test_no_warning_when_valid(self, caplog):
         """No warning should be logged when validation passes."""
         with caplog.at_level(logging.WARNING):
@@ -342,6 +368,7 @@ class TestLogging:
         assert result.is_valid is True
         assert "non-existent content" not in caplog.text
 
+    @pytest.mark.fast
     def test_debug_logged_when_valid(self, caplog):
         """Debug message should be logged when validation passes."""
         with caplog.at_level(logging.DEBUG):
@@ -357,6 +384,7 @@ class TestLogging:
 class TestWarningMessage:
     """Tests for warning message content."""
 
+    @pytest.mark.fast
     def test_warning_message_format(self):
         """Warning message should have expected format."""
         result = validate_explanation_confidence(
@@ -368,6 +396,7 @@ class TestWarningMessage:
         assert "non-existent content" in result.warning_message
         assert "0/3" in result.warning_message or "0%" in result.warning_message
 
+    @pytest.mark.fast
     def test_warning_message_includes_penalty(self):
         """Warning message should mention the applied penalty."""
         result = validate_explanation_confidence(
@@ -377,6 +406,7 @@ class TestWarningMessage:
         )
         assert "-0.1" in result.warning_message
 
+    @pytest.mark.fast
     def test_warning_message_none_when_valid(self):
         """Warning message should be None when validation passes."""
         result = validate_explanation_confidence(
@@ -390,6 +420,7 @@ class TestWarningMessage:
 class TestEdgeCases:
     """Edge case tests."""
 
+    @pytest.mark.fast
     def test_case_insensitive_matching(self):
         """Keyword matching should be case-insensitive."""
         result = validate_explanation_confidence(
@@ -399,6 +430,7 @@ class TestEdgeCases:
         )
         assert result.verification_ratio == 1.0
 
+    @pytest.mark.fast
     def test_punctuation_handling(self):
         """Punctuation should be stripped from keywords."""
         result = validate_explanation_confidence(
@@ -411,6 +443,7 @@ class TestEdgeCases:
         assert "ocean" in result.verified_keywords
         assert "beach" in result.verified_keywords
 
+    @pytest.mark.fast
     def test_short_words_filtered(self):
         """Words shorter than 3 characters should be filtered."""
         result = validate_explanation_confidence(
@@ -421,6 +454,7 @@ class TestEdgeCases:
         assert len(result.explanation_keywords) == 1
         assert "sunset" in result.explanation_keywords
 
+    @pytest.mark.fast
     def test_stopwords_filtered(self):
         """Common stopwords should be filtered."""
         result = validate_explanation_confidence(
@@ -433,6 +467,7 @@ class TestEdgeCases:
         assert "and" not in result.explanation_keywords
         assert "with" not in result.explanation_keywords
 
+    @pytest.mark.fast
     def test_empty_voiceover_text(self):
         """Empty voiceover text should make all keywords unverifiable."""
         result = validate_explanation_confidence(
@@ -443,6 +478,7 @@ class TestEdgeCases:
         assert result.verification_ratio == 0.0
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_whitespace_only_texts(self):
         """Whitespace-only texts should be handled gracefully."""
         result = validate_explanation_confidence(
@@ -457,12 +493,14 @@ class TestEdgeCases:
 class TestConfigIntegration:
     """Tests related to config integration."""
 
+    @pytest.mark.fast
     def test_default_config_value_is_true(self):
         """explanation_validation_enabled should default to True."""
         from src.config.sections.matching import MatchingConfig
         config = MatchingConfig()
         assert config.explanation_validation_enabled is True
 
+    @pytest.mark.fast
     def test_config_can_be_disabled(self):
         """explanation_validation_enabled can be set to False."""
         from src.config.sections.matching import MatchingConfig
@@ -473,6 +511,7 @@ class TestConfigIntegration:
 class TestRealWorldScenarios:
     """Tests simulating real-world LLM explanation scenarios."""
 
+    @pytest.mark.fast
     def test_good_llm_explanation(self):
         """Realistic good LLM explanation should pass validation."""
         result = validate_explanation_confidence(
@@ -483,6 +522,7 @@ class TestRealWorldScenarios:
         assert result.is_valid is True
         assert result.confidence_penalty == 0.0
 
+    @pytest.mark.fast
     def test_hallucinated_llm_explanation(self):
         """LLM explanation referencing non-existent content should fail."""
         result = validate_explanation_confidence(
@@ -494,6 +534,7 @@ class TestRealWorldScenarios:
         assert result.confidence_penalty == 0.1
         # 'mountain', 'hiking', 'adventure', 'climbing', 'peaks' not in source
 
+    @pytest.mark.fast
     def test_partially_accurate_explanation(self):
         """Partially accurate explanation should be evaluated correctly."""
         result = validate_explanation_confidence(
@@ -505,6 +546,7 @@ class TestRealWorldScenarios:
         # This tests realistic partial accuracy scenario
         assert 0.0 < result.verification_ratio < 1.0
 
+    @pytest.mark.fast
     def test_technical_jargon_explanation(self):
         """Explanation with technical terms not in content should be penalized."""
         result = validate_explanation_confidence(

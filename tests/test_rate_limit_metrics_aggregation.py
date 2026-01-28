@@ -16,16 +16,19 @@ from src.downloader.rate_limit_metrics import RateLimitMetrics
 class TestSessionCount:
     """Test session_count field behavior."""
 
+    @pytest.mark.fast
     def test_default_session_count_is_one(self):
         """Test that new metrics start with session_count=1."""
         metrics = RateLimitMetrics()
         assert metrics.session_count == 1
 
+    @pytest.mark.fast
     def test_session_count_can_be_set(self):
         """Test session_count can be set on creation."""
         metrics = RateLimitMetrics(session_count=5)
         assert metrics.session_count == 5
 
+    @pytest.mark.fast
     def test_session_count_in_to_dict(self):
         """Test session_count is included in serialization."""
         metrics = RateLimitMetrics(session_count=3)
@@ -37,6 +40,7 @@ class TestSessionCount:
 class TestFromCheckpoint:
     """Test from_checkpoint() classmethod."""
 
+    @pytest.mark.fast
     def test_from_checkpoint_increments_session_count(self):
         """Test that from_checkpoint() increments session_count."""
         data = {
@@ -46,18 +50,21 @@ class TestFromCheckpoint:
         metrics = RateLimitMetrics.from_checkpoint(data)
         assert metrics.session_count == 2
 
+    @pytest.mark.fast
     def test_from_checkpoint_empty_data(self):
         """Test from_checkpoint with empty data returns default metrics."""
         metrics = RateLimitMetrics.from_checkpoint({})
         assert metrics.session_count == 1  # Default, not incremented
         assert metrics.total_downloads == 0
 
+    @pytest.mark.fast
     def test_from_checkpoint_none_data(self):
         """Test from_checkpoint with None returns default metrics."""
         metrics = RateLimitMetrics.from_checkpoint(None)
         assert metrics.session_count == 1
         assert metrics.total_downloads == 0
 
+    @pytest.mark.fast
     def test_from_checkpoint_preserves_all_metrics(self):
         """Test from_checkpoint preserves all metric values."""
         data = {
@@ -87,6 +94,7 @@ class TestFromCheckpoint:
         # Session count incremented
         assert metrics.session_count == 3
 
+    @pytest.mark.fast
     def test_from_checkpoint_logs_restoration(self):
         """Test from_checkpoint logs the restoration."""
         data = {
@@ -102,6 +110,7 @@ class TestFromCheckpoint:
             assert '50 downloads' in log_message
             assert '5 rate limits' in log_message
 
+    @pytest.mark.fast
     def test_from_checkpoint_vs_from_dict(self):
         """Test that from_checkpoint increments while from_dict does not."""
         data = {'session_count': 3, 'total_downloads': 100}
@@ -116,12 +125,14 @@ class TestFromCheckpoint:
 class TestFromDictSessionCount:
     """Test from_dict() handles session_count."""
 
+    @pytest.mark.fast
     def test_from_dict_preserves_session_count(self):
         """Test from_dict preserves session_count without incrementing."""
         data = {'session_count': 5, 'total_downloads': 100}
         metrics = RateLimitMetrics.from_dict(data)
         assert metrics.session_count == 5
 
+    @pytest.mark.fast
     def test_from_dict_missing_session_count_defaults_to_one(self):
         """Test from_dict defaults session_count to 1 when missing."""
         data = {'total_downloads': 100}
@@ -132,6 +143,7 @@ class TestFromDictSessionCount:
 class TestSummaryCrossSessions:
     """Test summary() shows cross-session info."""
 
+    @pytest.mark.fast
     def test_summary_single_session_no_indicator(self):
         """Test summary does not show session indicator for single session."""
         metrics = RateLimitMetrics(
@@ -142,6 +154,7 @@ class TestSummaryCrossSessions:
         summary = metrics.summary()
         assert 'sessions:' not in summary.lower()
 
+    @pytest.mark.fast
     def test_summary_multiple_sessions_shows_indicator(self):
         """Test summary shows 'Total across N sessions' when session_count > 1."""
         metrics = RateLimitMetrics(
@@ -152,6 +165,7 @@ class TestSummaryCrossSessions:
         summary = metrics.summary()
         assert 'Total across 3 sessions:' in summary
 
+    @pytest.mark.fast
     def test_summary_two_sessions(self):
         """Test summary for exactly 2 sessions."""
         metrics = RateLimitMetrics(
@@ -165,6 +179,7 @@ class TestSummaryCrossSessions:
 class TestClearSessionCount:
     """Test clear() resets session_count."""
 
+    @pytest.mark.fast
     def test_clear_resets_session_count_to_one(self):
         """Test clear() resets session_count to 1."""
         metrics = RateLimitMetrics(
@@ -174,6 +189,7 @@ class TestClearSessionCount:
         metrics.clear()
         assert metrics.session_count == 1
 
+    @pytest.mark.fast
     def test_clear_resets_all_including_session_count(self):
         """Test clear() resets everything including session_count."""
         metrics = RateLimitMetrics(
@@ -193,6 +209,7 @@ class TestClearSessionCount:
 class TestMultipleSaveLoadCycles:
     """Test cumulative metrics across multiple save/load cycles."""
 
+    @pytest.mark.fast
     def test_three_session_roundtrip(self):
         """Test metrics accumulate correctly across 3 sessions."""
         # Session 1
@@ -239,6 +256,7 @@ class TestMultipleSaveLoadCycles:
         summary = metrics3.summary()
         assert 'Total across 3 sessions:' in summary
 
+    @pytest.mark.fast
     def test_cumulative_backoff_time(self):
         """Test backoff time accumulates across sessions."""
         # Session 1
@@ -255,6 +273,7 @@ class TestMultipleSaveLoadCycles:
         assert metrics2.backoff_attempts == 3
         assert metrics2.session_count == 2
 
+    @pytest.mark.fast
     def test_cumulative_retries_by_type(self):
         """Test retries_by_error_type accumulates across sessions."""
         # Session 1: 3 timeout, 2 transient
@@ -280,6 +299,7 @@ class TestMultipleSaveLoadCycles:
         }
         assert metrics2.retry_attempts == 9
 
+    @pytest.mark.fast
     def test_cumulative_escalations(self):
         """Test cookie rotations and VPN switches accumulate."""
         # Session 1
@@ -298,6 +318,7 @@ class TestMultipleSaveLoadCycles:
         assert metrics2.cookie_rotations == 3
         assert metrics2.vpn_switches == 3
 
+    @pytest.mark.fast
     def test_speed_metrics_accumulation(self):
         """Test speed samples accumulate across sessions."""
         # Session 1: 2 samples, avg 5.0
@@ -325,6 +346,7 @@ class TestMultipleSaveLoadCycles:
 class TestBackwardCompatibility:
     """Test backward compatibility with checkpoints missing session_count."""
 
+    @pytest.mark.fast
     def test_from_checkpoint_missing_session_count(self):
         """Test from_checkpoint handles missing session_count (old checkpoint)."""
         # Simulate old checkpoint without session_count
@@ -339,6 +361,7 @@ class TestBackwardCompatibility:
         assert metrics.session_count == 2
         assert metrics.total_downloads == 50
 
+    @pytest.mark.fast
     def test_from_dict_missing_session_count(self):
         """Test from_dict handles missing session_count."""
         old_checkpoint = {
@@ -351,6 +374,7 @@ class TestBackwardCompatibility:
 class TestConfigRecommendationsWithSessions:
     """Test config recommendations work with cross-session data."""
 
+    @pytest.mark.fast
     def test_recommendations_based_on_cumulative_data(self):
         """Test recommendations use cumulative data across sessions."""
         # Simulate high rate limiting accumulated over 3 sessions

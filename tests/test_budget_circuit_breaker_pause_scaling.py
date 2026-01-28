@@ -33,6 +33,7 @@ from src.downloader.rate_limit_budget import RateLimitBudget
 class TestIsNearlyExhausted:
     """Test is_nearly_exhausted() method on RateLimitBudget."""
 
+    @pytest.mark.fast
     def test_healthy_budget_not_nearly_exhausted(self):
         """Budget with low usage is not nearly exhausted."""
         budget = RateLimitBudget()
@@ -45,6 +46,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is False
 
+    @pytest.mark.fast
     def test_rotations_above_80_percent(self):
         """Nearly exhausted when rotations exceed 80%."""
         budget = RateLimitBudget()
@@ -55,6 +57,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is True
 
+    @pytest.mark.fast
     def test_vpn_switches_above_80_percent(self):
         """Nearly exhausted when VPN switches exceed 80%."""
         budget = RateLimitBudget()
@@ -65,6 +68,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is True
 
+    @pytest.mark.fast
     def test_backoff_time_above_80_percent(self):
         """Nearly exhausted when backoff time exceeds 80%."""
         budget = RateLimitBudget()
@@ -75,6 +79,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is True
 
+    @pytest.mark.fast
     def test_exactly_at_80_percent_not_nearly_exhausted(self):
         """At exactly 80%, not nearly exhausted (threshold is >80%)."""
         budget = RateLimitBudget()
@@ -83,6 +88,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is False
 
+    @pytest.mark.fast
     def test_just_above_80_percent(self):
         """Just above 80% is nearly exhausted."""
         budget = RateLimitBudget()
@@ -91,6 +97,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is True
 
+    @pytest.mark.fast
     def test_unlimited_resources_not_nearly_exhausted(self):
         """Unlimited resources (0 max) are never nearly exhausted."""
         budget = RateLimitBudget()
@@ -103,6 +110,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is False
 
+    @pytest.mark.fast
     def test_mixed_some_unlimited_some_high(self):
         """Some unlimited, some high-usage: nearly exhausted if any limited resource >80%."""
         budget = RateLimitBudget()
@@ -113,6 +121,7 @@ class TestIsNearlyExhausted:
 
         assert budget.is_nearly_exhausted() is True
 
+    @pytest.mark.fast
     def test_fresh_budget_not_nearly_exhausted(self):
         """Fresh budget with no usage is not nearly exhausted."""
         budget = RateLimitBudget()
@@ -174,6 +183,7 @@ class TestBudgetAwarePauseScaling:
         budget.backoff_time_spent = 300.0
         return budget
 
+    @pytest.mark.fast
     def test_healthy_budget_no_extension(self):
         """Healthy budget: 1.0x pause (no extension)."""
         breaker = self._make_breaker(pause_seconds=60.0)
@@ -182,6 +192,7 @@ class TestBudgetAwarePauseScaling:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 60.0
 
+    @pytest.mark.fast
     def test_nearly_exhausted_1_5x_extension(self):
         """Nearly exhausted budget: 1.5x pause extension."""
         breaker = self._make_breaker(pause_seconds=60.0)
@@ -190,6 +201,7 @@ class TestBudgetAwarePauseScaling:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 90.0  # 60 * 1.5
 
+    @pytest.mark.fast
     def test_exhausted_2_5x_extension(self):
         """Fully exhausted budget: 2.5x pause extension."""
         breaker = self._make_breaker(pause_seconds=60.0)
@@ -198,6 +210,7 @@ class TestBudgetAwarePauseScaling:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 150.0  # 60 * 2.5
 
+    @pytest.mark.fast
     def test_no_budget_no_extension(self):
         """Without budget linked, no extension applied."""
         breaker = self._make_breaker(pause_seconds=60.0)
@@ -215,6 +228,7 @@ class TestBudgetAwarePauseScaling:
 class TestMaxPauseSecondsCap:
     """Test that pause extension is capped at max_pause_seconds."""
 
+    @pytest.mark.fast
     def test_cap_applied_with_exhausted_budget(self):
         """Exhausted budget extension is capped at max_pause_seconds."""
         config = CircuitBreakerConfig(
@@ -236,6 +250,7 @@ class TestMaxPauseSecondsCap:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 300.0
 
+    @pytest.mark.fast
     def test_cap_not_applied_when_under(self):
         """No capping when extension is under max_pause_seconds."""
         config = CircuitBreakerConfig(
@@ -257,11 +272,13 @@ class TestMaxPauseSecondsCap:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 150.0
 
+    @pytest.mark.fast
     def test_default_max_pause_seconds_is_300(self):
         """Default max_pause_seconds is 300."""
         config = CircuitBreakerConfig()
         assert config.max_pause_seconds == 300.0
 
+    @pytest.mark.fast
     def test_custom_max_pause_seconds(self):
         """Custom max_pause_seconds is respected."""
         config = CircuitBreakerConfig(
@@ -288,6 +305,7 @@ class TestMaxPauseSecondsCap:
 class TestPauseExtensionLogging:
     """Test that pause extension is logged with reason."""
 
+    @pytest.mark.fast
     def test_nearly_exhausted_logged(self, caplog):
         """Nearly exhausted extension logs the reason."""
         config = CircuitBreakerConfig(pause_seconds=60.0)
@@ -307,6 +325,7 @@ class TestPauseExtensionLogging:
             for r in caplog.records
         )
 
+    @pytest.mark.fast
     def test_exhausted_logged(self, caplog):
         """Exhausted extension logs the reason."""
         config = CircuitBreakerConfig(pause_seconds=60.0)
@@ -330,6 +349,7 @@ class TestPauseExtensionLogging:
             for r in caplog.records
         )
 
+    @pytest.mark.fast
     def test_healthy_budget_no_log(self, caplog):
         """Healthy budget does not log extension."""
         config = CircuitBreakerConfig(pause_seconds=60.0)
@@ -349,6 +369,7 @@ class TestPauseExtensionLogging:
         ]
         assert len(budget_logs) == 0
 
+    @pytest.mark.fast
     def test_log_format_includes_original_and_extended(self, caplog):
         """Log message includes original and extended pause values."""
         config = CircuitBreakerConfig(pause_seconds=60.0)
@@ -380,6 +401,7 @@ class TestPauseExtensionLogging:
 class TestCombinedScaling:
     """Test escalation + budget scaling compose correctly."""
 
+    @pytest.mark.fast
     def test_escalation_and_budget_compose(self):
         """Both escalation (2x) and budget (1.5x) apply multiplicatively."""
         config = CircuitBreakerConfig(
@@ -404,6 +426,7 @@ class TestCombinedScaling:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 180.0
 
+    @pytest.mark.fast
     def test_escalation_and_exhausted_budget_compose(self):
         """Escalation (2x) and exhausted budget (2.5x) compose."""
         config = CircuitBreakerConfig(
@@ -430,6 +453,7 @@ class TestCombinedScaling:
         effective = breaker._get_effective_pause_seconds()
         assert effective == 300.0
 
+    @pytest.mark.fast
     def test_combined_scaling_capped(self):
         """Combined scaling is capped at max_pause_seconds."""
         config = CircuitBreakerConfig(
@@ -465,6 +489,7 @@ class TestCombinedScaling:
 class TestConfigSectionMaxPauseSeconds:
     """Test max_pause_seconds in config/sections/download.py."""
 
+    @pytest.mark.fast
     def test_config_section_has_max_pause_seconds(self):
         """CircuitBreakerConfig in config/sections/download.py has max_pause_seconds."""
         from src.config.sections.download import CircuitBreakerConfig as ConfigCB
@@ -472,12 +497,14 @@ class TestConfigSectionMaxPauseSeconds:
         assert hasattr(config, 'max_pause_seconds')
         assert config.max_pause_seconds == 300.0
 
+    @pytest.mark.fast
     def test_config_section_custom_max_pause(self):
         """Can set custom max_pause_seconds."""
         from src.config.sections.download import CircuitBreakerConfig as ConfigCB
         config = ConfigCB(max_pause_seconds=500.0)
         assert config.max_pause_seconds == 500.0
 
+    @pytest.mark.fast
     def test_config_yaml_has_max_pause_seconds(self):
         """config.yaml circuit_breaker section has max_pause_seconds."""
         import yaml
@@ -501,6 +528,7 @@ class TestConfigSectionMaxPauseSeconds:
 class TestSetBudgetMethod:
     """Test CircuitBreaker.set_budget() method."""
 
+    @pytest.mark.fast
     def test_set_budget_stores_reference(self):
         """set_budget stores the budget reference."""
         breaker = CircuitBreaker()
@@ -508,11 +536,13 @@ class TestSetBudgetMethod:
         breaker.set_budget(budget)
         assert breaker._budget is budget
 
+    @pytest.mark.fast
     def test_no_budget_by_default(self):
         """Budget is None by default."""
         breaker = CircuitBreaker()
         assert breaker._budget is None
 
+    @pytest.mark.fast
     def test_budget_can_be_replaced(self):
         """Budget can be replaced with a new one."""
         breaker = CircuitBreaker()

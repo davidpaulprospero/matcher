@@ -21,6 +21,7 @@ class TestFindVoiceoverSearchOrderUS010:
     """AC1: find_voiceover_interactive() searches voiceover/ subdirectory first,
     then project root."""
 
+    @pytest.mark.fast
     def test_finds_srt_in_voiceover_subdir(self, tmp_path):
         """File in voiceover/ is found without needing to search root."""
         vo_dir = tmp_path / "voiceover"
@@ -34,6 +35,7 @@ class TestFindVoiceoverSearchOrderUS010:
         assert "script.srt" in result
         assert str(vo_dir) in result
 
+    @pytest.mark.fast
     def test_finds_mp3_in_voiceover_subdir(self, tmp_path):
         """MP3 file in voiceover/ is found."""
         vo_dir = tmp_path / "voiceover"
@@ -46,6 +48,7 @@ class TestFindVoiceoverSearchOrderUS010:
         assert result is not None
         assert "narration.mp3" in result
 
+    @pytest.mark.fast
     def test_finds_wav_in_voiceover_subdir(self, tmp_path):
         """WAV file in voiceover/ is found."""
         vo_dir = tmp_path / "voiceover"
@@ -58,6 +61,7 @@ class TestFindVoiceoverSearchOrderUS010:
         assert result is not None
         assert "audio.wav" in result
 
+    @pytest.mark.fast
     def test_falls_back_to_project_root(self, tmp_path):
         """File in project root is found when voiceover/ doesn't exist."""
         srt_file = tmp_path / "script.srt"
@@ -68,6 +72,7 @@ class TestFindVoiceoverSearchOrderUS010:
         assert result is not None
         assert "script.srt" in result
 
+    @pytest.mark.fast
     def test_voiceover_subdir_file_listed_before_root(self, tmp_path):
         """When files exist in both locations, voiceover/ files are included."""
         vo_dir = tmp_path / "voiceover"
@@ -85,6 +90,7 @@ class TestFindVoiceoverSearchOrderUS010:
         # Should have returned one of the candidates
         assert result is not None
 
+    @pytest.mark.fast
     def test_returns_none_when_no_files(self, tmp_path):
         """Returns None when no voiceover files exist."""
         vo_dir = tmp_path / "voiceover"
@@ -95,6 +101,7 @@ class TestFindVoiceoverSearchOrderUS010:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_ignores_non_voiceover_extensions(self, tmp_path):
         """Files with non-voiceover extensions are ignored."""
         vo_dir = tmp_path / "voiceover"
@@ -116,6 +123,7 @@ class TestFindVoiceoverAutoSelectUS010:
     """AC2: find_voiceover_interactive() auto-selects when only one candidate found,
     without prompting the user."""
 
+    @pytest.mark.fast
     def test_auto_selects_single_srt(self, tmp_path):
         """Single SRT file is auto-selected without user prompt."""
         vo_dir = tmp_path / "voiceover"
@@ -128,6 +136,7 @@ class TestFindVoiceoverAutoSelectUS010:
 
         assert result == str(srt_file)
 
+    @pytest.mark.fast
     def test_auto_selects_single_mp4(self, tmp_path):
         """Single MP4 file is auto-selected without user prompt."""
         mp4_file = tmp_path / "voiceover.mp4"
@@ -137,6 +146,7 @@ class TestFindVoiceoverAutoSelectUS010:
 
         assert result == str(mp4_file)
 
+    @pytest.mark.fast
     def test_auto_selects_single_m4a(self, tmp_path):
         """Single M4A file is auto-selected."""
         vo_dir = tmp_path / "voiceover"
@@ -148,6 +158,7 @@ class TestFindVoiceoverAutoSelectUS010:
 
         assert result == str(m4a_file)
 
+    @pytest.mark.fast
     def test_no_prompt_when_single_file(self, tmp_path):
         """Verify input() is NOT called when only one file exists."""
         vo_dir = tmp_path / "voiceover"
@@ -160,6 +171,7 @@ class TestFindVoiceoverAutoSelectUS010:
 
         assert result == str(srt_file)
 
+    @pytest.mark.fast
     def test_prompts_when_multiple_files(self, tmp_path):
         """Verify input() IS called when multiple files exist."""
         vo_dir = tmp_path / "voiceover"

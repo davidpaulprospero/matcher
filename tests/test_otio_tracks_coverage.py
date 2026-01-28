@@ -88,6 +88,7 @@ class MockConfig:
 class TestTrackBuilderFactory:
     """Test get_track_builder factory function."""
 
+    @pytest.mark.fast
     def test_get_track_builder_invalid_index(self):
         """Test that invalid track index raises ValueError."""
         from src.otio.tracks import get_track_builder
@@ -100,6 +101,7 @@ class TestTrackBuilderFactory:
                 frame_rate=24.0
             )
 
+    @pytest.mark.fast
     def test_get_track_builder_valid_indices(self):
         """Test that valid track indices return builders."""
         from src.otio.tracks import get_track_builder
@@ -113,6 +115,7 @@ class TestTrackBuilderFactory:
             )
             assert builder is not None
 
+    @pytest.mark.fast
     def test_get_track_name_beyond_list(self):
         """Test track name fallback for indices beyond list."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -131,6 +134,7 @@ class TestTrackBuilderFactory:
 class TestPrimaryTrackBuilder:
     """Test PrimaryTrackBuilder (V1)."""
 
+    @pytest.mark.fast
     def test_build_with_resolve_video_segment(self):
         """Test build with audio-first mode resolution."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -165,6 +169,7 @@ class TestPrimaryTrackBuilder:
 class TestAlternativeTrackBuilder:
     """Test AlternativeTrackBuilder (V2-V3)."""
 
+    @pytest.mark.fast
     def test_build_no_alternative_adds_gap(self):
         """Test that missing alternative adds gap."""
         from src.otio.tracks import AlternativeTrackBuilder
@@ -185,6 +190,7 @@ class TestAlternativeTrackBuilder:
         # Should have added gaps for missing alternatives
         assert video_track is not None
 
+    @pytest.mark.fast
     def test_build_with_alternative(self):
         """Test building with available alternative."""
         from src.otio.tracks import AlternativeTrackBuilder
@@ -211,6 +217,7 @@ class TestAlternativeTrackBuilder:
 class TestDiversityTrackBuilder:
     """Test DiversityTrackBuilder (V4-V6)."""
 
+    @pytest.mark.fast
     def test_build_no_secondary_adds_gap(self):
         """Test that missing secondary match adds gap."""
         from src.otio.tracks import DiversityTrackBuilder
@@ -234,6 +241,7 @@ class TestDiversityTrackBuilder:
 class TestEmbeddingDiversityTrackBuilder:
     """Test EmbeddingDiversityTrackBuilder (V7)."""
 
+    @pytest.mark.fast
     def test_build_no_strategy_match_adds_gap(self):
         """Test that missing strategy match adds gap."""
         from src.otio.tracks import EmbeddingDiversityTrackBuilder
@@ -253,6 +261,7 @@ class TestEmbeddingDiversityTrackBuilder:
 
         assert video_track is not None
 
+    @pytest.mark.fast
     def test_build_with_matching_strategy(self):
         """Test building with matching strategy."""
         from src.otio.tracks import EmbeddingDiversityTrackBuilder
@@ -286,6 +295,7 @@ class TestEmbeddingDiversityTrackBuilder:
 class TestBRollTrackBuilder:
     """Test BRollTrackBuilder (V8)."""
 
+    @pytest.mark.fast
     def test_build_with_broll_strategy(self):
         """Test building with broll_only strategy match."""
         from src.otio.tracks import BRollTrackBuilder
@@ -319,6 +329,7 @@ class TestBRollTrackBuilder:
 class TestEntityTrackBuilders:
     """Test EntityImageTrackBuilder (V9) and EntityVideoTrackBuilder (V10)."""
 
+    @pytest.mark.fast
     def test_entity_image_builder_no_images(self):
         """Test V9 builder with no entity images."""
         from src.otio.tracks import EntityImageTrackBuilder
@@ -341,6 +352,7 @@ class TestEntityTrackBuilders:
 
         assert video_track is not None
 
+    @pytest.mark.fast
     def test_entity_video_builder_no_videos(self):
         """Test V10 builder with no entity videos."""
         from src.otio.tracks import EntityVideoTrackBuilder
@@ -367,6 +379,7 @@ class TestEntityTrackBuilders:
 class TestTrackBuilderHelpers:
     """Test TrackBuilder helper methods."""
 
+    @pytest.mark.fast
     def test_create_gap(self):
         """Test _create_gap method."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -381,6 +394,7 @@ class TestTrackBuilderHelpers:
 
         assert gap is not None
 
+    @pytest.mark.fast
     def test_create_clip_with_segment_offset(self):
         """Test _create_clip handles segment offset."""
         # This test verifies segment offset extraction logic
@@ -403,6 +417,7 @@ class TestTrackBuilderHelpers:
 class TestAddGapIfNeeded:
     """Test _add_gap_if_needed method for lines 162-179."""
 
+    @pytest.mark.fast
     def test_add_gap_when_voiceover_has_silence_lines_162_179(self):
         """Test lines 162-179: Gap insertion when expected_start_frames > timeline_frames."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -440,6 +455,7 @@ class TestAddGapIfNeeded:
         assert mock_video_track.append.called
         assert mock_audio_track.append.called
 
+    @pytest.mark.fast
     def test_no_gap_when_timeline_at_expected_position(self):
         """Test no gap inserted when timeline_frames == expected_start_frames."""
         from src.otio.tracks import PrimaryTrackBuilder
@@ -472,6 +488,7 @@ class TestAddGapIfNeeded:
         assert not mock_video_track.append.called
         assert not mock_audio_track.append.called
 
+    @pytest.mark.fast
     def test_gap_calculation_with_offset_start_lines_162_166(self):
         """Test lines 162, 166: Gap calculation with non-zero first_segment_start."""
         from src.otio.tracks import PrimaryTrackBuilder

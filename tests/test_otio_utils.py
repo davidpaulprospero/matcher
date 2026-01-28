@@ -37,6 +37,7 @@ import numpy as np
 class TestWindowsPathConversion:
     """Test Windows path conversion (now uses forward slashes for DaVinci)."""
 
+    @pytest.mark.fast
     def test_to_windows_path_forward_slashes(self):
         """Test that forward slashes are preserved (DaVinci prefers them)."""
         path = "C:/Users/test/video.mp4"
@@ -44,6 +45,7 @@ class TestWindowsPathConversion:
         # Now converts TO forward slashes for DaVinci compatibility
         assert "/" in result or "\\" not in result.replace("\\\\", "")
 
+    @pytest.mark.fast
     def test_to_windows_path_already_backslashes(self):
         """Test converting backslashes to forward slashes."""
         path = "C:\\Users\\test\\video.mp4"
@@ -51,6 +53,7 @@ class TestWindowsPathConversion:
         # Should convert to forward slashes
         assert "\\" not in result or result.count("/") > 0
 
+    @pytest.mark.fast
     def test_to_windows_path_returns_absolute(self):
         """Test that result is an absolute path with forward slashes."""
         path = "C:/Users/test/video.mp4"
@@ -63,6 +66,7 @@ class TestWindowsPathConversion:
 class TestPathFormatting:
     """Test path formatting for URLs."""
 
+    @pytest.mark.fast
     def test_format_path_url_basic(self):
         """Test basic path URL formatting."""
         path = "C:/Videos/test.mp4"
@@ -72,6 +76,7 @@ class TestPathFormatting:
         # Returns plain path with forward slashes, not file:// URL
         assert "/" in formatted
 
+    @pytest.mark.fast
     def test_format_path_url_windows_backslashes(self):
         """Test Windows path with backslashes."""
         path = "C:\\Users\\test\\video.mp4"
@@ -80,6 +85,7 @@ class TestPathFormatting:
         # Should convert to forward slashes for URL
         assert "\\" not in formatted or path.startswith("\\\\?\\")
 
+    @pytest.mark.fast
     def test_format_path_url_with_spaces(self):
         """Test path with spaces."""
         path = "C:/Videos/test video.mp4"
@@ -88,6 +94,7 @@ class TestPathFormatting:
         # Returns plain path - spaces NOT encoded (DaVinci prefers unencoded)
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_sanitize_path_for_url(self):
         """Test sanitizing path for URL."""
         path = "C:/Videos/test video.mp4"
@@ -96,6 +103,7 @@ class TestPathFormatting:
         # Should handle special characters
         assert isinstance(sanitized, str)
 
+    @pytest.mark.fast
     def test_sanitize_path_for_url_double_slashes(self):
         """Test removing double slashes."""
         path = "C://Users//test//video.mp4"
@@ -103,6 +111,7 @@ class TestPathFormatting:
         # Should not have consecutive slashes (except file://)
         assert "///" not in sanitized
 
+    @pytest.mark.fast
     def test_encode_path_for_xml_url(self):
         """Test encoding path for XML URL."""
         path = "C:/Videos/test & more.mp4"
@@ -115,6 +124,7 @@ class TestPathFormatting:
 class TestXMLEscaping:
     """Test XML escaping."""
 
+    @pytest.mark.fast
     def test_escape_xml_ampersand(self):
         """Test escaping ampersand."""
         text = "Test & more"
@@ -122,36 +132,42 @@ class TestXMLEscaping:
         assert "&amp;" in escaped
         assert "&" not in escaped.replace("&amp;", "")
 
+    @pytest.mark.fast
     def test_escape_xml_less_than(self):
         """Test escaping less than."""
         text = "x < 5"
         escaped = escape_xml(text)
         assert "&lt;" in escaped
 
+    @pytest.mark.fast
     def test_escape_xml_greater_than(self):
         """Test escaping greater than."""
         text = "x > 5"
         escaped = escape_xml(text)
         assert "&gt;" in escaped
 
+    @pytest.mark.fast
     def test_escape_xml_quotes(self):
         """Test escaping double quotes."""
         text = 'Say "hello"'
         escaped = escape_xml(text)
         assert "&quot;" in escaped
 
+    @pytest.mark.fast
     def test_escape_xml_apostrophe(self):
         """Test escaping apostrophes."""
         text = "It's working"
         escaped = escape_xml(text)
         assert "&apos;" in escaped or "'" not in escaped
 
+    @pytest.mark.fast
     def test_escape_xml_no_special_chars(self):
         """Test text without special characters."""
         text = "Plain text"
         escaped = escape_xml(text)
         assert escaped == text
 
+    @pytest.mark.fast
     def test_escape_xml_multiple_special_chars(self):
         """Test escaping multiple special characters."""
         text = "Test & <tag> \"quote\""
@@ -165,6 +181,7 @@ class TestXMLEscaping:
 class TestTypeConversion:
     """Test Python type conversion for numpy types."""
 
+    @pytest.mark.fast
     def test_to_python_type_numpy_int(self):
         """Test converting numpy int to Python int."""
         value = np.int64(42)
@@ -172,6 +189,7 @@ class TestTypeConversion:
         assert isinstance(result, int)
         assert result == 42
 
+    @pytest.mark.fast
     def test_to_python_type_numpy_float(self):
         """Test converting numpy float to Python float."""
         value = np.float64(3.14)
@@ -179,12 +197,14 @@ class TestTypeConversion:
         assert isinstance(result, float)
         assert abs(result - 3.14) < 0.01
 
+    @pytest.mark.fast
     def test_to_python_type_regular_int(self):
         """Test regular int passes through."""
         value = 42
         result = _to_python_type(value)
         assert result == 42
 
+    @pytest.mark.fast
     def test_to_python_type_string(self):
         """Test string passes through."""
         value = "test"
@@ -195,6 +215,7 @@ class TestTypeConversion:
 class TestMetadataSanitization:
     """Test metadata sanitization for JSON serialization."""
 
+    @pytest.mark.fast
     def test_sanitize_metadata_numpy_values(self):
         """Test sanitizing metadata with numpy values."""
         metadata = {
@@ -207,6 +228,7 @@ class TestMetadataSanitization:
         assert isinstance(sanitized["count"], int)
         assert sanitized["name"] == "test"
 
+    @pytest.mark.fast
     def test_sanitize_metadata_nested_dict(self):
         """Test sanitizing nested metadata."""
         metadata = {
@@ -217,6 +239,7 @@ class TestMetadataSanitization:
         sanitized = _sanitize_metadata(metadata)
         assert isinstance(sanitized["outer"]["inner"], float)
 
+    @pytest.mark.fast
     def test_sanitize_metadata_list_values(self):
         """Test sanitizing metadata with lists."""
         metadata = {
@@ -230,6 +253,7 @@ class TestMediaDuration:
     """Test media duration extraction."""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_media_duration_success(self, mock_run):
         """Test successful duration extraction."""
         # Mock ffprobe output
@@ -243,6 +267,7 @@ class TestMediaDuration:
         assert duration == 120.5
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_media_duration_failure(self, mock_run):
         """Test duration extraction failure."""
         mock_run.return_value = Mock(returncode=1, stdout="", stderr="Error")
@@ -251,6 +276,7 @@ class TestMediaDuration:
         assert duration is None
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_media_duration_invalid_output(self, mock_run):
         """Test handling invalid ffprobe output."""
         mock_run.return_value = Mock(returncode=0, stdout="invalid\n", stderr="")
@@ -262,36 +288,43 @@ class TestMediaDuration:
 class TestSegmentFileHandling:
     """Test segment file detection and offset extraction."""
 
+    @pytest.mark.fast
     def test_is_segment_file_true(self):
         """Test detecting segment file with _0000.mp4 pattern."""
         result = is_segment_file("/path/to/video_0000.mp4")
         assert result is True
 
+    @pytest.mark.fast
     def test_is_segment_file_false(self):
         """Test non-segment file."""
         result = is_segment_file("/path/to/video.mp4")
         assert result is False
 
+    @pytest.mark.fast
     def test_is_segment_file_different_pattern(self):
         """Test segment file with different number pattern."""
         result = is_segment_file("/path/to/video_segment_0005.mp4")
         assert isinstance(result, bool)
 
+    @pytest.mark.fast
     def test_get_segment_file_offset_basic(self):
         """Test extracting offset from segment filename with 4-digit pattern."""
         offset = get_segment_file_offset("/path/to/abc12345678_0045.mp4")
         assert offset == 45.0
 
+    @pytest.mark.fast
     def test_get_segment_file_offset_no_offset(self):
         """Test regular (non-segment) file."""
         offset = get_segment_file_offset("/path/to/video.mp4")
         assert offset == 0.0
 
+    @pytest.mark.fast
     def test_get_segment_file_offset_zero(self):
         """Test segment file with zero offset."""
         offset = get_segment_file_offset("/path/to/videoidhere_0000.mp4")
         assert offset == 0.0
 
+    @pytest.mark.fast
     def test_get_segment_file_offset_large_value(self):
         """Test offset with large value (e.g., 2 hours)."""
         offset = get_segment_file_offset("/path/to/myvideofile_7200.mp4")
@@ -301,6 +334,7 @@ class TestSegmentFileHandling:
 class TestTimecodeConversion:
     """Test timecode conversion."""
 
+    @pytest.mark.fast
     def test_frames_to_tc_basic(self):
         """Test converting frames to timecode."""
         tc = frames_to_tc(300, fps=30.0)
@@ -309,11 +343,13 @@ class TestTimecodeConversion:
         # 300 frames at 30fps = 10 seconds = 00:00:10:00
         assert "10" in tc
 
+    @pytest.mark.fast
     def test_frames_to_tc_zero(self):
         """Test zero frames."""
         tc = frames_to_tc(0, fps=30.0)
         assert "00:00:00:00" in tc
 
+    @pytest.mark.fast
     def test_frames_to_tc_different_fps(self):
         """Test with different frame rates."""
         tc1 = frames_to_tc(60, fps=60.0)
@@ -326,6 +362,7 @@ class TestTimecodeConversion:
 class TestConfidenceColor:
     """Test confidence color mapping."""
 
+    @pytest.mark.fast
     def test_confidence_color_high(self):
         """Test color for high confidence."""
         color = get_confidence_color(0.9)
@@ -333,26 +370,31 @@ class TestConfidenceColor:
         # High confidence should be green
         assert color == "GREEN"
 
+    @pytest.mark.fast
     def test_confidence_color_medium(self):
         """Test color for medium confidence."""
         color = get_confidence_color(0.6)
         assert color == "CYAN"
 
+    @pytest.mark.fast
     def test_confidence_color_low(self):
         """Test color for low confidence."""
         color = get_confidence_color(0.3)
         assert color == "ORANGE"
 
+    @pytest.mark.fast
     def test_confidence_color_very_low(self):
         """Test color for very low confidence."""
         color = get_confidence_color(0.1)
         assert color == "RED"
 
+    @pytest.mark.fast
     def test_confidence_color_zero(self):
         """Test color for zero confidence."""
         color = get_confidence_color(0.0)
         assert color == "RED"
 
+    @pytest.mark.fast
     def test_confidence_color_boundary_cases(self):
         """Test boundary values for color mapping."""
         assert get_confidence_color(0.8) == "GREEN"
@@ -364,6 +406,7 @@ class TestConfidenceColor:
 class TestClipCreation:
     """Test OTIO clip creation with timewarp."""
 
+    @pytest.mark.fast
     def test_create_clip_basic(self):
         """Test basic clip creation without speed adjustment."""
         clip = create_clip_with_timewarp(
@@ -379,6 +422,7 @@ class TestClipCreation:
         assert clip.name == "TestClip"
         assert clip.media_reference is not None
 
+    @pytest.mark.fast
     def test_create_clip_with_slowdown(self):
         """Test clip creation with source longer than target (trim approach).
 
@@ -400,6 +444,7 @@ class TestClipCreation:
         # source_range.duration should equal target_duration
         assert clip.source_range.duration.value == 15.0 * 30.0  # 15s at 30fps
 
+    @pytest.mark.fast
     def test_create_clip_with_speedup(self):
         """Test clip creation with source shorter than target (trim approach).
 
@@ -421,6 +466,7 @@ class TestClipCreation:
         # source_range.duration should equal target_duration
         assert clip.source_range.duration.value == 5.0 * 30.0  # 5s at 30fps
 
+    @pytest.mark.fast
     def test_create_clip_with_metadata(self):
         """Test clip creation with custom metadata."""
         metadata = {
@@ -442,6 +488,7 @@ class TestClipCreation:
         assert clip.metadata is not None
         assert "confidence" in clip.metadata
 
+    @pytest.mark.fast
     def test_create_clip_with_media_duration(self):
         """Test clip creation with known media duration."""
         clip = create_clip_with_timewarp(
@@ -458,6 +505,7 @@ class TestClipCreation:
         # Media reference should have available_range set
         assert clip.media_reference.available_range is not None
 
+    @pytest.mark.fast
     def test_create_clip_windows_path_handling(self):
         """Test clip creation with Windows path."""
         clip = create_clip_with_timewarp(
@@ -473,6 +521,7 @@ class TestClipCreation:
         # Should handle backslashes
         assert clip.media_reference.target_url is not None
 
+    @pytest.mark.fast
     def test_create_clip_unique_naming(self):
         """Test that clips get unique media reference names."""
         clip1 = create_clip_with_timewarp(
@@ -503,6 +552,7 @@ class TestOTIOTimingModel:
     These tests ensure our clip creation functions respect this constraint.
     """
 
+    @pytest.mark.fast
     def test_source_range_within_available_range(self):
         """Test that source_range always fits within available_range."""
         clip = create_clip_with_timewarp(
@@ -528,6 +578,7 @@ class TestOTIOTimingModel:
             f"exceeds available_range ({avail_range.start_time.value}-{avail_end})"
         )
 
+    @pytest.mark.fast
     def test_no_effects_means_normal_speed(self):
         """Test that clips without effects play at normal speed (100%)."""
         clip = create_clip_with_timewarp(
@@ -546,6 +597,7 @@ class TestOTIOTimingModel:
         assert clip.metadata.get('time_scalar') == 1.0
         assert clip.metadata.get('speed_percent') == 100.0
 
+    @pytest.mark.fast
     def test_metadata_contains_timing_info(self):
         """Test that clips have proper timing metadata for debugging."""
         clip = create_clip_with_timewarp(
@@ -571,6 +623,7 @@ class TestOTIOTimingModel:
 class TestClipMetadataValidation:
     """Test OTIO clip metadata validation functions."""
 
+    @pytest.mark.fast
     def test_validate_clip_valid_clip(self):
         """Test validation passes for a well-formed clip."""
         clip = create_clip_with_timewarp(
@@ -584,6 +637,7 @@ class TestClipMetadataValidation:
         errors = _validate_clip_metadata(clip)
         assert len(errors) == 0
 
+    @pytest.mark.fast
     def test_validate_clip_negative_start_time(self):
         """Test validation catches negative start_time."""
         # Create a clip and manually set negative start_time
@@ -602,6 +656,7 @@ class TestClipMetadataValidation:
         assert errors[0].error_type == "negative_start_time"
         assert "-30" in errors[0].message
 
+    @pytest.mark.fast
     def test_validate_clip_zero_duration(self):
         """Test validation catches zero duration."""
         clip = otio.schema.Clip(
@@ -618,6 +673,7 @@ class TestClipMetadataValidation:
         assert len(errors) == 1
         assert errors[0].error_type == "non_positive_duration"
 
+    @pytest.mark.fast
     def test_validate_clip_negative_duration(self):
         """Test validation catches negative duration."""
         clip = otio.schema.Clip(
@@ -634,6 +690,7 @@ class TestClipMetadataValidation:
         assert len(errors) == 1
         assert errors[0].error_type == "non_positive_duration"
 
+    @pytest.mark.fast
     def test_validate_clip_empty_target_url(self):
         """Test validation catches empty target_url."""
         clip = otio.schema.Clip(
@@ -650,6 +707,7 @@ class TestClipMetadataValidation:
         assert len(errors) == 1
         assert errors[0].error_type == "empty_target_url"
 
+    @pytest.mark.fast
     def test_validate_clip_whitespace_target_url(self):
         """Test validation catches whitespace-only target_url."""
         clip = otio.schema.Clip(
@@ -666,6 +724,7 @@ class TestClipMetadataValidation:
         assert len(errors) == 1
         assert errors[0].error_type == "empty_target_url"
 
+    @pytest.mark.fast
     def test_validate_clip_missing_media_reference(self):
         """Test validation catches missing media_reference.
 
@@ -684,6 +743,7 @@ class TestClipMetadataValidation:
         assert errors[0].error_type == "missing_media_reference"
         assert "MissingReference" in errors[0].message
 
+    @pytest.mark.fast
     def test_validate_clip_missing_source_range(self):
         """Test validation catches missing source_range."""
         clip = otio.schema.Clip(
@@ -696,6 +756,7 @@ class TestClipMetadataValidation:
         assert len(errors) == 1
         assert errors[0].error_type == "missing_source_range"
 
+    @pytest.mark.fast
     def test_validate_clip_multiple_errors(self):
         """Test validation reports multiple errors."""
         clip = otio.schema.Clip(
@@ -715,6 +776,7 @@ class TestClipMetadataValidation:
         assert "non_positive_duration" in error_types
         assert "empty_target_url" in error_types
 
+    @pytest.mark.fast
     def test_validate_clip_unnamed_clip(self):
         """Test validation handles unnamed clips."""
         clip = otio.schema.Clip(
@@ -731,6 +793,7 @@ class TestClipMetadataValidation:
         # Should use "<unnamed>" as fallback
         assert "<unnamed>" in errors[0].message
 
+    @pytest.mark.fast
     def test_clip_validation_error_repr(self):
         """Test ClipValidationError string representation."""
         error = ClipValidationError(
@@ -746,6 +809,7 @@ class TestClipMetadataValidation:
 class TestTimelineClipsValidation:
     """Test timeline-wide clip validation."""
 
+    @pytest.mark.fast
     def test_validate_timeline_all_valid(self):
         """Test validation passes for timeline with valid clips."""
         timeline = otio.schema.Timeline(name="ValidTimeline")
@@ -772,6 +836,7 @@ class TestTimelineClipsValidation:
         errors = validate_timeline_clips(timeline)
         assert len(errors) == 0
 
+    @pytest.mark.fast
     def test_validate_timeline_with_invalid_clips(self):
         """Test validation finds errors across multiple tracks."""
         timeline = otio.schema.Timeline(name="InvalidTimeline")
@@ -807,12 +872,14 @@ class TestTimelineClipsValidation:
         assert len(errors) == 1
         assert errors[0].clip_name == "InvalidClip"
 
+    @pytest.mark.fast
     def test_validate_timeline_empty_timeline(self):
         """Test validation handles empty timeline."""
         timeline = otio.schema.Timeline(name="EmptyTimeline")
         errors = validate_timeline_clips(timeline)
         assert len(errors) == 0
 
+    @pytest.mark.fast
     def test_validate_timeline_skips_gaps(self):
         """Test validation ignores Gap items (only validates Clips)."""
         timeline = otio.schema.Timeline(name="TimelineWithGaps")
@@ -841,6 +908,7 @@ class TestTimelineClipsValidation:
         errors = validate_timeline_clips(timeline)
         assert len(errors) == 0
 
+    @pytest.mark.fast
     def test_validate_timeline_multiple_errors_in_track(self):
         """Test validation aggregates errors from multiple clips in one track."""
         timeline = otio.schema.Timeline(name="MultiErrorTimeline")

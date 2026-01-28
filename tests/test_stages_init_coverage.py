@@ -13,28 +13,33 @@ from src.stages import StageResult, Stage, register_stage, get_stage, list_stage
 class TestStageResultBool:
     """Test StageResult.__bool__ method (line 47)."""
 
+    @pytest.mark.fast
     def test_bool_success_true(self):
         """Test StageResult with success=True is truthy."""
         result = StageResult(success=True)
         assert bool(result) is True
         assert result  # Direct boolean context
 
+    @pytest.mark.fast
     def test_bool_success_false(self):
         """Test StageResult with success=False is falsy."""
         result = StageResult(success=False)
         assert bool(result) is False
         assert not result  # Direct boolean context
 
+    @pytest.mark.fast
     def test_bool_ok_result(self):
         """Test StageResult.ok() is truthy."""
         result = StageResult.ok(data={"key": "value"})
         assert result  # Uses __bool__
 
+    @pytest.mark.fast
     def test_bool_fail_result(self):
         """Test StageResult.fail() is falsy."""
         result = StageResult.fail("Error message")
         assert not result  # Uses __bool__
 
+    @pytest.mark.fast
     def test_bool_in_if_statement(self):
         """Test StageResult in if statement."""
         success_result = StageResult.ok()
@@ -57,17 +62,20 @@ class TestStageResultBool:
 class TestListStages:
     """Test list_stages function (line 168)."""
 
+    @pytest.mark.fast
     def test_list_stages_returns_list(self):
         """Test that list_stages returns a list."""
         result = list_stages()
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_list_stages_contains_strings(self):
         """Test that list_stages contains string names."""
         result = list_stages()
         for name in result:
             assert isinstance(name, str)
 
+    @pytest.mark.fast
     def test_list_stages_matches_registry(self):
         """Test that list_stages returns all registered stages."""
         from src.stages import _stage_registry
@@ -79,6 +87,7 @@ class TestListStages:
 class TestStageRegistry:
     """Test stage registry functions."""
 
+    @pytest.mark.fast
     def test_register_stage_decorator(self):
         """Test register_stage decorator adds to registry."""
         from src.stages import _stage_registry
@@ -104,6 +113,7 @@ class TestStageRegistry:
         # Clean up
         del _stage_registry["test_coverage_stage"]
 
+    @pytest.mark.fast
     def test_get_stage_existing(self):
         """Test get_stage returns registered stage."""
         from src.stages import _stage_registry
@@ -129,11 +139,13 @@ class TestStageRegistry:
         # Clean up
         del _stage_registry["another_test_stage"]
 
+    @pytest.mark.fast
     def test_get_stage_nonexistent(self):
         """Test get_stage returns None for unknown stage."""
         result = get_stage("nonexistent_stage_xyz")
         assert result is None
 
+    @pytest.mark.fast
     def test_register_stage_without_name(self):
         """Test register_stage with no name doesn't add to registry."""
         from src.stages import _stage_registry
@@ -160,6 +172,7 @@ class TestStageRegistry:
 class TestStageResult:
     """Additional StageResult tests."""
 
+    @pytest.mark.fast
     def test_ok_with_warnings(self):
         """Test StageResult.ok() with warnings."""
         result = StageResult.ok(
@@ -171,6 +184,7 @@ class TestStageResult:
         assert result.data == {"output": "value"}
         assert len(result.warnings) == 2
 
+    @pytest.mark.fast
     def test_fail_with_warnings(self):
         """Test StageResult.fail() with warnings."""
         result = StageResult.fail(
@@ -186,6 +200,7 @@ class TestStageResult:
 class TestStageRepr:
     """Test Stage __repr__ method."""
 
+    @pytest.mark.fast
     def test_stage_repr(self):
         """Test Stage string representation."""
         from src.stages import Stage

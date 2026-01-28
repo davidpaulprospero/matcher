@@ -18,6 +18,7 @@ from src.keyword_extractor.topic_detector import (
 class TestDetectTopicLlm:
     """Test detect_topic_llm() function with mocked LLM"""
 
+    @pytest.mark.fast
     def test_detect_topic_basic(self):
         """Test basic topic detection"""
         mock_llm_client = Mock()
@@ -31,6 +32,7 @@ class TestDetectTopicLlm:
         assert topic == "Wildlife Conservation"
         mock_llm_client.generate.assert_called_once()
 
+    @pytest.mark.fast
     def test_detect_topic_with_quotes(self):
         """Test topic detection strips quotes"""
         mock_llm_client = Mock()
@@ -44,6 +46,7 @@ class TestDetectTopicLlm:
         assert topic == "Mountain Climbing"
         assert '"' not in topic
 
+    @pytest.mark.fast
     def test_detect_topic_with_extra_whitespace(self):
         """Test topic detection strips whitespace"""
         mock_llm_client = Mock()
@@ -56,6 +59,7 @@ class TestDetectTopicLlm:
 
         assert topic == "Space Exploration"
 
+    @pytest.mark.fast
     def test_detect_topic_multiword(self):
         """Test topic detection with multiple words"""
         mock_llm_client = Mock()
@@ -68,6 +72,7 @@ class TestDetectTopicLlm:
 
         assert "Deep Sea" in topic or "Marine Biology" in topic
 
+    @pytest.mark.fast
     def test_detect_topic_short_response(self):
         """Test topic detection with single word"""
         mock_llm_client = Mock()
@@ -80,6 +85,7 @@ class TestDetectTopicLlm:
 
         assert topic == "Nature"
 
+    @pytest.mark.fast
     def test_detect_topic_empty_response(self):
         """Test topic detection with empty response"""
         mock_llm_client = Mock()
@@ -92,6 +98,7 @@ class TestDetectTopicLlm:
 
         assert topic == ""
 
+    @pytest.mark.fast
     def test_detect_topic_json_response(self):
         """Test topic detection with JSON response"""
         mock_llm_client = Mock()
@@ -105,6 +112,7 @@ class TestDetectTopicLlm:
         # Should extract topic from JSON or return raw response
         assert "Climate" in topic or "topic" in topic
 
+    @pytest.mark.fast
     def test_detect_topic_prompt_contains_text(self):
         """Test that LLM prompt contains input text"""
         mock_llm_client = Mock()
@@ -123,6 +131,7 @@ class TestDetectTopicLlm:
 class TestDetectTopic:
     """Test detect_topic() orchestration function"""
 
+    @pytest.mark.fast
     def test_detect_topic_with_llm_client(self):
         """Test detect_topic() with available LLM client"""
         mock_client = Mock()
@@ -138,6 +147,7 @@ class TestDetectTopic:
         # With None client, should return empty string
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_detect_topic_without_llm_client(self):
         """Test detect_topic() without LLM client (fallback)"""
         text = "Documentary about mountain climbing."
@@ -146,12 +156,14 @@ class TestDetectTopic:
         # Should return empty string or handle gracefully
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_detect_topic_empty_text(self):
         """Test detect_topic() with empty text"""
         topic = detect_topic("", None)
 
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_detect_topic_long_text(self):
         """Test detect_topic() with very long text"""
         long_text = "Documentary " * 1000
@@ -159,6 +171,7 @@ class TestDetectTopic:
 
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_detect_topic_special_characters(self):
         """Test detect_topic() with special characters"""
         text = "Documentary about Sao Paulo, Brazil's cafe culture & art scene"
@@ -170,6 +183,7 @@ class TestDetectTopic:
 class TestTopicDetectionIntegration:
     """Integration tests for topic detection"""
 
+    @pytest.mark.fast
     def test_topic_detection_travel_documentary(self):
         """Test topic detection for travel documentary"""
         mock_llm_client = Mock()
@@ -189,6 +203,7 @@ class TestTopicDetectionIntegration:
         assert len(topic) > 0
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_topic_detection_nature_documentary(self):
         """Test topic detection for nature documentary"""
         mock_llm_client = Mock()
@@ -207,6 +222,7 @@ class TestTopicDetectionIntegration:
         assert len(topic) > 0
         assert isinstance(topic, str)
 
+    @pytest.mark.fast
     def test_topic_detection_history_documentary(self):
         """Test topic detection for history documentary"""
         mock_llm_client = Mock()

@@ -80,6 +80,7 @@ def sample_embeddings():
 class TestEmbeddingCacheInit:
     """Test EmbeddingCache initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_cache_dir(self, temp_dir):
         """Test cache directory creation"""
         cache = EmbeddingCache(str(temp_dir))
@@ -87,6 +88,7 @@ class TestEmbeddingCacheInit:
         assert cache.cache_dir.exists()
         assert cache.cache_dir.name == "embeddings"
 
+    @pytest.mark.fast
     def test_init_creates_index_file(self, temp_dir):
         """Test index file creation"""
         cache = EmbeddingCache(str(temp_dir))
@@ -94,6 +96,7 @@ class TestEmbeddingCacheInit:
         # Index should be created (may be empty)
         assert isinstance(cache.index, dict)
 
+    @pytest.mark.fast
     def test_init_ttl_is_zero(self, temp_dir):
         """Test that embeddings don't expire"""
         cache = EmbeddingCache(str(temp_dir))
@@ -109,6 +112,7 @@ class TestEmbeddingCacheInit:
 class TestHashingFunctions:
     """Test text and batch hashing"""
 
+    @pytest.mark.fast
     def test_text_hash_generates_consistent_hash(self, embedding_cache):
         """Test text hash is consistent"""
         text = "Test text"
@@ -119,6 +123,7 @@ class TestHashingFunctions:
         assert hash1 == hash2
         assert len(hash1) == 12  # Hash length
 
+    @pytest.mark.fast
     def test_text_hash_different_for_different_texts(self, embedding_cache):
         """Test different texts produce different hashes"""
         text1 = "First text"
@@ -129,6 +134,7 @@ class TestHashingFunctions:
 
         assert hash1 != hash2
 
+    @pytest.mark.fast
     def test_batch_hash_generates_consistent_hash(self, embedding_cache, sample_texts):
         """Test batch hash is consistent"""
         hash1 = embedding_cache._batch_hash(sample_texts)
@@ -137,6 +143,7 @@ class TestHashingFunctions:
         assert hash1 == hash2
         assert len(hash1) == 16  # Batch hash length
 
+    @pytest.mark.fast
     def test_batch_hash_order_sensitive(self, embedding_cache):
         """Test batch hash changes with order"""
         texts1 = ["A", "B", "C"]
@@ -159,6 +166,7 @@ class TestHashingFunctions:
 class TestEmbeddingCaching:
     """Test embedding caching operations"""
 
+    @pytest.mark.fast
     def test_cache_embeddings_creates_files(self, embedding_cache, sample_texts, sample_embeddings):
         """Test caching creates cache files"""
         indices = [0, 1, 2]
@@ -175,6 +183,7 @@ class TestEmbeddingCaching:
         cache_files = list(embedding_cache.cache_dir.glob(f"{cache_key}_*.json"))
         assert len(cache_files) == 3
 
+    @pytest.mark.fast
     def test_cache_embeddings_updates_index(self, embedding_cache, sample_texts, sample_embeddings):
         """Test caching updates the index"""
         indices = [0, 1, 2]
@@ -190,6 +199,7 @@ class TestEmbeddingCaching:
         assert cache_key in embedding_cache.index
         assert embedding_cache.index[cache_key]['count'] == 3
 
+    @pytest.mark.fast
     def test_get_cached_embeddings_all_cached(self, embedding_cache, sample_texts, sample_embeddings):
         """Test retrieving all cached embeddings"""
         indices = [0, 1, 2]
@@ -213,6 +223,7 @@ class TestEmbeddingCaching:
         assert len(uncached_texts) == 0
         assert len(uncached_indices) == 0
 
+    @pytest.mark.fast
     def test_get_cached_embeddings_none_cached(self, embedding_cache, sample_texts):
         """Test retrieving when nothing is cached"""
         cache_key = "test_video"
@@ -226,6 +237,7 @@ class TestEmbeddingCaching:
         assert len(uncached_texts) == 3
         assert uncached_indices == [0, 1, 2]
 
+    @pytest.mark.fast
     def test_get_cached_embeddings_partial(self, embedding_cache, sample_texts, sample_embeddings):
         """Test retrieving with some cached, some not"""
         cache_key = "test_video"
@@ -257,6 +269,7 @@ class TestEmbeddingCaching:
 class TestBatchCaching:
     """Test batch caching operations"""
 
+    @pytest.mark.fast
     def test_cache_batch_creates_file(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch caching creates a file"""
         cache_key = "test_video"
@@ -271,6 +284,7 @@ class TestBatchCaching:
         cache_files = list(embedding_cache.cache_dir.glob(f"batch_{cache_key}_*.json"))
         assert len(cache_files) == 1
 
+    @pytest.mark.fast
     def test_get_batch_cache_hit(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch cache hit"""
         cache_key = "test_video"
@@ -293,6 +307,7 @@ class TestBatchCaching:
         else:
             assert len(result) == 3
 
+    @pytest.mark.fast
     def test_get_batch_cache_miss(self, embedding_cache, sample_texts):
         """Test batch cache miss"""
         cache_key = "test_video"
@@ -301,6 +316,7 @@ class TestBatchCaching:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_batch_cache_wrong_length(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch cache miss when length doesn't match"""
         cache_key = "test_video"
@@ -326,6 +342,7 @@ class TestBatchCaching:
 class TestCosineSimilarity:
     """Test cosine similarity computation"""
 
+    @pytest.mark.fast
     def test_identical_vectors_similarity_one(self):
         """Test identical vectors have similarity 1.0"""
         vec = [1.0, 0.0, 0.0]
@@ -334,6 +351,7 @@ class TestCosineSimilarity:
 
         assert abs(similarity - 1.0) < 0.001
 
+    @pytest.mark.fast
     def test_orthogonal_vectors_similarity_zero(self):
         """Test orthogonal vectors have similarity 0.0"""
         vec1 = [1.0, 0.0, 0.0]
@@ -343,6 +361,7 @@ class TestCosineSimilarity:
 
         assert abs(similarity - 0.0) < 0.001
 
+    @pytest.mark.fast
     def test_opposite_vectors_similarity_negative_one(self):
         """Test opposite vectors have similarity -1.0"""
         vec1 = [1.0, 0.0, 0.0]
@@ -352,6 +371,7 @@ class TestCosineSimilarity:
 
         assert abs(similarity - (-1.0)) < 0.001
 
+    @pytest.mark.fast
     def test_similar_vectors_high_similarity(self):
         """Test similar vectors have high similarity"""
         vec1 = [1.0, 1.0, 0.0]
@@ -361,6 +381,7 @@ class TestCosineSimilarity:
 
         assert similarity > 0.9
 
+    @pytest.mark.fast
     def test_zero_vector_returns_zero(self):
         """Test zero vector returns 0.0 similarity"""
         vec1 = [0.0, 0.0, 0.0]
@@ -371,6 +392,7 @@ class TestCosineSimilarity:
         assert similarity == 0.0
 
     @pytest.mark.skipif(not HAS_NUMPY, reason="Requires numpy")
+    @pytest.mark.fast
     def test_numpy_arrays_work(self):
         """Test cosine similarity with numpy arrays"""
         import numpy as np
@@ -391,6 +413,7 @@ class TestCosineSimilarity:
 class TestNumpyConversion:
     """Test numpy array conversion"""
 
+    @pytest.mark.fast
     def test_to_numpy_converts_list(self):
         """Test converting list to numpy array"""
         import numpy as np
@@ -403,6 +426,7 @@ class TestNumpyConversion:
         assert result.dtype == np.float32
         assert result.shape == (2, 2)
 
+    @pytest.mark.fast
     def test_to_numpy_preserves_numpy(self):
         """Test numpy arrays are preserved"""
         import numpy as np
@@ -414,6 +438,7 @@ class TestNumpyConversion:
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float32  # Should convert to float32
 
+    @pytest.mark.fast
     def test_to_numpy_returns_input_if_not_list_or_array(self):
         """Test other types are returned as-is"""
         embeddings = "not an array"
@@ -430,6 +455,7 @@ class TestNumpyConversion:
 class TestCleanup:
     """Test embedding cleanup"""
 
+    @pytest.mark.fast
     def test_cleanup_embeddings_runs_without_error(self):
         """Test cleanup can be called safely"""
         # Should not raise any errors even if no model loaded
@@ -438,6 +464,7 @@ class TestCleanup:
         # Verify it completes
         assert True
 
+    @pytest.mark.fast
     def test_cleanup_embeddings_with_mock_model(self):
         """Test cleanup with a mock model"""
         import src.embeddings as emb_module
@@ -458,6 +485,7 @@ class TestCleanup:
 class TestSerialization:
     """Test cache entry serialization"""
 
+    @pytest.mark.fast
     def test_serialize_entry(self, embedding_cache):
         """Test serializing a cache entry"""
         from src.cache import CacheEntry
@@ -476,6 +504,7 @@ class TestSerialization:
         assert 'metadata' in serialized
         assert serialized['data'] == [1.0, 2.0, 3.0]
 
+    @pytest.mark.fast
     def test_deserialize_entry(self, embedding_cache):
         """Test deserializing a cache entry"""
         data = {
@@ -497,6 +526,7 @@ class TestSerialization:
 class TestErrorHandling:
     """Test error handling in caching"""
 
+    @pytest.mark.fast
     def test_cache_embeddings_handles_write_error(self, embedding_cache, sample_texts, sample_embeddings):
         """Test caching handles write errors gracefully"""
         indices = [0, 1, 2]
@@ -518,6 +548,7 @@ class TestErrorHandling:
                 # Should not reach here - embeddings module handles errors gracefully
                 pytest.fail(f"Should handle write errors gracefully, but got: {e}")
 
+    @pytest.mark.fast
     def test_get_cached_embeddings_handles_corrupted_cache(self, embedding_cache, temp_dir):
         """Test retrieving handles corrupted cache files"""
         cache_key = "test_video"
@@ -541,6 +572,7 @@ class TestErrorHandling:
         assert len(cached) == 0
         assert len(uncached_texts) == 1
 
+    @pytest.mark.fast
     def test_get_batch_cache_handles_corrupted_batch(self, embedding_cache, sample_texts):
         """Test batch retrieval handles corrupted files"""
         cache_key = "test_video"
@@ -566,6 +598,7 @@ class TestErrorHandling:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_empty_text_list(self, embedding_cache):
         """Test caching with empty text list"""
         cached, uncached_texts, uncached_indices = embedding_cache.get_cached_embeddings(
@@ -577,6 +610,7 @@ class TestEdgeCases:
         assert len(uncached_texts) == 0
         assert len(uncached_indices) == 0
 
+    @pytest.mark.fast
     def test_very_long_text(self, embedding_cache):
         """Test caching with very long text"""
         long_text = "a" * 10000
@@ -597,6 +631,7 @@ class TestEdgeCases:
 
         assert len(cached) == 1
 
+    @pytest.mark.fast
     def test_special_characters_in_text(self, embedding_cache):
         """Test caching with special characters"""
         special_text = "Text with 特殊字符 and émojis 🎉"
@@ -624,6 +659,7 @@ class TestEdgeCases:
 class TestBatchCaching:
     """Test batch-level caching operations"""
 
+    @pytest.mark.fast
     def test_cache_batch_creates_file(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch caching creates cache file"""
         cache_key = "test_batch"
@@ -634,6 +670,7 @@ class TestBatchCaching:
         batch_files = list(embedding_cache.cache_dir.glob(f"batch_{cache_key}_*.json"))
         assert len(batch_files) == 1
 
+    @pytest.mark.fast
     def test_get_batch_cache_hit(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch cache hit"""
         cache_key = "test_batch"
@@ -649,6 +686,7 @@ class TestBatchCaching:
             import numpy as np
             assert isinstance(result, np.ndarray)
 
+    @pytest.mark.fast
     def test_get_batch_cache_miss(self, embedding_cache, sample_texts):
         """Test batch cache miss"""
         cache_key = "nonexistent"
@@ -657,6 +695,7 @@ class TestBatchCaching:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_cache_batch_with_numpy(self, embedding_cache, sample_texts, sample_embeddings):
         """Test batch caching with numpy arrays"""
         import numpy as np
@@ -670,6 +709,7 @@ class TestBatchCaching:
         result = embedding_cache.get_batch_cache(sample_texts, cache_key)
         assert result is not None
 
+    @pytest.mark.fast
     def test_cache_batch_length_mismatch(self, embedding_cache, sample_texts):
         """Test batch cache rejects length mismatch"""
         import numpy as np
@@ -693,6 +733,7 @@ class TestBatchCaching:
 class TestIncrementalCaching:
     """Test incremental batch caching for streaming"""
 
+    @pytest.mark.fast
     def test_cache_incremental_creates_files(self, embedding_cache, sample_texts, sample_embeddings):
         """Test incremental caching creates numbered batch files"""
         cache_key = "streaming"
@@ -704,6 +745,7 @@ class TestIncrementalCaching:
         incremental_files = list(embedding_cache.cache_dir.glob(f"incremental_{cache_key}_*.json"))
         assert len(incremental_files) == 3
 
+    @pytest.mark.fast
     def test_load_incremental_combines_batches(self, embedding_cache, sample_texts, sample_embeddings):
         """Test loading incremental batches combines them"""
         cache_key = "streaming"
@@ -718,6 +760,7 @@ class TestIncrementalCaching:
         assert len(all_texts) == 9  # 3 batches × 3 texts
         assert len(all_embeddings) == 9
 
+    @pytest.mark.fast
     def test_load_incremental_empty(self, embedding_cache):
         """Test loading incremental with no files"""
         cache_key = "nonexistent"
@@ -727,6 +770,7 @@ class TestIncrementalCaching:
         assert len(all_texts) == 0
         assert len(all_embeddings) == 0
 
+    @pytest.mark.fast
     def test_load_incremental_handles_corrupted_file(self, embedding_cache, sample_texts, sample_embeddings):
         """Test loading incremental handles corrupted files"""
         cache_key = "partial"
@@ -746,6 +790,7 @@ class TestIncrementalCaching:
         assert len(all_texts) == 3  # Only batch 0
         assert len(all_embeddings) == 3
 
+    @pytest.mark.fast
     def test_clear_incremental_removes_files(self, embedding_cache, sample_texts, sample_embeddings):
         """Test clearing incremental files"""
         cache_key = "streaming"
@@ -769,6 +814,7 @@ class TestIncrementalCaching:
 class TestEmbeddingProvider:
     """Test base EmbeddingProvider class"""
 
+    @pytest.mark.fast
     def test_embed_batch_with_single_batch(self):
         """Test batch embedding with texts that fit in one batch"""
         from src.embeddings import EmbeddingProvider
@@ -785,6 +831,7 @@ class TestEmbeddingProvider:
         assert len(result) == 3
         assert result[0] == [1.0, 2.0]
 
+    @pytest.mark.fast
     def test_embed_batch_with_multiple_batches(self):
         """Test batch embedding across multiple batches"""
         from src.embeddings import EmbeddingProvider
@@ -800,6 +847,7 @@ class TestEmbeddingProvider:
 
         assert len(result) == 25
 
+    @pytest.mark.fast
     def test_embed_batch_with_retry_success(self):
         """Test batch embedding retries on failure then succeeds"""
         from src.embeddings import EmbeddingProvider
@@ -822,6 +870,7 @@ class TestEmbeddingProvider:
         assert len(result) == 2
         assert provider.attempt == 2  # Failed once, succeeded on retry
 
+    @pytest.mark.fast
     def test_embed_batch_with_retry_exhausted(self):
         """Test batch embedding fills with zeros after max retries"""
         from src.embeddings import EmbeddingProvider
@@ -840,6 +889,7 @@ class TestEmbeddingProvider:
         assert result[0] == [0.0] * 768
         assert result[1] == [0.0] * 768
 
+    @pytest.mark.fast
     def test_embed_batch_retry_uses_existing_dimension(self):
         """Test retry uses dimension from successful batches"""
         from src.embeddings import EmbeddingProvider
@@ -875,6 +925,7 @@ class TestGeminiEmbeddings:
 
     @patch('google.generativeai.configure')
     @patch('google.generativeai.embed_content')
+    @pytest.mark.fast
     def test_gemini_embed_single_batch(self, mock_embed, mock_configure):
         """Test Gemini embedding single batch"""
         from src.embeddings import GeminiEmbeddings
@@ -895,6 +946,7 @@ class TestGeminiEmbeddings:
 
     @patch('google.generativeai.configure')
     @patch('google.generativeai.embed_content')
+    @pytest.mark.fast
     def test_gemini_embed_batch_mode(self, mock_embed, mock_configure):
         """Test Gemini batch mode uses embed_content correctly"""
         from src.embeddings import GeminiEmbeddings
@@ -924,6 +976,7 @@ class TestVoyageEmbeddings:
     """Test VoyageEmbeddings provider"""
 
     @patch('voyageai.Client')
+    @pytest.mark.fast
     def test_voyage_embed(self, mock_client_class):
         """Test Voyage embedding"""
         from src.embeddings import VoyageEmbeddings
@@ -953,6 +1006,7 @@ class TestLocalEmbeddings:
     """Test LocalEmbeddings provider"""
 
     @patch('sentence_transformers.SentenceTransformer')
+    @pytest.mark.fast
     def test_local_embed(self, mock_st_class):
         """Test local embedding with SentenceTransformer"""
         from src.embeddings import LocalEmbeddings

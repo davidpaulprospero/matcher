@@ -69,6 +69,7 @@ class MockConfig:
 class TestCacheManagerInit:
     """Tests for CacheManager initialization"""
 
+    @pytest.mark.fast
     def test_init_resolves_paths(self, tmp_path):
         """CacheManager resolves all cache paths"""
         config = MockConfig()
@@ -83,6 +84,7 @@ class TestCacheManagerInit:
         assert 'transcripts' in mgr._cache_paths
         assert 'llm' in mgr._cache_paths
 
+    @pytest.mark.fast
     def test_init_handles_relative_cache_dir(self, tmp_path):
         """Handles relative cache directory in config"""
         config = MockConfig()
@@ -96,6 +98,7 @@ class TestCacheManagerInit:
 class TestGetAllStats:
     """Tests for get_all_stats method"""
 
+    @pytest.mark.fast
     def test_returns_stats_for_all_cache_types(self, tmp_path):
         """Returns stats for all configured cache types"""
         config = MockConfig()
@@ -111,6 +114,7 @@ class TestGetAllStats:
         assert 'transcripts' in stats
         assert all(isinstance(s, CacheStats) for s in stats.values())
 
+    @pytest.mark.fast
     def test_counts_files_in_cache(self, tmp_path):
         """Correctly counts files in cache directories"""
         # Setup cache directory with files
@@ -129,6 +133,7 @@ class TestGetAllStats:
 
         assert stats['llm'].total_entries == 2
 
+    @pytest.mark.fast
     def test_reports_not_created_status(self, tmp_path):
         """Reports 'not_created' for nonexistent directories"""
         config = MockConfig()
@@ -145,6 +150,7 @@ class TestGetAllStats:
 class TestClearCache:
     """Tests for clear_cache method"""
 
+    @pytest.mark.fast
     def test_clears_single_cache_type(self, tmp_path):
         """Clears only the specified cache type"""
         # Setup cache with files
@@ -168,6 +174,7 @@ class TestClearCache:
         assert not list(llm_dir.glob("*"))  # LLM dir should be empty
         assert list(trans_dir.glob("*"))  # Transcripts should still have files
 
+    @pytest.mark.fast
     def test_clears_all_caches(self, tmp_path):
         """Clears all caches when type is 'all'"""
         # Setup caches
@@ -187,6 +194,7 @@ class TestClearCache:
         assert result.entries_removed >= 3
         assert result.cache_type == 'all'
 
+    @pytest.mark.fast
     def test_dry_run_does_not_delete(self, tmp_path):
         """Dry run reports but doesn't delete"""
         llm_dir = tmp_path / ".cache" / "llm_responses"
@@ -206,6 +214,7 @@ class TestClearCache:
         assert result.dry_run is True
         assert test_file.exists()  # File should still exist
 
+    @pytest.mark.fast
     def test_returns_error_for_unknown_type(self, tmp_path):
         """Returns error for unknown cache type"""
         config = MockConfig()
@@ -223,6 +232,7 @@ class TestClearCache:
 class TestCleanupAll:
     """Tests for cleanup_all method"""
 
+    @pytest.mark.fast
     def test_returns_cleanup_result(self, tmp_path):
         """Returns CleanupResult with details"""
         config = MockConfig()
@@ -237,6 +247,7 @@ class TestCleanupAll:
         assert hasattr(result, 'expired_removed')
         assert hasattr(result, 'orphaned_removed')
 
+    @pytest.mark.fast
     def test_dry_run_does_not_modify(self, tmp_path):
         """Dry run doesn't modify caches"""
         config = MockConfig()
@@ -253,6 +264,7 @@ class TestCleanupAll:
 class TestListEntries:
     """Tests for list_entries method"""
 
+    @pytest.mark.fast
     def test_list_global_entries(self, tmp_path):
         """Lists entries from global cache"""
         # Setup global cache with entry
@@ -280,6 +292,7 @@ class TestListEntries:
         assert entries[0]['filename'] == 'test_video.mp4'
         assert entries[0]['usage_count'] == 5
 
+    @pytest.mark.fast
     def test_list_entity_entries(self, tmp_path):
         """Lists entries from entity cache"""
         # Setup entity cache
@@ -309,6 +322,7 @@ class TestListEntries:
         assert entries[0]['entity_name'] == 'John Doe'
         assert entries[0]['image_count'] == 2
 
+    @pytest.mark.fast
     def test_returns_empty_for_nonexistent(self, tmp_path):
         """Returns empty list for nonexistent cache"""
         config = MockConfig()
@@ -325,6 +339,7 @@ class TestListEntries:
 class TestDisplayFunctions:
     """Tests for display helper functions"""
 
+    @pytest.mark.fast
     def test_display_cache_stats_no_error(self, capsys):
         """display_cache_stats doesn't raise"""
         stats = {
@@ -352,6 +367,7 @@ class TestDisplayFunctions:
         assert 'Entity' in captured.out
         assert '10' in captured.out  # entries count
 
+    @pytest.mark.fast
     def test_display_cache_list_no_error(self, capsys):
         """display_cache_list doesn't raise"""
         entries = [
@@ -375,6 +391,7 @@ class TestDisplayFunctions:
 class TestClearResultSummary:
     """Tests for ClearResult.summary method"""
 
+    @pytest.mark.fast
     def test_summary_for_dry_run(self):
         """Summary indicates dry run"""
         result = ClearResult(
@@ -388,6 +405,7 @@ class TestClearResultSummary:
         assert 'Would remove' in summary
         assert '5' in summary
 
+    @pytest.mark.fast
     def test_summary_for_actual_clear(self):
         """Summary indicates actual clear"""
         result = ClearResult(
@@ -405,6 +423,7 @@ class TestClearResultSummary:
 class TestCleanupResultSummary:
     """Tests for CleanupResult.summary method"""
 
+    @pytest.mark.fast
     def test_summary_includes_counts(self):
         """Summary includes expired and orphaned counts"""
         result = CleanupResult(

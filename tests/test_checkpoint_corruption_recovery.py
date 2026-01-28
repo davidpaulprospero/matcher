@@ -24,6 +24,7 @@ from src.checkpoint import CheckpointManager, CheckpointData, STAGE_ORDER
 class TestBackupFallbackOnCorruption:
     """AC1: load() falls back to backup when primary checkpoint.json is corrupted JSON."""
 
+    @pytest.mark.fast
     def test_load_from_backup_when_primary_corrupted(self, tmp_path):
         """Verify data loaded from checkpoint.backup.json matches saved state."""
         # Create corrupted primary checkpoint
@@ -57,6 +58,7 @@ class TestBackupFallbackOnCorruption:
         assert result.analyze["segment_count"] == 12
         assert result.download["video_paths"] == ["/v/vid1.mp4", "/v/vid2.mp4"]
 
+    @pytest.mark.fast
     def test_backup_fallback_restores_primary_file(self, tmp_path):
         """Verify that after backup fallback, primary file is restored from backup."""
         primary = tmp_path / "checkpoint.json"
@@ -80,6 +82,7 @@ class TestBackupFallbackOnCorruption:
         restored = json.loads(primary.read_text())
         assert restored["last_completed_stage"] == "TRANSCRIBE"
 
+    @pytest.mark.fast
     def test_backup_fallback_with_empty_primary(self, tmp_path):
         """Verify backup fallback works when primary is empty (0 bytes)."""
         primary = tmp_path / "checkpoint.json"
@@ -102,6 +105,7 @@ class TestBackupFallbackOnCorruption:
         assert result.last_completed_stage == "ANALYZE"
         assert result.analyze["keywords"] == ["nature"]
 
+    @pytest.mark.fast
     def test_backup_fallback_with_truncated_primary(self, tmp_path):
         """Verify backup fallback works when primary is truncated JSON."""
         primary = tmp_path / "checkpoint.json"
@@ -129,6 +133,7 @@ class TestBackupFallbackOnCorruption:
 class TestBothCorrupted:
     """AC2: load() returns None when both checkpoint.json and backup are corrupted."""
 
+    @pytest.mark.fast
     def test_both_corrupted_json_returns_none(self, tmp_path):
         """Verify no exception raised, returns None gracefully."""
         primary = tmp_path / "checkpoint.json"
@@ -143,6 +148,7 @@ class TestBothCorrupted:
         assert result is None
         assert manager.data is None
 
+    @pytest.mark.fast
     def test_both_empty_returns_none(self, tmp_path):
         """Verify None when both files are empty."""
         primary = tmp_path / "checkpoint.json"
@@ -156,6 +162,7 @@ class TestBothCorrupted:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_primary_corrupted_no_backup_returns_none(self, tmp_path):
         """Verify None when primary is corrupted and backup doesn't exist."""
         primary = tmp_path / "checkpoint.json"
@@ -167,6 +174,7 @@ class TestBothCorrupted:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_both_json_arrays_returns_none(self, tmp_path):
         """Verify None when both files contain JSON arrays (not dicts)."""
         primary = tmp_path / "checkpoint.json"
@@ -180,6 +188,7 @@ class TestBothCorrupted:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_both_too_small_returns_none(self, tmp_path):
         """Verify None when both files are too small (< 10 chars)."""
         primary = tmp_path / "checkpoint.json"
@@ -197,6 +206,7 @@ class TestBothCorrupted:
 class TestSaveCreatesBackup:
     """AC3: save() creates backup of previous checkpoint before overwriting."""
 
+    @pytest.mark.fast
     def test_backup_contains_pre_save_state(self, tmp_path):
         """Verify checkpoint.backup.json contains the pre-save state after save() call."""
         manager = CheckpointManager(tmp_path, config_hash="hash1")
@@ -221,6 +231,7 @@ class TestSaveCreatesBackup:
         current_data = json.loads((tmp_path / "checkpoint.json").read_text())
         assert current_data["last_completed_stage"] == "DOWNLOAD"
 
+    @pytest.mark.fast
     def test_backup_updates_on_each_save(self, tmp_path):
         """Verify backup is updated on each successive save."""
         manager = CheckpointManager(tmp_path)
@@ -238,6 +249,7 @@ class TestSaveCreatesBackup:
         current = json.loads((tmp_path / "checkpoint.json").read_text())
         assert current["last_completed_stage"] == "TRANSCRIBE"
 
+    @pytest.mark.fast
     def test_first_save_no_backup(self, tmp_path):
         """Verify no backup exists after first save (nothing to back up)."""
         manager = CheckpointManager(tmp_path)
@@ -246,6 +258,7 @@ class TestSaveCreatesBackup:
         # No backup should exist after the very first save
         assert not (tmp_path / "checkpoint.backup.json").exists()
 
+    @pytest.mark.fast
     def test_save_intermediate_also_creates_backup(self, tmp_path):
         """Verify save_intermediate() also creates backup."""
         manager = CheckpointManager(tmp_path)
@@ -263,6 +276,7 @@ class TestSaveCreatesBackup:
 class TestIsStaleThresholds:
     """AC4: is_stale() correctly identifies checkpoints older than max_age_hours."""
 
+    @pytest.mark.fast
     def test_25_hour_old_checkpoint_is_stale(self, tmp_path):
         """Verify True for 25-hour-old checkpoint with default 24h threshold."""
         manager = CheckpointManager(tmp_path)
@@ -273,6 +287,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=24.0) is True
 
+    @pytest.mark.fast
     def test_23_hour_old_checkpoint_is_not_stale(self, tmp_path):
         """Verify False for 23-hour-old checkpoint with default 24h threshold."""
         manager = CheckpointManager(tmp_path)
@@ -283,6 +298,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=24.0) is False
 
+    @pytest.mark.fast
     def test_exactly_24_hour_boundary(self, tmp_path):
         """Verify behavior right at the 24-hour boundary (slightly over)."""
         manager = CheckpointManager(tmp_path)
@@ -294,6 +310,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=24.0) is True
 
+    @pytest.mark.fast
     def test_just_under_24_hour_boundary(self, tmp_path):
         """Verify behavior just under the 24-hour boundary."""
         manager = CheckpointManager(tmp_path)
@@ -305,6 +322,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=24.0) is False
 
+    @pytest.mark.fast
     def test_custom_max_age_1_hour(self, tmp_path):
         """Verify is_stale with custom 1-hour threshold."""
         manager = CheckpointManager(tmp_path)
@@ -315,6 +333,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=1.0) is True
 
+    @pytest.mark.fast
     def test_custom_max_age_1_hour_not_stale(self, tmp_path):
         """Verify is_stale with custom 1-hour threshold for fresh checkpoint."""
         manager = CheckpointManager(tmp_path)
@@ -325,6 +344,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=1.0) is False
 
+    @pytest.mark.fast
     def test_stale_uses_created_at_when_no_updated_at(self, tmp_path):
         """Verify is_stale falls back to created_at when updated_at is empty."""
         manager = CheckpointManager(tmp_path)
@@ -336,6 +356,7 @@ class TestIsStaleThresholds:
 
         assert manager.is_stale(max_age_hours=24.0) is True
 
+    @pytest.mark.fast
     def test_no_timestamp_is_stale(self, tmp_path):
         """Verify checkpoint with no timestamps is considered stale."""
         manager = CheckpointManager(tmp_path)
@@ -350,6 +371,7 @@ class TestIsStaleThresholds:
 class TestNonSerializableStageData:
     """AC5: save() with stage data containing non-serializable objects."""
 
+    @pytest.mark.fast
     def test_save_with_datetime_in_stage_data(self, tmp_path):
         """Verify datetime objects are converted via default=str, no crash."""
         manager = CheckpointManager(tmp_path)
@@ -367,6 +389,7 @@ class TestNonSerializableStageData:
         saved = json.loads(manager.checkpoint_path.read_text())
         assert "2026-01-15" in saved["analyze"]["started_at"]
 
+    @pytest.mark.fast
     def test_save_with_path_objects_in_stage_data(self, tmp_path):
         """Verify Path objects are converted via default=str, no crash."""
         manager = CheckpointManager(tmp_path)
@@ -382,6 +405,7 @@ class TestNonSerializableStageData:
         # Path objects should be serialized as strings
         assert "vid1.mp4" in saved["download"]["video_paths"][0]
 
+    @pytest.mark.fast
     def test_save_with_set_in_stage_data(self, tmp_path):
         """Verify set objects are converted via default=str, no crash."""
         manager = CheckpointManager(tmp_path)
@@ -395,6 +419,7 @@ class TestNonSerializableStageData:
 
         assert manager.checkpoint_path.exists()
 
+    @pytest.mark.fast
     def test_save_with_bytes_in_stage_data(self, tmp_path):
         """Verify bytes objects are converted via default=str, no crash."""
         manager = CheckpointManager(tmp_path)
@@ -408,6 +433,7 @@ class TestNonSerializableStageData:
 
         assert manager.checkpoint_path.exists()
 
+    @pytest.mark.fast
     def test_save_with_mixed_non_serializable_types(self, tmp_path):
         """Verify mixed non-serializable types all handled gracefully."""
         manager = CheckpointManager(tmp_path)
@@ -431,6 +457,7 @@ class TestNonSerializableStageData:
         assert saved["analyze"]["normal_data"] == {"key": "value"}
         assert saved["analyze"]["numbers"] == [1, 2.5, 3]
 
+    @pytest.mark.fast
     def test_save_preserves_serializable_data_alongside_non_serializable(self, tmp_path):
         """Verify that serializable data is preserved correctly even when non-serializable types present."""
         manager = CheckpointManager(tmp_path)

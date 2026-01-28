@@ -28,6 +28,7 @@ class TestRotationExhaustionTriggersVpnAdvice:
     """When cookie rotations are exhausted but VPN is available,
     get_budget_advice() should return 'skip_to_vpn'."""
 
+    @pytest.mark.fast
     def test_skip_to_vpn_when_rotations_exhausted(self):
         """Exhausting rotations with VPN available returns skip_to_vpn."""
         budget = RateLimitBudget()
@@ -41,6 +42,7 @@ class TestRotationExhaustionTriggersVpnAdvice:
         assert budget.can_switch_vpn() is True
         assert budget.get_budget_advice() == "skip_to_vpn"
 
+    @pytest.mark.fast
     def test_continue_when_rotations_available(self):
         """With rotations still available, advice is continue."""
         budget = RateLimitBudget()
@@ -53,6 +55,7 @@ class TestRotationExhaustionTriggersVpnAdvice:
         assert budget.can_rotate() is True
         assert budget.get_budget_advice() == "continue"
 
+    @pytest.mark.fast
     def test_skip_to_vpn_includes_correct_state(self):
         """skip_to_vpn advice is based on can_rotate() and can_switch_vpn()."""
         budget = RateLimitBudget()
@@ -78,6 +81,7 @@ class TestFullExhaustionTriggersAbort:
     """When both cookie rotations AND VPN switches are exhausted,
     get_budget_advice() should return 'abort_keyword'."""
 
+    @pytest.mark.fast
     def test_abort_keyword_when_all_exhausted(self):
         """Exhausting both rotations and VPN returns abort_keyword."""
         budget = RateLimitBudget()
@@ -95,6 +99,7 @@ class TestFullExhaustionTriggersAbort:
         assert budget.can_switch_vpn() is False
         assert budget.get_budget_advice() == "abort_keyword"
 
+    @pytest.mark.fast
     def test_abort_keyword_cascade_progression(self):
         """Advice progresses: continue -> skip_to_vpn -> abort_keyword."""
         budget = RateLimitBudget()
@@ -113,6 +118,7 @@ class TestFullExhaustionTriggersAbort:
         budget.record_vpn_switch()
         assert budget.get_budget_advice() == "abort_keyword"
 
+    @pytest.mark.fast
     def test_abort_keyword_with_backoff_still_available(self):
         """abort_keyword even if backoff budget remains (backoff doesn't help
         when all escalation resources are gone)."""
@@ -139,6 +145,7 @@ class TestRotationBudgetExactBoundary:
     """record_rotation() succeeds N times then can_rotate() returns False,
     verifying exact boundary (max_rotations consumed)."""
 
+    @pytest.mark.fast
     def test_exact_boundary_small_budget(self):
         """With max_rotations=3, can_rotate() flips at exactly 3."""
         budget = RateLimitBudget()
@@ -152,6 +159,7 @@ class TestRotationBudgetExactBoundary:
         assert budget.rotations_used == 3
         assert budget.rotations_remaining() == 0
 
+    @pytest.mark.fast
     def test_exact_boundary_single_rotation(self):
         """With max_rotations=1, one rotation exhausts budget."""
         budget = RateLimitBudget()
@@ -161,6 +169,7 @@ class TestRotationBudgetExactBoundary:
         budget.record_rotation()
         assert budget.can_rotate() is False
 
+    @pytest.mark.fast
     def test_exact_boundary_large_budget(self):
         """With max_rotations=100, boundary is at exactly 100."""
         budget = RateLimitBudget()
@@ -175,6 +184,7 @@ class TestRotationBudgetExactBoundary:
         assert budget.can_rotate() is False
         assert budget.rotations_remaining() == 0
 
+    @pytest.mark.fast
     def test_over_budget_still_false(self):
         """Recording beyond max_rotations still returns False."""
         budget = RateLimitBudget()
@@ -188,6 +198,7 @@ class TestRotationBudgetExactBoundary:
         assert budget.rotations_used == 3
         assert budget.rotations_remaining() == 0
 
+    @pytest.mark.fast
     def test_mid_download_boundary_triggers_vpn_advice(self):
         """At the exact rotation boundary, advice shifts to skip_to_vpn."""
         budget = RateLimitBudget()
@@ -211,6 +222,7 @@ class TestBackoffBudgetExhaustion:
     """record_backoff() with cumulative > max_backoff_time causes
     can_backoff() to return False at threshold."""
 
+    @pytest.mark.fast
     def test_backoff_exhaustion_at_threshold(self):
         """can_backoff() returns False when cumulative equals max."""
         budget = RateLimitBudget()
@@ -224,6 +236,7 @@ class TestBackoffBudgetExhaustion:
         assert budget.can_backoff(0.1) is False  # 60 + 0.1 = 60.1 > 60
         assert budget.can_backoff(0.0) is True   # 60 + 0 = 60 <= 60
 
+    @pytest.mark.fast
     def test_backoff_exhaustion_incremental(self):
         """Incremental small backoffs exhaust budget correctly."""
         budget = RateLimitBudget()
@@ -236,6 +249,7 @@ class TestBackoffBudgetExhaustion:
         assert budget.can_backoff(0.1) is False
         assert budget.backoff_time_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_backoff_exhaustion_over_threshold(self):
         """Recording backoff over threshold; can_backoff stays False."""
         budget = RateLimitBudget()
@@ -247,6 +261,7 @@ class TestBackoffBudgetExhaustion:
         assert budget.can_backoff(0.0) is False  # 25 > 20
         assert budget.backoff_time_remaining() == 0.0
 
+    @pytest.mark.fast
     def test_backoff_does_not_affect_rotation_advice(self):
         """Backoff exhaustion alone doesn't change get_budget_advice()
         (advice is about rotation/VPN, not backoff)."""
@@ -270,6 +285,7 @@ class TestCheckpointRestoresBudgetState:
     """Serialize with 5 rotations used, deserialize, verify
     rotations_used=5 and can_rotate() reflects remaining budget."""
 
+    @pytest.mark.fast
     def test_restore_5_rotations_used(self):
         """Round-trip with 5 rotations preserves exact count."""
         budget = RateLimitBudget()
@@ -288,6 +304,7 @@ class TestCheckpointRestoresBudgetState:
         assert restored.can_rotate() is True
         assert restored.rotations_remaining() == 5
 
+    @pytest.mark.fast
     def test_restore_exhausted_rotations(self):
         """Round-trip with exhausted rotations preserves can_rotate()=False."""
         budget = RateLimitBudget()
@@ -305,6 +322,7 @@ class TestCheckpointRestoresBudgetState:
         assert restored.max_rotations == 3
         assert restored.can_rotate() is False
 
+    @pytest.mark.fast
     def test_restore_preserves_advice(self):
         """Round-trip preserves get_budget_advice() output."""
         budget = RateLimitBudget()
@@ -320,6 +338,7 @@ class TestCheckpointRestoresBudgetState:
         restored = RateLimitBudget.from_dict(data)
         assert restored.get_budget_advice() == "skip_to_vpn"
 
+    @pytest.mark.fast
     def test_restore_preserves_abort_keyword(self):
         """Round-trip preserves abort_keyword advice state."""
         budget = RateLimitBudget()
@@ -334,6 +353,7 @@ class TestCheckpointRestoresBudgetState:
         restored = RateLimitBudget.from_dict(data)
         assert restored.get_budget_advice() == "abort_keyword"
 
+    @pytest.mark.fast
     def test_restore_keywords_and_escalation_level(self):
         """Round-trip preserves keywords_rate_limited and last_escalation_level."""
         budget = RateLimitBudget()

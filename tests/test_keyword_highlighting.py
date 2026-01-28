@@ -25,6 +25,7 @@ from src.utils import MatchResult, SRTSegment, Match
 class TestMatchResultMatchedKeywords:
     """Tests for MatchResult.matched_keywords field existence and defaults."""
 
+    @pytest.mark.fast
     def test_matched_keywords_field_exists(self):
         """MatchResult should have matched_keywords field."""
         # Create minimal MatchResult
@@ -38,6 +39,7 @@ class TestMatchResultMatchedKeywords:
         result = MatchResult(primary_match=match)
         assert hasattr(result, 'matched_keywords')
 
+    @pytest.mark.fast
     def test_matched_keywords_default_empty_list(self):
         """matched_keywords should default to empty list."""
         match = Match(
@@ -50,6 +52,7 @@ class TestMatchResultMatchedKeywords:
         result = MatchResult(primary_match=match)
         assert result.matched_keywords == []
 
+    @pytest.mark.fast
     def test_matched_keywords_can_be_set(self):
         """matched_keywords should accept list of strings."""
         match = Match(
@@ -63,6 +66,7 @@ class TestMatchResultMatchedKeywords:
         result = MatchResult(primary_match=match, matched_keywords=keywords)
         assert result.matched_keywords == keywords
 
+    @pytest.mark.fast
     def test_matched_keywords_is_list_type(self):
         """matched_keywords should be a list."""
         match = Match(
@@ -105,6 +109,7 @@ class TestExtractMatchedKeywordsHelper:
         config.anthropic_api_key = None
         return config
 
+    @pytest.mark.fast
     def test_helper_function_exists(self, mock_config):
         """_extract_matched_keywords should exist on TieredMatcher."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -112,6 +117,7 @@ class TestExtractMatchedKeywordsHelper:
         assert hasattr(matcher, '_extract_matched_keywords')
         assert callable(matcher._extract_matched_keywords)
 
+    @pytest.mark.fast
     def test_helper_returns_list(self, mock_config):
         """_extract_matched_keywords should return a list."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -123,6 +129,7 @@ class TestExtractMatchedKeywordsHelper:
         result = matcher._extract_matched_keywords(vo_seg, video_seg)
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_helper_finds_common_words(self, mock_config):
         """Should find words common to both segments."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -141,6 +148,7 @@ class TestExtractMatchedKeywordsHelper:
         assert 'earthquake' in result
         assert 'city' in result
 
+    @pytest.mark.fast
     def test_helper_uses_keywords_list(self, mock_config):
         """Should use keywords list if available."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -191,6 +199,7 @@ class TestKeywordMatchingLogic:
         config.anthropic_api_key = None
         return config
 
+    @pytest.mark.fast
     def test_filters_common_words(self, mock_config):
         """Should filter out common stopwords."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -212,6 +221,7 @@ class TestKeywordMatchingLogic:
         # 'building' should be included
         assert 'building' in result
 
+    @pytest.mark.fast
     def test_case_insensitive_matching(self, mock_config):
         """Matching should be case-insensitive."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -229,6 +239,7 @@ class TestKeywordMatchingLogic:
         result = matcher._extract_matched_keywords(vo_seg, video_seg)
         assert 'earthquake' in result
 
+    @pytest.mark.fast
     def test_filters_short_words(self, mock_config):
         """Should filter words shorter than minimum length."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -247,6 +258,7 @@ class TestKeywordMatchingLogic:
         # Very short words like 'on', 'a' should be filtered
         assert 'on' not in result or len('on') >= 3
 
+    @pytest.mark.fast
     def test_returns_sorted_list(self, mock_config):
         """Should return keywords sorted alphabetically."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -266,6 +278,7 @@ class TestKeywordMatchingLogic:
         result = matcher._extract_matched_keywords(vo_seg, video_seg)
         assert result == sorted(result)
 
+    @pytest.mark.fast
     def test_no_duplicates_in_result(self, mock_config):
         """Should not have duplicate keywords."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -315,6 +328,7 @@ class TestKeywordEdgeCases:
         config.anthropic_api_key = None
         return config
 
+    @pytest.mark.fast
     def test_empty_text_returns_empty_list(self, mock_config):
         """Empty text should return empty list."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -326,6 +340,7 @@ class TestKeywordEdgeCases:
         result = matcher._extract_matched_keywords(vo_seg, video_seg)
         assert result == []
 
+    @pytest.mark.fast
     def test_no_common_words_returns_empty_list(self, mock_config):
         """No common words should return empty list."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -343,6 +358,7 @@ class TestKeywordEdgeCases:
         result = matcher._extract_matched_keywords(vo_seg, video_seg)
         assert result == []
 
+    @pytest.mark.fast
     def test_handles_punctuation(self, mock_config):
         """Should handle punctuation in text."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -361,6 +377,7 @@ class TestKeywordEdgeCases:
         assert 'earthquake' in result
         assert 'devastating' in result
 
+    @pytest.mark.fast
     def test_handles_none_keywords_list(self, mock_config):
         """Should handle None keywords list gracefully."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -389,6 +406,7 @@ class TestKeywordEdgeCases:
 class TestCheckpointSerialization:
     """Tests for matched_keywords in checkpoint output."""
 
+    @pytest.mark.fast
     def test_checkpoint_includes_matched_keywords(self):
         """Checkpoint match data should include matched_keywords field."""
         # Simulate what MatchStage does for serialization
@@ -414,6 +432,7 @@ class TestCheckpointSerialization:
         assert 'matched_keywords' in serialized
         assert serialized['matched_keywords'] == ['earthquake', 'disaster']
 
+    @pytest.mark.fast
     def test_checkpoint_empty_keywords(self):
         """Empty matched_keywords should serialize as empty list."""
         match_result = MagicMock()
@@ -422,6 +441,7 @@ class TestCheckpointSerialization:
         serialized_keywords = list(match_result.matched_keywords) if match_result.matched_keywords else []
         assert serialized_keywords == []
 
+    @pytest.mark.fast
     def test_checkpoint_handles_none_keywords(self):
         """None matched_keywords should serialize as empty list."""
         matched_kws = None
@@ -458,6 +478,7 @@ class TestRealWorldScenarios:
         config.anthropic_api_key = None
         return config
 
+    @pytest.mark.fast
     def test_documentary_narration_match(self, mock_config):
         """Test with documentary-style narration."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -479,6 +500,7 @@ class TestRealWorldScenarios:
         assert 'giza' in result
         assert 'egypt' in result
 
+    @pytest.mark.fast
     def test_nature_documentary_match(self, mock_config):
         """Test with nature documentary content."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -499,6 +521,7 @@ class TestRealWorldScenarios:
         assert 'elephant' in result
         assert 'african' in result
 
+    @pytest.mark.fast
     def test_cooking_show_match(self, mock_config):
         """Test with cooking show content."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -527,6 +550,7 @@ class TestRealWorldScenarios:
 class TestMatchResultIntegration:
     """Tests for matched_keywords integration with full MatchResult."""
 
+    @pytest.mark.fast
     def test_match_result_with_all_fields(self):
         """MatchResult should work with all fields populated."""
         from src.utils import AlternativeMatch, StrategyMatch
@@ -558,6 +582,7 @@ class TestMatchResultIntegration:
         assert result.confidence_variance == 0.05
         assert result.has_gap is False
 
+    @pytest.mark.fast
     def test_match_result_defaults(self):
         """MatchResult should have sensible defaults."""
         match = Match(

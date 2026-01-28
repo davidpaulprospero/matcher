@@ -54,6 +54,7 @@ def mock_cache_file(tmp_path):
 class TestTranscriptCacheInit:
     """Test TranscriptCache initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_cache_dir(self, tmp_cache_dir):
         """Test that initialization creates cache directory"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -61,6 +62,7 @@ class TestTranscriptCacheInit:
         assert cache.cache_dir.exists()
         assert cache.cache_dir.name == "transcriptions"
 
+    @pytest.mark.fast
     def test_init_scans_existing_cache(self, mock_cache_file, tmp_path):
         """Test that initialization scans existing cache files"""
         cache_dir = tmp_path / "cache"
@@ -69,6 +71,7 @@ class TestTranscriptCacheInit:
         # Should have built source map from mock_cache_file
         assert len(cache._source_map) > 0
 
+    @pytest.mark.fast
     def test_init_handles_empty_cache(self, tmp_cache_dir):
         """Test initialization with no existing cache files"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -76,6 +79,7 @@ class TestTranscriptCacheInit:
         assert cache._source_map == {}
         assert cache._video_id_map == {}
 
+    @pytest.mark.fast
     def test_init_checks_alt_cache_dir(self, tmp_path):
         """Test that initialization checks alternate cache directory"""
         cache_dir = tmp_path / "cache"
@@ -97,6 +101,7 @@ class TestTranscriptCacheInit:
 class TestSourceMapBuilding:
     """Test source map building from cache files"""
 
+    @pytest.mark.fast
     def test_build_source_map_list_format(self, tmp_cache_dir):
         """Test building source map from list format cache"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -120,6 +125,7 @@ class TestSourceMapBuilding:
         # Should have entries for normalized path and filename
         assert len(cache._source_map) >= 1
 
+    @pytest.mark.fast
     def test_build_source_map_dict_format(self, tmp_cache_dir):
         """Test building source map from dict format cache"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -139,6 +145,7 @@ class TestSourceMapBuilding:
 
         assert len(cache._source_map) >= 1
 
+    @pytest.mark.fast
     def test_build_source_map_video_key(self, tmp_cache_dir):
         """Test building source map from dict with 'video' key"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -156,6 +163,7 @@ class TestSourceMapBuilding:
 
         assert len(cache._source_map) >= 1
 
+    @pytest.mark.fast
     def test_build_source_map_extracts_video_id(self, tmp_cache_dir):
         """Test that video IDs are extracted for audio-first mode"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -179,6 +187,7 @@ class TestSourceMapBuilding:
         # Should have extracted video ID
         assert len(cache._video_id_map) >= 0  # May or may not extract depending on utils.extract_video_id
 
+    @pytest.mark.fast
     def test_build_source_map_handles_corrupt_data(self, tmp_cache_dir):
         """Test that corrupt cache files are skipped"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -199,6 +208,7 @@ class TestSourceMapBuilding:
 class TestVideoHashing:
     """Test video file hashing"""
 
+    @pytest.mark.fast
     def test_get_video_hash_existing_file(self, tmp_cache_dir):
         """Test hash generation for existing file"""
         # Create a test file
@@ -211,6 +221,7 @@ class TestVideoHashing:
         assert isinstance(hash_val, str)
         assert len(hash_val) == 32  # MD5 hash length
 
+    @pytest.mark.fast
     def test_get_video_hash_nonexistent_file(self, tmp_cache_dir):
         """Test hash generation for nonexistent file (size=0)"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -220,6 +231,7 @@ class TestVideoHashing:
         assert isinstance(hash_val, str)
         assert len(hash_val) == 32
 
+    @pytest.mark.fast
     def test_get_video_hash_consistency(self, tmp_cache_dir):
         """Test that same file produces same hash"""
         test_file = tmp_cache_dir / "test.mp4"
@@ -235,6 +247,7 @@ class TestVideoHashing:
 class TestCacheLookup:
     """Test cache lookup strategies"""
 
+    @pytest.mark.fast
     def test_get_by_source_path(self, tmp_cache_dir):
         """Test lookup by source file path"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -255,6 +268,7 @@ class TestCacheLookup:
         assert len(result) == 1
         assert result[0]['text'] == "Test"
 
+    @pytest.mark.fast
     def test_get_by_filename(self, tmp_cache_dir):
         """Test lookup by filename only"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -276,6 +290,7 @@ class TestCacheLookup:
         if result:
             assert result[0]['text'] == "Test"
 
+    @pytest.mark.fast
     def test_get_cache_miss(self, tmp_cache_dir):
         """Test cache miss returns None"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -283,6 +298,7 @@ class TestCacheLookup:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_normalizes_segment_format(self, tmp_cache_dir):
         """Test that get() normalizes different cache formats"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -303,6 +319,7 @@ class TestCacheLookup:
         assert result[0]['start'] == 0.0
         assert result[0]['end'] == 3.0
 
+    @pytest.mark.fast
     def test_get_dict_format_with_segments(self, tmp_cache_dir):
         """Test lookup for dict format with segments key"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -325,6 +342,7 @@ class TestCacheLookup:
         assert len(result) == 1
         assert result[0]['text'] == "Test"
 
+    @pytest.mark.fast
     def test_get_dict_format_with_transcripts(self, tmp_cache_dir):
         """Test lookup for dict format with transcripts key"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -350,6 +368,7 @@ class TestCacheLookup:
 class TestCacheSet:
     """Test caching transcripts with set()"""
 
+    @pytest.mark.fast
     def test_set_creates_cache_file(self, tmp_cache_dir):
         """Test that set() creates cache file"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -365,6 +384,7 @@ class TestCacheSet:
         cache_files = list(cache.cache_dir.glob("*.json"))
         assert len(cache_files) == 1
 
+    @pytest.mark.fast
     def test_set_stores_segments(self, tmp_cache_dir):
         """Test that set() stores segments correctly"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -383,6 +403,7 @@ class TestCacheSet:
         assert result[0]['text'] == "First"
         assert result[1]['text'] == "Second"
 
+    @pytest.mark.fast
     def test_set_updates_source_map(self, tmp_cache_dir):
         """Test that set() updates internal source map"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -398,6 +419,7 @@ class TestCacheSet:
         # Source map should be updated
         assert len(cache._source_map) > 0
 
+    @pytest.mark.fast
     def test_set_normalizes_format(self, tmp_cache_dir):
         """Test that set() normalizes segment format"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -420,6 +442,7 @@ class TestCacheSet:
         assert 'end_time' in data[0]
         assert 'source_file' in data[0]
 
+    @pytest.mark.fast
     def test_set_handles_write_error(self, tmp_cache_dir):
         """Test that set() handles write errors gracefully"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -441,6 +464,7 @@ class TestCacheSet:
 class TestHashBasedLookup:
     """Test hash-based fallback lookup"""
 
+    @pytest.mark.fast
     def test_get_by_hash_fallback(self, tmp_cache_dir):
         """Test hash-based lookup when path matching fails"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -466,6 +490,7 @@ class TestHashBasedLookup:
 class TestEdgeCases:
     """Test edge cases and error handling"""
 
+    @pytest.mark.fast
     def test_get_empty_cache_data(self, tmp_cache_dir):
         """Test handling of empty cache data"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -480,6 +505,7 @@ class TestEdgeCases:
         # Should handle gracefully (no crash)
         assert cache._source_map is not None
 
+    @pytest.mark.fast
     def test_get_invalid_data_type(self, tmp_cache_dir):
         """Test handling of invalid data types in cache"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -494,6 +520,7 @@ class TestEdgeCases:
         # Should skip invalid data
         assert cache._source_map is not None
 
+    @pytest.mark.fast
     def test_get_segment_missing_required_fields(self, tmp_cache_dir):
         """Test handling of segments missing required fields"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -515,6 +542,7 @@ class TestEdgeCases:
             assert result[0]['start'] == 0
             assert result[0]['end'] == 0
 
+    @pytest.mark.fast
     def test_multiple_cache_files_same_video(self, tmp_cache_dir):
         """Test handling of multiple cache files for same video"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -541,6 +569,7 @@ class TestEdgeCases:
 class TestTranscriptCacheUncoveredLines:
     """Tests for specific uncovered lines in cache.py"""
 
+    @pytest.mark.fast
     def test_dict_format_no_source_file_with_segments(self, tmp_cache_dir):
         """Test lines 85-88: Dict with no source_file but segments has it"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -561,6 +590,7 @@ class TestTranscriptCacheUncoveredLines:
         # Should have extracted source_file from segments (lines 86-88)
         assert len(cache._source_map) > 0
 
+    @pytest.mark.fast
     def test_video_id_map_first_wins(self, tmp_cache_dir):
         """Test line 102: video ID only added if not already in map"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -588,6 +618,7 @@ class TestTranscriptCacheUncoveredLines:
         # The video ID might be "abc123" or "abc123__tit" depending on extract_video_id impl
         assert len(cache._video_id_map) >= 0  # Just verify no crash
 
+    @pytest.mark.fast
     def test_video_id_lookup_hit(self, tmp_cache_dir):
         """Test line 155: video ID lookup successfully finds cache"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -620,6 +651,7 @@ class TestTranscriptCacheUncoveredLines:
         # May or may not find depending on extract_video_id implementation
         # The important thing is the code path is exercised
 
+    @pytest.mark.fast
     def test_get_returns_none_for_non_dict_non_list(self, tmp_cache_dir):
         """Test line 180: return None when data is neither list nor dict"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -647,6 +679,7 @@ class TestTranscriptCacheUncoveredLines:
         # Line 180: should return None
         assert result is None
 
+    @pytest.mark.fast
     def test_get_exception_handling(self, tmp_cache_dir):
         """Test lines 194-196: exception during cache read"""
         transcriptions_dir = tmp_cache_dir / "transcriptions"
@@ -671,6 +704,7 @@ class TestTranscriptCacheUncoveredLines:
         result = cache.get(video_path)
         assert result is None
 
+    @pytest.mark.fast
     def test_set_exception_handling(self, tmp_cache_dir):
         """Test lines 229-230: exception during cache write"""
         cache = TranscriptCache(str(tmp_cache_dir))
@@ -683,6 +717,7 @@ class TestTranscriptCacheUncoveredLines:
             # Lines 229-230: Should handle exception gracefully
             cache.set(video_path, segments)  # Should not raise
 
+    @pytest.mark.fast
     def test_set_with_permission_error(self, tmp_cache_dir):
         """Test lines 229-230: permission error during write"""
         cache = TranscriptCache(str(tmp_cache_dir))

@@ -72,6 +72,7 @@ class TestSRTSegment:
         assert segment.end_time == 5.0
         assert segment.text == "Test subtitle text"
 
+    @pytest.mark.fast
     def test_srt_segment_duration(self):
         """Test computing segment duration."""
         segment = SRTSegment(
@@ -84,6 +85,7 @@ class TestSRTSegment:
         duration = segment.end_time - segment.start_time
         assert duration == 15.5
 
+    @pytest.mark.fast
     def test_srt_segment_with_source_file(self):
         """Test segment with source file."""
         segment = SRTSegment(
@@ -96,6 +98,7 @@ class TestSRTSegment:
 
         assert segment.source_file == "/path/to/video.mp4"
 
+    @pytest.mark.fast
     def test_srt_segment_equality(self):
         """Test comparing SRT segments."""
         seg1 = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="Test")
@@ -118,24 +121,28 @@ class TestSRTTimestamps:
         assert ":" in formatted
         assert "," in formatted
 
+    @pytest.mark.fast
     def test_format_srt_timestamp_hours(self):
         """Test formatting with hours."""
         formatted = format_srt_timestamp(3665.0)  # 1 hour, 1 minute, 5 seconds
 
         assert formatted.count(":") == 2
 
+    @pytest.mark.fast
     def test_parse_srt_timestamp_basic(self):
         """Test parsing SRT timestamp."""
         seconds = parse_srt_timestamp("00:01:30,000")
 
         assert seconds == 90.0
 
+    @pytest.mark.fast
     def test_parse_srt_timestamp_with_milliseconds(self):
         """Test parsing with milliseconds."""
         seconds = parse_srt_timestamp("00:00:01,500")
 
         assert seconds == 1.5
 
+    @pytest.mark.fast
     def test_format_parse_roundtrip(self):
         """Test formatting and parsing round-trip."""
         original = 125.75
@@ -158,6 +165,7 @@ class TestPathHandling:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_normalize_path_backslash(self):
         """Test normalizing path with backslashes."""
         path = "C:\\Users\\Test\\video.mp4"
@@ -166,6 +174,7 @@ class TestPathHandling:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_sanitize_path_basic(self):
         """Test sanitizing path."""
         path = "C:/Users/Test/video.mp4"
@@ -174,6 +183,7 @@ class TestPathHandling:
 
         assert sanitized is not None
 
+    @pytest.mark.fast
     def test_sanitize_path_special_chars(self):
         """Test sanitizing path with special characters."""
         path = "C:/Users/Test: Video/file.mp4"
@@ -207,6 +217,7 @@ Second subtitle
         assert segments[0].text == "First subtitle"
         assert segments[1].text == "Second subtitle"
 
+    @pytest.mark.fast
     def test_parse_srt_with_timestamps(self, tmp_path):
         """Test parsing SRT preserves timestamps."""
         srt_content = """1
@@ -222,6 +233,7 @@ Test subtitle
         assert segments[0].start_time == 10.5
         assert segments[0].end_time == 15.75
 
+    @pytest.mark.fast
     def test_write_srt_basic(self, tmp_path):
         """Test writing SRT file."""
         segments = [
@@ -249,6 +261,7 @@ Test subtitle
         assert "First subtitle" in content
         assert "Second subtitle" in content
 
+    @pytest.mark.fast
     def test_write_read_roundtrip(self, tmp_path):
         """Test writing and reading SRT round-trip."""
         original_segments = [
@@ -287,18 +300,21 @@ class TestEmbeddingHelpers:
         """Test checking None embeddings."""
         assert is_embeddings_empty(None)
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_array(self):
         """Test checking empty array."""
         empty_array = np.array([])
 
         assert is_embeddings_empty(empty_array)
 
+    @pytest.mark.fast
     def test_is_embeddings_not_empty(self):
         """Test checking non-empty embeddings."""
         embeddings = np.random.randn(10, 1024).astype(np.float32)
 
         assert not is_embeddings_empty(embeddings)
 
+    @pytest.mark.fast
     def test_is_embeddings_single_vector(self):
         """Test checking single vector."""
         single_vec = np.random.randn(1024).astype(np.float32)
@@ -318,6 +334,7 @@ class TestPathUtilitiesAdvanced:
         assert not sanitized.startswith(r"\\?")
         assert "C:" in sanitized or "c:" in sanitized
 
+    @pytest.mark.fast
     def test_sanitize_path_device_form(self):
         """Test removing device form prefix."""
         path = r"\\.\C:\Users\Test\video.mp4"
@@ -325,6 +342,7 @@ class TestPathUtilitiesAdvanced:
 
         assert not sanitized.startswith(r"\\.")
 
+    @pytest.mark.fast
     def test_sanitize_path_forward_slash_prefix(self):
         """Test removing forward slash prefix."""
         path = "//?/C:/Users/Test/video.mp4"
@@ -332,6 +350,7 @@ class TestPathUtilitiesAdvanced:
 
         assert not sanitized.startswith("//?/")
 
+    @pytest.mark.fast
     def test_sanitize_path_question_mark_edge_case(self):
         """Test edge case with ?\ or ?/ prefix."""
         path = r"?\C:\Users\Test\video.mp4"
@@ -340,6 +359,7 @@ class TestPathUtilitiesAdvanced:
         # Should remove the ?\ prefix
         assert not sanitized.startswith("?")
 
+    @pytest.mark.fast
     def test_sanitize_path_double_slashes(self):
         """Test removing double slashes."""
         path = "C://Users//Test//video.mp4"
@@ -348,12 +368,14 @@ class TestPathUtilitiesAdvanced:
         # Should not have consecutive slashes
         assert "//" not in sanitized
 
+    @pytest.mark.fast
     def test_normalize_path_empty_string(self):
         """Test normalizing empty path."""
         normalized = normalize_path("")
 
         assert normalized == ""
 
+    @pytest.mark.fast
     def test_resolve_path_absolute(self, tmp_path):
         """Test resolving absolute path."""
         test_file = tmp_path / "test.txt"
@@ -364,6 +386,7 @@ class TestPathUtilitiesAdvanced:
         assert resolved is not None
         assert "test.txt" in resolved
 
+    @pytest.mark.fast
     def test_resolve_path_relative_with_base(self, tmp_path):
         """Test resolving relative path with base directory."""
         base_dir = tmp_path
@@ -374,6 +397,7 @@ class TestPathUtilitiesAdvanced:
         assert "subdir" in resolved
         assert "file.txt" in resolved
 
+    @pytest.mark.fast
     def test_resolve_path_oserror_fallback(self):
         """Test resolve_path handles OSError gracefully."""
         # Test with a path that might cause issues
@@ -401,6 +425,7 @@ class TestFFmpegDebugLogging:
         assert "FFmpeg Debug Log" in content
         assert "Started:" in content
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_basic(self, tmp_path):
         """Test logging FFmpeg debug message."""
         log_dir = tmp_path / "logs"
@@ -414,6 +439,7 @@ class TestFFmpegDebugLogging:
         assert "Test message" in content
         assert "[opencv]" in content
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_no_log_set(self):
         """Test logging when no log is set up (should not crash)."""
         # Reset global log path by calling with invalid dir
@@ -425,6 +451,7 @@ class TestFFmpegDebugLogging:
         except Exception:
             pytest.fail("log_ffmpeg_debug raised exception when log not set")
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_context(self, tmp_path):
         """Test FFmpeg stderr capture context manager."""
         log_dir = tmp_path / "logs"
@@ -440,6 +467,7 @@ class TestFFmpegDebugLogging:
 
         assert "Test stderr message" in content or "test_source" in content
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_no_log(self):
         """Test stderr capture when log not set up."""
         # Reset by not calling setup
@@ -449,6 +477,7 @@ class TestFFmpegDebugLogging:
 
         assert True
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_exception_passthrough(self, tmp_path):
         """Test that exceptions are not suppressed."""
         log_dir = tmp_path / "logs"
@@ -476,6 +505,7 @@ class TestChapterDataclass:
         assert chapter.contains_segment(3)
         assert chapter.contains_segment(5)
 
+    @pytest.mark.fast
     def test_chapter_contains_segment_false(self):
         """Test chapter does not contain segment."""
         chapter = Chapter(
@@ -487,6 +517,7 @@ class TestChapterDataclass:
         assert not chapter.contains_segment(4)
         assert not chapter.contains_segment(11)
 
+    @pytest.mark.fast
     def test_chapter_to_dict(self):
         """Test converting chapter to dict."""
         chapter = Chapter(
@@ -529,6 +560,7 @@ class TestSRTSegmentAdvanced:
         assert len(seg_dict["keywords"]) == 2
         assert len(seg_dict["entities"]) == 1
 
+    @pytest.mark.fast
     def test_srt_segment_from_dict(self):
         """Test creating segment from dict."""
         data = {
@@ -549,6 +581,7 @@ class TestSRTSegmentAdvanced:
         assert len(segment.keywords) == 1
         assert not hasattr(segment, "extra_field")
 
+    @pytest.mark.fast
     def test_srt_segment_from_dict_missing_fields(self):
         """Test from_dict with missing fields (should use defaults)."""
         data = {
@@ -562,6 +595,7 @@ class TestSRTSegmentAdvanced:
         assert segment.text == "Only text provided"
         assert segment.keywords == []  # Default
 
+    @pytest.mark.fast
     def test_srt_segment_duration_property(self):
         """Test segment duration property."""
         segment = SRTSegment(
@@ -599,6 +633,7 @@ class TestSceneInfoDataclass:
         assert scene_dict["description"] == "Test scene"
         assert scene_dict["transcript_segment"] is not None
 
+    @pytest.mark.fast
     def test_scene_info_from_dict(self):
         """Test creating scene from dict."""
         data = {
@@ -623,6 +658,7 @@ class TestSceneInfoDataclass:
         assert scene.transcript_segment is not None
         assert scene.transcript_segment.text == "Test"
 
+    @pytest.mark.fast
     def test_scene_info_from_dict_no_transcript(self):
         """Test scene from dict without transcript."""
         data = {
@@ -669,6 +705,7 @@ class TestVideoIndexDataclass:
         assert len(index_dict["transcript_segments"]) == 1
         assert len(index_dict["scenes"]) == 1
 
+    @pytest.mark.fast
     def test_video_index_from_dict(self):
         """Test creating video index from dict."""
         data = {
@@ -718,6 +755,7 @@ class TestMatchDataclasses:
         assert match_dict["is_keyword_match"] is True
         assert match_dict["embedding_similarity"] == 0.85
 
+    @pytest.mark.fast
     def test_strategy_match_to_dict(self):
         """Test converting strategy match to dict."""
         video_seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="Video")
@@ -748,6 +786,7 @@ class TestProgressBar:
         assert bar.current == 0
         assert bar.description == "Test"
 
+    @pytest.mark.fast
     def test_progress_bar_update(self):
         """Test updating progress."""
         bar = ProgressBar(total=100)
@@ -758,6 +797,7 @@ class TestProgressBar:
         bar.update(5)
         assert bar.current == 15
 
+    @pytest.mark.fast
     def test_progress_bar_set(self):
         """Test setting absolute progress."""
         bar = ProgressBar(total=100)
@@ -765,6 +805,7 @@ class TestProgressBar:
         bar.set(50)
         assert bar.current == 50
 
+    @pytest.mark.fast
     def test_progress_bar_close(self):
         """Test closing progress bar."""
         bar = ProgressBar(total=100)
@@ -790,6 +831,7 @@ class TestCacheManager:
         assert manager.transcription_dir.exists()
         assert manager.embedding_dir.exists()
 
+    @pytest.mark.fast
     def test_get_file_hash(self, tmp_path):
         """Test getting file hash."""
         test_file = tmp_path / "test.txt"
@@ -801,6 +843,7 @@ class TestCacheManager:
         assert isinstance(file_hash, str)
         assert len(file_hash) == 32  # MD5 hash
 
+    @pytest.mark.fast
     def test_get_text_hash(self, tmp_path):
         """Test getting text hash."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -810,6 +853,7 @@ class TestCacheManager:
         assert isinstance(text_hash, str)
         assert len(text_hash) == 16  # Truncated MD5
 
+    @pytest.mark.fast
     def test_transcription_cache(self, tmp_path):
         """Test transcription caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -828,6 +872,7 @@ class TestCacheManager:
         assert len(loaded) == 1
         assert loaded[0].text == "Test"
 
+    @pytest.mark.fast
     def test_transcription_cache_miss(self, tmp_path):
         """Test transcription cache miss."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -836,6 +881,7 @@ class TestCacheManager:
 
         assert loaded is None
 
+    @pytest.mark.fast
     def test_embeddings_cache(self, tmp_path):
         """Test embeddings caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -848,6 +894,7 @@ class TestCacheManager:
         assert loaded is not None
         assert len(loaded) == 2
 
+    @pytest.mark.fast
     def test_scenes_cache(self, tmp_path):
         """Test scenes caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -862,6 +909,7 @@ class TestCacheManager:
         assert loaded is not None
         assert len(loaded) == 1
 
+    @pytest.mark.fast
     def test_llm_response_cache(self, tmp_path):
         """Test LLM response caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -874,6 +922,7 @@ class TestCacheManager:
         assert loaded is not None
         assert loaded["result"] == "test response"
 
+    @pytest.mark.fast
     def test_video_index_cache(self, tmp_path):
         """Test video index caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -890,6 +939,7 @@ class TestCacheManager:
         assert loaded is not None
         assert loaded.video_path == "/test.mp4"
 
+    @pytest.mark.fast
     def test_get_all_video_indices(self, tmp_path):
         """Test getting all video indices."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -904,6 +954,7 @@ class TestCacheManager:
 
         assert len(all_indices) == 2
 
+    @pytest.mark.fast
     def test_master_index(self, tmp_path):
         """Test master index caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -928,6 +979,7 @@ class TestReuseTracker:
         assert tracker.max_reuse == 3
         assert tracker.reuse_penalty == 0.1
 
+    @pytest.mark.fast
     def test_get_clip_id(self):
         """Test generating clip ID."""
         tracker = ReuseTracker()
@@ -945,6 +997,7 @@ class TestReuseTracker:
         assert "10.00" in clip_id
         assert "15.00" in clip_id
 
+    @pytest.mark.fast
     def test_get_source_file(self):
         """Test getting normalized source file."""
         tracker = ReuseTracker()
@@ -961,6 +1014,7 @@ class TestReuseTracker:
         # Should be lowercase and forward slashes
         assert source == "c:/test/video.mp4"
 
+    @pytest.mark.fast
     def test_record_usage(self):
         """Test recording clip usage."""
         tracker = ReuseTracker()
@@ -978,6 +1032,7 @@ class TestReuseTracker:
 
         assert tracker.get_usage_count(segment) == 1
 
+    @pytest.mark.fast
     def test_can_use_within_limit(self):
         """Test can use clip within limit."""
         tracker = ReuseTracker(max_reuse=2)
@@ -994,6 +1049,7 @@ class TestReuseTracker:
         # Now at max (count=2, max=2)
         assert not tracker.can_use(segment)
 
+    @pytest.mark.fast
     def test_get_penalty(self):
         """Test getting reuse penalty."""
         tracker = ReuseTracker(max_reuse=5, reuse_penalty=0.2)
@@ -1009,6 +1065,7 @@ class TestReuseTracker:
         penalty = tracker.get_penalty(segment)
         assert penalty == 0.4  # 2 * 0.2
 
+    @pytest.mark.fast
     def test_adjust_confidence(self):
         """Test adjusting confidence based on reuse."""
         tracker = ReuseTracker(max_reuse=5, reuse_penalty=0.1)
@@ -1020,6 +1077,7 @@ class TestReuseTracker:
 
         assert adjusted == 0.8  # 0.9 - 0.1
 
+    @pytest.mark.fast
     def test_reset(self):
         """Test resetting tracker."""
         tracker = ReuseTracker()
@@ -1032,6 +1090,7 @@ class TestReuseTracker:
 
         assert tracker.get_usage_count(segment) == 0
 
+    @pytest.mark.fast
     def test_get_top_sources(self):
         """Test getting top sources."""
         tracker = ReuseTracker()
@@ -1061,6 +1120,7 @@ class TestSRTParsingAdvanced:
 
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_srt_invalid_format(self, tmp_path):
         """Test parsing file with invalid format."""
         srt_file = tmp_path / "invalid.srt"
@@ -1071,6 +1131,7 @@ class TestSRTParsingAdvanced:
         # Should handle gracefully
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_binary_file(self, tmp_path):
         """Test parsing binary file (should detect and skip)."""
         binary_file = tmp_path / "binary.srt"
@@ -1081,6 +1142,7 @@ class TestSRTParsingAdvanced:
         # Should detect binary and return empty
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_srt_utf16_encoding(self, tmp_path):
         """Test parsing UTF-16 encoded SRT."""
         srt_content = """1
@@ -1094,6 +1156,7 @@ Test subtitle
 
         assert len(segments) >= 0  # Should handle encoding
 
+    @pytest.mark.fast
     def test_parse_srt_with_bom(self, tmp_path):
         """Test parsing SRT with BOM."""
         srt_content = """1
@@ -1109,6 +1172,7 @@ Test
         # Should handle BOM
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_malformed_timestamp(self, tmp_path):
         """Test parsing SRT with malformed timestamp."""
         srt_content = """1

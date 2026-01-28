@@ -46,6 +46,7 @@ def create_downloader(config):
 class TestExistingVideosPartialMatch:
     """Test partial existing videos branch (lines 486-487)."""
 
+    @pytest.mark.fast
     def test_existing_videos_partial_download(self, tmp_path):
         """Test when some but not all videos exist for a keyword."""
         config = create_mock_downloader_config(tmp_path)
@@ -83,6 +84,7 @@ class TestExistingVideosPartialMatch:
 class TestCheckpointSkip:
     """Test checkpoint-based skip (lines 491-494)."""
 
+    @pytest.mark.fast
     def test_checkpoint_skips_completed_video(self, tmp_path):
         """Test that checkpoint skips completed video keys."""
         config = create_mock_downloader_config(tmp_path)
@@ -115,6 +117,7 @@ class TestCheckpointSkip:
 class TestRetryKeywordBreak:
     """Test retry loop break (line 508)."""
 
+    @pytest.mark.fast
     def test_retry_breaks_when_no_alt_keyword(self, tmp_path):
         """Test that retry loop breaks when no alternative keyword available."""
         config = create_mock_downloader_config(tmp_path)
@@ -151,6 +154,7 @@ class TestRetryKeywordBreak:
 class TestRemixNoResults:
     """Test remix with no results (line 536)."""
 
+    @pytest.mark.fast
     def test_remix_also_returns_no_results(self, tmp_path):
         """Test logging when remix keyword also returns no results."""
         config = create_mock_downloader_config(tmp_path)
@@ -182,6 +186,7 @@ class TestRemixNoResults:
 class TestCheckpointSave:
     """Test checkpoint save after download (lines 541-545)."""
 
+    @pytest.mark.fast
     def test_checkpoint_saves_after_download(self, tmp_path):
         """Test that checkpoint is saved after successful download."""
         config = create_mock_downloader_config(tmp_path)
@@ -218,6 +223,7 @@ class TestCheckpointSave:
 class TestPartFileCleanup:
     """Test partial file cleanup (lines 806-807, 811-812)."""
 
+    @pytest.mark.integration
     def test_cleanup_handles_exceptions(self, tmp_path):
         """Test that .part and .ytdl cleanup handles exceptions gracefully."""
         config = create_mock_downloader_config(tmp_path)
@@ -261,6 +267,7 @@ class TestPartFileCleanup:
 class TestTimeoutOverride:
     """Test timeout_override (line 816) and fallback (line 822)."""
 
+    @pytest.mark.integration
     def test_timeout_override_used(self, tmp_path):
         """Test that timeout_override takes precedence."""
         config = create_mock_downloader_config(tmp_path, download_timeout=100)
@@ -295,6 +302,7 @@ class TestTimeoutOverride:
                 stall_timeout = call_args[0][1]  # second positional arg
                 assert stall_timeout == 30
 
+    @pytest.mark.integration
     def test_timeout_fallback_when_no_tier(self, tmp_path):
         """Test timeout falls back to config default when tier not in timeouts."""
         config = create_mock_downloader_config(tmp_path, download_timeout=120)
@@ -331,6 +339,7 @@ class TestTimeoutOverride:
 class TestTimeoutExpired:
     """Test TimeoutExpired handling (lines 839-844)."""
 
+    @pytest.mark.integration
     def test_timeout_expired_handling(self, tmp_path):
         """Test handling of subprocess.TimeoutExpired."""
         config = create_mock_downloader_config(tmp_path)
@@ -366,6 +375,7 @@ class TestTimeoutExpired:
 class TestProcessCleanup:
     """Test process cleanup in finally (lines 848-852)."""
 
+    @pytest.mark.integration
     def test_process_cleanup_on_exception(self, tmp_path):
         """Test that process is properly cleaned up on exception."""
         config = create_mock_downloader_config(tmp_path)
@@ -400,6 +410,7 @@ class TestProcessCleanup:
 class TestInfoFileException:
     """Test info file read exception (lines 883-884)."""
 
+    @pytest.mark.integration
     def test_info_file_read_exception(self, tmp_path):
         """Test handling of exception when reading .info.json file."""
         config = create_mock_downloader_config(tmp_path)
@@ -443,6 +454,7 @@ class TestInfoFileException:
 class TestGeneralException:
     """Test general exception handling (lines 972-974)."""
 
+    @pytest.mark.integration
     def test_general_exception_handled(self, tmp_path):
         """Test handling of general exceptions in _run_download_cmd."""
         config = create_mock_downloader_config(tmp_path)

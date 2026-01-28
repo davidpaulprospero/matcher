@@ -21,11 +21,13 @@ pytestmark = pytest.mark.unit
 class TestCalculateSourceDiversityScoreFunction:
     """Test that calculate_source_diversity_score() function exists and has correct signature."""
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """Function is importable from strategies module."""
         from src.matching.strategies import calculate_source_diversity_score
         assert callable(calculate_source_diversity_score)
 
+    @pytest.mark.fast
     def test_function_accepts_required_args(self):
         """Function accepts all required arguments."""
         result = calculate_source_diversity_score(
@@ -36,6 +38,7 @@ class TestCalculateSourceDiversityScoreFunction:
         )
         assert isinstance(result, float)
 
+    @pytest.mark.fast
     def test_function_returns_float(self):
         """Function returns a float value."""
         result = calculate_source_diversity_score(
@@ -46,6 +49,7 @@ class TestCalculateSourceDiversityScoreFunction:
         )
         assert isinstance(result, float)
 
+    @pytest.mark.fast
     def test_score_in_valid_range(self):
         """Function returns score between 0.0 and 1.0."""
         result = calculate_source_diversity_score(
@@ -60,6 +64,7 @@ class TestCalculateSourceDiversityScoreFunction:
 class TestSourceDiversityScoring:
     """Test diversity score calculation based on source files."""
 
+    @pytest.mark.fast
     def test_different_source_gets_higher_score(self):
         """Candidate from different source file gets higher score."""
         # Same source
@@ -80,6 +85,7 @@ class TestSourceDiversityScoring:
 
         assert different_source_score > same_source_score
 
+    @pytest.mark.fast
     def test_same_source_gets_lower_score(self):
         """Candidate from same source as V1-V3 gets lower diversity score."""
         score = calculate_source_diversity_score(
@@ -92,6 +98,7 @@ class TestSourceDiversityScoring:
         # Same keyword = 0 for keyword component (40% weight)
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_unique_source_contributes_to_score(self):
         """Unique source file adds 0.6 to the score (60% weight)."""
         score = calculate_source_diversity_score(
@@ -107,6 +114,7 @@ class TestSourceDiversityScoring:
 class TestKeywordDiversityScoring:
     """Test diversity score calculation based on keyword overlap."""
 
+    @pytest.mark.fast
     def test_unique_keywords_get_higher_score(self):
         """Candidate with unique keywords gets higher score."""
         # Same keywords
@@ -127,6 +135,7 @@ class TestKeywordDiversityScoring:
 
         assert unique_kw_score > same_kw_score
 
+    @pytest.mark.fast
     def test_partial_keyword_overlap(self):
         """Partial keyword overlap results in moderate score."""
         score = calculate_source_diversity_score(
@@ -139,6 +148,7 @@ class TestKeywordDiversityScoring:
         # 50% overlap = 0.5 keyword score * 0.4 = 0.2
         assert 0.6 < score < 1.0
 
+    @pytest.mark.fast
     def test_no_keywords_neutral_score(self):
         """Empty candidate keywords result in neutral keyword score."""
         score = calculate_source_diversity_score(
@@ -150,6 +160,7 @@ class TestKeywordDiversityScoring:
         # Different source = 0.6, neutral keyword = 0.5 * 0.4 = 0.2
         assert score == 0.8
 
+    @pytest.mark.fast
     def test_no_v1_v3_keywords_full_diversity(self):
         """When V1-V3 have no keywords, candidate keywords get full score."""
         score = calculate_source_diversity_score(
@@ -165,6 +176,7 @@ class TestKeywordDiversityScoring:
 class TestCombinedDiversityScoring:
     """Test combined source + keyword diversity scoring."""
 
+    @pytest.mark.fast
     def test_maximum_diversity_score(self):
         """Different source + unique keywords = maximum score."""
         score = calculate_source_diversity_score(
@@ -175,6 +187,7 @@ class TestCombinedDiversityScoring:
         )
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_minimum_diversity_score(self):
         """Same source + same keywords = minimum score."""
         score = calculate_source_diversity_score(
@@ -185,6 +198,7 @@ class TestCombinedDiversityScoring:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_moderate_diversity_different_source_same_keywords(self):
         """Different source but same keywords = 0.6 score."""
         score = calculate_source_diversity_score(
@@ -200,6 +214,7 @@ class TestCombinedDiversityScoring:
 class TestAlternativeMatchDiversityScore:
     """Test that AlternativeMatch dataclass has diversity_score field."""
 
+    @pytest.mark.fast
     def test_diversity_score_field_exists(self):
         """AlternativeMatch has diversity_score field."""
         from src.utils import AlternativeMatch
@@ -213,6 +228,7 @@ class TestAlternativeMatchDiversityScore:
         assert hasattr(match, 'diversity_score')
         assert match.diversity_score == 0.75
 
+    @pytest.mark.fast
     def test_diversity_score_default_zero(self):
         """AlternativeMatch diversity_score defaults to 0.0."""
         from src.utils import AlternativeMatch
@@ -224,6 +240,7 @@ class TestAlternativeMatchDiversityScore:
         )
         assert match.diversity_score == 0.0
 
+    @pytest.mark.fast
     def test_diversity_score_is_float(self):
         """diversity_score field is a float."""
         from src.utils import AlternativeMatch
@@ -257,6 +274,7 @@ class TestStrategyMatcherDiversityIntegration:
         config.output.strategy_tracks = []
         return config
 
+    @pytest.mark.fast
     def test_secondary_matches_include_diversity_score(self, mock_config):
         """get_secondary_matches_diversity returns matches with diversity_score."""
         matcher = StrategyMatcher(mock_config, scenes={})
@@ -334,6 +352,7 @@ class TestDiversityScoreLogging:
         config.output.strategy_tracks = []
         return config
 
+    @pytest.mark.fast
     def test_diversity_score_logged(self, mock_config, caplog):
         """Diversity score is logged at DEBUG level."""
         with caplog.at_level(logging.DEBUG, logger="src.matching.strategies"):
@@ -381,6 +400,7 @@ class TestDiversityScoreLogging:
 class TestSameSourceAlternativesLowerScore:
     """Test that same-source alternatives get lower diversity score."""
 
+    @pytest.mark.fast
     def test_same_source_lower_than_different(self):
         """Same source file results in lower diversity score than different source."""
         same_source_score = calculate_source_diversity_score(
@@ -401,6 +421,7 @@ class TestSameSourceAlternativesLowerScore:
         # Different source contributes 0.6 to the score
         assert different_source_score - same_source_score == 0.6
 
+    @pytest.mark.fast
     def test_same_source_same_keywords_minimum(self):
         """Same source and same keywords = minimum possible score."""
         score = calculate_source_diversity_score(
@@ -411,6 +432,7 @@ class TestSameSourceAlternativesLowerScore:
         )
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_different_source_same_keywords_moderate(self):
         """Different source but same keywords = 0.6 (source contribution only)."""
         score = calculate_source_diversity_score(
@@ -425,6 +447,7 @@ class TestSameSourceAlternativesLowerScore:
 class TestEdgeCases:
     """Test edge cases in diversity scoring."""
 
+    @pytest.mark.fast
     def test_empty_v1_v3_sources(self):
         """Empty V1-V3 sources means all candidates are different."""
         score = calculate_source_diversity_score(
@@ -436,6 +459,7 @@ class TestEdgeCases:
         # Different source = 0.6, same keyword = 0
         assert score == 0.6
 
+    @pytest.mark.fast
     def test_empty_all_sets(self):
         """Empty sets for everything."""
         score = calculate_source_diversity_score(
@@ -448,6 +472,7 @@ class TestEdgeCases:
         # No keywords = neutral 0.5 * 0.4 = 0.2
         assert score == 0.8
 
+    @pytest.mark.fast
     def test_case_insensitive_keywords(self):
         """Keywords are case-insensitive in the function."""
         # Note: The function expects lowercase keywords as input
@@ -460,6 +485,7 @@ class TestEdgeCases:
         )
         assert score == 0.6  # Different source, same keyword
 
+    @pytest.mark.fast
     def test_many_keywords_partial_overlap(self):
         """Many keywords with partial overlap."""
         score = calculate_source_diversity_score(
@@ -476,6 +502,7 @@ class TestEdgeCases:
 class TestRealWorldScenarios:
     """Test realistic scenarios for diversity scoring."""
 
+    @pytest.mark.fast
     def test_documentary_footage_diversity(self):
         """Documentary with earthquake footage - similar topics."""
         # V1-V3 are all earthquake videos
@@ -497,6 +524,7 @@ class TestRealWorldScenarios:
         # 1 of 4 overlap (destruction) = 0.75 * 0.4 = 0.3
         assert score == 0.9
 
+    @pytest.mark.fast
     def test_cooking_show_variety(self):
         """Cooking show needs variety in recipe types."""
         v1_v3_sources = {

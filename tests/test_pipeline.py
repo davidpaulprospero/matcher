@@ -88,6 +88,7 @@ class MockStage(Stage):
 class TestPipelineOrchestratorInit:
     """Test PipelineOrchestrator initialization."""
 
+    @pytest.mark.fast
     def test_init_with_minimal_args(self, temp_dir):
         """Test initialization with minimal arguments."""
         config = Config()
@@ -102,6 +103,7 @@ class TestPipelineOrchestratorInit:
         assert pipeline.current_stage is None
         assert pipeline.stage_timings == {}
 
+    @pytest.mark.fast
     def test_init_with_stages(self, temp_dir):
         """Test initialization with pre-defined stages."""
         config = Config()
@@ -112,6 +114,7 @@ class TestPipelineOrchestratorInit:
         assert pipeline.stages[0].name == "stage1"
         assert pipeline.stages[1].name == "stage2"
 
+    @pytest.mark.fast
     def test_add_stage_fluent_interface(self, temp_dir):
         """Test adding stages using fluent interface."""
         config = Config()
@@ -127,6 +130,7 @@ class TestPipelineOrchestratorInit:
 class TestPipelineCheckpoint:
     """Test checkpoint loading and validation."""
 
+    @pytest.mark.fast
     def test_load_checkpoint_not_exists(self, temp_dir):
         """Test loading checkpoint when it doesn't exist."""
         config = Config()
@@ -137,6 +141,7 @@ class TestPipelineCheckpoint:
         assert result is False
         assert pipeline.resume_mode is False
 
+    @pytest.mark.fast
     def test_load_checkpoint_invalid(self, temp_dir):
         """Test loading checkpoint when validation fails."""
         config = Config()
@@ -158,6 +163,7 @@ class TestPipelineCheckpoint:
             assert pipeline.resume_mode is False
             mock_logger.error.assert_called_once()
 
+    @pytest.mark.fast
     def test_load_checkpoint_valid_with_warnings(self, temp_dir):
         """Test loading valid checkpoint with warnings."""
         config = Config()
@@ -179,6 +185,7 @@ class TestPipelineCheckpoint:
             assert pipeline.resume_mode is True
             mock_logger.warning.assert_called_once()
 
+    @pytest.mark.fast
     def test_clear_checkpoint(self, temp_dir):
         """Test clearing checkpoint."""
         config = Config()
@@ -195,6 +202,7 @@ class TestPipelineCheckpoint:
 class TestPipelineRun:
     """Test pipeline execution logic."""
 
+    @pytest.mark.fast
     def test_run_empty_pipeline(self, temp_dir):
         """Test running pipeline with no stages."""
         config = Config()
@@ -205,6 +213,7 @@ class TestPipelineRun:
         assert result is True
         assert pipeline.stage_timings == {}
 
+    @pytest.mark.fast
     def test_run_single_stage_success(self, temp_dir):
         """Test running pipeline with one successful stage."""
         config = Config()
@@ -219,6 +228,7 @@ class TestPipelineRun:
         assert pipeline.stage_timings["test_stage"] >= 0  # Can be 0.0 for very fast execution
         assert pipeline.current_stage is None  # Cleared after run
 
+    @pytest.mark.fast
     def test_run_multiple_stages_success(self, temp_dir):
         """Test running pipeline with multiple successful stages."""
         config = Config()
@@ -238,6 +248,7 @@ class TestPipelineRun:
         assert "stage2" in pipeline.stage_timings
         assert "stage3" in pipeline.stage_timings
 
+    @pytest.mark.fast
     def test_run_stage_failure(self, temp_dir):
         """Test pipeline stops on stage failure."""
         config = Config()
@@ -258,6 +269,7 @@ class TestPipelineRun:
             mock_logger.error.assert_called()
             mock_logger.warning.assert_called()  # Warnings from failed stage
 
+    @pytest.mark.fast
     def test_run_validation_failure(self, temp_dir):
         """Test pipeline stops if stage validation fails."""
         config = Config()
@@ -283,6 +295,7 @@ class TestPipelineRun:
 class TestPipelineStageFiltering:
     """Test stage filtering with skip_stages and only_stages."""
 
+    @pytest.mark.fast
     def test_skip_stages(self, temp_dir):
         """Test skipping specific stages."""
         config = Config()
@@ -301,6 +314,7 @@ class TestPipelineStageFiltering:
         assert stages[2]._run_called is True
         assert "stage2" not in pipeline.stage_timings
 
+    @pytest.mark.fast
     def test_only_stages(self, temp_dir):
         """Test running only specific stages."""
         config = Config()
@@ -319,6 +333,7 @@ class TestPipelineStageFiltering:
         assert stages[2]._run_called is True
         assert "stage2" not in pipeline.stage_timings
 
+    @pytest.mark.fast
     def test_skip_stages_and_only_stages(self, temp_dir):
         """Test combining skip_stages and only_stages."""
         config = Config()
@@ -346,6 +361,7 @@ class TestPipelineStageFiltering:
 class TestPipelineResume:
     """Test resume functionality with checkpoint."""
 
+    @pytest.mark.fast
     def test_resume_skip_completed_stage(self, temp_dir):
         """Test resuming skips stages already in checkpoint."""
         config = Config()
@@ -366,6 +382,7 @@ class TestPipelineResume:
         assert stage1._restore_called is True  # Restored from checkpoint
         assert stage2._run_called is True  # Should run
 
+    @pytest.mark.fast
     def test_resume_restore_failure(self, temp_dir):
         """Test handling restore failure during resume."""
         config = Config()
@@ -387,6 +404,7 @@ class TestPipelineResume:
 class TestPipelineSummary:
     """Test pipeline summary generation."""
 
+    @pytest.mark.fast
     def test_get_summary_empty_pipeline(self, temp_dir):
         """Test summary for pipeline that hasn't run."""
         config = Config()
@@ -399,6 +417,7 @@ class TestPipelineSummary:
         assert summary['stage_timings'] == {}
         assert 'state' in summary
 
+    @pytest.mark.fast
     def test_get_summary_after_run(self, temp_dir):
         """Test summary after running pipeline."""
         config = Config()
@@ -418,6 +437,7 @@ class TestPipelineSummary:
 class TestPipelineFactories:
     """Test factory functions for creating pipelines."""
 
+    @pytest.mark.fast
     def test_create_default_pipeline(self, temp_dir):
         """Test creating default pipeline."""
         config = Config()
@@ -434,6 +454,7 @@ class TestPipelineFactories:
         assert "MATCH" in stage_names
         assert "OUTPUT" in stage_names
 
+    @pytest.mark.fast
     def test_create_default_pipeline_audio_first(self, temp_dir):
         """Test creating default pipeline with audio-first mode."""
         config = Config()
@@ -450,6 +471,7 @@ class TestPipelineFactories:
         output_idx = stage_names.index("OUTPUT")
         assert match_idx < download_segments_idx < output_idx
 
+    @pytest.mark.fast
     def test_create_match_only_pipeline(self, temp_dir):
         """Test creating match-only pipeline."""
         config = Config()
@@ -475,6 +497,7 @@ class TestPipelineFactories:
 class TestPipelineCheckpointSaving:
     """Test checkpoint saving during pipeline execution."""
 
+    @pytest.mark.fast
     def test_checkpoint_saved_after_stage(self, temp_dir):
         """Test that checkpoint is saved after each successful stage."""
         config = Config()
@@ -492,6 +515,7 @@ class TestPipelineCheckpointSaving:
         assert call_args[0][1]['stage'] == "test_stage"
         assert 'segments' in call_args[0][1]
 
+    @pytest.mark.fast
     def test_checkpoint_not_saved_on_failure(self, temp_dir):
         """Test that checkpoint is not saved if stage fails."""
         config = Config()
@@ -510,6 +534,7 @@ class TestPipelineCheckpointSaving:
 class TestPipelineTimingTracking:
     """Test stage timing tracking."""
 
+    @pytest.mark.fast
     def test_timing_tracked_per_stage(self, temp_dir):
         """Test that timing is tracked for each stage."""
         config = Config()
@@ -526,6 +551,7 @@ class TestPipelineTimingTracking:
         assert pipeline.state.stage_timings['stage1'] == pipeline.stage_timings['stage1']
         assert pipeline.state.stage_timings['stage2'] == pipeline.stage_timings['stage2']
 
+    @pytest.mark.fast
     def test_timing_not_tracked_for_skipped_stages(self, temp_dir):
         """Test that timing is not tracked for skipped stages."""
         config = Config()
@@ -545,6 +571,7 @@ class TestPipelineTimingTracking:
 class TestPipelineCoverage:
     """Test pipeline coverage gaps."""
 
+    @pytest.mark.fast
     def test_load_checkpoint_returns_false_when_data_is_none(self):
         """Test line 83: Returns False when checkpoint.load() returns None."""
         from src.pipeline import PipelineOrchestrator
@@ -561,6 +588,7 @@ class TestPipelineCoverage:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_run_calls_load_checkpoint_when_resume_true(self, temp_dir):
         """Test line 119: load_checkpoint() is called when resume=True."""
         from src.pipeline import PipelineOrchestrator

@@ -44,6 +44,7 @@ class TestBaseMediaClient:
         assert client.output_dir == output_dir
         assert client.config == config
 
+    @pytest.mark.fast
     def test_init_with_custom_params(self, tmp_path):
         """Test initialization with custom parameters."""
         config = MagicMock()
@@ -62,6 +63,7 @@ class TestBaseMediaClient:
         assert client._min_interval == 0.5
         assert client.session.headers["User-Agent"] == "CustomAgent/1.0"
 
+    @pytest.mark.fast
     def test_rate_limit_delays(self, tmp_path):
         """Test that _rate_limit() enforces minimum delay."""
         config = MagicMock()
@@ -102,6 +104,7 @@ class TestBaseMediaClient:
         # Should not have delayed much
         assert elapsed < 0.02
 
+    @pytest.mark.fast
     def test_download_with_timeout_success(self, tmp_path):
         """Test successful download."""
         config = MagicMock()
@@ -122,6 +125,7 @@ class TestBaseMediaClient:
             assert result is True
             assert output_path.exists()
 
+    @pytest.mark.fast
     def test_download_with_timeout_file_too_small(self, tmp_path):
         """Test download failure due to small file size."""
         config = MagicMock()
@@ -142,6 +146,7 @@ class TestBaseMediaClient:
             assert result is False
             assert not output_path.exists()  # Should be deleted
 
+    @pytest.mark.requires_network
     def test_download_with_timeout_exception(self, tmp_path):
         """Test download failure due to exception."""
         config = MagicMock()
@@ -157,6 +162,7 @@ class TestBaseMediaClient:
             assert result is False
             assert not output_path.exists()
 
+    @pytest.mark.fast
     def test_download_with_timeout_exception_cleanup(self, tmp_path):
         """Test that partial download is cleaned up on exception."""
         config = MagicMock()
@@ -175,6 +181,7 @@ class TestBaseMediaClient:
             assert result is False
             assert not output_path.exists()  # Should be deleted
 
+    @pytest.mark.fast
     def test_download_with_timeout_custom_timeout(self, tmp_path):
         """Test download with custom timeout override."""
         config = MagicMock()
@@ -197,6 +204,7 @@ class TestBaseMediaClient:
             call_kwargs = mock_get.call_args[1]
             assert call_kwargs['timeout'] == 60
 
+    @pytest.mark.fast
     def test_cleanup(self, tmp_path):
         """Test cleanup method closes session."""
         config = MagicMock()
@@ -209,6 +217,7 @@ class TestBaseMediaClient:
 
         mock_session.close.assert_called_once()
 
+    @pytest.mark.fast
     def test_cleanup_no_session(self, tmp_path):
         """Test cleanup when session doesn't exist."""
         config = MagicMock()
@@ -240,6 +249,7 @@ class TestPexelsVideoClient:
         assert client.max_duration == 30.0
         assert client.prefer_hd is True
 
+    @pytest.mark.requires_api
     def test_init_api_key_from_env(self, tmp_path):
         """Test initialization with API key from environment."""
         config = MagicMock()
@@ -251,6 +261,7 @@ class TestPexelsVideoClient:
             )
             assert client.api_key == "env_api_key"
 
+    @pytest.mark.fast
     def test_init_custom_params(self, tmp_path):
         """Test initialization with custom parameters."""
         config = MagicMock()
@@ -270,6 +281,7 @@ class TestPexelsVideoClient:
         assert client.prefer_hd is False
         assert client.download_timeout == 120
 
+    @pytest.mark.requires_api
     def test_search_no_api_key(self, tmp_path):
         """Test search returns empty list when no API key."""
         config = MagicMock()
@@ -290,6 +302,7 @@ class TestPexelsVideoClient:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.fast
     def test_search_success(self, tmp_path):
         """Test successful video search."""
         config = MagicMock()
@@ -331,6 +344,7 @@ class TestPexelsVideoClient:
             assert results[0].height == 1080  # Prefer HD
             assert results[0].duration == 10
 
+    @pytest.mark.fast
     def test_search_duration_filter(self, tmp_path):
         """Test that duration filter works."""
         config = MagicMock()
@@ -358,6 +372,7 @@ class TestPexelsVideoClient:
             assert len(results) == 2
             assert all(r.duration >= 5.0 and r.duration <= 20.0 for r in results)
 
+    @pytest.mark.fast
     def test_search_no_video_files(self, tmp_path):
         """Test that videos without files are skipped."""
         config = MagicMock()
@@ -382,6 +397,7 @@ class TestPexelsVideoClient:
             assert len(results) == 1
             assert results[0].id == "3"
 
+    @pytest.mark.fast
     def test_search_exception(self, tmp_path):
         """Test search handles exception gracefully."""
         config = MagicMock()
@@ -395,6 +411,7 @@ class TestPexelsVideoClient:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.fast
     def test_download_video_success(self, tmp_path):
         """Test successful video download."""
         config = MagicMock()
@@ -426,6 +443,7 @@ class TestPexelsVideoClient:
             assert Path(result).exists()
             assert "p12345678.mp4" in result  # Source letter + short ID
 
+    @pytest.mark.fast
     def test_download_video_no_download_url(self, tmp_path):
         """Test download returns None when no download URL."""
         config = MagicMock()
@@ -450,6 +468,7 @@ class TestPexelsVideoClient:
         result = client.download_video(video)
         assert result is None
 
+    @pytest.mark.fast
     def test_download_video_file_exists(self, tmp_path):
         """Test download returns existing file path."""
         config = MagicMock()
@@ -479,6 +498,7 @@ class TestPexelsVideoClient:
 
         assert result == str(existing_file)
 
+    @pytest.mark.fast
     def test_download_video_exception(self, tmp_path):
         """Test download handles exception and cleans up."""
         config = MagicMock()
@@ -507,6 +527,7 @@ class TestPexelsVideoClient:
             # File should not exist
             assert not (tmp_path / "p12345678.mp4").exists()
 
+    @pytest.mark.fast
     def test_download_video_exception_cleanup(self, tmp_path):
         """Test that partial file is cleaned up on exception."""
         config = MagicMock()
@@ -542,6 +563,7 @@ class TestPexelsVideoClient:
             # Partial file should be cleaned up
             assert not (tmp_path / "p12345678.mp4").exists()
 
+    @pytest.mark.fast
     def test_search_and_download(self, tmp_path):
         """Test search_and_download method."""
         config = MagicMock()
@@ -567,6 +589,7 @@ class TestPexelsVideoClient:
 
                 assert len(results) == 2
 
+    @pytest.mark.fast
     def test_search_and_download_partial_success(self, tmp_path):
         """Test search_and_download when some downloads fail."""
         config = MagicMock()
@@ -606,6 +629,7 @@ class TestPixabayVideoClient:
 
         assert client.api_key == "test_api_key"
 
+    @pytest.mark.requires_api
     def test_init_api_key_from_env(self, tmp_path):
         """Test initialization with API key from environment."""
         config = MagicMock()
@@ -617,6 +641,7 @@ class TestPixabayVideoClient:
             )
             assert client.api_key == "env_pixabay_key"
 
+    @pytest.mark.fast
     def test_search_no_api_key(self, tmp_path):
         """Test search returns empty list when no API key."""
         config = MagicMock()
@@ -631,6 +656,7 @@ class TestPixabayVideoClient:
         results = client.search("test")
         assert results == []
 
+    @pytest.mark.fast
     def test_search_success(self, tmp_path):
         """Test successful video search."""
         config = MagicMock()
@@ -663,6 +689,7 @@ class TestPixabayVideoClient:
             assert results[0].source == "pixabay"
             assert results[0].height == 1080  # Large preferred
 
+    @pytest.mark.fast
     def test_search_duration_filter(self, tmp_path):
         """Test that duration filter works."""
         config = MagicMock()
@@ -689,6 +716,7 @@ class TestPixabayVideoClient:
             assert len(results) == 1
             assert results[0].id == "2"
 
+    @pytest.mark.fast
     def test_search_video_size_fallback(self, tmp_path):
         """Test that video size falls back from large to medium to small."""
         config = MagicMock()
@@ -718,6 +746,7 @@ class TestPixabayVideoClient:
             assert results[1].download_url == "small_url"
             assert results[2].download_url == "med_url"
 
+    @pytest.mark.fast
     def test_search_no_valid_video_url(self, tmp_path):
         """Test that videos without valid URLs are skipped."""
         config = MagicMock()
@@ -742,6 +771,7 @@ class TestPixabayVideoClient:
             assert len(results) == 1
             assert results[0].id == "3"
 
+    @pytest.mark.fast
     def test_search_exception(self, tmp_path):
         """Test search handles exception gracefully."""
         config = MagicMock()
@@ -755,6 +785,7 @@ class TestPixabayVideoClient:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.fast
     def test_download_video_success(self, tmp_path):
         """Test successful video download."""
         config = MagicMock()
@@ -785,6 +816,7 @@ class TestPixabayVideoClient:
             assert result is not None
             assert Path(result).exists()
 
+    @pytest.mark.fast
     def test_download_video_no_download_url(self, tmp_path):
         """Test download returns None when no download URL."""
         config = MagicMock()
@@ -809,6 +841,7 @@ class TestPixabayVideoClient:
         result = client.download_video(video)
         assert result is None
 
+    @pytest.mark.fast
     def test_download_video_file_exists(self, tmp_path):
         """Test download returns existing file path."""
         config = MagicMock()
@@ -838,6 +871,7 @@ class TestPixabayVideoClient:
 
         assert result == str(existing_file)
 
+    @pytest.mark.fast
     def test_download_video_exception(self, tmp_path):
         """Test download handles exception and cleans up."""
         config = MagicMock()
@@ -863,6 +897,7 @@ class TestPixabayVideoClient:
             result = client.download_video(video)
             assert result is None
 
+    @pytest.mark.fast
     def test_download_video_cleanup_partial_file(self, tmp_path):
         """Test that partial file is cleaned up on exception."""
         config = MagicMock()
@@ -897,6 +932,7 @@ class TestPixabayVideoClient:
             assert result is None
             assert not partial_file.exists()
 
+    @pytest.mark.fast
     def test_search_and_download(self, tmp_path):
         """Test search_and_download method."""
         config = MagicMock()
@@ -920,6 +956,7 @@ class TestPixabayVideoClient:
 
                 assert len(results) == 2
 
+    @pytest.mark.fast
     def test_search_and_download_max_limit(self, tmp_path):
         """Test search_and_download respects max_videos limit."""
         config = MagicMock()
@@ -977,6 +1014,7 @@ class TestVideoClientLongIds:
             # Should be p + last 8 chars + .mp4
             assert filename == "p90123456.mp4"
 
+    @pytest.mark.fast
     def test_pixabay_short_id_unchanged(self, tmp_path):
         """Test Pixabay keeps short IDs unchanged."""
         config = MagicMock()
@@ -1045,6 +1083,7 @@ class TestVideoClientPreferHD:
             assert results[0].download_url == "hd_url"
             assert results[0].height == 1080
 
+    @pytest.mark.fast
     def test_pexels_prefer_hd_false(self, tmp_path):
         """Test Pexels doesn't sort by height when HD not preferred."""
         config = MagicMock()
@@ -1081,6 +1120,7 @@ class TestVideoClientPreferHD:
 class TestPexelsAPIRateLimitingUS001:
     """US-001: Test PexelsClient.search_videos() handles API rate limiting with retry backoff."""
 
+    @pytest.mark.requires_network
     def test_search_handles_429_rate_limit_error(self, tmp_path):
         """Test that 429 rate limit error returns empty list without crash."""
         config = MagicMock()
@@ -1101,6 +1141,7 @@ class TestPexelsAPIRateLimitingUS001:
             # Should return empty list, not crash
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_handles_rate_limit_headers(self, tmp_path):
         """Test that rate limit headers are handled gracefully."""
         config = MagicMock()
@@ -1123,6 +1164,7 @@ class TestPexelsAPIRateLimitingUS001:
             # Should gracefully return empty list
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_multiple_rate_limits_no_crash(self, tmp_path):
         """Test that consecutive rate limit errors don't cause crash."""
         config = MagicMock()
@@ -1149,6 +1191,7 @@ class TestPexelsAPIRateLimitingUS001:
 class TestPexelsNetworkTimeoutUS001:
     """US-001: Test PexelsClient.search_videos() handles network timeout gracefully."""
 
+    @pytest.mark.requires_network
     def test_search_handles_connect_timeout(self, tmp_path):
         """Test that connection timeout returns empty list."""
         config = MagicMock()
@@ -1162,6 +1205,7 @@ class TestPexelsNetworkTimeoutUS001:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_handles_read_timeout(self, tmp_path):
         """Test that read timeout returns empty list."""
         config = MagicMock()
@@ -1175,6 +1219,7 @@ class TestPexelsNetworkTimeoutUS001:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_handles_connection_error(self, tmp_path):
         """Test that connection error returns empty list."""
         config = MagicMock()
@@ -1188,6 +1233,7 @@ class TestPexelsNetworkTimeoutUS001:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.requires_network
     def test_download_handles_timeout(self, tmp_path):
         """Test that download timeout returns None."""
         config = MagicMock()
@@ -1234,6 +1280,7 @@ class TestPexelsMalformedJSONUS001:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.fast
     def test_search_handles_missing_videos_key(self, tmp_path):
         """Test that response without 'videos' key returns empty list."""
         config = MagicMock()
@@ -1251,6 +1298,7 @@ class TestPexelsMalformedJSONUS001:
             # Should return empty list because "videos" defaults to []
             assert results == []
 
+    @pytest.mark.fast
     def test_search_handles_null_videos(self, tmp_path):
         """Test that null videos array returns empty list."""
         config = MagicMock()
@@ -1267,6 +1315,7 @@ class TestPexelsMalformedJSONUS001:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.fast
     def test_search_handles_malformed_video_entry(self, tmp_path):
         """Test that malformed video entries are handled gracefully (returns empty)."""
         config = MagicMock()
@@ -1289,6 +1338,7 @@ class TestPexelsMalformedJSONUS001:
             # Exception is caught and returns empty list (graceful degradation)
             assert results == []
 
+    @pytest.mark.fast
     def test_search_handles_empty_dict_entries(self, tmp_path):
         """Test that empty dict entries are skipped gracefully."""
         config = MagicMock()
@@ -1315,6 +1365,7 @@ class TestPexelsMalformedJSONUS001:
             assert len(results) == 1
             assert results[0].id == "4"
 
+    @pytest.mark.fast
     def test_search_handles_unicode_decode_error(self, tmp_path):
         """Test that response with encoding issues returns empty list."""
         config = MagicMock()
@@ -1355,6 +1406,7 @@ class TestPexelsPaginationUS001:
             call_kwargs = mock_get.call_args[1]
             assert call_kwargs['params']['per_page'] == 15
 
+    @pytest.mark.fast
     def test_search_returns_correct_number_of_results(self, tmp_path):
         """Test that search respects max_results limit."""
         config = MagicMock()
@@ -1379,6 +1431,7 @@ class TestPexelsPaginationUS001:
             # but if API returns more, we get more
             assert len(results) == 20
 
+    @pytest.mark.fast
     def test_search_pagination_params_include_orientation(self, tmp_path):
         """Test that search includes orientation parameter for landscape videos."""
         config = MagicMock()
@@ -1397,6 +1450,7 @@ class TestPexelsPaginationUS001:
             call_kwargs = mock_get.call_args[1]
             assert call_kwargs['params']['orientation'] == 'landscape'
 
+    @pytest.mark.fast
     def test_search_pagination_uses_correct_headers(self, tmp_path):
         """Test that search includes Authorization header."""
         config = MagicMock()
@@ -1415,6 +1469,7 @@ class TestPexelsPaginationUS001:
             call_kwargs = mock_get.call_args[1]
             assert call_kwargs['headers']['Authorization'] == 'my_test_key'
 
+    @pytest.mark.fast
     def test_search_and_download_iterates_through_results(self, tmp_path):
         """Test search_and_download iterates through search results."""
         config = MagicMock()
@@ -1483,6 +1538,7 @@ class TestPexelsDownloadURLValidationUS002:
         result = client.download_video(video)
         assert result is None
 
+    @pytest.mark.fast
     def test_download_rejects_empty_string_url(self, tmp_path):
         """Test that download returns None when URL is empty string."""
         config = MagicMock()
@@ -1507,6 +1563,7 @@ class TestPexelsDownloadURLValidationUS002:
         result = client.download_video(video)
         assert result is None
 
+    @pytest.mark.requires_network
     def test_download_rejects_whitespace_only_url(self, tmp_path):
         """Test that download handles whitespace-only URL gracefully."""
         config = MagicMock()
@@ -1533,6 +1590,7 @@ class TestPexelsDownloadURLValidationUS002:
             result = client.download_video(video)
             assert result is None
 
+    @pytest.mark.fast
     def test_download_does_not_call_session_on_empty_url(self, tmp_path):
         """Test that session.get() is never called when URL is empty."""
         config = MagicMock()
@@ -1564,6 +1622,7 @@ class TestPexelsDownloadURLValidationUS002:
 class TestPexelsPartialDownloadUS002:
     """US-002: Test PexelsClient.download_video() handles partial download scenarios."""
 
+    @pytest.mark.requires_network
     def test_download_cleans_up_partial_file_on_network_error(self, tmp_path):
         """Test that partial file is deleted when download fails mid-stream."""
         config = MagicMock()
@@ -1599,6 +1658,7 @@ class TestPexelsPartialDownloadUS002:
             # Partial file should be cleaned up
             assert not filepath.exists()
 
+    @pytest.mark.requires_network
     def test_download_cleans_up_on_timeout(self, tmp_path):
         """Test that partial file is cleaned up on timeout."""
         config = MagicMock()
@@ -1633,6 +1693,7 @@ class TestPexelsPartialDownloadUS002:
             assert result is None
             assert not filepath.exists()
 
+    @pytest.mark.fast
     def test_download_skips_existing_file(self, tmp_path):
         """Test that existing complete file is not re-downloaded (resume-by-skip behavior)."""
         config = MagicMock()
@@ -1666,6 +1727,7 @@ class TestPexelsPartialDownloadUS002:
             # Should not call HTTP (resume behavior = skip if exists)
             mock_get.assert_not_called()
 
+    @pytest.mark.fast
     def test_download_restarts_from_zero_if_partial_file_exists(self, tmp_path):
         """Test that partial file from interrupted download gets overwritten (no HTTP Range resume)."""
         config = MagicMock()
@@ -1740,6 +1802,7 @@ class TestPexelsQualityOptionsParsingUS002:
             assert results[0].quality == "uhd"
             assert results[0].download_url == "url_uhd"
 
+    @pytest.mark.fast
     def test_parses_mixed_file_types(self, tmp_path):
         """Test that different file types are parsed correctly."""
         config = MagicMock()
@@ -1776,6 +1839,7 @@ class TestPexelsQualityOptionsParsingUS002:
             assert results[0].file_type == "mp4"
             assert results[1].file_type == "webm"
 
+    @pytest.mark.fast
     def test_handles_missing_quality_field(self, tmp_path):
         """Test that missing quality field defaults to 'unknown'."""
         config = MagicMock()
@@ -1804,6 +1868,7 @@ class TestPexelsQualityOptionsParsingUS002:
             assert len(results) == 1
             assert results[0].quality == "unknown"
 
+    @pytest.mark.fast
     def test_handles_missing_dimensions(self, tmp_path):
         """Test that missing width/height default to 0."""
         config = MagicMock()
@@ -1869,6 +1934,7 @@ class TestPexelsQualityPreferenceUS002:
             assert results[0].download_url == "4k_url"
             assert results[0].height == 2160
 
+    @pytest.mark.fast
     def test_prefer_hd_false_keeps_first_file(self, tmp_path):
         """Test that prefer_hd=False uses original order (first file)."""
         config = MagicMock()
@@ -1900,6 +1966,7 @@ class TestPexelsQualityPreferenceUS002:
             assert results[0].download_url == "sd_url"
             assert results[0].height == 480
 
+    @pytest.mark.fast
     def test_prefer_hd_with_only_sd_available(self, tmp_path):
         """Test that prefer_hd=True still works when only SD is available."""
         config = MagicMock()
@@ -1930,6 +1997,7 @@ class TestPexelsQualityPreferenceUS002:
             assert len(results) == 1
             assert results[0].download_url == "sd_url"
 
+    @pytest.mark.fast
     def test_quality_preference_sorting_stable(self, tmp_path):
         """Test that quality sorting is stable for equal heights."""
         config = MagicMock()
@@ -1984,6 +2052,7 @@ class TestPexelsAPIKeyValidationUS002:
             # Should NOT make HTTP request
             mock_get.assert_not_called()
 
+    @pytest.mark.fast
     def test_search_logs_debug_message_for_missing_key(self, tmp_path, caplog):
         """Test that missing API key logs a debug message."""
         import logging
@@ -2000,6 +2069,7 @@ class TestPexelsAPIKeyValidationUS002:
 
         assert "Pexels API key not available" in caplog.text
 
+    @pytest.mark.requires_network
     def test_invalid_api_key_returns_empty_on_401(self, tmp_path):
         """Test that invalid API key (401 response) returns empty list."""
         config = MagicMock()
@@ -2020,6 +2090,7 @@ class TestPexelsAPIKeyValidationUS002:
             results = client.search("test")
             assert results == []
 
+    @pytest.mark.requires_network
     def test_invalid_api_key_logs_error(self, tmp_path, caplog):
         """Test that invalid API key logs appropriate error message."""
         import logging
@@ -2043,6 +2114,7 @@ class TestPexelsAPIKeyValidationUS002:
 
         assert "Pexels video search error" in caplog.text
 
+    @pytest.mark.requires_api
     def test_api_key_from_constructor_takes_precedence(self, tmp_path):
         """Test that constructor API key takes precedence over environment variable."""
         config = MagicMock()
@@ -2055,6 +2127,7 @@ class TestPexelsAPIKeyValidationUS002:
             )
             assert client.api_key == "constructor_key"
 
+    @pytest.mark.requires_api
     def test_api_key_falls_back_to_env_variable(self, tmp_path):
         """Test that missing constructor key falls back to environment variable."""
         config = MagicMock()

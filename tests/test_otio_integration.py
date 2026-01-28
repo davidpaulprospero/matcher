@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 class TestOutputStageIntegration:
     """Test that OutputStage can import all required functions."""
 
+    @pytest.mark.fast
     def test_output_stage_imports(self):
         """Test the exact imports used by OutputStage."""
         # This is the exact import block from OutputStage (lines 79-86)
@@ -38,6 +39,7 @@ class TestOutputStageIntegration:
 
         print("✓ All OutputStage imports successful")
 
+    @pytest.mark.fast
     def test_output_stage_module_compiles(self):
         """Test that OutputStage itself compiles with new imports."""
         from src.stages import output
@@ -49,6 +51,7 @@ class TestOutputStageIntegration:
 class TestPackageStructure:
     """Test the complete package structure."""
 
+    @pytest.mark.fast
     def test_package_has_all_modules(self):
         """Verify all expected modules exist in package."""
         import src.otio as otio
@@ -67,6 +70,7 @@ class TestPackageStructure:
 
         print("✓ All expected modules present in package")
 
+    @pytest.mark.fast
     def test_package_metadata(self):
         """Test package has proper metadata."""
         import src.otio as otio
@@ -94,6 +98,7 @@ class TestPackageStructure:
 class TestModuleCoordination:
     """Test that modules work together correctly."""
 
+    @pytest.mark.fast
     def test_timeline_uses_utils(self):
         """Test timeline module uses utility functions."""
         from src.otio import timeline, utils
@@ -104,6 +109,7 @@ class TestModuleCoordination:
 
         print("✓ Timeline module can access utils")
 
+    @pytest.mark.fast
     def test_entities_uses_utils(self):
         """Test entities module uses utility functions."""
         from src.otio import entities, utils
@@ -113,6 +119,7 @@ class TestModuleCoordination:
 
         print("✓ Entities module can access utils")
 
+    @pytest.mark.fast
     def test_export_uses_reporting(self):
         """Test export module uses reporting functions."""
         from src.otio import export, reporting
@@ -126,6 +133,7 @@ class TestModuleCoordination:
 class TestBackwardCompatibilityComplete:
     """Comprehensive backward compatibility test."""
 
+    @pytest.mark.fast
     def test_all_original_functions_present(self):
         """Verify ALL original otio_builder functions are accessible."""
         import src.otio as otio
@@ -146,6 +154,7 @@ class TestBackwardCompatibilityComplete:
 
         print(f"✓ All {len(original_functions)} original functions present and callable")
 
+    @pytest.mark.fast
     def test_import_from_package_root(self):
         """Test that functions can be imported from package root."""
         # Test different import styles
@@ -163,6 +172,7 @@ class TestBackwardCompatibilityComplete:
 class TestRefactoringSuccess:
     """Verify the refactoring achieved its goals."""
 
+    @pytest.mark.fast
     def test_modular_structure(self):
         """Test that code is now modular."""
         from src.otio import (
@@ -184,6 +194,7 @@ class TestRefactoringSuccess:
 
         print(f"✓ Successfully split into {len(modules)} focused modules")
 
+    @pytest.mark.fast
     def test_code_organization(self):
         """Test that related functions are grouped logically."""
         from src.otio import export, reporting, xml_export

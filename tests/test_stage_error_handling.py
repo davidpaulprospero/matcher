@@ -77,6 +77,7 @@ def mock_checkpoint():
 class TestDownloadStageErrorHandling:
     """Tests for DownloadStage error handling."""
 
+    @pytest.mark.fast
     def test_download_stage_can_create_fail_result(self):
         """Test DownloadStage can return StageResult.fail() on network error."""
         # This tests the error handling mechanism - StageResult.fail() usage
@@ -85,6 +86,7 @@ class TestDownloadStageErrorHandling:
         assert result.success is False
         assert "Network" in result.error or "Connection" in result.error
 
+    @pytest.mark.fast
     def test_download_stage_validate_inputs_catches_config_error(self, mock_config, mock_state):
         """Test DownloadStage.validate_inputs() catches configuration errors."""
         from src.stages.download import DownloadStage
@@ -98,6 +100,7 @@ class TestDownloadStageErrorHandling:
         # Should either return error or handle gracefully
         assert validation_error is None or isinstance(validation_error, str)
 
+    @pytest.mark.fast
     def test_download_stage_no_keywords_returns_ok(self, mock_config, mock_state, mock_checkpoint, tmp_path):
         """Test DownloadStage returns success when no keywords to download."""
         from src.stages.download import DownloadStage
@@ -122,6 +125,7 @@ class TestDownloadStageErrorHandling:
 class TestTranscribeStageErrorHandling:
     """Tests for TranscribeStage error handling."""
 
+    @pytest.mark.fast
     def test_transcribe_stage_model_load_error_returns_fail(self):
         """Test TranscribeStage returns StageResult.fail() on model load error."""
         # This tests the error handling mechanism - StageResult.fail() usage
@@ -130,6 +134,7 @@ class TestTranscribeStageErrorHandling:
         assert result.success is False
         assert "Model" in result.error or "CUDA" in result.error
 
+    @pytest.mark.fast
     def test_transcribe_stage_no_videos_returns_ok(self, mock_config, mock_state, mock_checkpoint, tmp_path):
         """Test TranscribeStage returns success when no videos to transcribe."""
         from src.stages.transcribe import TranscribeStage
@@ -147,6 +152,7 @@ class TestTranscribeStageErrorHandling:
         # Should handle empty list gracefully
         assert result.success is True
 
+    @pytest.mark.fast
     def test_transcribe_stage_validate_inputs_returns_on_empty_videos(self, mock_config, mock_state):
         """Test TranscribeStage.validate_inputs() handles empty video lists."""
         from src.stages.transcribe import TranscribeStage
@@ -164,6 +170,7 @@ class TestTranscribeStageErrorHandling:
 class TestMatchStageErrorHandling:
     """Tests for MatchStage error handling."""
 
+    @pytest.mark.fast
     def test_match_stage_no_candidates_returns_fail(self, mock_config, mock_state, mock_checkpoint):
         """Test MatchStage returns StageResult.fail() when no candidates exist."""
         from src.stages.match import MatchStage
@@ -179,6 +186,7 @@ class TestMatchStageErrorHandling:
         validation_error = stage.validate_inputs(mock_state, mock_config)
         assert validation_error is not None
 
+    @pytest.mark.fast
     def test_match_stage_empty_embeddings_returns_fail(self, mock_config, mock_state, mock_checkpoint):
         """Test MatchStage handles empty embeddings gracefully."""
         from src.stages.match import MatchStage
@@ -193,6 +201,7 @@ class TestMatchStageErrorHandling:
         assert validation_error is not None
         assert "embeddings" in validation_error.lower() or "TRANSCRIBE" in validation_error
 
+    @pytest.mark.fast
     def test_match_stage_missing_voiceover_returns_fail(self, mock_config, mock_state, mock_checkpoint):
         """Test MatchStage fails with missing voiceover segments."""
         from src.stages.match import MatchStage
@@ -210,6 +219,7 @@ class TestMatchStageErrorHandling:
 class TestOutputStageErrorHandling:
     """Tests for OutputStage error handling."""
 
+    @pytest.mark.fast
     def test_output_stage_write_permission_error_returns_fail(self, mock_config, mock_state, mock_checkpoint, tmp_path):
         """Test OutputStage returns StageResult.fail() on write permission error."""
         from src.stages.output import OutputStage
@@ -238,6 +248,7 @@ class TestOutputStageErrorHandling:
         assert result.success is False
         assert result.error is not None
 
+    @pytest.mark.fast
     def test_output_stage_no_matches_returns_fail(self, mock_config, mock_state, mock_checkpoint):
         """Test OutputStage returns StageResult.fail() when no matches exist."""
         from src.stages.output import OutputStage
@@ -250,6 +261,7 @@ class TestOutputStageErrorHandling:
         assert validation_error is not None
         assert "matches" in validation_error.lower() or "MATCH" in validation_error
 
+    @pytest.mark.fast
     def test_output_stage_missing_output_dir_returns_fail(self, mock_config, mock_state, mock_checkpoint):
         """Test OutputStage fails when output directory not configured."""
         from src.stages.output import OutputStage
@@ -266,6 +278,7 @@ class TestOutputStageErrorHandling:
 class TestStageResultClass:
     """Tests for StageResult class behavior."""
 
+    @pytest.mark.fast
     def test_stage_result_fail_creates_failed_result(self):
         """Test StageResult.fail() creates a failed result."""
         result = StageResult.fail("Test error message")
@@ -274,6 +287,7 @@ class TestStageResultClass:
         assert result.error == "Test error message"
         assert result.data is None
 
+    @pytest.mark.fast
     def test_stage_result_fail_with_warnings(self):
         """Test StageResult.fail() can include warnings."""
         warnings = ["Warning 1", "Warning 2"]
@@ -282,6 +296,7 @@ class TestStageResultClass:
         assert result.success is False
         assert result.warnings == warnings
 
+    @pytest.mark.fast
     def test_stage_result_fail_with_metrics(self):
         """Test StageResult.fail() can include metrics."""
         metrics = StageMetrics(items_processed=10, items_failed=2)
@@ -292,6 +307,7 @@ class TestStageResultClass:
         assert result.metrics.items_processed == 10
         assert result.metrics.items_failed == 2
 
+    @pytest.mark.fast
     def test_stage_result_ok_creates_success_result(self):
         """Test StageResult.ok() creates a successful result."""
         data = {"key": "value"}
@@ -301,6 +317,7 @@ class TestStageResultClass:
         assert result.data == data
         assert result.error is None
 
+    @pytest.mark.fast
     def test_stage_result_bool_conversion(self):
         """Test StageResult bool conversion."""
         success = StageResult.ok({})
@@ -309,6 +326,7 @@ class TestStageResultClass:
         assert bool(success) is True
         assert bool(failure) is False
 
+    @pytest.mark.fast
     def test_stage_result_default_warnings_empty_list(self):
         """Test StageResult defaults warnings to empty list."""
         result = StageResult.fail("Error")
@@ -321,6 +339,7 @@ class TestStageResultClass:
 class TestStageMetricsClass:
     """Tests for StageMetrics class."""
 
+    @pytest.mark.fast
     def test_stage_metrics_default_values(self):
         """Test StageMetrics default values."""
         metrics = StageMetrics()
@@ -329,6 +348,7 @@ class TestStageMetricsClass:
         assert metrics.items_failed == 0
         assert metrics.duration_seconds == 0.0
 
+    @pytest.mark.fast
     def test_stage_metrics_to_dict(self):
         """Test StageMetrics.to_dict() serialization."""
         metrics = StageMetrics(
@@ -343,6 +363,7 @@ class TestStageMetricsClass:
         assert result['items_failed'] == 5
         assert result['duration_seconds'] == 10.5
 
+    @pytest.mark.fast
     def test_stage_metrics_from_dict(self):
         """Test StageMetrics.from_dict() deserialization."""
         data = {
@@ -357,6 +378,7 @@ class TestStageMetricsClass:
         assert metrics.items_failed == 3
         assert metrics.duration_seconds == 5.25
 
+    @pytest.mark.fast
     def test_stage_metrics_from_dict_missing_keys(self):
         """Test StageMetrics.from_dict() handles missing keys."""
         data = {'items_processed': 10}  # Missing other keys
@@ -371,6 +393,7 @@ class TestStageMetricsClass:
 class TestValidateInputsErrorHandling:
     """Tests for stage validate_inputs() error handling."""
 
+    @pytest.mark.fast
     def test_download_stage_validate_inputs_returns_none_on_valid(self, mock_config, mock_state):
         """Test DownloadStage.validate_inputs() returns None when valid."""
         from src.stages.download import DownloadStage
@@ -383,6 +406,7 @@ class TestValidateInputsErrorHandling:
         # May return None or error depending on other validations
         assert result is None or isinstance(result, str)
 
+    @pytest.mark.fast
     def test_match_stage_validate_inputs_returns_error_message(self, mock_config, mock_state):
         """Test MatchStage.validate_inputs() returns descriptive error."""
         from src.stages.match import MatchStage
@@ -399,6 +423,7 @@ class TestValidateInputsErrorHandling:
         # Should mention what's missing
         assert "voiceover" in result.lower() or "segment" in result.lower() or "Missing" in result
 
+    @pytest.mark.fast
     def test_output_stage_validate_inputs_returns_error_message(self, mock_config, mock_state):
         """Test OutputStage.validate_inputs() returns descriptive error."""
         from src.stages.output import OutputStage

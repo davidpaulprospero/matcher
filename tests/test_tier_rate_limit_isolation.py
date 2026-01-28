@@ -102,6 +102,7 @@ def create_downloader(tmp_path, rate_limit_config=None, **overrides):
 class TestTierRateLimitState:
     """Test the TierRateLimitState dataclass."""
 
+    @pytest.mark.fast
     def test_state_initializes_with_zeros(self):
         """Test that state initializes with default zero values."""
         from src.downloader.core import TierRateLimitState
@@ -112,6 +113,7 @@ class TestTierRateLimitState:
         assert state.in_recovery is False
         assert state.last_event_time is None
 
+    @pytest.mark.fast
     def test_state_reset_clears_values(self):
         """Test that reset() clears backoff state but not recovery mode."""
         from src.downloader.core import TierRateLimitState
@@ -129,6 +131,7 @@ class TestTierRateLimitState:
         # in_recovery is NOT reset - it's session-level
         assert state.in_recovery is True
 
+    @pytest.mark.fast
     def test_state_to_dict(self):
         """Test serialization to dictionary."""
         from src.downloader.core import TierRateLimitState
@@ -148,6 +151,7 @@ class TestTierRateLimitState:
             'last_event_time': "2026-01-25T10:00:00"
         }
 
+    @pytest.mark.fast
     def test_state_from_dict(self):
         """Test deserialization from dictionary."""
         from src.downloader.core import TierRateLimitState
@@ -165,6 +169,7 @@ class TestTierRateLimitState:
         assert state.in_recovery is False
         assert state.last_event_time == "2026-01-25T09:00:00"
 
+    @pytest.mark.fast
     def test_state_from_dict_handles_empty(self):
         """Test that from_dict handles empty dict."""
         from src.downloader.core import TierRateLimitState
@@ -173,6 +178,7 @@ class TestTierRateLimitState:
         assert state.backoff_count == 0
         assert state.total_delay == 0.0
 
+    @pytest.mark.fast
     def test_state_from_dict_handles_none(self):
         """Test that from_dict handles None."""
         from src.downloader.core import TierRateLimitState
@@ -184,6 +190,7 @@ class TestTierRateLimitState:
 class TestPerTierIsolationConfig:
     """Test per_tier_isolation configuration option."""
 
+    @pytest.mark.fast
     def test_config_defaults_to_true(self, tmp_path):
         """Test that per_tier_isolation defaults to True."""
         rate_config = MockRateLimitConfig()
@@ -191,6 +198,7 @@ class TestPerTierIsolationConfig:
 
         assert downloader._per_tier_isolation is True
 
+    @pytest.mark.fast
     def test_config_can_be_disabled(self, tmp_path):
         """Test that per_tier_isolation can be set to False."""
         rate_config = MockRateLimitConfig(per_tier_isolation=False)
@@ -198,6 +206,7 @@ class TestPerTierIsolationConfig:
 
         assert downloader._per_tier_isolation is False
 
+    @pytest.mark.fast
     def test_tier_states_initialized_for_all_tiers(self, tmp_path):
         """Test that tier states are initialized for all duration tiers."""
         downloader = create_downloader(tmp_path)
@@ -211,6 +220,7 @@ class TestPerTierIsolationConfig:
 class TestTierIsolatedBackoff:
     """Test that rate limits are isolated per tier."""
 
+    @pytest.mark.fast
     def test_tier_a_backoff_does_not_affect_tier_b(self, tmp_path):
         """Test that rate limit on tier A doesn't affect tier B backoff state."""
         rate_config = MockRateLimitConfig(
@@ -236,6 +246,7 @@ class TestTierIsolatedBackoff:
             assert short_state.backoff_count == 0
             assert short_state.total_delay == 0.0
 
+    @pytest.mark.fast
     def test_each_tier_tracks_independently(self, tmp_path):
         """Test that each tier maintains independent backoff counters."""
         rate_config = MockRateLimitConfig(
@@ -259,6 +270,7 @@ class TestTierIsolatedBackoff:
             assert downloader._tier_rate_limit_states['long'].backoff_count == 3
             assert downloader._tier_rate_limit_states['longer'].backoff_count == 0
 
+    @pytest.mark.fast
     def test_isolation_disabled_uses_global_state(self, tmp_path):
         """Test that when per_tier_isolation is False, global state is used."""
         rate_config = MockRateLimitConfig(
@@ -284,6 +296,7 @@ class TestTierIsolatedBackoff:
 class TestTierSpecificReset:
     """Test that reset only affects the specified tier."""
 
+    @pytest.mark.fast
     def test_reset_only_affects_specified_tier(self, tmp_path):
         """Test that _reset_rate_limit_backoff resets only the affected tier."""
         rate_config = MockRateLimitConfig(per_tier_isolation=True)
@@ -307,6 +320,7 @@ class TestTierSpecificReset:
             assert downloader._tier_rate_limit_states['long'].backoff_count == 0
             assert downloader._tier_rate_limit_states['long'].total_delay == 0.0
 
+    @pytest.mark.fast
     def test_reset_without_tier_resets_global(self, tmp_path):
         """Test that reset without tier parameter resets global state."""
         rate_config = MockRateLimitConfig(per_tier_isolation=False)
@@ -324,6 +338,7 @@ class TestTierSpecificReset:
 class TestTierRateLimitMetrics:
     """Test per-tier tracking in metrics."""
 
+    @pytest.mark.fast
     def test_metrics_track_events_per_tier(self, tmp_path):
         """Test that metrics track rate limit events per tier."""
         rate_config = MockRateLimitConfig(per_tier_isolation=True)
@@ -339,6 +354,7 @@ class TestTierRateLimitMetrics:
             assert metrics.tier_rate_limit_events.get('long', 0) == 1
             assert metrics.tier_rate_limit_events.get('medium', 0) == 0
 
+    @pytest.mark.fast
     def test_metrics_total_includes_all_tiers(self, tmp_path):
         """Test that total rate limit events includes all tiers."""
         rate_config = MockRateLimitConfig(per_tier_isolation=True)
@@ -355,6 +371,7 @@ class TestTierRateLimitMetrics:
 class TestMetricsTierDict:
     """Test tier_rate_limit_events dict in RateLimitMetrics."""
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_with_tier(self):
         """Test that record_rate_limit_event accepts tier parameter."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -367,6 +384,7 @@ class TestMetricsTierDict:
         assert metrics.tier_rate_limit_events == {'short': 2, 'long': 1}
         assert metrics.rate_limit_events == 3
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_without_tier(self):
         """Test that record_rate_limit_event works without tier."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -378,6 +396,7 @@ class TestMetricsTierDict:
         assert metrics.rate_limit_events == 2
         assert metrics.tier_rate_limit_events == {}
 
+    @pytest.mark.fast
     def test_tier_events_in_summary(self):
         """Test that tier events appear in summary output."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -392,6 +411,7 @@ class TestMetricsTierDict:
         assert "long: 2" in summary
         assert "short: 1" in summary
 
+    @pytest.mark.fast
     def test_tier_events_persistence(self):
         """Test that tier events are saved/loaded correctly."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -407,6 +427,7 @@ class TestMetricsTierDict:
 
         assert restored.tier_rate_limit_events == {'short': 1, 'long': 1}
 
+    @pytest.mark.fast
     def test_tier_events_cleared_on_reset(self):
         """Test that clear() clears tier events."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -423,6 +444,7 @@ class TestMetricsTierDict:
 class TestTierBackoffLogging:
     """Test logging includes tier information."""
 
+    @pytest.mark.fast
     def test_backoff_log_includes_tier(self, tmp_path, caplog):
         """Test that backoff log messages include tier label."""
         import logging
@@ -443,6 +465,7 @@ class TestTierBackoffLogging:
 class TestTierWithCookieRotation:
     """Test tier isolation with cookie rotation escalation."""
 
+    @pytest.mark.fast
     def test_tier_escalation_independent(self, tmp_path):
         """Test that one tier can escalate to rotation without affecting others."""
         rate_config = MockRateLimitConfig(
@@ -475,6 +498,7 @@ class TestTierWithCookieRotation:
 class TestConfigYamlIntegration:
     """Test config.yaml includes per_tier_isolation setting."""
 
+    @pytest.mark.fast
     def test_dataclass_has_per_tier_isolation(self):
         """Test that RateLimitConfig dataclass has per_tier_isolation field."""
         from src.config.sections.download import RateLimitConfig
@@ -483,6 +507,7 @@ class TestConfigYamlIntegration:
         assert hasattr(config, 'per_tier_isolation')
         assert config.per_tier_isolation is True  # Default
 
+    @pytest.mark.fast
     def test_dataclass_per_tier_isolation_configurable(self):
         """Test that per_tier_isolation can be set."""
         from src.config.sections.download import RateLimitConfig

@@ -376,6 +376,7 @@ def create_mock_match_result(video_seg, vo_seg, confidence=0.85, has_alternative
 class TestLocationInitialization:
     """Test location chapter and video location initialization (lines 91, 93)"""
 
+    @pytest.mark.fast
     def test_match_with_location_chapters(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_location_chapters):
         """Test that location_chapters are passed to matcher (line 91)"""
         vo_embeddings, video_embeddings = embeddings
@@ -413,6 +414,7 @@ class TestLocationInitialization:
                     # Verify set_location_chapters was called
                     mock_matcher_instance.set_location_chapters.assert_called_once_with(mock_location_chapters)
 
+    @pytest.mark.fast
     def test_match_with_video_locations(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_video_locations):
         """Test that video_locations are passed to matcher (line 93)"""
         vo_embeddings, video_embeddings = embeddings
@@ -450,6 +452,7 @@ class TestLocationInitialization:
                     # Verify set_video_locations was called
                     mock_matcher_instance.set_video_locations.assert_called_once_with(mock_video_locations)
 
+    @pytest.mark.fast
     def test_match_with_both_location_params(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_location_chapters, mock_video_locations):
         """Test both location parameters together"""
         vo_embeddings, video_embeddings = embeddings
@@ -497,6 +500,7 @@ class TestLocationInitialization:
 class TestConfigLogging:
     """Test logging for special config values (lines 107, 110)"""
 
+    @pytest.mark.fast
     def test_max_clip_reuse_one_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when max_clip_reuse=1 (line 107)"""
         mock_config.matching.max_clip_reuse = 1  # Trigger line 107
@@ -536,6 +540,7 @@ class TestConfigLogging:
                         info_calls = [str(c) for c in mock_logger.info.call_args_list]
                         assert any("ONCE" in str(c) for c in info_calls), "Expected 'used ONCE' log message"
 
+    @pytest.mark.fast
     def test_face_preference_more_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when face_preference != 'neutral' (line 110)"""
         vo_embeddings, video_embeddings = embeddings
@@ -575,6 +580,7 @@ class TestConfigLogging:
                         info_calls = [str(c) for c in mock_logger.info.call_args_list]
                         assert any("Face preference" in str(c) for c in info_calls), "Expected 'Face preference' log message"
 
+    @pytest.mark.fast
     def test_face_preference_none_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when face_preference is 'none'"""
         vo_embeddings, video_embeddings = embeddings
@@ -621,6 +627,7 @@ class TestConfigLogging:
 class TestVarietyConfigAsDict:
     """Test variety config handling when passed as dict (lines 118-120, 145-147)"""
 
+    @pytest.mark.fast
     def test_variety_config_dict_timeline_settings(self, mock_config_variety_dict, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that dict variety config is handled correctly for timeline settings"""
         vo_embeddings, video_embeddings = embeddings
@@ -666,6 +673,7 @@ class TestVarietyConfigAsDict:
                             max_repeats=2  # From dict
                         )
 
+    @pytest.mark.fast
     def test_variety_config_dict_strategy_logging(self, mock_config_variety_dict, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test strategy logging with dict variety config (lines 145-147)"""
         vo_embeddings, video_embeddings = embeddings
@@ -713,6 +721,7 @@ class TestVarietyConfigAsDict:
 class TestBrollCandidateHandling:
     """Test B-roll segment handling in candidate building (lines 190-193, 198)"""
 
+    @pytest.mark.fast
     def test_broll_segments_added_to_candidates(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that B-roll segments are added to candidates (lines 190-193)"""
         vo_embeddings, video_embeddings = embeddings
@@ -756,6 +765,7 @@ class TestBrollCandidateHandling:
                         # Line 198: "Added X B-roll segments to candidates"
                         assert any("B-roll" in str(c) for c in info_calls), "Expected B-roll logging"
 
+    @pytest.mark.fast
     def test_broll_not_added_if_already_in_candidates(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test B-roll not duplicated if already in embedding results"""
         vo_embeddings, video_embeddings = embeddings
@@ -801,6 +811,7 @@ class TestBrollCandidateHandling:
 class TestGlobalClipDeduplication:
     """Test global clip deduplication filtering (lines 208, 218)"""
 
+    @pytest.mark.fast
     def test_global_dedup_filters_used_clips(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that global clip tracker filters used clips (line 208)"""
         vo_embeddings, video_embeddings = embeddings
@@ -847,6 +858,7 @@ class TestGlobalClipDeduplication:
                             assert mock_global_tracker.is_used.called
                             assert mock_global_tracker.record_usage.called
 
+    @pytest.mark.fast
     def test_variety_constraint_relaxation(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test variety constraint is relaxed when not enough candidates (line 218)"""
         vo_embeddings, video_embeddings = embeddings
@@ -909,6 +921,7 @@ class TestGlobalClipDeduplication:
 class TestStrategyCandidatesFiltering:
     """Test strategy candidates filtering and recording (lines 280-283, 305)"""
 
+    @pytest.mark.fast
     def test_strategy_candidates_filtering(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test strategy candidates are filtered by variety tracker (lines 280-283)"""
         vo_embeddings, video_embeddings = embeddings
@@ -964,6 +977,7 @@ class TestStrategyCandidatesFiltering:
                         record_calls = [str(c) for c in mock_tracker.record_usage.call_args_list]
                         assert any("V_strategy" in str(c) for c in record_calls), "Expected V_strategy recording"
 
+    @pytest.mark.fast
     def test_strategy_recording_for_each_match(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test each strategy match is recorded for variety tracking (line 305)"""
         vo_embeddings, video_embeddings = embeddings
@@ -1036,6 +1050,7 @@ class TestStrategyCandidatesFiltering:
 class TestSecondaryMatchesRecording:
     """Test secondary matches (V4-V6) recording (lines 330-332)"""
 
+    @pytest.mark.fast
     def test_secondary_matches_recorded_for_variety(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test secondary matches are recorded for variety tracking (lines 330-332)"""
         vo_embeddings, video_embeddings = embeddings
@@ -1098,6 +1113,7 @@ class TestSecondaryMatchesRecording:
                         assert any("V4" in str(c) for c in record_calls), "Expected V4 recording"
                         assert any("V5" in str(c) for c in record_calls), "Expected V5 recording"
 
+    @pytest.mark.fast
     def test_secondary_matches_not_in_global_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test secondary matches are NOT added to global clip tracker"""
         vo_embeddings, video_embeddings = embeddings
@@ -1161,6 +1177,7 @@ class TestSecondaryMatchesRecording:
 class TestDurationScoringLogging:
     """Test duration scoring logging"""
 
+    @pytest.mark.fast
     def test_duration_scoring_enabled_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when duration scoring is enabled"""
         mock_config.matching.duration_scoring_enabled = True
@@ -1211,6 +1228,7 @@ class TestDurationScoringLogging:
 class TestAlternativesRecording:
     """Test alternatives (V2-V3) recording"""
 
+    @pytest.mark.fast
     def test_alternatives_recorded_in_variety_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test V2-V3 alternatives are recorded for variety tracking"""
         vo_embeddings, video_embeddings = embeddings
@@ -1266,6 +1284,7 @@ class TestAlternativesRecording:
                         record_calls = [str(c) for c in mock_tracker.record_usage.call_args_list]
                         assert any("V2" in str(c) for c in record_calls), "Expected V2 recording"
 
+    @pytest.mark.fast
     def test_alternatives_recorded_in_global_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test V2-V3 alternatives are recorded in global clip tracker"""
         vo_embeddings, video_embeddings = embeddings
@@ -1328,6 +1347,7 @@ class TestAlternativesRecording:
 class TestGapReporting:
     """Test gap reporting for low confidence matches"""
 
+    @pytest.mark.fast
     def test_gaps_reported_in_log(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that gaps are reported in the log"""
         vo_embeddings, video_embeddings = embeddings
@@ -1378,6 +1398,7 @@ class TestGapReporting:
 class TestLocalLLMReview:
     """Test local LLM review functionality"""
 
+    @pytest.mark.fast
     def test_local_llm_review_called_when_enabled(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test local LLM review is called when enabled"""
         mock_config.matching.use_local_for_review = True
@@ -1424,6 +1445,7 @@ class TestLocalLLMReview:
 class TestVarietyFilteringSuccess:
     """Test variety filtering when enough candidates remain after filtering"""
 
+    @pytest.mark.fast
     def test_variety_filtering_replaces_candidates_line_218(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test line 218: all_candidates = filtered_candidates when enough filtered"""
         vo_embeddings, video_embeddings = embeddings
@@ -1471,6 +1493,7 @@ class TestVarietyFilteringSuccess:
                         # Should succeed - line 218 path taken
                         assert len(results) == len(vo_segments)
 
+    @pytest.mark.fast
     def test_strategy_filtering_replaces_candidates_line_283(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test line 283: strategy_candidates = filtered_strategy when enough filtered"""
         vo_embeddings, video_embeddings = embeddings

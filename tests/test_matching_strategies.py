@@ -131,6 +131,7 @@ def sample_candidates(sample_segment):
 class TestStrategyMatcherInit:
     """Test StrategyMatcher initialization"""
 
+    @pytest.mark.fast
     def test_init_with_scenes(self, mock_config, mock_scenes):
         """Test initialization with scene data"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -139,6 +140,7 @@ class TestStrategyMatcherInit:
         assert matcher.scenes == mock_scenes
         assert len(matcher.scenes) == 2
 
+    @pytest.mark.fast
     def test_init_without_scenes(self, mock_config):
         """Test initialization without scene data"""
         matcher = StrategyMatcher(mock_config, None)
@@ -146,6 +148,7 @@ class TestStrategyMatcherInit:
         assert matcher.config == mock_config
         assert matcher.scenes == {}
 
+    @pytest.mark.fast
     def test_init_with_dict_variety_config(self):
         """Test initialization when variety config is dict"""
         config = Mock()
@@ -169,6 +172,7 @@ class TestStrategyMatcherInit:
 class TestClipIdentification:
     """Test clip ID generation and exclusion logic"""
 
+    @pytest.mark.fast
     def test_get_clip_id(self, mock_config):
         """Test unique clip ID generation"""
         matcher = StrategyMatcher(mock_config, None)
@@ -178,6 +182,7 @@ class TestClipIdentification:
 
         assert clip_id == "/video1.mp4:10.50-15.30"
 
+    @pytest.mark.fast
     def test_is_clip_excluded_same_clip(self, mock_config):
         """Test exclusion of same clip"""
         matcher = StrategyMatcher(mock_config, None)
@@ -190,6 +195,7 @@ class TestClipIdentification:
         assert is_excluded == True
         assert "same clip" in reason.lower()
 
+    @pytest.mark.fast
     def test_is_clip_excluded_same_source_forced(self, mock_config):
         """Test forced different source exclusion"""
         matcher = StrategyMatcher(mock_config, None)
@@ -204,6 +210,7 @@ class TestClipIdentification:
         assert is_excluded == True
         assert "source" in reason.lower()
 
+    @pytest.mark.fast
     def test_is_clip_excluded_time_distance(self, mock_config):
         """Test time distance exclusion"""
         matcher = StrategyMatcher(mock_config, None)
@@ -216,6 +223,7 @@ class TestClipIdentification:
         assert is_excluded == True
         assert "time" in reason.lower()
 
+    @pytest.mark.fast
     def test_is_clip_excluded_embedding_distance(self, mock_config):
         """Test embedding similarity exclusion"""
         matcher = StrategyMatcher(mock_config, None)
@@ -236,6 +244,7 @@ class TestClipIdentification:
         assert is_excluded == True
         assert "similar" in reason.lower()
 
+    @pytest.mark.fast
     def test_is_clip_excluded_passes_all_checks(self, mock_config):
         """Test candidate that passes all exclusion checks"""
         matcher = StrategyMatcher(mock_config, None)
@@ -252,6 +261,7 @@ class TestClipIdentification:
 class TestVisualFirstStrategy:
     """Test visual_first matching strategy"""
 
+    @pytest.mark.fast
     def test_visual_first_with_scene_description(self, mock_config, mock_scenes, sample_vo_segment, sample_candidates):
         """Test visual matching using scene descriptions"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -273,6 +283,7 @@ class TestVisualFirstStrategy:
         assert result.confidence > 0
         assert "visual" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_visual_first_fallback_to_filename(self, mock_config, sample_vo_segment, sample_candidates):
         """Test visual matching falls back to filename when no scenes"""
         matcher = StrategyMatcher(mock_config, None)  # No scenes
@@ -291,6 +302,7 @@ class TestVisualFirstStrategy:
         # Should still return a match using text/filename matching
         assert result is not None or len(sample_candidates) == 0
 
+    @pytest.mark.fast
     def test_visual_first_respects_variety_rules(self, mock_config, mock_scenes, sample_vo_segment, sample_candidates):
         """Test visual_first enforces different source"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -314,6 +326,7 @@ class TestVisualFirstStrategy:
 class TestDifferentSourceStrategy:
     """Test different_source matching strategy"""
 
+    @pytest.mark.fast
     def test_different_source_finds_new_video(self, mock_config, sample_vo_segment, sample_candidates):
         """Test different_source picks from unused video"""
         matcher = StrategyMatcher(mock_config, None)
@@ -334,6 +347,7 @@ class TestDifferentSourceStrategy:
         assert result.video_segment.source_file != "/video1.mp4"
         assert "different source" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_different_source_fallback(self, mock_config, sample_vo_segment):
         """Test fallback when no different source available"""
         matcher = StrategyMatcher(mock_config, None)
@@ -363,6 +377,7 @@ class TestDifferentSourceStrategy:
 class TestKeywordOnlyStrategy:
     """Test keyword_only matching strategy"""
 
+    @pytest.mark.fast
     def test_keyword_only_with_keywords(self, mock_config, sample_vo_segment, sample_candidates):
         """Test keyword matching with populated keywords"""
         matcher = StrategyMatcher(mock_config, None)
@@ -389,6 +404,7 @@ class TestKeywordOnlyStrategy:
         # Should match first candidate (earthquake + damage overlap)
         assert result.video_segment.keywords[0] in sample_vo_segment.keywords
 
+    @pytest.mark.fast
     def test_keyword_only_fallback_to_words(self, mock_config, sample_candidates):
         """Test keyword matching falls back to word extraction"""
         matcher = StrategyMatcher(mock_config, None)
@@ -414,6 +430,7 @@ class TestKeywordOnlyStrategy:
         # Should extract words and still find matches
         assert result is not None or len(sample_candidates) == 0
 
+    @pytest.mark.fast
     def test_keyword_only_respects_variety(self, mock_config, sample_vo_segment, sample_candidates):
         """Test keyword_only enforces different source"""
         matcher = StrategyMatcher(mock_config, None)
@@ -439,6 +456,7 @@ class TestKeywordOnlyStrategy:
 class TestEmbeddingDiversityStrategy:
     """Test embedding_diversity matching strategy"""
 
+    @pytest.mark.fast
     def test_embedding_diversity_finds_diverse_match(self, mock_config, sample_vo_segment, sample_candidates):
         """Test embedding diversity picks maximally different clip"""
         matcher = StrategyMatcher(mock_config, None)
@@ -473,6 +491,7 @@ class TestEmbeddingDiversityStrategy:
         assert result.strategy == "embedding_diversity"
         assert "diversity" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_embedding_diversity_requires_embeddings(self, mock_config, sample_vo_segment, sample_candidates):
         """Test embedding diversity returns None without embeddings"""
         matcher = StrategyMatcher(mock_config, None)
@@ -488,6 +507,7 @@ class TestEmbeddingDiversityStrategy:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_embedding_diversity_enforces_different_source(self, mock_config, sample_vo_segment, sample_candidates):
         """Test embedding diversity requires different source from V1-V3"""
         matcher = StrategyMatcher(mock_config, None)
@@ -520,6 +540,7 @@ class TestEmbeddingDiversityStrategy:
 class TestBRollOnlyStrategy:
     """Test broll_only matching strategy"""
 
+    @pytest.mark.fast
     def test_broll_only_finds_silent_footage(self, mock_config, sample_vo_segment):
         """Test broll_only picks segments with is_broll=True"""
         matcher = StrategyMatcher(mock_config, None)
@@ -556,6 +577,7 @@ class TestBRollOnlyStrategy:
         assert result.video_segment == broll_seg
         assert "b-roll" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_broll_only_returns_none_without_broll(self, mock_config, sample_vo_segment, sample_candidates):
         """Test broll_only returns None when no B-roll available"""
         matcher = StrategyMatcher(mock_config, None)
@@ -575,6 +597,7 @@ class TestBRollOnlyStrategy:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_broll_only_enforces_variety(self, mock_config, sample_vo_segment):
         """Test broll_only enforces different source"""
         matcher = StrategyMatcher(mock_config, None)
@@ -613,6 +636,7 @@ class TestBRollOnlyStrategy:
 class TestSourceRotationStrategy:
     """Test source_rotation matching strategy"""
 
+    @pytest.mark.fast
     def test_source_rotation_cycles_sources(self, mock_config, sample_vo_segment, sample_candidates):
         """Test source rotation picks assigned source for segment"""
         matcher = StrategyMatcher(mock_config, None)
@@ -631,6 +655,7 @@ class TestSourceRotationStrategy:
         assert result.strategy == "source_rotation"
         assert "rotation" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_source_rotation_fallback_to_next_source(self, mock_config, sample_vo_segment):
         """Test source rotation falls back if assigned source unavailable"""
         matcher = StrategyMatcher(mock_config, None)
@@ -655,6 +680,7 @@ class TestSourceRotationStrategy:
         assert result is not None
         assert result.video_segment.source_file == "/video2.mp4"
 
+    @pytest.mark.fast
     def test_source_rotation_respects_variety_rules(self, mock_config, sample_vo_segment, sample_candidates):
         """Test source rotation still enforces variety within source"""
         matcher = StrategyMatcher(mock_config, None)
@@ -679,6 +705,7 @@ class TestSourceRotationStrategy:
 class TestSecondaryMatchesDiversity:
     """Test V4-V6 secondary matches with diversity scoring"""
 
+    @pytest.mark.fast
     def test_secondary_matches_enforces_different_sources(self, mock_config, sample_vo_segment, sample_candidates):
         """Test secondary matches require different source per track"""
         matcher = StrategyMatcher(mock_config, None)
@@ -714,6 +741,7 @@ class TestSecondaryMatchesDiversity:
             assert match.video_segment.source_file not in used_sources
             used_sources.add(match.video_segment.source_file)
 
+    @pytest.mark.fast
     def test_secondary_matches_returns_empty_without_embeddings(self, mock_config, sample_vo_segment, sample_candidates):
         """Test secondary matches requires embeddings"""
         matcher = StrategyMatcher(mock_config, None)
@@ -731,6 +759,7 @@ class TestSecondaryMatchesDiversity:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_secondary_matches_respects_global_used_clips(self, mock_config, sample_vo_segment, sample_candidates):
         """Test secondary matches skips globally used clips"""
         matcher = StrategyMatcher(mock_config, None)
@@ -764,6 +793,7 @@ class TestSecondaryMatchesDiversity:
 class TestGetStrategyMatches:
     """Test get_strategy_matches orchestration"""
 
+    @pytest.mark.fast
     def test_get_strategy_matches_returns_all_enabled(self, mock_config, sample_vo_segment, sample_candidates):
         """Test get_strategy_matches runs all enabled strategies"""
         mock_config.output.include_strategy_tracks = True
@@ -795,6 +825,7 @@ class TestGetStrategyMatches:
         strategies = [m.strategy for m in result]
         assert len(strategies) == len(set(strategies))  # All unique
 
+    @pytest.mark.fast
     def test_get_strategy_matches_returns_empty_when_disabled(self, mock_config, sample_vo_segment, sample_candidates):
         """Test get_strategy_matches returns empty when disabled"""
         mock_config.output.include_strategy_tracks = False
@@ -815,6 +846,7 @@ class TestGetStrategyMatches:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_get_strategy_matches_filters_global_used_clips(self, mock_config, sample_vo_segment, sample_candidates):
         """Test get_strategy_matches pre-filters by global used clips"""
         mock_config.output.strategy_tracks = ["visual_first"]
@@ -846,6 +878,7 @@ class TestGetStrategyMatches:
 class TestSceneLookup:
     """Test _get_scene_for_segment helper"""
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_finds_correct_scene(self, mock_config, mock_scenes):
         """Test scene lookup by time range"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -859,6 +892,7 @@ class TestSceneLookup:
         assert scene.end_time == 10.0
         assert "earthquake" in scene.description
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_returns_none_when_not_found(self, mock_config, mock_scenes):
         """Test scene lookup returns None when no match"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -870,6 +904,7 @@ class TestSceneLookup:
 
         assert scene is None
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_returns_none_for_unknown_video(self, mock_config, mock_scenes):
         """Test scene lookup returns None for unknown video"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -884,6 +919,7 @@ class TestSceneLookup:
 class TestVisualFirstStrategySelection:
     """Additional tests verifying visual_first returns highest visual scores"""
 
+    @pytest.mark.fast
     def test_visual_first_selects_highest_visual_score(self, mock_config, mock_scenes):
         """Test visual_first returns clip with highest visual score, not highest text sim"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -913,6 +949,7 @@ class TestVisualFirstStrategySelection:
         assert result.video_segment.source_file == "/video1.mp4"
         assert "visual" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_visual_first_scoring_weights_visual_over_text(self, mock_config, mock_scenes):
         """Test that visual score (70%) outweighs text score (30%)"""
         matcher = StrategyMatcher(mock_config, mock_scenes)
@@ -941,6 +978,7 @@ class TestVisualFirstStrategySelection:
 class TestDifferentSourceStrategyExclusion:
     """Additional tests verifying different_source properly excludes used sources"""
 
+    @pytest.mark.fast
     def test_different_source_excludes_multiple_used_sources(self, mock_config):
         """Test that all used sources are excluded, not just the first"""
         matcher = StrategyMatcher(mock_config, None)
@@ -964,6 +1002,7 @@ class TestDifferentSourceStrategyExclusion:
         # Should only pick from video3 since video1 and video2 are used
         assert result.video_segment.source_file == "/video3.mp4"
 
+    @pytest.mark.fast
     def test_different_source_returns_first_unused_from_sorted_candidates(self, mock_config):
         """Test that different_source returns first unused source from pre-sorted candidates"""
         matcher = StrategyMatcher(mock_config, None)
@@ -990,6 +1029,7 @@ class TestDifferentSourceStrategyExclusion:
 class TestEmbeddingDiversityMaximization:
     """Additional tests verifying embedding_diversity maximizes variance from V1-V3"""
 
+    @pytest.mark.fast
     def test_embedding_diversity_selects_most_diverse(self, mock_config):
         """Test that embedding_diversity picks clip with maximum distance from existing"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1027,6 +1067,7 @@ class TestEmbeddingDiversityMaximization:
         # Should pick most_diverse_seg due to maximum distance from existing
         # Note: also weighted by vo relevance (40%) so exact selection depends on combined score
 
+    @pytest.mark.fast
     def test_embedding_diversity_respects_relevance_threshold(self, mock_config):
         """Test that clips below 0.3 relevance threshold are excluded"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1066,6 +1107,7 @@ class TestEmbeddingDiversityMaximization:
 class TestBRollOnlyExclusivity:
     """Additional tests verifying broll_only strategy ONLY returns B-roll clips"""
 
+    @pytest.mark.fast
     def test_broll_only_ignores_non_broll_even_with_higher_score(self, mock_config):
         """Test that non-B-roll clips are ignored even if they have higher similarity"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1100,6 +1142,7 @@ class TestBRollOnlyExclusivity:
         assert result.video_segment.is_broll == True
         assert "b-roll" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_broll_only_returns_best_broll_by_relevance(self, mock_config):
         """Test that among B-roll clips, the most relevant is returned"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1135,6 +1178,7 @@ class TestBRollOnlyExclusivity:
         # Should pick broll2 as it has highest embedding similarity to vo
         assert result.video_segment == broll2
 
+    @pytest.mark.fast
     def test_broll_only_rejects_all_non_broll(self, mock_config):
         """Test that when no B-roll exists, None is returned"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1160,6 +1204,7 @@ class TestBRollOnlyExclusivity:
 class TestStrategySelectionOrdering:
     """Tests verifying strategy selection order and cumulative exclusion"""
 
+    @pytest.mark.fast
     def test_strategies_build_on_previous_exclusions(self, mock_config):
         """Test that each strategy excludes clips used by previous strategies"""
         mock_config.output.strategy_tracks = ["different_source", "visual_first"]
@@ -1216,6 +1261,7 @@ class TestParametrizedStrategyMatching:
         ("invalid_strategy", False),
         ("", False),
     ])
+    @pytest.mark.fast
     def test_strategy_name_validation(self, strategy_name, expected_valid):
         """Test that strategy names are validated correctly"""
         valid_strategies = [
@@ -1231,6 +1277,7 @@ class TestParametrizedStrategyMatching:
         (0.75, [0.1, 0.5, 0.9], 1),  # Accept >= 0.75
         (1.0, [0.1, 0.5, 0.9], 0),   # Accept none (need exact 1.0)
     ])
+    @pytest.mark.fast
     def test_confidence_threshold_filtering(self, confidence_threshold, similarity_scores, expected_matches):
         """Test confidence threshold affects match count"""
         passing_scores = [s for s in similarity_scores if s >= confidence_threshold]
@@ -1243,6 +1290,7 @@ class TestParametrizedStrategyMatching:
         (10, 5, 5),  # 10 candidates, max 5 alternatives
         (3, 10, 2),  # 3 candidates, only 2 alternatives possible
     ])
+    @pytest.mark.fast
     def test_alternatives_count_limits(self, num_candidates, num_alternatives_config, expected_alternatives):
         """Test that alternatives are properly limited by candidates or config"""
         # One candidate is used for primary, rest available for alternatives
@@ -1260,6 +1308,7 @@ class TestParametrizedVisualFirst:
         (False, True, True),   # Keywords only - still matches
         (False, False, False), # Neither available - may not match
     ])
+    @pytest.mark.fast
     def test_visual_first_data_combinations(self, mock_config, has_scene_desc, has_keywords, expected_match):
         """Test visual_first with different data availability"""
         if has_scene_desc:
@@ -1304,6 +1353,7 @@ class TestParametrizedDifferentSource:
         (["/v1.mp4"], ["/v2.mp4", "/v3.mp4"], "/v2.mp4"),
         ([], ["/v1.mp4", "/v2.mp4"], "/v1.mp4"),
     ])
+    @pytest.mark.fast
     def test_different_source_selection(self, mock_config, used_sources, candidate_sources, expected_source):
         """Test different_source picks correct source"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1333,6 +1383,7 @@ class TestParametrizedKeywordOnly:
         ([], ["earthquake", "damage"], 0),
         (["earthquake"], [], 0),
     ])
+    @pytest.mark.fast
     def test_keyword_overlap_calculation(self, mock_config, vo_keywords, candidate_keywords, expected_overlap):
         """Test keyword overlap affects matching"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1357,6 +1408,7 @@ class TestParametrizedEmbeddingDiversity:
         ([1.0, 0.0, 0.0], [[0.9, 0.1, 0.0], [0.5, 0.5, 0.0], [0.0, 0.0, 1.0]], 2),
         ([0.5, 0.5, 0.0], [[0.5, 0.5, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], 1),  # [0.0, 1.0, 0.0] most different from [0.5, 0.5, 0.0]
     ])
+    @pytest.mark.fast
     def test_diversity_calculation(self, existing_emb, candidate_embs, expected_most_diverse_idx):
         """Test embedding diversity calculation picks most different"""
         import numpy as np
@@ -1384,6 +1436,7 @@ class TestParametrizedBrollOnly:
         ([True, True, True], 3),
         ([False, False, False], 0),
     ])
+    @pytest.mark.fast
     def test_broll_filtering(self, mock_config, broll_flags, expected_broll_count):
         """Test B-roll filtering by is_broll flag"""
         matcher = StrategyMatcher(mock_config, None)
@@ -1411,6 +1464,7 @@ class TestParametrizedSourceRotation:
         (3, 3, 0),   # Fourth segment -> wraps to first source
         (5, 2, 1),   # Wrapping with 2 sources
     ])
+    @pytest.mark.fast
     def test_source_rotation_assignment(self, segment_index, num_sources, expected_source_idx):
         """Test source rotation assigns sources correctly"""
         # Source rotation should cycle through sources based on segment index
@@ -1427,6 +1481,7 @@ class TestParametrizedVarietyEnforcement:
         (20.0, [10.0, 15.0, 25.0], 2), # 2 clips within 20s
         (0.0, [1.0, 2.0, 3.0], 0),     # No time-based exclusion
     ])
+    @pytest.mark.fast
     def test_time_distance_exclusion(self, mock_config, min_time_distance, time_diffs, expected_exclusions):
         """Test time distance exclusion rule"""
         mock_config.output.variety.min_time_distance = min_time_distance
@@ -1440,6 +1495,7 @@ class TestParametrizedVarietyEnforcement:
         (0.5, [0.6, 0.5, 0.4], 1),     # 1 too similar: 1-0.6=0.4<0.5
         (0.0, [1.0, 1.0, 1.0], 0),     # No embedding exclusion (distance always >= 0)
     ])
+    @pytest.mark.fast
     def test_embedding_distance_exclusion(self, mock_config, min_emb_distance, emb_similarities, expected_exclusions):
         """Test embedding distance exclusion rule"""
         mock_config.output.variety.min_embedding_distance = min_emb_distance
@@ -1460,6 +1516,7 @@ class TestParametrizedStrategyFallbacks:
         ("embedding_diversity", {"embeddings": True}, False),
         ("embedding_diversity", {"embeddings": False}, True),
     ])
+    @pytest.mark.fast
     def test_strategy_fallback_conditions(self, strategy, available_data, should_fallback):
         """Test when strategies should fall back"""
         # Strategies fall back when required data is unavailable
@@ -1480,6 +1537,7 @@ class TestParametrizedStrategyFallbacks:
         (True, False, "fallback"),     # Primary fails, fallback succeeds
         (True, True, "none"),          # Both fail
     ])
+    @pytest.mark.fast
     def test_fallback_chain_results(self, primary_fails, fallback_fails, expected_result):
         """Test fallback chain produces correct result type"""
         if not primary_fails:

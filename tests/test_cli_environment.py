@@ -32,20 +32,24 @@ from src.cli.environment import (
 class TestInstallDirConstant:
     """Tests for INSTALL_DIR constant."""
 
+    @pytest.mark.fast
     def test_install_dir_is_path(self):
         """Test INSTALL_DIR is a Path object."""
         assert isinstance(INSTALL_DIR, Path)
 
+    @pytest.mark.fast
     def test_install_dir_exists(self):
         """Test INSTALL_DIR points to existing directory."""
         assert INSTALL_DIR.exists()
         assert INSTALL_DIR.is_dir()
 
+    @pytest.mark.fast
     def test_install_dir_contains_main_py(self):
         """Test INSTALL_DIR contains main.py (project root)."""
         main_py = INSTALL_DIR / "main.py"
         assert main_py.exists(), f"Expected main.py at {main_py}"
 
+    @pytest.mark.fast
     def test_install_dir_contains_src(self):
         """Test INSTALL_DIR contains src directory."""
         src_dir = INSTALL_DIR / "src"
@@ -56,36 +60,42 @@ class TestInstallDirConstant:
 class TestStripExtendedPathPrefix:
     """Tests for strip_extended_path_prefix()."""
 
+    @pytest.mark.fast
     def test_strip_unc_prefix(self):
         r"""Test strip_extended_path_prefix() strips \\?\ prefix."""
         path = Path(r"\\?\C:\Users\test\file.txt")
         result = strip_extended_path_prefix(path)
         assert str(result) == r"C:\Users\test\file.txt"
 
+    @pytest.mark.fast
     def test_strip_device_prefix(self):
         r"""Test strip_extended_path_prefix() strips \\.\ prefix."""
         path = Path(r"\\.\C:\Users\test\file.txt")
         result = strip_extended_path_prefix(path)
         assert str(result) == r"C:\Users\test\file.txt"
 
+    @pytest.mark.fast
     def test_strip_forward_slash_prefix(self):
         """Test strip_extended_path_prefix() strips //?/ prefix."""
         path = Path("//?/C:/Users/test/file.txt")
         result = strip_extended_path_prefix(path)
         assert "C:" in str(result) or "Users" in str(result)
 
+    @pytest.mark.fast
     def test_strip_forward_slash_device_prefix(self):
         """Test strip_extended_path_prefix() strips //./ prefix."""
         path = Path("//./C:/Users/test/file.txt")
         result = strip_extended_path_prefix(path)
         assert "C:" in str(result) or "Users" in str(result)
 
+    @pytest.mark.fast
     def test_no_prefix_unchanged(self):
         """Test strip_extended_path_prefix() leaves normal paths unchanged."""
         path = Path(r"C:\Users\test\file.txt")
         result = strip_extended_path_prefix(path)
         assert str(result) == r"C:\Users\test\file.txt"
 
+    @pytest.mark.fast
     def test_unix_path_unchanged(self):
         """Test strip_extended_path_prefix() leaves Unix paths unchanged."""
         path = Path("/home/user/file.txt")
@@ -93,6 +103,7 @@ class TestStripExtendedPathPrefix:
         # On Windows, Path normalizes to backslashes
         assert "home" in str(result) and "user" in str(result) and "file.txt" in str(result)
 
+    @pytest.mark.fast
     def test_relative_path_unchanged(self):
         """Test strip_extended_path_prefix() leaves relative paths unchanged."""
         path = Path("relative/path/file.txt")
@@ -100,6 +111,7 @@ class TestStripExtendedPathPrefix:
         # On Windows, Path normalizes to backslashes
         assert "relative" in str(result) and "path" in str(result) and "file.txt" in str(result)
 
+    @pytest.mark.fast
     def test_empty_path_after_prefix(self):
         """Test strip_extended_path_prefix() handles edge case of just prefix."""
         # This is an invalid path but should not crash
@@ -112,6 +124,7 @@ class TestStripExtendedPathPrefix:
 class TestLoadEnvironment:
     """Tests for load_environment()."""
 
+    @pytest.mark.fast
     def test_load_environment_no_dotenv_installed(self, tmp_path):
         """Test load_environment() handles missing python-dotenv gracefully."""
         with patch.dict('sys.modules', {'dotenv': None}):
@@ -121,6 +134,7 @@ class TestLoadEnvironment:
             except ImportError:
                 pass  # Expected if dotenv actually not installed
 
+    @pytest.mark.fast
     def test_load_environment_with_project_dir(self, tmp_path):
         """Test load_environment() loads project .env when it exists."""
         # Create project .env file
@@ -135,6 +149,7 @@ class TestLoadEnvironment:
         # Should have called load_dotenv with project .env
         assert mock_load.called
 
+    @pytest.mark.fast
     def test_load_environment_without_project_dir(self, tmp_path):
         """Test load_environment() works without project_dir argument."""
         with patch('dotenv.load_dotenv'):
@@ -142,6 +157,7 @@ class TestLoadEnvironment:
                 load_environment(None)
         # Should not raise
 
+    @pytest.mark.fast
     def test_load_environment_global_env_file(self, tmp_path, monkeypatch):
         """Test load_environment() loads global .env from INSTALL_DIR."""
         # Create a fake global .env
@@ -167,11 +183,13 @@ class TestTerminalDetection:
     These tests verify terminal-related behavior using stdlib functions.
     """
 
+    @pytest.mark.fast
     def test_sys_stdout_isatty(self):
         """Test sys.stdout.isatty() returns boolean."""
         result = sys.stdout.isatty()
         assert isinstance(result, bool)
 
+    @pytest.mark.fast
     def test_os_isatty_stdin(self):
         """Test os.isatty() works for stdin."""
         try:
@@ -181,6 +199,7 @@ class TestTerminalDetection:
             # stdin may not have fileno in some test environments
             pass
 
+    @pytest.mark.fast
     def test_os_get_terminal_size_fallback(self):
         """Test os.get_terminal_size() with fallback."""
         try:
@@ -193,12 +212,14 @@ class TestTerminalDetection:
             default_columns = 80
             assert isinstance(default_columns, int)
 
+    @pytest.mark.fast
     def test_term_environment_variable(self):
         """Test TERM environment variable is accessible."""
         term = os.environ.get('TERM', '')
         # TERM should be string (may be empty on Windows)
         assert isinstance(term, str)
 
+    @pytest.mark.fast
     def test_colorterm_environment_variable(self):
         """Test COLORTERM environment variable is accessible."""
         colorterm = os.environ.get('COLORTERM', '')
@@ -208,6 +229,7 @@ class TestTerminalDetection:
 class TestColorSupport:
     """Tests for color support detection patterns."""
 
+    @pytest.mark.fast
     def test_windows_virtual_terminal_check(self):
         """Test Windows virtual terminal support can be checked."""
         is_windows = sys.platform == 'win32'
@@ -222,6 +244,7 @@ class TestColorSupport:
             except (AttributeError, OSError):
                 pass
 
+    @pytest.mark.fast
     def test_ansi_color_environment_patterns(self):
         """Test common environment patterns for ANSI color support."""
         # These are common patterns for detecting color support
@@ -241,6 +264,7 @@ class TestColorSupport:
 class TestInteractiveMode:
     """Tests for interactive mode detection."""
 
+    @pytest.mark.fast
     def test_stdin_detection(self):
         """Test stdin can be checked for TTY."""
         try:
@@ -250,16 +274,19 @@ class TestInteractiveMode:
             # Some test environments don't have isatty
             pass
 
+    @pytest.mark.fast
     def test_stdout_detection(self):
         """Test stdout can be checked for TTY."""
         is_tty = sys.stdout.isatty()
         assert isinstance(is_tty, bool)
 
+    @pytest.mark.fast
     def test_stderr_detection(self):
         """Test stderr can be checked for TTY."""
         is_tty = sys.stderr.isatty()
         assert isinstance(is_tty, bool)
 
+    @pytest.mark.fast
     def test_non_interactive_flag_detection(self):
         """Test --non-interactive flag can be detected from args."""
         test_args = ['script.py', '--non-interactive']
@@ -272,6 +299,7 @@ class TestInteractiveMode:
 class TestTerminalWidth:
     """Tests for terminal width detection."""
 
+    @pytest.mark.fast
     def test_shutil_get_terminal_size(self):
         """Test shutil.get_terminal_size() returns valid size."""
         import shutil
@@ -281,6 +309,7 @@ class TestTerminalWidth:
         assert size.columns > 0
         assert size.lines > 0
 
+    @pytest.mark.fast
     def test_shutil_get_terminal_size_fallback(self):
         """Test shutil.get_terminal_size() uses fallback when specified."""
         import shutil
@@ -291,6 +320,7 @@ class TestTerminalWidth:
         assert size.columns >= 1
         assert size.lines >= 1
 
+    @pytest.mark.fast
     def test_columns_environment_variable(self):
         """Test COLUMNS environment variable can be used for width."""
         with patch.dict(os.environ, {'COLUMNS': '100'}):
@@ -298,6 +328,7 @@ class TestTerminalWidth:
             assert columns == '100'
             assert int(columns) == 100
 
+    @pytest.mark.fast
     def test_lines_environment_variable(self):
         """Test LINES environment variable can be used for height."""
         with patch.dict(os.environ, {'LINES': '50'}):

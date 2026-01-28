@@ -57,6 +57,7 @@ def sample_raw_segments():
 class TestSkipIfCachedParameter:
     """Test skip_if_cached parameter exists and has correct default"""
 
+    @pytest.mark.fast
     def test_skip_if_cached_parameter_exists(self):
         """Test that skip_if_cached parameter exists in function signature"""
         import inspect
@@ -64,6 +65,7 @@ class TestSkipIfCachedParameter:
         params = list(sig.parameters.keys())
         assert 'skip_if_cached' in params
 
+    @pytest.mark.fast
     def test_skip_if_cached_default_true(self):
         """Test that skip_if_cached defaults to True"""
         import inspect
@@ -71,6 +73,7 @@ class TestSkipIfCachedParameter:
         default = sig.parameters['skip_if_cached'].default
         assert default is True
 
+    @pytest.mark.fast
     def test_skip_if_cached_is_bool_type(self):
         """Test that skip_if_cached default is boolean"""
         import inspect
@@ -84,6 +87,7 @@ class TestSkipIfCachedTrue:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_cached_videos_skipped(
         self, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -114,6 +118,7 @@ class TestSkipIfCachedTrue:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_default_skips_cached(
         self, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -144,6 +149,7 @@ class TestSkipIfCachedTrue:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_uncached_videos_processed_when_skip_true(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -185,6 +191,7 @@ class TestSkipIfCachedFalse:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_cached_videos_reprocessed(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -223,6 +230,7 @@ class TestSkipIfCachedFalse:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_all_videos_reprocessed(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -258,6 +266,7 @@ class TestSkipIfCachedWithForceReprocess:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_force_reprocess_overrides_skip_if_cached(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -293,6 +302,7 @@ class TestSkipIfCachedWithForceReprocess:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_both_false_still_reprocesses(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -329,6 +339,7 @@ class TestSkipIfCachedLogging:
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_logs_skipped_count(
         self, mock_logger, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -356,6 +367,7 @@ class TestSkipIfCachedLogging:
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.integration
     def test_no_log_when_no_cached_videos(
         self, mock_logger, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -393,6 +405,7 @@ class TestSkipIfCachedLogging:
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
     @patch('src.transcription.parallel_processor.logger')
+    @pytest.mark.fast
     def test_no_skip_log_when_skip_false(
         self, mock_logger, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -423,6 +436,7 @@ class TestSkipIfCachedReturnsCorrectResults:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_returns_transcript_segments(
         self, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments
@@ -452,6 +466,7 @@ class TestSkipIfCachedReturnsCorrectResults:
     @patch('src.transcription.parallel_processor.shutil.rmtree')
     @patch('pathlib.Path.unlink')
     @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
     def test_mixed_cached_and_fresh_results(
         self, mock_mkdir, mock_unlink, mock_rmtree, mock_extract,
         MockWhisperClient, MockTranscriptCache,
@@ -497,6 +512,7 @@ class TestSkipIfCachedEdgeCases:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_empty_video_list(
         self, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config
@@ -512,6 +528,7 @@ class TestSkipIfCachedEdgeCases:
 
     @patch('src.transcription.parallel_processor.TranscriptCache')
     @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
     def test_all_cached_returns_immediately(
         self, MockWhisperClient, MockTranscriptCache,
         mock_cache, mock_config, sample_raw_segments

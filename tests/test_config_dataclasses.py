@@ -34,6 +34,7 @@ from src.config.sections.output import (
 class TestDurationTierConfig:
     """Test DurationTierConfig dataclass"""
 
+    @pytest.mark.fast
     def test_duration_tier_default_initialization(self):
         """Test default initialization"""
         tier = DurationTierConfig()
@@ -43,6 +44,7 @@ class TestDurationTierConfig:
         assert tier.videos_per_keyword == 5
         assert tier.max_total == 0
 
+    @pytest.mark.fast
     def test_duration_tier_custom_values(self):
         """Test with custom values"""
         tier = DurationTierConfig(
@@ -57,11 +59,13 @@ class TestDurationTierConfig:
         assert tier.videos_per_keyword == 10
         assert tier.max_total == 50
 
+    @pytest.mark.fast
     def test_duration_tier_zero_max_total(self):
         """Test max_total=0 means no limit"""
         tier = DurationTierConfig(max_total=0)
         assert tier.max_total == 0  # No limit
 
+    @pytest.mark.fast
     def test_duration_tier_large_values(self):
         """Test with large duration values"""
         tier = DurationTierConfig(
@@ -77,6 +81,7 @@ class TestDurationTierConfig:
 class TestDurationTiersConfig:
     """Test DurationTiersConfig dataclass"""
 
+    @pytest.mark.fast
     def test_duration_tiers_default_initialization(self):
         """Test default initialization with factory functions"""
         tiers = DurationTiersConfig()
@@ -99,6 +104,7 @@ class TestDurationTiersConfig:
         assert tiers.longer.max_seconds == 3000
         assert tiers.longer.max_total == 1
 
+    @pytest.mark.fast
     def test_duration_tiers_custom_short(self):
         """Test with custom short tier"""
         custom_short = DurationTierConfig(10, 100, 5, 0)
@@ -108,6 +114,7 @@ class TestDurationTiersConfig:
         assert tiers.short.max_seconds == 100
         assert tiers.short.videos_per_keyword == 5
 
+    @pytest.mark.fast
     def test_duration_tiers_all_custom(self):
         """Test with all custom tiers"""
         tiers = DurationTiersConfig(
@@ -126,6 +133,7 @@ class TestDurationTiersConfig:
 class TestStockFootageConfig:
     """Test StockFootageConfig dataclass"""
 
+    @pytest.mark.fast
     def test_stock_footage_default_initialization(self):
         """Test default initialization"""
         config = StockFootageConfig()
@@ -140,6 +148,7 @@ class TestStockFootageConfig:
         assert config.prefer_landscape is True
         assert config.request_interval == 0.5
 
+    @pytest.mark.fast
     def test_stock_footage_all_disabled(self):
         """Test with all APIs disabled"""
         config = StockFootageConfig(
@@ -152,6 +161,7 @@ class TestStockFootageConfig:
         assert config.pexels_enabled is False
         assert config.pixabay_enabled is False
 
+    @pytest.mark.fast
     def test_stock_footage_custom_duration(self):
         """Test with custom duration limits"""
         config = StockFootageConfig(
@@ -162,6 +172,7 @@ class TestStockFootageConfig:
         assert config.min_duration == 10
         assert config.max_duration == 120
 
+    @pytest.mark.fast
     def test_stock_footage_high_resolution(self):
         """Test with 4K resolution requirement"""
         config = StockFootageConfig(
@@ -170,6 +181,7 @@ class TestStockFootageConfig:
 
         assert config.min_height == 2160
 
+    @pytest.mark.fast
     def test_stock_footage_rate_limiting(self):
         """Test request interval for rate limiting"""
         config = StockFootageConfig(request_interval=1.0)
@@ -179,6 +191,7 @@ class TestStockFootageConfig:
 class TestDeduplicationConfig:
     """Test DeduplicationConfig dataclass"""
 
+    @pytest.mark.fast
     def test_deduplication_default_initialization(self):
         """Test default initialization"""
         config = DeduplicationConfig()
@@ -190,26 +203,31 @@ class TestDeduplicationConfig:
         assert config.generate_report is True
         assert config.frame_timeout == 30
 
+    @pytest.mark.fast
     def test_deduplication_disabled(self):
         """Test with deduplication disabled"""
         config = DeduplicationConfig(enabled=False)
         assert config.enabled is False
 
+    @pytest.mark.fast
     def test_deduplication_strict_threshold(self):
         """Test with strict threshold"""
         config = DeduplicationConfig(hash_threshold=5)
         assert config.hash_threshold == 5
 
+    @pytest.mark.fast
     def test_deduplication_lenient_threshold(self):
         """Test with lenient threshold"""
         config = DeduplicationConfig(hash_threshold=20)
         assert config.hash_threshold == 20
 
+    @pytest.mark.fast
     def test_deduplication_no_auto_delete(self):
         """Test with auto_delete disabled"""
         config = DeduplicationConfig(auto_delete=False)
         assert config.auto_delete is False
 
+    @pytest.mark.fast
     def test_deduplication_custom_timeout(self):
         """Test with custom frame extraction timeout"""
         config = DeduplicationConfig(frame_timeout=60)
@@ -219,6 +237,7 @@ class TestDeduplicationConfig:
 class TestVarietyConfig:
     """Test VarietyConfig dataclass"""
 
+    @pytest.mark.fast
     def test_variety_default_initialization(self):
         """Test default initialization"""
         config = VarietyConfig()
@@ -231,26 +250,31 @@ class TestVarietyConfig:
         assert config.timeline_variety_window == 600.0
         assert config.max_source_repeats_in_window == 1
 
+    @pytest.mark.fast
     def test_variety_allow_same_source(self):
         """Test with same source allowed"""
         config = VarietyConfig(require_different_source=False)
         assert config.require_different_source is False
 
+    @pytest.mark.fast
     def test_variety_custom_time_distance(self):
         """Test with custom time distance"""
         config = VarietyConfig(min_time_distance=30.0)
         assert config.min_time_distance == 30.0
 
+    @pytest.mark.fast
     def test_variety_custom_embedding_distance(self):
         """Test with custom embedding distance"""
         config = VarietyConfig(min_embedding_distance=0.5)
         assert config.min_embedding_distance == 0.5
 
+    @pytest.mark.fast
     def test_variety_timeline_enforcement_disabled(self):
         """Test with timeline variety enforcement disabled"""
         config = VarietyConfig(enforce_timeline_variety=False)
         assert config.enforce_timeline_variety is False
 
+    @pytest.mark.fast
     def test_variety_custom_window(self):
         """Test with custom timeline variety window"""
         config = VarietyConfig(
@@ -265,6 +289,7 @@ class TestVarietyConfig:
 class TestOutputConfig:
     """Test OutputConfig dataclass"""
 
+    @pytest.mark.fast
     def test_output_default_initialization(self):
         """Test default initialization"""
         config = OutputConfig()
@@ -284,11 +309,13 @@ class TestOutputConfig:
         assert config.include_strategy_tracks is True
         assert isinstance(config.variety, VarietyConfig)
 
+    @pytest.mark.fast
     def test_output_custom_output_dir(self):
         """Test with custom output directory"""
         config = OutputConfig(output_dir="/custom/output")
         assert config.output_dir == "/custom/output"
 
+    @pytest.mark.fast
     def test_output_disable_all_formats(self):
         """Test with all formats disabled"""
         config = OutputConfig(
@@ -303,16 +330,19 @@ class TestOutputConfig:
         assert config.generate_xml is False
         assert config.generate_report is False
 
+    @pytest.mark.fast
     def test_output_custom_frame_rate(self):
         """Test with custom frame rate"""
         config = OutputConfig(frame_rate=60.0)
         assert config.frame_rate == 60.0
 
+    @pytest.mark.fast
     def test_output_custom_timecode(self):
         """Test with custom start timecode"""
         config = OutputConfig(timeline_start_tc="10:00:00:00")
         assert config.timeline_start_tc == "10:00:00:00"
 
+    @pytest.mark.fast
     def test_output_variety_dict_conversion(self):
         """Test __post_init__ converts dict to VarietyConfig"""
         # Create config with variety as dict
@@ -327,6 +357,7 @@ class TestOutputConfig:
         assert config.variety.require_different_source is False
         assert config.variety.min_time_distance == 20.0
 
+    @pytest.mark.fast
     def test_output_variety_object(self):
         """Test with variety as VarietyConfig object"""
         variety = VarietyConfig(min_time_distance=15.0)
@@ -335,11 +366,13 @@ class TestOutputConfig:
         assert isinstance(config.variety, VarietyConfig)
         assert config.variety.min_time_distance == 15.0
 
+    @pytest.mark.fast
     def test_output_custom_alternatives(self):
         """Test with custom number of alternatives"""
         config = OutputConfig(num_alternatives=3)
         assert config.num_alternatives == 3
 
+    @pytest.mark.fast
     def test_output_strategy_tracks(self):
         """Test default strategy tracks"""
         config = OutputConfig()
@@ -348,6 +381,7 @@ class TestOutputConfig:
         assert "embedding_diversity" in config.strategy_tracks
         assert "broll_only" in config.strategy_tracks
 
+    @pytest.mark.fast
     def test_output_custom_strategy_tracks(self):
         """Test with custom strategy tracks"""
         custom_tracks = ["custom_strategy_1", "custom_strategy_2"]
@@ -356,6 +390,7 @@ class TestOutputConfig:
         assert config.strategy_tracks == custom_tracks
         assert len(config.strategy_tracks) == 2
 
+    @pytest.mark.fast
     def test_output_split_otio_settings(self):
         """Test OTIO splitting configuration"""
         config = OutputConfig(
@@ -370,6 +405,7 @@ class TestOutputConfig:
 class TestMultiStyleConfig:
     """Test MultiStyleConfig dataclass"""
 
+    @pytest.mark.fast
     def test_multi_style_default_initialization(self):
         """Test default initialization"""
         config = MultiStyleConfig()
@@ -377,11 +413,13 @@ class TestMultiStyleConfig:
         assert config.enabled is False
         assert config.styles == ["default", "strict"]
 
+    @pytest.mark.fast
     def test_multi_style_enabled(self):
         """Test with multi-style enabled"""
         config = MultiStyleConfig(enabled=True)
         assert config.enabled is True
 
+    @pytest.mark.fast
     def test_multi_style_custom_styles(self):
         """Test with custom styles"""
         custom_styles = ["conservative", "aggressive", "balanced"]
@@ -394,6 +432,7 @@ class TestMultiStyleConfig:
         assert config.styles == custom_styles
         assert len(config.styles) == 3
 
+    @pytest.mark.fast
     def test_multi_style_single_style(self):
         """Test with single style"""
         config = MultiStyleConfig(styles=["default"])
@@ -403,6 +442,7 @@ class TestMultiStyleConfig:
 class TestConfigEdgeCases:
     """Test edge cases for config dataclasses"""
 
+    @pytest.mark.fast
     def test_duration_tier_negative_values(self):
         """Test duration tier with negative values (invalid but allowed)"""
         tier = DurationTierConfig(min_seconds=-10, max_seconds=-5)
@@ -410,6 +450,7 @@ class TestConfigEdgeCases:
         assert tier.min_seconds == -10
         assert tier.max_seconds == -5
 
+    @pytest.mark.fast
     def test_stock_footage_zero_duration(self):
         """Test stock footage with zero duration"""
         config = StockFootageConfig(min_duration=0, max_duration=0)
@@ -417,11 +458,13 @@ class TestConfigEdgeCases:
         assert config.min_duration == 0
         assert config.max_duration == 0
 
+    @pytest.mark.fast
     def test_deduplication_zero_threshold(self):
         """Test deduplication with zero threshold (identical only)"""
         config = DeduplicationConfig(hash_threshold=0)
         assert config.hash_threshold == 0
 
+    @pytest.mark.fast
     def test_variety_zero_distances(self):
         """Test variety with zero distances"""
         config = VarietyConfig(
@@ -432,11 +475,13 @@ class TestConfigEdgeCases:
         assert config.min_time_distance == 0.0
         assert config.min_embedding_distance == 0.0
 
+    @pytest.mark.fast
     def test_output_empty_strategy_tracks(self):
         """Test output with empty strategy tracks"""
         config = OutputConfig(strategy_tracks=[])
         assert config.strategy_tracks == []
 
+    @pytest.mark.fast
     def test_multi_style_empty_styles(self):
         """Test multi-style with empty styles list"""
         config = MultiStyleConfig(styles=[])

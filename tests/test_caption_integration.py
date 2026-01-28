@@ -107,6 +107,7 @@ class TestCaptionIntegrationFetch:
     - Quality detection
     """
 
+    @pytest.mark.fast
     def test_fetch_captions_ted_talk(self):
         """Test fetching captions from a TED Talk.
 
@@ -150,6 +151,7 @@ class TestCaptionIntegrationFetch:
                 pytest.skip(f"yt-dlp preprocessing error for {video_id} - transient issue")
             raise
 
+    @pytest.mark.fast
     def test_fetch_captions_backup_video(self):
         """Test fetching captions from backup video (Rick Astley).
 
@@ -192,6 +194,7 @@ class TestCaptionIntegrationFetch:
                 pytest.skip(f"yt-dlp preprocessing error for {video_id} - transient issue")
             raise
 
+    @pytest.mark.fast
     def test_caption_quality_detection(self):
         """Test that caption quality is properly detected."""
         fetcher = CaptionFetcher()
@@ -240,6 +243,7 @@ class TestCaptionIntegrationAuto:
     - Quality marking for auto-generated content
     """
 
+    @pytest.mark.fast
     def test_fetch_auto_captions_detection(self):
         """Test fetching and detecting auto-generated captions.
 
@@ -290,6 +294,7 @@ class TestCaptionIntegrationAuto:
         except CaptionUnavailableError:
             pytest.skip(f"Video {video_id} captions not available")
 
+    @pytest.mark.fast
     def test_auto_language_selection(self):
         """Test automatic language selection with fallback chain."""
         fetcher = CaptionFetcher()
@@ -309,6 +314,7 @@ class TestCaptionIntegrationAuto:
         except CaptionUnavailableError:
             pytest.skip(f"No captions available for video {video_id}")
 
+    @pytest.mark.fast
     def test_auto_language_fallback_chain(self):
         """Test that language fallback works when preferred language unavailable."""
         fetcher = CaptionFetcher()
@@ -345,6 +351,7 @@ class TestCaptionIntegrationNoCaption:
     - Informative error messages
     """
 
+    @pytest.mark.fast
     def test_no_captions_raises_error(self):
         """Test that videos without captions raise CaptionUnavailableError."""
         fetcher = CaptionFetcher()
@@ -374,6 +381,7 @@ class TestCaptionIntegrationNoCaption:
                 pytest.skip(f"Video {video_id} not accessible")
             raise
 
+    @pytest.mark.fast
     def test_auto_language_no_captions(self):
         """Test auto language selection handles no-caption videos gracefully."""
         fetcher = CaptionFetcher()
@@ -393,6 +401,7 @@ class TestCaptionIntegrationNoCaption:
                 pytest.skip(f"Video {video_id} not accessible")
             raise
 
+    @pytest.mark.fast
     def test_list_languages_empty_for_no_captions(self):
         """Test that list_available_languages returns empty list for no-caption videos."""
         fetcher = CaptionFetcher()
@@ -426,6 +435,7 @@ class TestCaptionIntegrationNoCaption:
 class TestCaptionIntegrationLanguage:
     """Integration tests for caption language detection and selection."""
 
+    @pytest.mark.fast
     def test_list_multiple_languages(self):
         """Test listing all available languages for a multilingual video."""
         fetcher = CaptionFetcher()
@@ -456,6 +466,7 @@ class TestCaptionIntegrationLanguage:
                 pytest.skip(f"Video {video_id} not accessible")
             raise
 
+    @pytest.mark.fast
     def test_select_best_language_preference(self):
         """Test that language selection respects preferences."""
         fetcher = CaptionFetcher()
@@ -496,6 +507,7 @@ class TestCaptionIntegrationLanguage:
 class TestCaptionIntegrationQuality:
     """Integration tests for caption quality detection and metrics."""
 
+    @pytest.mark.fast
     def test_caption_quality_detection(self):
         """Test that caption quality is properly determined."""
         fetcher = CaptionFetcher()
@@ -529,6 +541,7 @@ class TestCaptionIntegrationQuality:
                 pytest.skip(f"yt-dlp preprocessing error - transient issue")
             raise
 
+    @pytest.mark.fast
     def test_caption_segments_have_valid_timing(self):
         """Test that caption segments have valid, sequential timing."""
         fetcher = CaptionFetcher()
@@ -577,6 +590,7 @@ class TestCaptionIntegrationQuality:
 class TestCaptionIntegrationRetry:
     """Integration tests for retry behavior with real network conditions."""
 
+    @pytest.mark.fast
     def test_retry_eventually_succeeds(self):
         """Test that retry mechanism works with real network conditions."""
         fetcher = CaptionFetcher()
@@ -602,6 +616,7 @@ class TestCaptionIntegrationRetry:
                 pytest.skip(f"yt-dlp preprocessing error - transient issue")
             pytest.skip(f"Network error during test: {e}")
 
+    @pytest.mark.fast
     def test_unavailable_not_retried(self):
         """Test that CaptionUnavailableError is not retried (no point)."""
         fetcher = CaptionFetcher()
@@ -638,6 +653,7 @@ class TestCaptionIntegrationRetry:
 class TestCaptionIntegrationCache:
     """Integration tests for caption caching with real videos."""
 
+    @pytest.mark.fast
     def test_cache_stores_real_captions(self, tmp_path):
         """Test that cache correctly stores captions from real fetch."""
         from src.caption_fetcher import CaptionCache
@@ -674,6 +690,7 @@ class TestCaptionIntegrationCache:
                 pytest.skip(f"yt-dlp preprocessing error - transient issue")
             raise
 
+    @pytest.mark.fast
     def test_cache_key_includes_language(self, tmp_path):
         """Test that cache keys are language-specific."""
         from src.caption_fetcher import CaptionCache
@@ -709,6 +726,7 @@ class TestVideoFixtureValidation:
     and have the expected caption states.
     """
 
+    @pytest.mark.fast
     def test_validate_with_captions_fixture(self):
         """Validate that with_captions fixture video has captions."""
         fetcher = CaptionFetcher()
@@ -725,6 +743,7 @@ class TestVideoFixtureValidation:
         except CaptionFetchError as e:
             pytest.fail(f"with_captions fixture video unavailable: {e}")
 
+    @pytest.mark.fast
     def test_validate_backup_fixture(self):
         """Validate that backup video fixture has captions available."""
         fetcher = CaptionFetcher()
@@ -751,6 +770,7 @@ class TestVideoFixtureValidation:
         except CaptionFetchError as e:
             pytest.fail(f"Backup fixture video unavailable: {e}")
 
+    @pytest.mark.fast
     def test_validate_no_caption_fixture(self):
         """Validate that no-caption fixture video has no captions."""
         fetcher = CaptionFetcher()

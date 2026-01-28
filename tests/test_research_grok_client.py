@@ -26,6 +26,7 @@ class TestGrokResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_returns_research_result_object(self):
         """Research method returns a ResearchResult dataclass."""
         from src.research.grok_client import GrokClient, ResearchResult
@@ -49,6 +50,7 @@ class TestGrokResearchResultParsing:
                 assert result.model == "grok-3-latest"
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_result_extracts_sources_from_content(self):
         """Research result extracts source references from content."""
         from src.research.grok_client import GrokClient, ResearchResult
@@ -82,6 +84,7 @@ class TestGrokResearchResultParsing:
                 assert any('elonmusk' in s for s in sources_lower)
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_with_quick_depth(self):
         """Research with depth='quick' uses concise prompt."""
         from src.research.grok_client import GrokClient
@@ -105,6 +108,7 @@ class TestGrokResearchResultParsing:
                 assert payload['max_tokens'] == 2000
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_with_comprehensive_depth(self):
         """Research with depth='comprehensive' uses detailed prompt."""
         from src.research.grok_client import GrokClient
@@ -128,6 +132,7 @@ class TestGrokResearchResultParsing:
                 assert payload['max_tokens'] == 6000
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_with_custom_system_prompt(self):
         """Research accepts custom system prompt."""
         from src.research.grok_client import GrokClient
@@ -162,6 +167,7 @@ class TestGrokConnectionErrorHandling:
     """AC2: Test research() handles connection errors with retry logic."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_connection_error_triggers_retry(self):
         """Connection error triggers retry with backoff."""
         from src.research.grok_client import GrokClient
@@ -194,6 +200,7 @@ class TestGrokConnectionErrorHandling:
                     assert mock_sleep.call_count >= 1
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_timeout_error_triggers_retry(self):
         """Timeout error triggers retry with backoff."""
         from src.research.grok_client import GrokClient
@@ -225,6 +232,7 @@ class TestGrokConnectionErrorHandling:
                     assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_429_rate_limit_triggers_retry(self):
         """429 Rate limit error triggers retry with backoff."""
         from src.research.grok_client import GrokClient
@@ -261,6 +269,7 @@ class TestGrokConnectionErrorHandling:
                     assert mock_sleep.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_500_server_error_triggers_retry(self):
         """500 Server error triggers retry."""
         from src.research.grok_client import GrokClient
@@ -295,6 +304,7 @@ class TestGrokConnectionErrorHandling:
                     assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_max_retries_exceeded_raises_exception(self):
         """After MAX_RETRIES, raises the exception."""
         from src.research.grok_client import GrokClient, MAX_RETRIES
@@ -321,6 +331,7 @@ class TestGrokEmptyResponseHandling:
     """AC3: Test research() handles empty response gracefully."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_empty_content_handled(self):
         """Empty content in response returns empty string."""
         from src.research.grok_client import GrokClient
@@ -342,6 +353,7 @@ class TestGrokEmptyResponseHandling:
                 assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_whitespace_only_content_handled(self):
         """Whitespace-only content returns that whitespace."""
         from src.research.grok_client import GrokClient
@@ -363,6 +375,7 @@ class TestGrokEmptyResponseHandling:
                 assert result.content == "   \n  "
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_no_sources_in_content_returns_empty_list(self):
         """Content without source patterns returns empty sources list."""
         from src.research.grok_client import GrokClient
@@ -384,6 +397,7 @@ class TestGrokEmptyResponseHandling:
                 assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_response_without_search_enabled(self):
         """Response works when search is disabled."""
         from src.research.grok_client import GrokClient
@@ -407,6 +421,7 @@ class TestGrokEmptyResponseHandling:
                 assert 'search' not in payload
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_sources_deduplicated_and_limited(self):
         """Sources are deduplicated and limited to 15."""
         from src.research.grok_client import GrokClient
@@ -446,6 +461,7 @@ class TestGrokTimeoutSettings:
     """AC4: Test research() respects configured timeout settings."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_default_timeout_used(self):
         """Default timeout values are used in requests."""
         from src.research.grok_client import GrokClient
@@ -470,6 +486,7 @@ class TestGrokTimeoutSettings:
                 assert call_args[1]['timeout'] == (120, 600)
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_retry_backoff_respects_max_backoff(self):
         """Retry backoff is capped at MAX_BACKOFF."""
         from src.research.grok_client import GrokClient, MAX_BACKOFF, MAX_RETRIES
@@ -491,6 +508,7 @@ class TestGrokTimeoutSettings:
                             assert sleep_time <= MAX_BACKOFF
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_exponential_backoff_pattern(self):
         """Backoff increases exponentially with jitter."""
         from src.research.grok_client import GrokClient, INITIAL_BACKOFF
@@ -553,6 +571,7 @@ class TestGrokInputValidation:
             assert "XAI_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_empty_string_api_key_raises_value_error(self):
         """Empty string API key is treated as missing."""
         from src.research.grok_client import GrokClient
@@ -565,6 +584,7 @@ class TestGrokInputValidation:
             assert "XAI_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_api_key_from_parameter_preferred(self):
         """API key from parameter is used over environment variable."""
         from src.research.grok_client import GrokClient
@@ -588,6 +608,7 @@ class TestGrokInputValidation:
                 assert headers['Authorization'] == 'Bearer param-api-key'
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_api_key_from_environment_used_when_no_param(self):
         """API key from environment variable is used when no parameter."""
         from src.research.grok_client import GrokClient
@@ -611,6 +632,7 @@ class TestGrokInputValidation:
                 assert headers['Authorization'] == 'Bearer env-api-key-12345'
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_custom_model_respected(self):
         """Custom model parameter is respected."""
         from src.research.grok_client import GrokClient
@@ -643,6 +665,7 @@ class TestGrokOtherMethods:
     """Additional tests for compare and test_connection methods."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_compare_returns_research_result(self):
         """compare method returns ResearchResult."""
         from src.research.grok_client import GrokClient, ResearchResult
@@ -665,6 +688,7 @@ class TestGrokOtherMethods:
                 assert "Item B" in result.topic
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_compare_with_criteria(self):
         """compare method accepts optional criteria."""
         from src.research.grok_client import GrokClient
@@ -693,6 +717,7 @@ class TestGrokOtherMethods:
                 assert "ease of learning" in user_content
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_test_connection_success(self):
         """test_connection returns True on successful API call."""
         from src.research.grok_client import GrokClient
@@ -711,6 +736,7 @@ class TestGrokOtherMethods:
                 mock_get.assert_called_once()
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_test_connection_failure(self):
         """test_connection returns False on API error."""
         from src.research.grok_client import GrokClient
@@ -725,6 +751,7 @@ class TestGrokOtherMethods:
                 assert result is False
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_compare_enables_search(self):
         """compare method enables search by default."""
         from src.research.grok_client import GrokClient
@@ -756,6 +783,7 @@ class TestGrokEdgeCases:
     """Edge case tests for GrokClient."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_http_error_with_json_body(self):
         """HTTP error with JSON body includes error details."""
         from src.research.grok_client import GrokClient
@@ -777,6 +805,7 @@ class TestGrokEdgeCases:
                 assert "Invalid request" in str(exc_info.value) or "400" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_http_error_with_text_body(self):
         """HTTP error with non-JSON body handles gracefully."""
         from src.research.grok_client import GrokClient
@@ -799,6 +828,7 @@ class TestGrokEdgeCases:
                 assert "Plain text error" in str(exc_info.value) or "400" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_source_extraction_patterns(self):
         """Source extraction handles various patterns correctly."""
         from src.research.grok_client import GrokClient
@@ -825,6 +855,7 @@ class TestGrokEdgeCases:
             assert 'wall street journal' in sources_str or 'bbc' in sources_str
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_search_payload_structure(self):
         """Research method creates correct payload structure."""
         from src.research.grok_client import GrokClient
@@ -858,6 +889,7 @@ class TestGrokEdgeCases:
                 assert payload['messages'][1]['role'] == 'user'
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_base_url_used_correctly(self):
         """API calls use correct base URL."""
         from src.research.grok_client import GrokClient
