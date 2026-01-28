@@ -978,3 +978,201 @@ class TestStageMetricsCollection:
         assert result.success is False
         assert result.metrics is metrics
         assert result.metrics.items_failed == 2
+
+
+class TestResumeLogic:
+    """
+    US-007 (Sprint 15): Pipeline orchestrator resume logic tests.
+
+    Tests specifically targeting acceptance criteria for resume behavior:
+    - Resume skips stages before checkpoint's last_completed_stage
+    - Fresh run executes all stages in order
+    - Halts on stage failure (subsequent stages NOT called)
+    - Stage timing recorded for each completed stage
+    - Stage callbacks fire with correct stage names
+    """
+
+    def test_resume_skips_stages_before_checkpoint_3_stages(self, temp_project_dir, mock_config):
+        """AC1: Mock 3 stages, set checkpoint to stage 1, verify only stages 2 and 3 execute."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage1 = MockStage("ANALYZE", can_skip_value=True)
+        stage2 = MockStage("DOWNLOAD", can_skip_value=False)
+        stage3 = MockStage("OUTPUT", can_skip_value=False)
+        pipeline.add_stage(stage1).add_stage(stage2).add_stage(stage3)
+
+        # Simulate checkpoint resume: stage1 already completed
+        pipeline.resume_mode = True
+
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        # Stage 1 skipped (restored from checkpoint), stages 2 and 3 executed
+        assert stage1._run_called is False
+        assert stage1._restore_called is True
+        assert stage2._run_called is True
+        assert stage3._run_called is True
+
+    def test_resume_skips_first_two_of_three(self, temp_project_dir, mock_config):
+        """AC1 variant: Both first stages completed, only last executes."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage1 = MockStage("ANALYZE", can_skip_value=True)
+        stage2 = MockStage("DOWNLOAD", can_skip_value=True)
+        stage3 = MockStage("OUTPUT", can_skip_value=False)
+        pipeline.add_stage(stage1).add_stage(stage2).add_stage(stage3)
+
+        pipeline.resume_mode = True
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert stage1._run_called is False
+        assert stage2._run_called is False
+        assert stage3._run_called is True
+
+    def test_fresh_run_executes_all_stages_in_order(self, temp_project_dir, mock_config):
+        """AC2: No checkpoint exists — verify all stage execute() methods called in order."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage1 = MockStage("ANALYZE")
+        stage2 = MockStage("DOWNLOAD")
+        stage3 = MockStage("OUTPUT")
+        pipeline.add_stage(stage1).add_stage(stage2).add_stage(stage3)
+
+        execution_order = []
+
+        def on_start(name):
+            execution_order.append(name)
+
+        result = pipeline.run(resume=False, on_stage_start=on_start)
+
+        assert result is True
+        # All three stages executed
+        assert stage1._run_called is True
+        assert stage2._run_called is True
+        assert stage3._run_called is True
+        # Correct order
+        assert execution_order == ["ANALYZE", "DOWNLOAD", "OUTPUT"]
+
+    def test_fresh_run_no_can_skip_called(self, temp_project_dir, mock_config):
+        """AC2: Fresh run does not invoke can_skip on any stage."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage1 = MockStage("ANALYZE")
+        stage2 = MockStage("DOWNLOAD")
+        pipeline.add_stage(stage1).add_stage(stage2)
+
+        # resume_mode is False (fresh), so can_skip should never be checked
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert stage1._can_skip_called is False
+        assert stage2._can_skip_called is False
+
+    def test_halts_on_failure_subsequent_not_called(self, temp_project_dir, mock_config):
+        """AC3: Stage failure halts pipeline — subsequent stages NOT called."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage1 = MockStage("ANALYZE")
+        stage2 = MockStage("DOWNLOAD", should_fail=True)
+        stage3 = MockStage("OUTPUT")
+        pipeline.add_stage(stage1).add_stage(stage2).add_stage(stage3)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        assert stage1._run_called is True
+        assert stage2._run_called is True   # Ran but failed
+        assert stage3._run_called is False   # Never reached
+
+    def test_halts_on_failure_returns_false(self, temp_project_dir, mock_config):
+        """AC3: Pipeline returns False when a stage fails."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("FAIL", should_fail=True))
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False)
+
+        assert result is False
+
+    def test_timing_recorded_per_completed_stage(self, temp_project_dir, mock_config):
+        """AC4: elapsed_seconds populated for each completed stage after run."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("DOWNLOAD"))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        pipeline.run(resume=False)
+
+        # All 3 stages have timing entries
+        assert len(pipeline.stage_timings) == 3
+        for name in ["ANALYZE", "DOWNLOAD", "OUTPUT"]:
+            assert name in pipeline.stage_timings
+            assert isinstance(pipeline.stage_timings[name], float)
+            assert pipeline.stage_timings[name] >= 0
+
+    def test_timing_not_recorded_for_stages_after_failure(self, temp_project_dir, mock_config):
+        """AC4: Stages after failure have no timing entry."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("DOWNLOAD", should_fail=True))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        assert "ANALYZE" in pipeline.stage_timings
+        assert "DOWNLOAD" in pipeline.stage_timings  # Ran but failed — still timed
+        assert "OUTPUT" not in pipeline.stage_timings  # Never ran
+
+    def test_callbacks_fire_with_correct_stage_names(self, temp_project_dir, mock_config):
+        """AC5: on_stage_start and on_stage_complete called with correct stage name."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("DOWNLOAD"))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        started = []
+        completed = []
+
+        def on_start(name):
+            started.append(name)
+
+        def on_complete(name, result, elapsed):
+            completed.append(name)
+
+        pipeline.run(resume=False, on_stage_start=on_start, on_stage_complete=on_complete)
+
+        assert started == ["ANALYZE", "DOWNLOAD", "OUTPUT"]
+        assert completed == ["ANALYZE", "DOWNLOAD", "OUTPUT"]
+
+    def test_callbacks_interleave_start_complete(self, temp_project_dir, mock_config):
+        """AC5: start fires before complete for each stage, interleaved correctly."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B"))
+
+        events = []
+
+        def on_start(name):
+            events.append(f"start:{name}")
+
+        def on_complete(name, result, elapsed):
+            events.append(f"complete:{name}")
+
+        pipeline.run(resume=False, on_stage_start=on_start, on_stage_complete=on_complete)
+
+        assert events == ["start:A", "complete:A", "start:B", "complete:B"]
+
+    def test_callbacks_receive_success_result(self, temp_project_dir, mock_config):
+        """AC5: on_stage_complete receives StageResult with success=True for passing stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        results = []
+
+        def on_complete(name, result, elapsed):
+            results.append({'name': name, 'success': result.success, 'elapsed': elapsed})
+
+        pipeline.run(resume=False, on_stage_complete=on_complete)
+
+        assert len(results) == 1
+        assert results[0]['name'] == "ANALYZE"
+        assert results[0]['success'] is True
+        assert results[0]['elapsed'] >= 0
