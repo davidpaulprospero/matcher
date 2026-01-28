@@ -1444,14 +1444,24 @@ $pairsList
             $process.StandardInput.Close()
 
             # 60 second timeout for simple classification
-            $completed = $process.WaitForExit(60000)
+            # NOTE: Do NOT use $process.WaitForExit($ms) — deadlocks on .NET Framework
+            # when child processes inherit stdout/stderr pipe handles. Poll HasExited instead.
+            $deadline = (Get-Date).AddSeconds(60)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $completed = $process.HasExited
 
             if (-not $completed) {
-                $process.Kill()
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
                 Write-Host "    Pre-flight: LLM verification timed out" -ForegroundColor DarkYellow
                 return @()
             }
 
+            try { $process.CancelOutputRead() } catch {}
+            try { $process.CancelErrorRead() } catch {}
             Start-Sleep -Milliseconds 200
 
             $output = $outBuilder.ToString()

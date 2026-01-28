@@ -1,7 +1,7 @@
 ﻿{
     "version":  1,
-    "totalSprintsCompleted":  10,
-    "totalStoriesCompleted":  104,
+    "totalSprintsCompleted":  15,
+    "totalStoriesCompleted":  147,
     "focusAreaBreakdown":  {
                                "caption":  {
                                                "sprints":  4,
@@ -16,6 +16,10 @@
                                                      "stories":  10
                                                  },
                                "testing":  {
+                                               "sprints":  5,
+                                               "stories":  43
+                                           },
+                               "quality":  {
                                                "sprints":  1,
                                                "stories":  10
                                            }
@@ -101,6 +105,51 @@
                         "startedAt":  "2026-01-27T23:34:10.7472442+08:00",
                         "completedAt":  "2026-01-28T00:34:10.7632478+08:00",
                         "sprintNumber":  13
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-14.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-28T10:58:35.9238102+08:00",
+                        "completedAt":  "2026-01-28T11:58:35.9413128+08:00",
+                        "sprintNumber":  14
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-15.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-28T13:54:26.7897896+08:00",
+                        "completedAt":  "2026-01-28T14:54:26.8067912+08:00",
+                        "sprintNumber":  15
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-16.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  3,
+                        "startedAt":  "2026-01-28T14:39:32.4763426+08:00",
+                        "completedAt":  "2026-01-28T15:39:32.4933464+08:00",
+                        "sprintNumber":  16
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-17.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-28T16:26:18.5899952+08:00",
+                        "completedAt":  "2026-01-28T17:26:18.5919951+08:00",
+                        "sprintNumber":  17
+                    },
+                    {
+                        "focusArea":  "quality",
+                        "archiveFile":  "sprint-18.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-28T19:22:46.7495220+08:00",
+                        "completedAt":  "2026-01-28T20:22:46.7650247+08:00",
+                        "sprintNumber":  18
                     }
                 ]
 }

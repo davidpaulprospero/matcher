@@ -8,82 +8,109 @@
                        },
                        {
                            "id":  "rate-limiting",
+                           "completed":  true,
+                           "startedAt":  null,
+                           "completedAt":  "2026-01-28T14:10:00"
+                       },
+                       {
+                           "id":  "testing",
+                           "completed":  true,
+                           "startedAt":  "2026-01-27T23:34:10",
+                           "completedAt":  "2026-01-28T17:26:20"
+                       },
+                       {
+                           "id":  "caption",
+                           "completed":  true,
+                           "startedAt":  null,
+                           "completedAt":  "2026-01-28T15:18:14"
+                       },
+                       {
+                           "id":  "quality",
+                           "completed":  true,
+                           "startedAt":  "2026-01-28T18:30:00",
+                           "completedAt":  "2026-01-28T20:22:48"
+                       },
+                       {
+                           "id":  "pipeline",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "agents",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "otio",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "speed",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "config",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "unit-tests",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "compilation",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "client-learning",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "ux",
+                           "completed":  false,
+                           "startedAt":  null,
+                           "completedAt":  null
+                       },
+                       {
+                           "id":  "documentation",
                            "completed":  false,
                            "startedAt":  null,
                            "completedAt":  null
                        }
                    ],
-    "sessionId":  "impersonation-bypass-2026-01-26",
-    "createdAt":  "2026-01-26T12:00:00Z",
-    "interviewContext":  "Sprint 13 (testing) completed all 10 stories covering rate-limiting intelligence tests: retry queue deadlock prevention, rate limit window estimation, escalation timeline export, tier effectiveness correlation, auto-scaling budget, stale checkpoint restoration, recommendation engine, health status aggregation, circuit breaker pause scaling, and speed tracker signal detection. Sprint 14 targets deeper integration-level testing gaps identified during sprint 13: AudioFirstPipeline has zero escalation/cookie integration tests, RateLimitBudget lacks thread safety, CookieMethodFallback has untested cross-keyword exhaustion paths, parallel downloads have only 10 config-level tests with no concurrency coverage, and checkpoint save/restore cycles for escalation timeline and tier outcomes are untested end-to-end.",
+    "sessionId":  "full-sweep-2026-01-28",
+    "createdAt":  "2026-01-28T18:00:00Z",
+    "interviewContext":  "Sprint 19 continues test coverage improvements, targeting the compilation module (GapAnalyzer, TopicBroadener, CompilationTimelineBuilder), stage checkpoint serialization edge cases, and test infrastructure enhancements. Previous testing sprints (13-17) established coverage for conftest fixtures, cache systems, and scoring functions. Sprint 18 completed comprehensive scoring function tests (temporal coherence, transcript quality, semantic coherence, pool normalization, confidence histogram). This sprint addresses ~300 LOC of untested compilation logic and test reliability patterns that affect CI/CD pipeline stability.",
     "interviewDetails":  {
-                             "workType":  "feature",
-                             "description":  "yt-dlp browser impersonation bypass with curl_cffi for TLS fingerprint spoofing",
-                             "architecture":  {
-                                                  "activation":  "always-on for every yt-dlp subprocess call",
-                                                  "targetRotation":  "round-robin per call, cycling through Chrome/Firefox/Safari targets",
-                                                  "targetDetection":  "auto-detect at pipeline startup via yt-dlp --list-impersonate-targets",
-                                                  "escalationTiers":  [
-                                                                          "Tier 1 (always): --impersonate \u003crotating-target\u003e on every call",
-                                                                          "Tier 2 (on 403/bot-detection): add --extractor-args youtube:player_client=web_safari,tv_downgraded,web",
-                                                                          "Tier 3 (continued failure): Tier 2 + cookie rotation (existing infrastructure)"
-                                                                      ]
-                                              },
-                             "callSites":  {
-                                               "core.py:1517":  "Keyword search+download (main flow)",
-                                               "core.py:1617":  "ID-based download",
-                                               "audio_first.py:241":  "Audio download",
-                                               "audio_first.py:427":  "Segment download (--download-sections)",
-                                               "audio_first.py:591":  "Full video fallback",
-                                               "title_filter.py:91":  "Title filter search (--dump-json)",
-                                               "speech_screening.py:66":  "Speech screening sample",
-                                               "caption_fetcher.py:2966":  "Caption language listing (--list-subs)"
-                                           },
-                             "availableTargets":  [
-                                                      "Chrome-136:Macos-15",
-                                                      "Chrome-133:Macos-15",
-                                                      "Chrome-131:Macos-14",
-                                                      "Chrome-131:Android-14",
-                                                      "Chrome-99:Windows-10",
-                                                      "Firefox-135:Macos-14",
-                                                      "Firefox-133:Macos-14",
-                                                      "Safari-18.4:Macos-15",
-                                                      "Safari-18.0:Macos-15",
-                                                      "Edge-101:Windows-10",
-                                                      "Edge-99:Windows-10"
-                                                  ],
-                             "existingInfrastructure":  {
-                                                            "cookieRotation":  "src/downloader/cookie_rotator.py - rotate_on_errors, cooldown, strategy",
-                                                            "circuitBreaker":  "CircuitBreakerConfig - pause after 5 consecutive failures",
-                                                            "exponentialBackoff":  "max_retries=3, retry_delay=2.0, retry_backoff=2.0",
-                                                            "batchRetry":  "BatchRetryConfig - collect rate-limited, retry after 120s",
-                                                            "speedTracking":  "SpeedTrackingConfig - preemptive rate limit detection",
-                                                            "errorClassification":  "ERROR_SEVERITY_PATTERNS: high/medium/low with multipliers"
-                                                        },
-                             "keyFiles":  [
-                                              "src/downloader/core.py",
-                                              "src/downloader/audio_first.py",
-                                              "src/downloader/cookie_rotator.py",
-                                              "src/downloader/title_filter.py",
-                                              "src/downloader/speech_screening.py",
-                                              "src/downloader/utils.py",
-                                              "src/caption_fetcher.py",
-                                              "src/config/sections/download.py",
-                                              "config.yaml"
-                                          ],
-                             "storyOutline":  [
-                                                  "ImpersonationManager class: auto-detect targets, round-robin rotation, thread-safe",
-                                                  "ImpersonationConfig dataclass in download config section",
-                                                  "Wire impersonation into core.py (2 command sites)",
-                                                  "Wire impersonation into audio_first.py (3 command sites)",
-                                                  "Wire impersonation into auxiliary downloaders (title_filter, speech_screening, caption_fetcher)",
-                                                  "EscalationManager: 3-tier bypass progression with state tracking",
-                                                  "ExtractorArgs config: player_client options, escalation defaults",
-                                                  "Integrate escalation with existing retry loops in core.py and audio_first.py",
-                                                  "Impersonation metrics and logging (target usage, escalation events)",
-                                                  "Healer integration: auto-escalate on repeated 403s",
-                                                  "Unit tests for ImpersonationManager (auto-detect parsing, rotation, error handling)",
-                                                  "Integration tests for escalation tiers (mock 403, verify progression)"
-                                              ]
+                             "workType":  "improvement",
+                             "description":  "Broad codebase improvement across all untouched focus areas",
+                             "completedAreas":  {
+                                                    "download":  "3 sprints, 30 stories - core download, audio-first, impersonation, escalation",
+                                                    "rate-limiting":  "1 sprint, 10 stories - cookie rotation, circuit breaker, rate budget",
+                                                    "testing":  "5 sprints, 43 stories - conftest, fixtures, coverage gaps, unit tests",
+                                                    "caption":  "4 sprints, 42 stories - caption-first mode, fetcher, cache, validation"
+                                                },
+                             "keyPriorities":  [
+                                                   "Match quality scoring and confidence calibration",
+                                                   "Pipeline stage robustness and error handling",
+                                                   "Self-healing agent coverage and healer tests",
+                                                   "OTIO/EDL/XML output correctness",
+                                                   "Performance bottlenecks in transcription and embedding",
+                                                   "Config validation and edge cases",
+                                                   "CLI user experience improvements"
+                                               ]
                          }
 }

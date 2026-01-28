@@ -22,8 +22,8 @@
             "id": "US-002",
             "title": "Add TopicBroadener LLM integration and fallback tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "11 tests in TestTopicBroadener - added lazy-load, limit, and invalid JSON tests",
             "acceptanceCriteria": [
                 "Test TopicBroadener.broaden() returns new keywords from LLM response parsing",
                 "Test TopicBroadener.broaden() excludes already-used keywords from results",

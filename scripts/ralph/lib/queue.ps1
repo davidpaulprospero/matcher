@@ -114,7 +114,8 @@ function Get-NextQueuedFocusArea {
 function Update-QueueProgress {
     <#
     .SYNOPSIS
-        Mark a focus area as completed in queue.json
+        Mark a focus area as completed in queue.json.
+        If the area isn't tracked in the queue yet, adds it automatically.
     .PARAMETER AreaId
         The focus area ID to mark as completed
     .PARAMETER Silent
@@ -132,14 +133,28 @@ function Update-QueueProgress {
     try {
         $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
 
-        # Update focusAreas array
-        if ($queue.focusAreas) {
-            foreach ($area in $queue.focusAreas) {
-                if ($area.id -eq $AreaId) {
-                    $area.completed = $true
-                    $area.completedAt = $timestamp
-                }
+        if (-not $queue.focusAreas) {
+            $queue.focusAreas = @()
+        }
+
+        # Find existing entry or add new one
+        $found = $false
+        foreach ($area in $queue.focusAreas) {
+            if ($area.id -eq $AreaId) {
+                $area.completed = $true
+                $area.completedAt = $timestamp
+                $found = $true
             }
+        }
+
+        if (-not $found) {
+            # Area was picked by scoring, not originally queued — add it
+            $queue.focusAreas = @($queue.focusAreas) + @([PSCustomObject]@{
+                id = $AreaId
+                completed = $true
+                startedAt = $timestamp
+                completedAt = $timestamp
+            })
         }
 
         # Update session info
@@ -156,6 +171,99 @@ function Update-QueueProgress {
     }
     catch {
         Write-Host "  Warning: Could not update queue.json" -ForegroundColor Yellow
+    }
+}
+
+function Sync-QueueFromHistory {
+    <#
+    .SYNOPSIS
+        Reconcile queue.json with sprint_history.json and current PRD.
+        - Marks queued areas as completed if found in sprint history
+        - Adds areas from sprint history that aren't in the queue
+        - Adds the current PRD's focus area as in-progress if not tracked
+    .PARAMETER Silent
+        If set, don't print per-area messages
+    #>
+    param([switch]$Silent)
+
+    $queue = Get-QueueData
+    if (-not $queue) { return }
+
+    if (-not $queue.focusAreas) {
+        $queue | Add-Member -NotePropertyName focusAreas -NotePropertyValue @() -Force
+    }
+
+    $history = Read-JsonFile -Path $script:SprintHistoryFile
+    $updated = $false
+    $queuedIds = @($queue.focusAreas | ForEach-Object { $_.id })
+
+    # Sync completed areas from sprint history
+    if ($history -and $history.focusAreaBreakdown) {
+        $completedInHistory = @($history.focusAreaBreakdown.PSObject.Properties | ForEach-Object { $_.Name })
+
+        foreach ($area in $queue.focusAreas) {
+            if (-not $area.completed -and $completedInHistory -contains $area.id) {
+                $area.completed = $true
+                $area.completedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+                $updated = $true
+                if (-not $Silent) {
+                    Write-Host "  Queue sync: marked '$($area.id)' as completed (found in sprint history)" -ForegroundColor Green
+                }
+            }
+        }
+
+        # Add areas from history that aren't tracked in the queue
+        foreach ($areaId in $completedInHistory) {
+            if ($queuedIds -notcontains $areaId) {
+                $queue.focusAreas = @($queue.focusAreas) + @([PSCustomObject]@{
+                    id = $areaId
+                    completed = $true
+                    startedAt = $null
+                    completedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+                })
+                $queuedIds = @($queuedIds) + @($areaId)
+                $updated = $true
+                if (-not $Silent) {
+                    Write-Host "  Queue sync: added '$areaId' (completed in sprint history)" -ForegroundColor Green
+                }
+            }
+        }
+    }
+
+    # Track the current PRD's focus area as in-progress
+    $prd = Read-JsonFile -Path $script:PrdFile -Silent
+    if ($prd -and $prd.focusArea) {
+        $hasIncompleteStories = $prd.userStories -and @($prd.userStories | Where-Object { -not $_.passes }).Count -gt 0
+
+        if ($queuedIds -notcontains $prd.focusArea) {
+            # Area not in queue at all — add it
+            $queue.focusAreas = @($queue.focusAreas) + @([PSCustomObject]@{
+                id = $prd.focusArea
+                completed = $false
+                startedAt = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+                completedAt = $null
+            })
+            $updated = $true
+            if (-not $Silent) {
+                Write-Host "  Queue sync: added '$($prd.focusArea)' (current sprint)" -ForegroundColor Green
+            }
+        } elseif ($hasIncompleteStories) {
+            # Area exists but marked completed — re-open for active sprint
+            foreach ($area in $queue.focusAreas) {
+                if ($area.id -eq $prd.focusArea -and $area.completed) {
+                    $area.completed = $false
+                    $area.completedAt = $null
+                    $updated = $true
+                    if (-not $Silent) {
+                        Write-Host "  Queue sync: re-opened '$($prd.focusArea)' (active sprint)" -ForegroundColor Green
+                    }
+                }
+            }
+        }
+    }
+
+    if ($updated) {
+        Save-Queue -Queue $queue
     }
 }
 

@@ -460,6 +460,9 @@ function Start-RalphsChoiceLoop {
     Write-Host "  Ralph's Choice mode: Ralph decides, you confirm" -ForegroundColor Magenta
     Write-Host ""
 
+    # Reconcile queue with sprint history (catch up on any missed completions)
+    Sync-QueueFromHistory
+
     $sprintCount = 0
     $config = Get-RalphConfig
 
@@ -620,6 +623,9 @@ function Start-RalphsChoiceAutoLoop {
     $script:State.CurrentMode = "RalphsChoiceAuto"
     Write-Host "  Ralph's Choice Auto: Fully autonomous" -ForegroundColor Magenta
     Write-Host ""
+
+    # Reconcile queue with sprint history (catch up on any missed completions)
+    Sync-QueueFromHistory -Silent
 
     $sprintCount = 0
     $config = Get-RalphConfig

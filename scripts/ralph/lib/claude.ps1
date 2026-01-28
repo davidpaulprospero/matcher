@@ -99,7 +99,7 @@ function Invoke-ClaudeSubprocess {
         $lastPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
         $lastProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
         $lastGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
-        $lastLogSize = if (Test-Path $OutFile) { (Get-Item $OutFile).Length } else { 0 }
+        $lastBufferLength = $outBuilder.Length
 
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
@@ -114,21 +114,21 @@ function Invoke-ClaudeSubprocess {
                 $currentPrdTime = (Get-Item $script:PrdFile -ErrorAction SilentlyContinue).LastWriteTime
                 $currentProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
                 $currentGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
-                $currentLogSize = if (Test-Path $OutFile) { (Get-Item $OutFile).Length } else { 0 }
+                $currentBufferLength = $outBuilder.Length
 
                 $prdUpdated = $currentPrdTime -and $lastPrdTime -and ($currentPrdTime -gt $lastPrdTime)
                 $progressUpdated = $currentProgressTime -and $lastProgressTime -and ($currentProgressTime -gt $lastProgressTime)
                 $gitChanged = $currentGitStatus -ne $lastGitStatus
-                $logGrowing = $currentLogSize -gt $lastLogSize
+                $bufferGrowing = $currentBufferLength -gt $lastBufferLength
 
-                if ($prdUpdated -or $progressUpdated -or $gitChanged -or $logGrowing) {
-                    $reason = if ($prdUpdated) { "prd.json" } elseif ($progressUpdated) { "progress.txt" } elseif ($gitChanged) { "git changes" } else { "log output" }
+                if ($prdUpdated -or $progressUpdated -or $gitChanged -or $bufferGrowing) {
+                    $reason = if ($prdUpdated) { "prd.json" } elseif ($progressUpdated) { "progress.txt" } elseif ($gitChanged) { "git changes" } else { "claude output" }
                     Write-Host "  [$mins min] Activity detected ($reason)" -ForegroundColor DarkGreen
                     $timeSinceProgress = 0
                     $lastPrdTime = $currentPrdTime
                     $lastProgressTime = $currentProgressTime
                     $lastGitStatus = $currentGitStatus
-                    $lastLogSize = $currentLogSize
+                    $lastBufferLength = $currentBufferLength
                 }
                 elseif ($mins -gt $lastMinuteShown) {
                     Write-Host "  [$mins min] Running..." -ForegroundColor DarkGray
@@ -142,7 +142,12 @@ function Invoke-ClaudeSubprocess {
 
         $exitCode = $null
         if ($exited) {
-            $process.WaitForExit()
+            # Do NOT call parameterless WaitForExit() — it deadlocks on .NET Framework
+            # when child processes hold stdout/stderr pipe handles open.
+            # HasExited is already true, so just cancel async readers and read exit code.
+            try { $process.CancelOutputRead() } catch {}
+            try { $process.CancelErrorRead() } catch {}
+            Start-Sleep -Milliseconds 200
             $exitCode = $process.ExitCode
         }
     }
@@ -165,7 +170,13 @@ function Invoke-ClaudeSubprocess {
         # Ensure process is terminated on any exit path (timeout, Ctrl+C, error)
         if ($process -and -not $process.HasExited) {
             Write-Host "  Terminating Claude process..." -ForegroundColor Yellow
-            try { $process.Kill(); $process.WaitForExit(5000) } catch {}
+            # Kill entire process tree to avoid orphaned node subagents
+            $treePid = $process.Id
+            try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+            # Fallback if taskkill didn't work
+            if (-not $process.HasExited) {
+                try { $process.Kill() } catch {}
+            }
         }
         if ($process) { $process.Dispose() }
     }

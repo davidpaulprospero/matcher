@@ -458,15 +458,30 @@ function Invoke-ClaudeExploration {
             $process.StandardInput.Close()
 
             # Wait with timeout (5 minutes for exploration)
+            # NOTE: Do NOT use $process.WaitForExit($ms) — it deadlocks on .NET Framework
+            # when child processes (Task/Explore node subagents) inherit stdout/stderr pipe
+            # handles. Poll HasExited instead.
             $timeoutMs = 300000
-            $completed = $process.WaitForExit($timeoutMs)
+            $deadline = (Get-Date).AddMilliseconds($timeoutMs)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $completed = $process.HasExited
 
             if (-not $completed) {
-                $process.Kill()
+                # Kill entire process tree — $process.Kill() only kills parent,
+                # leaving orphaned node subagents that hold pipes open forever
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) {
+                    try { $process.Kill() } catch {}
+                }
                 Write-Host "  Exploration timed out after 5 minutes" -ForegroundColor Yellow
             }
 
-            # Small delay to let async handlers flush
+            # Stop async readers and let final events flush
+            try { $process.CancelOutputRead() } catch {}
+            try { $process.CancelErrorRead() } catch {}
             Start-Sleep -Milliseconds 200
 
             $output = $outBuilder.ToString()
@@ -481,6 +496,14 @@ function Invoke-ClaudeExploration {
         finally {
             Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
             Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+            if ($process -and -not $process.HasExited) {
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+            }
+            if ($process) { $process.Dispose() }
         }
     }
     catch {

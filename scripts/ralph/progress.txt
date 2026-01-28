@@ -6525,3 +6525,12 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC4: test_empty_tracks_returns_incomplete — verifies empty tracks list returns 4-track shortfall calculation
 - AC5: total_shortfall verified in test_partial_tracks_reports_shortfall (assert report.total_shortfall == 200.0)
 - Test results: 5 passed in 0.27s
+
+## Iteration US-002 (Sprint 19) - Add TopicBroadener LLM integration and fallback tests
+- Added 3 new tests: lazy-load, limits-to-five, invalid-json-fallback
+- AC1: test_broaden_filters_used_keywords — verifies LLM response parsing returns new keywords
+- AC2: test_broaden_filters_used_keywords — verifies already-used 'cats' not in result
+- AC3: test_broaden_lazy_loads_llm_client — verifies _llm_client=None initially, cached after access
+- AC4: test_broaden_limits_to_five_keywords — verifies result limited to 5 keywords (code hardcodes this)
+- AC5: test_broaden_llm_failure_uses_fallback + test_broaden_returns_list_on_invalid_json — verifies fallback behavior (returns list, not empty)
+- Test results: 11 passed in 0.35s

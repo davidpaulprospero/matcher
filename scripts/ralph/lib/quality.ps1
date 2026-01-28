@@ -111,13 +111,21 @@ Please output your review as JSON.
             $process.StandardInput.Write($reviewRequest)
             $process.StandardInput.Close()
 
-            $exited = $process.WaitForExit($timeout * 1000)
-            if ($exited) { $process.WaitForExit() }  # Flush async events
+            # Poll HasExited instead of WaitForExit to avoid .NET Framework deadlock
+            # when child processes inherit stdout/stderr pipe handles
+            $deadline = (Get-Date).AddSeconds($timeout)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $exited = $process.HasExited
+            try { $process.CancelOutputRead() } catch {}
             Start-Sleep -Milliseconds 200
             $output = $outBuilder.ToString()
 
             if (-not $exited) {
-                try { $process.Kill() } catch {}
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
                 Write-Host "  Review timed out after ${timeout}s" -ForegroundColor Yellow
                 return $null
             }
@@ -126,7 +134,9 @@ Please output your review as JSON.
             Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
             Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
             if ($process -and -not $process.HasExited) {
-                try { $process.Kill() } catch {}
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
             }
             if ($process) { $process.Dispose() }
         }
@@ -482,34 +492,57 @@ function Compare-TestBaseline {
     # Parse current results
     $currentPassed = 0
     $currentFailed = 0
+    $currentTotal = 0
     if ($CurrentResults -match '(\d+)/(\d+)') {
         $currentPassed = [int]$Matches[1]
+        $currentTotal = [int]$Matches[2]
     }
     if ($CurrentResults -match '(\d+)\s+fail') {
         $currentFailed = [int]$Matches[1]
     }
+    # Fallback: if total wasn't parsed from X/Y format, compute it
+    if ($currentTotal -eq 0) {
+        $currentTotal = $currentPassed + $currentFailed
+    }
 
     $baselinePassed = [int]$baseline.passed
     $baselineFailed = [int]$baseline.failed
+    $baselineTotal = $baselinePassed + $baselineFailed
 
     $passedDelta = $currentPassed - $baselinePassed
     $failedDelta = $currentFailed - $baselineFailed
 
-    $hasRegression = ($failedDelta -gt 0) -or ($passedDelta -lt 0 -and $baselinePassed -gt 0)
+    # Detect subset runs: iteration ran significantly fewer tests than baseline.
+    # Each Claude iteration may run only its own new tests, not the full suite.
+    # A passed-count drop from a subset run is NOT a regression.
+    $subsetThreshold = 0.8
+    $isSubsetRun = ($baselineTotal -gt 0) -and ($currentTotal -lt [math]::Floor($baselineTotal * $subsetThreshold))
+
+    # Regression criteria:
+    # 1. New failures appeared (always a regression)
+    # 2. Fewer tests passing, but ONLY when running a comparable number of tests
+    #    (prevents false positives from subset runs where Claude ran only its new tests)
+    $hasRegression = ($failedDelta -gt 0) -or ($passedDelta -lt 0 -and $baselinePassed -gt 0 -and -not $isSubsetRun)
 
     $comparison = @{
         baselinePassed = $baselinePassed
         baselineFailed = $baselineFailed
         currentPassed = $currentPassed
         currentFailed = $currentFailed
+        currentTotal = $currentTotal
+        baselineTotal = $baselineTotal
         passedDelta = $passedDelta
         failedDelta = $failedDelta
         hasRegression = $hasRegression
+        isSubsetRun = $isSubsetRun
         capturedAt = $baseline.capturedAt
     }
 
     if ($hasRegression) {
         Write-Host "  REGRESSION DETECTED: $baselinePassed -> $currentPassed passed, $baselineFailed -> $currentFailed failed" -ForegroundColor Red
+    }
+    elseif ($isSubsetRun -and $passedDelta -lt 0) {
+        Write-Host "  Subset run: $currentTotal tests run (baseline: $baselineTotal) - $currentPassed passed, no regression" -ForegroundColor DarkGray
     }
     else {
         $deltaStr = if ($passedDelta -gt 0) { " (+$passedDelta)" } else { "" }
@@ -523,6 +556,10 @@ function Update-TestBaseline {
     <#
     .SYNOPSIS
         Update test baseline after successful story (Story 1.5)
+    .DESCRIPTION
+        Only updates baseline when current run covers at least as many tests
+        as the existing baseline. Subset runs (where Claude only ran its own
+        new tests) should not downgrade the baseline.
     .PARAMETER TestResults
         Current test results string from Get-TestResults
     #>
@@ -547,6 +584,20 @@ function Update-TestBaseline {
     }
 
     if ($total -eq 0 -and $passed -eq 0) { return }
+
+    # Read existing baseline to check if this is a subset run
+    $existing = $null
+    if (Test-Path $baselineFile) {
+        $existing = Read-JsonFile -Path $baselineFile
+    }
+
+    if ($existing) {
+        $existingTotal = [int]$existing.passed + [int]$existing.failed
+        if ($existingTotal -gt 0 -and $total -lt [math]::Floor($existingTotal * 0.8)) {
+            # Subset run - don't downgrade baseline
+            return
+        }
+    }
 
     $baseline = @{
         capturedAt = (Get-Date).ToString("o")
@@ -1072,13 +1123,20 @@ function Invoke-CodeReview {
             $process.StandardInput.Write($reviewPrompt)
             $process.StandardInput.Close()
 
-            $exited = $process.WaitForExit($timeout * 1000)
-            if ($exited) { $process.WaitForExit() }  # Flush async events
+            # Poll HasExited instead of WaitForExit to avoid .NET Framework deadlock
+            $deadline = (Get-Date).AddSeconds($timeout)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $exited = $process.HasExited
+            try { $process.CancelOutputRead() } catch {}
             Start-Sleep -Milliseconds 200
             $reviewOutput = $outBuilder.ToString()
 
             if (-not $exited) {
-                try { $process.Kill() } catch {}
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
                 Write-Host "  Code review: Timed out after ${timeout}s" -ForegroundColor Yellow
                 return $null
             }
@@ -1087,7 +1145,9 @@ function Invoke-CodeReview {
             Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
             Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
             if ($process -and -not $process.HasExited) {
-                try { $process.Kill() } catch {}
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
             }
             if ($process) { $process.Dispose() }
         }
