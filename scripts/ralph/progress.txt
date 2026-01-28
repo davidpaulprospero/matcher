@@ -1,4 +1,21 @@
 
+## Iteration US-007 (Sprint 15) - Add pipeline orchestrator resume logic tests
+- Added TestResumeLogic class with 11 tests to tests/test_pipeline_orchestrator.py
+- test_resume_skips_stages_before_checkpoint_3_stages: 3 stages, stage1 can_skip=True, only stages 2+3 execute
+- test_resume_skips_first_two_of_three: Both first stages completed, only last executes
+- test_fresh_run_executes_all_stages_in_order: All 3 stages run in ANALYZE→DOWNLOAD→OUTPUT order via callback
+- test_fresh_run_no_can_skip_called: Fresh run never invokes can_skip on any stage
+- test_halts_on_failure_subsequent_not_called: Stage 2 fails, stage 3 never reached
+- test_halts_on_failure_returns_false: Pipeline returns False on stage failure
+- test_timing_recorded_per_completed_stage: All 3 stages have float >= 0 in stage_timings
+- test_timing_not_recorded_for_stages_after_failure: Failed stage timed, unreached stage absent
+- test_callbacks_fire_with_correct_stage_names: on_stage_start and on_stage_complete both receive correct names
+- test_callbacks_interleave_start_complete: start:A, complete:A, start:B, complete:B ordering
+- test_callbacks_receive_success_result: on_stage_complete gets StageResult with success=True and elapsed >= 0
+- No source code changes needed (pure test-only story)
+- Files modified: tests/test_pipeline_orchestrator.py
+- Test results: 69 passed in 0.91s (58 existing + 11 new), 0 regressions
+
 ## Iteration US-006 (Sprint 15) - Add checkpoint stage data round-trip tests
 - Created tests/test_checkpoint_stage_data_roundtrip.py with 29 tests across 5 classes
 - TestSaveLoadRoundTrip (6 tests): all 14 stages save/load round-trip, metadata preservation (config_hash, voiceover_path, timestamps), single stage, nested data structures, empty/None stage data, overwrite same stage

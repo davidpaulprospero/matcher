@@ -92,8 +92,8 @@
             "id": "US-007",
             "title": "Add pipeline orchestrator resume logic tests",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added TestResumeLogic class with 11 tests to tests/test_pipeline_orchestrator.py: resume skips stages before checkpoint (3-stage and 2-of-3 variants), fresh run executes all stages in order with callback verification, fresh run doesn't call can_skip, halts on failure (subsequent not called + returns False), timing recorded per completed stage, timing absent for stages after failure, callbacks fire with correct stage names, callbacks interleave start/complete correctly, callbacks receive success result. Total: 69 tests pass in 0.91s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test run_pipeline() skips stages before checkpoint's last_completed_stage during resume — mock 3 stages, set checkpoint to stage 1, verify only stages 2 and 3 execute",
                 "Test run_pipeline() executes all stages when no checkpoint exists (fresh run) — verify all stage execute() methods called in order",
