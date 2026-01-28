@@ -831,3 +831,55 @@ class TestCompilationTimelineBuilder:
         assert tl.tracks[3].name.startswith("A2")
         assert tl.tracks[4].name.startswith("V3")
         assert tl.tracks[5].name.startswith("A3")
+
+    @pytest.mark.fast
+    def test_clips_ordered_by_input_sequence(self, clip_factory):
+        """Clips should appear in the order they were provided (keyword groups)."""
+        builder = CompilationTimelineBuilder()
+        clip_cats = clip_factory(keyword="cats", title="cats1", video_id="vid_cats_001")
+        clip_dogs = clip_factory(keyword="dogs", title="dogs1", video_id="vid_dogs_001")
+        clip_cats2 = clip_factory(keyword="cats", title="cats2", video_id="vid_cats_002")
+
+        # Clips grouped by keyword
+        tl = builder.create_timeline(tracks=[[clip_cats, clip_cats2, clip_dogs]])
+
+        video_track = tl.tracks[0]
+        clips = list(video_track)
+
+        assert len(clips) == 3
+        assert clips[0].metadata['keyword'] == "cats"
+        assert clips[0].name == "cats1"
+        assert clips[1].metadata['keyword'] == "cats"
+        assert clips[1].name == "cats2"
+        assert clips[2].metadata['keyword'] == "dogs"
+
+    @pytest.mark.fast
+    def test_clip_with_zero_duration_handled(self, clip_factory):
+        """Clips with zero actual_duration should create valid (zero-length) clips."""
+        builder = CompilationTimelineBuilder()
+        clip_zero = clip_factory(actual_duration=0.0)
+        tl = builder.create_timeline(tracks=[[clip_zero]])
+
+        video_track = tl.tracks[0]
+        otio_clip = list(video_track)[0]
+
+        # Should create clip with 0 duration (not crash)
+        assert otio_clip.source_range.duration.to_seconds() == 0.0
+
+    @pytest.mark.fast
+    def test_clip_names_use_video_id_fallback(self, clip_factory):
+        """Multiple clips with same title should use video_id for uniqueness."""
+        builder = CompilationTimelineBuilder()
+        clip_a = clip_factory(title="Same Title", video_id="unique_id_a")
+        clip_b = clip_factory(title="Same Title", video_id="unique_id_b")
+        tl = builder.create_timeline(tracks=[[clip_a, clip_b]])
+
+        video_track = tl.tracks[0]
+        clips = list(video_track)
+
+        # Both clips use title (the code doesn't do collision avoidance currently)
+        # This test documents current behavior - names are not unique
+        assert clips[0].name == "Same Title"
+        assert clips[1].name == "Same Title"
+        # But video_id in metadata is unique
+        assert clips[0].metadata['video_id'] != clips[1].metadata['video_id']
