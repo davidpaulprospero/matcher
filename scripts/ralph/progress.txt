@@ -6669,3 +6669,26 @@ def test_eta_accuracy_batch_50_videos(self):
   - test_no_truncation_below_max_entries (AC5)
 - Test results: 27 tests passed in 1.25s
 - Commit: d83e87b
+
+## Iteration US-003 (Sprint 20) - Add HealingLogger log method tests for all entry types
+- Added 14 new tests to tests/test_agents/test_healing_logger.py
+- TestLogClassification (3 tests):
+  - test_log_classification_creates_entry_with_correct_component_and_action (AC1)
+  - test_log_classification_captures_classification_details (additional)
+  - test_log_classification_truncates_long_reasoning (edge case)
+- TestLogHealerAttempt (3 tests):
+  - test_log_healer_attempt_captures_healer_name_and_result (AC2)
+  - test_log_healer_attempt_records_failed_result (additional)
+  - test_log_healer_attempt_handles_action_without_value_attr (edge case)
+- TestLogFallback (2 tests):
+  - test_log_fallback_records_component_transition (AC3)
+  - test_log_fallback_multiple_transitions (additional)
+- TestLogEscalation (3 tests):
+  - test_log_escalation_distinguishes_to_user (AC4)
+  - test_log_escalation_distinguishes_to_llm_healer (AC4)
+  - test_log_escalation_default_is_to_llm_healer (edge case)
+- TestLogSelfHeal (3 tests):
+  - test_log_self_heal_captures_attempt_progression (AC5)
+  - test_log_self_heal_records_action_as_error_message (additional)
+  - test_log_self_heal_different_healers (additional)
+- Test results: 41 passed in 1.33s

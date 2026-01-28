@@ -36,8 +36,8 @@
                             "id":  "US-003",
                             "title":  "Add HealingLogger log method tests for all entry types",
                             "priority":  3,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Added 14 new tests to tests/test_agents/test_healing_logger.py. TestLogClassification (3 tests), TestLogHealerAttempt (3 tests), TestLogFallback (2 tests), TestLogEscalation (3 tests), TestLogSelfHeal (3 tests). All 41 tests pass in 1.33s.",
                             "acceptanceCriteria":  [
                                                        "Test log_classification() creates entry with correct component=\u0027watcher\u0027 and action=\u0027classify\u0027",
                                                        "Test log_healer_attempt() captures healer_name, result, and stack_trace in details",
