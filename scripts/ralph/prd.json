@@ -50,8 +50,8 @@
             "id": "US-004",
             "title": "Add compilation mode timeline builder tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "12 new tests added in tests/test_compilation.py (now 64 total). TestCompilationTimelineBuilderGapCheckIntegration (5 tests): AC2 - handles tracks after gap_fill, mixed keyword tracks, total duration after gap_fill, empty tracks from failed gap_fill, keyword order preservation. TestCompilationTimelineBuilderDurationLimits (7 tests): AC3 - correct duration calculation, boundary handling, very short/long clips, frame count accuracy, per-track stats, fractional truncation. AC1/AC4/AC5 already covered by 19 existing tests in TestCompilationTimelineBuilder. All 64 tests pass in 0.44s.",
             "acceptanceCriteria": [
                 "Test CompilationTimelineBuilder creates valid OTIO structure from keyword matches",
                 "Test CompilationTimelineBuilder handles gap_check stage results correctly",
