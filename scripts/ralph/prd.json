@@ -1,147 +1,154 @@
 {
-    "branchName": "ralph/sprint-15",
-    "sprintNumber": 15,
+    "branchName": "ralph/sprint-16",
+    "sprintNumber": 16,
     "focusArea": "testing",
-    "projectContext": "Sprints 13-14 (testing) completed 20 stories covering rate-limiting intelligence tests and integration-level download/escalation/cookie/budget tests. Sprint 15 pivots to under-tested non-download modules: post-edit analysis (1666 lines, 1 indirect test), CLI config_utils (368 lines, no direct tests), newproject.py (331 lines, zero tests), checkpoint corruption recovery (784 lines, basic tests only), pipeline orchestrator resume logic (521 lines, basic tests), vision module cost tracking (544 lines, basic tests), and state dataclass serialization edge cases. These modules handle critical user-facing and pipeline-integrity functionality with minimal test coverage.",
+    "projectContext": "Sprint 16 continues the testing focus by targeting the deepest coverage gaps: self-healing agent healers (5 of 7 healer classes have zero tests), compilation module (695 lines at ~10% coverage), matching scoring private helpers (7 functions with 0 tests), LLM client error/retry paths (exceptions.py, retry.py, parsers.py untested), CLI utility modules (environment.py, logging_setup.py, cache_commands.py with 0 tests), and media_sources Unsplash image client (0% coverage). These modules handle error recovery, pipeline resilience, and user-facing CLI functionality with critical untested code paths.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add post-edit analysis filename-based matching tests",
+            "title": "Add CheckpointHealer and DiskHealer agent tests",
             "priority": 1,
             "passes": true,
-            "notes": "Created tests/test_post_edit_analysis.py with 55 tests: 12 for _is_matcher_track (V1-V10, V11/V100 false, keywords), 17 for _get_track_category (all categories + keywords + None), 7 for _render_coverage_bar (0/50/100%, custom width), 9 for _format_timecode (MM:SS, HH:MM:SS, negative, zero), 10 for filename-based analysis (_normalize, FilenameAnalysisResult counts/coverage/to_dict).",
+            "notes": "Pre-implemented: 64 tests passing (31 CheckpointHealer + 33 DiskHealer) across test_checkpoint_healer.py and test_disk_healer.py. All 6 acceptance criteria met.",
             "acceptanceCriteria": [
-                "Test _is_matcher_track() correctly identifies V1-V10 track names — verify True for 'V1', 'V10', 'V1 Primary', and False for 'V11', 'V100', 'Audio 1'",
-                "Test _get_track_category() returns correct categories — verify 'v1' for V1, 'v2_v3' for V2/V3, 'v4_v6' for V4-V6, 'v7_plus' for V7+, None for non-matcher tracks",
-                "Test _render_coverage_bar() renders ASCII bars — verify 100% yields '[##########]', 0% yields '[..........]', 50% yields '[#####.....]'",
-                "Test _format_timecode() formats seconds — verify 90s='1:30', 3661s='1:01:01', negative seconds prepends '-', 0s='0:00'",
-                "Test filename-based analysis matches clips by normalized filename across original and edited OTIO — verify clips found, clips missing, and coverage percentage calculation"
+                "Test CheckpointHealer.can_heal() returns True for checkpoint-related errors (JSONDecodeError, missing checkpoint, corrupted stages dict) and False for unrelated errors (network, API)",
+                "Test CheckpointHealer.heal() restores from backup when primary checkpoint is corrupted — verify .fixed() returned and backup data loaded correctly",
+                "Test CheckpointHealer.heal() returns .failed() when both primary and backup are corrupted — verify no exception raised, failure reason logged",
+                "Test DiskHealer.can_heal() returns True for disk space errors (OSError errno 28, 'No space left') and permission errors (errno 13) — False for network errors",
+                "Test DiskHealer.heal() attempts cleanup of temp files and stale cache when disk full — verify cleanup actions logged via self.log_attempt()",
+                "Test both healers use self.log_attempt() and self.log_success() per Rule 20 — verify log methods called with descriptive messages during heal attempts"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add post-edit analysis track category statistics tests",
+            "title": "Add PathHealer and OTIOHealer agent tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Added 31 tests across 5 classes: TestTrackCategoryAggregation (5 tests: 10-clip aggregation, V1-V10 bucket mapping, track_breakdown dict, user-added separation, single-category), TestCoverageCalculation (5 tests: coverage_pct, v1_kept_pct, _pct helper, duration ratio, segments sum), TestEmptyEditedOtio (6 tests: zero div, all-zero categories, 0% pct, summary no crash, to_dict no crash, zero ratio), TestPositionBasedMatching (7 tests: exact match, gaps, alt/secondary, mismatches, to_dict, PositionAnalysisResult, position to_dict), TestReportGeneration (8 tests: header, track breakdown, coverage bars, segment counts, duration section, position section, JSON serializable, position summary). All 86 tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test track category aggregation groups clips into v1, v2_v3, v4_v6, v7_plus buckets — verify counts per category with a mock timeline containing 10 clips across 5 tracks",
-                "Test coverage calculation per track category — verify coverage_pct is (matched_duration / total_duration) * 100 for each category",
-                "Test empty edited OTIO returns 0% coverage for all categories — verify no division by zero errors",
-                "Test position-based mode matches clips by frame position — verify clips matched when original and edited positions align within tolerance",
-                "Test report generation produces valid markdown with track breakdown, coverage bars, and summary statistics"
+                "Test PathHealer.can_heal() returns True for path-related errors (FileNotFoundError, path too long, invalid characters) — False for API or network errors",
+                "Test PathHealer.heal() fixes Windows path length issues by shortening paths — verify .fixed() returned with corrected path in result",
+                "Test PathHealer.heal() returns .failed() for paths on missing drives (e.g., Z:\\nonexistent) — verify descriptive failure reason",
+                "Test OTIOHealer.can_heal() returns True for OTIO-related errors (import errors, serialization failures, track corruption) — False for download errors",
+                "Test OTIOHealer.heal() attempts OTIO timeline reconstruction when export fails — verify reconstruction steps logged and .fixed() or .failed() returned appropriately",
+                "Test both healers integrate with ResilientRunner — mock runner with healer list, trigger matching error, verify correct healer selected and heal() called"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add CLI config_utils root directory validation tests",
+            "title": "Add DownloadHealer and ResilientRunner error path tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Created tests/test_cli_config_utils.py with 20 tests across 5 classes: TestValidateRootDirCreatesMissing (5 tests: creates download/image/both/nested dirs, existing dir ok), TestValidateRootDirRejectsRelative (4 tests: relative download/image/both paths cause SystemExit, error mentions path), TestValidateRootDirHandlesNone (3 tests: None/empty string root_dir, None image with valid download), TestValidateRootDirReportsFailure (3 tests: PermissionError/OSError include path for download/image roots), TestMakePathsProjectRelative (5 tests: output/download/cache relative resolved, absolute preserved, returns config).",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test validate_root_directories() creates missing directories — verify mkdir called for download.root_dir and image_search.root_dir when paths are absolute but don't exist",
-                "Test validate_root_directories() rejects relative paths — verify SystemExit when download.root_dir is './videos' (not absolute)",
-                "Test validate_root_directories() handles None root_dir gracefully — verify no error when root_dir is not configured (None or empty string)",
-                "Test validate_root_directories() reports creation failure — verify error message includes path when mkdir raises PermissionError",
-                "Test make_paths_project_relative() converts absolute paths to project-relative — verify voiceover path is resolved relative to project_dir"
+                "Test DownloadHealer.can_heal() returns True for download errors (403 Forbidden, rate limited, yt-dlp extraction failed) — False for config or OTIO errors",
+                "Test DownloadHealer.heal() escalates bypass tier on repeated 403 errors — verify escalation_manager.escalate() called and .fixed() returned for retry",
+                "Test DownloadHealer.heal() returns .failed() when max escalation tier reached and all retries exhausted — verify failure logged with tier info",
+                "Test ResilientRunner catches exceptions from stage.execute() — mock stage that raises RuntimeError, verify runner does not crash and returns failure result",
+                "Test ResilientRunner iterates through healer list to find matching healer — mock 3 healers where only the 2nd can_heal() returns True, verify only 2nd healer's heal() called",
+                "Test ResilientRunner respects max_attempts_per_stage from healing config — verify heal() called at most N times before stage marked as permanently failed"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add CLI newproject Google Doc parsing tests",
+            "title": "Add compilation GapAnalyzer and TopicBroadener tests",
             "priority": 4,
-            "passes": true,
-            "notes": "Created tests/test_cli_newproject.py with 25 tests across 5 classes: TestExtractDocId (7 tests: standard/sharing/invalid/empty/drive/long/fragment URLs), TestExtractDriveLinks (6 tests: multiline, empty, single, non-drive, hyphens/underscores), TestGetDateSuffix (4 tests: regex format, string type, length 10, specific date mock), TestCombineAudioFiles (3 tests: empty list, multi-file combine mock, missing pydub), TestDownloadDriveFiles (5 tests: missing gdown, ordered download, skip existing, failure handling, empty list).",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test extract_doc_id() parses Google Doc URLs — verify extraction from 'https://docs.google.com/document/d/ABC123/edit', '/edit?usp=sharing' variant, and returns None for invalid URLs",
-                "Test extract_drive_links() finds Google Drive file IDs in text — verify finds multiple IDs in multiline text, returns empty list for text with no Drive links",
-                "Test get_date_suffix() returns YYYY-MM-DD format — verify format matches regex pattern r'\\d{4}-\\d{2}-\\d{2}'",
-                "Test concatenate_audio_files() builds correct FFmpeg command for multiple audio files — verify command includes all input files and output path",
-                "Test download_drive_files() handles missing gdown gracefully — verify ImportError is caught and meaningful error message is printed"
+                "Test GapAnalyzer.analyze() identifies gaps in timeline — mock timeline with 3 clips and 2 gaps, verify gap positions and durations returned correctly",
+                "Test GapAnalyzer.analyze() returns empty list for gapless timeline — verify no false positives when clips are contiguous",
+                "Test GapAnalyzer.analyze() handles clips with zero or negative duration — verify no crash, invalid clips skipped or flagged",
+                "Test TopicBroadener.broaden() generates expanded keywords from LLM response — mock LLM client returning JSON, verify parsed keywords list matches expected expansion",
+                "Test TopicBroadener.broaden() handles LLM failure gracefully — mock LLM raising exception, verify fallback keywords generated from original topic without crash",
+                "Test TopicBroadener.broaden() handles malformed JSON from LLM — mock LLM returning invalid JSON string, verify fallback parsing extracts usable keywords"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add checkpoint corruption recovery tests",
+            "title": "Add compilation TimelineBuilder and DownloadStage tests",
             "priority": 5,
-            "passes": true,
-            "notes": "Created tests/test_checkpoint_corruption_recovery.py with 27 tests across 5 classes: TestBackupFallbackOnCorruption (4 tests: corrupted/empty/truncated primary restored from backup, primary file restored after fallback), TestBothCorrupted (5 tests: both corrupted/empty/too-small/arrays returns None, no backup returns None), TestSaveCreatesBackup (4 tests: backup contains pre-save state, backup updates on each save, no backup on first save, save_intermediate creates backup), TestIsStaleThresholds (8 tests: 25h stale, 23h fresh, 24h+1m boundary, 23h59m boundary, custom 1h threshold, created_at fallback, no timestamp), TestNonSerializableStageData (6 tests: datetime/Path/set/bytes/mixed types all handled via default=str, serializable data preserved alongside).",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test load() falls back to backup when primary checkpoint.json is corrupted JSON — verify data loaded from checkpoint.backup.json matches saved state",
-                "Test load() returns None when both checkpoint.json and backup are corrupted — verify no exception raised, returns None gracefully",
-                "Test save() creates backup of previous checkpoint before overwriting — verify checkpoint.backup.json contains the pre-save state after save() call",
-                "Test is_stale() correctly identifies checkpoints older than max_age_hours — verify True for 25-hour-old checkpoint with default 24h threshold, False for 23-hour-old",
-                "Test save() with stage data containing non-serializable objects — verify graceful handling (skip or convert) rather than json.dumps crash"
+                "Test CompilationTimelineBuilder.create_timeline() builds OTIO timeline from clip list — verify timeline has correct number of tracks and clips with proper durations",
+                "Test CompilationTimelineBuilder.create_timeline() handles empty clip list — verify returns valid but empty timeline without crash",
+                "Test CompilationTimelineBuilder._create_clip() formats file paths correctly — verify file:/// URL prefix and forward slashes on Windows paths",
+                "Test CompilationTimelineBuilder._create_clip() handles Unicode filenames — verify no encoding errors for non-ASCII characters in clip paths",
+                "Test compilation DownloadStage.run() calls ffprobe for duration detection — mock subprocess, verify ffprobe command constructed correctly with input file path",
+                "Test compilation DownloadStage.run() handles subprocess timeout — mock subprocess.TimeoutExpired, verify stage returns graceful failure instead of crash"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add checkpoint stage data round-trip tests",
+            "title": "Add matching scoring private helper function tests",
             "priority": 6,
-            "passes": true,
-            "notes": "Created tests/test_checkpoint_stage_data_roundtrip.py with 29 tests across 5 classes: TestSaveLoadRoundTrip (6 tests: all 14 stages round-trip, metadata preservation, single stage, nested data, empty data, overwrite), TestGetStageData (6 tests: before any stage, uncompleted stage, completed stage, unknown stage, future stages, all 14 empty), TestShouldSkipStage (6 tests: skip before last_completed, no checkpoint, first only, last/all, mid-pipeline split, unknown stage), TestConfigHashMismatch (5 tests: warns on mismatch, no warn on match, no warn when no original/current hash, resume_from correct despite mismatch), TestVoiceoverHashComparison (6 tests: warns on file change, no warn unchanged, no warn without path/hash, hash stored correctly, missing file empty hash). All 191 checkpoint tests pass, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test save/load round-trip preserves stage data for all 14 stage types — save with data for ANALYZE through OUTPUT, load, verify each stage dict matches original",
-                "Test get_stage_data() returns empty dict for stages not yet completed — verify no KeyError when accessing stage data before that stage runs",
-                "Test should_run_stage() correctly skips completed stages during resume — verify returns False for stages before last_completed_stage, True for stages after",
-                "Test config_hash mismatch detection — verify load() warns when checkpoint config_hash differs from current config hash (config changed between runs)",
-                "Test voiceover_hash comparison — verify checkpoint detects when voiceover file changed between runs via hash mismatch"
+                "Test _is_jarring_context_switch() returns True for unrelated segment pairs — verify segments with completely different topics/keywords flagged as jarring context switch",
+                "Test _is_jarring_context_switch() returns False for related segments and handles None/empty topics — verify no crash on None values, empty strings treated as non-jarring",
+                "Test _extract_entity_texts() extracts text from entity dicts — verify handles mixed entity formats (dict with 'text' key, plain strings), returns empty list for None input",
+                "Test _looks_like_entity() identifies capitalized multi-word phrases — verify True for 'New York', 'Barack Obama', False for 'the quick', 'is a', handles empty/whitespace strings",
+                "Test _calculate_language_consistency() scores transcript coherence — verify high score for well-formed English text, low score for gibberish/repetitive text, handles empty string",
+                "Test _calculate_sentence_coherence() scores punctuation patterns — verify high score for properly punctuated text, low for text without punctuation, handles non-ASCII punctuation"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add pipeline orchestrator resume logic tests",
+            "title": "Add LLM client exception hierarchy and retry logic tests",
             "priority": 7,
-            "passes": true,
-            "notes": "Added TestResumeLogic class with 11 tests to tests/test_pipeline_orchestrator.py: resume skips stages before checkpoint (3-stage and 2-of-3 variants), fresh run executes all stages in order with callback verification, fresh run doesn't call can_skip, halts on failure (subsequent not called + returns False), timing recorded per completed stage, timing absent for stages after failure, callbacks fire with correct stage names, callbacks interleave start/complete correctly, callbacks receive success result. Total: 69 tests pass in 0.91s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test run_pipeline() skips stages before checkpoint's last_completed_stage during resume — mock 3 stages, set checkpoint to stage 1, verify only stages 2 and 3 execute",
-                "Test run_pipeline() executes all stages when no checkpoint exists (fresh run) — verify all stage execute() methods called in order",
-                "Test run_pipeline() halts on stage failure — verify subsequent stages are NOT called when a stage returns StageResult with success=False",
-                "Test stage timing is recorded in metrics — verify elapsed_seconds is populated for each completed stage after run_pipeline() completes",
-                "Test stage callbacks fire correctly — register on_stage_start and on_stage_complete callbacks, verify both called with correct stage name for each stage"
+                "Test LLM exception classes inherit correctly — verify LLMRateLimitError, LLMAuthError, LLMTimeoutError all subclass base LLMError, each carries provider name and original error",
+                "Test retry logic applies exponential backoff — mock time.sleep, trigger retryable error 3 times, verify sleep durations follow backoff formula (delay * backoff^attempt)",
+                "Test retry logic distinguishes retryable vs non-retryable errors — verify LLMRateLimitError triggers retry, LLMAuthError does NOT trigger retry (fails immediately)",
+                "Test retry logic respects max_retries config — set max_retries=2, trigger 3 retryable errors, verify only 2 retries attempted then exception raised",
+                "Test LLM response parser handles malformed JSON — feed parser truncated JSON, JSON with trailing commas, empty string — verify graceful fallback or clear error message for each"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add vision module transcript analysis tests",
+            "title": "Add CLI environment and logging setup tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Created tests/test_vision_transcript_analysis.py with 35 tests across 5 classes: TestEmptyScenes (7 tests: needs_vision=True, reason mentions 'no scenes', returns VideoVisionDecision, total_scenes=0, sparse_scenes empty, coverage=0.0, empty scenes with transcript), TestSparseSceneIdentification (7 tests: single sparse flagged, all sparse no transcript, non-sparse excluded, mixed sparse/sufficient, SRTSegment objects, exact threshold not sparse, below threshold sparse), TestSufficientTranscript (5 tests: all sufficient needs_vision=False, sparse_scenes empty, coverage threshold met, single scene sufficient, reason mentions good coverage), TestSceneAnalysisSerialization (7 tests: required fields, optional defaults None, vision_description stored, asdict round-trip, asdict None optionals, JSON serializable), TestTranscriptCoverage (9 tests: 0.0 no transcript, 1.0 all covered, 0.5 half, 2/3 proportional, 1/3 proportional, float type, empty text=0.0, VideoVisionDecision fields, asdict). All 89 vision tests pass, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test TranscriptAnalyzer.analyze_video_transcript() with empty scenes list — verify returns VideoVisionDecision with needs_vision=True and reason mentioning 'no scenes'",
-                "Test TranscriptAnalyzer identifies sparse scenes — verify scenes with word_count < min_words_per_scene are flagged in sparse_scenes list",
-                "Test TranscriptAnalyzer returns needs_vision=False when all scenes have sufficient transcript — verify coverage_threshold check passes, sparse_scenes is empty",
-                "Test SceneAnalysis dataclass stores correct fields — verify scene_index, transcript_word_count, needs_vision, and optional vision_description all serialize correctly",
-                "Test VideoVisionDecision.transcript_coverage calculation — verify coverage is 0.0 for no-transcript video, 1.0 for fully transcribed video, and proportional for partial"
+                "Test strip_extended_path_prefix() removes Windows \\\\?\\ prefix — verify '\\\\?\\C:\\path' becomes 'C:\\path', plain paths unchanged, empty string returns empty",
+                "Test load_environment() loads .env file variables — mock dotenv.load_dotenv, verify called with correct path, handles missing .env file gracefully (no crash)",
+                "Test setup_logging() configures console handler with correct format — verify logger has StreamHandler after setup, log level matches config setting",
+                "Test setup_logging() handles file logging permission errors — mock open() raising PermissionError for log file, verify falls back to console-only without crash",
+                "Test CLI cache_commands display_cache_stats() formats output for empty cache — verify no division by zero when hit_count=0 and miss_count=0, displays '0 items' gracefully"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add state dataclass serialization edge case tests",
+            "title": "Add media sources Unsplash image client tests",
             "priority": 9,
-            "passes": true,
-            "notes": "Added 27 edge case tests across 5 new test classes to test_state_dataclasses.py: TestVoiceoverSegmentPostInit (5 tests: auto-calc, explicit preserved, zero triggers, negative range, same start/end), TestTranscriptSegmentToDictBroll (5 tests: broll true/false, description_source default/all values, round-trip), TestDownloadedVideoEmptyStrings (4 tests: all empty, file only, asdict empty, numeric defaults), TestPipelineStateDefaults (6 tests: lists empty, dicts empty, no shared mutable lists/dicts, string defaults, None defaults), TestMatchBoundaryConfidence (7 tests: 0.0/1.0 stored, not falsy, not rounded, asdict preserves, near-boundary precision, small epsilon). All 71 tests pass in 0.61s, 0 regressions.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test VoiceoverSegment.__post_init__() auto-calculates duration — verify duration=15.0 when start=10.0, end=25.0 and duration not explicitly set; verify explicit duration=5.0 is NOT overwritten",
-                "Test TranscriptSegment.to_dict() includes all fields including optional broll fields — verify is_broll and description_source appear in dict output",
-                "Test DownloadedVideo with empty string fields — verify no errors when url='', title='', channel='' (all optional fields empty)",
-                "Test PipelineState initialization with defaults — verify all list fields default to empty lists, all dict fields to empty dicts, no shared mutable defaults across instances",
-                "Test Match dataclass with confidence=0.0 and confidence=1.0 boundary values — verify no float comparison issues, to_dict() preserves exact values"
+                "Test UnsplashImageClient.search() constructs correct API request — verify URL includes query parameters (query, per_page, orientation), Authorization header contains API key",
+                "Test UnsplashImageClient.search() parses API response into ImageResult objects — mock HTTP response with 3 results, verify each has url, width, height, source='unsplash'",
+                "Test UnsplashImageClient.search() handles rate limit response (HTTP 429) — verify returns empty list without crash, logs rate limit warning",
+                "Test UnsplashImageClient.search() handles invalid API key (HTTP 401) — verify returns empty list, logs authentication error message",
+                "Test UnsplashImageClient.search() handles network timeout — mock requests.get raising Timeout, verify returns empty list without crash"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add SavedKeywords preset management tests",
+            "title": "Add matching scoring error paths and visual description tests",
             "priority": 10,
-            "passes": true,
-            "notes": "Pre-implemented: All 5 acceptance criteria already covered by existing tests in test_checkpoint_unit.py (TestSavedKeywordsDataclass, 5 tests) and test_checkpoint_coverage.py (TestSavedKeywordsDataClass + TestKeywordManager, 21 tests). Tests verify: from_dict ignores unknown keys, to_dict round-trip, save_keywords writes file, get_preset returns None for missing, list_presets sorted newest first. All 26 tests pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test SavedKeywords.from_dict() ignores unknown keys — verify extra keys in dict don't cause TypeError, only known dataclass fields are set",
-                "Test SavedKeywords.to_dict() round-trip preserves all fields — save with name, keywords list, topic_context, entities, verify from_dict(to_dict()) equals original",
-                "Test KeywordManager.save_preset() writes to saved_keywords.json — verify file created with correct preset name and keyword data",
-                "Test KeywordManager.load_preset() returns None for non-existent preset — verify no FileNotFoundError, returns None gracefully",
-                "Test KeywordManager.list_presets() returns sorted preset names — verify alphabetical order, empty list when no presets saved"
+                "Test calculate_visual_description_score() with None description — verify returns 0.0 without crash, not NaN or exception",
+                "Test calculate_visual_description_score() with None visual_keywords — verify handles None vs empty list differently, no TypeError",
+                "Test adjust_embedding_weight_for_transcript_quality() with unknown quality_tier — verify returns base_weight unchanged, no KeyError or crash",
+                "Test adjust_embedding_weight_for_transcript_quality() with boundary values — verify base_weight=0.0 returns 0.0, base_weight=1.0 applies reduction correctly",
+                "Test statistics.StatisticsError path in adaptive threshold — mock statistics.median raising StatisticsError on empty data, verify fallback value returned instead of crash",
+                "Test compute_multimodal_score() with all-None inputs — verify returns valid float (0.0 or default), no NoneType arithmetic errors"
             ]
         }
     ]
