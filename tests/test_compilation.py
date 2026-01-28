@@ -507,6 +507,73 @@ class TestGapCheckStage:
 
         assert not report.complete
 
+    @pytest.mark.fast
+    def test_shortfall_triggers_broadener(self, clip_factory):
+        """When tracks have shortfall and retries remain, should call broadener."""
+        stage = GapCheckStage(MagicMock())
+        state = _CompilationState(
+            arranged_tracks=[[clip_factory(actual_duration=50.0)]],
+            target_duration=300.0,
+            topic="cats",
+            all_used_keywords=["cats"],
+            retry_count=0,
+        )
+        comp_config = {'max_retries': 3, 'llm': {'provider': 'gemini'}}
+
+        with patch.object(stage.topic_broadener, 'broaden', return_value=["dogs", "animals"]) as mock_broaden:
+            report = stage.run(state, comp_config)
+
+            mock_broaden.assert_called_once()
+            # Verify broaden was called with correct params
+            call_kwargs = mock_broaden.call_args
+            assert call_kwargs[1]['topic'] == "cats"
+            assert "cats" in call_kwargs[1]['used_keywords']
+            assert call_kwargs[1]['shortfall_seconds'] == 250.0
+
+        assert not report.complete
+        assert report.new_keywords == ["dogs", "animals"]
+
+    @pytest.mark.fast
+    def test_report_contains_shortfall_details(self, clip_factory):
+        """Report should contain per-track shortfall details."""
+        stage = GapCheckStage(MagicMock())
+        clip_100s = clip_factory(actual_duration=100.0)
+        clip_200s = clip_factory(actual_duration=200.0)
+        state = _CompilationState(
+            arranged_tracks=[[clip_100s], [clip_200s]],
+            target_duration=300.0,
+            retry_count=5,  # Max retries exceeded to skip broadening
+        )
+        comp_config = {'max_retries': 3}
+
+        report = stage.run(state, comp_config)
+
+        assert report.total_shortfall == 300.0  # 200 + 100
+        assert report.track_shortfalls[0] == 200.0  # Track 1: 300-100
+        assert report.track_shortfalls[1] == 100.0  # Track 2: 300-200
+
+    @pytest.mark.fast
+    def test_returns_keywords_in_report_not_state(self, clip_factory):
+        """Stage returns keywords in report (orchestrator updates state)."""
+        stage = GapCheckStage(MagicMock())
+        original_keywords = ["cats"]
+        state = _CompilationState(
+            arranged_tracks=[[clip_factory(actual_duration=50.0)]],
+            target_duration=300.0,
+            topic="cats",
+            all_used_keywords=original_keywords.copy(),
+            retry_count=0,
+        )
+        comp_config = {'max_retries': 3}
+
+        with patch.object(stage.topic_broadener, 'broaden', return_value=["dogs"]):
+            report = stage.run(state, comp_config)
+
+        # Keywords are in report, NOT in state (orchestrator responsibility)
+        assert "dogs" in report.new_keywords
+        # State should be unchanged by stage (orchestrator updates it)
+        assert state.all_used_keywords == original_keywords
+
 
 # ===================================================================
 # DOWNLOAD STAGE TESTS
