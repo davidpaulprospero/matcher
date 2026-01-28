@@ -37,8 +37,8 @@
             "id": "US-003",
             "title": "Add calculate_transcript_quality word count and tier scoring tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: tests/test_transcript_quality.py has 32 tests covering all 6 AC. AC1: test_empty_transcript_returns_low_quality+test_none_transcript_returns_low_quality, AC2: test_long_transcript_high_word_score+test_well_structured_transcript_high_quality, AC3: test_medium_length_transcript, AC4: test_gibberish_transcript_low_quality, AC5: test_short_transcript_low_word_count+test_medium_length_transcript+test_long_transcript_high_word_score (word scoring coverage), AC6: test_short_transcript_low_word_count verifies 'words:6' in reason. All pass.",
             "acceptanceCriteria": [
                 "Test calculate_transcript_quality() returns (0.0, 'low', 'empty_transcript') for empty or whitespace-only input",
                 "Test calculate_transcript_quality() returns quality_tier='high' when score >= 0.8 — verify word_count >= 50 with good coherence",
