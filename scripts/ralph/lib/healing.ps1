@@ -604,6 +604,14 @@ function Invoke-HealingSession {
 
         if (-not $recheck.HasErrors) {
             Write-Host "  Codebase is clean!" -ForegroundColor Green
+            try {
+                Record-Metric -StoryId "HEALING-$($healingState.storyId)" -Mode "Healing" `
+                    -DurationMin ([math]::Round(((Get-Date) - $attemptStart).TotalMinutes, 1)) `
+                    -Success $true -Timeout $false -TokensUsed 0 `
+                    -ErrorCategory "" -TestResults "" `
+                    -RetryCount $attempt `
+                    -LinesAdded 0 -LinesDeleted 0
+            } catch {}
             return @{
                 Success      = $true
                 AttemptsUsed = $attempt
