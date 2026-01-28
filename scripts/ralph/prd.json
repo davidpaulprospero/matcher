@@ -36,8 +36,8 @@
             "id": "US-003",
             "title": "Add Grok research client unit tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "33 tests added in tests/test_research_grok_client.py. Note: AC criteria mention analyze() but actual method is research(). Tests cover: ResearchResult parsing (5), connection error retry (5), empty response handling (5), timeout settings (3), input validation (5), other methods (5), edge cases (5). All 33 tests pass in 0.52s.",
             "acceptanceCriteria": [
                 "Test GrokClient.analyze() returns correctly parsed AnalysisResult objects",
                 "Test GrokClient.analyze() handles connection errors with retry logic",
