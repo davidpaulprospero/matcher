@@ -105,6 +105,159 @@ result = match_result_factory(confidence=0.95, num_alternatives=3)
 
 See `conftest.py` for full factory documentation.
 
+## Complex Coordination Scenario Fixtures (US-010)
+
+The `tests/fixtures/` module provides factory functions for complex test scenarios:
+
+### Checkpoint with Populated Stages (Rule 25)
+
+For testing `--output-only` mode which requires checkpoint with populated `stages` dict:
+
+```python
+from tests.fixtures import create_checkpoint_with_populated_stages
+
+# Create checkpoint with default populated stage data
+checkpoint = create_checkpoint_with_populated_stages()
+
+# Customize match count and confidence
+checkpoint = create_checkpoint_with_populated_stages(
+    project_dir=tmp_path,
+    match_count=20,
+    avg_confidence=0.92,
+    video_count=10
+)
+
+# Override specific stage data
+checkpoint = create_checkpoint_with_populated_stages(
+    match={"custom_field": "value"},
+    analyze={"keywords": ["custom", "keywords"]}
+)
+
+# Use in tests
+assert checkpoint["match"]["match_count"] == 20
+assert len(checkpoint["match"]["matches"]) == 20
+```
+
+### Concurrent Download Escalation
+
+For testing EscalationManager with multiple keywords under thread contention:
+
+```python
+from tests.fixtures import create_concurrent_escalation_fixture
+
+# Create fixture with 5 concurrent keywords
+fixture = create_concurrent_escalation_fixture(num_keywords=5)
+
+# Access configuration
+keywords = fixture["keywords"]  # ['test_keyword_0', ..., 'test_keyword_4']
+ext_config = fixture["ext_config"]  # ExtractorArgs-compatible dict
+initial_states = fixture["initial_states"]  # Per-keyword tier states
+
+# Expected escalation results
+tier2_args = fixture["expected_tier2_args"]
+tier3_rotates = fixture["expected_tier3_rotate_cookies"]
+
+# Customize escalation behavior
+fixture = create_concurrent_escalation_fixture(
+    num_keywords=3,
+    escalation_threshold=3,  # 3 consecutive 403s to escalate
+    cooldown_seconds=0.0,    # No cooldown for tests
+    max_tier=3
+)
+```
+
+### OTIO Timeline Fixture (Rule 17)
+
+For testing auto-split at 3000 item threshold:
+
+```python
+from tests.fixtures import create_otio_timeline_fixture
+
+# Create fixture for boundary testing
+fixture = create_otio_timeline_fixture(3000)
+assert fixture["at_threshold"] is True
+assert fixture["expected_parts"] == 1
+
+# Create fixture above threshold (should split)
+fixture = create_otio_timeline_fixture(3001)
+assert fixture["above_threshold"] is True
+assert fixture["expected_parts"] == 2
+
+# Create large timeline
+fixture = create_otio_timeline_fixture(6500)
+assert fixture["expected_parts"] == 3
+
+# With custom configuration
+fixture = create_otio_timeline_fixture(
+    num_segments=1000,
+    frame_rate=24.0,
+    include_audio=True,
+    segment_duration_frames=48  # 2 seconds at 24fps
+)
+
+# Access constants
+MAX_SEGMENTS = fixture["max_segments_per_part"]  # 3000
+WARNING_THRESHOLD = fixture["warning_threshold"]  # 2500
+```
+
+### B-roll Propagation Chain State (Rule 8)
+
+For testing is_broll flag propagation from SceneDetection through Match stage:
+
+```python
+from tests.fixtures import create_broll_propagation_chain_state
+
+# Create state with 30% B-roll ratio
+state = create_broll_propagation_chain_state(
+    num_scenes=10,
+    broll_ratio=0.3
+)
+
+# Access scene data
+scenes = state["scenes"]
+text_metadata = state["text_metadata"]
+
+# Check expected B-roll counts
+assert state["expected_broll_count"] == 3
+assert state["face_detected_broll"] == 1  # Half of B-roll via face detection
+assert state["silent_detected_broll"] == 2  # Half via word count
+
+# Check thresholds
+assert state["thresholds"]["face_score"] == 0.3
+assert state["thresholds"]["min_words"] == 10
+
+# V8 track expectations
+assert state["expected_v8_entries"] == 3
+
+# Customize detection thresholds
+state = create_broll_propagation_chain_state(
+    num_scenes=20,
+    broll_ratio=0.4,
+    face_score_threshold=0.25,  # Stricter face detection
+    min_words_threshold=5       # More scenes as "silent"
+)
+```
+
+### Importing Fixtures
+
+```python
+# Import specific fixtures
+from tests.fixtures import (
+    create_checkpoint_with_populated_stages,
+    create_concurrent_escalation_fixture,
+    create_otio_timeline_fixture,
+    create_broll_propagation_chain_state,
+)
+
+# Or use shorter aliases
+from tests.fixtures import (
+    checkpoint_with_stages,
+    concurrent_escalation,
+    otio_timeline,
+    broll_chain_state,
+)
+```
+
 ## Coverage Requirements
 
 Target: 85% overall coverage (configured in `.coveragerc`)
