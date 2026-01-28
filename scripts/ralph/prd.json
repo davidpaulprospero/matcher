@@ -38,8 +38,8 @@
             "id": "US-003",
             "title": "Add CaptionStage batch processing and metrics tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "19 tests across 5 dedicated US-003 test classes: TestCaptionStageRunSkipsCachedUS003 (2 tests, AC1), TestSaveIntermediateCheckpointUS003 (4 tests, AC2), TestCalculateQualityDistributionUS003 (5 tests, AC3), TestCaptionStageRunEmptyVideoIdsUS003 (3 tests, AC4), TestCaptionStageRestoreFullUS003 (5 tests, AC5). All 142 caption tests pass in 1.70s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test CaptionStage.run() skips videos that already have cached captions — mock 5 video IDs with 2 cached, verify only 3 new fetches attempted",
                 "Test CaptionStage._save_intermediate_checkpoint() writes caption data to checkpoint without overwriting other stage data — verify checkpoint file updated with caption_metrics key",

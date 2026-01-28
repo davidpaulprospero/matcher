@@ -1,4 +1,15 @@
 
+## Iteration US-003 (Sprint 17) - Add CaptionStage batch processing and metrics tests
+- Added 19 new tests across 5 dedicated US-003 test classes in tests/test_stage_caption.py
+- TestCaptionStageRunSkipsCachedUS003 (2 tests): AC1 — run() skips cached captions (5 IDs, 2 cached → only 3 fetched), all-cached scenario
+- TestSaveIntermediateCheckpointUS003 (4 tests): AC2 — saves with metrics, saves without metrics, stage key isolation, exception handling
+- TestCalculateQualityDistributionUS003 (5 tests): AC3 — correct bins, all-high, unknown→low, empty results, missing key→low
+- TestCaptionStageRunEmptyVideoIdsUS003 (3 tests): AC4 — empty state ok+skipped, warning message, disabled mode
+- TestCaptionStageRestoreFullUS003 (5 tests): AC5 — restore with metrics, without metrics, skips unavailable, empty→False, exception→False
+- All 5 acceptance criteria verified met
+- Files modified: tests/test_stage_caption.py
+- Test results: 142 passed in 1.70s (123 existing + 19 new), 0 regressions
+
 ## Iteration US-002 (Sprint 17) - Add CaptionStage core execution and skip logic tests
 - Pre-implemented: 27 tests across 6 dedicated US-002 test classes already exist in tests/test_stage_caption.py
 - TestCaptionStageCanSkipUS002 (4 tests): AC1 — can_skip True/False from checkpoint, run() skip when disabled, run() proceeds when enabled
