@@ -610,3 +610,110 @@ assert_json_structure(
    ```python
    errors = assert_config_valid(config, allowed_errors=["API_KEY"])
    ```
+
+## CI Optimization: Test Categorization
+
+The `scripts/categorize_tests.py` tool analyzes test marker distribution and suggests markers for unmarked tests based on I/O patterns.
+
+### Why Categorize Tests?
+
+| Benefit | Impact |
+|---------|--------|
+| **Faster feedback loop** | Run `pytest -m fast` (216 tests, ~45s) instead of full suite (11K+ tests) |
+| **Selective CI runs** | Skip slow/network tests on PR drafts |
+| **Resource optimization** | Don't run API-dependent tests without keys |
+| **Parallel execution** | Separate fast/slow tests for concurrent jobs |
+
+### Quick Usage
+
+```bash
+# View marker distribution report
+python scripts/categorize_tests.py
+
+# Show sample tests needing markers
+python scripts/categorize_tests.py --verbose
+
+# Export to CSV for review
+python scripts/categorize_tests.py --output report.csv
+
+# Auto-suggest mode with grouped recommendations
+python scripts/categorize_tests.py --auto-suggest
+
+# JSON output for CI integration
+python scripts/categorize_tests.py --json --output report.json
+
+# Analyze specific directory
+python scripts/categorize_tests.py --path tests/test_agents
+```
+
+### Understanding the Output
+
+The script categorizes tests into:
+
+| Category | I/O Pattern Detected | Suggested Marker |
+|----------|---------------------|------------------|
+| **Pure unit tests** | No I/O, uses mocks | `@pytest.mark.fast` |
+| **File I/O tests** | tempfile, shutil, subprocess | `@pytest.mark.integration` |
+| **Network tests** | requests, httpx, socket | `@pytest.mark.requires_network` |
+| **API tests** | *_API_KEY environment vars | `@pytest.mark.requires_api` |
+| **Slow tests** | time.sleep > 2s | `@pytest.mark.slow` |
+
+### CSV Output Format
+
+```csv
+test_file,test_name,line_number,current_markers,suggested_marker,reason,io_patterns
+tests/test_cache.py,TestBaseCache::test_ttl_expiration,64,(none),integration,Found I/O pattern: tempfile...,integration:tempfile...
+tests/test_core.py,test_simple_logic,10,(none),fast,No I/O patterns detected,...
+```
+
+### CI Integration
+
+Add to your GitHub Actions workflow:
+
+```yaml
+jobs:
+  analyze-markers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Analyze test markers
+        run: |
+          python scripts/categorize_tests.py --json --output marker-report.json
+
+      - name: Upload marker report
+        uses: actions/upload-artifact@v4
+        with:
+          name: marker-report
+          path: marker-report.json
+```
+
+### Adding Markers Based on Suggestions
+
+1. Run `python scripts/categorize_tests.py --auto-suggest > suggestions.txt`
+2. Review suggestions by marker type
+3. Add markers to tests that match the suggested criteria
+4. Re-run to verify marker distribution improved
+
+Example before/after:
+
+```bash
+# Before
+Unmarked tests: 11143
+Tests with suggestions: 11255
+
+# After adding markers to high-impact tests
+Unmarked tests: 8500
+fast: 2800 tests
+integration: 400 tests
+```
+
+### Best Practices
+
+1. **Start with integration markers** - Tests using tempfile/subprocess are clearly integration tests
+2. **Mark fast tests gradually** - Don't add `@pytest.mark.fast` to everything at once
+3. **Verify with selective runs** - After marking, test with `pytest -m fast` to confirm
+4. **Update CI to use markers** - Once marked, update CI to run `-m fast` on PR updates
