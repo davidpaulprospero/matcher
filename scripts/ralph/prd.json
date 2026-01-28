@@ -1,148 +1,148 @@
-﻿{
-    "branchName":  "ralph/sprint-21",
-    "sprintNumber":  21,
-    "focusArea":  "testing",
-    "projectContext":  "Sprint 21 continues testing focus from Sprint 20, targeting cross-module coordination tests and CLAUDE.md rule compliance verification. Key areas: retry queue/circuit breaker deadlock prevention (Rule 27 subprocess encoding), caption-first video ID resolution (Rule 26), B-roll propagation chain (Rule 8), checkpoint stage data validation (Rule 25), config deep merge sibling preservation (Rule 23), and OTIO auto-split behavior (Rule 17). Sprint 13-20 established ~170 stories of test coverage. This sprint addresses complex integration scenarios and edge cases in the ~800 LOC of coordination logic.",
-    "userStories":  [
-                        {
-                            "id":  "US-001",
-                            "title":  "Add retry queue and circuit breaker coordination edge case tests",
-                            "priority":  1,
-                            "passes":  true,
-                            "notes":  "Added 7 tests in TestConcurrentRetryCoordination class: concurrent CB wait serialization, shared CB between queues, failure/success thread safety, state machine transitions, blocking via start_retry_pass, half-open recovery. Verified 191 total CB+retry coordination tests pass.",
-                            "acceptanceCriteria":  [
-                                                       "Test RetryQueue.add_to_retry() blocks when circuit breaker is in OPEN state",
-                                                       "Test RetryQueue.process_batch() respects circuit breaker pause duration scaling",
-                                                       "Test concurrent retry attempts coordinate through circuit breaker state machine",
-                                                       "Test deadlock prevention when retry queue and circuit breaker both wait on each other",
-                                                       "Test batch retry resumes correctly after circuit breaker transitions to HALF_OPEN"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-002",
-                            "title":  "Add subprocess encoding compliance tests for Rule 27",
-                            "priority":  2,
-                            "passes":  true,
-                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: 0384398 chore: [US-002] Update PRD and progress tracking",
-                            "acceptanceCriteria":  [
-                                                       "Test all 15 subprocess.Popen call sites include encoding=\u0027utf-8\u0027, errors=\u0027replace\u0027",
-                                                       "Test yt-dlp output processing handles non-ASCII characters without charmap crash",
-                                                       "Test stall detector reader thread handles encoding errors gracefully",
-                                                       "Test info.json reading uses utf-8 encoding with error handling",
-                                                       "Create conftest fixture that simulates Windows charmap encoding environment"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-003",
-                            "title":  "Add caption-first video ID resolution tests for Rule 26",
-                            "priority":  3,
-                            "passes":  true,
-                            "notes":  "Created tests/test_caption_first_video_id_resolution.py with 29 tests covering all 5 ACs: video ID to segment path resolution, global cache segment gaps, OTIO path validation, extract_video_id handling, and segment coverage analysis. Tests verify Rule 26 behavior for caption-first mode.",
-                            "acceptanceCriteria":  [
-                                                       "Test matches with video ID source_file resolve to segment paths after DOWNLOAD_SEGMENTS",
-                                                       "Test global caption cache entries don\u0027t have segments downloaded (expected gap)",
-                                                       "Test OTIO paths are valid file:/// URLs, not raw video IDs",
-                                                       "Test extract_video_id() handles both 11-char IDs and full URLs",
-                                                       "Test segment coverage analysis identifies missing segments from global cache"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-004",
-                            "title":  "Add B-roll propagation chain validation tests for Rule 8",
-                            "priority":  4,
-                            "passes":  true,
-                            "notes":  "Auto-completed by pre-flight check (pre-implemented). All 5 ACs covered by existing tests: AC1 in test_scene_detection_stage_coverage.py, AC2 in TestMergeSceneDataCoverage, AC3 in test_stage_match_coverage.py::TestPrepareSegments, AC4 in test_broll_match_us004.py::TestDetectSilentScenesWordCountUS004, AC5 in test_broll_stages.py::test_detect_silent_scenes_includes_is_broll. 170 related tests pass.",
-                            "acceptanceCriteria":  [
-                                                       "Test SceneDetection sets is_broll=True when face_score \u003c 0.3",
-                                                       "Test text_metadata preserves is_broll flag through pipeline stages",
-                                                       "Test MatchStage restores is_broll from text_metadata correctly",
-                                                       "Test BrollMatchStage uses word_count \u003c min_words_threshold for silent detection",
-                                                       "Test V8 track receives both face-detection and silent-detection B-roll entries"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-005",
-                            "title":  "Add checkpoint stage data validation tests for Rule 25",
-                            "priority":  5,
-                            "passes":  true,
-                            "notes":  "Created tests/test_checkpoint_stage_data_validation.py with 25 tests covering all 5 ACs: empty stages dict failure, populated stages dict success, backup restoration, manually edited checkpoint warnings, and reusable fixture for valid checkpoint with stage data. Tests verify Rule 25 behavior for --output-only mode.",
-                            "acceptanceCriteria":  [
-                                                       "Test --output-only fails gracefully when stages dict is empty {}",
-                                                       "Test --output-only succeeds when checkpoint has populated stages dict",
-                                                       "Test checkpoint backup restoration recovers stage data",
-                                                       "Test manually edited checkpoint without stages triggers appropriate warning",
-                                                       "Create fixture that generates valid checkpoint with stage data for OUTPUT tests"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-006",
-                            "title":  "Add config deep merge sibling preservation tests for Rule 23",
-                            "priority":  6,
-                            "passes":  true,
-                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: ce0e4c1 chore: [US-006] Mark as complete (pre-implemented)",
-                            "acceptanceCriteria":  [
-                                                       "Test project_config.yaml setting download.fallback.proxy preserves download.fallback.caption",
-                                                       "Test _deep_merge_section() handles nested dicts without replacing siblings",
-                                                       "Test multiple nested overrides merge correctly with parent config",
-                                                       "Test dataclass defaults are preserved when project_config touches sibling sections",
-                                                       "Test config merge logs warning when potential override collision detected"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-007",
-                            "title":  "Add OTIO auto-split validation tests for Rule 17",
-                            "priority":  7,
-                            "passes":  true,
-                            "notes":  "Created tests/test_otio_auto_split_rule17.py with 31 tests covering all 5 ACs: AC1 (4 tests for boundary at 3000 items), AC2 (7 tests for auto-split at 3001+), AC3 (6 tests for MediaPathNormalizer Rule 16), AC4 (5 tests for clip timing preservation), AC5 (6 tests for warning logs). Plus 3 integration tests. All tests pass.",
-                            "acceptanceCriteria":  [
-                                                       "Test timeline with exactly 3000 items does not split",
-                                                       "Test timeline with 3001+ items auto-splits into PART1-4 files",
-                                                       "Test MediaPathNormalizer deduplicates same file in different folders (Rule 16)",
-                                                       "Test split timelines maintain correct clip timing across parts",
-                                                       "Test large timeline warning is logged when approaching split threshold"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-008",
-                            "title":  "Add speed tracker sliding window edge case tests",
-                            "priority":  8,
-                            "passes":  true,
-                            "notes":  "Added 21 tests in 5 test classes to tests/test_speed_tracker.py: TestFewerThan2SamplesAverage (4 tests, AC1), TestZeroDurationSamplesUS008 (4 tests, AC2), TestSlidingWindowDropsOldUS008 (3 tests, AC3), TestNegativeSpeedValuesUS008 (5 tests, AC4), TestConcurrentSpeedRecordingUS008 (5 thread-safety tests, AC5). Total 80 speed tracker tests pass in 0.55s.",
-                            "acceptanceCriteria":  [
-                                                       "Test SpeedTracker with fewer than 2 samples returns None for average",
-                                                       "Test SpeedTracker handles zero duration samples gracefully",
-                                                       "Test sliding window correctly drops old samples beyond window size",
-                                                       "Test speed calculation with invalid (negative) speed values",
-                                                       "Test concurrent speed recording is thread-safe"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-009",
-                            "title":  "Add rate limit window estimation edge case tests",
-                            "priority":  9,
-                            "passes":  true,
-                            "notes":  "Added 24 tests in 4 test classes to tests/test_rate_limit_window_estimation.py: TestSparseTimingDataUS009 (5 tests, AC2), TestSessionCountPersistenceUS009 (5 tests, AC3), TestPerKeywordBreakdownAggregationUS009 (6 tests, AC4), TestOverlappingFailureWindowsUS009 (8 tests, AC5). AC1 was already covered by existing TestEstimatedRateLimitWindowNone. Total 45 window estimation tests pass in 0.47s, 276 rate limit tests pass overall.",
-                            "acceptanceCriteria":  [
-                                                       "Test window estimation with fewer than 3 failure/recovery pairs returns None",
-                                                       "Test median gap calculation handles sparse timing data correctly",
-                                                       "Test session count tracking persists across pipeline resumptions",
-                                                       "Test per-keyword breakdown aggregates correctly in export JSON",
-                                                       "Test window estimation handles overlapping failure windows"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-010",
-                            "title":  "Add test fixture utilities for complex coordination scenarios",
-                            "priority":  10,
-                            "passes":  true,
-                            "notes":  "Added 4 fixture factories to tests/fixtures/__init__.py: create_checkpoint_with_populated_stages (AC1), create_concurrent_escalation_fixture (AC2), create_otio_timeline_fixture (AC3), create_broll_propagation_chain_state (AC4). Updated tests/README.md with usage documentation (AC5). Added 23 tests in test_fixture_factories.py. All 37 fixture tests pass in 0.47s.",
-                            "acceptanceCriteria":  [
-                                                       "Create conftest fixture for checkpoint with populated stages dict",
-                                                       "Create conftest fixture simulating concurrent download escalations",
-                                                       "Create conftest fixture for OTIO timeline with N items (parameterized)",
-                                                       "Create conftest fixture for B-roll propagation chain state",
-                                                       "Document fixture usage patterns in tests/README.md"
-                                                   ]
-                        }
-                    ]
+{
+    "branchName": "ralph/sprint-22",
+    "sprintNumber": 22,
+    "focusArea": "testing",
+    "projectContext": "Sprint 22 addresses critical coverage gaps in untested/undertested modules. Key targets: Pexels API client (0 tests, 356 LOC), chapter detection multi-pass system (0 tests, 1,811 LOC), fallback pattern routing edge cases, LLM provider validation/hallucination detection, tiered matcher strategy selection, multi-factor scoring edge cases, post-edit analysis feedback loop, and audio/face detection threshold boundaries. Sprint 13-21 established ~190 stories of test coverage. This sprint focuses on module-level coverage rather than cross-module coordination (Sprint 21 focus).",
+    "userStories": [
+        {
+            "id": "US-001",
+            "title": "Add Pexels API client unit tests",
+            "priority": 1,
+            "passes": true,
+            "notes": "Added 18 new tests in tests/test_media_sources_video_clients.py: TestPexelsAPIRateLimitingUS001 (3), TestPexelsNetworkTimeoutUS001 (4), TestPexelsMalformedJSONUS001 (6), TestPexelsPaginationUS001 (5). All 5 AC verified. 63 total tests pass.",
+            "acceptanceCriteria": [
+                "Test PexelsClient.search_videos() returns correctly parsed VideoResult objects",
+                "Test PexelsClient.search_videos() handles API rate limiting with retry backoff",
+                "Test PexelsClient.search_videos() handles network timeout gracefully",
+                "Test PexelsClient.search_videos() handles malformed JSON response without crash",
+                "Test PexelsClient pagination iterates correctly through multiple result pages"
+            ]
+        },
+        {
+            "id": "US-002",
+            "title": "Add Pexels download and error handling tests",
+            "priority": 2,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test PexelsClient.download_video() validates URL before downloading",
+                "Test PexelsClient.download_video() handles partial download with resume",
+                "Test PexelsClient correctly parses video quality options from API response",
+                "Test PexelsClient respects configured quality preference (HD, SD, original)",
+                "Test PexelsClient API key validation fails fast with clear error message"
+            ]
+        },
+        {
+            "id": "US-003",
+            "title": "Add chapter detection ChunkingStrategy tests",
+            "priority": 3,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test ChunkingStrategy.chunk_transcript() splits on sentence boundaries",
+                "Test ChunkingStrategy.chunk_transcript() respects max_chunk_size limit",
+                "Test ChunkingStrategy handles transcripts shorter than min_chunk_size",
+                "Test ChunkingStrategy preserves timestamp alignment after chunking",
+                "Test ChunkingStrategy handles Unicode characters in transcript text"
+            ]
+        },
+        {
+            "id": "US-004",
+            "title": "Add chapter detection ChapterDetector integration tests",
+            "priority": 4,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test ChapterDetector.detect() returns ChapterResult with valid boundaries",
+                "Test ChapterDetector.detect() handles LLM response with overlapping chapters",
+                "Test ChapterDetector.detect() merges short chapters below min_duration threshold",
+                "Test ChapterDetector validation rejects chapters with negative durations",
+                "Test ChapterDetector handles empty transcript gracefully"
+            ]
+        },
+        {
+            "id": "US-005",
+            "title": "Add fallback pattern_route edge case tests",
+            "priority": 5,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test pattern_route() avoids word boundary false positives ('Singapore' not matching 'gap')",
+                "Test pattern_route() handles mixed HTTP status codes in error messages",
+                "Test pattern_route() identifies rate limit patterns across different services",
+                "Test pattern_route() returns UNKNOWN for multilingual error messages",
+                "Test pattern_route() priority ordering when multiple patterns match"
+            ]
+        },
+        {
+            "id": "US-006",
+            "title": "Add LLM provider validation and hallucination detection tests",
+            "priority": 6,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test validate_llm_reasoning() rejects generic phrases like 'good match' alone",
+                "Test validate_llm_reasoning() accepts responses with specific content references",
+                "Test ExplanationValidation detects hallucinated segment numbers",
+                "Test parse_cot_reasoning() handles nested quotes and special characters",
+                "Test build_cot_prompt() includes correct negative sampling from candidate pool"
+            ]
+        },
+        {
+            "id": "US-007",
+            "title": "Add tiered matcher strategy fallback tests",
+            "priority": 7,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test TieredMatcher selects correct strategy based on available resources",
+                "Test TieredMatcher falls back from embedding to keyword when index unavailable",
+                "Test TieredMatcher handles face preference scoring at exact 0.3 threshold",
+                "Test TieredMatcher B-roll detection with conflicting signals (silent + faces)",
+                "Test TieredMatcher memory exhaustion handling with >1000 candidates"
+            ]
+        },
+        {
+            "id": "US-008",
+            "title": "Add multi-factor scoring edge case tests",
+            "priority": 8,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test scoring handles all weights summing to zero gracefully",
+                "Test scoring prevents NaN propagation through multi-strategy computation",
+                "Test scoring clamps extreme confidence values (0.0 and 1.0) correctly",
+                "Test diversity enforcement with identical keyword matches",
+                "Test pool normalization with single-element candidate pools"
+            ]
+        },
+        {
+            "id": "US-009",
+            "title": "Add post-edit analysis feedback learning tests",
+            "priority": 9,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test analyze_feedback() adjusts confidence weights from editor corrections",
+                "Test analyze_feedback() aggregates batch corrections correctly",
+                "Test analyze_feedback() handles inconsistent user edits without crash",
+                "Test feedback validation rejects corrections outside valid range",
+                "Test confidence adjustment persists across pipeline restarts"
+            ]
+        },
+        {
+            "id": "US-010",
+            "title": "Add audio analysis and face detection threshold tests",
+            "priority": 10,
+            "passes": false,
+            "notes": "",
+            "acceptanceCriteria": [
+                "Test silence detection at exact volume threshold boundaries",
+                "Test VAD handles very short audio clips (<1 second) gracefully",
+                "Test face_score exactly at 0.3 threshold correctly classifies as B-roll",
+                "Test face detection with multiple faces returns highest confidence",
+                "Test audio analysis distinguishes speech from music-only content"
+            ]
+        }
+    ]
 }

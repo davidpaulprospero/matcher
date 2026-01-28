@@ -1,4 +1,21 @@
 
+## Iteration US-001 (Sprint 22) - Add Pexels API client unit tests
+- Added 18 new tests in tests/test_media_sources_video_clients.py
+- New test classes created:
+  - TestPexelsAPIRateLimitingUS001 (3 tests): 429 rate limit handling, rate limit headers, multiple consecutive limits
+  - TestPexelsNetworkTimeoutUS001 (4 tests): connect timeout, read timeout, connection error, download timeout
+  - TestPexelsMalformedJSONUS001 (6 tests): invalid JSON, missing videos key, null videos, malformed entries, empty dict entries, unicode decode error
+  - TestPexelsPaginationUS001 (5 tests): page size params, max_results, orientation param, authorization header, iteration through results
+- All 5 acceptance criteria verified:
+  - AC1: test_search_success (pre-existing) - VideoResult parsing
+  - AC2: test_search_handles_429_rate_limit_error - rate limit graceful degradation
+  - AC3: test_search_handles_connect_timeout - network timeout returns empty list
+  - AC4: test_search_handles_invalid_json + 5 more - malformed JSON handling
+  - AC5: test_search_and_download_iterates_through_results - pagination iteration
+- Files modified: tests/test_media_sources_video_clients.py (+374 lines)
+- Test results: 63 tests passed in 2.83s (45 pre-existing + 18 new)
+- Commit: ab1381d
+
 ## Iteration US-005 (Sprint 21) - Add checkpoint stage data validation tests for Rule 25
 - Created tests/test_checkpoint_stage_data_validation.py with 25 comprehensive tests
 - All 5 acceptance criteria verified:
@@ -6956,3 +6973,7 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 37 fixture tests pass in 0.47s
 - Files modified: tests/fixtures/__init__.py (+426 lines), tests/test_fixture_factories.py (+284 lines), tests/README.md (+153 lines)
 - Commit: 18f7481
+
+## Focus Area: testing - 2026-01-28 22:45:19
+- Status: In Progress...
+
