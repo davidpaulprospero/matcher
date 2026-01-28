@@ -77,6 +77,7 @@ class SpeechScreener:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--download-sections', f'*0-{duration}',  # Only first N seconds
             '-x',  # Extract audio
@@ -110,7 +111,7 @@ class SpeechScreener:
             speech_config = getattr(self.download_config, 'speech_screening', None)
             timeout = getattr(speech_config, 'timeout_per_video', 30) if speech_config else 30
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace')
             if result.returncode == 0:
                 matches = list(temp_dir.glob(f"{video_id}.*"))
                 return matches[0] if matches else None

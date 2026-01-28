@@ -551,15 +551,14 @@ class TestOTIOHealerPreflightCheck:
     """Tests for preflight checking."""
 
     def test_preflight_no_matches(self, mock_config, project_dir):
-        """Test preflight with no matches."""
+        """Test preflight with no matches returns no issues (early pipeline state)."""
         healer = OTIOHealer(mock_config, project_dir)
         state = Mock()
         state.matches = None
 
         issues = healer.preflight_check(state)
 
-        assert len(issues) == 1
-        assert "No matches available" in issues[0]
+        assert len(issues) == 0
 
     def test_preflight_missing_media(self, mock_config, project_dir):
         """Test preflight detects missing media."""

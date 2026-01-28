@@ -1,6 +1,32 @@
 # scripts/ralph/lib/sprint.ps1
 # Sprint lifecycle: PRD generation, archive, history, learning, dependencies
 
+function Read-JsonFile {
+    <#
+    .SYNOPSIS
+        Safe JSON file reader with existence check and error handling
+    .PARAMETER Path
+        File path to read
+    .PARAMETER Silent
+        Suppress warning on parse failure
+    .RETURNS
+        Parsed object or $null if file missing/invalid
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Silent
+    )
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        if (-not $Silent) {
+            Write-Warning "Failed to parse JSON: $Path"
+        }
+        return $null
+    }
+}
+
 function Save-StateFile {
     <#
     .SYNOPSIS
@@ -28,13 +54,7 @@ function Get-Sprint {
         Load sprint/PRD data from JSON file
     #>
     param([string]$Path = $script:PrdFile)
-    if (-not (Test-Path $Path)) { return $null }
-    try {
-        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    } catch {
-        Write-Warning "Failed to parse sprint file: $Path"
-        return $null
-    }
+    Read-JsonFile -Path $Path
 }
 
 function Save-Sprint {
@@ -90,15 +110,9 @@ function Get-RalphConfig {
         }
     }
 
-    if (Test-Path $script:ConfigFile) {
-        try {
-            $config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
-            return $config
-        }
-        catch {
-            Write-Host "  Warning: Could not parse ralph-config.json, using defaults" -ForegroundColor Yellow
-            return [PSCustomObject]$defaults
-        }
+    $config = Read-JsonFile -Path $script:ConfigFile
+    if ($config) {
+        return $config
     }
 
     return [PSCustomObject]$defaults
@@ -109,13 +123,8 @@ function Get-SprintHistory {
     .SYNOPSIS
         Load sprint history or return empty structure
     #>
-    if (Test-Path $script:SprintHistoryFile) {
-        try {
-            return Get-Content $script:SprintHistoryFile -Raw | ConvertFrom-Json
-        } catch {
-            Write-Host "  Warning: Could not parse sprint_history.json" -ForegroundColor Yellow
-        }
-    }
+    $history = Read-JsonFile -Path $script:SprintHistoryFile
+    if ($history) { return $history }
 
     return @{
         version = 1
@@ -185,7 +194,7 @@ function Update-SprintHistory {
     $history.sprints += $sprintRecord
 
     # Save
-    $history | ConvertTo-Json -Depth 10 | Set-Content $script:SprintHistoryFile -Encoding UTF8
+    Save-StateFile -Path $script:SprintHistoryFile -Data $history
 }
 
 function Save-SprintArchive {
@@ -204,9 +213,8 @@ function Save-SprintArchive {
         return  # Nothing to archive
     }
 
-    try {
-        $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-    } catch {
+    $prd = Get-Sprint
+    if (-not $prd) {
         Write-Host "  Warning: Could not parse prd.json for archiving" -ForegroundColor Yellow
         return
     }
@@ -250,8 +258,8 @@ function Save-SprintArchive {
         reason = $Reason
     } -Force
 
-    # Save archive
-    $prd | ConvertTo-Json -Depth 10 | Set-Content $archivePath -Encoding UTF8
+    # Save archive (atomic write)
+    Save-StateFile -Path $archivePath -Data $prd
 
     Write-Host "  Archived sprint $sprintNum to $archiveFile ($completedStories/$totalStories stories)" -ForegroundColor DarkGray
 
@@ -324,9 +332,8 @@ function Test-ShouldGenerateNewPRD {
         return @{ ShouldGenerate = $true; Reason = "No PRD exists" }
     }
 
-    try {
-        $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-    } catch {
+    $prd = Get-Sprint
+    if (-not $prd) {
         return @{ ShouldGenerate = $true; Reason = "PRD is corrupted" }
     }
 
@@ -413,11 +420,9 @@ function New-SeedPRD {
 
     # Read current PRD to get sprint number
     $currentSprint = 0
-    if (Test-Path $prdPath) {
-        try {
-            $currentPrd = Get-Content $prdPath -Raw | ConvertFrom-Json
-            $currentSprint = $currentPrd.sprintNumber
-        } catch {}
+    $currentPrd = Get-Sprint -Path $prdPath
+    if ($currentPrd) {
+        $currentSprint = $currentPrd.sprintNumber
     }
 
     $newSprint = $currentSprint + 1
@@ -449,6 +454,7 @@ function New-SeedPRD {
                     "Analyze the codebase to find 8-12 specific improvements for '$FocusAreaId'"
                     "Add stories US-002 through US-012 to scripts/ralph/prd.json with clear acceptance criteria"
                     "Each story should have 4-6 testable acceptance criteria"
+                    "IMPORTANT: All generated stories (US-002+) MUST have passes set to false - do NOT run tests or evaluate whether they already pass"
                     "Mark this story (US-001) as passes: true when done"
                 )
                 priority = "high"
@@ -458,8 +464,8 @@ function New-SeedPRD {
         )
     }
 
-    # Write the seed PRD
-    $seedPrd | ConvertTo-Json -Depth 10 | Set-Content $prdPath -Encoding UTF8
+    # Write the seed PRD (atomic write)
+    Save-StateFile -Path $prdPath -Data $seedPrd
 
     Write-Host "  Created seed PRD for $FocusAreaId (Sprint $newSprint)" -ForegroundColor Green
     Write-Host "  US-001 will generate the remaining stories" -ForegroundColor DarkGray
@@ -517,7 +523,7 @@ function New-SprintReport {
     if ($script:SessionLogDir -and (Test-Path $script:SessionLogDir)) {
         Get-ChildItem -Path $script:SessionLogDir -Filter "review_US-*.json" -ErrorAction SilentlyContinue | ForEach-Object {
             try {
-                $review = Get-Content $_.FullName -Raw | ConvertFrom-Json
+                $review = Read-JsonFile -Path $_.FullName
                 $qualityScores += $review
             }
             catch {}
@@ -589,20 +595,17 @@ function New-SprintReport {
 
     # Test baseline
     $baselineFile = Join-Path $script:RalphDir "test_baseline.json"
-    if (Test-Path $baselineFile) {
-        try {
-            $baseline = Get-Content $baselineFile -Raw | ConvertFrom-Json
-            $report += "## Test Baseline"
-            $report += ""
-            $report += "| Metric | Value |"
-            $report += "|--------|-------|"
-            $report += "| Tests passing | $($baseline.passed) |"
-            $report += "| Tests failing | $($baseline.failed) |"
-            $report += "| Total tests | $($baseline.totalTests) |"
-            $report += "| Last updated | $($baseline.capturedAt) |"
-            $report += ""
-        }
-        catch {}
+    $baseline = Read-JsonFile -Path $baselineFile
+    if ($baseline) {
+        $report += "## Test Baseline"
+        $report += ""
+        $report += "| Metric | Value |"
+        $report += "|--------|-------|"
+        $report += "| Tests passing | $($baseline.passed) |"
+        $report += "| Tests failing | $($baseline.failed) |"
+        $report += "| Total tests | $($baseline.totalTests) |"
+        $report += "| Last updated | $($baseline.capturedAt) |"
+        $report += ""
     }
 
     # Token budget
@@ -877,14 +880,9 @@ function Update-LearningDb {
     $dbFile = Join-Path $script:RalphDir "learning_db.json"
 
     $db = @{ entries = @(); lastUpdated = "" }
-    if (Test-Path $dbFile) {
-        try {
-            $existing = Get-Content $dbFile -Raw | ConvertFrom-Json
-            if ($existing.entries) {
-                $db.entries = @($existing.entries)
-            }
-        }
-        catch {}
+    $existing = Read-JsonFile -Path $dbFile
+    if ($existing -and $existing.entries) {
+        $db.entries = @($existing.entries)
     }
 
     $Entry.recordedAt = (Get-Date).ToString("o")
@@ -919,14 +917,8 @@ function Get-LearningContext {
     )
 
     $dbFile = Join-Path $script:RalphDir "learning_db.json"
-    if (-not (Test-Path $dbFile)) { return @() }
-
-    try {
-        $db = Get-Content $dbFile -Raw | ConvertFrom-Json
-    }
-    catch { return @() }
-
-    if (-not $db.entries -or $db.entries.Count -eq 0) { return @() }
+    $db = Read-JsonFile -Path $dbFile
+    if (-not $db -or -not $db.entries -or $db.entries.Count -eq 0) { return @() }
 
     $relevant = @()
 

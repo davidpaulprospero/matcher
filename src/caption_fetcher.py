@@ -2995,6 +2995,7 @@ class CaptionFetcher:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--skip-download',
             '--list-subs',
@@ -3013,7 +3014,9 @@ class CaptionFetcher:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout
+                timeout=self._timeout,
+                encoding='utf-8',
+                errors='replace'
             )
 
             # Parse the output to extract available languages
@@ -4499,6 +4502,7 @@ class CaptionFetcher:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--skip-download',  # Don't download video
             sub_flag,
@@ -4520,7 +4524,9 @@ class CaptionFetcher:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout
+                timeout=self._timeout,
+                encoding='utf-8',
+                errors='replace'
             )
 
             # Check for errors indicating no captions
@@ -4978,6 +4984,7 @@ class CaptionFetcher:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--skip-download',
             '--dump-json',
@@ -4996,7 +5003,9 @@ class CaptionFetcher:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=fetch_timeout
+                timeout=fetch_timeout,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode != 0:
@@ -5081,6 +5090,7 @@ class CaptionFetcher:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--skip-download',
             '--dump-json',
@@ -5099,7 +5109,9 @@ class CaptionFetcher:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=fetch_timeout
+                timeout=fetch_timeout,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode != 0:
@@ -5178,6 +5190,7 @@ class CaptionFetcher:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--skip-download',
             '--dump-json',
@@ -5196,7 +5209,9 @@ class CaptionFetcher:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=fetch_timeout
+                timeout=fetch_timeout,
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode != 0:

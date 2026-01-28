@@ -137,7 +137,7 @@ class TestIsVisualKeyword:
     def test_too_long_keyword(self):
         """Test very long keywords are rejected"""
         long_keyword = "this is a very long narrative phrase with many words"
-        assert is_visual_keyword(long_keyword) is False  # >6 words
+        assert is_visual_keyword(long_keyword) is False  # >8 words (default max)
 
     # Visual indicators
     def test_visual_indicators_presence(self):
@@ -185,7 +185,7 @@ class TestValidateVisualKeywords:
         """Test validation filters very long keywords"""
         keywords = ["this is a very long narrative phrase with many words"]
         result = validate_visual_keywords(keywords)
-        assert len(result) == 0  # Too long (>6 words)
+        assert len(result) == 0  # Too long (>8 words, default max)
 
     def test_validate_mixed(self):
         """Test validating mixed valid/invalid keywords"""

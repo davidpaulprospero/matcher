@@ -1,0 +1,5 @@
+{
+    "_schema": "Ralph Loop Human Feedback",
+    "_description": "Add feedback entries to influence story execution. Ralph reads this at session start.",
+    "entries": []
+}

@@ -48,7 +48,8 @@ function Get-RelevantFilesForStory {
         if (-not (Test-Path $fullDir)) { continue }
 
         foreach ($ext in $extensions) {
-            $files = Get-ChildItem -Path $fullDir -Filter $ext -Recurse -ErrorAction SilentlyContinue -Depth 3
+            $files = Get-ChildItem -Path $fullDir -Filter $ext -Recurse -ErrorAction SilentlyContinue -Depth 3 |
+                Where-Object { $_.FullName -notmatch '[\\/](\.git|node_modules|__pycache__|\.cache|\.venv|venv)[\\/]' }
             foreach ($file in $files) {
                 $relPath = $file.FullName.Replace($script:ProjectRoot, '').TrimStart('\', '/')
                 $score = 0
@@ -245,19 +246,16 @@ function Build-StoryPrompt {
     # Section 3: Retrospective context
     if ($recommendation.useRetrospective) {
         $retroFile = Join-Path $script:RalphDir "last_retrospective.json"
-        if (Test-Path $retroFile) {
-            try {
-                $retro = Get-Content $retroFile -Raw | ConvertFrom-Json
-                $retroContext = Get-RetrospectiveContext -Retro @{
-                    lessons = @($retro.lessons)
-                    failurePatterns = @($retro.failurePatterns)
-                    recommendations = @($retro.recommendations)
-                }
-                if ($retroContext) {
-                    $promptParts += $retroContext
-                }
+        $retro = Read-JsonFile -Path $retroFile
+        if ($retro) {
+            $retroContext = Get-RetrospectiveContext -Retro @{
+                lessons = @($retro.lessons)
+                failurePatterns = @($retro.failurePatterns)
+                recommendations = @($retro.recommendations)
             }
-            catch {}
+            if ($retroContext) {
+                $promptParts += $retroContext
+            }
         }
     }
 

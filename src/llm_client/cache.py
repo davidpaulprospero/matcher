@@ -51,21 +51,72 @@ def extract_confidence_from_response(response: "LLMResponse") -> Optional[float]
         response: LLM response object
 
     Returns:
-        Confidence score or None if not found
+        Confidence score (0.0-1.0) or None if not found
     """
     if response.parsed_data is None:
         return None
+
+    confidence = None
 
     # Handle list of results (batch responses)
     if isinstance(response.parsed_data, list):
         # Use first result's confidence if available
         if response.parsed_data and isinstance(response.parsed_data[0], dict):
-            return response.parsed_data[0].get('confidence')
+            confidence = response.parsed_data[0].get('confidence')
+    # Handle single result dict
+    elif isinstance(response.parsed_data, dict):
+        confidence = response.parsed_data.get('confidence')
+
+    # Convert string confidence to float
+    if confidence is not None:
+        confidence = _normalize_confidence(confidence)
+
+    return confidence
+
+
+def _normalize_confidence(confidence: Any) -> Optional[float]:
+    """
+    Normalize confidence value to a float.
+
+    Handles:
+    - Float values (0.0-1.0): returned as-is
+    - String labels ("high", "medium", "low"): mapped to floats
+    - Numeric strings ("0.8"): converted to float
+
+    Args:
+        confidence: Raw confidence value from LLM
+
+    Returns:
+        Normalized confidence as float, or None if invalid
+    """
+    if confidence is None:
         return None
 
-    # Handle single result dict
-    if isinstance(response.parsed_data, dict):
-        return response.parsed_data.get('confidence')
+    # Already a float or int
+    if isinstance(confidence, (int, float)):
+        return float(confidence)
+
+    # String - try to parse
+    if isinstance(confidence, str):
+        confidence_lower = confidence.lower().strip()
+
+        # Check for string labels
+        label_map = {
+            'high': 0.9,
+            'medium': 0.7,
+            'med': 0.7,
+            'low': 0.5,
+            'very_high': 0.95,
+            'very_low': 0.3,
+        }
+        if confidence_lower in label_map:
+            return label_map[confidence_lower]
+
+        # Try to parse as numeric string
+        try:
+            return float(confidence)
+        except ValueError:
+            pass
 
     return None
 

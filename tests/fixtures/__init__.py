@@ -94,6 +94,7 @@ def create_mock_config(
         max_retries=3,
         retry_delay=2.0,
         retry_backoff=2.0,
+        rate_limit_budget=None,
         audio_first=Mock(enabled=False),
         caption_first=Mock(enabled=False),
         fallback=Mock(

@@ -7,13 +7,7 @@ function Get-Queue {
         Load queue data from JSON file
     #>
     param([string]$Path = $script:QueueFile)
-    if (-not (Test-Path $Path)) { return $null }
-    try {
-        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    } catch {
-        Write-Warning "Failed to parse queue file: $Path"
-        return $null
-    }
+    Read-JsonFile -Path $Path
 }
 
 function Save-Queue {
@@ -83,11 +77,10 @@ function Update-ContextFromPRD {
         Called after PRD generation so the dashboard and all context readers
         show the new focus area's context instead of the stale interview context.
     #>
-    $prdPath = Join-Path $script:RalphDir "prd.json"
-    if (-not (Test-Path $prdPath)) { return }
+    $prd = Get-Sprint
+    if (-not $prd) { return }
 
     try {
-        $prd = Get-Content $prdPath -Raw | ConvertFrom-Json
         # Only update if projectContext is a string (not the seed PRD's dict)
         if ($prd.projectContext -and $prd.projectContext -is [string]) {
             $queue = Get-QueueData

@@ -17,9 +17,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.audio_first import AudioFirstPipeline
+from src.downloader.title_filter import SearchResult
 from src.downloader.types import MergedSegment, DownloadedSegment
 from src.state import AudioDownload
 from src.config import Config
+
+
+def _sr(videos):
+    """Wrap video list in SearchResult for mock return values."""
+    return SearchResult(videos=videos)
 
 
 # ============================================================================
@@ -51,6 +57,8 @@ def mock_config():
     download.audio_first = audio_first
     download.download_timeouts = {'short': 60, 'medium': 120, 'long': 300}
     download.max_keyword_len = 50  # MUST be int, not Mock
+    download.max_retries = 3
+    download.retry_delay = 2.0
 
     config.download = download
     return config
@@ -133,11 +141,11 @@ class TestDownloadAudioForKeyword:
 
         audio_pipeline._get_tier_value = Mock(side_effect=mock_get_tier_value)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video 1', 'duration': 300, 'webpage_url': 'https://youtube.com/watch?v=vid1'},
             {'id': 'vid2', 'title': 'Travel Video 2', 'duration': 200, 'webpage_url': 'https://youtube.com/watch?v=vid2'},
             {'id': 'vid3', 'title': 'Travel Video 3', 'duration': 150, 'webpage_url': 'https://youtube.com/watch?v=vid3'}
-        ])
+        ]))
 
         # Mock LLM filter to not filter anything
         audio_pipeline._filter_titles_with_llm = Mock(side_effect=lambda videos, *args: videos)
@@ -174,7 +182,7 @@ class TestDownloadAudioForKeyword:
     def test_download_audio_no_search_results(self, audio_pipeline, temp_dir):
         """Test when YouTube search returns no results"""
         audio_pipeline._get_tier_value = Mock(return_value=10)
-        audio_pipeline._search_video_metadata = Mock(return_value=[])
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([]))
 
         result = audio_pipeline.download_audio_for_keyword("obscure_keyword", temp_dir, "short")
 
@@ -186,9 +194,9 @@ class TestDownloadAudioForKeyword:
     def test_download_audio_llm_filter_rejects_all(self, audio_pipeline, temp_dir):
         """Test when LLM filter rejects all videos"""
         audio_pipeline._get_tier_value = Mock(return_value=10)
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Unrelated Video', 'duration': 200}
-        ])
+        ]))
         audio_pipeline._filter_titles_with_llm = Mock(return_value=[])  # Empty = all rejected
 
         result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -295,9 +303,9 @@ class TestAudioFirstEdgeCases:
         initial_count = audio_pipeline.tier_download_counts.get('short', 0)
 
         audio_pipeline._get_tier_value = Mock(return_value=10)
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 200}
-        ])
+        ]))
         audio_pipeline._filter_titles_with_llm = Mock(return_value=['vid1'])
         audio_pipeline._download_audio_by_ids = Mock(return_value=[
             AudioDownload(
@@ -676,11 +684,11 @@ class TestDownloadAudioAdditional:
             'max': 300   # Max 300 seconds
         }.get(key, default))
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Too Short', 'duration': 30, 'is_live': False},  # Filtered out
             {'id': 'vid2', 'title': 'Just Right', 'duration': 120, 'is_live': False},  # Kept
             {'id': 'vid3', 'title': 'Too Long', 'duration': 500, 'is_live': False}   # Filtered out
-        ])
+        ]))
 
         # Mock download to track which videos are attempted
         attempted_ids = []
@@ -703,10 +711,10 @@ class TestDownloadAudioAdditional:
             'max': 300
         }.get(key, default))
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Normal Video', 'duration': 120, 'is_live': False},
             {'id': 'vid2', 'title': 'Live Stream', 'duration': 120, 'is_live': True}  # Filtered
-        ])
+        ]))
 
         # The filter should remove live streams
         # (Testing the filtering logic that happens before download)
@@ -720,17 +728,17 @@ class TestDownloadAudioAdditional:
             'max': 300
         }.get(key, default))
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'No Duration', 'duration': None, 'is_live': False},  # Filtered (0 < 60)
             {'id': 'vid2', 'title': 'Has Duration', 'duration': 120, 'is_live': False}   # Kept
-        ])
+        ]))
 
         # Videos with None duration should be filtered out
 
     def test_download_audio_cleans_stale_part_files(self, audio_pipeline, temp_dir):
         """Test cleanup of stale .part files"""
         audio_pipeline._get_tier_value = Mock(return_value=10)
-        audio_pipeline._search_video_metadata = Mock(return_value=[])
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([]))
 
         # Create stale .part file
         audio_dir = temp_dir / "test_s_audio"
@@ -753,9 +761,9 @@ class TestDownloadAudioAdditional:
             'max': 300
         }.get(key, default))
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120, 'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         # Mock LLM filter to not filter anything
         audio_pipeline._filter_titles_with_llm = Mock(side_effect=lambda videos, *args: videos)

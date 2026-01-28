@@ -1,152 +1,137 @@
 {
-    "branchName": "ralph/sprint-13",
-    "sprintNumber": 13,
+    "branchName": "ralph/sprint-14",
+    "sprintNumber": 14,
     "focusArea": "testing",
-    "projectContext": "Sprint 12 (rate-limiting) completed US-001 through US-005: wired speed-based escalation into audio_first + core.py, activated adaptive backoff severity multipliers, added per-tier backoff state checkpoint persistence, budget-aware circuit breaker pause scaling, and cookie fallback chain init validation. US-006 through US-010 remain incomplete: retry queue + circuit breaker deadlock fix, rate limit window estimation, per-keyword escalation history export, error-pattern-to-tier correlation tracking, and auto-scaling budget limits. This testing sprint adds comprehensive test coverage for those incomplete features and their supporting modules, ensuring rate-limiting intelligence is reliable before further feature development.",
+    "projectContext": "Sprint 13 (testing) completed all 10 stories covering rate-limiting intelligence tests: retry queue deadlock prevention, rate limit window estimation, escalation timeline export, tier effectiveness correlation, auto-scaling budget, stale checkpoint restoration, recommendation engine, health status aggregation, circuit breaker pause scaling, and speed tracker signal detection. Sprint 14 targets deeper integration-level testing gaps identified during sprint 13: AudioFirstPipeline has zero escalation/cookie integration tests, RateLimitBudget lacks thread safety, CookieMethodFallback has untested cross-keyword exhaustion paths, parallel downloads have only 10 config-level tests with no concurrency coverage, and checkpoint save/restore cycles for escalation timeline and tier outcomes are untested end-to-end.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add retry queue deadlock prevention tests",
+            "title": "Add AudioFirstPipeline escalation integration tests",
             "priority": 1,
-            "passes": true,
-            "notes": "Implemented _wait_combined() with deadlock detection + max_combined_wait_seconds config. Added _get_cb_remaining() and _get_cookie_cooldown_remaining() non-blocking helpers. 32 new tests in test_retry_queue_deadlock.py covering all acceptance criteria. Updated 3 existing tests that mocked old sequential wait methods.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test _wait_combined() when both circuit breaker AND cookie cooldown are blocking simultaneously — verify it waits min(cb_remaining, cooldown_remaining) + 5s buffer",
-                "Test _wait_combined() when combined estimate exceeds max_combined_wait_seconds (300) — verify _forced_retry flag is set and wait returns 0",
-                "Test _wait_combined() when only circuit breaker blocks (cooldown clear) — verify it waits only for CB recovery",
-                "Test _wait_combined() when only cookie cooldown blocks (CB closed) — verify it waits only for cooldown",
-                "Test start_retry_pass() end-to-end: add items, mock CB open + cooldown active, verify pass completes within max_combined_wait_seconds",
-                "Test that forced retry uses current best cookie method by verifying cookie_rotator state is not advanced when _forced_retry is True"
+                "Test download_audio_for_keyword() passes escalation_manager.get_escalation_args(keyword) to yt-dlp command — verify args include --impersonate when Tier 1",
+                "Test download_audio_for_keyword() handles EscalationResult.rotate_cookies=True by calling cookie_rotator.rotate() before retry",
+                "Test download_video_segments() applies escalation args to segment download commands — verify --extractor-args added when Tier 2+",
+                "Test _download_full_video_fallback() escalates independently from segment download — verify tier state preserved across fallback transition",
+                "Test retry loop with 2 consecutive 403 errors triggers escalation from Tier 1 to Tier 2 within download_audio_for_keyword()"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add rate limit window duration estimation tests",
+            "title": "Add AudioFirstPipeline speed escalation wiring tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Implemented get_estimated_rate_limit_window() with failure/recovery pair tracking, median calculation, 3-pair minimum threshold, last-10-pairs capping. Added record_rate_limit_failure/recovery methods, _get_all_estimated_windows helper, integrated into export_to_json under rate_limiting.estimated_window_seconds. 21 new tests in test_rate_limit_window_estimation.py covering all 6 acceptance criteria. All 127 existing rate limit metrics tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test get_estimated_rate_limit_window() returns None when fewer than 3 failure/recovery pairs exist",
-                "Test median calculation with 5 alternating failure/success timestamps (e.g., gaps of 30s, 60s, 45s, 90s, 120s) — verify median is 60s",
-                "Test window estimation with exactly 3 pairs at minimum threshold — verify valid result returned",
-                "Test that only last 10 pairs are used when more data exists (verify oldest pairs discarded)",
-                "Test per-keyword window isolation — keyword A's pairs don't affect keyword B's estimate",
-                "Test window estimate included in RateLimitMetrics.export_to_json() under 'rate_limiting.estimated_window_seconds'"
+                "Test _check_speed_escalation() calls escalation_manager.record_slow_speed(keyword, speed_mbps) when speed_tracker detects rate limit signal",
+                "Test _check_speed_escalation() is called after each audio download attempt in download_audio_for_keyword() — verify invocation count matches retry count",
+                "Test _check_speed_escalation() is called after segment download in download_video_segments() — verify invocation with correct keyword",
+                "Test _check_speed_escalation() handles speed_tracker=None gracefully (no AttributeError when tracking disabled)",
+                "Test _check_speed_escalation() handles escalation_manager=None gracefully (no crash when escalation disabled)"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add per-keyword escalation timeline export tests",
+            "title": "Add CookieMethodFallback cross-keyword exhaustion tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Added _escalation_timeline dict and _record_timeline_event() to EscalationManager. Implemented get_keyword_escalation_timeline() (last 20 per keyword) and get_hot_keywords() (>3 in 30min, sorted desc). record_failure() now calls classify_trigger() to capture trigger_category. Added escalation_manager param to export_to_json() for keyword_timelines and hot_keywords. 26 new tests in test_escalation_timeline.py. 259 existing tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test get_keyword_escalation_timeline() returns dict keyed by keyword with list of {timestamp, from_tier, to_tier, trigger_category} events",
-                "Test timeline is limited to last 20 events per keyword — record 25 events, verify only last 20 returned",
-                "Test get_hot_keywords() returns keywords with >3 escalations in last 30 minutes, sorted by count descending",
-                "Test get_hot_keywords() excludes keywords with <=3 escalations or escalations older than 30 minutes",
-                "Test timeline and hot_keywords included in RateLimitMetrics.export_to_json() under 'escalation.keyword_timelines' and 'escalation.hot_keywords'"
+                "Test advance() through full chain (browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies) — verify each transition returns correct CookieMethod type",
+                "Test mark_success() proactive rotation: after success on method 0, verify current advances to method 1 for load balancing",
+                "Test reset_for_next_download() after exhaustion: verify resets to last_success_index (not always 0) for new keyword downloads",
+                "Test get_status() after partial chain traversal: verify remaining_methods count and current_method are accurate",
+                "Test duplicate cookie file paths in chain construction: verify resolved paths are deduplicated (no duplicate entries in self._chain)"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add error-pattern-to-tier success correlation tests",
+            "title": "Add RateLimitBudget thread safety tests",
             "priority": 4,
-            "passes": true,
-            "notes": "Added _tier_outcomes tracking dict to EscalationManager. Implemented record_outcome(trigger_category, tier, success) for per-category per-tier outcome tracking. Added get_tier_effectiveness() returning {category: {tier_N: rate}} structure. Added get_tier_recommendations() with 'skip escalation' (>80% T1) and 'skip Tier 2' (<20% T2 + >60% T3) logic. Integrated tier_effectiveness and tier_recommendations into export_to_json() under 'escalation'. Added _tier_outcomes.clear() to reset_all(). 28 new tests in test_tier_effectiveness.py covering all 6 ACs. All 185 related tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test get_tier_effectiveness() returns {trigger_category: {tier_1: rate, tier_2: rate, tier_3: rate}} structure with correct success rates",
-                "Test mixed outcomes: 10 attempts at Tier 1 (8 success) → 80% rate; 10 at Tier 2 (3 success) → 30% rate",
-                "Test recommendation: trigger category with >80% Tier 1 success rate generates 'skip escalation for {category}' recommendation",
-                "Test recommendation: category with <20% Tier 2 but >60% Tier 3 generates 'skip Tier 2 for {category}' recommendation",
-                "Test tier_effectiveness included in RateLimitMetrics.export_to_json() under 'escalation.tier_effectiveness'",
-                "Test empty data returns empty dict (no division-by-zero or KeyError)"
+                "Test concurrent record_rotation() from 10 threads — verify rotations_used equals exactly 10 (no race condition overwrites)",
+                "Test concurrent can_rotate() + record_rotation() — verify budget never exceeds max_rotations even under contention",
+                "Test concurrent record_backoff_time() from 5 threads with different durations — verify backoff_time_spent is sum of all durations",
+                "Test concurrent record_success() + record_failure() — verify successes + failures equals total call count",
+                "Test can_rotate() returns False atomically when last rotation consumed — verify no two threads both get True when only 1 rotation remains"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add auto-scaling budget limits tests",
+            "title": "Add escalation timeline checkpoint persistence tests",
             "priority": 5,
-            "passes": true,
-            "notes": "Added scale_for_keywords() method to RateLimitBudget with ceil(n/5) multiplier capped at 5x. Added auto_scale_budget config field to RateLimitBudgetConfig (default: True). Unlimited resources (max=0) are preserved during scaling. 25 new tests in test_auto_scaling_budget.py across 8 test classes covering all 6 acceptance criteria. Updated config.yaml with auto_scale_budget setting.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test scale_for_keywords(1) returns base limits unchanged (ceil(1/5) = 1x multiplier)",
-                "Test scale_for_keywords(10) returns 2x base limits (ceil(10/5) = 2x)",
-                "Test scale_for_keywords(25) returns 5x base limits (ceil(25/5) = 5x)",
-                "Test scale_for_keywords(100) is capped at 5x (not 20x) — max_rotations <= 50, max_backoff_time <= 3000",
-                "Test auto_scale_budget=false ignores keyword count and uses base limits",
-                "Test scaled budget logged at INFO level: 'Rate limit budget auto-scaled for {n} keywords: rotations={x}, backoff={y}s'"
+                "Test to_dict() includes _escalation_timeline under 'timeline' key with all recorded events per keyword",
+                "Test from_dict() restores _escalation_timeline correctly — record 5 events, serialize, deserialize, verify get_keyword_escalation_timeline() returns same data",
+                "Test to_dict() includes _tier_outcomes under 'tier_outcomes' key — record mixed outcomes, verify serialized structure matches get_tier_effectiveness() output",
+                "Test from_dict() restores _tier_outcomes correctly — record outcomes, serialize, deserialize, verify get_tier_effectiveness() returns same rates",
+                "Test checkpoint round-trip with hot_keywords: record escalations within 30 min window, save, restore, verify get_hot_keywords() still returns them"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add EscalationManager stale checkpoint restoration tests",
+            "title": "Add parallel download escalation coordination tests",
             "priority": 6,
-            "passes": true,
-            "notes": "Added 3 new tests to TestEscalationCheckpointPersistence class in test_escalation_manager.py: test_from_dict_missing_saved_at_treats_as_stale (AC3), test_from_dict_recent_saved_at_preserves_tiers (AC2 explicit), test_from_dict_empty_keyword_states_returns_fresh (AC5 explicit). Pre-existing tests already covered AC1 (test_stale_data_de_escalates_by_one_tier + test_stale_tier1_stays_at_tier1) and AC4 (test_from_dict_with_invalid_tier_value_clamped). All 109 escalation manager tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test from_dict() with checkpoint saved_at > 1 hour ago: verify all tiers de-escalated by one level (Tier 3 → 2, Tier 2 → 1, Tier 1 stays)",
-                "Test from_dict() with checkpoint saved_at < 1 hour ago: verify tiers preserved exactly",
-                "Test from_dict() with missing 'saved_at' key: verify graceful fallback (treat as stale, de-escalate)",
-                "Test from_dict() with corrupted tier values (e.g., tier=5, tier=-1): verify clamped to valid EscalationTier range (1-3)",
-                "Test from_dict() with empty keyword states dict: verify returns fresh EscalationManager (no crash)"
+                "Test two concurrent keywords sharing EscalationManager — keyword A escalates to Tier 2 while B stays at Tier 1, verify independent tier states",
+                "Test concurrent record_failure() calls for same keyword — verify consecutive_failures count is accurate (thread-safe increment)",
+                "Test concurrent escalation triggers for different keywords — verify per-keyword locks prevent cross-keyword interference",
+                "Test shared budget depletion during parallel downloads — when keyword A exhausts rotations, keyword B's can_rotate() returns False",
+                "Test concurrent get_escalation_args() returns consistent tier-appropriate args (no partial reads of tier state during escalation)"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add RateLimitMetrics recommendation engine tests",
+            "title": "Add cookie rotator mid-session file validation tests",
             "priority": 7,
-            "passes": true,
-            "notes": "Implementation already existed in get_config_recommendations() (rate_limit_metrics.py:427). Added 6 new tests to TestConfigRecommendations: return type verification (AC6 - list not None/dict), rate limit mentions backoff/cookies (AC1), retry mentions max_retries (AC2), CB mentions pause/VPN (AC3), no cookies mentions enable rotation (AC4), healthy metrics produce empty list (AC5). Total: 13 recommendation tests, 133 rate limit metrics tests all pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test recommendation triggered when rate_limit_events > 10% of total_downloads ('increase backoff or add cookies')",
-                "Test recommendation triggered when retry_exhaustion > 20% ('increase max_retries')",
-                "Test recommendation triggered when circuit_breaker_trips > 3 ('increase pause or use VPN')",
-                "Test recommendation triggered when rate limits detected but no cookie_rotations ('enable rotation')",
-                "Test no recommendations when all metrics are healthy (below thresholds)",
-                "Test get_config_recommendations() returns list of strings (not None, not empty dict) even when no recommendations apply"
+                "Test rotate() when current cookie file is deleted mid-session — verify graceful fallback to next available cookie (no FileNotFoundError crash)",
+                "Test rotate() when cookie file becomes empty (0 bytes) mid-session — verify it skips to next cookie instead of using empty file",
+                "Test rotate() with all cookie files deleted — verify returns None and logs warning (not exception)",
+                "Test round-robin rotation with single cookie file — verify it returns that file on every call (no infinite loop in _select_round_robin)",
+                "Test get_current_cookie_path() after cookie deletion — verify returns None rather than path to deleted file"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add RateLimitMetricsAggregator health status tests",
+            "title": "Add speech screening escalation integration tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Added 5 new tests to TestHealthStatus class: test_healthy_no_tier2_and_budget_above_50_pct (AC1 explicit), test_degraded_budget_between_50_and_90_pct_consumed (AC2 budget), test_degraded_over_30_pct_keywords_at_tier2_plus (AC2 escalation), test_critical_budget_under_20_pct_remaining (AC3 budget), test_health_transitions_healthy_to_degraded_to_critical (AC5 progressive). Pre-existing tests already covered AC3 (critical CB open, critical high escalation), AC4 (aggregate all subsystems). Total: 32 tests in test_metrics_aggregator.py, all passing.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test get_health_status() returns 'healthy' when no keywords at Tier 2+ and budget > 50% remaining",
-                "Test get_health_status() returns 'degraded' when >30% keywords at Tier 2+ OR budget between 20-50% remaining",
-                "Test get_health_status() returns 'critical' when >50% keywords at Tier 3 OR budget < 20% remaining OR circuit breaker open",
-                "Test aggregate() correctly pulls metrics from EscalationManager, CookieRotator, RateLimitBudget, and CircuitBreaker",
-                "Test health status transitions: healthy → degraded → critical as failures accumulate"
+                "Test _download_audio_clip() applies escalation_manager.get_escalation_args() to yt-dlp command when escalation_manager is provided",
+                "Test _download_audio_clip() omits escalation args gracefully when escalation_manager is None",
+                "Test screen_video() records escalation failure via escalation_manager.record_failure() when download returns 403 error",
+                "Test screen_video() handles EscalationResult.rotate_cookies=True by advancing cookie method before retry",
+                "Test screen_approved_videos() processes multiple videos with shared escalation state — verify tier progression carries across video screening calls"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add circuit breaker pause scaling composition tests",
+            "title": "Add title filter escalation args integration tests",
             "priority": 9,
-            "passes": true,
-            "notes": "All 5 ACs pre-implemented across two existing test files: test_budget_circuit_breaker_pause_scaling.py (AC1-AC3: TestCombinedScaling class with multiplicative composition 2.0x*1.5x=180, 2.0x*2.5x=300, and max_pause_seconds cap) and test_circuit_breaker_escalation_coordination.py (AC4-AC5: TestExtendedReset class with 3-success Tier 3 requirement and 1-success normal reset). All 57 tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget nearly exhausted (1.5x) apply — verify multiplicative composition (base * 2.0 * 1.5)",
-                "Test _get_effective_pause_seconds() when both escalation (2.0x) AND budget exhausted (2.5x) apply — verify multiplicative composition (base * 2.0 * 2.5)",
-                "Test effective pause never exceeds max_pause_seconds (300) even with maximum multipliers",
-                "Test half-open state requires 3 consecutive successes when escalation at Tier 3 (extended reset)",
-                "Test half-open state requires only 1 success when escalation below Tier 3 (normal reset)"
+                "Test filter_by_title() includes escalation args from get_escalation_args(keyword) in yt-dlp --dump-json search command",
+                "Test filter_by_title() handles 403 during search by calling escalation_manager.record_failure() and retrying with escalated args",
+                "Test filter_by_title() timeout does NOT trigger escalation (timeout is search-specific, not rate-limit related)",
+                "Test filter_by_title() JSON parse error in yt-dlp output does not crash escalation tracking — verify escalation state unchanged",
+                "Test filter_by_title() with escalation_manager=None skips all escalation logic without AttributeError"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add speed tracker rate limit signal detection tests",
+            "title": "Add budget exhaustion cascade behavior tests",
             "priority": 10,
-            "passes": true,
-            "notes": "Added PerKeywordSpeedTracker class to speed_tracker.py for per-keyword isolation. Added 11 new tests: TestRollingWindowAverage (2 tests for AC3), TestFastSampleResetsCounter (2 tests for AC4), TestPerKeywordIsolation (7 tests for AC5). Pre-existing tests covered AC1 and AC2. All 59 speed tracker tests pass.",
+            "passes": false,
             "acceptanceCriteria": [
-                "Test detect_rate_limit_signals() returns True when consecutive_slow_samples >= threshold (default 3) AND speed < rate_limit_signal_threshold",
-                "Test detect_rate_limit_signals() returns False when speed is above threshold (even with many samples)",
-                "Test speed sample averaging: record 5 samples, verify avg_speed computed correctly with rolling window",
-                "Test that a single fast sample resets consecutive_slow_samples counter",
-                "Test speed tracking per-keyword isolation — keyword A's slow samples don't affect keyword B"
+                "Test can_rotate()=False triggers direct VPN escalation advice in get_budget_advice() — verify advice includes 'skip_to_vpn'",
+                "Test can_switch_vpn()=False after can_rotate()=False — verify get_budget_advice() recommends 'abort_keyword' (all resources exhausted)",
+                "Test budget exhaustion mid-download: record_rotation() succeeds N times then can_rotate() returns False — verify exact boundary (max_rotations consumed)",
+                "Test backoff budget exhaustion: record_backoff_time() with cumulative > max_backoff_time — verify can_backoff() returns False at threshold",
+                "Test from_checkpoint() restores budget state correctly — serialize with 5 rotations used, deserialize, verify rotations_used=5 and can_rotate() reflects remaining budget"
             ]
         }
     ]

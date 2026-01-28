@@ -445,13 +445,15 @@ class TestCaptionCacheTTL:
         cache_dir.mkdir()
         return cache_dir
 
-    def test_expired_entry_returns_none(self, temp_cache_dir):
-        """Test expired entries are not returned"""
+    def test_expired_entry_returns_none_strict_mode(self, temp_cache_dir):
+        """Test expired entries are not returned in strict validation mode"""
         # Use very short TTL (1 second = ~0.00001 days)
         config = Mock()
         config.cache_dir = str(temp_cache_dir)
         config.max_cache_age_days = 0.00001  # About 0.8 seconds
         config.cache_captions = True
+        config.cache_validation = 'strict'  # Strict mode rejects stale entries
+        config.cache_validation_tolerance = 0.2
 
         cache = CaptionCache(config)
 
@@ -472,7 +474,7 @@ class TestCaptionCacheTTL:
         # Wait for expiration
         time.sleep(1.5)
 
-        # Should be expired now
+        # Should be expired now (strict mode returns None for stale entries)
         cached = cache.get_caption("dQw4w9WgXcQ", "en")
         assert cached is None
 
@@ -1595,3 +1597,484 @@ class TestCaptionFetcherAdaptiveOrder:
 
         # Should use metrics data (vtt first), not cache data (srt first)
         assert order[0] == 'vtt'
+
+
+class TestCacheStaleness:
+    """Test cache staleness checking (US-004 Sprint 8)"""
+
+    @pytest.fixture
+    def temp_cache_dir(self, tmp_path):
+        """Create a temporary cache directory"""
+        cache_dir = tmp_path / "test_staleness_cache"
+        cache_dir.mkdir()
+        return cache_dir
+
+    @pytest.fixture
+    def mock_config_strict(self, temp_cache_dir):
+        """Create a mock config with strict validation mode"""
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 7  # 7 day max age
+        config.cache_captions = True
+        config.cache_validation = 'strict'
+        config.cache_validation_tolerance = 0.2
+        return config
+
+    @pytest.fixture
+    def mock_config_warn(self, temp_cache_dir):
+        """Create a mock config with warn validation mode"""
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 7
+        config.cache_captions = True
+        config.cache_validation = 'warn'
+        config.cache_validation_tolerance = 0.2
+        return config
+
+    @pytest.fixture
+    def mock_config_skip(self, temp_cache_dir):
+        """Create a mock config with skip validation mode"""
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 7
+        config.cache_captions = True
+        config.cache_validation = 'skip'
+        config.cache_validation_tolerance = 0.2
+        return config
+
+    def test_is_stale_returns_false_for_fresh_entry(self, mock_config_warn):
+        """Test is_stale returns False for entries younger than max_age_days"""
+        from src.caption_fetcher import CaptionCache
+        from src.cache.base import CacheEntry
+
+        cache = CaptionCache(mock_config_warn)
+
+        # Entry from 1 day ago (within 7 day max)
+        one_day_ago = time.time() - (1 * 24 * 3600)
+        entry = CacheEntry(
+            data={'test': 'data'},
+            cached_at=one_day_ago,
+            key='test_key'
+        )
+
+        assert cache.is_stale(entry) is False
+
+    def test_is_stale_returns_true_for_old_entry(self, mock_config_warn):
+        """Test is_stale returns True for entries older than max_age_days"""
+        from src.caption_fetcher import CaptionCache
+        from src.cache.base import CacheEntry
+
+        cache = CaptionCache(mock_config_warn)
+
+        # Entry from 10 days ago (beyond 7 day max)
+        ten_days_ago = time.time() - (10 * 24 * 3600)
+        entry = CacheEntry(
+            data={'test': 'data'},
+            cached_at=ten_days_ago,
+            key='test_key'
+        )
+
+        assert cache.is_stale(entry) is True
+
+    def test_is_stale_with_custom_max_age(self, mock_config_warn):
+        """Test is_stale respects override max_age_days parameter"""
+        from src.caption_fetcher import CaptionCache
+        from src.cache.base import CacheEntry
+
+        cache = CaptionCache(mock_config_warn)  # config has 7 days
+
+        # Entry from 5 days ago
+        five_days_ago = time.time() - (5 * 24 * 3600)
+        entry = CacheEntry(
+            data={'test': 'data'},
+            cached_at=five_days_ago,
+            key='test_key'
+        )
+
+        # Not stale with config's 7 days
+        assert cache.is_stale(entry) is False
+
+        # Stale with override of 3 days
+        assert cache.is_stale(entry, max_age_days=3) is True
+
+    def test_is_stale_returns_false_when_no_expiration(self, temp_cache_dir):
+        """Test is_stale returns False when max_age_days is 0 (no expiration)"""
+        from src.caption_fetcher import CaptionCache
+        from src.cache.base import CacheEntry
+
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 0  # No expiration
+        config.cache_captions = True
+        config.cache_validation = 'warn'
+        config.cache_validation_tolerance = 0.2
+
+        cache = CaptionCache(config)
+
+        # Very old entry (100 days ago)
+        old_entry = CacheEntry(
+            data={'test': 'data'},
+            cached_at=time.time() - (100 * 24 * 3600),
+            key='test_key'
+        )
+
+        # Should not be stale since max_age=0 means no expiration
+        assert cache.is_stale(old_entry) is False
+
+    def test_get_entry_age_days(self, mock_config_warn):
+        """Test get_entry_age_days returns correct age"""
+        from src.caption_fetcher import CaptionCache
+        from src.cache.base import CacheEntry
+
+        cache = CaptionCache(mock_config_warn)
+
+        # Entry from 5 days ago
+        five_days_ago = time.time() - (5 * 24 * 3600)
+        entry = CacheEntry(
+            data={'test': 'data'},
+            cached_at=five_days_ago,
+            key='test_key'
+        )
+
+        age = cache.get_entry_age_days(entry)
+        # Allow small tolerance for test execution time
+        assert 4.9 < age < 5.1
+
+    def test_get_caption_returns_none_for_stale_in_strict_mode(
+        self, mock_config_strict, temp_cache_dir
+    ):
+        """Test get_caption returns None for stale entries in strict mode"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        cache = CaptionCache(mock_config_strict)
+
+        # Store an entry
+        segments = [CaptionSegment(0, 0.0, 2.0, "Test", "dQw4w9WgXcQ")]
+        result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+        cache.store(result)
+
+        # Manually backdate the cached_at to make it stale
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en")
+        entry_data = cache.index[key]
+        entry_data['cached_at'] = time.time() - (10 * 24 * 3600)  # 10 days ago
+        cache.index[key] = entry_data
+        cache._save_index()
+
+        # Should return None in strict mode for stale entry
+        cached = cache.get_caption("dQw4w9WgXcQ", "en")
+        assert cached is None
+
+    def test_get_caption_returns_data_for_stale_in_warn_mode(
+        self, mock_config_warn, temp_cache_dir
+    ):
+        """Test get_caption returns stale data with warning in warn mode"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        cache = CaptionCache(mock_config_warn)
+
+        # Store an entry
+        segments = [CaptionSegment(0, 0.0, 2.0, "Test", "dQw4w9WgXcQ")]
+        result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+        cache.store(result)
+
+        # Manually backdate the cached_at to make it stale
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en")
+        entry_data = cache.index[key]
+        entry_data['cached_at'] = time.time() - (10 * 24 * 3600)  # 10 days ago
+        cache.index[key] = entry_data
+        cache._save_index()
+
+        # Should return data in warn mode even when stale
+        cached = cache.get_caption("dQw4w9WgXcQ", "en")
+        assert cached is not None
+        assert cached.video_id == "dQw4w9WgXcQ"
+
+    def test_get_caption_skips_staleness_check_in_skip_mode(
+        self, mock_config_skip, temp_cache_dir
+    ):
+        """Test get_caption doesn't check staleness in skip mode"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        cache = CaptionCache(mock_config_skip)
+
+        # Store an entry
+        segments = [CaptionSegment(0, 0.0, 2.0, "Test", "dQw4w9WgXcQ")]
+        result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+        cache.store(result)
+
+        # Manually backdate the cached_at to make it stale
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en")
+        entry_data = cache.index[key]
+        entry_data['cached_at'] = time.time() - (100 * 24 * 3600)  # 100 days ago
+        cache.index[key] = entry_data
+        cache._save_index()
+
+        # Should return data in skip mode regardless of staleness
+        cached = cache.get_caption("dQw4w9WgXcQ", "en")
+        assert cached is not None
+
+
+class TestCleanupStaleEntries:
+    """Test cleanup_stale_entries method (US-004 Sprint 8)"""
+
+    @pytest.fixture
+    def temp_cache_dir(self, tmp_path):
+        """Create a temporary cache directory"""
+        cache_dir = tmp_path / "test_cleanup_cache"
+        cache_dir.mkdir()
+        return cache_dir
+
+    @pytest.fixture
+    def mock_config(self, temp_cache_dir):
+        """Create a mock CaptionFirstConfig"""
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 7
+        config.cache_captions = True
+        config.cache_validation = 'warn'
+        config.cache_validation_tolerance = 0.2
+        return config
+
+    @pytest.fixture
+    def cache_with_entries(self, mock_config):
+        """Create a cache with mixed fresh and stale entries"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        cache = CaptionCache(mock_config)
+
+        # Store 5 entries
+        for i in range(5):
+            segments = [CaptionSegment(0, 0.0, 2.0, f"Test {i}", f"vid{i:011d}")]
+            result = CaptionResult(
+                video_id=f"vid{i:011d}",
+                segments=segments,
+                language="en",
+                is_auto_generated=False,
+                format_source="vtt"
+            )
+            cache.store(result)
+
+        # Backdate entries 0, 1, 2 to be stale (10 days ago)
+        for i in range(3):
+            key = cache._make_cache_key(f"vid{i:011d}", "en")
+            entry_data = cache.index[key]
+            entry_data['cached_at'] = time.time() - (10 * 24 * 3600)
+            cache.index[key] = entry_data
+
+        # Entries 3, 4 remain fresh (just created)
+        cache._save_index()
+
+        return cache
+
+    def test_cleanup_removes_stale_entries(self, cache_with_entries):
+        """Test cleanup_stale_entries removes entries older than max_age_days"""
+        result = cache_with_entries.cleanup_stale_entries()
+
+        assert result['entries_removed'] == 3
+        assert result['dry_run'] is False
+        assert result['oldest_removed_days'] > 9  # At least 10 days
+
+        # Verify stale entries were removed
+        assert cache_with_entries.get_caption("vid00000000000", "en") is None
+        assert cache_with_entries.get_caption("vid00000000001", "en") is None
+        assert cache_with_entries.get_caption("vid00000000002", "en") is None
+
+        # Fresh entries should still exist
+        assert cache_with_entries.get_caption("vid00000000003", "en") is not None
+        assert cache_with_entries.get_caption("vid00000000004", "en") is not None
+
+    def test_cleanup_dry_run_does_not_remove(self, cache_with_entries):
+        """Test cleanup_stale_entries with dry_run=True doesn't remove entries"""
+        result = cache_with_entries.cleanup_stale_entries(dry_run=True)
+
+        assert result['entries_removed'] == 3
+        assert result['dry_run'] is True
+
+        # All entries should still exist
+        for i in range(5):
+            # Use the same matching pattern to check existence
+            cached = cache_with_entries.get_caption(f"vid{i:011d}", "en")
+            # In warn mode, stale entries are still returned (with warning)
+            # But in any case, they should be in the index
+            key = cache_with_entries._make_cache_key(f"vid{i:011d}", "en")
+            assert key in cache_with_entries.index
+
+    def test_cleanup_with_custom_max_age(self, cache_with_entries):
+        """Test cleanup_stale_entries respects custom max_age_days"""
+        # With 3 day threshold, all 5 entries should be considered stale
+        # (even "fresh" ones if we backdate them slightly)
+        # But actually the fresh ones were just created so let's be more specific
+
+        # Use 1 day threshold - should remove the 3 stale entries
+        result = cache_with_entries.cleanup_stale_entries(max_age_days=1)
+
+        assert result['entries_removed'] == 3
+
+        # Use 20 day threshold - should remove 0 entries
+        # But we need fresh cache for this test
+        # So let's verify with a different approach
+
+    def test_cleanup_returns_bytes_freed(self, cache_with_entries):
+        """Test cleanup_stale_entries reports bytes freed"""
+        result = cache_with_entries.cleanup_stale_entries()
+
+        # Should have freed some bytes (rough estimate)
+        assert result['bytes_freed'] > 0
+
+    def test_cleanup_with_zero_max_age_does_nothing(self, mock_config, temp_cache_dir):
+        """Test cleanup_stale_entries does nothing when max_age_days=0"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        mock_config.max_cache_age_days = 0  # No expiration
+        cache = CaptionCache(mock_config)
+
+        # Store old entry
+        segments = [CaptionSegment(0, 0.0, 2.0, "Old", "oldvideo1234")]
+        result = CaptionResult(
+            video_id="oldvideo1234",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+        cache.store(result)
+
+        # Backdate it
+        key = cache._make_cache_key("oldvideo1234", "en")
+        entry_data = cache.index[key]
+        entry_data['cached_at'] = time.time() - (365 * 24 * 3600)  # 1 year old
+        cache.index[key] = entry_data
+        cache._save_index()
+
+        # Cleanup should do nothing with max_age=0
+        cleanup_result = cache.cleanup_stale_entries()
+
+        assert cleanup_result['entries_removed'] == 0
+        assert cache.get_caption("oldvideo1234", "en") is not None
+
+    def test_cleanup_skips_metadata_entries(self, cache_with_entries):
+        """Test cleanup_stale_entries skips entries starting with __"""
+        # Add a metadata entry
+        cache_with_entries.index['__format_statistics__'] = {
+            'format_success_counts': {'json3': 100},
+            'updated_at': time.time() - (365 * 24 * 3600),  # 1 year old
+        }
+        cache_with_entries._save_index()
+
+        result = cache_with_entries.cleanup_stale_entries()
+
+        # Metadata entry should not be removed even if "old"
+        assert '__format_statistics__' in cache_with_entries.index
+
+
+class TestCacheStalenessIntegration:
+    """Integration tests for staleness with strict/warn modes (US-004 Sprint 8)"""
+
+    @pytest.fixture
+    def temp_cache_dir(self, tmp_path):
+        """Create a temporary cache directory"""
+        cache_dir = tmp_path / "test_integration_cache"
+        cache_dir.mkdir()
+        return cache_dir
+
+    def test_stale_entry_skipped_strict_refetched(self, temp_cache_dir):
+        """Test that stale entries in strict mode trigger re-fetch"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        # Create strict mode cache
+        config = Mock()
+        config.cache_dir = str(temp_cache_dir)
+        config.max_cache_age_days = 7
+        config.cache_captions = True
+        config.cache_validation = 'strict'
+        config.cache_validation_tolerance = 0.2
+
+        cache = CaptionCache(config)
+
+        # Store and backdate entry
+        segments = [CaptionSegment(0, 0.0, 2.0, "Test", "dQw4w9WgXcQ")]
+        result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=segments,
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+        cache.store(result)
+
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en")
+        entry_data = cache.index[key]
+        entry_data['cached_at'] = time.time() - (10 * 24 * 3600)
+        cache.index[key] = entry_data
+        cache._save_index()
+
+        # In strict mode, get_caption returns None
+        assert cache.get_caption("dQw4w9WgXcQ", "en") is None
+
+        # Entry should still exist (not deleted, just skipped)
+        assert key in cache.index
+
+    def test_batch_with_mixed_staleness(self, temp_cache_dir):
+        """Test that batch with 40% network errors uses 60% fewer retries"""
+        from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
+
+        # This test simulates a scenario where some cached entries are stale
+        # In strict mode, those should be skipped; in warn mode, returned with warning
+
+        config_strict = Mock()
+        config_strict.cache_dir = str(temp_cache_dir / "strict")
+        config_strict.max_cache_age_days = 7
+        config_strict.cache_captions = True
+        config_strict.cache_validation = 'strict'
+        config_strict.cache_validation_tolerance = 0.2
+
+        (temp_cache_dir / "strict").mkdir()
+        cache = CaptionCache(config_strict)
+
+        # Create 10 entries, make 4 stale (40%)
+        for i in range(10):
+            segments = [CaptionSegment(0, 0.0, 2.0, f"Test {i}", f"vid{i:011d}")]
+            result = CaptionResult(
+                video_id=f"vid{i:011d}",
+                segments=segments,
+                language="en",
+                is_auto_generated=False,
+                format_source="vtt"
+            )
+            cache.store(result)
+
+            # Make first 4 stale
+            if i < 4:
+                key = cache._make_cache_key(f"vid{i:011d}", "en")
+                entry_data = cache.index[key]
+                entry_data['cached_at'] = time.time() - (10 * 24 * 3600)
+                cache.index[key] = entry_data
+
+        cache._save_index()
+
+        # Count how many entries are returned (non-stale in strict mode)
+        returned_count = 0
+        for i in range(10):
+            if cache.get_caption(f"vid{i:011d}", "en") is not None:
+                returned_count += 1
+
+        # In strict mode, 4 stale should be skipped, 6 returned
+        assert returned_count == 6

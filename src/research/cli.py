@@ -65,7 +65,7 @@ Environment variables:
 """
     )
 
-    parser.add_argument("query", help="Research query or topic")
+    parser.add_argument("query", nargs="?", help="Research query or topic")
     parser.add_argument(
         "--backend", "-b",
         choices=["perplexity", "gemini", "grok", "auto"],
@@ -130,6 +130,11 @@ Environment variables:
     if not available:
         print("Error: No API keys configured.")
         print("Set one of: PERPLEXITY_API_KEY, GEMINI_API_KEY, XAI_API_KEY")
+        return 1
+
+    # Query is required for research
+    if not args.query:
+        parser.error("query is required (use --list-backends to see available backends)")
         return 1
 
     # Select backend

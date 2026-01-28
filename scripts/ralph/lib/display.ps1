@@ -2,6 +2,13 @@
 # Display and UI: banners, reasoning output, user input prompts, choice logging
 
 function Write-RalphBanner {
+    param(
+        [switch]$Queue,
+        [switch]$TrueAuto,
+        [switch]$RalphsChoice,
+        [switch]$RalphsChoiceAuto
+    )
+
     Write-Host ""
     Write-Host "=====================================================" -ForegroundColor Cyan
     Write-Host "   'Me fail English? That's unpossible!' - Ralph" -ForegroundColor Yellow
@@ -81,12 +88,14 @@ function Show-RalphsReasoning {
     # Git Activity summary
     Write-Host "  Git Activity (last $windowDays days):" -ForegroundColor Yellow
     $topActivity = $activityByArea.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 5
+    $anyPrinted = $false
     foreach ($entry in $topActivity) {
         if ($entry.Value -gt 0) {
             Write-Host "    * $($entry.Key.PadRight(20)) $($entry.Value) commits" -ForegroundColor White
+            $anyPrinted = $true
         }
     }
-    if (-not $topActivity -or ($topActivity | Measure-Object).Count -eq 0) {
+    if (-not $anyPrinted) {
         Write-Host "    (no recent activity)" -ForegroundColor DarkGray
     }
     Write-Host ""
@@ -106,8 +115,8 @@ function Show-RalphsReasoning {
 
             # Find last sprint time
             $lastTime = "never"
-            $areaSprints = $sprintHistory.sprints | Where-Object { $_.focusArea -eq $areaId } | Sort-Object completedAt -Descending
-            if ($areaSprints -and $areaSprints.Count -gt 0) {
+            $areaSprints = @($sprintHistory.sprints | Where-Object { $_.focusArea -eq $areaId } | Sort-Object completedAt -Descending)
+            if ($areaSprints.Count -gt 0) {
                 $lastSprint = $areaSprints | Select-Object -First 1
                 if ($lastSprint.completedAt) {
                     $hoursAgo = [math]::Round(((Get-Date) - [datetime]$lastSprint.completedAt).TotalHours, 0)
@@ -148,12 +157,16 @@ function Show-RalphsReasoning {
     Write-Host "  Scores:" -ForegroundColor Yellow
     $displayScores = if ($ShowAllScores) { $Scores } else { $Scores | Select-Object -First 5 }
     foreach ($score in $displayScores) {
-        $dots = "." * (25 - $score.areaId.Length)
+        $dots = "." * [Math]::Max(1, 25 - $score.areaId.Length)
         Write-Host "    $($score.areaId) $dots $($score.total)" -ForegroundColor White
     }
     Write-Host ""
 
     # Recommendation
+    if (-not $Scores -or $Scores.Count -eq 0) {
+        Write-Host "  No scores available" -ForegroundColor Yellow
+        return
+    }
     $topScore = $Scores[0]
     Write-Host "  > Ralph recommends: " -ForegroundColor Cyan -NoNewline
     Write-Host $topScore.areaId -ForegroundColor Green
@@ -291,5 +304,14 @@ function Write-RalphsChoiceLog {
     $topScores = ($Scores | Select-Object -First 3 | ForEach-Object { "$($_.areaId):$($_.total)" }) -join ", "
 
     $logLine = "[$timestamp] Decision: $Decision | Reason: $Reason | TopScores: $topScores"
-    Add-Content -Path $logPath -Value $logLine
+    try {
+        Add-Content -Path $logPath -Value $logLine -Encoding UTF8
+    } catch {
+        Start-Sleep -Milliseconds 200
+        try {
+            Add-Content -Path $logPath -Value $logLine -Encoding UTF8
+        } catch {
+            Write-Host "  Warning: Failed to write choice log: $_" -ForegroundColor Yellow
+        }
+    }
 }

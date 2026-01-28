@@ -395,6 +395,11 @@ class HealingOrchestrator:
         if not watcher_config or not getattr(watcher_config, 'enabled', True):
             return issues
 
+        # Only check Ollama if the watcher provider is ollama
+        provider = getattr(watcher_config, 'provider', 'ollama')
+        if provider != 'ollama':
+            return issues
+
         # Get Ollama settings
         host = getattr(watcher_config, 'host', 'http://localhost:11434')
         model = getattr(watcher_config, 'model', 'llama3.2')

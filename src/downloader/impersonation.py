@@ -107,10 +107,12 @@ class ImpersonationManager:
         """
         try:
             result = subprocess.run(
-                ['yt-dlp', '--list-impersonate-targets'],
+                ['yt-dlp', '--ignore-config', '--list-impersonate-targets'],
                 capture_output=True,
                 text=True,
                 timeout=self._detection_timeout,
+                encoding='utf-8',
+                errors='replace',
             )
 
             if result.returncode != 0:

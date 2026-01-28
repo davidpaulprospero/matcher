@@ -103,6 +103,7 @@ class TitleFilter:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             f'ytsearch{max_results}:{keyword}',
             '--dump-json',  # Get metadata only, no download
             '--flat-playlist',  # Faster - don't extract full info

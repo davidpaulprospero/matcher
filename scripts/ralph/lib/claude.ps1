@@ -82,6 +82,7 @@ function Invoke-ClaudeSubprocess {
 
     try {
         $process.Start() | Out-Null
+        $processId = $process.Id  # Cache before Dispose() in finally block
         $process.BeginOutputReadLine()
         $process.BeginErrorReadLine()
 
@@ -151,14 +152,28 @@ function Invoke-ClaudeSubprocess {
         Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
         Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 100
-        $outBuilder.ToString() | Set-Content $OutFile -ErrorAction SilentlyContinue
-        $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction SilentlyContinue
+        try {
+            $outBuilder.ToString() | Set-Content $OutFile -ErrorAction Stop
+        } catch {
+            Write-Host "  Warning: Failed to write Claude output to $OutFile : $_" -ForegroundColor Yellow
+        }
+        try {
+            $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction Stop
+        } catch {
+            Write-Host "  Warning: Failed to write Claude stderr to $ErrFile : $_" -ForegroundColor Yellow
+        }
+        # Ensure process is terminated on any exit path (timeout, Ctrl+C, error)
+        if ($process -and -not $process.HasExited) {
+            Write-Host "  Terminating Claude process..." -ForegroundColor Yellow
+            try { $process.Kill(); $process.WaitForExit(5000) } catch {}
+        }
+        if ($process) { $process.Dispose() }
     }
 
     $timedOut = -not $exited
     if ($timedOut) {
         Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
-        $process.Kill()
+        # Process already killed in finally block
     }
 
     return @{
@@ -170,7 +185,7 @@ function Invoke-ClaudeSubprocess {
         ExecutionEnd   = $executionEnd
         TimedOut       = $timedOut
         Timeout        = $timeout
-        ProcessId      = $process.Id
+        ProcessId      = $processId
     }
 }
 

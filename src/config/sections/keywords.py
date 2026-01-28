@@ -35,6 +35,7 @@ class KeywordConfig:
     # Extraction settings
     max_keywords: int = 30
     min_keyword_length: int = 3
+    max_keyword_words: int = 8  # Max words per keyword (filters "too long" phrases)
 
     # List detection
     list_detection: ListDetectionConfig = None

@@ -228,6 +228,12 @@ class FallbackChain:
             self._set_watcher_unavailable("Watcher disabled in config")
             return False
 
+        # Only check Ollama if the watcher provider is ollama
+        provider = getattr(watcher_config, 'provider', 'ollama')
+        if provider != 'ollama':
+            self._set_watcher_unavailable(f"Watcher uses {provider}, not Ollama")
+            return False
+
         host = getattr(watcher_config, 'host', 'http://localhost:11434')
         model = getattr(watcher_config, 'model', 'llama3.2')
         fallback_model = getattr(watcher_config, 'fallback_model', 'llama3.1')

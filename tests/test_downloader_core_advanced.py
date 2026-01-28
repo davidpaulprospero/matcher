@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.core import VideoDownloader
 from src.downloader.checkpoint import DownloadCheckpoint
+from src.downloader.title_filter import SearchResult
 from src.state import DownloadedVideo
 from src.config import Config
 
@@ -71,7 +72,7 @@ def downloader(mock_config):
 
         # Mock delegation methods to avoid real API calls
         downloader._get_tier_value = Mock(return_value=5)
-        downloader._search_video_metadata = Mock(return_value=[])
+        downloader._search_video_metadata = Mock(return_value=SearchResult(videos=[]))
         downloader._filter_titles_with_llm = Mock(return_value=[])
         downloader._screen_approved_videos = Mock(return_value=[])
         downloader._get_remix_keyword = Mock(return_value=None)
@@ -408,7 +409,7 @@ class TestDownloadSingle:
             {'id': 'vid1', 'title': 'Travel Video 1'},
             {'id': 'vid2', 'title': 'Travel Video 2'}
         ]
-        downloader._search_video_metadata = Mock(return_value=mock_videos)
+        downloader._search_video_metadata = Mock(return_value=SearchResult(videos=mock_videos))
         downloader._filter_titles_with_llm = Mock(return_value=mock_videos[:1])
         downloader._download_by_ids = Mock(return_value=[
             DownloadedVideo(file="test.mp4", url="url", title="Test", duration_tier="short", keyword="travel")
@@ -435,7 +436,7 @@ class TestDownloadSingle:
         """Test handles no search results gracefully"""
         downloader.download_config.llm_title_filter = Mock()
         downloader.download_config.llm_title_filter.enabled = True
-        downloader._search_video_metadata = Mock(return_value=[])
+        downloader._search_video_metadata = Mock(return_value=SearchResult(videos=[]))
 
         output_dir = temp_dir / "videos"
 
@@ -455,7 +456,7 @@ class TestDownloadSingle:
             {'id': 'vid2', 'title': 'Food Mukbang'},
             {'id': 'vid3', 'title': 'Product Review'}
         ]
-        downloader._search_video_metadata = Mock(return_value=mock_videos)
+        downloader._search_video_metadata = Mock(return_value=SearchResult(videos=mock_videos))
         downloader._filter_titles_with_llm = Mock(return_value=[mock_videos[0]])
         downloader._download_by_ids = Mock(return_value=[])
 
@@ -480,7 +481,7 @@ class TestDownloadSingle:
             {'id': 'vid1', 'title': 'Silent Video'},
             {'id': 'vid2', 'title': 'Speech Video'}
         ]
-        downloader._search_video_metadata = Mock(return_value=mock_videos)
+        downloader._search_video_metadata = Mock(return_value=SearchResult(videos=mock_videos))
         downloader._filter_titles_with_llm = Mock(return_value=mock_videos)
         downloader._screen_approved_videos = Mock(return_value=[mock_videos[0]])  # Only vid1 passes
         downloader._download_by_ids = Mock(return_value=[])
@@ -680,7 +681,11 @@ class TestRunDownloadCmd:
         pass
 
     def test_run_download_cmd_tier_specific_timeout(self, downloader, temp_dir):
-        """Test uses tier-specific timeout configuration"""
+        """Test uses tier-specific timeout configuration.
+
+        When stall_timeout is configured (e.g. 60s), it takes precedence over the tier timeout.
+        The tier timeout (300s for 'long') is used as the base for max_timeout (300 * 1.5 = 450).
+        """
         downloader.download_config.download_timeouts = {
             'short': 60,
             'medium': 120,
@@ -694,22 +699,27 @@ class TestRunDownloadCmd:
         cmd = ['yt-dlp', 'ytsearch1:travel']
         existing_before = set()
 
-        communicate_called_with = []
-
-        def mock_communicate(timeout=None):
-            communicate_called_with.append(timeout)
-            return ('', '')
-
         with patch('subprocess.Popen') as mock_popen:
             mock_process = Mock()
-            mock_process.communicate = mock_communicate
             mock_process.poll.return_value = 0
             mock_popen.return_value = mock_process
 
-            downloader._run_download_cmd(cmd, keyword_dir, output_dir, "travel", "long", existing_before)
+            # Mock progress-aware timeout to capture stall_timeout and max_timeout args
+            with patch.object(downloader, '_wait_for_process_with_progress',
+                              return_value=("", "", None)) as mock_wait:
+                downloader._run_download_cmd(cmd, keyword_dir, output_dir, "travel", "long", existing_before)
 
-            # Should use 300s timeout for 'long' tier
-            assert communicate_called_with[0] == 300
+                call_args = mock_wait.call_args
+                stall_timeout = call_args[0][1]  # second positional arg
+                max_timeout = call_args[0][2]    # third positional arg
+                # stall_timeout uses configured value (60s), not tier timeout
+                configured_stall = getattr(downloader.download_config, 'stall_timeout', 0)
+                if configured_stall > 0:
+                    assert stall_timeout == configured_stall
+                else:
+                    assert stall_timeout == 300  # falls back to tier timeout
+                # max_timeout is 1.5x the tier timeout
+                assert max_timeout == 450
 
     def test_run_download_cmd_cleanup_partial_files(self, downloader, temp_dir):
         """Test cleans up .part files before download"""

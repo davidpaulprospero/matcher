@@ -47,6 +47,7 @@ def create_mock_config(tmp_path, rate_limit_config=None, **overrides):
     mock_config.download.rate_limit = rate_limit_config or MockRateLimitConfig()
     mock_config.download.cookie_rotation = None
     mock_config.download.vpn = None
+    mock_config.download.rate_limit_budget = None
     mock_config.llm = MagicMock()
     mock_config.llm.provider = 'gemini'
     mock_config.llm.model = 'gemini-pro'

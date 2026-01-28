@@ -78,6 +78,7 @@ function Start-InterviewQueueLoop {
             if ($status.complete) {
                 Write-Host "  Sprint complete for $areaId!" -ForegroundColor Green
                 $sprintComplete = $true
+                Save-SprintArchive -Reason "complete"
                 Update-QueueProgress -AreaId $areaId
                 $completedAreas += $area
 
@@ -101,7 +102,11 @@ function Start-InterviewQueueLoop {
 
                 # After first story (US-001 generates full PRD), update context
                 if (-not $contextRefreshed) {
-                    Update-ContextFromPRD
+                    try {
+                        Update-ContextFromPRD
+                    } catch {
+                        Write-Host "  Warning: Failed to update context from PRD: $_" -ForegroundColor Yellow
+                    }
                     $contextRefreshed = $true
                 }
             }
@@ -176,7 +181,10 @@ function Start-TrueAutoLoop {
     <#
     .SYNOPSIS
         Continuous improvement mode - work through stories until max iterations
+    .PARAMETER FocusArea
+        Optional focus area to use instead of Ralph's Choice scoring
     #>
+    param([string]$FocusArea = "")
 
     $script:State.CurrentMode = "TrueAuto"
     Write-Host "  TrueAuto mode: Continuous improvement" -ForegroundColor Magenta
@@ -204,26 +212,41 @@ function Start-TrueAutoLoop {
 
             Write-Host "  TrueAuto will generate new stories..." -ForegroundColor Magenta
 
-            # Use -FocusArea parameter if provided, otherwise use Ralph's Choice scoring
-            if ($FocusArea) {
-                $focusTarget = $FocusArea
-                Write-Host "  Focus: $focusTarget (from parameter)" -ForegroundColor Yellow
-            } else {
-                # Use Ralph's Choice scoring to pick the best area
-                $scores = Get-AllFocusAreaScores
-                $topArea = $scores[0]
-                $focusTarget = $topArea.areaId
-                Write-Host "  Focus: $focusTarget (Ralph's Choice score: $($topArea.total))" -ForegroundColor Yellow
+            # Score, select focus area, and generate new sprint PRD
+            # Wrapped in try-catch to prevent silent crash (see session 2026-01-27_231506)
+            try {
+                # Use -FocusArea parameter if provided, otherwise use Ralph's Choice scoring
+                if ($FocusArea) {
+                    $focusTarget = $FocusArea
+                    Write-Host "  Focus: $focusTarget (from parameter)" -ForegroundColor Yellow
+                } else {
+                    # Use Ralph's Choice scoring to pick the best area
+                    $scores = Get-AllFocusAreaScores
+                    if (-not $scores -or $scores.Count -eq 0) {
+                        Write-Host "  Error: No focus area scores returned - cannot select next area" -ForegroundColor Red
+                        break
+                    }
+                    $topArea = $scores[0]
+                    $focusTarget = $topArea.areaId
+                    Write-Host "  Focus: $focusTarget (Ralph's Choice score: $($topArea.total))" -ForegroundColor Yellow
+                }
+
+                # Generate new PRD using Invoke-ClaudeForFocusArea (archive happens in New-SeedPRD)
+                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $focusTarget -Context "" -GeneratePRD
+
+                # Pre-flight: check new PRD for already-committed stories
+                Invoke-BatchPreFlight | Out-Null
+
+                Start-Sleep -Seconds 2
+                continue
             }
-
-            # Generate new PRD using Invoke-ClaudeForFocusArea (archive happens in New-SeedPRD)
-            $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $focusTarget -Context "" -GeneratePRD
-
-            # Pre-flight: check new PRD for already-committed stories
-            Invoke-BatchPreFlight | Out-Null
-
-            Start-Sleep -Seconds 2
-            continue
+            catch {
+                Write-Host ""
+                Write-Host "  ERROR: Failed to start next sprint: $_" -ForegroundColor Red
+                Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                Write-Host ""
+                break
+            }
         }
 
         if ($status.nextStory) {
@@ -263,29 +286,23 @@ function Start-StandardLoop {
     # Check if we need to generate a new PRD for the queued focus area
     # Read queue directly (inline) for reliability - Get-NextQueuedFocusArea has been unreliable
     $queuedArea = $null
-    if (Test-Path $script:QueueFile) {
-        try {
-            $inlineQueue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
-            if ($inlineQueue.focusAreas) {
-                $inlineIncomplete = @($inlineQueue.focusAreas | Where-Object { -not $_.completed })
-                Write-Host "  Queue: $($inlineQueue.focusAreas.Count) areas, $($inlineIncomplete.Count) incomplete" -ForegroundColor DarkGray
-                if ($inlineIncomplete.Count -gt 0) {
-                    $queuedArea = $inlineIncomplete[0].id
-                }
+    $inlineQueue = Get-Queue
+    if ($inlineQueue) {
+        if ($inlineQueue.focusAreas) {
+            $inlineIncomplete = @($inlineQueue.focusAreas | Where-Object { -not $_.completed })
+            Write-Host "  Queue: $($inlineQueue.focusAreas.Count) areas, $($inlineIncomplete.Count) incomplete" -ForegroundColor DarkGray
+            if ($inlineIncomplete.Count -gt 0) {
+                $queuedArea = $inlineIncomplete[0].id
             }
-        } catch {
-            Write-Host "  Queue parse error: $_" -ForegroundColor Red
         }
     }
     Write-Host "  Queue next area: '$queuedArea'" -ForegroundColor DarkGray
     if ($queuedArea) {
         # Check current PRD focus area
         $currentPrdFocus = ""
-        if (Test-Path $script:PrdFile) {
-            try {
-                $currentPrd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-                $currentPrdFocus = if ($currentPrd.focusArea) { $currentPrd.focusArea } else { "" }
-            } catch {}
+        $currentPrd = Get-Sprint
+        if ($currentPrd) {
+            $currentPrdFocus = if ($currentPrd.focusArea) { $currentPrd.focusArea } else { "" }
         }
         Write-Host "  Current PRD focus: '$currentPrdFocus', Queue next: '$queuedArea'" -ForegroundColor DarkGray
 
@@ -364,16 +381,12 @@ function Start-StandardLoop {
 
             # Check for pending queue items (inline for reliability)
             $nextArea = $null
-            if (Test-Path $script:QueueFile) {
-                try {
-                    $loopQueue = Get-Content $script:QueueFile -Raw | ConvertFrom-Json
-                    if ($loopQueue.focusAreas) {
-                        $loopIncomplete = @($loopQueue.focusAreas | Where-Object { -not $_.completed })
-                        if ($loopIncomplete.Count -gt 0) {
-                            $nextArea = $loopIncomplete[0].id
-                        }
-                    }
-                } catch {}
+            $loopQueue = Get-Queue
+            if ($loopQueue -and $loopQueue.focusAreas) {
+                $loopIncomplete = @($loopQueue.focusAreas | Where-Object { -not $_.completed })
+                if ($loopIncomplete.Count -gt 0) {
+                    $nextArea = $loopIncomplete[0].id
+                }
             }
             Write-Host "  Next queued area: '$nextArea'" -ForegroundColor DarkGray
             if ($nextArea) {
@@ -405,10 +418,7 @@ function Start-StandardLoop {
                 }
             }
             else {
-                # Update interview progress (queue already marked above)
-                if ($status.focusArea) {
-                    Update-QueueProgress -AreaId $status.focusArea
-                }
+                # Queue area already marked complete at line 371 above
                 Write-Host "  Queue complete! All focus areas done." -ForegroundColor Green
                 break
             }
@@ -464,6 +474,11 @@ function Start-RalphsChoiceLoop {
                 # Archive the completed sprint
                 Save-SprintArchive -Reason "complete"
 
+                # Update queue if completed area is tracked
+                if ($status.focusArea) {
+                    Update-QueueProgress -AreaId $status.focusArea -Silent
+                }
+
                 # Check for graceful stop
                 if (Test-GracefulStopRequested) {
                     Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
@@ -471,44 +486,69 @@ function Start-RalphsChoiceLoop {
                     break
                 }
 
-                # Get stay/switch decision
-                $decision = Get-StayOrSwitchDecision -CurrentArea $status.focusArea
-                $scores = $decision.scores
+                # Score, select next area, and generate new sprint PRD
+                # Wrapped in try-catch to prevent silent crash (see session 2026-01-27_231506)
+                try {
+                    # Get stay/switch decision
+                    $decision = Get-StayOrSwitchDecision -CurrentArea $status.focusArea
+                    $scores = $decision.scores
 
-                # Show reasoning with stay/switch context
-                Show-RalphsReasoning -Scores (Get-AllFocusAreaScores) -Decision $decision
+                    # Show reasoning with stay/switch context
+                    Show-RalphsReasoning -Scores (Get-AllFocusAreaScores) -Decision $decision
 
-                # Get user input
-                $userChoice = Get-RalphsChoiceUserInput -Scores $scores -IsStaySwitch -CurrentArea $status.focusArea
-
-                while ($userChoice.action -eq "showAll") {
-                    Show-RalphsReasoning -Scores (Get-AllFocusAreaScores) -Decision $decision -ShowAllScores
+                    # Get user input
                     $userChoice = Get-RalphsChoiceUserInput -Scores $scores -IsStaySwitch -CurrentArea $status.focusArea
-                }
 
-                $selectedArea = if ($userChoice.action -eq "stay") {
-                    $status.focusArea
-                } elseif ($userChoice.action -eq "manual") {
-                    $userChoice.selectedArea
-                } else {
-                    $decision.newArea
+                    while ($userChoice.action -eq "showAll") {
+                        Show-RalphsReasoning -Scores (Get-AllFocusAreaScores) -Decision $decision -ShowAllScores
+                        $userChoice = Get-RalphsChoiceUserInput -Scores $scores -IsStaySwitch -CurrentArea $status.focusArea
+                    }
+
+                    $selectedArea = if ($userChoice.action -eq "stay") {
+                        $status.focusArea
+                    } elseif ($userChoice.action -eq "manual") {
+                        $userChoice.selectedArea
+                    } else {
+                        $decision.newArea
+                    }
+                }
+                catch {
+                    Write-Host ""
+                    Write-Host "  ERROR: Failed to start next sprint: $_" -ForegroundColor Red
+                    Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                    Write-Host ""
+                    break
                 }
             } else {
                 # First sprint - just pick
-                $scores = Get-AllFocusAreaScores
-                Show-RalphsReasoning -Scores $scores
+                # Wrapped in try-catch to prevent silent crash (see session 2026-01-27_231506)
+                try {
+                    $scores = Get-AllFocusAreaScores
+                    if (-not $scores -or $scores.Count -eq 0) {
+                        Write-Host "  Error: No focus area scores returned" -ForegroundColor Red
+                        break
+                    }
+                    Show-RalphsReasoning -Scores $scores
 
-                $userChoice = Get-RalphsChoiceUserInput -Scores $scores
-
-                while ($userChoice.action -eq "showAll") {
-                    Show-RalphsReasoning -Scores $scores -ShowAllScores
                     $userChoice = Get-RalphsChoiceUserInput -Scores $scores
-                }
 
-                $selectedArea = if ($userChoice.action -eq "manual") {
-                    $userChoice.selectedArea
-                } else {
-                    $scores[0].areaId
+                    while ($userChoice.action -eq "showAll") {
+                        Show-RalphsReasoning -Scores $scores -ShowAllScores
+                        $userChoice = Get-RalphsChoiceUserInput -Scores $scores
+                    }
+
+                    $selectedArea = if ($userChoice.action -eq "manual") {
+                        $userChoice.selectedArea
+                    } else {
+                        $scores[0].areaId
+                    }
+                }
+                catch {
+                    Write-Host ""
+                    Write-Host "  ERROR: Failed to start next sprint: $_" -ForegroundColor Red
+                    Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                    Write-Host ""
+                    break
                 }
             }
 
@@ -517,20 +557,29 @@ function Start-RalphsChoiceLoop {
             Write-Host ""
 
             # Generate PRD for selected area
-            $context = Get-InterviewContext
-            $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
+            try {
+                $context = Get-InterviewContext
+                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
 
-            if (-not $prdGenerated) {
-                Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
+                if (-not $prdGenerated) {
+                    Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
+                    break
+                }
+
+                # Pre-flight: check new PRD for already-committed stories
+                Invoke-BatchPreFlight | Out-Null
+
+                $sprintCount++
+                Start-Sleep -Seconds 2
+                continue
+            }
+            catch {
+                Write-Host ""
+                Write-Host "  ERROR: Failed to generate PRD: $_" -ForegroundColor Red
+                Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                Write-Host ""
                 break
             }
-
-            # Pre-flight: check new PRD for already-committed stories
-            Invoke-BatchPreFlight | Out-Null
-
-            $sprintCount++
-            Start-Sleep -Seconds 2
-            continue
         }
 
         # Work on current story
@@ -587,6 +636,11 @@ function Start-RalphsChoiceAutoLoop {
                 # Archive the completed sprint
                 Save-SprintArchive -Reason "complete"
 
+                # Update queue if completed area is tracked
+                if ($status.focusArea) {
+                    Update-QueueProgress -AreaId $status.focusArea -Silent
+                }
+
                 # Check for graceful stop
                 if (Test-GracefulStopRequested) {
                     Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
@@ -595,106 +649,122 @@ function Start-RalphsChoiceAutoLoop {
                 }
             }
 
-            # Get decision
-            $scores = Get-AllFocusAreaScores
-            $selectedArea = $scores[0].areaId
-            $reason = "Highest score"
-
-            if ($sprintCount -gt 0 -and $status.focusArea) {
-                $decision = Get-StayOrSwitchDecision -CurrentArea $status.focusArea
-                if ($decision.decision -eq "stay") {
-                    $selectedArea = $decision.currentArea
-                    $reason = "Staying: " + ($decision.stayReasons -join ", ")
-                } else {
-                    $selectedArea = $decision.newArea
-                    $reason = "Switching: " + ($decision.switchReasons -join ", ")
-                }
-            }
-
-            # Log the decision
-            Write-RalphsChoiceLog -Decision $selectedArea -Reason $reason -Scores $scores
-
-            # Show brief status
-            Write-Host ""
-            Write-Host "  -----------------------------------------------------" -ForegroundColor Magenta
-            Write-Host "  Ralph's Choice Auto" -ForegroundColor Magenta
-            Write-Host "  -----------------------------------------------------" -ForegroundColor Magenta
-            Write-Host ""
-            Write-Host "  Decision: " -ForegroundColor Cyan -NoNewline
-            Write-Host $selectedArea -ForegroundColor Green
-            Write-Host "  Reason: $reason" -ForegroundColor DarkGray
-            Write-Host ""
-
-            # Countdown with interrupt option
-            Write-Host "  Continuing in ${continueDelay}s... [Press any key to pause]" -ForegroundColor Yellow
-
-            $interrupted = $false
-            for ($i = $continueDelay; $i -gt 0; $i--) {
-                if ([Console]::KeyAvailable) {
-                    [Console]::ReadKey($true) | Out-Null
-                    $interrupted = $true
+            # Score, select next area, and generate new sprint PRD
+            # Wrapped in try-catch: session 2026-01-27_231506 crashed silently here
+            # after Save-SprintArchive (no session_end event, no error output)
+            try {
+                $scores = Get-AllFocusAreaScores
+                if (-not $scores -or $scores.Count -eq 0) {
+                    Write-Host "  Error: No focus area scores returned - cannot select next area" -ForegroundColor Red
                     break
                 }
-                Write-Host "`r  Continuing in ${i}s... [Press any key to pause]  " -ForegroundColor Yellow -NoNewline
-                Start-Sleep -Seconds 1
-            }
-            Write-Host ""
+                $selectedArea = $scores[0].areaId
+                $reason = "Highest score"
 
-            if ($interrupted) {
+                if ($sprintCount -gt 0 -and $status.focusArea) {
+                    $decision = Get-StayOrSwitchDecision -CurrentArea $status.focusArea
+                    if ($decision.decision -eq "stay") {
+                        $selectedArea = $decision.currentArea
+                        $reason = "Staying: " + ($decision.stayReasons -join ", ")
+                    } else {
+                        $selectedArea = $decision.newArea
+                        $reason = "Switching: " + ($decision.switchReasons -join ", ")
+                    }
+                }
+
+                # Log the decision
+                Write-RalphsChoiceLog -Decision $selectedArea -Reason $reason -Scores $scores
+
+                # Show brief status
                 Write-Host ""
-                Write-Host "  Paused! Options:" -ForegroundColor Cyan
-                Write-Host "    [C] Continue with $selectedArea" -ForegroundColor White
-                Write-Host "    [M] Manual override" -ForegroundColor White
-                Write-Host "    [S] Show full analysis" -ForegroundColor White
-                Write-Host "    [Q] Quit" -ForegroundColor White
+                Write-Host "  -----------------------------------------------------" -ForegroundColor Magenta
+                Write-Host "  Ralph's Choice Auto" -ForegroundColor Magenta
+                Write-Host "  -----------------------------------------------------" -ForegroundColor Magenta
+                Write-Host ""
+                Write-Host "  Decision: " -ForegroundColor Cyan -NoNewline
+                Write-Host $selectedArea -ForegroundColor Green
+                Write-Host "  Reason: $reason" -ForegroundColor DarkGray
                 Write-Host ""
 
-                $pauseChoice = Read-Host "  Choice"
+                # Countdown with interrupt option
+                Write-Host "  Continuing in ${continueDelay}s... [Press any key to pause]" -ForegroundColor Yellow
 
-                switch -Regex ($pauseChoice) {
-                    "^[Qq]$" {
-                        Write-Host "  Exiting Ralph's Choice Auto" -ForegroundColor Yellow
+                $interrupted = $false
+                for ($i = $continueDelay; $i -gt 0; $i--) {
+                    if ([Console]::KeyAvailable) {
+                        [Console]::ReadKey($true) | Out-Null
+                        $interrupted = $true
                         break
                     }
-                    "^[Mm]$" {
-                        Write-Host "  Enter focus area ID:" -ForegroundColor Cyan
-                        $selectedArea = Read-Host "  "
-                    }
-                    "^[Ss]$" {
-                        Show-RalphsReasoning -Scores $scores -ShowAllScores
-                        Write-Host "  Press Enter to continue with $selectedArea, or type new area:" -ForegroundColor Yellow
-                        $override = Read-Host "  "
-                        if ($override -and $override.Trim() -ne "") {
-                            $selectedArea = $override.Trim()
+                    Write-Host "`r  Continuing in ${i}s... [Press any key to pause]  " -ForegroundColor Yellow -NoNewline
+                    Start-Sleep -Seconds 1
+                }
+                Write-Host ""
+
+                if ($interrupted) {
+                    Write-Host ""
+                    Write-Host "  Paused! Options:" -ForegroundColor Cyan
+                    Write-Host "    [C] Continue with $selectedArea" -ForegroundColor White
+                    Write-Host "    [M] Manual override" -ForegroundColor White
+                    Write-Host "    [S] Show full analysis" -ForegroundColor White
+                    Write-Host "    [Q] Quit" -ForegroundColor White
+                    Write-Host ""
+
+                    $pauseChoice = Read-Host "  Choice"
+
+                    $quitRequested = $false
+                    switch -Regex ($pauseChoice) {
+                        "^[Qq]$" {
+                            Write-Host "  Exiting Ralph's Choice Auto" -ForegroundColor Yellow
+                            $quitRequested = $true
                         }
+                        "^[Mm]$" {
+                            Write-Host "  Enter focus area ID:" -ForegroundColor Cyan
+                            $selectedArea = Read-Host "  "
+                        }
+                        "^[Ss]$" {
+                            Show-RalphsReasoning -Scores $scores -ShowAllScores
+                            Write-Host "  Press Enter to continue with $selectedArea, or type new area:" -ForegroundColor Yellow
+                            $override = Read-Host "  "
+                            if ($override -and $override.Trim() -ne "") {
+                                $selectedArea = $override.Trim()
+                            }
+                        }
+                        # Default: continue with selected area
                     }
-                    # Default: continue with selected area
+
+                    if ($quitRequested) {
+                        break
+                    }
                 }
 
-                if ($pauseChoice -match "^[Qq]$") {
+                Write-Host ""
+                Write-Host "  Starting sprint for: $selectedArea" -ForegroundColor Green
+                Write-Host ""
+
+                # Generate PRD for selected area
+                $context = Get-InterviewContext
+                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
+
+                if (-not $prdGenerated) {
+                    Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
                     break
                 }
+
+                # Pre-flight: check new PRD for already-committed stories
+                Invoke-BatchPreFlight | Out-Null
+
+                $sprintCount++
+                Start-Sleep -Seconds 2
+                continue
             }
-
-            Write-Host ""
-            Write-Host "  Starting sprint for: $selectedArea" -ForegroundColor Green
-            Write-Host ""
-
-            # Generate PRD for selected area
-            $context = Get-InterviewContext
-            $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
-
-            if (-not $prdGenerated) {
-                Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
+            catch {
+                Write-Host ""
+                Write-Host "  ERROR: Failed to start next sprint: $_" -ForegroundColor Red
+                Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                Write-Host ""
                 break
             }
-
-            # Pre-flight: check new PRD for already-committed stories
-            Invoke-BatchPreFlight | Out-Null
-
-            $sprintCount++
-            Start-Sleep -Seconds 2
-            continue
         }
 
         # Work on current story

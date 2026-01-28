@@ -332,13 +332,10 @@ function Log-IterationManifest {
     # Get PRD info
     $sprint = 0
     $prdBranch = ""
-    if (Test-Path $script:PrdFile) {
-        try {
-            $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-            $sprint = $prd.sprintNumber
-            $prdBranch = $prd.branchName
-        }
-        catch {}
+    $prd = Get-Sprint
+    if ($prd) {
+        $sprint = $prd.sprintNumber
+        $prdBranch = $prd.branchName
     }
 
     # Use git branch as source of truth, fall back to PRD branch
@@ -732,14 +729,8 @@ function Compare-HealthMetrics {
     if (-not $Current) { return $null }
 
     $healthFile = Join-Path $script:RalphDir "health_metrics.json"
-    if (-not (Test-Path $healthFile)) {
-        return @{ isBaseline = $true; trends = @() }
-    }
-
-    try {
-        $previous = Get-Content $healthFile -Raw | ConvertFrom-Json
-    }
-    catch {
+    $previous = Read-JsonFile -Path $healthFile
+    if (-not $previous) {
         return @{ isBaseline = $true; trends = @() }
     }
 
@@ -846,21 +837,16 @@ function Get-StoryProgress {
     }
 
     # Check saved progress
-    if (Test-Path $progressFile) {
-        try {
-            $saved = Get-Content $progressFile -Raw | ConvertFrom-Json
-            if ($saved.$StoryId) {
-                $storyData = $saved.$StoryId
-                if ($storyData.milestones) {
-                    if ($storyData.milestones.testsCreated) { $progress.milestones.testsCreated = $true }
-                    if ($storyData.milestones.implementationStarted) { $progress.milestones.implementationStarted = $true }
-                    if ($storyData.milestones.committed) { $progress.milestones.committed = $true }
-                    if ($storyData.milestones.reviewPassed) { $progress.milestones.reviewPassed = $true }
-                }
-                if ($storyData.lastCheckpoint) { $progress.lastCheckpoint = $storyData.lastCheckpoint }
-            }
+    $saved = Read-JsonFile -Path $progressFile
+    if ($saved -and $saved.$StoryId) {
+        $storyData = $saved.$StoryId
+        if ($storyData.milestones) {
+            if ($storyData.milestones.testsCreated) { $progress.milestones.testsCreated = $true }
+            if ($storyData.milestones.implementationStarted) { $progress.milestones.implementationStarted = $true }
+            if ($storyData.milestones.committed) { $progress.milestones.committed = $true }
+            if ($storyData.milestones.reviewPassed) { $progress.milestones.reviewPassed = $true }
         }
-        catch {}
+        if ($storyData.lastCheckpoint) { $progress.lastCheckpoint = $storyData.lastCheckpoint }
     }
 
     # Check git log for recent commits mentioning this story
@@ -898,15 +884,12 @@ function Save-StoryProgress {
     $progressFile = Join-Path $script:RalphDir "story_progress.json"
     $allProgress = @{}
 
-    if (Test-Path $progressFile) {
-        try {
-            $existing = Get-Content $progressFile -Raw | ConvertFrom-Json
-            # Convert PSCustomObject to hashtable
-            foreach ($prop in $existing.PSObject.Properties) {
-                $allProgress[$prop.Name] = $prop.Value
-            }
+    $existing = Read-JsonFile -Path $progressFile
+    if ($existing) {
+        # Convert PSCustomObject to hashtable
+        foreach ($prop in $existing.PSObject.Properties) {
+            $allProgress[$prop.Name] = $prop.Value
         }
-        catch {}
     }
 
     # Get or create story entry
@@ -964,10 +947,6 @@ function Log-StateTransition {
     $Context.from = $From; $Context.to = $To; $Context.reason = $Reason; $Context.iteration = $script:State.IterationCount
     Append-Jsonl -File (Join-Path $script:SessionLogDir "state_transitions.jsonl") -Data $Context
 }
-
-# ============================================================================
-# PHASE TIMING (Phase 2 - Task 2.1)
-# ============================================================================
 
 # ============================================================================
 # PHASE TIMING (Phase 2 - Task 2.1)
@@ -1031,10 +1010,6 @@ function Measure-PhaseTimings {
 # ERROR EVOLUTION (Phase 2 - Task 2.4)
 # ============================================================================
 
-# ============================================================================
-# ERROR EVOLUTION (Phase 2 - Task 2.4)
-# ============================================================================
-
 function Log-ErrorEvolution {
     <#
     .SYNOPSIS
@@ -1051,8 +1026,6 @@ function Log-ErrorEvolution {
 # ============================================================================
 
 # Task 3.1: Configuration Change Audit Trail
-
-# Task 3.1: Configuration Change Audit Trail
 function Log-ConfigChange {
     <#
     .SYNOPSIS
@@ -1063,8 +1036,6 @@ function Log-ConfigChange {
         field = $Field; old = $OldValue; new = $NewValue; reason = $Reason
     }
 }
-
-# Task 3.2: Test Failure Detail Logging
 
 # Task 3.2: Test Failure Detail Logging
 function Log-TestDetails {
@@ -1137,8 +1108,6 @@ function Log-TestDetails {
 }
 
 # Task 3.3: Resource Usage Monitoring
-
-# Task 3.3: Resource Usage Monitoring
 function Get-ProcessMetrics {
     <#
     .SYNOPSIS
@@ -1207,8 +1176,6 @@ function Log-ResourceUsage {
 
     Write-JsonNoBom -Path $resourceFile -Content ($usage | ConvertTo-Json -Depth 5)
 }
-
-# Task 3.4: Prompt Effectiveness Scoring
 
 # Task 3.4: Prompt Effectiveness Scoring
 function Get-PromptEffectiveness {
@@ -1327,8 +1294,12 @@ function Record-Metric {
                         # Coming from v2, add 3 new exploration columns
                         $lines[$i] = $lines[$i] + ",false,,0"
                     } else {
-                        # Coming from older version, pad with zeros
-                        $lines[$i] = $lines[$i] + (',' + '0' * $padding -replace '0', ',0').Substring(1)
+                        # Coming from older version, pad phase timing with 0s then exploration defaults
+                        $phasePadding = [math]::Max(0, 21 - $rowCols)
+                        if ($phasePadding -gt 0) {
+                            $lines[$i] = $lines[$i] + (',0' * $phasePadding)
+                        }
+                        $lines[$i] = $lines[$i] + ",false,,0"
                     }
                 }
             }
@@ -1341,13 +1312,10 @@ function Record-Metric {
     if (-not $Session) { $Session = $script:State.SessionId }
     if (-not $Mode) { $Mode = $script:State.CurrentMode }
     if (-not $FocusArea -or -not $Sprint) {
-        if (Test-Path $script:PrdFile) {
-            try {
-                $prd = Get-Content $script:PrdFile -Raw | ConvertFrom-Json
-                if (-not $FocusArea) { $FocusArea = $prd.focusArea }
-                if (-not $Sprint) { $Sprint = "sprint-$($prd.sprintNumber)" }
-            }
-            catch {}
+        $prd = Get-Sprint
+        if ($prd) {
+            if (-not $FocusArea) { $FocusArea = $prd.focusArea }
+            if (-not $Sprint) { $Sprint = "sprint-$($prd.sprintNumber)" }
         }
     }
 
@@ -1357,8 +1325,21 @@ function Record-Metric {
     }
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$ErrorCategory,$HourOfDay,$TestResults,$RetryCount,$LinesAdded,$LinesDeleted,$PhaseReadMs,$PhaseAnalyzeMs,$PhaseImplementMs,$PhaseTestMs,$PhaseCommitMs,$($ExplorationTriggered.ToString().ToLower()),$ExplorationReason,$ExplorationTokens"
-    Add-Content -Path $script:MetricsFile -Value $row
+    # Quote CSV fields that may contain commas to prevent corruption
+    $safeError = if ($ErrorCategory -match '[,"\r\n]') { "`"$(($ErrorCategory -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $ErrorCategory }
+    $safeResults = if ($TestResults -match '[,"\r\n]') { "`"$(($TestResults -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $TestResults }
+    $safeReason = if ($ExplorationReason -match '[,"\r\n]') { "`"$(($ExplorationReason -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $ExplorationReason }
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$safeError,$HourOfDay,$safeResults,$RetryCount,$LinesAdded,$LinesDeleted,$PhaseReadMs,$PhaseAnalyzeMs,$PhaseImplementMs,$PhaseTestMs,$PhaseCommitMs,$($ExplorationTriggered.ToString().ToLower()),$safeReason,$ExplorationTokens"
+    try {
+        Add-Content -Path $script:MetricsFile -Value $row -Encoding UTF8
+    } catch {
+        Start-Sleep -Milliseconds 200
+        try {
+            Add-Content -Path $script:MetricsFile -Value $row -Encoding UTF8
+        } catch {
+            Write-Host "  Warning: Failed to write metrics row: $_" -ForegroundColor Yellow
+        }
+    }
 }
 
 # ============================================================================
@@ -1479,6 +1460,9 @@ $pairsList
         finally {
             Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
             Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+            if ($process) { $process.Dispose() }
         }
     }
     catch {
