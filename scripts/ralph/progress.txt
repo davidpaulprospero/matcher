@@ -5985,3 +5985,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 12 passed, 0 failures
 - All 5 acceptance criteria met
 
+## Iteration 2 - [US-002] Add AudioFirstPipeline speed escalation wiring tests
+- Created tests/test_speed_escalation_wiring.py with 17 tests across 5 classes
+- AC1: TestCheckSpeedEscalationCallsRecordSlowSpeed — verifies record_slow_speed called with correct keyword and speed when signal detected, not called when not detected
+- AC2: TestSpeedEscalationCalledAfterAudioDownload — verifies _check_speed_escalation called once per download_audio_for_keyword (not per video or retry), called on failures, correct keyword
+- AC3: TestSpeedEscalationCalledAfterSegmentDownload — verifies called per video_id group in download_video_segments, correct keyword forwarding, called on download failure
+- AC4: TestSpeedEscalationWithNullSpeedTracker — verifies no AttributeError when speed_tracker=None, no record_slow_speed call, handles disabled config
+- AC5: TestSpeedEscalationWithNullEscalationManager — verifies no crash when escalation_manager=None, detect_rate_limit_signals not called (early return), both None safe, integration test with None managers
+- Key insight: _check_speed_escalation checks speed_tracker first (including config.enabled), then escalation_manager, before calling detect_rate_limit_signals
+- Files created: tests/test_speed_escalation_wiring.py
+- Test results: 17 passed, 0 failures
+- All 5 acceptance criteria met
+

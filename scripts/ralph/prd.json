@@ -22,7 +22,8 @@
             "id": "US-002",
             "title": "Add AudioFirstPipeline speed escalation wiring tests",
             "priority": 2,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_speed_escalation_wiring.py with 17 tests across 5 classes: TestCheckSpeedEscalationCallsRecordSlowSpeed (4 tests: signal detection triggers record_slow_speed, no call when not detected, correct keyword/speed forwarding, detect invoked once), TestSpeedEscalationCalledAfterAudioDownload (3 tests: called once per download_audio_for_keyword, called on failures, correct keyword), TestSpeedEscalationCalledAfterSegmentDownload (3 tests: called per video_id, correct keyword per video, called on failure), TestSpeedEscalationWithNullSpeedTracker (3 tests: None tracker, None tracker no record, disabled tracker), TestSpeedEscalationWithNullEscalationManager (4 tests: None manager, detect skipped, both None, integration with None managers). All 17 tests pass.",
             "acceptanceCriteria": [
                 "Test _check_speed_escalation() calls escalation_manager.record_slow_speed(keyword, speed_mbps) when speed_tracker detects rate limit signal",
                 "Test _check_speed_escalation() is called after each audio download attempt in download_audio_for_keyword() — verify invocation count matches retry count",
